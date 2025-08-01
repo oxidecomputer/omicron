@@ -509,7 +509,7 @@ mod tests {
         .await?;
 
         // `by_id` should contain one entry for every `KnownArtifactKind`
-        // (except `Zone`), as well as `installinator_document`.
+        // (except `ControlPlane`), as well as `installinator_document`.
         let by_id_kinds: BTreeSet<_> =
             plan.by_id().keys().map(|id| id.kind.clone()).collect();
         let expected_kinds: BTreeSet<_> = KnownArtifactKind::iter()

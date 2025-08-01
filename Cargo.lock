@@ -6815,6 +6815,7 @@ dependencies = [
  "sp-sim",
  "static_assertions",
  "strum 0.27.2",
+ "swrite",
  "test-strategy",
  "thiserror 2.0.12",
  "tufaceous-artifact",
@@ -10868,6 +10869,7 @@ dependencies = [
  "qorb",
  "serde_json",
  "slog",
+ "swrite",
  "tokio",
  "tufaceous-artifact",
 ]
@@ -14129,7 +14131,7 @@ dependencies = [
 [[package]]
 name = "tufaceous"
 version = "0.1.0"
-source = "git+https://github.com//oxidecomputer/tufaceous?rev=63eb87709a4854b131212fe0e539776415946bb6#63eb87709a4854b131212fe0e539776415946bb6"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#570f7cbd227a6522afdf6cc0c2bfafb08f2efdbd"
 dependencies = [
  "anyhow",
  "camino",
@@ -14150,7 +14152,7 @@ dependencies = [
 [[package]]
 name = "tufaceous-artifact"
 version = "0.1.0"
-source = "git+https://github.com//oxidecomputer/tufaceous?rev=63eb87709a4854b131212fe0e539776415946bb6#63eb87709a4854b131212fe0e539776415946bb6"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#570f7cbd227a6522afdf6cc0c2bfafb08f2efdbd"
 dependencies = [
  "daft",
  "hex",
@@ -14167,7 +14169,7 @@ dependencies = [
 [[package]]
 name = "tufaceous-brand-metadata"
 version = "0.1.0"
-source = "git+https://github.com//oxidecomputer/tufaceous?rev=63eb87709a4854b131212fe0e539776415946bb6#63eb87709a4854b131212fe0e539776415946bb6"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#570f7cbd227a6522afdf6cc0c2bfafb08f2efdbd"
 dependencies = [
  "semver 1.0.26",
  "serde",
@@ -14179,7 +14181,7 @@ dependencies = [
 [[package]]
 name = "tufaceous-lib"
 version = "0.1.0"
-source = "git+https://github.com//oxidecomputer/tufaceous?rev=63eb87709a4854b131212fe0e539776415946bb6#63eb87709a4854b131212fe0e539776415946bb6"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#570f7cbd227a6522afdf6cc0c2bfafb08f2efdbd"
 dependencies = [
  "anyhow",
  "async-trait",

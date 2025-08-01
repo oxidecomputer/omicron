@@ -6,12 +6,12 @@ use std::{fmt, fs::FileType, io, sync::Arc};
 
 use camino::Utf8PathBuf;
 use iddqd::{IdOrdItem, IdOrdMap, id_upcast};
-use nexus_sled_agent_shared::inventory::ClearMupdateOverrideBootSuccessInventory;
-use nexus_sled_agent_shared::inventory::ClearMupdateOverrideInventory;
 use nexus_sled_agent_shared::inventory::MupdateOverrideBootInventory;
 use nexus_sled_agent_shared::inventory::MupdateOverrideInventory;
 use nexus_sled_agent_shared::inventory::MupdateOverrideNonBootInventory;
 use nexus_sled_agent_shared::inventory::OmicronZoneConfig;
+use nexus_sled_agent_shared::inventory::RemoveMupdateOverrideBootSuccessInventory;
+use nexus_sled_agent_shared::inventory::RemoveMupdateOverrideInventory;
 use nexus_sled_agent_shared::inventory::ZoneArtifactInventory;
 use nexus_sled_agent_shared::inventory::ZoneImageResolverInventory;
 use nexus_sled_agent_shared::inventory::ZoneKind;
@@ -744,28 +744,31 @@ pub enum ArtifactReadResult {
     Error(ArcIoError),
 }
 
-/// The result of an operation to clear MUPdate overrides on a sled's boot disk.
+/// The result of an operation to remove MUPdate overrides on a sled's boot
+/// disk.
 #[derive(Clone, Debug)]
-pub struct ClearMupdateOverrideResult {
+pub struct RemoveMupdateOverrideResult {
     /// The path to the override on the boot disk.
     pub boot_disk_path: Utf8PathBuf,
 
-    /// The result of clearing the mupdate override on the boot disk.
-    pub boot_disk_result:
-        Result<ClearMupdateOverrideBootSuccess, ClearMupdateOverrideBootError>,
+    /// The result of removing the mupdate override on the boot disk.
+    pub boot_disk_result: Result<
+        RemoveMupdateOverrideBootSuccess,
+        RemoveMupdateOverrideBootError,
+    >,
 
-    /// The result of clearing the mupdate override on non-boot disks.
-    pub non_boot_disk_info: IdOrdMap<ClearMupdateOverrideNonBootInfo>,
+    /// The result of removing the mupdate override on non-boot disks.
+    pub non_boot_disk_info: IdOrdMap<RemoveMupdateOverrideNonBootInfo>,
 }
 
-impl ClearMupdateOverrideResult {
-    pub fn to_inventory(&self) -> ClearMupdateOverrideInventory {
+impl RemoveMupdateOverrideResult {
+    pub fn to_inventory(&self) -> RemoveMupdateOverrideInventory {
         let boot_disk_result = match &self.boot_disk_result {
-            Ok(ClearMupdateOverrideBootSuccess::Cleared(_)) => {
-                Ok(ClearMupdateOverrideBootSuccessInventory::Cleared)
+            Ok(RemoveMupdateOverrideBootSuccess::Removed(_)) => {
+                Ok(RemoveMupdateOverrideBootSuccessInventory::Removed)
             }
-            Ok(ClearMupdateOverrideBootSuccess::NoOverride) => {
-                Ok(ClearMupdateOverrideBootSuccessInventory::NoOverride)
+            Ok(RemoveMupdateOverrideBootSuccess::NoOverride) => {
+                Ok(RemoveMupdateOverrideBootSuccessInventory::NoOverride)
             }
             Err(error) => Err(InlineErrorChain::new(error).to_string()),
         };
@@ -780,7 +783,7 @@ impl ClearMupdateOverrideResult {
             );
         }
 
-        ClearMupdateOverrideInventory { boot_disk_result, non_boot_message }
+        RemoveMupdateOverrideInventory { boot_disk_result, non_boot_message }
     }
 
     pub fn log_to(&self, log: &slog::Logger) {
@@ -790,14 +793,14 @@ impl ClearMupdateOverrideResult {
             Ok(info) => {
                 info!(
                     log,
-                    "cleared mupdate override on boot disk";
+                    "removed mupdate override on boot disk";
                     "prev_info" => ?info,
                 );
             }
             Err(error) => {
                 error!(
                     log,
-                    "failed to clear mupdate override on boot disk";
+                    "failed to remove mupdate override on boot disk";
                     "error" => InlineErrorChain::new(error),
                 );
             }
@@ -809,11 +812,11 @@ impl ClearMupdateOverrideResult {
     }
 }
 
-/// A success condition clearing the mupdate override on a boot disk.
+/// A success condition removing the mupdate override on a boot disk.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum ClearMupdateOverrideBootSuccess {
-    /// The mupdate override was matched up and successfully cleared.
-    Cleared(MupdateOverrideInfo),
+pub enum RemoveMupdateOverrideBootSuccess {
+    /// The mupdate override was matched up and successfully removed.
+    Removed(MupdateOverrideInfo),
 
     /// No mupdate override was found.
     ///
@@ -822,7 +825,7 @@ pub enum ClearMupdateOverrideBootSuccess {
 }
 
 #[derive(Clone, Debug, Error, PartialEq)]
-pub enum ClearMupdateOverrideBootError {
+pub enum RemoveMupdateOverrideBootError {
     #[error("boot disk not found in internal disks")]
     BootDiskMissing,
     #[error(
@@ -833,7 +836,7 @@ pub enum ClearMupdateOverrideBootError {
         /// The actual override ID on the boot disk.
         actual: MupdateOverrideUuid,
 
-        /// The override ID provided to the `clear_mupdate_override` method.
+        /// The override ID provided to the `remove_mupdate_override` method.
         provided: MupdateOverrideUuid,
     },
     #[error("error removing mupdate override file at `{path}`")]
@@ -846,7 +849,8 @@ pub enum ClearMupdateOverrideBootError {
         error: ArcIoError,
     },
     #[error(
-        "mupdate override at `{path}` not cleared since there was an error reading it"
+        "mupdate override at `{path}` not removed \
+         since there was an error reading it"
     )]
     ReadError {
         /// The path to the mupdate override file that could not be read.
@@ -859,7 +863,7 @@ pub enum ClearMupdateOverrideBootError {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct ClearMupdateOverrideNonBootInfo {
+pub struct RemoveMupdateOverrideNonBootInfo {
     /// The zpool ID of the non-boot disk.
     pub zpool_id: InternalZpoolUuid,
 
@@ -867,11 +871,11 @@ pub struct ClearMupdateOverrideNonBootInfo {
     /// was available.
     pub path: Option<Utf8PathBuf>,
 
-    /// The result of clearing the mupdate override on the non-boot disk.
-    pub result: ClearMupdateOverrideNonBootResult,
+    /// The result of removing the mupdate override on the non-boot disk.
+    pub result: RemoveMupdateOverrideNonBootResult,
 }
 
-impl ClearMupdateOverrideNonBootInfo {
+impl RemoveMupdateOverrideNonBootInfo {
     pub fn log_to(&self, log: &slog::Logger) {
         let log = log.new(o!(
             "non_boot_zpool_id" => self.zpool_id.to_string(),
@@ -885,7 +889,7 @@ impl ClearMupdateOverrideNonBootInfo {
     }
 }
 
-impl IdOrdItem for ClearMupdateOverrideNonBootInfo {
+impl IdOrdItem for RemoveMupdateOverrideNonBootInfo {
     type Key<'a> = InternalZpoolUuid;
 
     fn key(&self) -> Self::Key<'_> {
@@ -896,10 +900,10 @@ impl IdOrdItem for ClearMupdateOverrideNonBootInfo {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub enum ClearMupdateOverrideNonBootResult {
-    /// The mupdate override was present and was cleared successfully.
-    Cleared {
-        /// The previous mupdate override result that was cleared. This could
+pub enum RemoveMupdateOverrideNonBootResult {
+    /// The mupdate override was present and was removed successfully.
+    Removed {
+        /// The previous mupdate override result that was removed. This could
         /// potentially be an invalid override.
         prev_result: MupdateOverrideNonBootResult,
     },
@@ -907,11 +911,11 @@ pub enum ClearMupdateOverrideNonBootResult {
     /// No mupdate override was found on the non-boot disk.
     NoOverride,
 
-    /// There was an error clearing the mupdate override on the boot disk, so
+    /// There was an error removing the mupdate override on the boot disk, so
     /// the non-boot disk was not altered.
     BootDiskError,
 
-    /// An error occurred while clearing the mupdate override on the non-boot
+    /// An error occurred while removing the mupdate override on the non-boot
     /// disk.
     RemoveError {
         /// The path to the MUPdate override file that could not be removed.
@@ -940,28 +944,28 @@ pub enum ClearMupdateOverrideNonBootResult {
     DiskMissing,
 }
 
-impl ClearMupdateOverrideNonBootResult {
-    pub fn display(&self) -> ClearMupdateOverrideNonBootDisplay<'_> {
-        ClearMupdateOverrideNonBootDisplay { result: self }
+impl RemoveMupdateOverrideNonBootResult {
+    pub fn display(&self) -> RemoveMupdateOverrideNonBootDisplay<'_> {
+        RemoveMupdateOverrideNonBootDisplay { result: self }
     }
 
     fn log_to(&self, log: &slog::Logger) {
         match self {
-            ClearMupdateOverrideNonBootResult::Cleared { prev_result } => {
+            RemoveMupdateOverrideNonBootResult::Removed { prev_result } => {
                 info!(
                     log,
-                    "cleared mupdate override on non-boot disk";
+                    "removed mupdate override on non-boot disk";
                     "prev_result" => %prev_result.display(),
                 );
             }
-            ClearMupdateOverrideNonBootResult::BootDiskError => {
+            RemoveMupdateOverrideNonBootResult::BootDiskError => {
                 warn!(
                     log,
-                    "mupdate override on non-boot disk not cleared due to \
+                    "mupdate override on non-boot disk not removed due to \
                      boot disk error"
                 );
             }
-            ClearMupdateOverrideNonBootResult::RemoveError { path, error } => {
+            RemoveMupdateOverrideNonBootResult::RemoveError { path, error } => {
                 warn!(
                     log,
                     "error removing mupdate override file on non-boot disk";
@@ -969,7 +973,7 @@ impl ClearMupdateOverrideNonBootResult {
                     "error" => InlineErrorChain::new(error),
                 );
             }
-            ClearMupdateOverrideNonBootResult::ReadError { path, error } => {
+            RemoveMupdateOverrideNonBootResult::ReadError { path, error } => {
                 warn!(
                     log,
                     "error reading mupdate override file on non-boot disk";
@@ -977,73 +981,73 @@ impl ClearMupdateOverrideNonBootResult {
                     "error" => InlineErrorChain::new(error),
                 );
             }
-            ClearMupdateOverrideNonBootResult::NoStatus => {
+            RemoveMupdateOverrideNonBootResult::NoStatus => {
                 warn!(
                     log,
                     "no status available for non-boot disk when sled-agent \
-                     started, mupdate override not cleared"
+                     started, mupdate override not removed"
                 );
             }
-            ClearMupdateOverrideNonBootResult::DiskMissing => {
+            RemoveMupdateOverrideNonBootResult::DiskMissing => {
                 warn!(
                     log,
                     "non-boot disk missing from latest InternalDisks, \
-                     mupdate override not cleared"
+                     mupdate override not removed"
                 );
             }
-            ClearMupdateOverrideNonBootResult::NoOverride => {
+            RemoveMupdateOverrideNonBootResult::NoOverride => {
                 warn!(
                     log,
-                    "no mupdate override found on non-boot disk to clear"
+                    "no mupdate override found on non-boot disk to remove"
                 );
             }
         }
     }
 }
 
-pub struct ClearMupdateOverrideNonBootDisplay<'a> {
-    result: &'a ClearMupdateOverrideNonBootResult,
+pub struct RemoveMupdateOverrideNonBootDisplay<'a> {
+    result: &'a RemoveMupdateOverrideNonBootResult,
 }
 
-impl fmt::Display for ClearMupdateOverrideNonBootDisplay<'_> {
+impl fmt::Display for RemoveMupdateOverrideNonBootDisplay<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.result {
-            ClearMupdateOverrideNonBootResult::Cleared { prev_result } => {
-                write!(f, "cleared (previous: {})", prev_result.display())
+            RemoveMupdateOverrideNonBootResult::Removed { prev_result } => {
+                write!(f, "removed (previous: {})", prev_result.display())
             }
-            ClearMupdateOverrideNonBootResult::BootDiskError => {
-                write!(f, "not cleared due to boot disk error")
+            RemoveMupdateOverrideNonBootResult::BootDiskError => {
+                write!(f, "not removed due to boot disk error")
             }
-            ClearMupdateOverrideNonBootResult::RemoveError { path, error } => {
+            RemoveMupdateOverrideNonBootResult::RemoveError { path, error } => {
                 write!(
                     f,
                     "error removing file at `{path}`: {}",
                     InlineErrorChain::new(error),
                 )
             }
-            ClearMupdateOverrideNonBootResult::ReadError { path, error } => {
+            RemoveMupdateOverrideNonBootResult::ReadError { path, error } => {
                 write!(
                     f,
                     "error reading file at `{path}`: {}",
                     InlineErrorChain::new(error),
                 )
             }
-            ClearMupdateOverrideNonBootResult::NoStatus => {
+            RemoveMupdateOverrideNonBootResult::NoStatus => {
                 write!(
                     f,
                     "no status was available when sled-agent was started, \
-                     so mupdate override not cleared"
+                     so mupdate override not removed"
                 )
             }
-            ClearMupdateOverrideNonBootResult::DiskMissing => {
+            RemoveMupdateOverrideNonBootResult::DiskMissing => {
                 write!(
                     f,
                     "non-boot disk missing from latest InternalDisks, \
-                     mupdate override not cleared"
+                     mupdate override not removed"
                 )
             }
-            ClearMupdateOverrideNonBootResult::NoOverride => {
-                write!(f, "no override to clear")
+            RemoveMupdateOverrideNonBootResult::NoOverride => {
+                write!(f, "no override to remove")
             }
         }
     }

@@ -9,16 +9,16 @@
 use crate::blueprint_builder::BlueprintBuilder;
 use crate::blueprint_builder::Ensure;
 use crate::blueprint_builder::EnsureMultiple;
+use crate::blueprint_builder::EnsureMupdateOverrideAction;
 use crate::blueprint_builder::Error;
 use crate::blueprint_builder::Operation;
 use crate::blueprint_editor::DisksEditError;
 use crate::blueprint_editor::SledEditError;
 use crate::mgs_updates::plan_mgs_updates;
-use crate::planner::image_source::NoopConvertInfo;
-use crate::planner::image_source::NoopConvertSledStatus;
 use crate::planner::image_source::NoopConvertZoneStatus;
 use crate::planner::omicron_zone_placement::PlacementError;
 use gateway_client::types::SpType;
+use itertools::Itertools;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryResult;
 use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
 use nexus_sled_agent_shared::inventory::OmicronZoneType;
@@ -49,12 +49,19 @@ use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
 use slog::debug;
 use slog::error;
+use slog::o;
 use slog::{Logger, info, warn};
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::str::FromStr;
 
+pub(crate) use self::image_source::NoopConvertGlobalIneligibleReason;
+pub(crate) use self::image_source::NoopConvertInfo;
+pub(crate) use self::image_source::NoopConvertSledEligible;
+pub(crate) use self::image_source::NoopConvertSledIneligibleReason;
+pub(crate) use self::image_source::NoopConvertSledInfoMut;
+pub(crate) use self::image_source::NoopConvertSledStatus;
 pub(crate) use self::omicron_zone_placement::DiscretionaryOmicronZone;
 use self::omicron_zone_placement::OmicronZonePlacement;
 use self::omicron_zone_placement::OmicronZonePlacementSledState;
@@ -91,6 +98,7 @@ pub(crate) mod rng;
 /// services, etc.).
 const NUM_CONCURRENT_MGS_UPDATES: usize = 1;
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum UpdateStepResult {
     ContinueToNextStep,
     Waiting,
@@ -166,16 +174,64 @@ impl<'a> Planner<'a> {
         self.do_plan_expunge()?;
         self.do_plan_decommission()?;
 
-        let noop_info =
+        let mut noop_info =
             NoopConvertInfo::new(self.input, self.inventory, &self.blueprint)?;
+
+        let plan_mupdate_override_res =
+            self.do_plan_mupdate_override(&mut noop_info)?;
+
+        // Log noop-convert results after do_plan_mupdate_override, because this
+        // step might alter noop_info.
         noop_info.log_to(&self.log);
 
+        // Within `do_plan_noop_image_source`, we plan noop image sources on
+        // sleds other than those currently affected by mupdate overrides. This
+        // means that we don't have to wait for the `plan_mupdate_override_res`
+        // result for that step.
         self.do_plan_noop_image_source(noop_info)?;
-        self.do_plan_add()?;
-        if let UpdateStepResult::ContinueToNextStep = self.do_plan_mgs_updates()
-        {
-            self.do_plan_zone_updates()?;
+
+        // Perform do_plan_add either if plan_mupdate_override_res says to
+        // continue, or if the chicken switch is true.
+        match (
+            plan_mupdate_override_res,
+            self.input.chicken_switches().add_zones_with_mupdate_override,
+        ) {
+            (UpdateStepResult::ContinueToNextStep, _) => {
+                self.do_plan_add()?;
+            }
+            (UpdateStepResult::Waiting, true) => {
+                debug!(
+                    self.log,
+                    "add_zones_with_mupdate_override chicken switch \
+                     is true, so running do_plan_add even though \
+                     plan_mupdate_override returned Waiting",
+                );
+                self.do_plan_add()?;
+            }
+            (UpdateStepResult::Waiting, false) => {
+                debug!(
+                    self.log,
+                    "plan_mupdate_override returned Waiting, and \
+                     add_zones_with_mupdate_override chicken switch \
+                     is false, so skipping do_plan_add",
+                );
+            }
         }
+
+        // Perform other steps only if plan_mupdate_override says to continue.
+        if let UpdateStepResult::ContinueToNextStep = plan_mupdate_override_res
+        {
+            // If do_plan_mupdate_override returns Waiting, we don't plan *any*
+            // additional steps until the system has recovered.
+            if let UpdateStepResult::ContinueToNextStep =
+                self.do_plan_mgs_updates()
+            {
+                self.do_plan_zone_updates()?;
+            }
+        }
+
+        // CockroachDB settings aren't dependent on zones, so they can be
+        // planned independently of the rest of the system.
         self.do_plan_cockroachdb_settings();
         Ok(())
     }
@@ -1394,6 +1450,240 @@ impl<'a> Planner<'a> {
         Ok(())
     }
 
+    fn do_plan_mupdate_override(
+        &mut self,
+        noop_info: &mut NoopConvertInfo,
+    ) -> Result<UpdateStepResult, Error> {
+        // For each sled, compare what's in the inventory to what's in the
+        // blueprint.
+        let mut actions_by_sled = BTreeMap::new();
+        let log = self.log.new(o!("phase" => "do_plan_mupdate_override"));
+
+        // We use the list of in-service sleds here -- we don't want to alter
+        // expunged or decommissioned sleds.
+        for sled_id in self.input.all_sled_ids(SledFilter::InService) {
+            let log = log.new(o!("sled_id" => sled_id.to_string()));
+            let Some(inv_sled) = self.inventory.sled_agents.get(&sled_id)
+            else {
+                warn!(log, "no inventory found for in-service sled");
+                continue;
+            };
+            let action = self.blueprint.sled_ensure_mupdate_override(
+                sled_id,
+                inv_sled
+                    .zone_image_resolver
+                    .mupdate_override
+                    .boot_override
+                    .as_ref(),
+                noop_info,
+            )?;
+            action.log_to(&log);
+            actions_by_sled.insert(sled_id, action);
+        }
+
+        // As a result of the action above, did any sleds get a new mupdate
+        // override in the blueprint? In that case, halt consideration of
+        // updates by setting the target_release_minimum_generation.
+        //
+        // Note that this is edge-triggered, not level-triggered. This is a
+        // domain requirement. Consider what happens if:
+        //
+        // 1. Let's say the target release generation is 5.
+        // 2. A sled is mupdated.
+        // 3. As a result of the mupdate, we update the target release minimum
+        //    generation to 6.
+        // 4. Then, an operator sets the target release generation to 6.
+        //
+        // At this point, we *do not* want to set the blueprint's minimum
+        // generation to 7. We only want to do it if we acknowledged a new sled
+        // getting mupdated.
+        //
+        // Some notes:
+        //
+        // * We only process sleds that are currently in the inventory. This
+        //   means that if some sleds take longer to come back up than others
+        //   and the target release is updated in the middle, we'll potentially
+        //   bump the minimum generation multiple times, asking the operator to
+        //   intervene each time.
+        //
+        //   It's worth considering ways to mitigate this in the future: for
+        //   example, we could ensure that for a particular TUF repo a shared
+        //   mupdate override ID is assigned by wicketd, and track the override
+        //   IDs that are currently in flight.
+        //
+        // * We aren't handling errors while fetching the mupdate override here.
+        //   We don't have a history of state transitions for the mupdate
+        //   override, so we can't do edge-triggered logic. We probably need
+        //   another channel to report errors. (But in general, errors should be
+        //   rare.)
+        if actions_by_sled.values().any(|action| {
+            matches!(action, EnsureMupdateOverrideAction::BpSetOverride { .. })
+        }) {
+            let current = self.blueprint.target_release_minimum_generation();
+            let new = self.input.tuf_repo().target_release_generation.next();
+            if current == new {
+                // No change needed.
+                info!(
+                    log,
+                    "would have updated target release minimum generation, but \
+                     it was already set to the desired value, so no change was \
+                     needed";
+                    "generation" => %current,
+                );
+            } else {
+                if current < new {
+                    info!(
+                        log,
+                        "updating target release minimum generation based on \
+                         new set-override actions";
+                        "current_generation" => %current,
+                        "new_generation" => %new,
+                    );
+                } else {
+                    // It would be very strange for the current value to be
+                    // greater than the new value. That would indicate something
+                    // like a row being removed from the target release
+                    // generation table -- one of the invariants of the target
+                    // release generation is that it only moves forward.
+                    //
+                    // In this case we bail out of planning entirely.
+                    return Err(
+                        Error::TargetReleaseMinimumGenerationRollback {
+                            current,
+                            new,
+                        },
+                    );
+                }
+                self.blueprint
+                    .set_target_release_minimum_generation(current, new)
+                    .expect("current value passed in => can't fail");
+            }
+        }
+
+        // Now we need to determine whether to also perform other actions like
+        // updating or adding zones. We have to be careful here:
+        //
+        // * We may have moved existing zones with an Artifact source to using
+        //   the install dataset via the BpSetOverride action, but we don't want
+        //   to use the install dataset on sleds that weren't MUPdated (because
+        //   the install dataset might be ancient).
+        //
+        // * While any overrides are in place according to inventory, we wait
+        //   for the system to recover and don't start new zones on *any* sleds,
+        //   or perform any further updates.
+        //
+        // This decision is level-triggered on the following conditions:
+        //
+        // 1. If the planning input's target release generation is less than the
+        //    minimum generation set in the blueprint, the operator hasn't set a
+        //    new generation in the blueprint -- we should wait to decide what
+        //    to do until the operator provides an indication.
+        //
+        // 2. If any sleds have the `remove_mupdate_override` field set in the
+        //    blueprint (which is downstream of the inventory reporting the
+        //    presence of a mupdate override), then we need to wait until the
+        //    `remove_mupdate_override` field is cleared. Until that happens,
+        //    we don't want to add zones on *any* sled.
+        //
+        //    This might seem overly conservative (why block zone additions on
+        //    *all* sleds if *any* are currently recovering from a MUPdate?),
+        //    but is probably correct for the medium term: we want to minimize
+        //    the number of different versions of services running at any time.
+        //
+        // 3. If any sleds had errors obtaining mupdate override info, the
+        //    system is in a corrupt state. The planner will not take any
+        //    actions until the error is resolved.
+        //
+        // 4. (TODO: https://github.com/oxidecomputer/omicron/issues/8726)
+        //    If any sleds' deployment units aren't at known versions after
+        //    noop image source changes have been considered, then we shouldn't
+        //    proceed with adding or updating zones. Again, this is driven
+        //    primarily by the desire to minimize the number of versions of
+        //    system software running at any time.
+        //
+        // What does "any sleds" mean in this context? We don't need to care
+        // about decommissioned or expunged sleds, so we consider in-service
+        // sleds.
+        let mut reasons = Vec::new();
+
+        // Condition 1 above.
+        if self.blueprint.target_release_minimum_generation()
+            > self.input.tuf_repo().target_release_generation
+        {
+            reasons.push(format!(
+                "current target release generation ({}) is lower than \
+                 minimum required by blueprint ({})",
+                self.input.tuf_repo().target_release_generation,
+                self.blueprint.target_release_minimum_generation(),
+            ));
+        }
+
+        // Condition 2 above.
+        {
+            let mut sleds_with_override = BTreeSet::new();
+            for sled_id in self.input.all_sled_ids(SledFilter::InService) {
+                if self
+                    .blueprint
+                    .sled_get_remove_mupdate_override(sled_id)?
+                    .is_some()
+                {
+                    sleds_with_override.insert(sled_id);
+                }
+            }
+
+            if !sleds_with_override.is_empty() {
+                reasons.push(format!(
+                    "sleds have remove mupdate override set in blueprint: {}",
+                    sleds_with_override.iter().join(", ")
+                ));
+            }
+        }
+
+        // Condition 3 above.
+        {
+            // Note: actions_by_sled doesn't consider sleds that aren't present
+            // in this inventory run. This can in very rare cases cause issues
+            // where both (a) a server has an error fetching override
+            // information (should never happen in normal operation) and (b)
+            // there's a blip in inventory data. We consider this an acceptable
+            // risk.
+            //
+            // In the future, we could potentially address this by not
+            // proceeding with steps if any sleds are missing from inventory.
+            let sleds_with_mupdate_override_errors: BTreeSet<_> =
+                actions_by_sled
+                    .iter()
+                    .filter_map(|(sled_id, action)| {
+                        matches!(
+                            action,
+                            EnsureMupdateOverrideAction::GetOverrideError { .. }
+                        )
+                        .then_some(*sled_id)
+                    })
+                    .collect();
+            if !sleds_with_mupdate_override_errors.is_empty() {
+                reasons.push(format!(
+                    "sleds have mupdate override errors: {}",
+                    sleds_with_mupdate_override_errors.iter().join(", ")
+                ));
+            }
+        }
+
+        // TODO: implement condition 4 above.
+
+        if !reasons.is_empty() {
+            let reasons = reasons.join("; ");
+            info!(
+                log,
+                "not ready to add or update new zones yet";
+                "reasons" => reasons,
+            );
+            Ok(UpdateStepResult::Waiting)
+        } else {
+            Ok(UpdateStepResult::ContinueToNextStep)
+        }
+    }
+
     fn do_plan_cockroachdb_settings(&mut self) {
         // Figure out what we should set the CockroachDB "preserve downgrade
         // option" setting to based on the planning input.
@@ -1647,6 +1937,84 @@ impl<'a> Planner<'a> {
                 );
                 can_shutdown
             }
+            ZoneKind::InternalDns => {
+                debug!(
+                    self.log,
+                    "Checking if internal DNS zone can be shut down"
+                );
+
+                // Find all internal DNS zones expected to be in-service by our
+                // blueprint.
+                let mut internal_dns_zones = std::collections::HashSet::new();
+                for sled_id in self.blueprint.sled_ids_with_zones() {
+                    for zone in self.blueprint.current_sled_zones(
+                        sled_id,
+                        BlueprintZoneDisposition::is_in_service,
+                    ) {
+                        if zone.zone_type.kind() == ZoneKind::InternalDns {
+                            internal_dns_zones.insert(zone.id);
+                            debug!(
+                                self.log,
+                                "Found internal dns zone in blueprint";
+                                "id" => ?zone.id
+                            );
+                        }
+                    }
+                }
+
+                // Count the number of Internal DNS servers exactly at our
+                // expected generation number.
+                let mut synchronized_internal_dns_count = 0;
+                for status in
+                    self.inventory.internal_dns_generation_status.iter()
+                {
+                    // We only consider zones which we expect to be in-service
+                    // from our blueprint.
+                    debug!(
+                        self.log,
+                        "Found internal dns zone in inventory";
+                        "id" => ?status.zone_id
+                    );
+
+                    // We consider internal DNS servers up-to-date if they have
+                    // a generation number matching what we observed in the DB
+                    // at the start of blueprint generation.
+                    //
+                    // - If we observe an older generation number in inventory,
+                    // the DNS server is out-of-date.
+                    // - If we observe a newer generation number in inventory,
+                    // the value the planner read from the database is
+                    // out-of-date.
+                    //
+                    // Either way, from our perspective, the internal DNS zone
+                    // shouldn't be considered "ready-to-shutdown".
+                    if internal_dns_zones.contains(&status.zone_id)
+                        && status.generation
+                            == self.input.internal_dns_version()
+                    {
+                        synchronized_internal_dns_count += 1;
+                    }
+                }
+
+                // Our goal is to have enough Internal DNS servers running
+                // at a sufficiently up-to-date version such that if the system
+                // powers off and restarts, at least one exists and can get the
+                // control plane back up and running.
+                //
+                // Our INTERNAL_DNS_REDUNDANCY factor is set so that we can
+                // tolerate "at least one upgrade, and at least one failure
+                // during that upgrade window".
+                let can_shutdown =
+                    synchronized_internal_dns_count >= INTERNAL_DNS_REDUNDANCY;
+                info!(
+                    self.log,
+                    "Internal DNS zone shutdown check";
+                    "total_internal_dns_zones" => internal_dns_zones.len(),
+                    "synchronized_count" => synchronized_internal_dns_count,
+                    "can_shutdown" => can_shutdown
+                );
+                can_shutdown
+            }
             _ => true, // other zone kinds have no special safety checks
         }
     }
@@ -1698,6 +2066,7 @@ pub(crate) mod test {
     use nexus_types::external_api::views::SledProvisionPolicy;
     use nexus_types::external_api::views::SledState;
     use nexus_types::inventory::CockroachStatus;
+    use nexus_types::inventory::InternalDnsGenerationStatus;
     use nexus_types::inventory::TimeSync;
     use omicron_common::api::external::Generation;
     use omicron_common::api::external::MacAddr;
@@ -5614,8 +5983,8 @@ pub(crate) mod test {
             TEST_NAME,
         );
 
-        // If we're missing info from even a single node, we
-        // will still refuse to update.
+        // If we don't have valid statuses from enough internal DNS zones, we
+        // will refuse to update.
         example.collection.cockroach_status = create_valid_looking_status();
         example.collection.cockroach_status.pop_first();
         assert_planning_makes_no_changes(
@@ -6341,6 +6710,274 @@ pub(crate) mod test {
         logctx.cleanup_successful();
     }
 
+    #[test]
+    fn test_update_internal_dns() {
+        static TEST_NAME: &str = "update_internal_dns";
+        let logctx = test_setup_log(TEST_NAME);
+        let log = logctx.log.clone();
+
+        // Use our example system.
+        let mut rng = SimRngState::from_seed(TEST_NAME);
+        let (mut example, mut blueprint) = ExampleSystemBuilder::new_with_rng(
+            &logctx.log,
+            rng.next_system_rng(),
+        )
+        .build();
+        verify_blueprint(&blueprint);
+
+        // All zones should be sourced from the install dataset by default.
+        assert!(
+            blueprint
+                .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+                .all(|(_, z)| matches!(
+                    z.image_source,
+                    BlueprintZoneImageSource::InstallDataset
+                ))
+        );
+
+        // This test "starts" here -- we specify a new TUF repo with an updated
+        // Internal DNS image. We create a new TUF repo where version of
+        // Internal DNS has been updated out of the install dataset.
+        //
+        // The planner should avoid doing this update until it has confirmation
+        // from inventory that the Internal DNS servers are ready.
+
+        let mut input_builder = example.input.clone().into_builder();
+        let version = ArtifactVersion::new_static("1.0.0-freeform")
+            .expect("can't parse artifact version");
+        let fake_hash = ArtifactHash([0; 32]);
+        let image_source = BlueprintZoneImageSource::Artifact {
+            version: BlueprintArtifactVersion::Available {
+                version: version.clone(),
+            },
+            hash: fake_hash,
+        };
+        let artifacts = create_artifacts_at_version(&version);
+        let target_release_generation = Generation::from_u32(2);
+        input_builder.policy_mut().tuf_repo = TufRepoPolicy {
+            target_release_generation,
+            description: TargetReleaseDescription::TufRepo(
+                TufRepoDescription {
+                    repo: TufRepoMeta {
+                        hash: fake_hash,
+                        targets_role_version: 0,
+                        valid_until: Utc::now(),
+                        system_version: Version::new(1, 0, 0),
+                        file_name: String::from(""),
+                    },
+                    artifacts,
+                },
+            ),
+        };
+        example.input = input_builder.build();
+
+        // Manually update all zones except Internal DNS
+        //
+        // We just specified a new TUF repo, everything is going to shift from
+        // the install dataset to this new repo.
+        for mut zone in blueprint
+            .sleds
+            .values_mut()
+            .flat_map(|config| config.zones.iter_mut())
+            .filter(|z| !z.zone_type.is_internal_dns())
+        {
+            zone.image_source = BlueprintZoneImageSource::Artifact {
+                version: BlueprintArtifactVersion::Available {
+                    version: version.clone(),
+                },
+                hash: fake_hash,
+            };
+        }
+        update_collection_from_blueprint(&mut example, &blueprint);
+
+        // Some helper predicates for the assertions below.
+        let is_old_internal_dns = |zone: &BlueprintZoneConfig| -> bool {
+            zone.zone_type.is_internal_dns()
+                && matches!(
+                    zone.image_source,
+                    BlueprintZoneImageSource::InstallDataset
+                )
+        };
+        let is_up_to_date_internal_dns = |zone: &BlueprintZoneConfig| -> bool {
+            zone.zone_type.is_internal_dns()
+                && zone.image_source == image_source
+        };
+        let create_valid_looking_status = |bp: &Blueprint| {
+            let mut result = IdOrdMap::new();
+            for sled in bp.sleds.values() {
+                for zone in &sled.zones {
+                    if zone.zone_type.is_internal_dns() {
+                        result
+                            .insert_unique(InternalDnsGenerationStatus {
+                                zone_id: zone.id,
+                                generation: bp.internal_dns_version,
+                            })
+                            .expect("Observed duplicate Internal DNS zones");
+                    }
+                }
+            }
+            result
+        };
+
+        // If we have missing info in our inventory, the
+        // planner will not update any Internal DNS zones.
+        example.collection.internal_dns_generation_status = IdOrdMap::new();
+        assert_planning_makes_no_changes(
+            &log,
+            &blueprint,
+            &example.input,
+            &example.collection,
+            TEST_NAME,
+        );
+
+        // If we're missing info from even a single zone, we
+        // will still refuse to update.
+        example.collection.internal_dns_generation_status =
+            create_valid_looking_status(&blueprint);
+        let first_zone = example
+            .collection
+            .internal_dns_generation_status
+            .iter()
+            .next()
+            .unwrap()
+            .zone_id;
+        example
+            .collection
+            .internal_dns_generation_status
+            .remove(&first_zone)
+            .expect("Could not remove one status");
+        assert_planning_makes_no_changes(
+            &log,
+            &blueprint,
+            &example.input,
+            &example.collection,
+            TEST_NAME,
+        );
+
+        // If we have any out-of-sync generations in our inventory,
+        // the planner will not update Internal DNS zones.
+        example.collection.internal_dns_generation_status =
+            create_valid_looking_status(&blueprint);
+        // I'd rather have the generation be "too low", but we also reject
+        // generations that are "too far ahead", so this works.
+        example
+            .collection
+            .internal_dns_generation_status
+            .iter_mut()
+            .next()
+            .unwrap()
+            .generation = blueprint.internal_dns_version.next();
+        assert_planning_makes_no_changes(
+            &log,
+            &blueprint,
+            &example.input,
+            &example.collection,
+            TEST_NAME,
+        );
+
+        // Once we have valid DNS statuses, we can start to update Internal DNS
+        // zones.
+        //
+        // We'll update one zone at a time, from the install dataset to the
+        // new TUF repo artifact.
+        for i in 1..=INTERNAL_DNS_REDUNDANCY {
+            example.collection.internal_dns_generation_status =
+                create_valid_looking_status(&blueprint);
+
+            // First blueprint: Remove an internal DNS zone
+
+            println!(
+                "Updating internal DNS {i} of {INTERNAL_DNS_REDUNDANCY} (expunge)"
+            );
+            let new_blueprint = Planner::new_based_on(
+                log.clone(),
+                &blueprint,
+                &example.input,
+                &format!("test_blueprint_internal_dns_{i}_removal"),
+                &example.collection,
+            )
+            .expect("can't create planner")
+            .with_rng(PlannerRng::from_seed((TEST_NAME, "bp_dns")))
+            .plan()
+            .expect("plan for trivial TUF repo");
+            {
+                let summary = new_blueprint.diff_since_blueprint(&blueprint);
+                assert_eq!(summary.total_zones_added(), 0);
+                assert_eq!(summary.total_zones_removed(), 0);
+                assert_eq!(summary.total_zones_modified(), 1);
+            }
+            blueprint = new_blueprint;
+            update_collection_from_blueprint(&mut example, &blueprint);
+            verify_blueprint(&blueprint);
+
+            // Next blueprint: Add an (updated) internal DNS zone back
+
+            println!(
+                "Updating internal DNS {i} of {INTERNAL_DNS_REDUNDANCY} (add)"
+            );
+            let new_blueprint = Planner::new_based_on(
+                log.clone(),
+                &blueprint,
+                &example.input,
+                &format!("test_blueprint_internal_dns_{i}_addition"),
+                &example.collection,
+            )
+            .expect("can't create planner")
+            .with_rng(PlannerRng::from_seed((TEST_NAME, "bp_dns")))
+            .plan()
+            .expect("plan for trivial TUF repo");
+            {
+                let summary = new_blueprint.diff_since_blueprint(&blueprint);
+                assert_eq!(summary.total_zones_added(), 1);
+                assert_eq!(summary.total_zones_removed(), 0);
+                assert_eq!(summary.total_zones_modified(), 1);
+            }
+            blueprint = new_blueprint;
+            update_collection_from_blueprint(&mut example, &blueprint);
+            verify_blueprint(&blueprint);
+
+            assert_eq!(
+                blueprint
+                    .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+                    .filter(|(_, z)| is_old_internal_dns(z))
+                    .count(),
+                INTERNAL_DNS_REDUNDANCY - i
+            );
+            assert_eq!(
+                blueprint
+                    .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+                    .filter(|(_, z)| is_up_to_date_internal_dns(z))
+                    .count(),
+                i
+            );
+        }
+
+        // Validate that we have no further changes to make, once all Internal
+        // DNS zones have been updated.
+        example.collection.internal_dns_generation_status =
+            create_valid_looking_status(&blueprint);
+        assert_planning_makes_no_changes(
+            &log,
+            &blueprint,
+            &example.input,
+            &example.collection,
+            TEST_NAME,
+        );
+
+        // Validate that we do not flip back to the install dataset after
+        // performing the update.
+        example.collection.internal_dns_generation_status = IdOrdMap::new();
+        assert_planning_makes_no_changes(
+            &log,
+            &blueprint,
+            &example.input,
+            &example.collection,
+            TEST_NAME,
+        );
+
+        logctx.cleanup_successful();
+    }
+
     /// Ensure that planning to update all zones terminates.
     #[test]
     fn test_update_all_zones() {
@@ -6393,21 +7030,7 @@ pub(crate) mod test {
                         system_version: Version::new(1, 0, 0),
                         file_name: String::from(""),
                     },
-                    artifacts: vec![
-                        // Omit `BoundaryNtp` because it has the same artifact
-                        // name as `InternalNtp`.
-                        fake_zone_artifact!(Clickhouse, version.clone()),
-                        fake_zone_artifact!(ClickhouseKeeper, version.clone()),
-                        fake_zone_artifact!(ClickhouseServer, version.clone()),
-                        fake_zone_artifact!(CockroachDb, version.clone()),
-                        fake_zone_artifact!(Crucible, version.clone()),
-                        fake_zone_artifact!(CruciblePantry, version.clone()),
-                        fake_zone_artifact!(ExternalDns, version.clone()),
-                        fake_zone_artifact!(InternalDns, version.clone()),
-                        fake_zone_artifact!(InternalNtp, version.clone()),
-                        fake_zone_artifact!(Nexus, version.clone()),
-                        fake_zone_artifact!(Oximeter, version.clone()),
-                    ],
+                    artifacts: create_artifacts_at_version(&version),
                 },
             ),
         };
