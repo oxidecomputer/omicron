@@ -24,8 +24,8 @@ type InMemoryRepoDepotServerContext = Arc<ArtifactData>;
 ///
 /// `TestArtifacts` does a few things:
 ///
-/// - it creates some specific useful test artifacts (SP, RoT, and host OS
-///   images)
+/// - it creates some specific useful test artifacts (SP, RoT, RoT bootloader,
+///   and host OS images)
 /// - it provides the hashes and cabooses used for these images
 /// - it serves these images via an in-memory Repo Depot server
 ///

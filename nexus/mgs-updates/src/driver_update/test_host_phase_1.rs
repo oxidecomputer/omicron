@@ -341,6 +341,10 @@ async fn update_takeover() {
     // update finialization steps (changing the active slot and power cycling
     // the host) to the update ID used to deliver the artifact. If we do that,
     // ideally we could uncomment this assertion.
+    //
+    // The toplevel issue for related SP work is
+    // https://github.com/oxidecomputer/hubris/issues/2178.
+    //
     // assert_eq!(target_sp_sim.power_state_changes(), 2);
 
     artifacts.teardown().await;

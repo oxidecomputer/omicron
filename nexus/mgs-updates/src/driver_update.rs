@@ -722,8 +722,8 @@ async fn wait_for_update_done(
             // * incorrect active slot
             // * incorrect active host phase 2 artifact (this is written by
             //   sled-agent, and must be done before we pass precheck)
-            // * non-empty pending_persistent_boot_preference
-            // * non-empty transient_boot_preference
+            // * non-empty pending_persistent_boot_preference (RoT only)
+            // * non-empty transient_boot_preference (RoT only)
             // * failure to fetch inventory from sled-agent (host OS only)
             // * failure to determine an active slot artifact
             //

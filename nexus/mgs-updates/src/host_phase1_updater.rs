@@ -55,7 +55,7 @@
 //!    - boot disk: A
 //!    - slot A contains Y1+Y2
 //!    - slot B contains Z1+X2 (note: mismatched! this is expected, and our
-//!      active slo tis still set to A, so if we reboot in this state everything
+//!      active slot is still set to A, so if we reboot in this state everything
 //!      is fine and we'll come up on version Y)
 //!
 //! 5. Our precheck will now return `ReadyForUpdate`, and we'll start writing
@@ -399,11 +399,11 @@ impl ReconfiguratorHostPhase1Updater {
             "hash" => %current_active_slot_hash,
         );
 
-        // If the version in the currently-active slot matches the one we're
-        // trying to set, the the phase 1 update is complete. We need to confirm
-        // that we've finished `post_update()` though (i.e., we've rebooted the
-        // sled); contact sled agent and confirm it booted from this same active
-        // slot.
+        // If the artifact hash in the currently-active slot matches the one
+        // we're trying to set, the the phase 1 update is complete. We need to
+        // confirm that we've finished `post_update()` though (i.e., we've
+        // rebooted the sled); contact sled agent and confirm it booted from
+        // this same active slot.
         if current_active_slot_hash == update.artifact_hash {
             self.confirm_sled_agent_boot_disk_matches(current_active_slot, log)
                 .await?;
@@ -422,11 +422,12 @@ impl ReconfiguratorHostPhase1Updater {
             }
         }
 
-        // ... and that the version in the currently active slot matches what we
-        // expect to find.  It may be that somebody else has come along and
-        // completed a subsequent update and we don't want to roll that back.
-        // (If for some reason we *do* want to do this update, the planner will
-        // have to notice that what's here is wrong and update the blueprint.)
+        // ... and that the artifact hash in the currently active slot matches
+        // what we expect to find.  It may be that somebody else has come along
+        // and completed a subsequent update and we don't want to roll that
+        // back. (If for some reason we *do* want to do this update, the planner
+        // will have to notice that what's here is wrong and update the
+        // blueprint.)
         if current_active_slot_hash != expected_active_slot.phase_1 {
             return Err(PrecheckError::WrongActiveArtifact {
                 kind: ArtifactKind::HOST_PHASE_1,
@@ -435,8 +436,8 @@ impl ReconfiguratorHostPhase1Updater {
             });
         }
 
-        // For the same reason, check that the version in the inactive slot
-        // matches what we expect to find.
+        // For the same reason, check that the artifact hash in the inactive
+        // slot matches what we expect to find.
         let expected_inactive_slot =
             expected_active_slot.phase_1_slot.toggled();
         let found_inactive_artifact = self
