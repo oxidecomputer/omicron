@@ -1103,5 +1103,5 @@ fn test_trust_quorum_protocol(input: TestInput) {
         "skipped_actions" => state.skipped_actions
     );
 
-    //    logctx.cleanup_successful();
+    logctx.cleanup_successful();
 }
