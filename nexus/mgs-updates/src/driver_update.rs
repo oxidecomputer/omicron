@@ -635,27 +635,30 @@ enum UpdateWaitError {
 // We have to pick some maximum time we're willing to wait for the `post_update`
 // hook to complete. In general this hook is responsible for resetting the
 // updated target to cause it to boot into its new version, but the details vary
-// wildly by device type (e.g., resetting the RoT requires multiple resets) and
-// the expected amount of time also varies wildly (e.g., resetting a gimlet SP
-// takes a few seconds, resetting a sidecar SP can take 10s of seconds,
-// resetting a sled after a host OS update takes minutes).
+// wildly by device type (e.g., post-update RoT bootloader actions require
+// multiple RoT resets) and the expected amount of time also varies wildly
+// (e.g., resetting a gimlet SP takes a few seconds, resetting a sidecar SP can
+// take 10s of seconds, resetting a sled after a host OS update takes minutes).
 fn post_update_timeout(update: &PendingMgsUpdate) -> Duration {
     match &update.details {
         PendingMgsUpdateDetails::Sp { .. } => {
             // We're resetting an SP; use a generous timeout for sleds and power
             // shelf controllers (which should take a few seconds) and an even
-            // more generaous timeout for switches (which we've seen take 10-20
+            // more generous timeout for switches (which we've seen take 10-20
             // seconds in practice).
             match update.sp_type {
                 SpType::Sled | SpType::Power => Duration::from_secs(60),
                 SpType::Switch => Duration::from_secs(120),
             }
         }
-        PendingMgsUpdateDetails::Rot { .. }
-        | PendingMgsUpdateDetails::RotBootloader { .. } => {
-            // Resetting the RoT and the bootloader should be quick (a few
-            // seconds each).
+        PendingMgsUpdateDetails::Rot { .. } => {
+            // Resetting the RoT should be quick (a few seconds).
             Duration::from_secs(60)
+        }
+        PendingMgsUpdateDetails::RotBootloader { .. } => {
+            // Resetting the bootloader requires multiple RoT resets; give this
+            // a longer timeout.
+            Duration::from_secs(120)
         }
     }
 }
