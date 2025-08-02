@@ -6,7 +6,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::{Configuration, Epoch};
+use crate::{Configuration, Epoch, PlatformId};
 
 #[derive(
     Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize,
@@ -20,18 +20,11 @@ pub enum Alarm {
     /// coordinators will generate different key shares. However, since Nexus
     /// will not tell different nodes to coordinate the same configuration, this
     /// state should be impossible to reach.
-    MismatchedConfigurations { config1: Configuration, config2: Configuration },
-
-    /// We received a `CommitAdvance` while coordinating for the same epoch
-    ///
-    /// Reason: `CommitAdvance` is a reply for a key share request in an
-    /// old epoch that we don't have the latest committed coordination.
-    /// However we are actually the coordinator for the configuration in the
-    /// `CommitAdvance`. While it's possible that another node could learn
-    /// of the commit from Nexus before the coordinator, the coordinator will
-    /// never ask for a key share for that epoch. Therefore this state should be
-    /// impossible to reach.
-    CommitAdvanceForCoordinatingEpoch { config: Configuration },
+    MismatchedConfigurations {
+        config1: Configuration,
+        config2: Configuration,
+        from: PlatformId,
+    },
 
     /// The `keyShareComputer` could not compute this node's share
     ///

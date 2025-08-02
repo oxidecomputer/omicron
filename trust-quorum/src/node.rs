@@ -325,6 +325,7 @@ impl Node {
                 ctx.raise_alarm(Alarm::MismatchedConfigurations {
                     config1: (*existing).clone(),
                     config2: config.clone(),
+                    from: from.clone(),
                 });
             }
         } else {
@@ -347,15 +348,12 @@ impl Node {
                 );
                 self.coordinator_state = None;
             } else if coordinating_epoch == config.epoch {
-                error!(
+                info!(
                     self.log,
                     "Received CommitAdvance while coordinating for same epoch!";
                     "from" => %from,
                     "epoch" => %config.epoch
                 );
-                ctx.raise_alarm(Alarm::CommitAdvanceForCoordinatingEpoch {
-                    config,
-                });
                 return;
             } else {
                 info!(
