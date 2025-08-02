@@ -3422,6 +3422,27 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
+    async fn networking_address_lot_view(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<params::AddressLotPath>,
+    ) -> Result<HttpResponseOk<AddressLot>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let nexus = &apictx.context.nexus;
+            let path = path_params.into_inner();
+            let (.., address_lot) =
+                nexus.address_lot_lookup(&opctx, path.address_lot)?.fetch().await?;
+            Ok(HttpResponseOk(address_lot.into()))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
     async fn networking_address_lot_delete(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::AddressLotPath>,

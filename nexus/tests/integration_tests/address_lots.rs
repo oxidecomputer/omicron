@@ -78,6 +78,16 @@ async fn test_address_lot_basic_crud(ctx: &ControlPlaneTestContext) {
         "203.0.113.20".parse::<IpAddr>().unwrap()
     );
 
+    // View a single lot by name
+    let view_lot = NexusRequest::object_get(
+        client,
+        "/v1/system/networking/address-lot/parkinglot",
+    )
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute_and_parse_unwrap::<AddressLot>()
+        .await;
+    assert_eq!(view_lot.identity.name, "parkinglot");
+
     // Verify there are lots
     let lots = NexusRequest::iter_collection_authn::<AddressLot>(
         client,
