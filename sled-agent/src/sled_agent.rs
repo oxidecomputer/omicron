@@ -1097,8 +1097,7 @@ impl SledAgent {
             self.inner.hardware.online_processor_count();
         let usable_physical_ram =
             self.inner.hardware.usable_physical_ram_bytes();
-        let cpu_family =
-            self.inner.hardware.cpu_family();
+        let cpu_family = self.inner.hardware.cpu_family();
         let reservoir_size = self.inner.instances.reservoir_size();
         let sled_role =
             if is_scrimlet { SledRole::Scrimlet } else { SledRole::Gimlet };

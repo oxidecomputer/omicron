@@ -26,7 +26,7 @@ use omicron_common::update::OmicronZoneManifestSource;
 use omicron_common::{
     api::{
         external::{ByteCount, Generation},
-        internal::shared::{NetworkInterface, SourceNatConfig, SledCpuFamily},
+        internal::shared::{NetworkInterface, SledCpuFamily, SourceNatConfig},
     },
     disk::{DatasetConfig, DiskVariant, OmicronPhysicalDiskConfig},
     update::ArtifactId,

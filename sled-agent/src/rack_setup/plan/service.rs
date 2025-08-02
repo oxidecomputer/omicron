@@ -1160,6 +1160,7 @@ mod tests {
     use omicron_common::api::external::ByteCount;
     use omicron_common::api::internal::shared::AllowedSourceIps;
     use omicron_common::api::internal::shared::RackNetworkConfig;
+    use omicron_common::api::internal::shared::SledCpuFamily;
     use oxnet::Ipv6Net;
     use sled_agent_types::rack_init::BootstrapAddressDiscovery;
     use sled_agent_types::rack_init::RecoverySiloConfig;
@@ -1372,6 +1373,7 @@ mod tests {
                 baseboard: Baseboard::Unknown,
                 usable_hardware_threads: 32,
                 usable_physical_ram: ByteCount::try_from(1_u64 << 40).unwrap(),
+                cpu_family: SledCpuFamily::AmdMilan,
                 reservoir_size: ByteCount::try_from(1_u64 << 40).unwrap(),
                 disks,
                 zpools: vec![],

@@ -666,7 +666,6 @@ mod test {
     use crate::StaticSledAgentEnumerator;
     use gateway_messages::SpPort;
     use id_map::IdMap;
-    use nexus_client::types::SledCpuFamily;
     use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryStatus;
     use nexus_sled_agent_shared::inventory::HostPhase2DesiredSlots;
     use nexus_sled_agent_shared::inventory::OmicronSledConfig;
@@ -676,6 +675,7 @@ mod test {
     use nexus_types::inventory::Collection;
     use omicron_cockroach_metrics::CockroachClusterAdminClient;
     use omicron_common::api::external::Generation;
+    use omicron_common::api::internal::shared::SledCpuFamily;
     use omicron_common::zpool_name::ZpoolName;
     use omicron_sled_agent::sim;
     use omicron_uuid_kinds::OmicronZoneUuid;

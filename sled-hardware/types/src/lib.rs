@@ -95,21 +95,3 @@ impl std::fmt::Display for Baseboard {
         }
     }
 }
-
-/// A general description of the CPU family for processor(s) in this sled.
-///
-/// This is intended to broadly support the control plane answering the question
-/// "can I run this instance on that sled?" given an instance with either no or
-/// some CPU platform requirement. It is not enough information for more precise
-/// placement questions - for example, is a CPU a high-frequency part or
-/// many-core part? We don't include Genoa here, but in that CPU family there
-/// are high frequency parts, many-core parts, and large-cache parts. To support
-/// those questions (or satisfactorily answer #8730) we would need to collect
-/// additional information and send it along.
-#[derive(Clone, Copy, Debug)]
-pub enum CpuFamily {
-    Unknown,
-    AmdMilan,
-    AmdTurin,
-    AmdTurinDense,
-}

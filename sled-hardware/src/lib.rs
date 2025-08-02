@@ -162,9 +162,11 @@ impl MemoryReservations {
 /// sled-agent does not yet know about libtopo, getting topo snapshots, walking
 /// them, or any of that, so the parsing is performed again here.
 #[cfg(target_arch = "x86_64")]
-pub fn detect_cpu_family(log: &Logger) -> sled_hardware_types::CpuFamily {
+pub fn detect_cpu_family(
+    log: &Logger,
+) -> omicron_common::api::internal::shared::SledCpuFamily {
     use core::arch::x86_64::__cpuid_count;
-    use sled_hardware_types::CpuFamily;
+    use omicron_common::api::internal::shared::SledCpuFamily;
 
     // Read leaf 0 to figure out the processor's vendor and whether leaf 1
     // (which contains family, model, and stepping information) is available.
@@ -175,14 +177,14 @@ pub fn detect_cpu_family(log: &Logger) -> sled_hardware_types::CpuFamily {
     // If leaf 1 is unavailable, there's no way to figure out what family this
     // processor belongs to.
     if leaf_0.eax < 1 {
-        return CpuFamily::Unknown;
+        return SledCpuFamily::Unknown;
     }
 
     // Check the vendor ID string in ebx/ecx/edx.
     match (leaf_0.ebx, leaf_0.ecx, leaf_0.edx) {
         // "AuthenticAMD"; see AMD APM volume 3 (March 2024) section E.3.1.
         (0x68747541, 0x444D4163, 0x69746E65) => {}
-        _ => return CpuFamily::Unknown,
+        _ => return SledCpuFamily::Unknown,
     }
 
     // Feature detection after this point is AMD-specific - if we find ourselves
@@ -249,7 +251,7 @@ pub fn detect_cpu_family(log: &Logger) -> sled_hardware_types::CpuFamily {
             // This covers both Milan and Zen 3-based Threadrippers. I don't
             // have a 5000-series Threadripper on hand to test but I believe
             // they are feature-compatible.
-            CpuFamily::AmdMilan
+            SledCpuFamily::AmdMilan
         }
         0x19 if model >= 0x10 && model <= 0x1F => {
             // This covers both Genoa and Zen 4-based Threadrippers. Again,
@@ -259,33 +261,33 @@ pub fn detect_cpu_family(log: &Logger) -> sled_hardware_types::CpuFamily {
             // choose, skipping the Zen 4 EPYC parts. So, round this down to
             // Milan; if we're here it's a lab system and the alternative is
             // "unknown".
-            CpuFamily::AmdMilan
+            SledCpuFamily::AmdMilan
         }
         0x19 if model >= 0x20 && model <= 0x2F => {
             // These are client Zen 3 parts aka Vermeer. Feature-wise, they are
             // missing INVLPGB from Milan, but are otherwise close, and we don't
             // expose INVLPGB to guests currently anyway.
-            CpuFamily::AmdMilan
+            SledCpuFamily::AmdMilan
         }
         0x19 if model >= 0x60 && model <= 0x6F => {
             // These are client Zen 4 parts aka Raphael. Similar to the above
             // with Genoa and Vermeer, round these down to Milan in support of
             // lab clusters instead of calling them unknown.
-            CpuFamily::AmdMilan
+            SledCpuFamily::AmdMilan
         }
-        0x1A if model <= 0x0F => CpuFamily::AmdTurin,
+        0x1A if model <= 0x0F => SledCpuFamily::AmdTurin,
         0x1A if model >= 0x10 && model <= 0x1F => {
             // These are Turin Dense. From a CPU feature perspective they're
             // equivalently capable to Turin, but they are physically distinct
             // and sled operators should be able to see that.
-            CpuFamily::AmdTurinDense
+            SledCpuFamily::AmdTurinDense
         }
         0x1A if model >= 0x40 && model <= 0x4F => {
             // These are client Zen 5 parts aka Granite Ridge. Won't be in a
             // rack, but plausibly in a lab cluster. Like other non-server
             // parts, these don't have INVLPGB, which we don't expose to guests.
             // They should otherwise be a sufficient stand-in for Turin.
-            CpuFamily::AmdTurin
+            SledCpuFamily::AmdTurin
         }
         // Remaining family/model ranges in known families are likely mobile
         // parts and intentionally rolled up into "Unknown." There, it's harder
@@ -294,6 +296,6 @@ pub fn detect_cpu_family(log: &Logger) -> sled_hardware_types::CpuFamily {
         // or APU as part of a development cluster!
         //
         // Other families are, of course, unknown.
-        _ => CpuFamily::Unknown,
+        _ => SledCpuFamily::Unknown,
     }
 }

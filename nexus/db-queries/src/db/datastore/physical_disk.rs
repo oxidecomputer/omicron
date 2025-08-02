@@ -344,6 +344,7 @@ mod test {
     };
     use nexus_types::identity::Asset;
     use omicron_common::api::external::ByteCount;
+    use omicron_common::api::internal::shared::SledCpuFamily;
     use omicron_common::disk::{DiskIdentity, DiskVariant};
     use omicron_test_utils::dev;
     use std::num::NonZeroU32;
@@ -693,6 +694,7 @@ mod test {
                     sled_id: SledUuid::from_untyped_uuid(sled.id()),
                     usable_hardware_threads: 10,
                     usable_physical_ram: ByteCount::from(1024 * 1024),
+                    cpu_family: SledCpuFamily::AmdMilan,
                     disks,
                     zpools: vec![],
                     datasets: vec![],

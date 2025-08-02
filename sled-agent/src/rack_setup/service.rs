@@ -1754,6 +1754,7 @@ mod test {
     use omicron_common::{
         address::{Ipv6Subnet, SLED_PREFIX, get_sled_address},
         api::external::{ByteCount, Generation},
+        api::internal::shared::SledCpuFamily,
         disk::{DiskIdentity, DiskVariant},
     };
     use omicron_uuid_kinds::SledUuid;
@@ -1775,6 +1776,7 @@ mod test {
                 baseboard: Baseboard::Unknown,
                 usable_hardware_threads: 32,
                 usable_physical_ram: ByteCount::from_gibibytes_u32(16),
+                cpu_family: SledCpuFamily::AmdMilan,
                 reservoir_size: ByteCount::from_gibibytes_u32(0),
                 disks: (0..u2_count)
                     .map(|i| InventoryDisk {
