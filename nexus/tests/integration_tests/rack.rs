@@ -7,6 +7,7 @@ use http::Method;
 use http::StatusCode;
 use nexus_client::types::SledId;
 use nexus_db_model::SledBaseboard;
+use nexus_db_model::SledCpuFamily as DbSledCpuFamily;
 use nexus_db_model::SledSystemHardware;
 use nexus_db_model::SledUpdate;
 use nexus_sled_agent_shared::inventory::SledRole;
@@ -22,6 +23,7 @@ use nexus_types::external_api::views::Rack;
 use nexus_types::internal_api::params::SledAgentInfo;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Generation;
+use omicron_common::api::internal::shared::SledCpuFamily;
 use omicron_uuid_kinds::GenericUuid;
 use std::time::Duration;
 use uuid::Uuid;
@@ -135,6 +137,7 @@ async fn test_sled_list_uninitialized(cptestctx: &ControlPlaneTestContext) {
         usable_hardware_threads: 32,
         usable_physical_ram: ByteCount::from_gibibytes_u32(100),
         reservoir_size: ByteCount::from_mebibytes_u32(100),
+        cpu_family: SledCpuFamily::Unknown,
         generation: Generation::new(),
         decommissioned: false,
     };
@@ -240,6 +243,7 @@ async fn test_sled_add(cptestctx: &ControlPlaneTestContext) {
                 usable_hardware_threads: 8,
                 usable_physical_ram: (1 << 30).try_into().unwrap(),
                 reservoir_size: (1 << 20).try_into().unwrap(),
+                cpu_family: DbSledCpuFamily::Unknown,
             },
             nexus.rack_id(),
             Generation::new().into(),

@@ -4,6 +4,7 @@
 
 use crate::SledMode;
 use crate::disk::{DiskPaths, Partition, PooledDiskError, UnparsedDisk};
+use omicron_common::api::internal::shared::SledCpuFamily;
 use omicron_common::disk::{DiskIdentity, DiskVariant};
 use omicron_uuid_kinds::ZpoolUuid;
 use sled_hardware_types::Baseboard;
@@ -38,6 +39,10 @@ impl HardwareManager {
     }
 
     pub fn baseboard(&self) -> Baseboard {
+        unimplemented!("Accessing hardware unsupported on non-illumos");
+    }
+
+    pub fn cpu_family(&self) -> SledCpuFamily {
         unimplemented!("Accessing hardware unsupported on non-illumos");
     }
 

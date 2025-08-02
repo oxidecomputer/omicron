@@ -595,6 +595,7 @@ impl CollectionBuilder {
             baseboard_id,
             usable_hardware_threads: inventory.usable_hardware_threads,
             usable_physical_ram: inventory.usable_physical_ram,
+            cpu_family: inventory.cpu_family,
             reservoir_size: inventory.reservoir_size,
             time_collected,
             sled_id,

@@ -74,6 +74,7 @@ use omicron_common::api::internal::nexus::ProducerKind;
 use omicron_common::api::internal::shared::DatasetKind;
 use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::api::internal::shared::NetworkInterfaceKind;
+use omicron_common::api::internal::shared::SledCpuFamily;
 use omicron_common::api::internal::shared::SourceNatConfig;
 use omicron_common::api::internal::shared::SwitchLocation;
 use omicron_common::disk::CompressionAlgorithm;
@@ -1902,7 +1903,18 @@ pub async fn start_sled_agent(
         Some(nexus_address),
         Some(update_directory),
         sim::ZpoolConfig::None,
+        SledCpuFamily::AmdMilan,
     );
+    start_sled_agent_with_config(log, &config, sled_index, simulated_upstairs)
+        .await
+}
+
+pub async fn start_sled_agent_with_config(
+    log: Logger,
+    config: &sim::Config,
+    sled_index: u16,
+    simulated_upstairs: &Arc<sim::SimulatedUpstairs>,
+) -> Result<sim::Server, String> {
     let server =
         sim::Server::start(&config, &log, true, simulated_upstairs, sled_index)
             .await

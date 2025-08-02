@@ -180,7 +180,8 @@ mod test {
     use id_map::IdMap;
     use itertools::Itertools as _;
     use nexus_db_model::{
-        ByteCount, SledBaseboard, SledSystemHardware, SledUpdate, Zpool,
+        ByteCount, SledBaseboard, SledCpuFamily, SledSystemHardware,
+        SledUpdate, Zpool,
     };
     use nexus_db_queries::authn;
     use nexus_db_queries::context::OpContext;
@@ -359,6 +360,7 @@ mod test {
                     usable_hardware_threads: 4,
                     usable_physical_ram: ByteCount(1000.into()),
                     reservoir_size: ByteCount(999.into()),
+                    cpu_family: SledCpuFamily::AmdMilan,
                 },
                 rack_id,
                 nexus_db_model::Generation::new(),

@@ -294,6 +294,7 @@ mod test {
     use crate::db::pub_test_utils::TestDatabase;
     use nexus_db_model::Generation;
     use nexus_db_model::SledBaseboard;
+    use nexus_db_model::SledCpuFamily;
     use nexus_db_model::SledSystemHardware;
     use nexus_db_model::SledUpdate;
     use omicron_common::api::external::ByteCount;
@@ -323,6 +324,7 @@ mod test {
                 usable_hardware_threads: 128,
                 usable_physical_ram: (64 << 30).try_into().unwrap(),
                 reservoir_size: (16 << 30).try_into().unwrap(),
+                cpu_family: SledCpuFamily::AmdMilan,
             },
             Uuid::new_v4(),
             Generation::new(),

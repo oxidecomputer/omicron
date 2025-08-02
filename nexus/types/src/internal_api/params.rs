@@ -18,6 +18,7 @@ use omicron_common::api::internal::nexus::Certificate;
 use omicron_common::api::internal::shared::AllowedSourceIps;
 use omicron_common::api::internal::shared::ExternalPortDiscovery;
 use omicron_common::api::internal::shared::RackNetworkConfig;
+use omicron_common::api::internal::shared::SledCpuFamily;
 use omicron_common::api::internal::shared::SourceNatConfig;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
@@ -55,6 +56,9 @@ pub struct SledAgentInfo {
     ///
     /// Must be smaller than "usable_physical_ram"
     pub reservoir_size: ByteCount,
+
+    /// The family of the sled's CPU.
+    pub cpu_family: SledCpuFamily,
 
     /// The generation number of this request from sled-agent
     pub generation: Generation,
