@@ -3705,6 +3705,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_sled_agent (
     -- present.
     mupdate_override_boot_disk_error TEXT,
 
+    -- The sled's CPU family. This is also duplicated with the `sled` table,
+    -- similar to `usable_hardware_threads` and friends above.
+    cpu_family omicron.public.sled_cpu_family NOT NULL,
+
     CONSTRAINT reconciler_status_sled_config_present_if_running CHECK (
         (reconciler_status_kind = 'running'
             AND reconciler_status_sled_config IS NOT NULL)
