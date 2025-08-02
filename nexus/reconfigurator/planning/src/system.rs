@@ -57,6 +57,7 @@ use omicron_common::address::SLED_PREFIX;
 use omicron_common::address::get_sled_address;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Generation;
+use omicron_common::api::internal::shared::SledCpuFamily;
 use omicron_common::disk::DiskIdentity;
 use omicron_common::disk::DiskVariant;
 use omicron_common::disk::M2Slot;
@@ -1071,6 +1072,7 @@ impl Sled {
                 sled_id,
                 usable_hardware_threads: 10,
                 usable_physical_ram: ByteCount::from(1024 * 1024),
+                cpu_family: SledCpuFamily::AmdMilan,
                 // Populate disks, appearing like a real device.
                 disks: zpools
                     .values()
@@ -1267,6 +1269,7 @@ impl Sled {
             sled_id,
             usable_hardware_threads: inv_sled_agent.usable_hardware_threads,
             usable_physical_ram: inv_sled_agent.usable_physical_ram,
+            cpu_family: inv_sled_agent.cpu_family,
             disks: vec![],
             zpools: vec![],
             datasets: vec![],

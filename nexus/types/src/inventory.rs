@@ -36,6 +36,7 @@ use omicron_common::api::external::ByteCount;
 pub use omicron_common::api::internal::shared::NetworkInterface;
 pub use omicron_common::api::internal::shared::NetworkInterfaceKind;
 pub use omicron_common::api::internal::shared::SourceNatConfig;
+pub use omicron_common::api::internal::shared::SledCpuFamily;
 use omicron_common::disk::M2Slot;
 pub use omicron_common::zpool_name::ZpoolName;
 use omicron_uuid_kinds::CollectionUuid;
@@ -638,6 +639,7 @@ pub struct SledAgent {
     pub sled_role: SledRole,
     pub usable_hardware_threads: u32,
     pub usable_physical_ram: ByteCount,
+    pub cpu_family: SledCpuFamily,
     pub reservoir_size: ByteCount,
     pub disks: Vec<PhysicalDisk>,
     pub zpools: Vec<Zpool>,

@@ -8,6 +8,7 @@ use crate::ArtifactHash;
 use crate::Generation;
 use crate::PhysicalDiskKind;
 use crate::omicron_zone_config::{self, OmicronZoneNic};
+use crate::sled_cpu_family::SledCpuFamily;
 use crate::typed_uuid::DbTypedUuid;
 use crate::{
     ByteCount, MacAddr, Name, ServiceKind, SqlU8, SqlU16, SqlU32,
@@ -887,6 +888,7 @@ pub struct InvSledAgent {
     pub sled_role: SledRole,
     pub usable_hardware_threads: SqlU32,
     pub usable_physical_ram: ByteCount,
+    pub cpu_family: SledCpuFamily,
     pub reservoir_size: ByteCount,
     // Soft foreign key to an `InvOmicronSledConfig`
     pub ledgered_sled_config: Option<DbTypedUuid<OmicronSledConfigKind>>,
@@ -1300,6 +1302,7 @@ impl InvSledAgent {
                 usable_physical_ram: ByteCount::from(
                     sled_agent.usable_physical_ram,
                 ),
+                cpu_family: sled_agent.cpu_family.into(),
                 reservoir_size: ByteCount::from(sled_agent.reservoir_size),
                 ledgered_sled_config: ledgered_sled_config.map(From::from),
                 reconciler_status,

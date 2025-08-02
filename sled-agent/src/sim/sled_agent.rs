@@ -754,6 +754,7 @@ impl SledAgent {
                 self.config.hardware.physical_ram,
             )
             .context("usable_physical_ram")?,
+            cpu_family: self.config.hardware.cpu_family,
             reservoir_size: ByteCount::try_from(
                 self.config.hardware.reservoir_ram,
             )

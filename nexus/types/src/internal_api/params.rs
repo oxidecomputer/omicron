@@ -18,6 +18,7 @@ use omicron_common::api::internal::nexus::Certificate;
 use omicron_common::api::internal::shared::AllowedSourceIps;
 use omicron_common::api::internal::shared::ExternalPortDiscovery;
 use omicron_common::api::internal::shared::RackNetworkConfig;
+use omicron_common::api::internal::shared::SledCpuFamily;
 use omicron_common::api::internal::shared::SourceNatConfig;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
@@ -29,28 +30,6 @@ use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
 use uuid::Uuid;
-
-/// Identifies the kind of CPU present on a sled, determined by reading CPUID.
-#[derive(Serialize, Deserialize, Debug, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum SledCpuFamily {
-    /// The CPU vendor or its family number don't correspond to any of the
-    /// known family variants.
-    Unknown,
-
-    /// AMD Milan processors (or very close). Could be an actual Milan in a
-    /// Gimlet, a close-to-Milan client Zen 3 part, or Zen 4 (for which Milan is
-    /// the greatest common denominator).
-    AmdMilan,
-
-    /// AMD Turin processors (or very close). Could be an actual Turin in a
-    /// Cosmo, or a close-to-Turin client Zen 5 part.
-    AmdTurin,
-
-    /// AMD Turin Dense processors. There are no "Turin Dense-like" CPUs unlike
-    /// other cases, so this means a bona fide Zen 5c Turin Dense part.
-    AmdTurinDense,
-}
 
 /// Sent by a sled agent to Nexus to inform about resources
 #[derive(Serialize, Deserialize, Debug, JsonSchema)]

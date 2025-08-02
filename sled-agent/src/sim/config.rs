@@ -7,7 +7,7 @@
 use crate::updates::ConfigUpdates;
 use camino::Utf8Path;
 use dropshot::ConfigDropshot;
-use nexus_client::types::SledCpuFamily;
+use omicron_common::api::internal::shared::SledCpuFamily;
 use omicron_uuid_kinds::SledUuid;
 use serde::Deserialize;
 use serde::Serialize;

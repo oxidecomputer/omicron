@@ -40,6 +40,7 @@ use nexus_types::inventory::ZpoolName;
 use omicron_cockroach_metrics::MetricValue;
 use omicron_cockroach_metrics::PrometheusMetrics;
 use omicron_common::api::external::ByteCount;
+use omicron_common::api::internal::shared::SledCpuFamily;
 use omicron_common::disk::DatasetConfig;
 use omicron_common::disk::DatasetKind;
 use omicron_common::disk::DatasetName;
@@ -957,6 +958,7 @@ pub fn sled_agent(
         sled_id,
         usable_hardware_threads: 10,
         usable_physical_ram: ByteCount::from(1024 * 1024),
+        cpu_family: SledCpuFamily::AmdMilan,
         disks,
         zpools,
         datasets,

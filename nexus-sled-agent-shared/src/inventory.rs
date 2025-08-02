@@ -26,7 +26,7 @@ use omicron_common::update::OmicronZoneManifestSource;
 use omicron_common::{
     api::{
         external::{ByteCount, Generation},
-        internal::shared::{NetworkInterface, SourceNatConfig},
+        internal::shared::{NetworkInterface, SourceNatConfig, SledCpuFamily},
     },
     disk::{DatasetConfig, DiskVariant, OmicronPhysicalDiskConfig},
     update::ArtifactId,
@@ -121,6 +121,7 @@ pub struct Inventory {
     pub baseboard: Baseboard,
     pub usable_hardware_threads: u32,
     pub usable_physical_ram: ByteCount,
+    pub cpu_family: SledCpuFamily,
     pub reservoir_size: ByteCount,
     pub disks: Vec<InventoryDisk>,
     pub zpools: Vec<InventoryZpool>,
