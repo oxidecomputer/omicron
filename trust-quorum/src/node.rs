@@ -308,6 +308,7 @@ impl Node {
                 "epoch" => %config.epoch
             );
             ctx.update_persistent_state(|ps| ps.commits.insert(config.epoch));
+            return;
         }
 
         // Do we have the configuration in our persistent state? If not save it.
@@ -347,6 +348,7 @@ impl Node {
                     "received_epoch" => %config.epoch
                 );
                 self.coordinator_state = None;
+                // Intentionally fall through
             } else if coordinating_epoch == config.epoch {
                 info!(
                     self.log,
@@ -402,7 +404,8 @@ impl Node {
             }
         }
 
-        // We either were collectiong shares for an old epoch or haven't started yet.
+        // We either were collectiong shares for an old epoch or haven't started
+        // yet.
         self.key_share_computer =
             Some(KeyShareComputer::new(&self.log, ctx, config));
     }
@@ -417,6 +420,18 @@ impl Node {
             ctx.persistent_state().latest_committed_configuration()
         {
             if latest_committed_config.epoch > epoch {
+                if !latest_committed_config.members.contains_key(&from) {
+                    info!(
+                        self.log,
+                        "Received a GetShare message from expunged node";
+                        "from" => %from,
+                        "latest_committed_epoch" =>
+                            %latest_committed_config.epoch,
+                        "requested_epoch" => %epoch
+                    );
+                    // TODO: Send an expunged message
+                    return;
+                }
                 info!(
                     self.log,
                     concat!(
@@ -431,6 +446,20 @@ impl Node {
                     from,
                     PeerMsgKind::CommitAdvance(latest_committed_config.clone()),
                 );
+                return;
+            }
+        }
+
+        // Do we have the configuration? Is the requesting peer a member?
+        if let Some(config) = ctx.persistent_state().configuration(epoch) {
+            if !config.members.contains_key(&from) {
+                info!(
+                    self.log,
+                    "Received a GetShare message from expunged node";
+                    "from" => %from,
+                    "epoch" => %epoch
+                );
+                // TODO: Send an expunged message
                 return;
             }
         }

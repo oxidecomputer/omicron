@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{Configuration, Epoch, PlatformId};
 
+#[allow(clippy::large_enum_variant)]
 #[derive(
     Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize,
 )]

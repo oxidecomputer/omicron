@@ -103,6 +103,7 @@ impl KeyShareComputer {
                 "epoch" => %epoch,
                 "from" => %from
             );
+            return false;
         }
 
         // A valid share was received. Is it new?
@@ -118,12 +119,23 @@ impl KeyShareComputer {
         // What index are we in the configuration? This is our "x-coordinate"
         // for our key share calculation. We always start indexing from 1, since
         // 0 is the rack secret.
-        let index = self
-            .config
-            .members
-            .keys()
-            .position(|id| id == ctx.platform_id())
-            .expect("node exists");
+        let index =
+            self.config.members.keys().position(|id| id == ctx.platform_id());
+
+        let Some(index) = index else {
+            let msg = concat!(
+                "Failed to get index for ourselves in current configuration. ",
+                "We are not a member, and must have been expunged."
+            );
+            error!(
+                self.log,
+                "{msg}";
+                "platform_id" => %ctx.platform_id(),
+                "config" => ?self.config
+            );
+            return false;
+        };
+
         let x_coordinate =
             Gf256::new(u8::try_from(index + 1).expect("index fits in u8"));
 
