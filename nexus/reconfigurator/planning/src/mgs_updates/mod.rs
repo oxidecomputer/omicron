@@ -63,7 +63,7 @@ pub fn plan_mgs_updates(
             Ok(MgsUpdateStatus::Done) => {
                 info!(
                     log,
-                    "SP update completed \
+                    "MGS-driven update completed \
                      (will remove it and re-evaluate board)";
                     update
                 );
@@ -72,7 +72,7 @@ pub fn plan_mgs_updates(
             Ok(MgsUpdateStatus::Impossible) => {
                 info!(
                     log,
-                    "SP update impossible \
+                    "MGS-driven update impossible \
                      (will remove it and re-evaluate board)";
                     update
                 );
@@ -81,7 +81,7 @@ pub fn plan_mgs_updates(
             Ok(MgsUpdateStatus::NotDone) => {
                 info!(
                     log,
-                    "SP update not yet completed (will keep it)";
+                    "MGS-driven update not yet completed (will keep it)";
                     update
                 );
                 rv.insert(update.clone());
@@ -89,7 +89,7 @@ pub fn plan_mgs_updates(
             Err(error) => {
                 info!(
                     log,
-                    "cannot determine SP update status (will keep it)";
+                    "cannot determine MGS-driven update status (will keep it)";
                     update,
                     InlineErrorChain::new(&error)
                 );
@@ -102,7 +102,7 @@ pub fn plan_mgs_updates(
     // containing artifacts), then we cannot configure more updates.
     let current_artifacts = match current_artifacts {
         TargetReleaseDescription::Initial => {
-            warn!(log, "cannot issue more SP updates (no current artifacts)");
+            warn!(log, "cannot issue more MGS updates (no current artifacts)");
             return rv;
         }
         TargetReleaseDescription::TufRepo(description) => description,
@@ -122,7 +122,7 @@ pub fn plan_mgs_updates(
         if rv.len() >= nmax_updates {
             info!(
                 log,
-                "reached maximum number of pending SP updates";
+                "reached maximum number of pending MGS updates";
                 "max" => nmax_updates
             );
             return rv;
@@ -130,16 +130,16 @@ pub fn plan_mgs_updates(
 
         match try_make_update(log, board, inventory, current_artifacts) {
             Some(update) => {
-                info!(log, "configuring SP update"; &update);
+                info!(log, "configuring MGS update"; &update);
                 rv.insert(update);
             }
             None => {
-                info!(log, "skipping board for SP update"; board);
+                info!(log, "skipping board for MGS update"; board);
             }
         }
     }
 
-    info!(log, "ran out of boards for SP update");
+    info!(log, "ran out of boards for MGS update");
     rv
 }
 
@@ -184,12 +184,12 @@ fn mgs_update_status(
     let baseboard_id = &update.baseboard_id;
     let desired_version = &update.artifact_version;
 
-    // Check the contents of the cabooses against what we expect either before
-    // or after the update.
+    // Check the contents of the target of `update` against what we expect
+    // either before or after the update.
     //
     // We check this before anything else because if we get back
     // `MgsUpdateStatus::Done`, then we're done no matter what else is true.
-    let caboose_status = match &update.details {
+    let update_status = match &update.details {
         PendingMgsUpdateDetails::Sp {
             expected_active_version,
             expected_inactive_version,
@@ -218,16 +218,16 @@ fn mgs_update_status(
         }
     };
 
-    // If we're able to reach a clear determination based on the caboose status
-    // alone, great.  Return that.
+    // If we're able to reach a clear determination based on the status alone,
+    // great.  Return that.
     if matches!(
-        caboose_status,
+        update_status,
         Err(_) | Ok(MgsUpdateStatus::Done) | Ok(MgsUpdateStatus::Impossible)
     ) {
-        return caboose_status;
+        return update_status;
     }
 
-    // If based on the caboose we're only able to determine that the update is
+    // If based on the status we're only able to determine that the update is
     // not yet done, there's another "impossible" case to consider: that the
     // baseboard has moved in the rack.
     let sp_info = inventory
@@ -248,13 +248,13 @@ fn mgs_update_status(
     } else if sp_info.sp_slot != update.slot_id {
         warn!(
             log,
-            "baseboard with in-progress SP update has moved";
+            "baseboard with in-progress MGS update has moved";
             "sp_info" => #?sp_info,
             update,
         );
         Ok(MgsUpdateStatus::Impossible)
     } else {
-        caboose_status
+        update_status
     }
 }
 
