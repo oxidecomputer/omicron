@@ -1161,6 +1161,15 @@ impl<'a> Planner<'a> {
                 self.blueprint.parent_blueprint().time_created,
             ),
         );
+        if next != *current_updates {
+            // This will only add comments if our set of updates changed _and_
+            // we have at least one update. If we went from "some updates" to
+            // "no updates", that's not really comment-worthy; presumably we'll
+            // do something else comment-worthy in a subsequent step.
+            for update in next.iter() {
+                self.blueprint.comment(update.description());
+            }
+        }
 
         // TODO This is not quite right.  See oxidecomputer/omicron#8285.
         let rv = if next.is_empty() {
