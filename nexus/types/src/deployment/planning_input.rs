@@ -70,7 +70,7 @@ use strum::IntoEnumIterator;
 /// because we're actively updating". This can also cause thrashing where
 /// competing Nexuses looking at different inventory collections believe the
 /// preconditions are impossible in different ways. See
-/// https://github.com/oxidecomputer/omicron/issues/8483 for examples.
+/// <https://github.com/oxidecomputer/omicron/issues/8483> for examples.
 const MGS_UPDATE_SETTLE_TIMEOUT: TimeDelta = TimeDelta::minutes(5);
 
 /// Policy and database inputs to the Reconfigurator planner
