@@ -52,9 +52,6 @@ impl From<Artifact> for ArtifactId {
             name: artifact.name,
             version: artifact.version,
             kind: artifact.kind,
-            // TODO-K: A drawback of having the sign live here,
-            // is that we'd have to alter Artifact maybe?
-            //sign: artifact.sign,
         }
     }
 }
