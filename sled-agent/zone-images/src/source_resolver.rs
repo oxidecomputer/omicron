@@ -11,7 +11,7 @@ use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
 use omicron_uuid_kinds::MupdateOverrideUuid;
 use sled_agent_config_reconciler::InternalDisks;
 use sled_agent_config_reconciler::InternalDisksWithBootDisk;
-use sled_agent_types::zone_images::ClearMupdateOverrideResult;
+use sled_agent_types::zone_images::RemoveMupdateOverrideResult;
 use sled_agent_types::zone_images::ResolverStatus;
 use slog::o;
 use std::sync::Arc;
@@ -65,12 +65,12 @@ impl ZoneImageSourceResolver {
         }
     }
 
-    /// Clears out the mupdate override field and files on disk.
-    pub fn clear_mupdate_override(
+    /// Removes the mupdate override field and files on disk.
+    pub fn remove_mupdate_override(
         &self,
         override_id: MupdateOverrideUuid,
         internal_disks: &InternalDisks,
-    ) -> ClearMupdateOverrideResult {
+    ) -> RemoveMupdateOverrideResult {
         let mut inner = self.inner.lock().unwrap();
         let ret =
             inner.mupdate_overrides.clear_override(override_id, internal_disks);

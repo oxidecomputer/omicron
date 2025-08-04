@@ -69,7 +69,7 @@ use sled_agent_types::zone_bundle::{
     PriorityOrder, StorageLimit, ZoneBundleCause, ZoneBundleMetadata,
 };
 use sled_agent_types::zone_images::{
-    ClearMupdateOverrideResult, PreparedOmicronZone, ResolverStatus,
+    PreparedOmicronZone, RemoveMupdateOverrideResult, ResolverStatus,
 };
 use sled_diagnostics::SledDiagnosticsCmdError;
 use sled_diagnostics::SledDiagnosticsCmdOutput;
@@ -1321,14 +1321,14 @@ impl SledAgentFacilities for ReconcilerFacilities {
         self.service_manager.zone_image_resolver().status()
     }
 
-    fn clear_mupdate_override(
+    fn remove_mupdate_override(
         &self,
         override_id: MupdateOverrideUuid,
         internal_disks: &InternalDisks,
-    ) -> ClearMupdateOverrideResult {
+    ) -> RemoveMupdateOverrideResult {
         self.service_manager
             .zone_image_resolver()
-            .clear_mupdate_override(override_id, internal_disks)
+            .remove_mupdate_override(override_id, internal_disks)
     }
 
     fn metrics_untrack_zone_links(

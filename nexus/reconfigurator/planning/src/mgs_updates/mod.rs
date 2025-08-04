@@ -413,6 +413,7 @@ fn try_make_update_sp(
                     KnownArtifactKind::GimletRot
                     | KnownArtifactKind::Host
                     | KnownArtifactKind::Trampoline
+                    | KnownArtifactKind::InstallinatorDocument
                     | KnownArtifactKind::ControlPlane
                     | KnownArtifactKind::Zone
                     | KnownArtifactKind::PscRot

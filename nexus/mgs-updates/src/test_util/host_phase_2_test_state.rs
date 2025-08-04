@@ -293,7 +293,7 @@ mod api_impl {
                     datasets: BTreeMap::new(),
                     orphaned_datasets: IdOrdMap::new(),
                     zones: BTreeMap::new(),
-                    clear_mupdate_override: None,
+                    remove_mupdate_override: None,
                     boot_partitions,
                 }),
                 zone_image_resolver: ZoneImageResolverInventory {

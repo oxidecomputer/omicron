@@ -12,8 +12,8 @@ use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX;
 use omicron_uuid_kinds::MupdateOverrideUuid;
 use sled_agent_types::zone_bundle::ZoneBundleCause;
-use sled_agent_types::zone_images::ClearMupdateOverrideResult;
 use sled_agent_types::zone_images::PreparedOmicronZone;
+use sled_agent_types::zone_images::RemoveMupdateOverrideResult;
 use sled_agent_types::zone_images::ResolverStatus;
 use std::future::Future;
 use tufaceous_artifact::ArtifactHash;
@@ -46,12 +46,12 @@ pub trait SledAgentFacilities: Send + Sync + 'static {
     /// This can be used to prepare zones as well as start them.
     fn zone_image_resolver_status(&self) -> ResolverStatus;
 
-    /// Clear out the mupdate override
-    fn clear_mupdate_override(
+    /// Remove the mupdate override file from disk.
+    fn remove_mupdate_override(
         &self,
         override_id: MupdateOverrideUuid,
         internal_disks: &InternalDisks,
-    ) -> ClearMupdateOverrideResult;
+    ) -> RemoveMupdateOverrideResult;
 
     /// Stop tracking metrics for a zone's datalinks.
     fn metrics_untrack_zone_links(

@@ -39,6 +39,7 @@ created repo-2.0.0.zip for system version 2.0.0
 > set target-release repo-1.0.0.zip
 INFO extracting uploaded archive to <EXTRACTING_UPLOADED_ARCHIVE_TO_REDACTED>
 INFO created directory to store extracted artifacts, path: <CREATED_DIRECTORY_TO_STORE_EXTRACTED_ARTIFACTS_PATH_REDACTED>
+INFO added artifact, name: installinator_document, kind: installinator_document, version: 1.0.0, hash: c6ae866031d1183094c92cde9d9d1fd5f18356abc81a842ce31471b473fd5582, length: 367
 INFO added artifact, name: SimGimletSp, kind: gimlet_sp, version: 1.0.0, hash: 7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670, length: 747
 INFO added artifact, name: fake-gimlet-rot, kind: gimlet_rot_image_a, version: 1.0.0, hash: 04e4a7fdb84acca92c8fd3235e26d64ea61bef8a5f98202589fd346989c5720a, length: 735
 INFO added artifact, name: fake-gimlet-rot, kind: gimlet_rot_image_b, version: 1.0.0, hash: 04e4a7fdb84acca92c8fd3235e26d64ea61bef8a5f98202589fd346989c5720a, length: 735
@@ -103,6 +104,7 @@ sled aff6c093-197d-42c5-ad80-9f10ba051a34: install dataset updated: to target re
 > sled-update-install-dataset serial4 --from-repo repo-2.0.0.zip
 INFO extracting uploaded archive to <EXTRACTING_UPLOADED_ARCHIVE_TO_REDACTED>
 INFO created directory to store extracted artifacts, path: <CREATED_DIRECTORY_TO_STORE_EXTRACTED_ARTIFACTS_PATH_REDACTED>
+INFO added artifact, name: installinator_document, kind: installinator_document, version: 2.0.0, hash: 065b2b7cde09474c9a1bcf98a8f9c93129f617e074404c6aa76164f440a5627f, length: 367
 INFO added artifact, name: fake-gimlet-sp, kind: gimlet_sp, version: 2.0.0, hash: ce1e98a8a9ae541654508f101d59a3ddeba3d28177f1d42d5614248eef0b820b, length: 751
 INFO added artifact, name: fake-gimlet-rot, kind: gimlet_rot_image_a, version: 2.0.0, hash: e7047f500a5391e22cd8e6a8d3ae66c9d9de7a8d021e6e9a10e05bb6d554da77, length: 743
 INFO added artifact, name: fake-gimlet-rot, kind: gimlet_rot_image_b, version: 2.0.0, hash: e7047f500a5391e22cd8e6a8d3ae66c9d9de7a8d021e6e9a10e05bb6d554da77, length: 743
