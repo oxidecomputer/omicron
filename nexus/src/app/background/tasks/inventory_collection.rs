@@ -45,7 +45,7 @@ impl InventoryCollector {
         disable: bool,
     ) -> InventoryCollector {
         let (tx, _) = watch::channel(None);
-        let timeout = Duration::from_secs(15);
+        let timeout = Duration::from_secs(5);
         let cockroach_admin_client = CockroachClusterAdminClient::new(
             opctx
                 .log
