@@ -27,6 +27,7 @@ use nexus_db_schema::schema::{
     bp_pending_mgs_update_sp, bp_sled_metadata, bp_target,
 };
 use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
+use nexus_types::deployment::BlueprintHostPhase2DesiredSlots;
 use nexus_types::deployment::BlueprintPhysicalDiskConfig;
 use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
 use nexus_types::deployment::BlueprintTarget;
@@ -44,10 +45,6 @@ use nexus_types::deployment::{
 use nexus_types::deployment::{BlueprintDatasetDisposition, ExpectedVersion};
 use nexus_types::deployment::{
     BlueprintHostPhase2DesiredContents, PendingMgsUpdateHostPhase1Details,
-};
-use nexus_types::deployment::{
-    BlueprintHostPhase2DesiredSlots, ExpectedActiveHostOsSlot,
-    ExpectedInactiveHostOsArtifact,
 };
 use nexus_types::deployment::{BlueprintZoneImageSource, blueprint_zone_type};
 use nexus_types::deployment::{
@@ -1456,7 +1453,7 @@ pub struct BpPendingMgsUpdateHostPhase1 {
     pub artifact_sha256: ArtifactHash,
     pub artifact_version: DbArtifactVersion,
     pub expected_active_phase_1_slot: HwM2Slot,
-    pub expected_active_boot_disk: HwM2Slot,
+    pub expected_boot_disk: HwM2Slot,
     pub expected_active_phase_1_hash: ArtifactHash,
     pub expected_active_phase_2_hash: ArtifactHash,
     pub expected_inactive_phase_1_hash: ArtifactHash,
@@ -1479,17 +1476,22 @@ impl BpPendingMgsUpdateComponent for BpPendingMgsUpdateHostPhase1 {
             artifact_version: (*self.artifact_version).clone(),
             details: PendingMgsUpdateDetails::HostPhase1(
                 PendingMgsUpdateHostPhase1Details {
-                    expected_active_slot: ExpectedActiveHostOsSlot {
-                        phase_1_slot: self.expected_active_phase_1_slot.into(),
-                        boot_disk: self.expected_active_boot_disk.into(),
-                        phase_1: self.expected_active_phase_1_hash.into(),
-                        phase_2: self.expected_active_phase_2_hash.into(),
-                    },
-                    expected_inactive_artifact:
-                        ExpectedInactiveHostOsArtifact {
-                            phase_1: self.expected_inactive_phase_1_hash.into(),
-                            phase_2: self.expected_inactive_phase_2_hash.into(),
-                        },
+                    expected_active_phase_1_slot: self
+                        .expected_active_phase_1_slot
+                        .into(),
+                    expected_boot_disk: self.expected_boot_disk.into(),
+                    expected_active_phase_1_hash: self
+                        .expected_active_phase_1_hash
+                        .into(),
+                    expected_active_phase_2_hash: self
+                        .expected_active_phase_2_hash
+                        .into(),
+                    expected_inactive_phase_1_hash: self
+                        .expected_inactive_phase_1_hash
+                        .into(),
+                    expected_inactive_phase_2_hash: self
+                        .expected_inactive_phase_2_hash
+                        .into(),
                     sled_agent_address: SocketAddrV6::new(
                         self.sled_agent_ip.into(),
                         *self.sled_agent_port,
