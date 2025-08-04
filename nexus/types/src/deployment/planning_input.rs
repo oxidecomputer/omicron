@@ -18,6 +18,7 @@ use crate::external_api::views::SledProvisionPolicy;
 use crate::external_api::views::SledState;
 use crate::inventory::BaseboardId;
 use chrono::DateTime;
+use chrono::TimeDelta;
 use chrono::Utc;
 use clap::ValueEnum;
 use daft::Diffable;
@@ -45,6 +46,32 @@ use std::error;
 use std::fmt;
 use strum::Display;
 use strum::IntoEnumIterator;
+
+/// Amount of time we're willing to let an MGS-managed update set in an
+/// "impossible preconditions" state waiting for it to settle.
+///
+/// A typical update flow looks something like this:
+///
+/// 1. Target device has active version A, inactive version B
+/// 2. We generate a blueprint containing an MGS-managed update with
+///    preconditions on active A + inactive B
+/// 3. We start the update process
+/// 4. If we generate an inventory collection at this point, we'll see
+///    "inactive version invalid", because we've started to overwrite it. This
+///    makes the update impossible due to the precondition on "inactive version
+///    B", so we want to replace the pending update details with a new one with
+///    precondition "inactive version invalid". But in most cases, the inactive
+///    version is only temporarily invalid, because it's actively being updated!
+///
+/// We have to be willing to reevaluate MGS updates that have become impossible
+/// eventually to handle cases like the rack losing power mid-update and leaving
+/// the inactive slot with "version invalid" indefinitely. But we don't want to
+/// churn on blueprints in the common case of "the preconditions are invalid
+/// because we're actively updating". This can also cause thrashing where
+/// competing Nexuses looking at different inventory collections believe the
+/// preconditions are impossible in different ways. See
+/// https://github.com/oxidecomputer/omicron/issues/8483 for examples.
+const MGS_UPDATE_SETTLE_TIMEOUT: TimeDelta = TimeDelta::minutes(5);
 
 /// Policy and database inputs to the Reconfigurator planner
 ///
@@ -84,6 +111,18 @@ pub struct PlanningInput {
 
     /// per-zone network resources
     network_resources: OmicronZoneNetworkResources,
+
+    /// age required to reevaluate impossible MGS updates
+    ///
+    /// MGS-driven updates include preconditions that must be satisfied for the
+    /// update to proceed (and must be met to be considered "possible"). While
+    /// an update is running, the state of the target device changes in a way
+    /// that breaks these preconditions. To avoid churning and replanning /
+    /// reevaluating MGS updates, we set an age at which we'll replace
+    /// impossible updates; the planner will _ignore_ updates newer than this
+    /// mark under the assumption that they may appear to be impossible because
+    /// they're currently in progress.
+    ignore_impossible_mgs_updates_since: DateTime<Utc>,
 }
 
 impl PlanningInput {
@@ -261,6 +300,10 @@ impl PlanningInput {
         &self.network_resources
     }
 
+    pub fn ignore_impossible_mgs_updates_since(&self) -> DateTime<Utc> {
+        self.ignore_impossible_mgs_updates_since
+    }
+
     /// Convert this `PlanningInput` back into a [`PlanningInputBuilder`]
     ///
     /// This is primarily useful for tests that want to mutate an existing
@@ -273,6 +316,8 @@ impl PlanningInput {
             cockroachdb_settings: self.cockroachdb_settings,
             sleds: self.sleds,
             network_resources: self.network_resources,
+            ignore_impossible_mgs_updates_since: self
+                .ignore_impossible_mgs_updates_since,
         }
     }
 }
@@ -1214,6 +1259,7 @@ pub struct PlanningInputBuilder {
     cockroachdb_settings: CockroachDbSettings,
     sleds: BTreeMap<SledUuid, SledDetails>,
     network_resources: OmicronZoneNetworkResources,
+    ignore_impossible_mgs_updates_since: DateTime<Utc>,
 }
 
 impl PlanningInputBuilder {
@@ -1241,6 +1287,7 @@ impl PlanningInputBuilder {
             cockroachdb_settings: CockroachDbSettings::empty(),
             sleds: BTreeMap::new(),
             network_resources: OmicronZoneNetworkResources::new(),
+            ignore_impossible_mgs_updates_since: Utc::now(),
         }
     }
 
@@ -1257,6 +1304,8 @@ impl PlanningInputBuilder {
             cockroachdb_settings,
             sleds: BTreeMap::new(),
             network_resources: OmicronZoneNetworkResources::new(),
+            ignore_impossible_mgs_updates_since: Utc::now()
+                - MGS_UPDATE_SETTLE_TIMEOUT,
         }
     }
 
@@ -1353,6 +1402,8 @@ impl PlanningInputBuilder {
             cockroachdb_settings: self.cockroachdb_settings,
             sleds: self.sleds,
             network_resources: self.network_resources,
+            ignore_impossible_mgs_updates_since: self
+                .ignore_impossible_mgs_updates_since,
         }
     }
 }

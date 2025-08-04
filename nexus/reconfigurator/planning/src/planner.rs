@@ -1150,6 +1150,14 @@ impl<'a> Planner<'a> {
         let current_updates =
             &self.blueprint.parent_blueprint().pending_mgs_updates;
         let current_artifacts = self.input.tuf_repo().description();
+        let impossible_update_policy =
+            if self.blueprint.parent_blueprint().time_created
+                >= self.input.ignore_impossible_mgs_updates_since()
+            {
+                ImpossibleUpdatePolicy::Keep
+            } else {
+                ImpossibleUpdatePolicy::Reevaluate
+            };
         let next = plan_mgs_updates(
             &self.log,
             &self.inventory,
@@ -1157,9 +1165,7 @@ impl<'a> Planner<'a> {
             current_updates,
             current_artifacts,
             NUM_CONCURRENT_MGS_UPDATES,
-            ImpossibleUpdatePolicy::based_on_parent_blueprint_age(
-                self.blueprint.parent_blueprint().time_created,
-            ),
+            impossible_update_policy,
         );
         if next != *current_updates {
             // This will only add comments if our set of updates changed _and_

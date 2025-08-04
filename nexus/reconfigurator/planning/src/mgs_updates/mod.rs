@@ -4,9 +4,6 @@
 
 //! Facilities for making choices about MGS-managed updates
 
-use chrono::DateTime;
-use chrono::TimeDelta;
-use chrono::Utc;
 use nexus_types::deployment::ExpectedVersion;
 use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdateDetails;
@@ -24,12 +21,6 @@ use thiserror::Error;
 use tufaceous_artifact::ArtifactVersion;
 use tufaceous_artifact::KnownArtifactKind;
 
-/// Amount of time we're willing to let an MGS-managed update set in an
-/// "impossible preconditions" state waiting for it to settle.
-///
-/// See [`ImpossibleUpdatePolicy::based_on_parent_blueprint_age()`].
-const MGS_UPDATE_SETTLE_TIMEOUT: TimeDelta = TimeDelta::minutes(5);
-
 /// How to handle an MGS update that has become impossible due to unsatisfied
 /// preconditions.
 #[derive(Debug, Clone, Copy, strum::EnumIter)]
@@ -41,46 +32,6 @@ pub enum ImpossibleUpdatePolicy {
     /// replace the impossible update with a new update for the same target with
     /// different preconditions.
     Reevaluate,
-}
-
-impl ImpossibleUpdatePolicy {
-    /// Decide how to handle an impossible update based on the wallclock age of
-    /// our parent blueprint.
-    ///
-    /// A typical update flow looks something like this:
-    ///
-    /// 1. Target device has active version A, inactive version B
-    /// 2. We generate a blueprint containing an MGS-managed update with
-    ///    preconditions on active A + inactive B
-    /// 3. We start the update process
-    /// 4. If we generate an inventory collection at this point, we'll see
-    ///    "inactive version invalid", because we've started to overwrite it.
-    ///    This makes the update impossible due to the precondition on "inactive
-    ///    version B", so we want to replace the pending update details with a
-    ///    new one with precondition "inactive version invalid". But in most
-    ///    cases, the inactive version is only temporarily invalid, because it's
-    ///    actively being updated!
-    ///
-    /// We have to be willing to reevaluate MGS updates that have become
-    /// impossible eventually to handle cases like the rack losing power
-    /// mid-update and leaving the inactive slot with "version invalid"
-    /// indefinitely. But we don't want to churn on blueprints in the common
-    /// case of "the preconditions are invalid because we're actively updating".
-    /// This can also cause thrashing where competing Nexuses looking at
-    /// different inventory collections believe the preconditions are impossible
-    /// in different ways. See
-    /// https://github.com/oxidecomputer/omicron/issues/8483 for examples.
-    pub fn based_on_parent_blueprint_age(
-        parent_blueprint_time_created: DateTime<Utc>,
-    ) -> Self {
-        let parent_blueprint_age =
-            Utc::now().signed_duration_since(parent_blueprint_time_created);
-        if parent_blueprint_age < MGS_UPDATE_SETTLE_TIMEOUT {
-            Self::Keep
-        } else {
-            Self::Reevaluate
-        }
-    }
 }
 
 /// Generates a new set of `PendingMgsUpdates` based on:
