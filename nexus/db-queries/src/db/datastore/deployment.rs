@@ -80,8 +80,6 @@ use nexus_types::deployment::BlueprintSledConfig;
 use nexus_types::deployment::BlueprintTarget;
 use nexus_types::deployment::ClickhouseClusterConfig;
 use nexus_types::deployment::CockroachDbPreserveDowngrade;
-use nexus_types::deployment::ExpectedActiveHostOsSlot;
-use nexus_types::deployment::ExpectedInactiveHostOsArtifact;
 use nexus_types::deployment::ExpectedVersion;
 use nexus_types::deployment::OximeterReadMode;
 use nexus_types::deployment::PendingMgsUpdate;
@@ -2399,18 +2397,12 @@ async fn insert_pending_mgs_update(
         }
         PendingMgsUpdateDetails::HostPhase1(
             PendingMgsUpdateHostPhase1Details {
-                expected_active_slot:
-                    ExpectedActiveHostOsSlot {
-                        phase_1_slot: expected_active_phase_1_slot,
-                        boot_disk: expected_active_boot_disk,
-                        phase_1: expected_active_phase_1_hash,
-                        phase_2: expected_active_phase_2_hash,
-                    },
-                expected_inactive_artifact:
-                    ExpectedInactiveHostOsArtifact {
-                        phase_1: expected_inactive_phase_1_hash,
-                        phase_2: expected_inactive_phase_2_hash,
-                    },
+                expected_active_phase_1_slot,
+                expected_boot_disk,
+                expected_active_phase_1_hash,
+                expected_active_phase_2_hash,
+                expected_inactive_phase_1_hash,
+                expected_inactive_phase_2_hash,
                 sled_agent_address,
             },
         ) => {
@@ -2429,8 +2421,7 @@ async fn insert_pending_mgs_update(
                 HwM2Slot::from(*expected_active_phase_1_slot)
                     .into_sql::<HwM2SlotEnum>();
             let db_expected_active_boot_disk =
-                HwM2Slot::from(*expected_active_boot_disk)
-                    .into_sql::<HwM2SlotEnum>();
+                HwM2Slot::from(*expected_boot_disk).into_sql::<HwM2SlotEnum>();
             let db_expected_active_phase_1_hash =
                 ArtifactHash(*expected_active_phase_1_hash)
                     .into_sql::<diesel::sql_types::Text>();
@@ -2490,7 +2481,7 @@ async fn insert_pending_mgs_update(
                 update_dsl::artifact_sha256,
                 update_dsl::artifact_version,
                 update_dsl::expected_active_phase_1_slot,
-                update_dsl::expected_active_boot_disk,
+                update_dsl::expected_boot_disk,
                 update_dsl::expected_active_phase_1_hash,
                 update_dsl::expected_active_phase_2_hash,
                 update_dsl::expected_inactive_phase_1_hash,
@@ -3814,17 +3805,12 @@ mod tests {
             slot_id: sp.sp_slot,
             details: PendingMgsUpdateDetails::HostPhase1(
                 PendingMgsUpdateHostPhase1Details {
-                    expected_active_slot: ExpectedActiveHostOsSlot {
-                        phase_1_slot: M2Slot::A,
-                        boot_disk: M2Slot::B,
-                        phase_1: ArtifactHash([1; 32]),
-                        phase_2: ArtifactHash([2; 32]),
-                    },
-                    expected_inactive_artifact:
-                        ExpectedInactiveHostOsArtifact {
-                            phase_1: ArtifactHash([3; 32]),
-                            phase_2: ArtifactHash([4; 32]),
-                        },
+                    expected_active_phase_1_slot: M2Slot::A,
+                    expected_boot_disk: M2Slot::B,
+                    expected_active_phase_1_hash: ArtifactHash([1; 32]),
+                    expected_active_phase_2_hash: ArtifactHash([2; 32]),
+                    expected_inactive_phase_1_hash: ArtifactHash([3; 32]),
+                    expected_inactive_phase_2_hash: ArtifactHash([4; 32]),
                     sled_agent_address: "[::1]:12345".parse().unwrap(),
                 },
             ),

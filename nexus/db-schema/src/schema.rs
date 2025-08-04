@@ -2178,7 +2178,7 @@ table! {
         artifact_sha256 -> Text,
         artifact_version -> Text,
         expected_active_phase_1_slot -> crate::enums::HwM2SlotEnum,
-        expected_active_boot_disk -> crate::enums::HwM2SlotEnum,
+        expected_boot_disk -> crate::enums::HwM2SlotEnum,
         expected_active_phase_1_hash -> Text,
         expected_active_phase_2_hash -> Text,
         expected_inactive_phase_1_hash -> Text,

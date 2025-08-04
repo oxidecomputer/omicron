@@ -4880,7 +4880,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_pending_mgs_update_host_phase_1 (
 
     -- host-phase-1-specific details
     expected_active_phase_1_slot omicron.public.hw_m2_slot NOT NULL,
-    expected_active_boot_disk omicron.public.hw_m2_slot NOT NULL,
+    expected_boot_disk omicron.public.hw_m2_slot NOT NULL,
     expected_active_phase_1_hash STRING(64) NOT NULL,
     expected_active_phase_2_hash STRING(64) NOT NULL,
     expected_inactive_phase_1_hash STRING(64) NOT NULL,
