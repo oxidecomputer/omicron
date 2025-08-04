@@ -48,7 +48,7 @@ INFO sufficient InternalDns zones exist in plan, desired_count: 3, current_count
 INFO sufficient ExternalDns zones exist in plan, desired_count: 3, current_count: 3
 INFO sufficient Nexus zones exist in plan, desired_count: 3, current_count: 3
 INFO sufficient Oximeter zones exist in plan, desired_count: 0, current_count: 0
-WARN cannot issue more SP updates (no current artifacts)
+WARN cannot issue more MGS updates (no current artifacts)
 INFO all zones up-to-date
 INFO will ensure cockroachdb setting, setting: cluster.preserve_downgrade_option, value: DoNotModify
 generated blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1 based on parent blueprint dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21
