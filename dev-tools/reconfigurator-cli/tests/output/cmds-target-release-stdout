@@ -32,6 +32,7 @@ created repo-1.0.0.zip for system version 1.0.0
 > set target-release repo-1.0.0.zip
 INFO extracting uploaded archive to <EXTRACTING_UPLOADED_ARCHIVE_TO_REDACTED>
 INFO created directory to store extracted artifacts, path: <CREATED_DIRECTORY_TO_STORE_EXTRACTED_ARTIFACTS_PATH_REDACTED>
+INFO added artifact, name: installinator_document, kind: installinator_document, version: 1.0.0, hash: c6ae866031d1183094c92cde9d9d1fd5f18356abc81a842ce31471b473fd5582, length: 367
 INFO added artifact, name: SimGimletSp, kind: gimlet_sp, version: 1.0.0, hash: 7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670, length: 747
 INFO added artifact, name: fake-gimlet-rot, kind: gimlet_rot_image_a, version: 1.0.0, hash: 04e4a7fdb84acca92c8fd3235e26d64ea61bef8a5f98202589fd346989c5720a, length: 735
 INFO added artifact, name: fake-gimlet-rot, kind: gimlet_rot_image_b, version: 1.0.0, hash: 04e4a7fdb84acca92c8fd3235e26d64ea61bef8a5f98202589fd346989c5720a, length: 735
@@ -70,6 +71,7 @@ internal DNS generations: 1
 external DNS generations: 1
 target number of Nexus instances: default
 target release (generation 2): 1.0.0 (system-update-v1.0.0.zip)
+    artifact: c6ae866031d1183094c92cde9d9d1fd5f18356abc81a842ce31471b473fd5582 installinator_document (installinator_document version 1.0.0)
     artifact: 7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670 gimlet_sp (SimGimletSp version 1.0.0)
     artifact: 04e4a7fdb84acca92c8fd3235e26d64ea61bef8a5f98202589fd346989c5720a gimlet_rot_image_a (fake-gimlet-rot version 1.0.0)
     artifact: 04e4a7fdb84acca92c8fd3235e26d64ea61bef8a5f98202589fd346989c5720a gimlet_rot_image_b (fake-gimlet-rot version 1.0.0)
@@ -147,6 +149,7 @@ internal DNS generations: 1
 external DNS generations: 1
 target number of Nexus instances: default
 target release (generation 2): 1.0.0 (system-update-v1.0.0.zip)
+    artifact: c6ae866031d1183094c92cde9d9d1fd5f18356abc81a842ce31471b473fd5582 installinator_document (installinator_document version 1.0.0)
     artifact: 7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670 gimlet_sp (SimGimletSp version 1.0.0)
     artifact: 04e4a7fdb84acca92c8fd3235e26d64ea61bef8a5f98202589fd346989c5720a gimlet_rot_image_a (fake-gimlet-rot version 1.0.0)
     artifact: 04e4a7fdb84acca92c8fd3235e26d64ea61bef8a5f98202589fd346989c5720a gimlet_rot_image_b (fake-gimlet-rot version 1.0.0)

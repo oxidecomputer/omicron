@@ -5,7 +5,7 @@
 //! Module containing types for updating RoT Bootloaders via MGS.
 
 use super::MgsClients;
-use crate::SpComponentUpdateHelper;
+use crate::SpComponentUpdateHelperImpl;
 use crate::common_sp_update::FoundVersion;
 use crate::common_sp_update::PostUpdateError;
 use crate::common_sp_update::PrecheckError;
@@ -33,7 +33,7 @@ const WAIT_FOR_BOOT_INFO_TIMEOUT: Duration = Duration::from_secs(120);
 const WAIT_FOR_BOOT_INFO_INTERVAL: Duration = Duration::from_secs(10);
 
 pub struct ReconfiguratorRotBootloaderUpdater;
-impl SpComponentUpdateHelper for ReconfiguratorRotBootloaderUpdater {
+impl SpComponentUpdateHelperImpl for ReconfiguratorRotBootloaderUpdater {
     /// Checks if the component is already updated or ready for update
     fn precheck<'a>(
         &'a self,

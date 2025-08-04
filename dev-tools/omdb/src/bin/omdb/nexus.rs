@@ -66,6 +66,7 @@ use nexus_types::internal_api::background::RegionSnapshotReplacementStartStatus;
 use nexus_types::internal_api::background::RegionSnapshotReplacementStepStatus;
 use nexus_types::internal_api::background::SupportBundleCleanupReport;
 use nexus_types::internal_api::background::SupportBundleCollectionReport;
+use nexus_types::internal_api::background::SupportBundleEreportStatus;
 use nexus_types::internal_api::background::TufArtifactReplicationCounters;
 use nexus_types::internal_api::background::TufArtifactReplicationRequest;
 use nexus_types::internal_api::background::TufArtifactReplicationStatus;
@@ -2414,6 +2415,8 @@ fn print_task_support_bundle_collector(details: &serde_json::Value) {
                 listed_in_service_sleds,
                 listed_sps,
                 activated_in_db_ok,
+                sp_ereports,
+                host_ereports,
             }) = collection_report
             {
                 println!("    Support Bundle Collection Report:");
@@ -2427,6 +2430,26 @@ fn print_task_support_bundle_collector(details: &serde_json::Value) {
                 println!(
                     "      Bundle was activated in the database: {activated_in_db_ok}"
                 );
+                print_ereport_status("SP", &sp_ereports);
+                print_ereport_status("Host OS", &host_ereports);
+            }
+        }
+    }
+
+    fn print_ereport_status(which: &str, status: &SupportBundleEreportStatus) {
+        match status {
+            SupportBundleEreportStatus::NotRequested => {
+                println!("      {which} ereport collection was not requested");
+            }
+            SupportBundleEreportStatus::Failed { error, n_collected } => {
+                println!("      {which} ereport collection failed:");
+                println!(
+                    "        ereports collected successfully: {n_collected}"
+                );
+                println!("        error: {error}");
+            }
+            SupportBundleEreportStatus::Collected { n_collected } => {
+                println!("      {which} ereports collected: {n_collected}");
             }
         }
     }
@@ -2787,7 +2810,7 @@ fn print_task_sp_ereport_ingester(details: &serde_json::Value) {
     use nexus_types::internal_api::background::SpEreportIngesterStatus;
     use nexus_types::internal_api::background::SpEreporterStatus;
 
-    let SpEreportIngesterStatus { sps, errors } =
+    let SpEreportIngesterStatus { sps, errors, disabled } =
         match serde_json::from_value(details.clone()) {
             Err(error) => {
                 eprintln!(
@@ -2813,9 +2836,19 @@ fn print_task_sp_ereport_ingester(details: &serde_json::Value) {
         }
     }
 
-    print_ereporter_status_totals(sps.iter().map(|sp| &sp.status));
+    if disabled {
+        println!("    SP ereport ingestion explicitly disabled by config!");
+    } else {
+        print_ereporter_status_totals(sps.iter().map(|sp| &sp.status));
+    }
 
     if !sps.is_empty() {
+        if disabled {
+            println!(
+                "/!\\ WEIRD: SP ereport ingestion disabled by config, but \
+                 some SP statuses were recorded!"
+            )
+        }
         println!("\n    service processors:");
         for SpEreporterStatus { sp_type, slot, status } in &sps {
             println!(

@@ -24,6 +24,7 @@ use gateway_messages::UpdateChunk;
 use gateway_messages::UpdateId;
 use gateway_messages::UpdateInProgressStatus;
 use hubtools::RawHubrisImage;
+use omicron_common::disk::M2Slot;
 use sha2::Sha256;
 use sha3::Digest;
 use sha3::Sha3_256;
@@ -40,9 +41,11 @@ pub(crate) struct SimSpUpdate {
     last_sp_update_data: Option<Box<[u8]>>,
     /// data from the last completed RoT update (exposed for testing)
     last_rot_update_data: Option<Box<[u8]>>,
-    /// data from the last completed phase1 update for each slot (exposed for
-    /// testing)
-    last_host_phase1_update_data: BTreeMap<u16, Box<[u8]>>,
+    /// current active phase 1 slot
+    phase1_active_slot: u16,
+    /// data in each phase 1 slot
+    phase1_slot_0_data: Vec<u8>,
+    phase1_slot_1_data: Vec<u8>,
     /// state of hashing each of the host phase1 slots
     phase1_hash_state: BTreeMap<u16, HostFlashHashState>,
     /// how do we decide when we're done hashing host phase1 slots? this allows
@@ -189,7 +192,9 @@ impl SimSpUpdate {
             state: UpdateState::NotPrepared,
             last_sp_update_data: None,
             last_rot_update_data: None,
-            last_host_phase1_update_data: BTreeMap::new(),
+            phase1_active_slot: 0,
+            phase1_slot_0_data: b"sp-sim fake phase 1 data for slot 0".to_vec(),
+            phase1_slot_1_data: b"sp-sim fake phase 1 data for slot 1".to_vec(),
             phase1_hash_state: BTreeMap::new(),
             phase1_hash_policy: phase1_hash_policy.0,
 
@@ -338,8 +343,12 @@ impl SimSpUpdate {
                     let data = stolen.into_inner();
 
                     if *component == SpComponent::HOST_CPU_BOOT_FLASH {
-                        self.last_host_phase1_update_data
-                            .insert(*slot, data.clone());
+                        let dest = match slot {
+                            0 => &mut self.phase1_slot_0_data,
+                            1 => &mut self.phase1_slot_1_data,
+                            _ => return Err(SpError::InvalidSlotForComponent),
+                        };
+                        *dest = data.clone().to_vec();
                     }
 
                     let component = *component;
@@ -474,11 +483,12 @@ impl SimSpUpdate {
         self.last_rot_update_data.clone()
     }
 
-    pub(crate) fn last_host_phase1_update_data(
-        &self,
-        slot: u16,
-    ) -> Option<Box<[u8]>> {
-        self.last_host_phase1_update_data.get(&slot).cloned()
+    pub(crate) fn host_phase1_data(&self, slot: u16) -> Option<Vec<u8>> {
+        match slot {
+            0 => Some(self.phase1_slot_0_data.clone()),
+            1 => Some(self.phase1_slot_1_data.clone()),
+            _ => None,
+        }
     }
 
     pub(crate) fn start_host_flash_hash(
@@ -566,7 +576,7 @@ impl SimSpUpdate {
         };
 
         if should_hash {
-            let data = self.last_host_phase1_update_data(slot);
+            let data = self.host_phase1_data(slot);
             let data = data.as_deref().unwrap_or(&[]);
             let hash = Sha256::digest(&data).into();
             self.phase1_hash_state
@@ -625,7 +635,14 @@ impl SimSpUpdate {
                     Err(SpError::RequestUnsupportedForComponent)
                 }
             }
-            SpComponent::HOST_CPU_BOOT_FLASH => Ok(()),
+            SpComponent::HOST_CPU_BOOT_FLASH => {
+                if M2Slot::from_mgs_firmware_slot(slot).is_some() {
+                    self.phase1_active_slot = slot;
+                    Ok(())
+                } else {
+                    Err(SpError::InvalidSlotForComponent)
+                }
+            }
             _ => {
                 // The real SP returns `RequestUnsupportedForComponent` for
                 // anything other than the RoT and host boot flash, including
@@ -642,11 +659,15 @@ impl SimSpUpdate {
         match component {
             // The only active component for SP is slot 0.
             SpComponent::SP_ITSELF => Ok(0),
+            // The only active component is stage0
+            SpComponent::STAGE0 => Ok(0),
+
+            // These slots can be controlled
             SpComponent::ROT => Ok(rot_slot_id_to_u16(
                 self.rot_state.persistent_boot_preference,
             )),
-            // The only active component is stage0
-            SpComponent::STAGE0 => Ok(0),
+            SpComponent::HOST_CPU_BOOT_FLASH => Ok(self.phase1_active_slot),
+
             _ => Err(SpError::RequestUnsupportedForComponent),
         }
     }

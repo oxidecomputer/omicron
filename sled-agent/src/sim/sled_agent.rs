@@ -20,13 +20,15 @@ use crate::updates::UpdateManager;
 use anyhow::Context;
 use anyhow::bail;
 use bytes::Bytes;
+use chrono::Utc;
 use dropshot::Body;
 use dropshot::HttpError;
 use futures::Stream;
 use nexus_sled_agent_shared::inventory::{
-    ConfigReconcilerInventoryStatus, HostPhase2DesiredSlots, Inventory,
-    InventoryDataset, InventoryDisk, InventoryZpool, OmicronSledConfig,
-    OmicronZonesConfig, SledRole, ZoneImageResolverInventory,
+    ConfigReconcilerInventory, ConfigReconcilerInventoryStatus,
+    HostPhase2DesiredSlots, Inventory, InventoryDataset, InventoryDisk,
+    InventoryZpool, OmicronSledConfig, OmicronZonesConfig, SledRole,
+    ZoneImageResolverInventory,
 };
 use omicron_common::api::external::{
     ByteCount, DiskState, Error, Generation, ResourceType,
@@ -805,9 +807,14 @@ impl SledAgent {
                         .collect::<Vec<_>>()
                 })
                 .unwrap_or_else(|_| vec![]),
-            ledgered_sled_config: Some(sled_config),
-            reconciler_status: ConfigReconcilerInventoryStatus::NotYetRun,
-            last_reconciliation: None,
+            ledgered_sled_config: Some(sled_config.clone()),
+            reconciler_status: ConfigReconcilerInventoryStatus::Idle {
+                completed_at: Utc::now() - Duration::from_secs(10),
+                ran_for: Duration::from_secs(3),
+            },
+            last_reconciliation: Some(
+                ConfigReconcilerInventory::debug_assume_success(sled_config),
+            ),
             // TODO: simulate the zone image resolver with greater fidelity
             zone_image_resolver: ZoneImageResolverInventory::new_fake(),
         })

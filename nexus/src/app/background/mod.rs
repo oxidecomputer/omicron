@@ -166,3 +166,22 @@ impl TaskName {
         &self.0
     }
 }
+
+#[usdt::provider(provider = "nexus")]
+mod probes {
+    /// Fires just before running the activate method of the named task.
+    fn background__task__activate__start(
+        task_name: &str,
+        iteration: u64,
+        reason: &str,
+    ) {
+    }
+
+    /// Fires just after completing the task, with the result as JSON.
+    fn background__task__activate__done(
+        task_name: &str,
+        iteration: u64,
+        details: &str,
+    ) {
+    }
+}

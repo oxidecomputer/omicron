@@ -224,26 +224,8 @@ impl ArtifactsWithPlan {
                     error: Box::new(error),
                 })?;
 
-            let target_hash = repository
-                .repo()
-                .targets()
-                .signed
-                .find_target(&target_name, false)
-                .map_err(|error| RepositoryError::TargetHashRead {
-                    target: artifact.target.clone(),
-                    error: Box::new(error),
-                })?
-                .hashes
-                .sha256
-                .clone()
-                .into_vec();
-
-            // The target hash is SHA-256, which is 32 bytes long.
-            let artifact_hash = ArtifactHash(
-                target_hash
-                    .try_into()
-                    .map_err(RepositoryError::TargetHashLength)?,
-            );
+            let artifact_hash =
+                lookup_artifact_hash(&repository, artifact, &target_name)?;
 
             let stream = repository
                 .repo()
@@ -346,6 +328,30 @@ impl ArtifactsWithPlan {
     }
 }
 
+fn lookup_artifact_hash(
+    repository: &OmicronRepo,
+    artifact: &tufaceous_artifact::Artifact,
+    target_name: &TargetName,
+) -> Result<ArtifactHash, RepositoryError> {
+    let target_hash = repository
+        .repo()
+        .targets()
+        .signed
+        .find_target(target_name, false)
+        .map_err(|error| RepositoryError::TargetHashRead {
+            target: artifact.target.clone(),
+            error: Box::new(error),
+        })?
+        .hashes
+        .sha256
+        .clone()
+        .into_vec();
+    let artifact_hash = ArtifactHash(
+        target_hash.try_into().map_err(RepositoryError::TargetHashLength)?,
+    );
+    Ok(artifact_hash)
+}
+
 #[derive(Debug, Clone, Copy)]
 pub enum ControlPlaneZonesMode {
     /// Ensure the control plane zones are combined into a single composite
@@ -433,7 +439,7 @@ mod tests {
             .collect();
 
         // `by_id` should contain one entry for every `KnownArtifactKind`
-        // (except `Zone`)...
+        // (except `Zone`).
         let mut expected_kinds: BTreeSet<_> = KnownArtifactKind::iter()
             .filter(|k| !matches!(k, KnownArtifactKind::Zone))
             .map(ArtifactKind::from)
@@ -514,7 +520,7 @@ mod tests {
         .await?;
 
         // `by_id` should contain one entry for every `KnownArtifactKind`
-        // (except `ControlPlane`).
+        // (except `ControlPlane`), as well as `installinator_document`.
         let by_id_kinds: BTreeSet<_> =
             plan.by_id().keys().map(|id| id.kind.clone()).collect();
         let expected_kinds: BTreeSet<_> = KnownArtifactKind::iter()

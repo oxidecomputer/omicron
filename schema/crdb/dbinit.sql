@@ -3757,6 +3757,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_sled_agent (
     PRIMARY KEY (inv_collection_id, sled_id)
 );
 
+-- This type name starts with "clear_" for legacy reasons. Prefer "remove" in
+-- the future.
 CREATE TYPE IF NOT EXISTS omicron.public.clear_mupdate_override_boot_success
 AS ENUM (
     'cleared',
@@ -3800,22 +3802,25 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_sled_config_reconciler (
     boot_partition_a_error TEXT,
     boot_partition_b_error TEXT,
 
-    -- Success clearing the mupdate override.
+    -- The names below start with "clear_" for legacy reasons. Prefer "remove"
+    -- in the future.
+    --
+    -- Success removing the mupdate override.
     clear_mupdate_override_boot_success omicron.public.clear_mupdate_override_boot_success,
-    -- Error clearing the mupdate override.
+    -- Error removing the mupdate override.
     clear_mupdate_override_boot_error TEXT,
 
-    -- A message describing the result clearing the mupdate override on the
-    -- non-boot disk.
+    -- A message describing the result removing the mupdate override on the
+    -- non-boot disk (success or error).
     clear_mupdate_override_non_boot_message TEXT,
 
     -- Three cases:
     --
-    -- 1. No clear_mupdate_override instruction was passed in. All three
+    -- 1. No remove_mupdate_override instruction was passed in. All three
     --    columns are NULL.
-    -- 2. Clearing the override was successful. boot_success is NOT NULL,
+    -- 2. Removing the override was successful. boot_success is NOT NULL,
     --    boot_error is NULL, and non_boot_message is NOT NULL.
-    -- 3. Clearing the override failed. boot_success is NULL, boot_error is
+    -- 3. Removing the override failed. boot_success is NULL, boot_error is
     --    NOT NULL, and non_boot_message is NOT NULL.
     CONSTRAINT clear_mupdate_override_consistency CHECK (
         (clear_mupdate_override_boot_success IS NULL

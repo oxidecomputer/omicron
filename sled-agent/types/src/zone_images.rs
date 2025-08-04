@@ -6,11 +6,12 @@ use std::{fmt, fs::FileType, io, sync::Arc};
 
 use camino::Utf8PathBuf;
 use iddqd::{IdOrdItem, IdOrdMap, id_upcast};
-use nexus_sled_agent_shared::inventory::ClearMupdateOverrideBootSuccessInventory;
-use nexus_sled_agent_shared::inventory::ClearMupdateOverrideInventory;
 use nexus_sled_agent_shared::inventory::MupdateOverrideBootInventory;
 use nexus_sled_agent_shared::inventory::MupdateOverrideInventory;
 use nexus_sled_agent_shared::inventory::MupdateOverrideNonBootInventory;
+use nexus_sled_agent_shared::inventory::OmicronZoneConfig;
+use nexus_sled_agent_shared::inventory::RemoveMupdateOverrideBootSuccessInventory;
+use nexus_sled_agent_shared::inventory::RemoveMupdateOverrideInventory;
 use nexus_sled_agent_shared::inventory::ZoneArtifactInventory;
 use nexus_sled_agent_shared::inventory::ZoneImageResolverInventory;
 use nexus_sled_agent_shared::inventory::ZoneKind;
@@ -20,6 +21,7 @@ use nexus_sled_agent_shared::inventory::ZoneManifestNonBootInventory;
 use omicron_common::update::{
     MupdateOverrideInfo, OmicronZoneManifest, OmicronZoneManifestSource,
 };
+use omicron_common::zone_images::ZoneImageFileSource;
 use omicron_uuid_kinds::InternalZpoolUuid;
 use omicron_uuid_kinds::MupdateOverrideUuid;
 use slog::{error, info, o, warn};
@@ -27,6 +29,9 @@ use slog_error_chain::InlineErrorChain;
 use swrite::{SWrite, swriteln};
 use thiserror::Error;
 use tufaceous_artifact::ArtifactHash;
+
+/// The location to look for images shipped with the RAM disk.
+pub const RAMDISK_IMAGE_PATH: &str = "/opt/oxide";
 
 /// Current status of the zone image resolver.
 #[derive(Clone, Debug)]
@@ -36,6 +41,11 @@ pub struct ResolverStatus {
 
     /// The mupdate override status.
     pub mupdate_override: MupdateOverrideStatus,
+
+    /// The image directory override, if any.
+    ///
+    /// This is injected by tests.
+    pub image_directory_override: Option<Utf8PathBuf>,
 }
 
 impl ResolverStatus {
@@ -124,7 +134,7 @@ impl ZoneManifestStatus {
     }
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Clone, Debug, thiserror::Error, PartialEq)]
 pub enum ZoneManifestZoneHashError {
     #[error("error reading boot disk")]
     ReadBootDisk(#[source] ZoneManifestReadError),
@@ -734,28 +744,31 @@ pub enum ArtifactReadResult {
     Error(ArcIoError),
 }
 
-/// The result of an operation to clear MUPdate overrides on a sled's boot disk.
+/// The result of an operation to remove MUPdate overrides on a sled's boot
+/// disk.
 #[derive(Clone, Debug)]
-pub struct ClearMupdateOverrideResult {
+pub struct RemoveMupdateOverrideResult {
     /// The path to the override on the boot disk.
     pub boot_disk_path: Utf8PathBuf,
 
-    /// The result of clearing the mupdate override on the boot disk.
-    pub boot_disk_result:
-        Result<ClearMupdateOverrideBootSuccess, ClearMupdateOverrideBootError>,
+    /// The result of removing the mupdate override on the boot disk.
+    pub boot_disk_result: Result<
+        RemoveMupdateOverrideBootSuccess,
+        RemoveMupdateOverrideBootError,
+    >,
 
-    /// The result of clearing the mupdate override on non-boot disks.
-    pub non_boot_disk_info: IdOrdMap<ClearMupdateOverrideNonBootInfo>,
+    /// The result of removing the mupdate override on non-boot disks.
+    pub non_boot_disk_info: IdOrdMap<RemoveMupdateOverrideNonBootInfo>,
 }
 
-impl ClearMupdateOverrideResult {
-    pub fn to_inventory(&self) -> ClearMupdateOverrideInventory {
+impl RemoveMupdateOverrideResult {
+    pub fn to_inventory(&self) -> RemoveMupdateOverrideInventory {
         let boot_disk_result = match &self.boot_disk_result {
-            Ok(ClearMupdateOverrideBootSuccess::Cleared(_)) => {
-                Ok(ClearMupdateOverrideBootSuccessInventory::Cleared)
+            Ok(RemoveMupdateOverrideBootSuccess::Removed(_)) => {
+                Ok(RemoveMupdateOverrideBootSuccessInventory::Removed)
             }
-            Ok(ClearMupdateOverrideBootSuccess::NoOverride) => {
-                Ok(ClearMupdateOverrideBootSuccessInventory::NoOverride)
+            Ok(RemoveMupdateOverrideBootSuccess::NoOverride) => {
+                Ok(RemoveMupdateOverrideBootSuccessInventory::NoOverride)
             }
             Err(error) => Err(InlineErrorChain::new(error).to_string()),
         };
@@ -770,7 +783,7 @@ impl ClearMupdateOverrideResult {
             );
         }
 
-        ClearMupdateOverrideInventory { boot_disk_result, non_boot_message }
+        RemoveMupdateOverrideInventory { boot_disk_result, non_boot_message }
     }
 
     pub fn log_to(&self, log: &slog::Logger) {
@@ -780,14 +793,14 @@ impl ClearMupdateOverrideResult {
             Ok(info) => {
                 info!(
                     log,
-                    "cleared mupdate override on boot disk";
+                    "removed mupdate override on boot disk";
                     "prev_info" => ?info,
                 );
             }
             Err(error) => {
                 error!(
                     log,
-                    "failed to clear mupdate override on boot disk";
+                    "failed to remove mupdate override on boot disk";
                     "error" => InlineErrorChain::new(error),
                 );
             }
@@ -799,11 +812,11 @@ impl ClearMupdateOverrideResult {
     }
 }
 
-/// A success condition clearing the mupdate override on a boot disk.
+/// A success condition removing the mupdate override on a boot disk.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum ClearMupdateOverrideBootSuccess {
-    /// The mupdate override was matched up and successfully cleared.
-    Cleared(MupdateOverrideInfo),
+pub enum RemoveMupdateOverrideBootSuccess {
+    /// The mupdate override was matched up and successfully removed.
+    Removed(MupdateOverrideInfo),
 
     /// No mupdate override was found.
     ///
@@ -812,7 +825,7 @@ pub enum ClearMupdateOverrideBootSuccess {
 }
 
 #[derive(Clone, Debug, Error, PartialEq)]
-pub enum ClearMupdateOverrideBootError {
+pub enum RemoveMupdateOverrideBootError {
     #[error("boot disk not found in internal disks")]
     BootDiskMissing,
     #[error(
@@ -823,7 +836,7 @@ pub enum ClearMupdateOverrideBootError {
         /// The actual override ID on the boot disk.
         actual: MupdateOverrideUuid,
 
-        /// The override ID provided to the `clear_mupdate_override` method.
+        /// The override ID provided to the `remove_mupdate_override` method.
         provided: MupdateOverrideUuid,
     },
     #[error("error removing mupdate override file at `{path}`")]
@@ -836,7 +849,8 @@ pub enum ClearMupdateOverrideBootError {
         error: ArcIoError,
     },
     #[error(
-        "mupdate override at `{path}` not cleared since there was an error reading it"
+        "mupdate override at `{path}` not removed \
+         since there was an error reading it"
     )]
     ReadError {
         /// The path to the mupdate override file that could not be read.
@@ -849,7 +863,7 @@ pub enum ClearMupdateOverrideBootError {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct ClearMupdateOverrideNonBootInfo {
+pub struct RemoveMupdateOverrideNonBootInfo {
     /// The zpool ID of the non-boot disk.
     pub zpool_id: InternalZpoolUuid,
 
@@ -857,11 +871,11 @@ pub struct ClearMupdateOverrideNonBootInfo {
     /// was available.
     pub path: Option<Utf8PathBuf>,
 
-    /// The result of clearing the mupdate override on the non-boot disk.
-    pub result: ClearMupdateOverrideNonBootResult,
+    /// The result of removing the mupdate override on the non-boot disk.
+    pub result: RemoveMupdateOverrideNonBootResult,
 }
 
-impl ClearMupdateOverrideNonBootInfo {
+impl RemoveMupdateOverrideNonBootInfo {
     pub fn log_to(&self, log: &slog::Logger) {
         let log = log.new(o!(
             "non_boot_zpool_id" => self.zpool_id.to_string(),
@@ -875,7 +889,7 @@ impl ClearMupdateOverrideNonBootInfo {
     }
 }
 
-impl IdOrdItem for ClearMupdateOverrideNonBootInfo {
+impl IdOrdItem for RemoveMupdateOverrideNonBootInfo {
     type Key<'a> = InternalZpoolUuid;
 
     fn key(&self) -> Self::Key<'_> {
@@ -886,10 +900,10 @@ impl IdOrdItem for ClearMupdateOverrideNonBootInfo {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub enum ClearMupdateOverrideNonBootResult {
-    /// The mupdate override was present and was cleared successfully.
-    Cleared {
-        /// The previous mupdate override result that was cleared. This could
+pub enum RemoveMupdateOverrideNonBootResult {
+    /// The mupdate override was present and was removed successfully.
+    Removed {
+        /// The previous mupdate override result that was removed. This could
         /// potentially be an invalid override.
         prev_result: MupdateOverrideNonBootResult,
     },
@@ -897,11 +911,11 @@ pub enum ClearMupdateOverrideNonBootResult {
     /// No mupdate override was found on the non-boot disk.
     NoOverride,
 
-    /// There was an error clearing the mupdate override on the boot disk, so
+    /// There was an error removing the mupdate override on the boot disk, so
     /// the non-boot disk was not altered.
     BootDiskError,
 
-    /// An error occurred while clearing the mupdate override on the non-boot
+    /// An error occurred while removing the mupdate override on the non-boot
     /// disk.
     RemoveError {
         /// The path to the MUPdate override file that could not be removed.
@@ -930,28 +944,28 @@ pub enum ClearMupdateOverrideNonBootResult {
     DiskMissing,
 }
 
-impl ClearMupdateOverrideNonBootResult {
-    pub fn display(&self) -> ClearMupdateOverrideNonBootDisplay<'_> {
-        ClearMupdateOverrideNonBootDisplay { result: self }
+impl RemoveMupdateOverrideNonBootResult {
+    pub fn display(&self) -> RemoveMupdateOverrideNonBootDisplay<'_> {
+        RemoveMupdateOverrideNonBootDisplay { result: self }
     }
 
     fn log_to(&self, log: &slog::Logger) {
         match self {
-            ClearMupdateOverrideNonBootResult::Cleared { prev_result } => {
+            RemoveMupdateOverrideNonBootResult::Removed { prev_result } => {
                 info!(
                     log,
-                    "cleared mupdate override on non-boot disk";
+                    "removed mupdate override on non-boot disk";
                     "prev_result" => %prev_result.display(),
                 );
             }
-            ClearMupdateOverrideNonBootResult::BootDiskError => {
+            RemoveMupdateOverrideNonBootResult::BootDiskError => {
                 warn!(
                     log,
-                    "mupdate override on non-boot disk not cleared due to \
+                    "mupdate override on non-boot disk not removed due to \
                      boot disk error"
                 );
             }
-            ClearMupdateOverrideNonBootResult::RemoveError { path, error } => {
+            RemoveMupdateOverrideNonBootResult::RemoveError { path, error } => {
                 warn!(
                     log,
                     "error removing mupdate override file on non-boot disk";
@@ -959,7 +973,7 @@ impl ClearMupdateOverrideNonBootResult {
                     "error" => InlineErrorChain::new(error),
                 );
             }
-            ClearMupdateOverrideNonBootResult::ReadError { path, error } => {
+            RemoveMupdateOverrideNonBootResult::ReadError { path, error } => {
                 warn!(
                     log,
                     "error reading mupdate override file on non-boot disk";
@@ -967,73 +981,73 @@ impl ClearMupdateOverrideNonBootResult {
                     "error" => InlineErrorChain::new(error),
                 );
             }
-            ClearMupdateOverrideNonBootResult::NoStatus => {
+            RemoveMupdateOverrideNonBootResult::NoStatus => {
                 warn!(
                     log,
                     "no status available for non-boot disk when sled-agent \
-                     started, mupdate override not cleared"
+                     started, mupdate override not removed"
                 );
             }
-            ClearMupdateOverrideNonBootResult::DiskMissing => {
+            RemoveMupdateOverrideNonBootResult::DiskMissing => {
                 warn!(
                     log,
                     "non-boot disk missing from latest InternalDisks, \
-                     mupdate override not cleared"
+                     mupdate override not removed"
                 );
             }
-            ClearMupdateOverrideNonBootResult::NoOverride => {
+            RemoveMupdateOverrideNonBootResult::NoOverride => {
                 warn!(
                     log,
-                    "no mupdate override found on non-boot disk to clear"
+                    "no mupdate override found on non-boot disk to remove"
                 );
             }
         }
     }
 }
 
-pub struct ClearMupdateOverrideNonBootDisplay<'a> {
-    result: &'a ClearMupdateOverrideNonBootResult,
+pub struct RemoveMupdateOverrideNonBootDisplay<'a> {
+    result: &'a RemoveMupdateOverrideNonBootResult,
 }
 
-impl fmt::Display for ClearMupdateOverrideNonBootDisplay<'_> {
+impl fmt::Display for RemoveMupdateOverrideNonBootDisplay<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.result {
-            ClearMupdateOverrideNonBootResult::Cleared { prev_result } => {
-                write!(f, "cleared (previous: {})", prev_result.display())
+            RemoveMupdateOverrideNonBootResult::Removed { prev_result } => {
+                write!(f, "removed (previous: {})", prev_result.display())
             }
-            ClearMupdateOverrideNonBootResult::BootDiskError => {
-                write!(f, "not cleared due to boot disk error")
+            RemoveMupdateOverrideNonBootResult::BootDiskError => {
+                write!(f, "not removed due to boot disk error")
             }
-            ClearMupdateOverrideNonBootResult::RemoveError { path, error } => {
+            RemoveMupdateOverrideNonBootResult::RemoveError { path, error } => {
                 write!(
                     f,
                     "error removing file at `{path}`: {}",
                     InlineErrorChain::new(error),
                 )
             }
-            ClearMupdateOverrideNonBootResult::ReadError { path, error } => {
+            RemoveMupdateOverrideNonBootResult::ReadError { path, error } => {
                 write!(
                     f,
                     "error reading file at `{path}`: {}",
                     InlineErrorChain::new(error),
                 )
             }
-            ClearMupdateOverrideNonBootResult::NoStatus => {
+            RemoveMupdateOverrideNonBootResult::NoStatus => {
                 write!(
                     f,
                     "no status was available when sled-agent was started, \
-                     so mupdate override not cleared"
+                     so mupdate override not removed"
                 )
             }
-            ClearMupdateOverrideNonBootResult::DiskMissing => {
+            RemoveMupdateOverrideNonBootResult::DiskMissing => {
                 write!(
                     f,
                     "non-boot disk missing from latest InternalDisks, \
-                     mupdate override not cleared"
+                     mupdate override not removed"
                 )
             }
-            ClearMupdateOverrideNonBootResult::NoOverride => {
-                write!(f, "no override to clear")
+            RemoveMupdateOverrideNonBootResult::NoOverride => {
+                write!(f, "no override to remove")
             }
         }
     }
@@ -1089,6 +1103,144 @@ pub enum InstallMetadataReadError {
         #[source]
         error: ArcIoError,
     },
+}
+
+/// An Omicron zone that is ready to be started.
+///
+/// This consists of the zone's configuration, as well as an image source for
+/// the zone.
+#[derive(Clone, Debug)]
+pub struct PreparedOmicronZone<'a> {
+    /// The zone's configuration.
+    config: &'a OmicronZoneConfig,
+
+    /// The file source of the zone.
+    file_source: OmicronZoneFileSource,
+}
+
+impl<'a> PreparedOmicronZone<'a> {
+    /// Creates a new `PreparedOmicronZone` from the given configuration and
+    /// file source.
+    pub fn new(
+        config: &'a OmicronZoneConfig,
+        file_source: OmicronZoneFileSource,
+    ) -> Self {
+        Self { config, file_source }
+    }
+
+    /// Returns the zone's configuration.
+    pub fn config(&self) -> &'a OmicronZoneConfig {
+        self.config
+    }
+
+    /// Returns the file source of the zone.
+    pub fn file_source(&self) -> &OmicronZoneFileSource {
+        &self.file_source
+    }
+}
+
+/// Contains information about the location of an Omicron zone image file after
+/// being resolved by a `ZoneImageSourceResolver`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct OmicronZoneFileSource {
+    /// The actual source from which the zone image was resolved.
+    ///
+    /// This is usually derived from the provided `OmicronZoneImageSource`, but
+    /// it may be a different source if a mupdate override is active.
+    pub location: OmicronZoneImageLocation,
+
+    /// The file name and search locations.
+    pub file_source: ZoneImageFileSource,
+}
+
+/// The location of an Omicron zone image after mupdate overrides have been
+/// considered, along with the hash corresponding to the zone.
+///
+/// Part of [`OmicronZoneFileSource`].
+#[derive(Clone, Debug, PartialEq)]
+pub enum OmicronZoneImageLocation {
+    /// The zone was looked up from the artifact store.
+    Artifact {
+        /// The hash of the zone image as provided, or an error reading the
+        /// mupdate override file.
+        ///
+        /// If the mupdate override file couldn't be read, we don't know whether
+        /// to start the zone from the artifact or the install dataset -- and
+        /// out of caution, we will refuse to start the zone entirely.
+        hash: Result<ArtifactHash, MupdateOverrideReadError>,
+    },
+
+    /// We attempted to look the zone up from the install dataset.
+    InstallDataset {
+        /// The hash of the zone image as found in the zone manifest, or an
+        /// error that occurred while looking up the zone from the install
+        /// dataset.
+        hash: Result<ArtifactHash, ZoneImageLocationError>,
+    },
+}
+
+impl OmicronZoneImageLocation {
+    /// Returns a [`RunningZoneImageLocation`], or `None` if it is impossible
+    /// to start the zone.
+    pub fn to_running(
+        &self,
+    ) -> Result<RunningZoneImageLocation, MupdateOverrideReadError> {
+        match self {
+            OmicronZoneImageLocation::Artifact { hash: Ok(hash) } => {
+                Ok(RunningZoneImageLocation::Artifact { hash: *hash })
+            }
+            OmicronZoneImageLocation::Artifact { hash: Err(error) } => {
+                // In this case, it's impossible to start the zone.
+                Err(error.clone())
+            }
+            OmicronZoneImageLocation::InstallDataset { hash: Ok(hash) } => {
+                Ok(RunningZoneImageLocation::InstallDataset { hash: *hash })
+            }
+            OmicronZoneImageLocation::InstallDataset { hash: Err(_) } => {
+                // In this case, if we can start the zone at all, it must be
+                // from the RAM disk.
+                Ok(RunningZoneImageLocation::Ramdisk)
+            }
+        }
+    }
+}
+
+/// The location of a running Omicron zone.
+///
+/// This is a stripped-down variant of [`OmicronZoneImageLocation`], with only
+/// success variants reported.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum RunningZoneImageLocation {
+    /// The zone was an Omicron zone, and was looked up from the artifact store.
+    Artifact {
+        /// The hash of the zone image.
+        hash: ArtifactHash,
+    },
+
+    /// The zone was run from the install dataset.
+    InstallDataset {
+        /// The hash of the zone image as found in the zone manifest.
+        hash: ArtifactHash,
+    },
+
+    /// The zone was run from the RAM disk.
+    ///
+    /// This can only happen with install-dataset zones in test scenarios such
+    /// as a4x2. In production, this should never happen.
+    Ramdisk,
+}
+
+/// An error that occurred while looking up a zone image from the install
+/// dataset.
+#[derive(Clone, Debug, PartialEq, Error)]
+pub enum ZoneImageLocationError {
+    /// An error occurred while looking up the zone hash.
+    #[error("error looking up zone hash from zone manifest")]
+    ZoneHash(#[source] ZoneManifestZoneHashError),
+
+    /// The boot disk is unavailable.
+    #[error("boot disk missing")]
+    BootDiskMissing,
 }
 
 /// An `io::Error` wrapper that implements `Clone` and `PartialEq`.

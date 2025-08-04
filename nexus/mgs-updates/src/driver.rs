@@ -5,14 +5,11 @@
 //! Drive one or more in-progress MGS-managed updates
 
 use crate::ArtifactCache;
-use crate::SpComponentUpdateHelper;
+use crate::common_sp_update::SpComponentUpdateHelper;
 use crate::driver_update::ApplyUpdateError;
 use crate::driver_update::PROGRESS_TIMEOUT;
 use crate::driver_update::SpComponentUpdate;
 use crate::driver_update::apply_update;
-use crate::rot_bootloader_updater::ReconfiguratorRotBootloaderUpdater;
-use crate::rot_updater::ReconfiguratorRotUpdater;
-use crate::sp_updater::ReconfiguratorSpUpdater;
 use futures::FutureExt;
 use futures::future::BoxFuture;
 use futures::stream::FuturesUnordered;
@@ -305,33 +302,9 @@ impl MgsUpdateDriver {
         ));
         info!(&log, "begin update attempt for baseboard");
 
-        let (sp_update, updater): (
-            _,
-            Box<dyn SpComponentUpdateHelper + Send + Sync>,
-        ) = match &request.details {
-            nexus_types::deployment::PendingMgsUpdateDetails::Sp { .. } => {
-                let sp_update =
-                    SpComponentUpdate::from_request(&log, &request, update_id);
-
-                (sp_update, Box::new(ReconfiguratorSpUpdater {}))
-            }
-            nexus_types::deployment::PendingMgsUpdateDetails::Rot {
-                ..
-            } => {
-                let sp_update =
-                    SpComponentUpdate::from_request(&log, &request, update_id);
-
-                (sp_update, Box::new(ReconfiguratorRotUpdater {}))
-            }
-            nexus_types::deployment::PendingMgsUpdateDetails::RotBootloader {
-                ..
-            } => {
-                let sp_update =
-                    SpComponentUpdate::from_request(&log, &request, update_id);
-
-                (sp_update, Box::new(ReconfiguratorRotBootloaderUpdater {}))
-            }
-        };
+        let sp_update =
+            SpComponentUpdate::from_request(&log, request, update_id);
+        let updater = SpComponentUpdateHelper::new(&request.details);
 
         let baseboard_id = baseboard_id.clone();
         let nattempts_done = internal_request.nattempts_done;
@@ -367,7 +340,7 @@ impl MgsUpdateDriver {
             let result = apply_update(
                 artifacts,
                 &sp_update,
-                &*updater,
+                &updater,
                 mgs_rx,
                 &request,
                 status_updater,

@@ -19,6 +19,7 @@ use camino_tempfile::Utf8TempDir;
 use debug_ignore::DebugIgnore;
 use ipnetwork::IpNetwork;
 use omicron_common::backoff;
+use omicron_common::zone_images::ZoneImageFileSource;
 use omicron_uuid_kinds::OmicronZoneUuid;
 pub use oxlog::is_oxide_smf_log_file;
 use slog::{Logger, error, info, o, warn};
@@ -1336,19 +1337,6 @@ impl<'a> ZoneBuilder<'a> {
             zones_api: DebugIgnore(zones_api),
         })
     }
-}
-
-/// Places to look for a zone's image.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ZoneImageFileSource {
-    /// The file name to look for.
-    pub file_name: String,
-
-    /// The paths to look for the zone image in.
-    ///
-    /// This represents a high-confidence belief, but not a guarantee, that the
-    /// zone image will be found in one of these locations.
-    pub search_paths: Vec<Utf8PathBuf>,
 }
 
 /// Return true if the service with the given FMRI appears to be an
