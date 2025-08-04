@@ -14,6 +14,7 @@ use crate::blueprint_builder::Error;
 use crate::blueprint_builder::Operation;
 use crate::blueprint_editor::DisksEditError;
 use crate::blueprint_editor::SledEditError;
+use crate::mgs_updates::ImpossibleUpdatePolicy;
 use crate::mgs_updates::plan_mgs_updates;
 use crate::planner::image_source::NoopConvertZoneStatus;
 use crate::planner::omicron_zone_placement::PlacementError;
@@ -1153,9 +1154,12 @@ impl<'a> Planner<'a> {
             &self.log,
             &self.inventory,
             &included_baseboards,
-            &current_updates,
+            current_updates,
             current_artifacts,
             NUM_CONCURRENT_MGS_UPDATES,
+            ImpossibleUpdatePolicy::based_on_parent_blueprint_age(
+                self.blueprint.parent_blueprint().time_created,
+            ),
         );
 
         // TODO This is not quite right.  See oxidecomputer/omicron#8285.

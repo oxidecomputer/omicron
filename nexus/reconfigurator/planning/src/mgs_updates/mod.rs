@@ -4,6 +4,9 @@
 
 //! Facilities for making choices about MGS-managed updates
 
+use chrono::DateTime;
+use chrono::TimeDelta;
+use chrono::Utc;
 use nexus_types::deployment::ExpectedVersion;
 use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdateDetails;
@@ -21,6 +24,65 @@ use thiserror::Error;
 use tufaceous_artifact::ArtifactVersion;
 use tufaceous_artifact::KnownArtifactKind;
 
+/// Amount of time we're willing to let an MGS-managed update set in an
+/// "impossible preconditions" state waiting for it to settle.
+///
+/// See [`ImpossibleUpdatePolicy::based_on_parent_blueprint_age()`].
+const MGS_UPDATE_SETTLE_TIMEOUT: TimeDelta = TimeDelta::minutes(5);
+
+/// How to handle an MGS update that has become impossible due to unsatisfied
+/// preconditions.
+#[derive(Debug, Clone, Copy)]
+pub enum ImpossibleUpdatePolicy {
+    /// Keep the update in the subsequent blueprint (e.g., because we believe it
+    /// may become possible again).
+    Keep,
+    /// Remove the impossible update and attempt to replan, which will typically
+    /// replace the impossible update with a new update for the same target with
+    /// different preconditions.
+    Reevaluate,
+}
+
+impl ImpossibleUpdatePolicy {
+    /// Decide how to handle an impossible update based on the wallclock age of
+    /// our parent blueprint.
+    ///
+    /// A typical update flow looks something like this:
+    ///
+    /// 1. Target device has active version A, inactive version B
+    /// 2. We generate a blueprint containing an MGS-managed update with
+    ///    preconditions on active A + inactive B
+    /// 3. We start the update process
+    /// 4. If we generate an inventory collection at this point, we'll see
+    ///    "inactive version invalid", because we've started to overwrite it.
+    ///    This makes the update impossible due to the precondition on "inactive
+    ///    version B", so we want to replace the pending update details with a
+    ///    new one with precondition "inactive version invalid". But in most
+    ///    cases, the inactive version is only temporarily invalid, because it's
+    ///    actively being updated!
+    ///
+    /// We have to be willing to reevaluate MGS updates that have become
+    /// impossible eventually to handle cases like the rack losing power
+    /// mid-update and leaving the inactive slot with "version invalid"
+    /// indefinitely. But we don't want to churn on blueprints in the common
+    /// case of "the preconditions are invalid because we're actively updating".
+    /// This can also cause thrashing where competing Nexuses looking at
+    /// different inventory collections believe the preconditions are impossible
+    /// in different ways. See
+    /// https://github.com/oxidecomputer/omicron/issues/8483 for examples.
+    pub fn based_on_parent_blueprint_age(
+        parent_blueprint_time_created: DateTime<Utc>,
+    ) -> Self {
+        let parent_blueprint_age =
+            Utc::now().signed_duration_since(parent_blueprint_time_created);
+        if parent_blueprint_age < MGS_UPDATE_SETTLE_TIMEOUT {
+            Self::Keep
+        } else {
+            Self::Reevaluate
+        }
+    }
+}
+
 /// Generates a new set of `PendingMgsUpdates` based on:
 ///
 /// * `inventory`: the latest inventory
@@ -31,6 +93,8 @@ use tufaceous_artifact::KnownArtifactKind;
 /// * `current_artifacts`: information about artifacts from the current target
 ///   release (if any)
 /// * `nmax_updates`: the maximum number of updates allowed at once
+/// * `impossible_update_policy`: what to do if we detect an update has become
+///   impossible due to unsatisfied preconditions
 ///
 /// By current policy, `nmax_updates` is always 1, but the implementation here
 /// supports more than one update per invocation.
@@ -41,6 +105,7 @@ pub fn plan_mgs_updates(
     current_updates: &PendingMgsUpdates,
     current_artifacts: &TargetReleaseDescription,
     nmax_updates: usize,
+    impossible_update_policy: ImpossibleUpdatePolicy,
 ) -> PendingMgsUpdates {
     let mut rv = PendingMgsUpdates::new();
     let mut boards_preferred = BTreeSet::new();
@@ -69,15 +134,26 @@ pub fn plan_mgs_updates(
                 );
                 boards_preferred.insert(update.baseboard_id.clone());
             }
-            Ok(MgsUpdateStatus::Impossible) => {
-                info!(
-                    log,
-                    "MGS-driven update impossible \
-                     (will remove it and re-evaluate board)";
-                    update
-                );
-                boards_preferred.insert(update.baseboard_id.clone());
-            }
+            Ok(MgsUpdateStatus::Impossible) => match impossible_update_policy {
+                ImpossibleUpdatePolicy::Keep => {
+                    info!(
+                        log,
+                        "keeping apparently-impossible MGS update (waiting \
+                         for recent update to be applied)";
+                        update
+                    );
+                    rv.insert(update.clone());
+                }
+                ImpossibleUpdatePolicy::Reevaluate => {
+                    info!(
+                        log,
+                        "MGS-driven update impossible \
+                         (will remove it and re-evaluate board)";
+                        update
+                    );
+                    boards_preferred.insert(update.baseboard_id.clone());
+                }
+            },
             Ok(MgsUpdateStatus::NotDone) => {
                 info!(
                     log,
@@ -483,7 +559,8 @@ fn try_make_update_sp(
 
 #[cfg(test)]
 mod test {
-    use crate::mgs_updates::plan_mgs_updates;
+    use super::ImpossibleUpdatePolicy;
+    use super::plan_mgs_updates;
     use chrono::Utc;
     use dropshot::ConfigLogging;
     use dropshot::ConfigLoggingLevel;
@@ -777,6 +854,7 @@ mod test {
         let current_boards = &collection.baseboards;
         let initial_updates = PendingMgsUpdates::new();
         let nmax_updates = 1;
+        let impossible_update_policy = ImpossibleUpdatePolicy::Reevaluate;
         let updates = plan_mgs_updates(
             log,
             &collection,
@@ -784,6 +862,7 @@ mod test {
             &initial_updates,
             &TargetReleaseDescription::Initial,
             nmax_updates,
+            impossible_update_policy,
         );
         assert!(updates.is_empty());
 
@@ -797,6 +876,7 @@ mod test {
             &initial_updates,
             &TargetReleaseDescription::TufRepo(repo.clone()),
             nmax_updates,
+            impossible_update_policy,
         );
         assert_eq!(updates.len(), 1);
         let first_update = updates.iter().next().expect("at least one update");
@@ -816,6 +896,7 @@ mod test {
             &updates,
             &TargetReleaseDescription::TufRepo(repo.clone()),
             nmax_updates,
+            impossible_update_policy,
         );
         assert_eq!(updates, later_updates);
 
@@ -837,6 +918,7 @@ mod test {
             &updates,
             &TargetReleaseDescription::TufRepo(repo.clone()),
             nmax_updates,
+            impossible_update_policy,
         );
         assert_eq!(updates, later_updates);
 
@@ -856,6 +938,7 @@ mod test {
             &updates,
             &TargetReleaseDescription::TufRepo(repo.clone()),
             nmax_updates,
+            impossible_update_policy,
         );
         assert_eq!(later_updates.len(), 1);
         let next_update =
@@ -881,6 +964,7 @@ mod test {
             &later_updates,
             &TargetReleaseDescription::TufRepo(repo.clone()),
             nmax_updates,
+            impossible_update_policy,
         );
         assert!(later_updates.is_empty());
 
@@ -898,6 +982,7 @@ mod test {
             &PendingMgsUpdates::new(),
             &TargetReleaseDescription::TufRepo(repo.clone()),
             nmax_updates,
+            impossible_update_policy,
         );
         assert!(updates.is_empty());
         let updates = plan_mgs_updates(
@@ -907,6 +992,7 @@ mod test {
             &PendingMgsUpdates::new(),
             &TargetReleaseDescription::TufRepo(repo.clone()),
             nmax_updates,
+            impossible_update_policy,
         );
         // We verified most of the details above.  Here we're just double
         // checking that the baseboard being missing is the only reason that no
@@ -943,6 +1029,7 @@ mod test {
             &updates,
             &TargetReleaseDescription::TufRepo(repo.clone()),
             nmax_updates,
+            impossible_update_policy,
         );
         assert_ne!(updates, new_updates);
         assert_eq!(new_updates.len(), 1);
@@ -981,6 +1068,7 @@ mod test {
             &updates,
             &TargetReleaseDescription::TufRepo(repo.clone()),
             nmax_updates,
+            impossible_update_policy,
         );
         assert_ne!(updates, new_updates);
         assert_eq!(new_updates.len(), 1);
@@ -1018,6 +1106,7 @@ mod test {
         let mut latest_updates = PendingMgsUpdates::new();
         let repo = make_tuf_repo();
         let nmax_updates = 1;
+        let impossible_update_policy = ImpossibleUpdatePolicy::Reevaluate;
 
         // Maintain a map of SPs that we've updated.  We'll use this to
         // configure the inventory collection that we create at each step.
@@ -1055,6 +1144,7 @@ mod test {
                 &latest_updates,
                 &TargetReleaseDescription::TufRepo(repo.clone()),
                 nmax_updates,
+                impossible_update_policy,
             );
             assert_eq!(new_updates.len(), 1);
             let update =
@@ -1085,6 +1175,7 @@ mod test {
             &latest_updates,
             &TargetReleaseDescription::TufRepo(repo.clone()),
             nmax_updates,
+            impossible_update_policy,
         );
         assert!(last_updates.is_empty());
 
@@ -1109,6 +1200,7 @@ mod test {
             .collect();
 
         // Update the whole system at once.
+        let impossible_update_policy = ImpossibleUpdatePolicy::Reevaluate;
         let collection = make_collection(
             ARTIFACT_VERSION_1,
             &BTreeMap::new(),
@@ -1121,6 +1213,7 @@ mod test {
             &PendingMgsUpdates::new(),
             &TargetReleaseDescription::TufRepo(repo.clone()),
             usize::MAX,
+            impossible_update_policy,
         );
         assert_eq!(all_updates.len(), expected_updates.len());
         for update in &all_updates {
@@ -1141,6 +1234,7 @@ mod test {
             &all_updates,
             &TargetReleaseDescription::TufRepo(repo.clone()),
             1,
+            impossible_update_policy,
         );
         assert!(all_updates_done.is_empty());
 
@@ -1187,13 +1281,16 @@ mod test {
             &BTreeMap::from([((SpType::Sled, 0), ARTIFACT_VERSION_1)]),
             ExpectedVersion::NoValidVersion,
         );
+        let nmax_updates = 1;
+        let impossible_update_policy = ImpossibleUpdatePolicy::Reevaluate;
         let updates = plan_mgs_updates(
             log,
             &collection,
             &collection.baseboards,
             &PendingMgsUpdates::new(),
             &TargetReleaseDescription::TufRepo(repo.clone()),
-            1,
+            nmax_updates,
+            impossible_update_policy,
         );
         assert!(!updates.is_empty());
         let update = updates.into_iter().next().expect("at least one update");
@@ -1215,7 +1312,8 @@ mod test {
             &collection.baseboards,
             &updates,
             &TargetReleaseDescription::TufRepo(repo.clone()),
-            1,
+            nmax_updates,
+            impossible_update_policy,
         );
         assert!(!new_updates.is_empty());
         let new_update =
