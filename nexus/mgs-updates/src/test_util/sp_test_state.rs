@@ -394,29 +394,22 @@ impl SpTestState {
             .expect("should be called only for sled SPs")
     }
 
+    pub fn expect_host_phase_1_hash(&self, slot: M2Slot) -> ArtifactHash {
+        let hash = match slot {
+            M2Slot::A => self.host_phase_1_slot_a_hash,
+            M2Slot::B => self.host_phase_1_slot_b_hash,
+        };
+        hash.expect("should only be called for sled SPs")
+    }
+
     pub fn expect_host_phase_1_active_hash(&self) -> ArtifactHash {
-        let (active, _inactive) = self.expect_host_phase_1_hashes();
-        active
+        let active_slot = self.expect_host_phase_1_active_slot();
+        self.expect_host_phase_1_hash(active_slot)
     }
 
     pub fn expect_host_phase_1_inactive_hash(&self) -> ArtifactHash {
-        let (_active, inactive) = self.expect_host_phase_1_hashes();
-        inactive
-    }
-
-    // Returns (active, inactive); helper to avoid needing to unpack the
-    // active/inactive slot in both of this method's callers.
-    fn expect_host_phase_1_hashes(&self) -> (ArtifactHash, ArtifactHash) {
-        let a = self
-            .host_phase_1_slot_a_hash
-            .expect("should be called only for sled SPs");
-        let b = self
-            .host_phase_1_slot_b_hash
-            .expect("should be called only for sled SPs");
-        match self.expect_host_phase_1_active_slot() {
-            M2Slot::A => (a, b),
-            M2Slot::B => (b, a),
-        }
+        let inactive_slot = self.expect_host_phase_1_active_slot().toggled();
+        self.expect_host_phase_1_hash(inactive_slot)
     }
 }
 
