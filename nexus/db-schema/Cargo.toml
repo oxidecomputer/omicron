@@ -7,9 +7,14 @@ license = "MPL-2.0"
 [lints]
 workspace = true
 
+[build-dependencies]
+omicron-rpaths.workspace = true
+
 [dependencies]
 # NOTE: This list of dependencies is kept very small so that this code (which is
 # expensive to compile) can be parallelized with other parts of Omicron. Please
 # avoid adding dependencies to other parts of Omicron here!
 diesel.workspace = true
 omicron-workspace-hack.workspace = true
+# See omicron-rpaths for more about the "pq-sys" dependency.
+pq-sys = "*"
