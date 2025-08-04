@@ -272,10 +272,10 @@ mod test {
     use crate::app::background::tasks::inventory_collection::InventoryCollector;
     use nexus_inventory::now_db_precision;
     use nexus_test_utils_macros::nexus_test;
-    use nexus_types::deployment::{
+    use nexus_types::{deployment::{
         PendingMgsUpdates, PlannerChickenSwitches,
         ReconfiguratorChickenSwitches,
-    };
+    }, quiesce::SagaQuiesceHandle};
     use omicron_uuid_kinds::OmicronZoneUuid;
 
     type ControlPlaneTestContext =
@@ -411,6 +411,7 @@ mod test {
             OmicronZoneUuid::new_v4(),
             Activator::new(),
             dummy_tx,
+            SagaQuiesceHandle::new(opctx.log.clone()),
         );
         let value = executor.activate(&opctx).await;
         let value = value.as_object().expect("response is not a JSON object");
