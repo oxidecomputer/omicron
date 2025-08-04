@@ -1387,6 +1387,13 @@ impl PlanningInputBuilder {
         self.external_dns_version = new_version;
     }
 
+    pub fn set_ignore_impossible_mgs_updates_since(
+        &mut self,
+        since: DateTime<Utc>,
+    ) {
+        self.ignore_impossible_mgs_updates_since = since;
+    }
+
     pub fn set_cockroachdb_settings(
         &mut self,
         cockroachdb_settings: CockroachDbSettings,
