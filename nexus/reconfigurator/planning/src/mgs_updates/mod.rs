@@ -32,7 +32,7 @@ const MGS_UPDATE_SETTLE_TIMEOUT: TimeDelta = TimeDelta::minutes(5);
 
 /// How to handle an MGS update that has become impossible due to unsatisfied
 /// preconditions.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, strum::EnumIter)]
 pub enum ImpossibleUpdatePolicy {
     /// Keep the update in the subsequent blueprint (e.g., because we believe it
     /// may become possible again).
@@ -584,6 +584,7 @@ mod test {
     use omicron_test_utils::dev::LogContext;
     use std::collections::BTreeMap;
     use std::collections::BTreeSet;
+    use strum::IntoEnumIterator;
     use tufaceous_artifact::ArtifactHash;
     use tufaceous_artifact::ArtifactVersion;
     use tufaceous_artifact::KnownArtifactKind;
@@ -1091,6 +1092,123 @@ mod test {
             ExpectedVersion::NoValidVersion,
             *new_expected_inactive_version
         );
+
+        logctx.cleanup_successful();
+    }
+
+    // Confirm our behavior for impossible updates
+    #[test]
+    fn test_impossible_update_policy() {
+        let logctx = LogContext::new(
+            "planning_mgs_updates_impossible_update_policy",
+            &ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Debug },
+        );
+        let log = &logctx.log;
+
+        // Initial setup: sled 0 has active version 1 and inactive version 1.5.
+        let collection = make_collection(
+            ARTIFACT_VERSION_2,
+            &BTreeMap::from([((SpType::Sled, 0), ARTIFACT_VERSION_1)]),
+            ExpectedVersion::Version(ARTIFACT_VERSION_1_5),
+        );
+        let current_boards = &collection.baseboards;
+        let initial_updates = PendingMgsUpdates::new();
+        let nmax_updates = 1;
+        let repo = make_tuf_repo();
+
+        // We should attempt to update this SP to version 2 no matter what our
+        // impossible update policy is; we have no updates at all, currently!
+        //
+        // We stash the updates from either iteration into this `updates` value;
+        // they're both the same.
+        let mut updates = None;
+        for impossible_update_policy in ImpossibleUpdatePolicy::iter() {
+            let planned_updates = plan_mgs_updates(
+                log,
+                &collection,
+                current_boards,
+                &initial_updates,
+                &TargetReleaseDescription::TufRepo(repo.clone()),
+                nmax_updates,
+                impossible_update_policy,
+            );
+            assert_eq!(planned_updates.len(), 1);
+            let first_update =
+                planned_updates.iter().next().expect("at least one update");
+            assert_eq!(first_update.baseboard_id.serial_number, "sled_0");
+            assert_eq!(first_update.sp_type, SpType::Sled);
+            assert_eq!(first_update.slot_id, 0);
+            assert_eq!(first_update.artifact_hash, ARTIFACT_HASH_SP_GIMLET_D);
+            assert_eq!(first_update.artifact_version, ARTIFACT_VERSION_2);
+            let PendingMgsUpdateDetails::Sp {
+                expected_active_version,
+                expected_inactive_version,
+            } = &first_update.details
+            else {
+                panic!("expected SP update");
+            };
+            assert_eq!(*expected_active_version, ARTIFACT_VERSION_1);
+            assert_eq!(
+                *expected_inactive_version,
+                ExpectedVersion::Version(ARTIFACT_VERSION_1_5)
+            );
+            updates = Some(planned_updates);
+        }
+        let updates = updates.unwrap();
+
+        // Create a new collection that differs from the original collection in
+        // that sled 0's inactive slot has no valid version. This emulates an
+        // update in progress; we've partially written the contents, so there is
+        // no caboose to read.
+        let collection = make_collection(
+            ARTIFACT_VERSION_2,
+            &BTreeMap::from([((SpType::Sled, 0), ARTIFACT_VERSION_1)]),
+            ExpectedVersion::NoValidVersion,
+        );
+
+        // If we plan with `ImpossibleUpdatePolicy::Keep`, we should _not_
+        // replace the update, even though its preconditions are no longer
+        // valid.
+        let keep_updates = plan_mgs_updates(
+            log,
+            &collection,
+            current_boards,
+            &updates,
+            &TargetReleaseDescription::TufRepo(repo.clone()),
+            nmax_updates,
+            ImpossibleUpdatePolicy::Keep,
+        );
+        assert_eq!(updates, keep_updates);
+
+        // On the other hand, if we plan with
+        // `ImpossibleUpdatePolicy::Reevaluate`, we should replace the update.
+        let reeval_updates = plan_mgs_updates(
+            log,
+            &collection,
+            current_boards,
+            &initial_updates,
+            &TargetReleaseDescription::TufRepo(repo.clone()),
+            nmax_updates,
+            ImpossibleUpdatePolicy::Keep,
+        );
+        assert_eq!(reeval_updates.len(), 1);
+        let first_update =
+            reeval_updates.iter().next().expect("at least one update");
+        assert_eq!(first_update.baseboard_id.serial_number, "sled_0");
+        assert_eq!(first_update.sp_type, SpType::Sled);
+        assert_eq!(first_update.slot_id, 0);
+        assert_eq!(first_update.artifact_hash, ARTIFACT_HASH_SP_GIMLET_D);
+        assert_eq!(first_update.artifact_version, ARTIFACT_VERSION_2);
+        let PendingMgsUpdateDetails::Sp {
+            expected_active_version,
+            expected_inactive_version,
+        } = &first_update.details
+        else {
+            panic!("expected SP update");
+        };
+        assert_eq!(*expected_active_version, ARTIFACT_VERSION_1);
+        // This is the only field that should have changed:
+        assert_eq!(*expected_inactive_version, ExpectedVersion::NoValidVersion);
 
         logctx.cleanup_successful();
     }
