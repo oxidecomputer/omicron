@@ -122,6 +122,7 @@
 
 use crate::Nexus;
 use crate::app::background::BackgroundTask;
+use crate::app::quiesce::SagaQuiesceHandle;
 use crate::app::sagas::NexusSagaType;
 use crate::saga_interface::SagaContext;
 use futures::FutureExt;
@@ -136,8 +137,6 @@ use std::sync::Arc;
 use steno::SagaId;
 use steno::SagaStateView;
 use tokio::sync::mpsc;
-use tokio::sync::watch;
-use nexus_types::internal_api::views::PendingSagaInfo;
 
 /// Helpers used for saga recovery
 pub struct SagaRecoveryHelpers<N: MakeSagaContext> {
@@ -146,13 +145,7 @@ pub struct SagaRecoveryHelpers<N: MakeSagaContext> {
     pub sec_client: Arc<steno::SecClient>,
     pub registry: Arc<steno::ActionRegistry<N::SagaType>>,
     pub sagas_started_rx: mpsc::UnboundedReceiver<SagaId>,
-    pub quiesce: watch::Sender<Quiesce>,
-}
-
-/// Manages quiesce state for recovered sagas
-struct Quiesce {
-    recovered_sagas_running: IdOrdMap<PendingSagaInfo>,
-    first_recovery_completed: Option<DateTime<Utc>>,
+    pub quiesce: SagaQuiesceHandle,
 }
 
 /// Background task that recovers sagas assigned to this Nexus
@@ -171,7 +164,7 @@ pub struct SagaRecovery<N: MakeSagaContext> {
     /// OpContext used for saga recovery
     saga_recovery_opctx: OpContext,
     /// Quiesce state
-    quiesce: watch::Sender<Quiesce>,
+    quiesce: SagaQuiesceHandle,
 
     // state required to resume a saga
     /// handle to Steno, which actually resumes the saga
@@ -215,6 +208,7 @@ impl<N: MakeSagaContext> SagaRecovery<N> {
         SagaRecovery {
             datastore,
             sec_id,
+            quiesce: helpers.quiesce,
             saga_recovery_opctx: helpers.recovery_opctx,
             maker: helpers.maker,
             sec_client: helpers.sec_client,
@@ -238,6 +232,14 @@ impl<N: MakeSagaContext> SagaRecovery<N> {
     )> {
         let log = &opctx.log;
         let datastore = &self.datastore;
+
+        // Record when saga recovery starts.  This must happen before we list
+        // sagas in order to track which sagas we're guaranteed to see (or not)
+        // from a concurrent re-assignment of sagas.  See `SagaQuiesceHandle`
+        // for details.
+        // XXX-dap could return something whose Drop invokes _done() so that if
+        // we bail early, we don't have to remember to call it?
+        self.quiesce.saga_recovery_start();
 
         // Fetch the list of not-yet-finished sagas that are assigned to
         // this Nexus instance.
@@ -285,10 +287,12 @@ impl<N: MakeSagaContext> SagaRecovery<N> {
                         &plan, &execution,
                     );
                 self.status.update_after_pass(&plan, execution, nstarted);
+                self.quiesce.saga_recovery_done(true);
                 Some((future, last_pass_success))
             }
             Err(error) => {
                 self.status.update_after_failure(&error, nstarted);
+                self.quiesce.saga_recovery_done(false);
                 None
             }
         }
@@ -409,6 +413,10 @@ impl<N: MakeSagaContext> SagaRecovery<N> {
                     error
                 ))
             })?;
+        let saga_completion = self
+            .quiesce
+            .record_saga_recovery(saga_id, &steno::SagaName::new(&saga.name))
+            .saga_completion_future(saga_completion);
 
         trace!(&bgtask_logger, "recovering saga: starting the saga";
             "saga_id" => %saga_id
@@ -704,6 +712,7 @@ mod test {
         // operations and completes.
         let sec_client = Arc::new(sec_client);
         let (_, sagas_started_rx) = tokio::sync::mpsc::unbounded_channel();
+        let quiesce = SagaQuiesceHandle::new(log.clone());
         let mut task = SagaRecovery::new(
             db_datastore.clone(),
             sec_id,
@@ -713,6 +722,7 @@ mod test {
                 sec_client: sec_client.clone(),
                 registry: registry_create(),
                 sagas_started_rx,
+                quiesce,
             },
         );
 
@@ -780,6 +790,7 @@ mod test {
         // Go through recovery.  We should not find or recover this saga.
         let sec_client = Arc::new(sec_client);
         let (_, sagas_started_rx) = tokio::sync::mpsc::unbounded_channel();
+        let quiesce = SagaQuiesceHandle::new(log.clone());
         let mut task = SagaRecovery::new(
             db_datastore.clone(),
             sec_id,
@@ -789,6 +800,7 @@ mod test {
                 sec_client: sec_client.clone(),
                 registry: registry_create(),
                 sagas_started_rx,
+                quiesce,
             },
         );
 

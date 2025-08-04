@@ -48,20 +48,18 @@
 //! * Tests can use any of the lower-level pieces to examine intermediate state
 //!   or inject errors.
 
+use super::quiesce::SagaQuiesceHandle;
 use super::sagas::ACTION_REGISTRY;
 use super::sagas::NexusSaga;
 use crate::Nexus;
 use crate::saga_interface::SagaContext;
 use anyhow::Context;
-use chrono::Utc;
 use futures::FutureExt;
 use futures::StreamExt;
 use futures::future::BoxFuture;
-use iddqd::IdOrdMap;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_types::internal_api::views::DemoSaga;
-use nexus_types::internal_api::views::PendingSagaInfo;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResult;
@@ -71,7 +69,6 @@ use omicron_common::bail_unless;
 use omicron_uuid_kinds::DemoSagaUuid;
 use slog_error_chain::InlineErrorChain;
 use std::sync::Arc;
-use std::sync::Mutex;
 use std::sync::OnceLock;
 use steno::SagaDag;
 use steno::SagaId;
@@ -163,11 +160,7 @@ pub(crate) struct SagaExecutor {
     log: slog::Logger,
     nexus: OnceLock<Arc<Nexus>>,
     saga_create_tx: mpsc::UnboundedSender<steno::SagaId>,
-
-    // This is a standard Mutex rather than a tokio one.  That's intentional:
-    // the tokio one is very difficult to use in the face of cancellation.
-    // Users of this mutex only keep it held for very brief periods.
-    quiesce: Mutex<SagaQuiesce>,
+    quiesce: SagaQuiesceHandle,
 }
 
 impl SagaExecutor {
@@ -175,7 +168,7 @@ impl SagaExecutor {
         sec_client: Arc<steno::SecClient>,
         log: slog::Logger,
         saga_create_tx: mpsc::UnboundedSender<steno::SagaId>,
-        quiesce: Mutex<SagaQuiesce>,
+        quiesce: SagaQuiesceHandle,
     ) -> SagaExecutor {
         SagaExecutor {
             sec_client,
@@ -249,23 +242,22 @@ impl SagaExecutor {
         // Record this new saga in the quiesce state.  This will fail if saga
         // creation is disallowed (e.g., because Nexus is quiescing).
         //
-        // This check should happen before we start the saga running.  If for
-        // whatever reason we *don't* start it running, we've got to make sure
-        // to call `saga_start_fail()`.
-        //
+        // This check should happen before we start the saga running.
         // We do this in a (small) block to ensure that we drop the lock
         // immediately.
-        let saga_created =
-            { self.quiesce.lock().unwrap().saga_created(saga_id, &saga_name) };
-        if let Err(error) = saga_created {
-            warn!(
-                &self.log,
-                "error creating new saga";
-                "saga_name" => saga_name.to_string();
-                InlineErrorChain::new(&error)
-            );
-            return Err(Error::from(error));
-        }
+        let qsaga = match self.quiesce.record_saga_create(saga_id, &saga_name)
+        {
+            Ok(qsaga) => qsaga,
+            Err(error) => {
+                warn!(
+                    &self.log,
+                    "error creating new saga";
+                    "saga_name" => saga_name.to_string(),
+                    InlineErrorChain::new(&error)
+                );
+                return Err(Error::from(error));
+            }
+        };
 
         // Construct the context necessary to execute this saga.
         let nexus = self.nexus()?;
@@ -308,20 +300,14 @@ impl SagaExecutor {
                 // depending on the failure mode.  We need more information from
                 // Steno.
                 Error::internal_error(&format!("{:#}", error))
-            });
-        let saga_completion_future = match saga_completion_future {
-            Ok(fut) => self.quiesce.saga_completion_future(saga_id, fut),
-            Err(error) => {
-                self.quiesce.saga_remove(saga_id);
-                return Err(error);
-            }
-        };
+            })?;
+        let saga_completion_future =
+            qsaga.saga_completion_future(saga_completion_future);
         Ok(RunnableSaga {
             id: saga_id,
             saga_completion_future,
             log: saga_logger,
             sec_client: self.sec_client.clone(),
-            saga_ref,
         })
     }
 
@@ -386,7 +372,6 @@ pub(crate) struct RunnableSaga {
     saga_completion_future: BoxFuture<'static, SagaResult>,
     log: slog::Logger,
     sec_client: Arc<steno::SecClient>,
-    saga_ref: RunningSagaReference,
 }
 
 impl RunnableSaga {
@@ -405,52 +390,11 @@ impl RunnableSaga {
             .await
             .context("starting saga")
             .map_err(|error| Error::internal_error(&format!("{:#}", error)))?;
-
-        // When the saga finishes, we need to update our state to reflect that
-        // it's no longer running (so that if Nexus is quiescing, the quiesce
-        // task knows it can proceed to the next step).  We're provided a Future
-        // that we can use to wait for the saga to finish.  We also provide an
-        // equivalent Future to our consumer (in the `RunningSaga` that we
-        // return).  It'd be handy to just hook into that one, but there's a
-        // hitch: our consumer is allowed to drop that Future if they don't care
-        // when the saga finishes.  But we always care (for the reason mentioned
-        // above)!  So we need to create our own task to poll the completion
-        // future that we were given and pass along the result to the Future
-        // that we provide our consumer.
-        let saga_ref = self.saga_ref;
-        let fut = self.saga_completion_future;
-
-        // This is the task we spawn off to wait for the saga to finish and
-        // update our state.  (The state update happens when `saga_ref` is
-        // dropped.)
-        let completion_watcher_task = tokio::spawn(async move {
-            let rv = fut.await;
-            drop(saga_ref);
-            rv
-        });
-
-        // This is the future we'll provide to the consumer to be notified when
-        // the saga finishes.
-        let saga_completion_future = async move {
-            match completion_watcher_task.await {
-                Ok(rv) => rv,
-                Err(error) => {
-                    // This should be basically impossible.  A panic from the
-                    // task would be a bug.  It's conceivable that it gets
-                    // cancelled if we're in the middle of a shutdown of the
-                    // tokio runtime itself.  That wouldn't really happen in the
-                    // real Nexus but could happen as part of the test suite.
-                    panic!(
-                        "RunnableSaga: failed to wait for completion \
-                         watcher task (is tokio runtime shutting down?): {}",
-                        InlineErrorChain::new(&error),
-                    );
-                }
-            }
-        }
-        .boxed();
-
-        Ok(RunningSaga { id: self.id, saga_completion_future, log: self.log })
+        Ok(RunningSaga {
+            id: self.id,
+            saga_completion_future: self.saga_completion_future,
+            log: self.log,
+        })
     }
 
     /// Start the saga running and wait for it to complete.

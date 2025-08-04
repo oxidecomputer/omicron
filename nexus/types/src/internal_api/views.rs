@@ -721,7 +721,7 @@ pub struct QuiesceStatus {
     /// This should only be non-empty when state is `Running` or
     /// `WaitingForSagas`.  Entries here prevent transitioning from
     /// `WaitingForSagas` to `WaitingForDb`.
-    pub sagas_running: IdOrdMap<PendingSagaInfo>,
+    pub sagas_pending: IdOrdMap<PendingSagaInfo>,
 
     /// what database claims are currently held (by any part of Nexus)
     ///
@@ -821,10 +821,6 @@ pub struct PendingSagaInfo {
     /// If false, this saga was created in this Nexus process's lifetime.  It's
     /// still running.
     pub recovered: bool,
-
-    /// tokio task watching saga completion
-    #[serde(skip)]
-    pub completion_task: tokio::task::JoinHandle<()>,
 }
 
 impl IdOrdItem for PendingSagaInfo {
