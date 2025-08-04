@@ -14,6 +14,7 @@ set target-release repo-1.0.0.zip
 
 # Print the default target release again.
 show
+
 # Test that this state survives a save/load operation.
 save saved.out
 wipe all
