@@ -3236,7 +3236,6 @@ mod tests {
                                 },
                                 hash: ZONE_ARTIFACT_HASH_1,
                                 size: 0,
-                                sign: None,
                             },
                             TufArtifactMeta {
                                 id: ArtifactId {
@@ -3246,7 +3245,6 @@ mod tests {
                                 },
                                 hash: HOST_ARTIFACT_HASH_1,
                                 size: 0,
-                                sign: None,
                             },
                             TufArtifactMeta {
                                 id: ArtifactId {
@@ -3256,9 +3254,10 @@ mod tests {
                                 },
                                 hash: HOST_ARTIFACT_HASH_2,
                                 size: 0,
-                                sign: None,
                             },
                         ],
+                        // TODO-K: add some stuff here?
+                        rots_by_sign: vec![],
                     },
                 )
                 .await

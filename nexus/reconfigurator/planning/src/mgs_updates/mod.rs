@@ -645,6 +645,9 @@ mod test {
                 file_name: String::new(),
             },
             artifacts,
+            // TODO: This will be filled out in the planner work for the RoT
+            // https://github.com/oxidecomputer/omicron/pull/8421
+            rots_by_sign: vec![],
         }
     }
 
@@ -660,8 +663,7 @@ mod test {
                 kind: kind.into(),
             },
             hash,
-            size: 0,    // unused here
-            sign: None, // unused here
+            size: 0, // unused here
         }
     }
 

@@ -28,7 +28,7 @@ static KNOWN_VERSIONS: LazyLock<Vec<KnownVersion>> = LazyLock::new(|| {
         // |  leaving the first copy as an example for the next person.
         // v
         // KnownVersion::new(next_int, "unique-dirname-with-the-sql-files"),
-        KnownVersion::new(174, "add-sign-to-tuf-artifact"),
+        KnownVersion::new(174, "add-tuf-rot-by-sign"),
         KnownVersion::new(173, "inv-internal-dns"),
         KnownVersion::new(172, "add-zones-with-mupdate-override"),
         KnownVersion::new(171, "inv-clear-mupdate-override"),

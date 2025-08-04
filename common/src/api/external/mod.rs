@@ -3350,6 +3350,24 @@ pub struct ServiceIcmpConfig {
     pub enabled: bool,
 }
 
+// // Used to represent the information extracted from signed RoT images. This
+// // is used when going from `UpdatePlanBuilder` -> `UpdatePlan` to check
+// // the versions on the RoT images and also to generate the map of
+// // ArtifactId -> Sign hashes for checking artifacts.
+// #[derive(Debug, Clone, Eq, Hash, PartialEq, Deserialize, Serialize, JsonSchema)]
+// pub struct RotSignData {
+//     pub kind: KnownArtifactKind,
+//     pub sign: Vec<u8>,
+// }
+//
+// // Represents the map end used with `RotSignData`. The `bord` is extracted
+// // from the associated artifact ID and is used to perform future checks
+// #[derive(Debug, Clone, Eq, Hash, PartialEq, Deserialize, Serialize, JsonSchema)]
+// pub struct RotSignTarget {
+//     pub id: ArtifactId,
+//     pub bord: String,
+// }
+
 /// A description of an uploaded TUF repository.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 pub struct TufRepoDescription {
@@ -3358,6 +3376,13 @@ pub struct TufRepoDescription {
 
     /// Information about the artifacts present in the repository.
     pub artifacts: Vec<TufArtifactMeta>,
+
+    // Map for RoT signing information, used in `ArtifactsWithPlan`
+    // Note this covers the RoT bootloader which are also signed
+
+    // rot_by_sign: HashMap<RotSignData, Vec<RotSignTarget>>,
+    // pub rot_by_sign: HashMap<ArtifactId, Vec<u8>>,
+    pub rots_by_sign: Vec<TufRotBySign>,
 }
 
 impl TufRepoDescription {
@@ -3409,15 +3434,18 @@ pub struct TufArtifactMeta {
 
     /// The size of the artifact in bytes.
     pub size: u64,
+}
 
-    // TODO-K: This where we want the rkth?
-    // clean up, this approach is a bit shit
-    // maybe put all of caboose information?
-    // maybe use RotSignData?
-    //
-    // If this is an artifact with a signed binary
-    // include the sign.
-    pub sign: Option<Vec<u8>>,
+/// Mapping for RoT signing information in RoT and RoT bootloader artifacts
+///
+/// Found within a `TufRepoDescription`.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+pub struct TufRotBySign {
+    /// The artifact ID.
+    pub id: ArtifactId,
+
+    /// The sign (RKTH value) of the artifact.
+    pub sign: Vec<u8>,
 }
 
 /// Data about a successful TUF repo import into Nexus.

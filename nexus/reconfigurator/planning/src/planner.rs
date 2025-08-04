@@ -5143,7 +5143,7 @@ pub(crate) mod test {
                 },
                 hash: ArtifactHash([0; 32]),
                 size: 0,
-                sign: None,
+                // sign: None,
             }
         };
     }
@@ -5235,6 +5235,7 @@ pub(crate) mod test {
                         file_name: String::from(""),
                     },
                     artifacts,
+                    rots_by_sign: vec![],
                 },
             ),
         };
@@ -5555,6 +5556,7 @@ pub(crate) mod test {
                         file_name: String::from(""),
                     },
                     artifacts,
+                    rots_by_sign: vec![],
                 },
             ),
         };
@@ -5975,6 +5977,7 @@ pub(crate) mod test {
                         file_name: String::from(""),
                     },
                     artifacts,
+                    rots_by_sign: vec![],
                 },
             ),
         };
@@ -6409,6 +6412,7 @@ pub(crate) mod test {
                         fake_zone_artifact!(Nexus, version.clone()),
                         fake_zone_artifact!(Oximeter, version.clone()),
                     ],
+                    rots_by_sign: vec![],
                 },
             ),
         };

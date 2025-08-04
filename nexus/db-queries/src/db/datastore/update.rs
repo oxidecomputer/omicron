@@ -18,8 +18,8 @@ use nexus_db_errors::OptionalError;
 use nexus_db_errors::{ErrorHandler, public_error_from_diesel};
 use nexus_db_lookup::DbConnection;
 use nexus_db_model::{
-    ArtifactHash, TufArtifact, TufRepo, TufRepoDescription, TufTrustRoot,
-    to_db_typed_uuid,
+    ArtifactHash, TufArtifact, TufRepo, TufRepoDescription, TufRotBySign,
+    TufTrustRoot, to_db_typed_uuid,
 };
 use omicron_common::api::external::{
     self, CreateResult, DataPageParams, DeleteResult, Generation,
@@ -68,6 +68,28 @@ async fn artifacts_for_repo(
         )
         .inner_join(tuf_artifact_dsl::tuf_artifact.on(join_on_dsl))
         .select(TufArtifact::as_select())
+        .load_async(conn)
+        .await
+}
+
+async fn rots_by_sign_for_repo(
+    repo_id: TypedUuid<TufRepoKind>,
+    conn: &async_bb8_diesel::Connection<DbConnection>,
+) -> Result<Vec<TufRotBySign>, DieselError> {
+    use nexus_db_schema::schema::tuf_repo_rot_by_sign::dsl as tuf_repo_rot_by_sign_dsl;
+    use nexus_db_schema::schema::tuf_rot_by_sign::dsl as tuf_rot_by_sign_dsl;
+
+    let join_on_dsl = tuf_rot_by_sign_dsl::id
+        .eq(tuf_repo_rot_by_sign_dsl::tuf_rot_by_sign_id);
+    // Don't bother paginating because each repo should only have a few (under
+    // 20) artifacts.
+    tuf_repo_rot_by_sign_dsl::tuf_repo_rot_by_sign
+        .filter(
+            tuf_repo_rot_by_sign_dsl::tuf_repo_id
+                .eq(nexus_db_model::to_db_typed_uuid(repo_id)),
+        )
+        .inner_join(tuf_rot_by_sign_dsl::tuf_rot_by_sign.on(join_on_dsl))
+        .select(TufRotBySign::as_select())
         .load_async(conn)
         .await
 }
@@ -139,7 +161,13 @@ impl DataStore {
         let artifacts = artifacts_for_repo(repo.id.into(), &conn)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
-        Ok(TufRepoDescription { repo, artifacts })
+
+        let rots_by_sign =
+            rots_by_sign_for_repo(repo.id.into(), &conn).await.map_err(
+                |e| public_error_from_diesel(e, ErrorHandler::Server),
+            )?;
+
+        Ok(TufRepoDescription { repo, artifacts, rots_by_sign })
     }
 
     /// Returns the TUF repo description corresponding to this system version.
@@ -172,7 +200,13 @@ impl DataStore {
         let artifacts = artifacts_for_repo(repo.id.into(), &conn)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
-        Ok(TufRepoDescription { repo, artifacts })
+
+        let rots_by_sign =
+            rots_by_sign_for_repo(repo.id.into(), &conn).await.map_err(
+                |e| public_error_from_diesel(e, ErrorHandler::Server),
+            )?;
+
+        Ok(TufRepoDescription { repo, artifacts, rots_by_sign })
     }
 
     /// Returns the list of all TUF repo artifacts known to the system.
@@ -313,8 +347,14 @@ async fn insert_impl(
             let artifacts =
                 artifacts_for_repo(existing_repo.id.into(), &conn).await?;
 
-            let recorded =
-                TufRepoDescription { repo: existing_repo, artifacts };
+            let rots_by_sign =
+                rots_by_sign_for_repo(existing_repo.id.into(), &conn).await?;
+
+            let recorded = TufRepoDescription {
+                repo: existing_repo,
+                artifacts,
+                rots_by_sign,
+            };
             return Ok(TufRepoInsertResponse {
                 recorded,
                 status: TufRepoInsertStatus::AlreadyExists,
@@ -520,7 +560,12 @@ async fn insert_impl(
             .await?;
     }
 
-    let recorded = TufRepoDescription { repo, artifacts: all_artifacts };
+    // TODO-K: Actually insert rots_by_sign
+    let recorded = TufRepoDescription {
+        repo,
+        artifacts: all_artifacts,
+        rots_by_sign: vec![],
+    };
     Ok(TufRepoInsertResponse {
         recorded,
         status: TufRepoInsertStatus::Inserted,

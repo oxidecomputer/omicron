@@ -1415,7 +1415,6 @@ table! {
         sha256 -> Text,
         artifact_size -> Int8,
         generation_added -> Int8,
-        sign -> Nullable<Binary>,
     }
 }
 
@@ -1433,6 +1432,32 @@ allow_tables_to_appear_in_same_query!(
 );
 joinable!(tuf_repo_artifact -> tuf_repo (tuf_repo_id));
 joinable!(tuf_repo_artifact -> tuf_artifact (tuf_artifact_id));
+
+table! {
+    tuf_rot_by_sign (id) {
+        id -> Uuid,
+        name -> Text,
+        version -> Text,
+        kind -> Text,
+        sign -> Binary,
+        time_created -> Timestamptz,
+    }
+}
+
+table! {
+    tuf_repo_rot_by_sign (tuf_repo_id, tuf_rot_by_sign_id) {
+        tuf_repo_id -> Uuid,
+        tuf_rot_by_sign_id -> Uuid,
+    }
+}
+
+allow_tables_to_appear_in_same_query!(
+    tuf_repo,
+    tuf_repo_rot_by_sign,
+    tuf_rot_by_sign
+);
+joinable!(tuf_repo_rot_by_sign -> tuf_repo (tuf_repo_id));
+joinable!(tuf_repo_rot_by_sign -> tuf_rot_by_sign (tuf_rot_by_sign_id));
 
 table! {
     tuf_generation (singleton) {

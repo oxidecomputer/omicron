@@ -37,13 +37,6 @@ pub struct ArtifactId {
 
     /// The kind of artifact this is.
     pub kind: ArtifactKind,
-    // TODO-K: This where we want the rkth?
-    // clean up, this approach is a bit shit
-    // maybe put all of caboose information?
-    //
-    // If this is an artifact with a signed binary
-    // include the sign.
-    // pub sign: Option<String>,
 }
 
 /// Used for user-friendly messages.
