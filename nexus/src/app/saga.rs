@@ -61,7 +61,7 @@ use iddqd::IdOrdMap;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_types::internal_api::views::DemoSaga;
-use nexus_types::internal_api::views::RunningSagaInfo;
+use nexus_types::internal_api::views::PendingSagaInfo;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResult;
@@ -71,13 +71,13 @@ use omicron_common::bail_unless;
 use omicron_uuid_kinds::DemoSagaUuid;
 use slog_error_chain::InlineErrorChain;
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::sync::OnceLock;
 use steno::SagaDag;
 use steno::SagaId;
 use steno::SagaResult;
 use steno::SagaResultOk;
 use tokio::sync::mpsc;
-use tokio::sync::watch;
 use uuid::Uuid;
 
 /// Given a particular kind of Nexus saga (the type parameter `N`) and
@@ -155,40 +155,6 @@ impl StartSaga for SagaExecutor {
     }
 }
 
-/// Describes both the configuration (whether sagas are allowed to be executed)
-/// and the state (how many sagas are running) for the purpose of quiescing
-/// Nexus.
-// Both configuration and state must be combined (under the same watch channel)
-// to avoid races in detecting quiesce.  We want the quiescer to be able to say
-// that if `sagas_allowed` is `Disallowed` and there are no sagas running, then
-// sagas are quiesced.  But there's no way to guarantee that if these are stored
-// in separate channels.
-#[derive(Debug, Clone)]
-struct Quiesce {
-    sagas_allowed: SagasAllowed,
-    sagas_running: IdOrdMap<RunningSagaInfo>,
-}
-
-impl Quiesce {
-    /// Returns whether sagas are fully and permanently quiesced
-    fn is_fully_quiesced(&self) -> bool {
-        self.sagas_allowed == SagasAllowed::Disallowed
-            && self.sagas_running.is_empty()
-    }
-}
-
-/// Policy determining whether new sagas are allowed to be started
-///
-/// This is used by Nexus quiesce to disallow creation of new sagas when we're
-/// trying to quiesce Nexus.
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
-enum SagasAllowed {
-    /// New sagas may be started (normal condition)
-    Allowed,
-    /// New sagas may not be started (happens during quiesce)
-    Disallowed,
-}
-
 /// Handle to a self-contained subsystem for kicking off sagas
 ///
 /// See the module-level documentation for details.
@@ -197,7 +163,11 @@ pub(crate) struct SagaExecutor {
     log: slog::Logger,
     nexus: OnceLock<Arc<Nexus>>,
     saga_create_tx: mpsc::UnboundedSender<steno::SagaId>,
-    quiesce: watch::Sender<Quiesce>,
+
+    // This is a standard Mutex rather than a tokio one.  That's intentional:
+    // the tokio one is very difficult to use in the face of cancellation.
+    // Users of this mutex only keep it held for very brief periods.
+    quiesce: Mutex<SagaQuiesce>,
 }
 
 impl SagaExecutor {
@@ -205,12 +175,8 @@ impl SagaExecutor {
         sec_client: Arc<steno::SecClient>,
         log: slog::Logger,
         saga_create_tx: mpsc::UnboundedSender<steno::SagaId>,
+        quiesce: Mutex<SagaQuiesce>,
     ) -> SagaExecutor {
-        let (quiesce, _) = watch::channel(Quiesce {
-            sagas_allowed: SagasAllowed::Allowed,
-            sagas_running: IdOrdMap::new(),
-        });
-
         SagaExecutor {
             sec_client,
             log,
@@ -218,31 +184,6 @@ impl SagaExecutor {
             saga_create_tx,
             quiesce,
         }
-    }
-
-    /// Disallow new sagas from being started.
-    ///
-    /// This is currently a one-way trip.  Sagas cannot be un-quiesced.
-    pub fn quiesce(&self) {
-        // Log this before changing the config to make sure this message
-        // appears before messages from code paths that saw this change.
-        info!(&self.log, "starting saga quiesce");
-        self.quiesce.send_modify(|q| {
-            q.sagas_allowed = SagasAllowed::Disallowed;
-        });
-    }
-
-    /// Wait for sagas to be quiesced
-    pub async fn wait_for_quiesced(&self) {
-        let mut rx = self.quiesce.subscribe();
-        // unwrap(): this can only fail if the tx side is dropped, but that
-        // can't happen because we have a reference to it via `self`.
-        rx.wait_for(|q| q.is_fully_quiesced()).await.unwrap();
-    }
-
-    /// Returns information about running sagas (involves a clone)
-    pub fn sagas_running(&self) -> IdOrdMap<RunningSagaInfo> {
-        self.quiesce.borrow().sagas_running.clone()
     }
 
     // This is a little gross.  We want to hang the SagaExecutor off of Nexus,
@@ -305,39 +246,26 @@ impl SagaExecutor {
         let saga_id = SagaId(Uuid::new_v4());
         let saga_name = dag.saga_name();
 
-        let allowed = self.quiesce.send_if_modified(|q| {
-            if let SagasAllowed::Allowed = q.sagas_allowed {
-                q.sagas_running
-                    .insert_unique(RunningSagaInfo {
-                        saga_id,
-                        saga_name: saga_name.clone(),
-                        time_started: Utc::now(),
-                    })
-                    .expect("unique saga id");
-                true
-            } else {
-                false
-            }
-        });
-
-        if !allowed {
+        // Record this new saga in the quiesce state.  This will fail if saga
+        // creation is disallowed (e.g., because Nexus is quiescing).
+        //
+        // This check should happen before we start the saga running.  If for
+        // whatever reason we *don't* start it running, we've got to make sure
+        // to call `saga_start_fail()`.
+        //
+        // We do this in a (small) block to ensure that we drop the lock
+        // immediately.
+        let saga_created =
+            { self.quiesce.lock().unwrap().saga_created(saga_id, &saga_name) };
+        if let Err(error) = saga_created {
             warn!(
                 &self.log,
-                "disallowing new saga (quiescing)";
-                "saga_name" => saga_name.to_string(),
+                "error creating new saga";
+                "saga_name" => saga_name.to_string();
+                InlineErrorChain::new(&error)
             );
-            return Err(Error::unavail("new sagas are currently disallowed"));
-        };
-
-        // This handle will ensure that we remove the saga from the
-        // `sagas_running` set if either the caller never runs the saga (i.e.,
-        // they drop the RunnableSaga before starting it) or else when the saga
-        // finishes.
-        //
-        // This must be instantiated after the successful insert above and
-        // before any code path that would return early.
-        let saga_ref =
-            RunningSagaReference { saga_id, quiesce: self.quiesce.clone() };
+            return Err(Error::from(error));
+        }
 
         // Construct the context necessary to execute this saga.
         let nexus = self.nexus()?;
@@ -380,7 +308,14 @@ impl SagaExecutor {
                 // depending on the failure mode.  We need more information from
                 // Steno.
                 Error::internal_error(&format!("{:#}", error))
-            })?;
+            });
+        let saga_completion_future = match saga_completion_future {
+            Ok(fut) => self.quiesce.saga_completion_future(saga_id, fut),
+            Err(error) => {
+                self.quiesce.saga_remove(saga_id);
+                return Err(error);
+            }
+        };
         Ok(RunnableSaga {
             id: saga_id,
             saga_completion_future,
@@ -603,23 +538,6 @@ impl StoppedSaga {
 
             error
         })
-    }
-}
-
-/// Handle to a running saga that's used to update our quiesce state when the
-/// saga finishes
-struct RunningSagaReference {
-    saga_id: steno::SagaId,
-    quiesce: watch::Sender<Quiesce>,
-}
-
-impl Drop for RunningSagaReference {
-    fn drop(&mut self) {
-        self.quiesce.send_modify(|q| {
-            q.sagas_running
-                .remove(&self.saga_id)
-                .expect("saga was previously recorded running");
-        });
     }
 }
 

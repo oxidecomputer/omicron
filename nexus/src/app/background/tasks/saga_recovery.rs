@@ -136,6 +136,8 @@ use std::sync::Arc;
 use steno::SagaId;
 use steno::SagaStateView;
 use tokio::sync::mpsc;
+use tokio::sync::watch;
+use nexus_types::internal_api::views::PendingSagaInfo;
 
 /// Helpers used for saga recovery
 pub struct SagaRecoveryHelpers<N: MakeSagaContext> {
@@ -144,6 +146,13 @@ pub struct SagaRecoveryHelpers<N: MakeSagaContext> {
     pub sec_client: Arc<steno::SecClient>,
     pub registry: Arc<steno::ActionRegistry<N::SagaType>>,
     pub sagas_started_rx: mpsc::UnboundedReceiver<SagaId>,
+    pub quiesce: watch::Sender<Quiesce>,
+}
+
+/// Manages quiesce state for recovered sagas
+struct Quiesce {
+    recovered_sagas_running: IdOrdMap<PendingSagaInfo>,
+    first_recovery_completed: Option<DateTime<Utc>>,
 }
 
 /// Background task that recovers sagas assigned to this Nexus
@@ -161,6 +170,8 @@ pub struct SagaRecovery<N: MakeSagaContext> {
     sec_id: db::SecId,
     /// OpContext used for saga recovery
     saga_recovery_opctx: OpContext,
+    /// Quiesce state
+    quiesce: watch::Sender<Quiesce>,
 
     // state required to resume a saga
     /// handle to Steno, which actually resumes the saga

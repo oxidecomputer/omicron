@@ -716,12 +716,12 @@ pub struct QuiesceStatus {
     /// what stage of quiescing is Nexus at
     pub state: QuiesceState,
 
-    /// what sagas are currently running
+    /// what sagas are currently running or known needing to be recovered
     ///
     /// This should only be non-empty when state is `Running` or
     /// `WaitingForSagas`.  Entries here prevent transitioning from
     /// `WaitingForSagas` to `WaitingForDb`.
-    pub sagas_running: IdOrdMap<RunningSagaInfo>,
+    pub sagas_running: IdOrdMap<PendingSagaInfo>,
 
     /// what database claims are currently held (by any part of Nexus)
     ///
@@ -809,15 +809,25 @@ impl QuiesceState {
     }
 }
 
-/// Describes a running saga (for debugging why quiesce is stuck)
+/// Describes a pending saga (for debugging why quiesce is stuck)
 #[derive(Debug, Clone, Serialize, JsonSchema)]
-pub struct RunningSagaInfo {
+pub struct PendingSagaInfo {
     pub saga_id: steno::SagaId,
     pub saga_name: steno::SagaName,
     pub time_started: DateTime<Utc>,
+    /// If true, we know the saga needs to be recovered.  It may or may not be
+    /// running already.
+    ///
+    /// If false, this saga was created in this Nexus process's lifetime.  It's
+    /// still running.
+    pub recovered: bool,
+
+    /// tokio task watching saga completion
+    #[serde(skip)]
+    pub completion_task: tokio::task::JoinHandle<()>,
 }
 
-impl IdOrdItem for RunningSagaInfo {
+impl IdOrdItem for PendingSagaInfo {
     type Key<'a> = &'a steno::SagaId;
 
     fn key(&self) -> Self::Key<'_> {
