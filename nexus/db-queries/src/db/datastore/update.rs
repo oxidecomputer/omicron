@@ -28,6 +28,7 @@ use omicron_common::api::external::{
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::TufRepoKind;
 use omicron_uuid_kinds::TypedUuid;
+use std::collections::HashSet;
 use swrite::{SWrite, swrite};
 use tufaceous_artifact::ArtifactVersion;
 use uuid::Uuid;
@@ -372,9 +373,10 @@ async fn insert_impl(
     };
 
     // Since we've inserted a new repo, we also need to insert the
-    // corresponding artifacts.
-    let all_artifacts = {
+    // corresponding artifacts and RoTs by sign.
+    let (all_artifacts, all_rots_by_sign) = {
         use nexus_db_schema::schema::tuf_artifact::dsl;
+        use nexus_db_schema::schema::tuf_rot_by_sign::dsl as rot_dsl;
 
         // Multiple repos can have the same artifacts, so we shouldn't error
         // out if we find an existing artifact. However, we should check that
@@ -529,15 +531,61 @@ async fn insert_impl(
 
             // Insert new artifacts into the database.
             diesel::insert_into(dsl::tuf_artifact)
-                .values(new_artifacts)
+                .values(new_artifacts.clone())
                 .execute_async(&conn)
                 .await?;
         }
 
-        all_artifacts
+        let rots_by_sign = desc.rots_by_sign;
+
+        let new_artifact_keys: HashSet<_> = new_artifacts
+            .iter()
+            .map(|artifact| (&artifact.name, &artifact.version, &artifact.kind))
+            .collect();
+
+        // Filter `rots_by_sign` based on the keys in the HashSet.
+        // .into_iter() consumes the original vector. Use .iter() if you need to keep it.
+        let new_rots_by_sign: Vec<TufRotBySign> = rots_by_sign
+            .clone()
+            .into_iter()
+            .filter(|rot| {
+                let rot_key = (&rot.name, &rot.version, &rot.kind);
+                new_artifact_keys.contains(&rot_key)
+            })
+            .collect();
+
+        debug!(
+            log,
+            "inserting {} new RoTs by sign", new_rots_by_sign.len();
+            "new_rots_by_sign" => ?new_rots_by_sign,
+        );
+
+        if !new_rots_by_sign.is_empty() {
+            // Insert new corresponding rots_by_sign into the database.
+            diesel::insert_into(rot_dsl::tuf_rot_by_sign)
+                .values(new_rots_by_sign)
+                .execute_async(&conn)
+                .await?;
+        }
+
+        // For each artifact in all_artifacts, we'll want a corresponding rot_by_sign
+        let all_artifact_keys: HashSet<_> = all_artifacts
+            .iter()
+            .map(|artifact| (&artifact.name, &artifact.version, &artifact.kind))
+            .collect();
+
+        let all_rots_by_sign: Vec<TufRotBySign> = rots_by_sign
+            .into_iter()
+            .filter(|rot| {
+                let rot_key = (&rot.name, &rot.version, &rot.kind);
+                all_artifact_keys.contains(&rot_key)
+            })
+            .collect();
+
+        (all_artifacts, all_rots_by_sign)
     };
 
-    // Finally, insert all the associations into the tuf_repo_artifact table.
+    // Insert all the associations into the tuf_repo_artifact table.
     {
         use nexus_db_schema::schema::tuf_repo_artifact::dsl;
 
@@ -560,11 +608,33 @@ async fn insert_impl(
             .await?;
     }
 
-    // TODO-K: Actually insert rots_by_sign
+    // Finally, Insert all the associations into the tuf_repo_rot_by_sign table.
+    {
+        use nexus_db_schema::schema::tuf_repo_rot_by_sign::dsl;
+
+        let mut values = Vec::new();
+        for rot_by_sign in &all_rots_by_sign {
+            slog::debug!(
+                log,
+                "inserting RoT by sign into tuf_repo_rot_by_sign table";
+                "rot_by_sign" => %rot_by_sign.id,
+            );
+            values.push((
+                dsl::tuf_repo_id.eq(desc.repo.id),
+                dsl::tuf_rot_by_sign_id.eq(rot_by_sign.id),
+            ));
+        }
+
+        diesel::insert_into(dsl::tuf_repo_rot_by_sign)
+            .values(values)
+            .execute_async(&conn)
+            .await?;
+    }
+
     let recorded = TufRepoDescription {
         repo,
         artifacts: all_artifacts,
-        rots_by_sign: vec![],
+        rots_by_sign: all_rots_by_sign,
     };
     Ok(TufRepoInsertResponse {
         recorded,
