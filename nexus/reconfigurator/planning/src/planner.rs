@@ -6770,6 +6770,7 @@ pub(crate) mod test {
                         file_name: String::from(""),
                     },
                     artifacts,
+                    rots_by_sign: vec![],
                 },
             ),
         };
