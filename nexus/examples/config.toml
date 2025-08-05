@@ -53,6 +53,11 @@ default_request_body_max_bytes = 1048576
 bind_address = "[::1]:12221"
 default_request_body_max_bytes = 1048576
 
+[deployment.dropshot_lockstep]
+# IP Address and TCP port on which to listen for the lockstep API
+bind_address = "[::1]:12232"
+default_request_body_max_bytes = 1048576
+
 [deployment.internal_dns]
 # Example address.
 # If you're using `omicron-dev run-all`, this is value is overwritten
@@ -109,7 +114,7 @@ blueprints.period_secs_plan = 60
 blueprints.period_secs_execute = 60
 blueprints.period_secs_rendezvous = 300
 blueprints.period_secs_collect_crdb_node_ids = 180
-blueprints.period_secs_load_chicken_switches = 5
+blueprints.period_secs_load_reconfigurator_config = 5
 sync_service_zone_nat.period_secs = 30
 switch_port_settings_manager.period_secs = 30
 region_replacement.period_secs = 30
@@ -131,6 +136,15 @@ region_snapshot_replacement_step.period_secs = 30
 region_snapshot_replacement_finish.period_secs = 30
 tuf_artifact_replication.period_secs = 300
 tuf_artifact_replication.min_sled_replication = 1
+tuf_repo_pruner.period_secs = 300
+# How many extra recent target releases to keep
+# The system always keeps two: the current release and the previous one.
+# This number is in addition to that.
+tuf_repo_pruner.nkeep_extra_target_releases = 1
+# How many extra recently uploaded repos to keep
+# The system always keeps one, assuming that the operator may be about to
+# update to it.  This number is in addition to that.
+tuf_repo_pruner.nkeep_extra_newly_uploaded = 1
 # In general, the webhook dispatcher will be activated when events are queued,
 # so we don't need to periodically activate it *that* frequently.
 alert_dispatcher.period_secs = 60

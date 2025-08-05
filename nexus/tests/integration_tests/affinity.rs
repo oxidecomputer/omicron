@@ -71,6 +71,8 @@ impl<T: AffinityGroupish> ProjectScopedApiHelper<'_, T> {
             false,
             // Auto-restart policy=
             None,
+            // Instance CPU platform=
+            None,
         )
         .await
     }

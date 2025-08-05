@@ -11,7 +11,6 @@ use crate::test_util::test_artifacts::TestArtifacts;
 use crate::test_util::updates::ExpectedSpComponent;
 use crate::test_util::updates::UpdateDescription;
 use assert_matches::assert_matches;
-use gateway_client::types::SpType;
 use gateway_messages::SpPort;
 use gateway_test_utils::setup::GatewayTestContext;
 use nexus_types::internal_api::views::UpdateAttemptStatus;
@@ -529,7 +528,7 @@ async fn basic_failures() {
         let message = InlineErrorChain::new(error).to_string();
         eprintln!("{}", message);
         assert!(message.contains(&format!(
-            "expected to find active host_phase_1 artifact {bad_hash}, \
+            "expected to find active gimlet_host_phase_1 artifact {bad_hash}, \
              but found {active_phase_1_hash}"
         )));
 
@@ -563,7 +562,7 @@ async fn basic_failures() {
         let message = InlineErrorChain::new(error).to_string();
         eprintln!("{}", message);
         assert!(message.contains(&format!(
-            "expected to find inactive host_phase_1 artifact {bad_hash}, \
+            "expected to find inactive gimlet_host_phase_1 artifact {bad_hash}, \
              but found {inactive_phase_1_hash}"
         )));
 

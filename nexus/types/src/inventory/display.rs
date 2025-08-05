@@ -8,12 +8,11 @@ use std::{
     borrow::Cow,
     collections::{BTreeMap, BTreeSet},
     fmt::{self, Write},
-    sync::LazyLock,
 };
 
 use chrono::SecondsFormat;
 use clap::Subcommand;
-use gateway_client::types::SpType;
+use gateway_types::component::SpType;
 use iddqd::IdOrdMap;
 use indent_write::fmt::IndentWriter;
 use itertools::Itertools;
@@ -1015,8 +1014,7 @@ fn display_orphaned_datasets(
     f: &mut dyn fmt::Write,
 ) -> fmt::Result {
     // Helper for `unwrap_or()` passing borrow check below
-    static EMPTY_SET: LazyLock<IdOrdMap<OrphanedDataset>> =
-        LazyLock::new(IdOrdMap::new);
+    static EMPTY_SET: IdOrdMap<OrphanedDataset> = IdOrdMap::new();
 
     let mut f = f;
     writeln!(f, "ORPHANED DATASETS")?;
@@ -1034,7 +1032,7 @@ fn display_orphaned_datasets(
             .last_reconciliation
             .as_ref()
             .map(|r| &r.orphaned_datasets)
-            .unwrap_or(&*EMPTY_SET);
+            .unwrap_or(&EMPTY_SET);
 
         let mut indented = IndentWriter::new("    ", f);
         if orphaned_datasets.is_empty() {

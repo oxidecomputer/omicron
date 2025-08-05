@@ -62,6 +62,7 @@ use nexus_db_model::BpSledMetadata;
 use nexus_db_model::BpTarget;
 use nexus_db_model::DbArtifactVersion;
 use nexus_db_model::DbTypedUuid;
+use nexus_db_model::DebugLogBlueprintPlanning;
 use nexus_db_model::HwBaseboardId;
 use nexus_db_model::HwM2Slot;
 use nexus_db_model::HwRotSlot;
@@ -77,6 +78,7 @@ use nexus_db_schema::enums::SpTypeEnum;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintMetadata;
 use nexus_types::deployment::BlueprintSledConfig;
+use nexus_types::deployment::BlueprintSource;
 use nexus_types::deployment::BlueprintTarget;
 use nexus_types::deployment::ClickhouseClusterConfig;
 use nexus_types::deployment::CockroachDbPreserveDowngrade;
@@ -89,7 +91,6 @@ use nexus_types::deployment::PendingMgsUpdateRotBootloaderDetails;
 use nexus_types::deployment::PendingMgsUpdateRotDetails;
 use nexus_types::deployment::PendingMgsUpdateSpDetails;
 use nexus_types::deployment::PendingMgsUpdates;
-use nexus_types::deployment::PlanningReport;
 use nexus_types::inventory::BaseboardId;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
@@ -105,6 +106,7 @@ use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::TypedUuid;
 use slog::Logger;
+use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::sync::Arc;
@@ -507,6 +509,38 @@ impl DataStore {
                     .await?;
                 }
 
+                // Serialize and insert a debug log for the planning report
+                // created with this blueprint, if we have one.
+                if let BlueprintSource::Planner(report) = &blueprint.source {
+                    match DebugLogBlueprintPlanning::new(
+                        blueprint_id,
+                        report.clone(),
+                    ) {
+                        Ok(debug_log) => {
+                            use nexus_db_schema::schema::debug_log_blueprint_planning::dsl;
+                            let _ = diesel::insert_into(
+                                dsl::debug_log_blueprint_planning
+                            )
+                                .values(debug_log)
+                                .execute_async(&conn)
+                                .await?;
+                        }
+                        Err(err) => {
+                            // This isn't a fatal error - we've already inserted
+                            // the production-meaningful blueprint content. Not
+                            // being able to log the debug version of the report
+                            // isn't great, but blocking real blueprint
+                            // insertion on debug logging issues seems worse.
+                            error!(
+                                self.log,
+                                "could not serialize blueprint planning report";
+                                InlineErrorChain::new(&err),
+                            );
+                        }
+
+                    }
+                }
+
                 Ok(())
             })
             .await
@@ -554,6 +588,7 @@ impl DataStore {
             time_created,
             creator,
             comment,
+            source,
         ) = {
             use nexus_db_schema::schema::blueprint::dsl;
 
@@ -581,6 +616,7 @@ impl DataStore {
                 blueprint.time_created,
                 blueprint.creator,
                 blueprint.comment,
+                BlueprintSource::from(blueprint.source),
             )
         };
         let cockroachdb_setting_preserve_downgrade =
@@ -1316,9 +1352,6 @@ impl DataStore {
             )?;
         }
 
-        // FIXME: Once reports are stored in the database, read them out here.
-        let report = PlanningReport::new(blueprint_id);
-
         Ok(Blueprint {
             id: blueprint_id,
             pending_mgs_updates,
@@ -1336,7 +1369,7 @@ impl DataStore {
             time_created,
             creator,
             comment,
-            report,
+            source,
         })
     }
 
@@ -1376,6 +1409,7 @@ impl DataStore {
             npending_mgs_updates_rot: usize,
             npending_mgs_updates_rot_bootloader: usize,
             npending_mgs_updates_host_phase_1: usize,
+            ndebug_log_planning_report: usize,
         }
 
         let NumRowsDeleted {
@@ -1393,6 +1427,7 @@ impl DataStore {
             npending_mgs_updates_rot,
             npending_mgs_updates_rot_bootloader,
             npending_mgs_updates_host_phase_1,
+            ndebug_log_planning_report,
         } = self
             .transaction_retry_wrapper("blueprint_delete")
             .transaction(&conn, |conn| {
@@ -1635,6 +1670,21 @@ impl DataStore {
                         .await?
                     };
 
+                    let ndebug_log_planning_report = {
+                        // Skip rustfmt because it bails out on this long line.
+                        #[rustfmt::skip]
+                        use nexus_db_schema::schema::
+                            debug_log_blueprint_planning::dsl;
+                        diesel::delete(
+                            dsl::debug_log_blueprint_planning.filter(
+                                dsl::blueprint_id
+                                    .eq(to_db_typed_uuid(blueprint_id)),
+                            ),
+                        )
+                        .execute_async(&conn)
+                        .await?
+                    };
+
                     Ok(NumRowsDeleted {
                         nblueprints,
                         nsled_metadata,
@@ -1650,6 +1700,7 @@ impl DataStore {
                         npending_mgs_updates_rot,
                         npending_mgs_updates_rot_bootloader,
                         npending_mgs_updates_host_phase_1,
+                        ndebug_log_planning_report,
                     })
                 }
             })
@@ -1677,6 +1728,7 @@ impl DataStore {
             npending_mgs_updates_rot_bootloader,
             "npending_mgs_updates_host_phase_1" =>
             npending_mgs_updates_host_phase_1,
+            "ndebug_log_planning_report" => ndebug_log_planning_report,
         );
 
         Ok(())
@@ -3039,94 +3091,20 @@ mod tests {
         pub should_write_data: Option<Arc<AtomicBool>>,
     }
 
-    // This is a not-super-future-maintainer-friendly helper to check that all
-    // the subtables related to blueprints have been pruned of a specific
-    // blueprint ID. If additional blueprint tables are added in the future,
-    // this function will silently ignore them unless they're manually added.
+    // Check that all the subtables related to blueprints have been pruned of a specific
+    // blueprint ID. Uses the shared BlueprintTableCounts struct.
     async fn ensure_blueprint_fully_deleted(
         datastore: &DataStore,
         blueprint_id: BlueprintUuid,
     ) {
-        let conn = datastore.pool_connection_for_tests().await.unwrap();
+        let counts = BlueprintTableCounts::new(datastore, blueprint_id).await;
 
-        macro_rules! query_count {
-            ($table:ident, $blueprint_id_col:ident) => {{
-                use nexus_db_schema::schema::$table::dsl;
-                let result = dsl::$table
-                    .filter(
-                        dsl::$blueprint_id_col
-                            .eq(to_db_typed_uuid(blueprint_id)),
-                    )
-                    .count()
-                    .get_result_async(&*conn)
-                    .await;
-                (stringify!($table), result)
-            }};
-        }
-
-        // These tables start with `bp_` but do not represent the contents of a
-        // specific blueprint.  It should be uncommon to add things to this
-        // list.
-        let tables_ignored: BTreeSet<_> = ["bp_target"].into_iter().collect();
-
-        let mut tables_checked = BTreeSet::new();
-        for (table_name, result) in [
-            query_count!(blueprint, id),
-            query_count!(bp_sled_metadata, blueprint_id),
-            query_count!(bp_omicron_dataset, blueprint_id),
-            query_count!(bp_omicron_physical_disk, blueprint_id),
-            query_count!(bp_omicron_zone, blueprint_id),
-            query_count!(bp_omicron_zone_nic, blueprint_id),
-            query_count!(bp_clickhouse_cluster_config, blueprint_id),
-            query_count!(bp_clickhouse_keeper_zone_id_to_node_id, blueprint_id),
-            query_count!(bp_clickhouse_server_zone_id_to_node_id, blueprint_id),
-            query_count!(bp_oximeter_read_policy, blueprint_id),
-            query_count!(bp_pending_mgs_update_sp, blueprint_id),
-            query_count!(bp_pending_mgs_update_rot, blueprint_id),
-            query_count!(bp_pending_mgs_update_rot_bootloader, blueprint_id),
-            query_count!(bp_pending_mgs_update_host_phase_1, blueprint_id),
-        ] {
-            let count: i64 = result.unwrap();
-            assert_eq!(
-                count, 0,
-                "nonzero row count for blueprint \
-                 {blueprint_id} in table {table_name}"
-            );
-            tables_checked.insert(table_name);
-        }
-
-        // Look for likely blueprint-related tables that we didn't check.
-        let mut query = QueryBuilder::new();
-        query.sql(
-            "SELECT table_name \
-            FROM information_schema.tables \
-            WHERE table_name LIKE 'bp\\_%'",
+        // All tables should be empty (no exceptions for deleted blueprints)
+        assert!(
+            counts.all_empty(),
+            "Blueprint {blueprint_id} not fully deleted. Non-empty tables: {:?}",
+            counts.non_empty_tables()
         );
-        let tables_unchecked: Vec<String> = query
-            .query::<diesel::sql_types::Text>()
-            .load_async(&*conn)
-            .await
-            .expect("Failed to query information_schema for tables")
-            .into_iter()
-            .filter(|f: &String| {
-                let t = f.as_str();
-                !tables_ignored.contains(t) && !tables_checked.contains(t)
-            })
-            .collect();
-        if !tables_unchecked.is_empty() {
-            // If you see this message, you probably added a blueprint table
-            // whose name started with `bp_*`.  Add it to the block above so
-            // that this function checks whether deleting a blueprint deletes
-            // rows from that table.  (You may also find you need to update
-            // blueprint_delete() to actually delete said rows.)
-            panic!(
-                "found table(s) that look related to blueprints, but \
-                 aren't covered by ensure_blueprint_fully_deleted(). \
-                 Please add them to that function!\n
-                 Found: {}",
-                tables_unchecked.join(", ")
-            );
-        }
     }
 
     // Create a fake set of `SledDetails`, either with a subnet matching
@@ -3286,6 +3264,9 @@ mod tests {
             blueprint_list_all_ids(&opctx, &datastore).await,
             [blueprint1.id]
         );
+
+        // Ensure every bp_* table received at least one row for this blueprint (issue #8455).
+        ensure_blueprint_fully_populated(&datastore, blueprint1.id).await;
 
         // Check the number of blueprint elements against our collection.
         assert_eq!(
@@ -3601,7 +3582,7 @@ mod tests {
         let num_new_crucible_zones = new_sled_zpools.len();
         let num_new_sled_zones = num_new_ntp_zones + num_new_crucible_zones;
 
-        let blueprint2 = builder.build();
+        let blueprint2 = builder.build(BlueprintSource::Test);
         let authz_blueprint2 = authz_blueprint_from_id(blueprint2.id);
 
         let diff = blueprint2.diff_since_blueprint(&blueprint1);
@@ -3729,7 +3710,7 @@ mod tests {
             artifact_hash: ArtifactHash([72; 32]),
             artifact_version: "2.0.0".parse().unwrap(),
         });
-        let blueprint3 = builder.build();
+        let blueprint3 = builder.build(BlueprintSource::Test);
         let authz_blueprint3 = authz_blueprint_from_id(blueprint3.id);
         datastore
             .blueprint_insert(&opctx, &blueprint3)
@@ -3783,7 +3764,7 @@ mod tests {
             artifact_hash: ArtifactHash([72; 32]),
             artifact_version: "2.0.0".parse().unwrap(),
         });
-        let blueprint4 = builder.build();
+        let blueprint4 = builder.build(BlueprintSource::Test);
         let authz_blueprint4 = authz_blueprint_from_id(blueprint4.id);
         datastore
             .blueprint_insert(&opctx, &blueprint4)
@@ -3841,7 +3822,7 @@ mod tests {
             artifact_hash: ArtifactHash([72; 32]),
             artifact_version: "2.0.0".parse().unwrap(),
         });
-        let blueprint5 = builder.build();
+        let blueprint5 = builder.build(BlueprintSource::Test);
         let authz_blueprint5 = authz_blueprint_from_id(blueprint5.id);
         datastore
             .blueprint_insert(&opctx, &blueprint5)
@@ -3877,7 +3858,7 @@ mod tests {
             PlannerRng::from_entropy(),
         )
         .expect("failed to create builder")
-        .build();
+        .build(BlueprintSource::Test);
         datastore
             .blueprint_insert(&opctx, &blueprint6)
             .await
@@ -3955,7 +3936,7 @@ mod tests {
             PlannerRng::from_entropy(),
         )
         .expect("failed to create builder")
-        .build();
+        .build(BlueprintSource::Test);
         let blueprint3 = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint1,
@@ -3965,7 +3946,7 @@ mod tests {
             PlannerRng::from_entropy(),
         )
         .expect("failed to create builder")
-        .build();
+        .build(BlueprintSource::Test);
         assert_eq!(blueprint1.parent_blueprint_id, None);
         assert_eq!(blueprint2.parent_blueprint_id, Some(blueprint1.id));
         assert_eq!(blueprint3.parent_blueprint_id, Some(blueprint1.id));
@@ -4066,7 +4047,7 @@ mod tests {
             PlannerRng::from_entropy(),
         )
         .expect("failed to create builder")
-        .build();
+        .build(BlueprintSource::Test);
         assert_eq!(blueprint4.parent_blueprint_id, Some(blueprint3.id));
         datastore.blueprint_insert(&opctx, &blueprint4).await.unwrap();
         let bp4_target = BlueprintTarget {
@@ -4112,7 +4093,7 @@ mod tests {
             PlannerRng::from_entropy(),
         )
         .expect("failed to create builder")
-        .build();
+        .build(BlueprintSource::Test);
         assert_eq!(blueprint1.parent_blueprint_id, None);
         assert_eq!(blueprint2.parent_blueprint_id, Some(blueprint1.id));
 
@@ -4252,6 +4233,7 @@ mod tests {
                             0,
                             0,
                         ),
+                        lockstep_port: 0,
                         external_ip: OmicronZoneExternalFloatingIp {
                             id: ExternalIpUuid::new_v4(),
                             ip: "10.0.0.1".parse().unwrap(),
@@ -4351,7 +4333,7 @@ mod tests {
             PlannerRng::from_entropy(),
         )
         .expect("failed to create builder")
-        .build();
+        .build(BlueprintSource::Test);
 
         // Insert an IP pool range covering the one Nexus IP.
         let nexus_ip = blueprint1
@@ -4582,5 +4564,199 @@ mod tests {
             "expected all zones to be in service, \
              found these zones not in service: {not_in_service:?}"
         );
+    }
+
+    /// Counts rows in blueprint-related tables for a specific blueprint ID.
+    /// Used by both `ensure_blueprint_fully_populated` and `ensure_blueprint_fully_deleted`.
+    struct BlueprintTableCounts {
+        counts: BTreeMap<String, i64>,
+    }
+
+    impl BlueprintTableCounts {
+        /// Create a new BlueprintTableCounts by querying all blueprint tables.
+        async fn new(
+            datastore: &DataStore,
+            blueprint_id: BlueprintUuid,
+        ) -> BlueprintTableCounts {
+            let conn = datastore.pool_connection_for_tests().await.unwrap();
+
+            macro_rules! query_count {
+                ($table:ident, $blueprint_id_col:ident) => {{
+                    use nexus_db_schema::schema::$table::dsl;
+                    let result = dsl::$table
+                        .filter(
+                            dsl::$blueprint_id_col
+                                .eq(to_db_typed_uuid(blueprint_id)),
+                        )
+                        .count()
+                        .get_result_async(&*conn)
+                        .await;
+                    (stringify!($table), result)
+                }};
+            }
+
+            let mut counts = BTreeMap::new();
+            for (table_name, result) in [
+                query_count!(blueprint, id),
+                query_count!(bp_sled_metadata, blueprint_id),
+                query_count!(bp_omicron_dataset, blueprint_id),
+                query_count!(bp_omicron_physical_disk, blueprint_id),
+                query_count!(bp_omicron_zone, blueprint_id),
+                query_count!(bp_omicron_zone_nic, blueprint_id),
+                query_count!(bp_clickhouse_cluster_config, blueprint_id),
+                query_count!(
+                    bp_clickhouse_keeper_zone_id_to_node_id,
+                    blueprint_id
+                ),
+                query_count!(
+                    bp_clickhouse_server_zone_id_to_node_id,
+                    blueprint_id
+                ),
+                query_count!(bp_oximeter_read_policy, blueprint_id),
+                query_count!(bp_pending_mgs_update_sp, blueprint_id),
+                query_count!(bp_pending_mgs_update_rot, blueprint_id),
+                query_count!(
+                    bp_pending_mgs_update_rot_bootloader,
+                    blueprint_id
+                ),
+                query_count!(bp_pending_mgs_update_host_phase_1, blueprint_id),
+                query_count!(debug_log_blueprint_planning, blueprint_id),
+            ] {
+                let count: i64 = result.unwrap();
+                counts.insert(table_name.to_string(), count);
+            }
+
+            let table_counts = BlueprintTableCounts { counts };
+
+            // Verify no new blueprint tables were added without updating this function
+            if let Err(msg) =
+                table_counts.verify_all_tables_covered(datastore).await
+            {
+                panic!("{}", msg);
+            }
+
+            table_counts
+        }
+
+        /// Returns true if all tables are empty (0 rows).
+        fn all_empty(&self) -> bool {
+            self.counts.values().all(|&count| count == 0)
+        }
+
+        /// Returns a list of table names that are empty.
+        fn empty_tables(&self) -> Vec<String> {
+            self.counts
+                .iter()
+                .filter_map(
+                    |(table, &count)| {
+                        if count == 0 { Some(table.clone()) } else { None }
+                    },
+                )
+                .collect()
+        }
+
+        /// Returns a list of table names that are non-empty.
+        fn non_empty_tables(&self) -> Vec<String> {
+            self.counts
+                .iter()
+                .filter_map(
+                    |(table, &count)| {
+                        if count > 0 { Some(table.clone()) } else { None }
+                    },
+                )
+                .collect()
+        }
+
+        /// Get all table names that were checked.
+        fn tables_checked(&self) -> BTreeSet<&str> {
+            self.counts.keys().map(|s| s.as_str()).collect()
+        }
+
+        /// Verify no new blueprint tables were added without updating this function.
+        async fn verify_all_tables_covered(
+            &self,
+            datastore: &DataStore,
+        ) -> Result<(), String> {
+            let conn = datastore.pool_connection_for_tests().await.unwrap();
+
+            // Tables prefixed with `bp_` that are *not* specific to a single blueprint
+            // and therefore intentionally ignored.  There is only one of these right now.
+            let tables_ignored: BTreeSet<_> =
+                ["bp_target"].into_iter().collect();
+            let tables_checked = self.tables_checked();
+
+            let mut query = QueryBuilder::new();
+            query.sql(
+                "SELECT table_name FROM information_schema.tables WHERE table_name LIKE 'bp\\_%'",
+            );
+            let tables_unchecked: Vec<String> = query
+                .query::<diesel::sql_types::Text>()
+                .load_async(&*conn)
+                .await
+                .expect("Failed to query information_schema for tables")
+                .into_iter()
+                .filter(|f: &String| {
+                    let t = f.as_str();
+                    !tables_ignored.contains(t) && !tables_checked.contains(t)
+                })
+                .collect();
+
+            if !tables_unchecked.is_empty() {
+                Err(format!(
+                    "found blueprint-related table(s) not covered by BlueprintTableCounts: {}\n\n\
+                    If you see this message, you probably added a blueprint table whose name started with `bp_*`. \
+                    Add it to the query list in BlueprintTableCounts::new() so that this function checks the table. \
+                    You may also need to update blueprint deletion/insertion code to handle rows in that table.",
+                    tables_unchecked.join(", ")
+                ))
+            } else {
+                Ok(())
+            }
+        }
+    }
+
+    // Verify that every blueprint-related table contains ≥1 row for `blueprint_id`.
+    // Complements `ensure_blueprint_fully_deleted`.
+    async fn ensure_blueprint_fully_populated(
+        datastore: &DataStore,
+        blueprint_id: BlueprintUuid,
+    ) {
+        let counts = BlueprintTableCounts::new(datastore, blueprint_id).await;
+
+        // Exception tables that may be empty in the representative blueprint:
+        // - MGS update tables: only populated when blueprint includes firmware
+        //   updates
+        // - ClickHouse tables: only populated when blueprint includes
+        //   ClickHouse configuration
+        // - debug log for planner reports: only populated when the blueprint
+        //   was produced by the planner (test blueprints generally aren't)
+        let exception_tables = [
+            "bp_pending_mgs_update_sp",
+            "bp_pending_mgs_update_rot",
+            "bp_pending_mgs_update_rot_bootloader",
+            "bp_pending_mgs_update_host_phase_1",
+            "bp_clickhouse_cluster_config",
+            "bp_clickhouse_keeper_zone_id_to_node_id",
+            "bp_clickhouse_server_zone_id_to_node_id",
+            "debug_log_blueprint_planning",
+        ];
+
+        // Check that all non-exception tables have at least one row
+        let empty_tables = counts.empty_tables();
+        let problematic_tables: Vec<_> = empty_tables
+            .into_iter()
+            .filter(|table| !exception_tables.contains(&table.as_str()))
+            .collect();
+
+        if !problematic_tables.is_empty() {
+            panic!(
+                "Expected tables to be populated for blueprint {blueprint_id}: {:?}\n\n\
+                If every blueprint should be expected to have a value in this table, then this is a bug. \
+                Otherwise, you may need to add a table to the exception list in `ensure_blueprint_fully_populated()`. \
+                If you do this, please ensure that you add a test to `test_representative_blueprint()` that creates a \
+                blueprint that _does_ populate this table and verifies it.",
+                problematic_tables
+            );
+        }
     }
 }

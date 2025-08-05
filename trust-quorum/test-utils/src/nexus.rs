@@ -10,7 +10,9 @@ use iddqd::{IdOrdItem, IdOrdMap, id_upcast};
 use omicron_uuid_kinds::RackUuid;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
-use trust_quorum::{Epoch, PlatformId, ReconfigureMsg, Threshold};
+use trust_quorum::{
+    BaseboardId, Epoch, LrtqUpgradeMsg, ReconfigureMsg, Threshold,
+};
 
 // The operational state of nexus for a given configuration
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Diffable)]
@@ -18,6 +20,7 @@ pub enum NexusOp {
     Committed,
     Aborted,
     Preparing,
+    LrtqCommitted,
 }
 
 /// A single nexus configuration
@@ -26,8 +29,8 @@ pub struct NexusConfig {
     pub op: NexusOp,
     pub epoch: Epoch,
     pub last_committed_epoch: Option<Epoch>,
-    pub coordinator: PlatformId,
-    pub members: BTreeSet<PlatformId>,
+    pub coordinator: BaseboardId,
+    pub members: BTreeSet<BaseboardId>,
     // This is our `K` parameter
     pub threshold: Threshold,
 
@@ -39,16 +42,16 @@ pub struct NexusConfig {
     // commit may occur.
     pub commit_crash_tolerance: u8,
 
-    pub prepared_members: BTreeSet<PlatformId>,
-    pub committed_members: BTreeSet<PlatformId>,
+    pub prepared_members: BTreeSet<BaseboardId>,
+    pub committed_members: BTreeSet<BaseboardId>,
 }
 
 impl NexusConfig {
     pub fn new(
         epoch: Epoch,
         last_committed_epoch: Option<Epoch>,
-        coordinator: PlatformId,
-        members: BTreeSet<PlatformId>,
+        coordinator: BaseboardId,
+        members: BTreeSet<BaseboardId>,
         threshold: Threshold,
     ) -> NexusConfig {
         // We want a few extra nodes beyond `threshold` to ack before we commit.
@@ -74,11 +77,42 @@ impl NexusConfig {
         }
     }
 
+    // An LRTQ config can only be the initial config.
+    //
+    // We create it so that we can test upgrading out of it.
+    pub fn new_lrtq(
+        coordinator: BaseboardId,
+        members: BTreeSet<BaseboardId>,
+    ) -> NexusConfig {
+        let threshold = Threshold((members.len() / 2 + 1) as u8);
+        NexusConfig {
+            // We start committed, since we aren't actually running the LRTQ protocol
+            op: NexusOp::LrtqCommitted,
+            epoch: Epoch(1),
+            last_committed_epoch: None,
+            coordinator,
+            members,
+            threshold,
+            commit_crash_tolerance: 0,
+            prepared_members: BTreeSet::new(),
+            committed_members: BTreeSet::new(),
+        }
+    }
+
     pub fn to_reconfigure_msg(&self, rack_id: RackUuid) -> ReconfigureMsg {
         ReconfigureMsg {
             rack_id,
             epoch: self.epoch,
             last_committed_epoch: self.last_committed_epoch,
+            members: self.members.clone(),
+            threshold: self.threshold,
+        }
+    }
+
+    pub fn to_lrtq_upgrade_msg(&self, rack_id: RackUuid) -> LrtqUpgradeMsg {
+        LrtqUpgradeMsg {
+            rack_id,
+            epoch: self.epoch,
             members: self.members.clone(),
             threshold: self.threshold,
         }
@@ -121,16 +155,17 @@ impl NexusState {
     // Create a `ReconfigureMsg` for the latest nexus config
     pub fn reconfigure_msg_for_latest_config(
         &self,
-    ) -> (&PlatformId, ReconfigureMsg) {
+    ) -> (&BaseboardId, ReconfigureMsg) {
         let config = self.configs.iter().last().expect("at least one config");
         (&config.coordinator, config.to_reconfigure_msg(self.rack_id))
     }
 
-    /// Abort the latest reconfiguration attempt
-    pub fn abort_reconfiguration(&mut self) {
+    // Create an `LrtqUpgradeMsg` for the latest nexus config
+    pub fn lrtq_upgrade_msg_for_latest_config(
+        &self,
+    ) -> (&BaseboardId, LrtqUpgradeMsg) {
         let config = self.configs.iter().last().expect("at least one config");
-        // Can only abort while preparing
-        assert_eq!(config.op, NexusOp::Preparing);
+        (&config.coordinator, config.to_lrtq_upgrade_msg(self.rack_id))
     }
 
     pub fn latest_config(&self) -> &NexusConfig {
@@ -153,6 +188,19 @@ impl NexusState {
         }
         found
     }
+
+    pub fn needs_upgrade_from_lrtq(&self) -> bool {
+        // If we don't have any committed TQ configurations and
+        // the configuration for epoch 1 is LRTQ then we must
+        // call `Node::coordinate_upgrade_from_lrtq` rather than
+        // `Node::coordinate_reconfiguration`.
+        self.last_committed_config().is_none()
+            && self
+                .configs
+                .get(&Epoch(1))
+                .map(|c| c.op == NexusOp::LrtqCommitted)
+                .unwrap_or(false)
+    }
 }
 
 #[derive(
@@ -167,6 +215,6 @@ impl NexusState {
     Diffable,
 )]
 pub enum NexusReply {
-    AckedPreparesFromCoordinator { epoch: Epoch, acks: BTreeSet<PlatformId> },
-    CommitAck { from: PlatformId, epoch: Epoch },
+    AckedPreparesFromCoordinator { epoch: Epoch, acks: BTreeSet<BaseboardId> },
+    CommitAck { from: BaseboardId, epoch: Epoch },
 }

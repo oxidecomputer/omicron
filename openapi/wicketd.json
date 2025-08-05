@@ -355,7 +355,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/TypedUuidForRackInitKind"
+                  "$ref": "#/components/schemas/RackInitUuid"
                 }
               }
             }
@@ -377,7 +377,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/TypedUuidForRackResetKind"
+                  "$ref": "#/components/schemas/RackResetUuid"
                 }
               }
             }
@@ -3346,14 +3346,23 @@
         ],
         "additionalProperties": false
       },
+      "RackInitUuid": {
+        "x-rust-type": {
+          "crate": "omicron-uuid-kinds",
+          "path": "omicron_uuid_kinds::RackInitUuid",
+          "version": "*"
+        },
+        "type": "string",
+        "format": "uuid"
+      },
       "RackOperationStatus": {
-        "description": "Current status of any rack-level operation being performed by this bootstrap agent.\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"Current status of any rack-level operation being performed by this bootstrap agent.\", \"oneOf\": [ { \"type\": \"object\", \"required\": [ \"id\", \"status\", \"step\" ], \"properties\": { \"id\": { \"$ref\": \"#/components/schemas/TypedUuidForRackInitKind\" }, \"status\": { \"type\": \"string\", \"enum\": [ \"initializing\" ] }, \"step\": { \"$ref\": \"#/components/schemas/RssStep\" } } }, { \"description\": \"`id` will be none if the rack was already initialized on startup.\", \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"id\": { \"oneOf\": [ { \"type\": \"null\" }, { \"allOf\": [ { \"$ref\": \"#/components/schemas/TypedUuidForRackInitKind\" } ] } ] }, \"status\": { \"type\": \"string\", \"enum\": [ \"initialized\" ] } } }, { \"type\": \"object\", \"required\": [ \"id\", \"message\", \"status\" ], \"properties\": { \"id\": { \"$ref\": \"#/components/schemas/TypedUuidForRackInitKind\" }, \"message\": { \"type\": \"string\" }, \"status\": { \"type\": \"string\", \"enum\": [ \"initialization_failed\" ] } } }, { \"type\": \"object\", \"required\": [ \"id\", \"status\" ], \"properties\": { \"id\": { \"$ref\": \"#/components/schemas/TypedUuidForRackInitKind\" }, \"status\": { \"type\": \"string\", \"enum\": [ \"initialization_panicked\" ] } } }, { \"type\": \"object\", \"required\": [ \"id\", \"status\" ], \"properties\": { \"id\": { \"$ref\": \"#/components/schemas/TypedUuidForRackResetKind\" }, \"status\": { \"type\": \"string\", \"enum\": [ \"resetting\" ] } } }, { \"description\": \"`reset_id` will be None if the rack is in an uninitialized-on-startup, or Some if it is in an uninitialized state due to a reset operation completing.\", \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"reset_id\": { \"oneOf\": [ { \"type\": \"null\" }, { \"allOf\": [ { \"$ref\": \"#/components/schemas/TypedUuidForRackResetKind\" } ] } ] }, \"status\": { \"type\": \"string\", \"enum\": [ \"uninitialized\" ] } } }, { \"type\": \"object\", \"required\": [ \"id\", \"message\", \"status\" ], \"properties\": { \"id\": { \"$ref\": \"#/components/schemas/TypedUuidForRackResetKind\" }, \"message\": { \"type\": \"string\" }, \"status\": { \"type\": \"string\", \"enum\": [ \"reset_failed\" ] } } }, { \"type\": \"object\", \"required\": [ \"id\", \"status\" ], \"properties\": { \"id\": { \"$ref\": \"#/components/schemas/TypedUuidForRackResetKind\" }, \"status\": { \"type\": \"string\", \"enum\": [ \"reset_panicked\" ] } } } ] } ``` </details>",
+        "description": "Current status of any rack-level operation being performed by this bootstrap agent.\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"Current status of any rack-level operation being performed by this bootstrap agent.\", \"oneOf\": [ { \"type\": \"object\", \"required\": [ \"id\", \"status\", \"step\" ], \"properties\": { \"id\": { \"$ref\": \"#/components/schemas/RackInitUuid\" }, \"status\": { \"type\": \"string\", \"enum\": [ \"initializing\" ] }, \"step\": { \"$ref\": \"#/components/schemas/RssStep\" } } }, { \"description\": \"`id` will be none if the rack was already initialized on startup.\", \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"id\": { \"oneOf\": [ { \"type\": \"null\" }, { \"allOf\": [ { \"$ref\": \"#/components/schemas/RackInitUuid\" } ] } ] }, \"status\": { \"type\": \"string\", \"enum\": [ \"initialized\" ] } } }, { \"type\": \"object\", \"required\": [ \"id\", \"message\", \"status\" ], \"properties\": { \"id\": { \"$ref\": \"#/components/schemas/RackInitUuid\" }, \"message\": { \"type\": \"string\" }, \"status\": { \"type\": \"string\", \"enum\": [ \"initialization_failed\" ] } } }, { \"type\": \"object\", \"required\": [ \"id\", \"status\" ], \"properties\": { \"id\": { \"$ref\": \"#/components/schemas/RackInitUuid\" }, \"status\": { \"type\": \"string\", \"enum\": [ \"initialization_panicked\" ] } } }, { \"type\": \"object\", \"required\": [ \"id\", \"status\" ], \"properties\": { \"id\": { \"$ref\": \"#/components/schemas/RackResetUuid\" }, \"status\": { \"type\": \"string\", \"enum\": [ \"resetting\" ] } } }, { \"description\": \"`reset_id` will be None if the rack is in an uninitialized-on-startup, or Some if it is in an uninitialized state due to a reset operation completing.\", \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"reset_id\": { \"oneOf\": [ { \"type\": \"null\" }, { \"allOf\": [ { \"$ref\": \"#/components/schemas/RackResetUuid\" } ] } ] }, \"status\": { \"type\": \"string\", \"enum\": [ \"uninitialized\" ] } } }, { \"type\": \"object\", \"required\": [ \"id\", \"message\", \"status\" ], \"properties\": { \"id\": { \"$ref\": \"#/components/schemas/RackResetUuid\" }, \"message\": { \"type\": \"string\" }, \"status\": { \"type\": \"string\", \"enum\": [ \"reset_failed\" ] } } }, { \"type\": \"object\", \"required\": [ \"id\", \"status\" ], \"properties\": { \"id\": { \"$ref\": \"#/components/schemas/RackResetUuid\" }, \"status\": { \"type\": \"string\", \"enum\": [ \"reset_panicked\" ] } } } ] } ``` </details>",
         "oneOf": [
           {
             "type": "object",
             "properties": {
               "id": {
-                "$ref": "#/components/schemas/TypedUuidForRackInitKind"
+                "$ref": "#/components/schemas/RackInitUuid"
               },
               "status": {
                 "type": "string",
@@ -3379,7 +3388,7 @@
                 "nullable": true,
                 "allOf": [
                   {
-                    "$ref": "#/components/schemas/TypedUuidForRackInitKind"
+                    "$ref": "#/components/schemas/RackInitUuid"
                   }
                 ]
               },
@@ -3398,7 +3407,7 @@
             "type": "object",
             "properties": {
               "id": {
-                "$ref": "#/components/schemas/TypedUuidForRackInitKind"
+                "$ref": "#/components/schemas/RackInitUuid"
               },
               "message": {
                 "type": "string"
@@ -3420,7 +3429,7 @@
             "type": "object",
             "properties": {
               "id": {
-                "$ref": "#/components/schemas/TypedUuidForRackInitKind"
+                "$ref": "#/components/schemas/RackInitUuid"
               },
               "status": {
                 "type": "string",
@@ -3438,7 +3447,7 @@
             "type": "object",
             "properties": {
               "id": {
-                "$ref": "#/components/schemas/TypedUuidForRackResetKind"
+                "$ref": "#/components/schemas/RackResetUuid"
               },
               "status": {
                 "type": "string",
@@ -3460,7 +3469,7 @@
                 "nullable": true,
                 "allOf": [
                   {
-                    "$ref": "#/components/schemas/TypedUuidForRackResetKind"
+                    "$ref": "#/components/schemas/RackResetUuid"
                   }
                 ]
               },
@@ -3479,7 +3488,7 @@
             "type": "object",
             "properties": {
               "id": {
-                "$ref": "#/components/schemas/TypedUuidForRackResetKind"
+                "$ref": "#/components/schemas/RackResetUuid"
               },
               "message": {
                 "type": "string"
@@ -3501,7 +3510,7 @@
             "type": "object",
             "properties": {
               "id": {
-                "$ref": "#/components/schemas/TypedUuidForRackResetKind"
+                "$ref": "#/components/schemas/RackResetUuid"
               },
               "status": {
                 "type": "string",
@@ -3516,6 +3525,15 @@
             ]
           }
         ]
+      },
+      "RackResetUuid": {
+        "x-rust-type": {
+          "crate": "omicron-uuid-kinds",
+          "path": "omicron_uuid_kinds::RackResetUuid",
+          "version": "*"
+        },
+        "type": "string",
+        "format": "uuid"
       },
       "RackV1Inventory": {
         "description": "The current state of the v1 Rack as known to wicketd",
@@ -4338,7 +4356,7 @@
         ]
       },
       "SpIgnition": {
-        "description": "State of an ignition target.\n\nTODO: Ignition returns much more information than we're reporting here: do we want to expand this?\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"State of an ignition target.\\n\\nTODO: Ignition returns much more information than we're reporting here: do we want to expand this?\", \"oneOf\": [ { \"type\": \"object\", \"required\": [ \"present\" ], \"properties\": { \"present\": { \"type\": \"string\", \"enum\": [ \"no\" ] } } }, { \"type\": \"object\", \"required\": [ \"ctrl_detect_0\", \"ctrl_detect_1\", \"flt_a2\", \"flt_a3\", \"flt_rot\", \"flt_sp\", \"id\", \"power\", \"present\" ], \"properties\": { \"ctrl_detect_0\": { \"type\": \"boolean\" }, \"ctrl_detect_1\": { \"type\": \"boolean\" }, \"flt_a2\": { \"type\": \"boolean\" }, \"flt_a3\": { \"type\": \"boolean\" }, \"flt_rot\": { \"type\": \"boolean\" }, \"flt_sp\": { \"type\": \"boolean\" }, \"id\": { \"$ref\": \"#/components/schemas/SpIgnitionSystemType\" }, \"power\": { \"type\": \"boolean\" }, \"present\": { \"type\": \"string\", \"enum\": [ \"yes\" ] } } } ] } ``` </details>",
+        "description": "State of an ignition target.\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"State of an ignition target.\", \"oneOf\": [ { \"type\": \"object\", \"required\": [ \"present\" ], \"properties\": { \"present\": { \"type\": \"string\", \"enum\": [ \"no\" ] } } }, { \"type\": \"object\", \"required\": [ \"ctrl_detect_0\", \"ctrl_detect_1\", \"flt_a2\", \"flt_a3\", \"flt_rot\", \"flt_sp\", \"id\", \"power\", \"present\" ], \"properties\": { \"ctrl_detect_0\": { \"type\": \"boolean\" }, \"ctrl_detect_1\": { \"type\": \"boolean\" }, \"flt_a2\": { \"description\": \"Fault from the A2 power domain\", \"type\": \"boolean\" }, \"flt_a3\": { \"description\": \"Fault from the A3 power domain\", \"type\": \"boolean\" }, \"flt_rot\": { \"description\": \"Fault from the RoT\", \"type\": \"boolean\" }, \"flt_sp\": { \"description\": \"Fault from the SP\", \"type\": \"boolean\" }, \"id\": { \"$ref\": \"#/components/schemas/SpIgnitionSystemType\" }, \"power\": { \"type\": \"boolean\" }, \"present\": { \"type\": \"string\", \"enum\": [ \"yes\" ] } } } ] } ``` </details>",
         "oneOf": [
           {
             "type": "object",
@@ -4364,15 +4382,19 @@
                 "type": "boolean"
               },
               "flt_a2": {
+                "description": "Fault from the A2 power domain",
                 "type": "boolean"
               },
               "flt_a3": {
+                "description": "Fault from the A3 power domain",
                 "type": "boolean"
               },
               "flt_rot": {
+                "description": "Fault from the RoT",
                 "type": "boolean"
               },
               "flt_sp": {
+                "description": "Fault from the SP",
                 "type": "boolean"
               },
               "id": {
@@ -4403,7 +4425,7 @@
         ]
       },
       "SpIgnitionSystemType": {
-        "description": "TODO: Do we want to bake in specific board names, or use raw u16 ID numbers?\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"TODO: Do we want to bake in specific board names, or use raw u16 ID numbers?\", \"oneOf\": [ { \"type\": \"object\", \"required\": [ \"system_type\" ], \"properties\": { \"system_type\": { \"type\": \"string\", \"enum\": [ \"gimlet\" ] } } }, { \"type\": \"object\", \"required\": [ \"system_type\" ], \"properties\": { \"system_type\": { \"type\": \"string\", \"enum\": [ \"sidecar\" ] } } }, { \"type\": \"object\", \"required\": [ \"system_type\" ], \"properties\": { \"system_type\": { \"type\": \"string\", \"enum\": [ \"psc\" ] } } }, { \"type\": \"object\", \"required\": [ \"id\", \"system_type\" ], \"properties\": { \"id\": { \"type\": \"integer\", \"format\": \"uint16\", \"minimum\": 0.0 }, \"system_type\": { \"type\": \"string\", \"enum\": [ \"unknown\" ] } } } ] } ``` </details>",
+        "description": "`SpIgnitionSystemType`\n\n<details><summary>JSON schema</summary>\n\n```json { \"oneOf\": [ { \"type\": \"object\", \"required\": [ \"system_type\" ], \"properties\": { \"system_type\": { \"type\": \"string\", \"enum\": [ \"gimlet\" ] } } }, { \"type\": \"object\", \"required\": [ \"system_type\" ], \"properties\": { \"system_type\": { \"type\": \"string\", \"enum\": [ \"sidecar\" ] } } }, { \"type\": \"object\", \"required\": [ \"system_type\" ], \"properties\": { \"system_type\": { \"type\": \"string\", \"enum\": [ \"psc\" ] } } }, { \"type\": \"object\", \"required\": [ \"id\", \"system_type\" ], \"properties\": { \"id\": { \"type\": \"integer\", \"format\": \"uint16\", \"minimum\": 0.0 }, \"system_type\": { \"type\": \"string\", \"enum\": [ \"unknown\" ] } } }, { \"type\": \"object\", \"required\": [ \"system_type\" ], \"properties\": { \"system_type\": { \"type\": \"string\", \"enum\": [ \"cosmo\" ] } } } ] } ``` </details>",
         "oneOf": [
           {
             "type": "object",
@@ -4464,6 +4486,20 @@
             },
             "required": [
               "id",
+              "system_type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "system_type": {
+                "type": "string",
+                "enum": [
+                  "cosmo"
+                ]
+              }
+            },
+            "required": [
               "system_type"
             ]
           }
@@ -4574,7 +4610,6 @@
         ]
       },
       "SpType": {
-        "description": "`SpType`\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"string\", \"enum\": [ \"sled\", \"power\", \"switch\" ] } ``` </details>",
         "type": "string",
         "enum": [
           "sled",
@@ -7043,14 +7078,6 @@
           }
         }
       },
-      "TypedUuidForRackInitKind": {
-        "type": "string",
-        "format": "uuid"
-      },
-      "TypedUuidForRackResetKind": {
-        "type": "string",
-        "format": "uuid"
-      },
       "UpdateComponent": {
         "oneOf": [
           {
@@ -7260,6 +7287,34 @@
                 "type": "string",
                 "enum": [
                   "waiting_for_trampoline_phase2_upload"
+                ]
+              }
+            },
+            "required": [
+              "id"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "enum": [
+                  "fetch_host_type"
+                ]
+              }
+            },
+            "required": [
+              "id"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "enum": [
+                  "check_host_type"
                 ]
               }
             },

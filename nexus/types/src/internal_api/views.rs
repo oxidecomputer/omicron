@@ -7,12 +7,13 @@ use crate::deployment::TargetReleaseDescription;
 use crate::inventory::BaseboardId;
 use crate::inventory::CabooseWhich;
 use crate::inventory::Collection;
+use crate::quiesce::SagaQuiesceStatus;
 use chrono::DateTime;
 use chrono::SecondsFormat;
 use chrono::Utc;
 use futures::future::ready;
 use futures::stream::StreamExt;
-use gateway_client::types::SpType;
+use gateway_types::component::SpType;
 use gateway_types::rot::RotSlot;
 use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
@@ -978,12 +979,8 @@ pub struct QuiesceStatus {
     /// what stage of quiescing is Nexus at
     pub state: QuiesceState,
 
-    /// what sagas are currently running or known needing to be recovered
-    ///
-    /// This should only be non-empty when state is `Running` or
-    /// `WaitingForSagas`.  Entries here prevent transitioning from
-    /// `WaitingForSagas` to `WaitingForDb`.
-    pub sagas_pending: IdOrdMap<PendingSagaInfo>,
+    /// information about saga quiescing
+    pub sagas: SagaQuiesceStatus,
 
     /// what database claims are currently held (by any part of Nexus)
     ///
@@ -1129,7 +1126,7 @@ mod test {
     use crate::internal_api::views::UpdateAttemptStatus;
     use crate::inventory::BaseboardId;
     use chrono::Utc;
-    use gateway_client::types::SpType;
+    use gateway_types::component::SpType;
     use std::collections::VecDeque;
     use std::sync::Arc;
     use std::time::Instant;

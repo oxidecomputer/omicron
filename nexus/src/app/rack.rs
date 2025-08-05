@@ -9,7 +9,6 @@ use crate::external_api::params;
 use crate::external_api::params::CertificateCreate;
 use crate::external_api::shared::ServiceUsingCertificate;
 use crate::internal_api::params::RackInitializationRequest;
-use gateway_client::types::SpType;
 use internal_dns_types::names::DNS_ZONE;
 use ipnetwork::{IpNetwork, Ipv6Network};
 use nexus_db_lookup::LookupPath;
@@ -45,6 +44,7 @@ use nexus_types::external_api::shared::SiloIdentityMode;
 use nexus_types::external_api::shared::SiloRole;
 use nexus_types::external_api::shared::UninitializedSled;
 use nexus_types::external_api::views;
+use nexus_types::inventory::SpType;
 use nexus_types::silo::silo_dns_name;
 use omicron_common::address::{Ipv6Subnet, RACK_PREFIX, get_64_subnet};
 use omicron_common::api::external::AddressLotKind;
@@ -60,7 +60,6 @@ use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::internal::shared::ExternalPortDiscovery;
 use omicron_common::api::internal::shared::LldpAdminStatus;
-use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SledUuid;
 use oxnet::IpNet;
 use sled_agent_client::types::AddSledRequest;
@@ -105,6 +104,7 @@ impl super::Nexus {
         opctx: &OpContext,
         rack_id: Uuid,
         request: RackInitializationRequest,
+        blueprint_execution_enabled: bool,
     ) -> Result<(), Error> {
         let log = &opctx.log;
 
@@ -144,7 +144,7 @@ impl super::Nexus {
             .map(|dataset| {
                 db::model::CrucibleDataset::new(
                     dataset.dataset_id,
-                    dataset.zpool_id.into_untyped_uuid(),
+                    dataset.zpool_id,
                     dataset.address,
                 )
             })
@@ -222,6 +222,7 @@ impl super::Nexus {
                 &request.blueprint,
                 vec![silo_name],
                 request.external_dns_zone_name,
+                request.blueprint.nexus_generation,
             );
         for (name, records) in external_dns_config.records.into_iter() {
             dns_update.add_name(name, records)?;
@@ -716,6 +717,7 @@ impl super::Nexus {
                         .into(),
                     rack_id,
                     blueprint,
+                    blueprint_execution_enabled,
                     physical_disks,
                     zpools,
                     datasets,

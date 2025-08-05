@@ -96,7 +96,6 @@ use super::tasks::blueprint_execution;
 use super::tasks::blueprint_load;
 use super::tasks::blueprint_planner;
 use super::tasks::blueprint_rendezvous;
-use super::tasks::chicken_switches::ChickenSwitchesLoader;
 use super::tasks::crdb_node_id_collector;
 use super::tasks::decommissioned_disk_cleaner;
 use super::tasks::dns_config;
@@ -114,6 +113,7 @@ use super::tasks::nat_cleanup;
 use super::tasks::phantom_disks;
 use super::tasks::physical_disk_adoption;
 use super::tasks::read_only_region_replacement_start::*;
+use super::tasks::reconfigurator_config::ReconfiguratorConfigLoader;
 use super::tasks::region_replacement;
 use super::tasks::region_replacement_driver;
 use super::tasks::region_snapshot_replacement_finish::*;
@@ -126,6 +126,7 @@ use super::tasks::support_bundle_collector;
 use super::tasks::sync_service_zone_nat::ServiceZoneNatTracker;
 use super::tasks::sync_switch_configuration::SwitchPortSettingsManager;
 use super::tasks::tuf_artifact_replication;
+use super::tasks::tuf_repo_pruner;
 use super::tasks::v2p_mappings::V2PManager;
 use super::tasks::vpc_routes;
 use super::tasks::webhook_deliverator;
@@ -140,6 +141,8 @@ use nexus_config::DnsTasksConfig;
 use nexus_db_model::DnsGroup;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
+use nexus_types::deployment::Blueprint;
+use nexus_types::deployment::BlueprintTarget;
 use nexus_types::deployment::PendingMgsUpdates;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use oximeter::types::ProducerRegistry;
@@ -228,11 +231,12 @@ impl BackgroundTasksInitializer {
             task_region_snapshot_replacement_step: Activator::new(),
             task_region_snapshot_replacement_finish: Activator::new(),
             task_tuf_artifact_replication: Activator::new(),
+            task_tuf_repo_pruner: Activator::new(),
             task_read_only_region_replacement_start: Activator::new(),
             task_alert_dispatcher: Activator::new(),
             task_webhook_deliverator: Activator::new(),
             task_sp_ereport_ingester: Activator::new(),
-            task_chicken_switches_loader: Activator::new(),
+            task_reconfigurator_config_loader: Activator::new(),
 
             task_internal_dns_propagation: Activator::new(),
             task_external_dns_propagation: Activator::new(),
@@ -305,11 +309,12 @@ impl BackgroundTasksInitializer {
             task_region_snapshot_replacement_step,
             task_region_snapshot_replacement_finish,
             task_tuf_artifact_replication,
+            task_tuf_repo_pruner,
             task_read_only_region_replacement_start,
             task_alert_dispatcher,
             task_webhook_deliverator,
             task_sp_ereport_ingester,
-            task_chicken_switches_loader,
+            task_reconfigurator_config_loader,
             // Add new background tasks here.  Be sure to use this binding in a
             // call to `Driver::register()` below.  That's what actually wires
             // up the Activator to the corresponding background task.
@@ -426,8 +431,10 @@ impl BackgroundTasksInitializer {
         // Background task: blueprint loader
         //
         // Registration is below so that it can watch the planner.
-        let blueprint_loader =
-            blueprint_load::TargetBlueprintLoader::new(datastore.clone());
+        let blueprint_loader = blueprint_load::TargetBlueprintLoader::new(
+            datastore.clone(),
+            args.blueprint_load_tx,
+        );
         let rx_blueprint = blueprint_loader.watcher();
 
         // Background task: blueprint executor
@@ -481,17 +488,18 @@ impl BackgroundTasksInitializer {
             inventory_watcher
         };
 
-        let chicken_switches_loader =
-            ChickenSwitchesLoader::new(datastore.clone());
-        let chicken_switches_watcher = chicken_switches_loader.watcher();
+        let reconfigurator_config_loader =
+            ReconfiguratorConfigLoader::new(datastore.clone());
+        let reconfigurator_config_watcher =
+            reconfigurator_config_loader.watcher();
         driver.register(TaskDefinition {
-            name: "chicken_switches_watcher",
-            description: "watch db for chicken switch changes",
-            period: config.blueprints.period_secs_load_chicken_switches,
-            task_impl: Box::new(chicken_switches_loader),
+            name: "reconfigurator_config_watcher",
+            description: "watch db for reconfigurator config changes",
+            period: config.blueprints.period_secs_load_reconfigurator_config,
+            task_impl: Box::new(reconfigurator_config_loader),
             opctx: opctx.child(BTreeMap::new()),
             watchers: vec![],
-            activator: task_chicken_switches_loader,
+            activator: task_reconfigurator_config_loader,
         });
 
         // Background task: blueprint planner
@@ -500,7 +508,7 @@ impl BackgroundTasksInitializer {
         // target blueprint.
         let blueprint_planner = blueprint_planner::BlueprintPlanner::new(
             datastore.clone(),
-            chicken_switches_watcher.clone(),
+            reconfigurator_config_watcher.clone(),
             inventory_watcher.clone(),
             rx_blueprint.clone(),
         );
@@ -514,7 +522,7 @@ impl BackgroundTasksInitializer {
             watchers: vec![
                 Box::new(inventory_watcher.clone()),
                 Box::new(rx_blueprint.clone()),
-                Box::new(chicken_switches_watcher),
+                Box::new(reconfigurator_config_watcher),
             ],
             activator: task_blueprint_planner,
         });
@@ -913,6 +921,19 @@ impl BackgroundTasksInitializer {
         });
 
         driver.register(TaskDefinition {
+            name: "tuf_repo_pruner",
+            description: "determine which TUF repos' artifacts can be pruned",
+            period: config.tuf_repo_pruner.period_secs,
+            task_impl: Box::new(tuf_repo_pruner::TufRepoPruner::new(
+                datastore.clone(),
+                config.tuf_repo_pruner.clone(),
+            )),
+            opctx: opctx.child(BTreeMap::new()),
+            watchers: vec![],
+            activator: task_tuf_repo_pruner,
+        });
+
+        driver.register(TaskDefinition {
             name: "read_only_region_replacement_start",
             description:
                 "detect if read-only regions need replacement and begin the \
@@ -1022,6 +1043,9 @@ pub struct BackgroundTasksData {
     pub saga_recovery: saga_recovery::SagaRecoveryHelpers<Arc<Nexus>>,
     /// Channel for TUF repository artifacts to be replicated out to sleds
     pub tuf_artifact_replication_rx: mpsc::Receiver<ArtifactsWithPlan>,
+    /// Channel for exposing the latest loaded blueprint
+    pub blueprint_load_tx:
+        watch::Sender<Option<Arc<(BlueprintTarget, Blueprint)>>>,
     /// `reqwest::Client` for webhook delivery requests.
     ///
     /// This is shared with the external API as it's also used when sending

@@ -9,18 +9,21 @@ workspace = true
 
 [dependencies]
 camino.workspace = true
+chrono.workspace = true
 dropshot.workspace = true
+dropshot-api-manager-types.workspace = true
 http.workspace = true
+id-map.workspace = true
+iddqd.workspace = true
 nexus-sled-agent-shared.workspace = true
 omicron-common.workspace = true
 omicron-uuid-kinds.workspace = true
 omicron-workspace-hack.workspace = true
 schemars.workspace = true
+semver.workspace = true
 serde.workspace = true
 sled-agent-types.workspace = true
-sled-hardware-types.workspace = true
 sled-diagnostics.workspace = true
+sled-hardware-types.workspace = true
 tufaceous-artifact.workspace = true
 uuid.workspace = true
-openapi-manager-types.workspace = true
-semver.workspace = true

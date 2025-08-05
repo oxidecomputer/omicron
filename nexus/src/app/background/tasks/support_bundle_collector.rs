@@ -74,11 +74,7 @@ const TEMPDIR: &str = "/var/tmp";
 const CHUNK_SIZE: NonZeroU64 = NonZeroU64::new(1024 * 1024 * 1024).unwrap();
 
 fn authz_support_bundle_from_id(id: SupportBundleUuid) -> authz::SupportBundle {
-    authz::SupportBundle::new(
-        authz::FLEET,
-        id,
-        LookupType::ById(id.into_untyped_uuid()),
-    )
+    authz::SupportBundle::new(authz::FLEET, id, LookupType::by_id(id))
 }
 
 // Specifies the data to be collected within the Support Bundle.
@@ -151,7 +147,7 @@ impl SupportBundleCollector {
         let sled_client = nexus_networking::sled_client(
             &self.datastore,
             &opctx,
-            sled_id.into_untyped_uuid(),
+            sled_id,
             &opctx.log,
         )
         .await?;
@@ -574,7 +570,7 @@ impl BundleCollection {
         let sled_client = nexus_networking::sled_client(
             &self.datastore,
             &self.opctx,
-            sled_id.into_untyped_uuid(),
+            sled_id,
             &self.log,
         )
         .await?;
@@ -1390,7 +1386,7 @@ async fn save_sp_dumps(
     sp_dumps_dir: Utf8PathBuf,
 ) -> anyhow::Result<()> {
     let dump_count = mgs_client
-        .sp_task_dump_count(sp.type_, sp.slot)
+        .sp_task_dump_count(&sp.type_, sp.slot)
         .await
         .context("failed to get task dump count from SP")?
         .into_inner();
@@ -1400,7 +1396,7 @@ async fn save_sp_dumps(
 
     for i in 0..dump_count {
         let task_dump = mgs_client
-            .sp_task_dump_get(sp.type_, sp.slot, i)
+            .sp_task_dump_get(&sp.type_, sp.slot, i)
             .await
             .with_context(|| format!("failed to get task dump {i} from SP"))?
             .into_inner();
@@ -1574,29 +1570,28 @@ mod test {
             .zpool_insert(
                 opctx,
                 Zpool::new(
-                    Uuid::new_v4(),
-                    sled_id.into_untyped_uuid(),
+                    ZpoolUuid::new_v4(),
+                    sled_id,
                     id,
                     ByteCount::from(0).into(),
                 ),
             )
             .await
             .unwrap();
-        let zpool_id = ZpoolUuid::from_untyped_uuid(zpool.id());
 
         let dataset = datastore
             .debug_dataset_insert_if_not_exists(
                 opctx,
                 RendezvousDebugDataset::new(
                     DatasetUuid::new_v4(),
-                    zpool_id,
+                    zpool.id(),
                     blueprint_id,
                 ),
             )
             .await
             .unwrap()
             .expect("inserted new dataset");
-        (zpool_id, dataset.id())
+        (zpool.id(), dataset.id())
     }
 
     async fn make_disk_in_db(
@@ -1612,7 +1607,7 @@ mod test {
             format!("s-{i})"),
             "m".into(),
             PhysicalDiskKind::U2,
-            sled_id.into_untyped_uuid(),
+            sled_id,
         );
         datastore
             .physical_disk_insert(&opctx, physical_disk.clone())

@@ -44,11 +44,12 @@ pub struct BackgroundTasks {
     pub task_region_snapshot_replacement_step: Activator,
     pub task_region_snapshot_replacement_finish: Activator,
     pub task_tuf_artifact_replication: Activator,
+    pub task_tuf_repo_pruner: Activator,
     pub task_read_only_region_replacement_start: Activator,
     pub task_alert_dispatcher: Activator,
     pub task_webhook_deliverator: Activator,
     pub task_sp_ereport_ingester: Activator,
-    pub task_chicken_switches_loader: Activator,
+    pub task_reconfigurator_config_loader: Activator,
 
     // Handles to activate background tasks that do not get used by Nexus
     // at-large.  These background tasks are implementation details as far as

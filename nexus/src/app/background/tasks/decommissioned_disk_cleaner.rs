@@ -20,7 +20,6 @@ use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::pagination::Paginator;
 use nexus_types::identity::Asset;
 use omicron_common::api::external::Error;
-use omicron_uuid_kinds::{GenericUuid, ZpoolUuid};
 use std::num::NonZeroU32;
 use std::sync::Arc;
 
@@ -64,7 +63,7 @@ impl DecommissionedDiskCleaner {
                 )
                 .await
                 .context("failed to list zpools on decommissioned disks")?;
-            paginator = p.found_batch(&zpools, &|zpool| zpool.id());
+            paginator = p.found_batch(&zpools, &|zpool| zpool.id().into());
             self.clean_batch(results, &mut last_err, opctx, &zpools).await;
         }
 
@@ -82,7 +81,7 @@ impl DecommissionedDiskCleaner {
         slog::debug!(opctx.log, "Found zpools on decommissioned disks"; "count" => zpools.len());
 
         for zpool in zpools {
-            let zpool_id = ZpoolUuid::from_untyped_uuid(zpool.id());
+            let zpool_id = zpool.id();
             slog::trace!(opctx.log, "Deleting Zpool"; "zpool" => %zpool_id);
 
             match self
@@ -185,10 +184,10 @@ mod tests {
     use nexus_test_utils_macros::nexus_test;
     use omicron_common::api::external::ByteCount;
     use omicron_uuid_kinds::{
-        DatasetUuid, PhysicalDiskUuid, RegionUuid, SledUuid, VolumeUuid,
+        DatasetUuid, GenericUuid, PhysicalDiskUuid, RegionUuid, SledUuid,
+        VolumeUuid, ZpoolUuid,
     };
     use std::str::FromStr;
-    use uuid::Uuid;
 
     type ControlPlaneTestContext =
         nexus_test_utils::ControlPlaneTestContext<crate::Server>;
@@ -206,7 +205,7 @@ mod tests {
             format!("s-{i})"),
             "m".into(),
             PhysicalDiskKind::U2,
-            sled_id.into_untyped_uuid(),
+            sled_id,
         );
         datastore
             .physical_disk_insert(&opctx, physical_disk.clone())
@@ -225,8 +224,8 @@ mod tests {
             .zpool_insert(
                 opctx,
                 Zpool::new(
-                    Uuid::new_v4(),
-                    sled_id.into_untyped_uuid(),
+                    ZpoolUuid::new_v4(),
+                    sled_id,
                     id,
                     ByteCount::from(0).into(),
                 ),
@@ -271,11 +270,7 @@ mod tests {
             .await
             .unwrap();
 
-        (
-            ZpoolUuid::from_untyped_uuid(zpool.id()),
-            dataset.id(),
-            RegionUuid::from_untyped_uuid(region_id),
-        )
+        (zpool.id(), dataset.id(), RegionUuid::from_untyped_uuid(region_id))
     }
 
     struct TestFixture {
@@ -287,9 +282,7 @@ mod tests {
 
     impl TestFixture {
         async fn setup(datastore: &Arc<DataStore>, opctx: &OpContext) -> Self {
-            let sled_id = SledUuid::from_untyped_uuid(
-                Uuid::from_str(&SLED_AGENT_UUID).unwrap(),
-            );
+            let sled_id = SledUuid::from_str(&SLED_AGENT_UUID).unwrap();
 
             let disk_id = make_disk_in_db(datastore, opctx, 0, sled_id).await;
             let (zpool_id, dataset_id, region_id) =

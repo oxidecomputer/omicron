@@ -32,8 +32,9 @@ itertools.workspace = true
 newtype_derive.workspace = true
 omicron-uuid-kinds.workspace = true
 openssl.workspace = true
-oxql-types.workspace = true
+oximeter-db.workspace = true
 oxnet.workspace = true
+oxql-types.workspace = true
 parse-display.workspace = true
 regex.workspace = true
 schemars = { workspace = true, features = ["chrono", "uuid1", "url"] }
@@ -45,6 +46,7 @@ slog-error-chain.workspace = true
 steno.workspace = true
 strum.workspace = true
 tabled.workspace = true
+test-strategy.workspace = true
 textwrap.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
@@ -64,12 +66,19 @@ omicron-common.workspace = true
 omicron-passwords.workspace = true
 omicron-workspace-hack.workspace = true
 semver.workspace = true
+swrite.workspace = true
 tough.workspace = true
 # Note: we're trying to avoid a dependency from nexus-types to sled-agent-types
 # because the correct direction of dependency is unclear. If there are types
 # common to both, put them in `omicron-common` or `nexus-sled-agent-shared`.
 
 [dev-dependencies]
+expectorate.workspace = true
+gateway-types = { workspace = true, features = ["testing"] }
+iddqd = { workspace = true, features = ["proptest"] }
+newtype-uuid = { workspace = true, features = ["proptest1"] }
+nexus-sled-agent-shared = { workspace = true, features = ["testing"] }
+omicron-common = { workspace = true, features = ["testing"] }
 omicron-test-utils.workspace = true
 proptest.workspace = true
 test-strategy.workspace = true

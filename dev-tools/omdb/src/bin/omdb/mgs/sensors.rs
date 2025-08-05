@@ -11,8 +11,8 @@ use gateway_client::types::MeasurementKind;
 use gateway_client::types::SpComponentDetails;
 use gateway_client::types::SpIdentifier;
 use gateway_client::types::SpIgnition;
-use gateway_client::types::SpType;
 use multimap::MultiMap;
+use nexus_types::inventory::SpType;
 use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::sync::Arc;
@@ -266,7 +266,7 @@ async fn sp_info(
     //
     // First, get a component list.
     //
-    let components = mgs_client.sp_component_list(type_, slot).await?;
+    let components = mgs_client.sp_component_list(&type_, slot).await?;
     timestamps.push(std::time::Instant::now());
 
     //
@@ -276,7 +276,7 @@ async fn sp_info(
     //
     for c in &components.components {
         for s in mgs_client
-            .sp_component_get(type_, slot, &c.component)
+            .sp_component_get(&type_, slot, &c.component)
             .await?
             .iter()
             .filter_map(|detail| match detail {
@@ -673,7 +673,7 @@ async fn sp_read_sensors(
 
     for (component, ids) in work.iter() {
         for (value, id) in mgs_client
-            .sp_component_get(id.type_, id.slot, component.device())
+            .sp_component_get(&id.type_, id.slot, component.device())
             .await?
             .iter()
             .filter_map(|detail| match detail {

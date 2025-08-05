@@ -34,11 +34,7 @@ async fn serial_console_communication() {
 
     // connect to the MGS websocket for this gimlet
     let upgraded = client
-        .sp_component_serial_console_attach(
-            gateway_client::types::SpType::Sled,
-            0,
-            "sp3-host-cpu",
-        )
+        .sp_component_serial_console_attach(&SpType::Sled, 0, "sp3-host-cpu")
         .await
         .unwrap()
         .into_inner();
@@ -83,11 +79,7 @@ async fn serial_console_detach() {
 
     // connect to the MGS websocket for this gimlet
     let upgraded = client
-        .sp_component_serial_console_attach(
-            gateway_client::types::SpType::Sled,
-            0,
-            "sp3-host-cpu",
-        )
+        .sp_component_serial_console_attach(&SpType::Sled, 0, "sp3-host-cpu")
         .await
         .unwrap()
         .into_inner();
@@ -97,11 +89,7 @@ async fn serial_console_detach() {
     // attempting to connect while the first connection is still open should
     // fail
     let err = client
-        .sp_component_serial_console_attach(
-            gateway_client::types::SpType::Sled,
-            0,
-            "sp3-host-cpu",
-        )
+        .sp_component_serial_console_attach(&SpType::Sled, 0, "sp3-host-cpu")
         .await
         .unwrap_err();
     let gateway_client::Error::UnexpectedResponse(response) = err else {
@@ -122,11 +110,7 @@ async fn serial_console_detach() {
 
     // hit the detach endpoint, which should disconnect `ws`
     client
-        .sp_component_serial_console_detach(
-            gateway_client::types::SpType::Sled,
-            0,
-            "sp3-host-cpu",
-        )
+        .sp_component_serial_console_detach(&SpType::Sled, 0, "sp3-host-cpu")
         .await
         .unwrap();
     match ws.next().await {
@@ -138,11 +122,7 @@ async fn serial_console_detach() {
 
     // we should now be able to rettach
     let upgraded = client
-        .sp_component_serial_console_attach(
-            gateway_client::types::SpType::Sled,
-            0,
-            "sp3-host-cpu",
-        )
+        .sp_component_serial_console_attach(&SpType::Sled, 0, "sp3-host-cpu")
         .await
         .unwrap()
         .into_inner();

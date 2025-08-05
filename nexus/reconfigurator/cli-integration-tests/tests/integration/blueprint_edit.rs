@@ -147,7 +147,13 @@ async fn test_blueprint_edit(cptestctx: &ControlPlaneTestContext) {
     // blueprint, and save the entire state to a new file.
     let mut s = String::new();
     swriteln!(s, "load {} {}", saved_state1_path, collection.id);
-    swriteln!(s, "blueprint-edit {} add-nexus {}", blueprint.id, sled_id);
+    swriteln!(
+        s,
+        "blueprint-edit {} add-nexus {} {}",
+        blueprint.id,
+        sled_id,
+        blueprint.nexus_generation
+    );
     swriteln!(s, "save {}", saved_state2_path);
     std::fs::write(&script1_path, &s)
         .with_context(|| format!("write {}", &script1_path))
@@ -188,10 +194,10 @@ async fn test_blueprint_edit(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(new_blueprint, new_blueprint2);
 
     // Import the new blueprint.
-    let nexus_internal_url =
-        format!("http://{}/", cptestctx.internal_client.bind_address);
+    let nexus_lockstep_url =
+        format!("http://{}/", cptestctx.lockstep_client.bind_address);
     let nexus_client =
-        nexus_client::Client::new(&nexus_internal_url, log.clone());
+        nexus_lockstep_client::Client::new(&nexus_lockstep_url, log.clone());
     nexus_client
         .blueprint_import(&new_blueprint)
         .await
@@ -206,10 +212,12 @@ async fn test_blueprint_edit(cptestctx: &ControlPlaneTestContext) {
 
     // Set the blueprint as the (disabled) target.
     nexus_client
-        .blueprint_target_set(&nexus_client::types::BlueprintTargetSet {
-            target_id: new_blueprint.id,
-            enabled: false,
-        })
+        .blueprint_target_set(
+            &nexus_lockstep_client::types::BlueprintTargetSet {
+                target_id: new_blueprint.id,
+                enabled: false,
+            },
+        )
         .await
         .context("setting target blueprint")
         .unwrap();

@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "20250730.0.0"
+    "version": "20251008.0.0"
   },
   "paths": {
     "/device/auth": {
@@ -20132,6 +20132,15 @@
             "type": "string",
             "format": "uuid"
           },
+          "cpu_platform": {
+            "nullable": true,
+            "description": "The CPU platform for this instance. If this is `null`, the instance requires no particular CPU platform.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/InstanceCpuPlatform"
+              }
+            ]
+          },
           "description": {
             "description": "human-readable free-form text about a resource",
             "type": "string"
@@ -20238,6 +20247,25 @@
         "format": "uint16",
         "minimum": 0
       },
+      "InstanceCpuPlatform": {
+        "description": "A required CPU platform for an instance.\n\nWhen an instance specifies a required CPU platform:\n\n- The system may expose (to the VM) new CPU features that are only present on that platform (or on newer platforms of the same lineage that also support those features). - The instance must run on hosts that have CPUs that support all the features of the supplied platform.\n\nThat is, the instance is restricted to hosts that have the CPUs which support all features of the required platform, but in exchange the CPU features exposed by the platform are available for the guest to use. Note that this may prevent an instance from starting (if the hosts that could run it are full but there is capacity on other incompatible hosts).\n\nIf an instance does not specify a required CPU platform, then when it starts, the control plane selects a host for the instance and then supplies the guest with the \"minimum\" CPU platform supported by that host. This maximizes the number of hosts that can run the VM if it later needs to migrate to another host.\n\nIn all cases, the CPU features presented by a given CPU platform are a subset of what the corresponding hardware may actually support; features which cannot be used from a virtual environment or do not have full hypervisor support may be masked off. See RFD 314 for specific CPU features in a CPU platform.",
+        "oneOf": [
+          {
+            "description": "An AMD Milan-like CPU platform.",
+            "type": "string",
+            "enum": [
+              "amd_milan"
+            ]
+          },
+          {
+            "description": "An AMD Turin-like CPU platform.",
+            "type": "string",
+            "enum": [
+              "amd_turin"
+            ]
+          }
+        ]
+      },
       "InstanceCreate": {
         "description": "Create-time parameters for an `Instance`",
         "type": "object",
@@ -20267,6 +20295,16 @@
             "allOf": [
               {
                 "$ref": "#/components/schemas/InstanceDiskAttachment"
+              }
+            ]
+          },
+          "cpu_platform": {
+            "nullable": true,
+            "description": "The CPU platform to be used for this instance. If this is `null`, the instance requires no particular CPU platform; when it is started the instance will have the most general CPU platform supported by the sled it is initially placed on.",
+            "default": null,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/InstanceCpuPlatform"
               }
             ]
           },
@@ -20795,7 +20833,7 @@
         "properties": {
           "auto_restart_policy": {
             "nullable": true,
-            "description": "Sets the auto-restart policy for this instance.\n\nThis policy determines whether the instance should be automatically restarted by the control plane on failure. If this is `null`, any explicitly configured auto-restart policy will be unset, and the control plane will select the default policy when determining whether the instance can be automatically restarted.\n\nCurrently, the global default auto-restart policy is \"best-effort\", so instances with `null` auto-restart policies will be automatically restarted. However, in the future, the default policy may be configurable through other mechanisms, such as on a per-project basis. In that case, any configured default policy will be used if this is `null`.",
+            "description": "The auto-restart policy for this instance.\n\nThis policy determines whether the instance should be automatically restarted by the control plane on failure. If this is `null`, any explicitly configured auto-restart policy will be unset, and the control plane will select the default policy when determining whether the instance can be automatically restarted.\n\nCurrently, the global default auto-restart policy is \"best-effort\", so instances with `null` auto-restart policies will be automatically restarted. However, in the future, the default policy may be configurable through other mechanisms, such as on a per-project basis. In that case, any configured default policy will be used if this is `null`.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/InstanceAutoRestartPolicy"
@@ -20804,15 +20842,24 @@
           },
           "boot_disk": {
             "nullable": true,
-            "description": "Name or ID of the disk the instance should be instructed to boot from.\n\nIf not provided, unset the instance's boot disk.",
+            "description": "The disk the instance is configured to boot from.\n\nSetting a boot disk is optional but recommended to ensure predictable boot behavior. The boot disk can be set during instance creation or later if the instance is stopped. The boot disk counts against the disk attachment limit.\n\nAn instance that does not have a boot disk set will use the boot options specified in its UEFI settings, which are controlled by both the instance's UEFI firmware and the guest operating system. Boot options can change as disks are attached and detached, which may result in an instance that only boots to the EFI shell until a boot disk is set.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/NameOrId"
               }
             ]
           },
+          "cpu_platform": {
+            "nullable": true,
+            "description": "The CPU platform to be used for this instance. If this is `null`, the instance requires no particular CPU platform; when it is started the instance will have the most general CPU platform supported by the sled it is initially placed on.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/InstanceCpuPlatform"
+              }
+            ]
+          },
           "memory": {
-            "description": "The amount of memory to assign to this instance.",
+            "description": "The amount of RAM (in bytes) to be allocated to the instance",
             "allOf": [
               {
                 "$ref": "#/components/schemas/ByteCount"
@@ -20820,7 +20867,7 @@
             ]
           },
           "ncpus": {
-            "description": "The number of CPUs to assign to this instance.",
+            "description": "The number of vCPUs to be allocated to the instance",
             "allOf": [
               {
                 "$ref": "#/components/schemas/InstanceCpuCount"
@@ -20829,6 +20876,9 @@
           }
         },
         "required": [
+          "auto_restart_policy",
+          "boot_disk",
+          "cpu_platform",
           "memory",
           "ncpus"
         ]
@@ -21147,6 +21197,54 @@
         },
         "required": [
           "items"
+        ]
+      },
+      "IoCount": {
+        "description": "A count of bytes / rows accessed during a query.",
+        "type": "object",
+        "properties": {
+          "bytes": {
+            "description": "The number of bytes accessed.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "rows": {
+            "description": "The number of rows accessed.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "bytes",
+          "rows"
+        ]
+      },
+      "IoSummary": {
+        "description": "Summary of the I/O resources used by a query.",
+        "type": "object",
+        "properties": {
+          "read": {
+            "description": "The bytes and rows read by the query.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/IoCount"
+              }
+            ]
+          },
+          "written": {
+            "description": "The bytes and rows written by the query.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/IoCount"
+              }
+            ]
+          }
+        },
+        "required": [
+          "read",
+          "written"
         ]
       },
       "IpNet": {
@@ -22266,6 +22364,14 @@
         "description": "The result of a successful OxQL query.",
         "type": "object",
         "properties": {
+          "query_summaries": {
+            "nullable": true,
+            "description": "Summaries of queries run against ClickHouse.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OxqlQuerySummary"
+            }
+          },
           "tables": {
             "description": "Tables resulting from the query, each containing timeseries.",
             "type": "array",
@@ -22276,6 +22382,41 @@
         },
         "required": [
           "tables"
+        ]
+      },
+      "OxqlQuerySummary": {
+        "description": "Basic metadata about the resource usage of a single ClickHouse SQL query.",
+        "type": "object",
+        "properties": {
+          "elapsed_ms": {
+            "description": "The total duration of the ClickHouse query (network plus execution).",
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0
+          },
+          "id": {
+            "description": "The database-assigned query ID.",
+            "type": "string",
+            "format": "uuid"
+          },
+          "io_summary": {
+            "description": "Summary of the data read and written.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/IoSummary"
+              }
+            ]
+          },
+          "query": {
+            "description": "The raw ClickHouse SQL query.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "elapsed_ms",
+          "id",
+          "io_summary",
+          "query"
         ]
       },
       "OxqlTable": {
@@ -25659,6 +25800,11 @@
         "description": "A timeseries query string, written in the Oximeter query language.",
         "type": "object",
         "properties": {
+          "include_summaries": {
+            "description": "Whether to include ClickHouse query summaries in the response.",
+            "default": false,
+            "type": "boolean"
+          },
           "query": {
             "description": "A timeseries query string, written in the Oximeter query language.",
             "type": "string"

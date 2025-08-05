@@ -12,6 +12,10 @@ use nexus_config::NexusConfig;
 use nexus_test_interface::NexusServer;
 use nexus_test_utils::resource_helpers::DiskTest;
 use signal_hook_tokio::Signals;
+use std::fs;
+
+const DEFAULT_NEXUS_CONFIG: &str =
+    concat!(env!("CARGO_MANIFEST_DIR"), "/../../nexus/examples/config.toml");
 
 fn main() -> anyhow::Result<()> {
     oxide_tokio_rt::run(async {
@@ -50,6 +54,9 @@ struct RunAllArgs {
     /// Override the gateway server configuration file.
     #[clap(long, default_value = DEFAULT_SP_SIM_CONFIG)]
     gateway_config: Utf8PathBuf,
+    /// Override the nexus configuration file.
+    #[clap(long, default_value = DEFAULT_NEXUS_CONFIG)]
+    nexus_config: Utf8PathBuf,
 }
 
 impl RunAllArgs {
@@ -60,9 +67,10 @@ impl RunAllArgs {
         let mut signal_stream = signals.fuse();
 
         // Read configuration.
-        let config_str = include_str!("../../../nexus/examples/config.toml");
-        let mut config: NexusConfig =
-            toml::from_str(config_str).context("parsing example config")?;
+        let config_str = fs::read_to_string(&self.nexus_config)?;
+        let mut config: NexusConfig = toml::from_str(&config_str).context(
+            format!("parsing config: {}", self.nexus_config.as_str()),
+        )?;
         config.pkg.log = dropshot::ConfigLogging::File {
             // See LogContext::new(),
             path: "UNUSED".to_string().into(),
@@ -103,41 +111,53 @@ impl RunAllArgs {
         // NOTE: The stdout strings here are not intended to be stable, but they
         // are used by the test suite.
         let addr = cptestctx.external_client.bind_address;
-        println!("omicron-dev: nexus external API:    {:?}", addr);
+        println!("omicron-dev: nexus external API:     {:?}", addr);
         println!(
-            "omicron-dev: nexus internal API:    {:?}",
+            "omicron-dev: nexus internal API:     {:?}",
             cptestctx.server.get_http_server_internal_address().await,
         );
         println!(
-            "omicron-dev: cockroachdb pid:       {}",
+            "omicron-dev: nexus lockstep API:     {:?}",
+            cptestctx.server.get_http_server_lockstep_address().await,
+        );
+        println!(
+            "omicron-dev: cockroachdb pid:        {}",
             cptestctx.database.pid(),
         );
         println!(
-            "omicron-dev: cockroachdb URL:       {}",
+            "omicron-dev: cockroachdb URL:        {}",
             cptestctx.database.pg_config()
         );
         println!(
-            "omicron-dev: cockroachdb directory: {}",
+            "omicron-dev: cockroachdb directory:  {}",
             cptestctx.database.temp_dir().display()
         );
         println!(
-            "omicron-dev: internal DNS HTTP:     http://{}",
+            "omicron-dev: clickhouse native addr: {}",
+            cptestctx.clickhouse.native_address(),
+        );
+        println!(
+            "omicron-dev: clickhouse http addr:   {}",
+            cptestctx.clickhouse.http_address(),
+        );
+        println!(
+            "omicron-dev: internal DNS HTTP:      http://{}",
             cptestctx.internal_dns.dropshot_server.local_addr()
         );
         println!(
-            "omicron-dev: internal DNS:          {}",
+            "omicron-dev: internal DNS:           {}",
             cptestctx.internal_dns.dns_server.local_address()
         );
         println!(
-            "omicron-dev: external DNS name:     {}",
+            "omicron-dev: external DNS name:      {}",
             cptestctx.external_dns_zone_name,
         );
         println!(
-            "omicron-dev: external DNS HTTP:     http://{}",
+            "omicron-dev: external DNS HTTP:      http://{}",
             cptestctx.external_dns.dropshot_server.local_addr()
         );
         println!(
-            "omicron-dev: external DNS:          {}",
+            "omicron-dev: external DNS:           {}",
             cptestctx.external_dns.dns_server.local_address()
         );
         println!(
@@ -149,16 +169,20 @@ impl RunAllArgs {
         );
         for (location, gateway) in &cptestctx.gateway {
             println!(
-                "omicron-dev: management gateway:    {} ({})",
+                "omicron-dev: management gateway:     {} ({})",
                 gateway.client.baseurl(),
                 location,
             );
         }
-        println!("omicron-dev: silo name:             {}", cptestctx.silo_name,);
         println!(
-            "omicron-dev: privileged user name:  {}",
+            "omicron-dev: silo name:              {}",
+            cptestctx.silo_name,
+        );
+        println!(
+            "omicron-dev: privileged user name:   {}",
             cptestctx.user_name.as_ref(),
         );
+        println!("omicron-dev: privileged password:    {}", cptestctx.password);
 
         // Wait for a signal.
         let caught_signal = signal_stream.next().await;

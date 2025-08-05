@@ -80,7 +80,6 @@ use omicron_common::update::OmicronZoneManifestSource;
 use omicron_common::zpool_name::ZpoolName;
 use omicron_uuid_kinds::DatasetKind;
 use omicron_uuid_kinds::DatasetUuid;
-use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InternalZpoolKind;
 use omicron_uuid_kinds::MupdateKind;
 use omicron_uuid_kinds::MupdateOverrideKind;
@@ -91,7 +90,6 @@ use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledKind;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolKind;
-use omicron_uuid_kinds::ZpoolUuid;
 use omicron_uuid_kinds::{CollectionKind, OmicronZoneKind};
 use omicron_uuid_kinds::{CollectionUuid, OmicronZoneUuid};
 use std::collections::BTreeSet;
@@ -2036,7 +2034,7 @@ impl From<InvNvmeDiskFirmware>
 pub struct InvZpool {
     pub inv_collection_id: DbTypedUuid<CollectionKind>,
     pub time_collected: DateTime<Utc>,
-    pub id: Uuid,
+    pub id: DbTypedUuid<ZpoolKind>,
     pub sled_id: DbTypedUuid<SledKind>,
     pub total_size: ByteCount,
 }
@@ -2050,7 +2048,7 @@ impl InvZpool {
         Self {
             inv_collection_id: inv_collection_id.into(),
             time_collected: zpool.time_collected,
-            id: zpool.id.into_untyped_uuid(),
+            id: zpool.id.into(),
             sled_id: sled_id.into(),
             total_size: zpool.total_size.into(),
         }
@@ -2061,7 +2059,7 @@ impl From<InvZpool> for nexus_types::inventory::Zpool {
     fn from(pool: InvZpool) -> Self {
         Self {
             time_collected: pool.time_collected,
-            id: ZpoolUuid::from_untyped_uuid(pool.id),
+            id: pool.id.into(),
             total_size: *pool.total_size,
         }
     }
@@ -2412,6 +2410,7 @@ pub struct InvOmicronSledConfigZone {
     pub filesystem_pool: Option<DbTypedUuid<ZpoolKind>>,
     pub image_source: InvZoneImageSource,
     pub image_artifact_sha256: Option<ArtifactHash>,
+    pub nexus_lockstep_port: Option<SqlU16>,
 }
 
 impl InvOmicronSledConfigZone {
@@ -2465,6 +2464,7 @@ impl InvOmicronSledConfigZone {
             snat_last_port: None,
             image_source,
             image_artifact_sha256,
+            nexus_lockstep_port: None,
         };
 
         match &zone.zone_type {
@@ -2570,6 +2570,7 @@ impl InvOmicronSledConfigZone {
             }
             OmicronZoneType::Nexus {
                 internal_address,
+                lockstep_port,
                 external_ip,
                 nic,
                 external_tls,
@@ -2591,6 +2592,8 @@ impl InvOmicronSledConfigZone {
                         .map(IpNetwork::from)
                         .collect(),
                 );
+                inv_omicron_zone.nexus_lockstep_port =
+                    Some(SqlU16::from(*lockstep_port));
             }
             OmicronZoneType::Oximeter { address } => {
                 // Set the common fields
@@ -2732,6 +2735,9 @@ impl InvOmicronSledConfigZone {
             }
             ZoneType::Nexus => OmicronZoneType::Nexus {
                 internal_address: primary_address,
+                lockstep_port: *self
+                    .nexus_lockstep_port
+                    .ok_or_else(|| anyhow!("expected 'nexus_lockstep_port'"))?,
                 external_ip: self
                     .second_service_ip
                     .ok_or_else(|| anyhow!("expected second service IP"))?

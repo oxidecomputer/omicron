@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 use std::collections::BTreeMap;
 
 use anyhow::anyhow;
@@ -10,6 +14,7 @@ use dropshot::{
     Query, RequestContext, ResultsPage, StreamingBody, TypedBody,
     WebsocketChannelResult, WebsocketConnection,
 };
+use dropshot_api_manager_types::ValidationContext;
 use http::Response;
 use ipnetwork::IpNetwork;
 use nexus_types::{
@@ -23,10 +28,9 @@ use omicron_common::api::external::{
     },
     *,
 };
-use openapi_manager_types::ValidationContext;
 use openapiv3::OpenAPI;
 
-pub const API_VERSION: &str = "20250730.0.0";
+pub const API_VERSION: &str = "20251008.0.0";
 
 const MIB: usize = 1024 * 1024;
 const GIB: usize = 1024 * MIB;

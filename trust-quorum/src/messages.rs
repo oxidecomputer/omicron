@@ -5,7 +5,7 @@
 //! Messsages for the trust quorum protocol
 
 use crate::crypto::LrtqShare;
-use crate::{Configuration, Epoch, PlatformId, Threshold};
+use crate::{BaseboardId, Configuration, Epoch, Threshold};
 use gfss::shamir::Share;
 use omicron_uuid_kinds::RackUuid;
 use serde::{Deserialize, Serialize};
@@ -18,7 +18,21 @@ pub struct ReconfigureMsg {
     pub rack_id: RackUuid,
     pub epoch: Epoch,
     pub last_committed_epoch: Option<Epoch>,
-    pub members: BTreeSet<PlatformId>,
+    pub members: BTreeSet<BaseboardId>,
+    pub threshold: Threshold,
+}
+
+/// A request from nexus informing a node to start coordinating an upgrade from
+/// LRTQ
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LrtqUpgradeMsg {
+    pub rack_id: RackUuid,
+    pub epoch: Epoch,
+    // The members of the LRTQ cluster must be the same as the members of the
+    // upgraded trust quorum cluster. This is implicit, as the membership of the
+    // LRTQ cluster is computed based on the existing control plane sleds known
+    // to Nexus.
+    pub members: BTreeSet<BaseboardId>,
     pub threshold: Threshold,
 }
 
@@ -50,14 +64,6 @@ pub enum PeerMsgKind {
     /// Acknowledge a successful prepare from a coordinator
     PrepareAck(Epoch),
 
-    /// Retrieve a configuration for a given epoch from a node. Nodes only
-    /// respond if this is the current configuration and the requesting node is
-    /// a member of the configuration.
-    GetConfig(Epoch),
-
-    /// A configuration returned in response to `GetConfig`
-    Config(Configuration),
-
     /// Request a node's key share for the given epoch from that node
     GetShare(Epoch),
 
@@ -67,7 +73,7 @@ pub enum PeerMsgKind {
         share: Share,
     },
 
-    // LRTQ shares are always at epoch 0
+    // LRTQ shares are always at epoch 1
     GetLrtqShare,
 
     LrtqShare(LrtqShare),
@@ -90,8 +96,6 @@ impl PeerMsgKind {
         match self {
             Self::Prepare { .. } => "prepare",
             Self::PrepareAck(_) => "prepare_ack",
-            Self::GetConfig(_) => "get_config",
-            Self::Config(_) => "config",
             Self::GetShare(_) => "get_share",
             Self::Share { .. } => "share",
             Self::GetLrtqShare => "get_lrtq_share",
@@ -110,9 +114,6 @@ impl PeerMsgKind {
                 Self::Prepare { config: config1, .. },
                 Self::Prepare { config: config2, .. },
             ) => config1.equal_except_for_crypto_data(config2),
-            (Self::Config(config1), Self::Config(config2)) => {
-                config1.equal_except_for_crypto_data(config2)
-            }
             (
                 Self::Share { epoch: epoch1, .. },
                 Self::Share { epoch: epoch2, .. },

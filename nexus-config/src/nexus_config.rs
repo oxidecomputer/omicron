@@ -10,6 +10,7 @@ use anyhow::anyhow;
 use camino::{Utf8Path, Utf8PathBuf};
 use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
+use nexus_types::deployment::ReconfiguratorConfig;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::NEXUS_TECHPORT_EXTERNAL_PORT;
 use omicron_common::address::RACK_PREFIX;
@@ -173,6 +174,9 @@ pub struct DeploymentConfig {
     /// Dropshot configuration for internal API server.
     #[schemars(skip)] // TODO we're protected against dropshot changes
     pub dropshot_internal: ConfigDropshot,
+    /// Dropshot configuration for lockstep API server.
+    #[schemars(skip)] // TODO we're protected against dropshot changes
+    pub dropshot_lockstep: ConfigDropshot,
     /// Describes how Nexus should find internal DNS servers
     /// for bootstrapping.
     pub internal_dns: InternalDns,
@@ -426,6 +430,8 @@ pub struct BackgroundTaskConfig {
         RegionSnapshotReplacementFinishConfig,
     /// configuration for TUF artifact replication task
     pub tuf_artifact_replication: TufArtifactReplicationConfig,
+    /// configuration for TUF repo pruner task
+    pub tuf_repo_pruner: TufRepoPrunerConfig,
     /// configuration for read-only region replacement start task
     pub read_only_region_replacement_start:
         ReadOnlyRegionReplacementStartConfig,
@@ -615,9 +621,9 @@ pub struct BlueprintTasksConfig {
     pub period_secs_collect_crdb_node_ids: Duration,
 
     /// period (in seconds) for periodic activations of the background task that
-    /// reads chicken switches from the database
+    /// reads the reconfigurator config from the database
     #[serde_as(as = "DurationSeconds<u64>")]
-    pub period_secs_load_chicken_switches: Duration,
+    pub period_secs_load_reconfigurator_config: Duration,
 }
 
 #[serde_as]
@@ -763,6 +769,26 @@ pub struct TufArtifactReplicationConfig {
 
 #[serde_as]
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct TufRepoPrunerConfig {
+    /// period (in seconds) for periodic activations of this background task
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
+
+    /// number of extra recent target releases to keep
+    ///
+    /// The system always keeps two: the current release and the previous one.
+    /// This number is in addition to that.
+    pub nkeep_extra_target_releases: u8,
+
+    /// number of extra recently uploaded repos to keep
+    ///
+    /// The system always keeps one, assuming that the operator may be about to
+    /// update to it.  This number is in addition to that.
+    pub nkeep_extra_newly_uploaded: u8,
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct ReadOnlyRegionReplacementStartConfig {
     /// period (in seconds) for periodic activations of this background task
     #[serde_as(as = "DurationSeconds<u64>")]
@@ -856,6 +882,11 @@ pub struct PackageConfig {
     /// Maghemite mgd daemon configuration
     #[serde(default)]
     pub mgd: HashMap<SwitchLocation, MgdConfig>,
+    /// Initial reconfigurator config
+    ///
+    /// We use this hook to disable reconfigurator automation in the test suite
+    #[serde(default)]
+    pub initial_reconfigurator_config: Option<ReconfiguratorConfig>,
     /// Background task configuration
     pub background_tasks: BackgroundTaskConfig,
     /// Default Crucible region allocation strategy
@@ -917,6 +948,7 @@ impl WebhookDeliveratorConfig {
 mod test {
     use super::*;
 
+    use nexus_types::deployment::PlannerConfig;
     use omicron_common::address::{
         CLICKHOUSE_TCP_PORT, Ipv6Subnet, RACK_PREFIX,
     };
@@ -1049,6 +1081,9 @@ mod test {
             [deployment.dropshot_internal]
             bind_address = "10.1.2.3:4568"
             default_request_body_max_bytes = 1024
+            [deployment.dropshot_lockstep]
+            bind_address = "10.1.2.3:4569"
+            default_request_body_max_bytes = 1024
             [deployment.internal_dns]
             type = "from_subnet"
             subnet.net = "::/56"
@@ -1058,6 +1093,9 @@ mod test {
             address = "[::1]:12224"
             [mgd.switch0]
             address = "[::1]:4676"
+            [initial_reconfigurator_config]
+            planner_enabled = true
+            planner_config.add_zones_with_mupdate_override = true
             [background_tasks]
             dns_internal.period_secs_config = 1
             dns_internal.period_secs_servers = 2
@@ -1083,7 +1121,7 @@ mod test {
             blueprints.period_secs_execute = 60
             blueprints.period_secs_rendezvous = 300
             blueprints.period_secs_collect_crdb_node_ids = 180
-            blueprints.period_secs_load_chicken_switches= 5
+            blueprints.period_secs_load_reconfigurator_config = 5
             sync_service_zone_nat.period_secs = 30
             switch_port_settings_manager.period_secs = 30
             region_replacement.period_secs = 30
@@ -1103,6 +1141,9 @@ mod test {
             region_snapshot_replacement_finish.period_secs = 30
             tuf_artifact_replication.period_secs = 300
             tuf_artifact_replication.min_sled_replication = 3
+            tuf_repo_pruner.period_secs = 299
+            tuf_repo_pruner.nkeep_extra_target_releases = 51
+            tuf_repo_pruner.nkeep_extra_newly_uploaded = 52
             read_only_region_replacement_start.period_secs = 30
             alert_dispatcher.period_secs = 42
             webhook_deliverator.period_secs = 43
@@ -1138,6 +1179,12 @@ mod test {
                     },
                     dropshot_internal: ConfigDropshot {
                         bind_address: "10.1.2.3:4568"
+                            .parse::<SocketAddr>()
+                            .unwrap(),
+                        ..Default::default()
+                    },
+                    dropshot_lockstep: ConfigDropshot {
+                        bind_address: "10.1.2.3:4569"
                             .parse::<SocketAddr>()
                             .unwrap(),
                         ..Default::default()
@@ -1195,6 +1242,12 @@ mod test {
                                 .unwrap(),
                         }
                     )]),
+                    initial_reconfigurator_config: Some(ReconfiguratorConfig {
+                        planner_enabled: true,
+                        planner_config: PlannerConfig {
+                            add_zones_with_mupdate_override: true,
+                        },
+                    }),
                     background_tasks: BackgroundTaskConfig {
                         dns_internal: DnsTasksConfig {
                             period_secs_config: Duration::from_secs(1),
@@ -1249,7 +1302,7 @@ mod test {
                             period_secs_collect_crdb_node_ids:
                                 Duration::from_secs(180),
                             period_secs_rendezvous: Duration::from_secs(300),
-                            period_secs_load_chicken_switches:
+                            period_secs_load_reconfigurator_config:
                                 Duration::from_secs(5)
                         },
                         sync_service_zone_nat: SyncServiceZoneNatConfig {
@@ -1314,6 +1367,11 @@ mod test {
                                 period_secs: Duration::from_secs(300),
                                 min_sled_replication: 3,
                             },
+                        tuf_repo_pruner: TufRepoPrunerConfig {
+                            period_secs: Duration::from_secs(299),
+                            nkeep_extra_target_releases: 51,
+                            nkeep_extra_newly_uploaded: 52,
+                        },
                         read_only_region_replacement_start:
                             ReadOnlyRegionReplacementStartConfig {
                                 period_secs: Duration::from_secs(30),
@@ -1367,6 +1425,9 @@ mod test {
             [deployment.dropshot_internal]
             bind_address = "10.1.2.3:4568"
             default_request_body_max_bytes = 1024
+            [deployment.dropshot_lockstep]
+            bind_address = "10.1.2.3:4569"
+            default_request_body_max_bytes = 1024
             [deployment.internal_dns]
             type = "from_subnet"
             subnet.net = "::/56"
@@ -1399,7 +1460,7 @@ mod test {
             blueprints.period_secs_execute = 60
             blueprints.period_secs_rendezvous = 300
             blueprints.period_secs_collect_crdb_node_ids = 180
-            blueprints.period_secs_load_chicken_switches= 5
+            blueprints.period_secs_load_reconfigurator_config = 5
             sync_service_zone_nat.period_secs = 30
             switch_port_settings_manager.period_secs = 30
             region_replacement.period_secs = 30
@@ -1418,6 +1479,9 @@ mod test {
             region_snapshot_replacement_finish.period_secs = 30
             tuf_artifact_replication.period_secs = 300
             tuf_artifact_replication.min_sled_replication = 3
+            tuf_repo_pruner.period_secs = 299
+            tuf_repo_pruner.nkeep_extra_target_releases = 51
+            tuf_repo_pruner.nkeep_extra_newly_uploaded = 52
             read_only_region_replacement_start.period_secs = 30
             alert_dispatcher.period_secs = 42
             webhook_deliverator.period_secs = 43
@@ -1463,6 +1527,9 @@ mod test {
             default_request_body_max_bytes = 1024
             [deployment.dropshot_internal]
             bind_address = "10.1.2.3:4568"
+            default_request_body_max_bytes = 1024
+            [deployment.dropshot_lockstep]
+            bind_address = "10.1.2.3:4569"
             default_request_body_max_bytes = 1024
             [deployment.internal_dns]
             type = "from_subnet"
@@ -1516,6 +1583,9 @@ mod test {
             bind_address = "10.1.2.3:4567"
             default_request_body_max_bytes = 1024
             [deployment.dropshot_internal]
+            bind_address = "10.1.2.3:4568"
+            default_request_body_max_bytes = 1024
+            [deployment.dropshot_lockstep]
             bind_address = "10.1.2.3:4568"
             default_request_body_max_bytes = 1024
             [deployment.internal_dns]

@@ -16,7 +16,8 @@ use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::{params, shared, views};
 use nexus_types::{identity::Asset, silo::DEFAULT_SILO_ID};
 use omicron_common::api::external::{
-    IdentityMetadataCreateParams, InstanceAutoRestartPolicy, Name, UserId,
+    IdentityMetadataCreateParams, InstanceAutoRestartPolicy,
+    InstanceCpuPlatform, Name, UserId,
 };
 use std::str::FromStr;
 
@@ -324,6 +325,7 @@ async fn test_audit_log_create_delete_ops(ctx: &ControlPlaneTestContext) {
         Vec::<params::ExternalIpCreate>::new(),
         false, // start=false, so instance is created in stopped state
         None::<InstanceAutoRestartPolicy>,
+        None::<InstanceCpuPlatform>,
     )
     .await;
     let _disk = create_disk(client, "test-project", "test-disk").await;

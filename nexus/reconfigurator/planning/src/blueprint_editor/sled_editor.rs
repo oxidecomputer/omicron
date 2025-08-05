@@ -9,6 +9,7 @@ use crate::blueprint_builder::EditedSledScalarEdits;
 use crate::blueprint_builder::EnsureMupdateOverrideAction;
 use crate::blueprint_builder::EnsureMupdateOverrideUpdatedZone;
 use crate::blueprint_builder::SledEditCounts;
+use crate::planner::NoopConvertGlobalIneligibleReason;
 use crate::planner::NoopConvertSledEligible;
 use crate::planner::NoopConvertSledIneligibleReason;
 use crate::planner::NoopConvertSledInfoMut;
@@ -980,10 +981,15 @@ impl ActiveSledEditor {
                             })
                         }
                     },
-                    NoopConvertSledInfoMut::GlobalIneligible(reason) => {
-                        Ok(EnsureMupdateOverrideAction::BpOverrideNotCleared {
-                            bp_override,
-                            reason: NoopGlobalIneligible(reason.clone()),
+                    NoopConvertSledInfoMut::GlobalIneligible(
+                        NoopConvertGlobalIneligibleReason::NoTargetRelease,
+                    ) => {
+                        // It's fine to clear the override when there's no
+                        // target release, even though noop conversions aren't
+                        // possible.
+                        self.set_remove_mupdate_override(None);
+                        Ok(EnsureMupdateOverrideAction::BpClearOverride {
+                            prev_bp_override: bp_override,
                         })
                     }
                 }

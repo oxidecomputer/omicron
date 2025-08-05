@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::blippy::Blippy;
+use crate::blippy::BlueprintKind;
 use crate::blippy::Severity;
 use crate::blippy::SledKind;
 use nexus_sled_agent_shared::inventory::ZoneKind;
@@ -21,6 +22,7 @@ use nexus_types::deployment::blueprint_zone_type;
 use omicron_common::address::DnsSubnet;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX;
+use omicron_common::api::external::Generation;
 use omicron_common::disk::DatasetKind;
 use omicron_common::disk::M2Slot;
 use omicron_uuid_kinds::MupdateOverrideUuid;
@@ -37,6 +39,7 @@ pub(crate) fn perform_all_blueprint_only_checks(blippy: &mut Blippy<'_>) {
     check_dataset_zpool_uniqueness(blippy);
     check_datasets(blippy);
     check_mupdate_override(blippy);
+    check_nexus_generation_consistency(blippy);
 }
 
 fn check_underlay_ips(blippy: &mut Blippy<'_>) {
@@ -632,6 +635,78 @@ fn check_mupdate_override_host_phase_2_contents(
     }
 }
 
+fn check_nexus_generation_consistency(blippy: &mut Blippy<'_>) {
+    use std::collections::HashMap;
+
+    // Map from generation -> (sled_id, image_source, zone)
+    let mut generation_info: HashMap<
+        Generation,
+        Vec<(SledUuid, BlueprintZoneImageSource, &BlueprintZoneConfig)>,
+    > = HashMap::new();
+
+    // Collect all Nexus zones and their generations
+    for (sled_id, zone) in blippy
+        .blueprint()
+        .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+    {
+        if let BlueprintZoneType::Nexus(nexus) = &zone.zone_type {
+            generation_info.entry(nexus.nexus_generation).or_default().push((
+                sled_id,
+                zone.image_source.clone(),
+                zone,
+            ));
+        }
+    }
+
+    // Check that the top-level Nexus generation is consistent with the images
+    let active_gen = blippy.blueprint().nexus_generation;
+    if !generation_info.contains_key(&active_gen) {
+        blippy.push_blueprint_note(
+            Severity::Fatal,
+            BlueprintKind::NoZonesWithActiveNexusGeneration(active_gen),
+        );
+        return;
+    };
+
+    // Check each generation for image source consistency
+    for (generation, zones_with_gen) in &generation_info {
+        // Take the first zone as the reference
+        let (ref_sled_id, ref_image_source, ref_zone) = &zones_with_gen[0];
+
+        if *generation > active_gen.next() {
+            blippy.push_sled_note(
+                *ref_sled_id,
+                Severity::Fatal,
+                SledKind::NexusZoneGenerationTooNew {
+                    active_generation: active_gen,
+                    zone_generation: *generation,
+                    id: ref_zone.id,
+                },
+            );
+        }
+
+        if zones_with_gen.len() < 2 {
+            // Only one zone with this generation, no consistency issue
+            continue;
+        }
+
+        // Compare all other zones to the reference
+        for (_sled_id, image_source, zone) in &zones_with_gen[1..] {
+            if image_source != ref_image_source {
+                blippy.push_sled_note(
+                    *ref_sled_id,
+                    Severity::Fatal,
+                    SledKind::NexusZoneGenerationImageSourceMismatch {
+                        zone1: (*ref_zone).clone(),
+                        zone2: (*zone).clone(),
+                        generation: *generation,
+                    },
+                );
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -724,30 +799,30 @@ mod tests {
                 severity: Severity::Fatal,
                 kind: Kind::Sled {
                     sled_id: nexus1_sled_id,
-                    kind: SledKind::DuplicateUnderlayIp {
+                    kind: Box::new(SledKind::DuplicateUnderlayIp {
                         zone1: nexus0.clone(),
                         zone2: nexus1.clone(),
-                    },
+                    }),
                 },
             },
             Note {
                 severity: Severity::Fatal,
                 kind: Kind::Sled {
                     sled_id: nexus1_sled_id,
-                    kind: SledKind::SledWithMixedUnderlaySubnets {
+                    kind: Box::new(SledKind::SledWithMixedUnderlaySubnets {
                         zone1: mixed_underlay_zone1,
                         zone2: mixed_underlay_zone2,
-                    },
+                    }),
                 },
             },
             Note {
                 severity: Severity::Fatal,
                 kind: Kind::Sled {
                     sled_id: nexus1_sled_id,
-                    kind: SledKind::ConflictingSledSubnets {
+                    kind: Box::new(SledKind::ConflictingSledSubnets {
                         other_sled: nexus0_sled_id,
                         subnet: Ipv6Subnet::new(dup_ip),
-                    },
+                    }),
                 },
             },
         ];
@@ -826,13 +901,13 @@ mod tests {
             severity: Severity::Fatal,
             kind: Kind::Sled {
                 sled_id: dns1_sled_id,
-                kind: SledKind::InternalDnsZoneBadSubnet {
+                kind: Box::new(SledKind::InternalDnsZoneBadSubnet {
                     zone: dns1.clone(),
                     rack_dns_subnets: rack_subnet
                         .get_dns_subnets()
                         .into_iter()
                         .collect(),
-                },
+                }),
             },
         };
 
@@ -898,11 +973,11 @@ mod tests {
             severity: Severity::Fatal,
             kind: Kind::Sled {
                 sled_id: nexus1_sled_id,
-                kind: SledKind::DuplicateExternalIp {
+                kind: Box::new(SledKind::DuplicateExternalIp {
                     zone1: nexus0.clone(),
                     zone2: nexus1.clone(),
                     ip: dup_ip.ip,
-                },
+                }),
             },
         }];
 
@@ -965,11 +1040,11 @@ mod tests {
             severity: Severity::Fatal,
             kind: Kind::Sled {
                 sled_id: nexus1_sled_id,
-                kind: SledKind::DuplicateNicIp {
+                kind: Box::new(SledKind::DuplicateNicIp {
                     zone1: nexus0.clone(),
                     zone2: nexus1.clone(),
                     ip: dup_ip,
-                },
+                }),
             },
         }];
 
@@ -1032,11 +1107,11 @@ mod tests {
             severity: Severity::Fatal,
             kind: Kind::Sled {
                 sled_id: nexus1_sled_id,
-                kind: SledKind::DuplicateNicMac {
+                kind: Box::new(SledKind::DuplicateNicMac {
                     zone1: nexus0.clone(),
                     zone2: nexus1.clone(),
                     mac: dup_mac,
-                },
+                }),
             },
         }];
 
@@ -1104,22 +1179,24 @@ mod tests {
                 severity: Severity::Fatal,
                 kind: Kind::Sled {
                     sled_id: dns1_sled_id,
-                    kind: SledKind::ZoneDurableDatasetCollision {
+                    kind: Box::new(SledKind::ZoneDurableDatasetCollision {
                         zone1: dns0.clone(),
                         zone2: dns1.clone(),
                         zpool: dup_zpool,
-                    },
+                    }),
                 },
             },
             Note {
                 severity: Severity::Fatal,
                 kind: Kind::Sled {
                     sled_id: dns1_sled_id,
-                    kind: SledKind::ZoneWithDatasetsOnDifferentZpools {
-                        zone: dns1.clone(),
-                        durable_zpool: dup_zpool,
-                        transient_zpool: dns1.filesystem_pool,
-                    },
+                    kind: Box::new(
+                        SledKind::ZoneWithDatasetsOnDifferentZpools {
+                            zone: dns1.clone(),
+                            durable_zpool: dup_zpool,
+                            transient_zpool: dns1.filesystem_pool,
+                        },
+                    ),
                 },
             },
         ];
@@ -1174,22 +1251,27 @@ mod tests {
                 severity: Severity::Fatal,
                 kind: Kind::Sled {
                     sled_id: dns1_sled_id,
-                    kind: SledKind::ZoneFilesystemDatasetCollision {
+                    kind: Box::new(SledKind::ZoneFilesystemDatasetCollision {
                         zone1: dns0.clone(),
                         zone2: dns1.clone(),
                         zpool: dup_zpool,
-                    },
+                    }),
                 },
             },
             Note {
                 severity: Severity::Fatal,
                 kind: Kind::Sled {
                     sled_id: dns1_sled_id,
-                    kind: SledKind::ZoneWithDatasetsOnDifferentZpools {
-                        zone: dns1.clone(),
-                        durable_zpool: *dns1.zone_type.durable_zpool().unwrap(),
-                        transient_zpool: dup_zpool,
-                    },
+                    kind: Box::new(
+                        SledKind::ZoneWithDatasetsOnDifferentZpools {
+                            zone: dns1.clone(),
+                            durable_zpool: *dns1
+                                .zone_type
+                                .durable_zpool()
+                                .unwrap(),
+                            transient_zpool: dup_zpool,
+                        },
+                    ),
                 },
             },
         ];
@@ -1245,11 +1327,11 @@ mod tests {
             severity: Severity::Fatal,
             kind: Kind::Sled {
                 sled_id,
-                kind: SledKind::ZpoolWithDuplicateDatasetKinds {
+                kind: Box::new(SledKind::ZpoolWithDuplicateDatasetKinds {
                     dataset1,
                     dataset2,
                     zpool: zpool.id(),
-                },
+                }),
             },
         }];
 
@@ -1303,7 +1385,7 @@ mod tests {
         eprintln!("{}", report.display());
         for note in report.notes() {
             match &note.kind {
-                Kind::Sled { kind, .. } => match kind {
+                Kind::Sled { kind, .. } => match &**kind {
                     SledKind::ZpoolWithDuplicateDatasetKinds { .. } => {
                         panic!(
                             "Saw unexpected duplicate dataset kind note: {note:?}"
@@ -1311,6 +1393,7 @@ mod tests {
                     }
                     _ => (),
                 },
+                _ => panic!("Unexpected note: {note:?}"),
             }
         }
 
@@ -1365,18 +1448,18 @@ mod tests {
                 severity: Severity::Fatal,
                 kind: Kind::Sled {
                     sled_id: *sled_id,
-                    kind: SledKind::ZpoolMissingDebugDataset {
+                    kind: Box::new(SledKind::ZpoolMissingDebugDataset {
                         zpool: debug_dataset.pool.id(),
-                    },
+                    }),
                 },
             },
             Note {
                 severity: Severity::Fatal,
                 kind: Kind::Sled {
                     sled_id: *sled_id,
-                    kind: SledKind::ZpoolMissingZoneRootDataset {
+                    kind: Box::new(SledKind::ZpoolMissingZoneRootDataset {
                         zpool: zoneroot_dataset.pool.id(),
-                    },
+                    }),
                 },
             },
         ];
@@ -1440,18 +1523,18 @@ mod tests {
                 severity: Severity::Fatal,
                 kind: Kind::Sled {
                     sled_id: *sled_id,
-                    kind: SledKind::ZoneMissingFilesystemDataset {
+                    kind: Box::new(SledKind::ZoneMissingFilesystemDataset {
                         zone: root_zone.clone(),
-                    },
+                    }),
                 },
             },
             Note {
                 severity: Severity::Fatal,
                 kind: Kind::Sled {
                     sled_id: *sled_id,
-                    kind: SledKind::ZoneMissingDurableDataset {
+                    kind: Box::new(SledKind::ZoneMissingDurableDataset {
                         zone: durable_zone,
-                    },
+                    }),
                 },
             },
         ];
@@ -1517,9 +1600,9 @@ mod tests {
                         severity: Severity::Fatal,
                         kind: Kind::Sled {
                             sled_id: *sled_id,
-                            kind: SledKind::OrphanedDataset {
+                            kind: Box::new(SledKind::OrphanedDataset {
                                 dataset: dataset.clone(),
-                            },
+                            }),
                         },
                     })
                 } else {
@@ -1576,9 +1659,9 @@ mod tests {
                             severity: Severity::Fatal,
                             kind: Kind::Sled {
                                 sled_id,
-                                kind: SledKind::OrphanedDataset {
+                                kind: Box::new(SledKind::OrphanedDataset {
                                     dataset: dataset.clone(),
-                                },
+                                }),
                             },
                         }
                     }
@@ -1586,9 +1669,11 @@ mod tests {
                         severity: Severity::Fatal,
                         kind: Kind::Sled {
                             sled_id,
-                            kind: SledKind::DatasetOnNonexistentZpool {
-                                dataset: dataset.clone(),
-                            },
+                            kind: Box::new(
+                                SledKind::DatasetOnNonexistentZpool {
+                                    dataset: dataset.clone(),
+                                },
+                            ),
                         },
                     },
                 };
@@ -1668,10 +1753,10 @@ mod tests {
                             severity: Severity::Fatal,
                             kind: Kind::Sled {
                                 sled_id: *sled_id,
-                                kind: SledKind::CrucibleDatasetWithIncorrectAddress {
+                                kind: Box::new(SledKind::CrucibleDatasetWithIncorrectAddress {
                                     dataset: dataset.clone(),
                                     expected_address,
-                                },
+                                }),
                             },
                         });
                     }
@@ -1684,10 +1769,10 @@ mod tests {
                             severity: Severity::Fatal,
                             kind: Kind::Sled {
                                 sled_id: *sled_id,
-                                kind: SledKind::NonCrucibleDatasetWithAddress {
+                                kind: Box::new(SledKind::NonCrucibleDatasetWithAddress {
                                     dataset: dataset.clone(),
                                     address,
-                                },
+                                }),
                             },
                         });
                         }
@@ -1793,17 +1878,156 @@ mod tests {
         let expected_notes = vec![
             Note {
                 severity: Severity::Fatal,
-                kind: Kind::Sled { sled_id, kind: artifact_zone_kind },
+                kind: Kind::Sled {
+                    sled_id,
+                    kind: Box::new(artifact_zone_kind),
+                },
             },
             Note {
                 severity: Severity::Fatal,
-                kind: Kind::Sled { sled_id, kind: host_phase_2_a_kind },
+                kind: Kind::Sled {
+                    sled_id,
+                    kind: Box::new(host_phase_2_a_kind),
+                },
             },
             Note {
                 severity: Severity::Fatal,
-                kind: Kind::Sled { sled_id, kind: host_phase_2_b_kind },
+                kind: Kind::Sled {
+                    sled_id,
+                    kind: Box::new(host_phase_2_b_kind),
+                },
             },
         ];
+
+        let report =
+            Blippy::new(&blueprint).into_report(BlippyReportSortKey::Kind);
+        eprintln!("{}", report.display());
+        assert_eq!(report.notes(), &expected_notes);
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn test_nexus_generation_no_nexus() {
+        static TEST_NAME: &str = "test_nexus_generation_no_nexus";
+        let logctx = test_setup_log(TEST_NAME);
+        let (_, blueprint) = ExampleSystemBuilder::new(&logctx.log, TEST_NAME)
+            .nsleds(1)
+            .nexus_count(0)
+            .build();
+
+        // Run blippy checks
+        let expected_notes = [Note {
+            severity: Severity::Fatal,
+            kind: Kind::Blueprint(
+                BlueprintKind::NoZonesWithActiveNexusGeneration(
+                    blueprint.nexus_generation,
+                ),
+            ),
+        }];
+
+        let report =
+            Blippy::new(&blueprint).into_report(BlippyReportSortKey::Kind);
+        eprintln!("{}", report.display());
+        assert_eq!(report.notes(), &expected_notes);
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn test_nexus_generation_image_consistency() {
+        static TEST_NAME: &str = "test_nexus_generation_image_consistency";
+        let logctx = test_setup_log(TEST_NAME);
+        let (_, mut blueprint) =
+            ExampleSystemBuilder::new(&logctx.log, TEST_NAME)
+                .nsleds(3)
+                .nexus_count(3)
+                .build();
+
+        // Find the Nexus zones
+        let ((sled1, zone1_id), (sled2, zone2_id)) = {
+            let nexus_zones: Vec<_> = blueprint
+                .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+                .filter_map(|(sled_id, zone)| {
+                    if matches!(zone.zone_type, BlueprintZoneType::Nexus(_)) {
+                        Some((sled_id, zone))
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+
+            // Should have exactly 3 Nexus zones
+            assert_eq!(nexus_zones.len(), 3);
+
+            // Modify two zones to have the same generation but different image sources
+            let (sled1, zone1) = nexus_zones[0];
+            let (sled2, zone2) = nexus_zones[1];
+
+            ((sled1, zone1.id), (sled2, zone2.id))
+        };
+
+        let generation = Generation::new();
+
+        let zone1 = {
+            // Find the zones in the blueprint and modify them
+            let mut zone1_config = blueprint
+                .sleds
+                .get_mut(&sled1)
+                .unwrap()
+                .zones
+                .get_mut(&zone1_id)
+                .unwrap();
+
+            match &mut zone1_config.zone_type {
+                BlueprintZoneType::Nexus(nexus) => {
+                    nexus.nexus_generation = generation;
+                }
+                _ => unreachable!("this is a Nexus zone"),
+            }
+            zone1_config.image_source =
+                BlueprintZoneImageSource::InstallDataset;
+            zone1_config.clone()
+        };
+
+        let zone2 = {
+            let mut zone2_config = blueprint
+                .sleds
+                .get_mut(&sled2)
+                .unwrap()
+                .zones
+                .get_mut(&zone2_id)
+                .unwrap();
+
+            match &mut zone2_config.zone_type {
+                BlueprintZoneType::Nexus(nexus) => {
+                    nexus.nexus_generation = generation;
+                }
+                _ => unreachable!("this is a Nexus zone"),
+            }
+            zone2_config.image_source = BlueprintZoneImageSource::Artifact {
+                version: BlueprintArtifactVersion::Available {
+                    version: "1.0.0".parse().unwrap(),
+                },
+                hash: ArtifactHash([0; 32]),
+            };
+            zone2_config.clone()
+        };
+
+        // Run blippy checks
+        let expected_notes = [Note {
+            severity: Severity::Fatal,
+            kind: Kind::Sled {
+                sled_id: sled1,
+                kind: Box::new(
+                    SledKind::NexusZoneGenerationImageSourceMismatch {
+                        zone1,
+                        zone2,
+                        generation,
+                    },
+                ),
+            },
+        }];
 
         let report =
             Blippy::new(&blueprint).into_report(BlippyReportSortKey::Kind);
