@@ -9,6 +9,7 @@
 
 mod error;
 pub mod http_pagination;
+pub use crate::address::IpVersion;
 pub use crate::api::internal::shared::AllowedSourceIps;
 pub use crate::api::internal::shared::SwitchLocation;
 use crate::update::ArtifactId;

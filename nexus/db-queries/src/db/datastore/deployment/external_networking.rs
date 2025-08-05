@@ -18,6 +18,7 @@ use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::OmicronZoneExternalIp;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadataCreateParams;
+use omicron_common::api::external::IpVersion;
 use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::api::internal::shared::NetworkInterfaceKind;
 use omicron_uuid_kinds::GenericUuid;
@@ -29,6 +30,47 @@ use slog::info;
 use slog::warn;
 use slog_error_chain::InlineErrorChain;
 
+// Helper type to lookup service IP Pools only when needed, at most once.
+//
+// In `ensure_zone_external_networking_deallocated_on_connection`, we lookup
+// pools only when we're sure we need them, based on the versions of the IP
+// addresses we need to provide for each zone.
+struct ServiceIpPools<'a> {
+    maybe_ipv4_pool: Option<IpPool>,
+    maybe_ipv6_pool: Option<IpPool>,
+    datastore: &'a DataStore,
+    opctx: &'a OpContext,
+}
+
+impl<'a> ServiceIpPools<'a> {
+    fn new(datastore: &'a DataStore, opctx: &'a OpContext) -> Self {
+        Self { maybe_ipv4_pool: None, maybe_ipv6_pool: None, datastore, opctx }
+    }
+
+    /// Get the service IP Pool for the given address.
+    ///
+    /// This may need to call out to the database to fetch the pool.
+    async fn pool_for(
+        &mut self,
+        external_ip: &OmicronZoneExternalIp,
+    ) -> Result<&IpPool, Error> {
+        let version = external_ip.ip_version();
+        let pool = match version {
+            IpVersion::V4 => &mut self.maybe_ipv4_pool,
+            IpVersion::V6 => &mut self.maybe_ipv6_pool,
+        };
+        if let Some(pool) = pool {
+            return Ok(&*pool);
+        }
+        let new_pool = self
+            .datastore
+            .ip_pools_service_lookup(self.opctx, version.into())
+            .await?
+            .1;
+        Ok(pool.insert(new_pool))
+    }
+}
+
 impl DataStore {
     pub(super) async fn ensure_zone_external_networking_allocated_on_connection(
         &self,
@@ -36,10 +78,10 @@ impl DataStore {
         opctx: &OpContext,
         zones_to_allocate: impl Iterator<Item = &BlueprintZoneConfig>,
     ) -> Result<(), Error> {
-        // Looking up the service pool ID requires an opctx; we'll do this once
-        // up front and reuse the pool ID (which never changes) in the loop
-        // below.
-        let (_, pool) = self.ip_pools_service_lookup(opctx).await?;
+        // Looking up the service pool IDs requires an opctx; we'll do this at
+        // most once inside the loop below, when we first encounter an address
+        // of the same IP version.
+        let mut ip_pools = ServiceIpPools::new(self, opctx);
 
         for z in zones_to_allocate {
             let Some((external_ip, nic)) = z.zone_type.external_networking()
@@ -55,10 +97,12 @@ impl DataStore {
                 "nic" => format!("{nic:?}"),
             ));
 
+            // Get existing pool or look it up and cache it.
+            let pool = ip_pools.pool_for(&external_ip).await?;
             let kind = z.zone_type.kind();
             self.ensure_external_service_ip(
                 conn,
-                &pool,
+                pool,
                 kind,
                 z.id,
                 external_ip,
@@ -592,12 +636,17 @@ mod tests {
             opctx: &OpContext,
             datastore: &DataStore,
         ) {
-            let (ip_pool, _) = datastore
-                .ip_pools_service_lookup(&opctx)
+            let (ip_pool, db_pool) = datastore
+                .ip_pools_service_lookup(&opctx, IpVersion::V4.into())
                 .await
                 .expect("failed to find service IP pool");
             datastore
-                .ip_pool_add_range(&opctx, &ip_pool, &self.external_ips_range)
+                .ip_pool_add_range(
+                    &opctx,
+                    &ip_pool,
+                    &db_pool,
+                    &self.external_ips_range,
+                )
                 .await
                 .expect("failed to expand service IP pool");
         }
