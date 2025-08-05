@@ -3256,7 +3256,6 @@ mod tests {
                                 size: 0,
                             },
                         ],
-                        // TODO-K: add some stuff here?
                         rots_by_sign: vec![],
                     },
                 )

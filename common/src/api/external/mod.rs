@@ -3349,24 +3349,6 @@ pub struct ServiceIcmpConfig {
     pub enabled: bool,
 }
 
-// // Used to represent the information extracted from signed RoT images. This
-// // is used when going from `UpdatePlanBuilder` -> `UpdatePlan` to check
-// // the versions on the RoT images and also to generate the map of
-// // ArtifactId -> Sign hashes for checking artifacts.
-// #[derive(Debug, Clone, Eq, Hash, PartialEq, Deserialize, Serialize, JsonSchema)]
-// pub struct RotSignData {
-//     pub kind: KnownArtifactKind,
-//     pub sign: Vec<u8>,
-// }
-//
-// // Represents the map end used with `RotSignData`. The `bord` is extracted
-// // from the associated artifact ID and is used to perform future checks
-// #[derive(Debug, Clone, Eq, Hash, PartialEq, Deserialize, Serialize, JsonSchema)]
-// pub struct RotSignTarget {
-//     pub id: ArtifactId,
-//     pub bord: String,
-// }
-
 /// A description of an uploaded TUF repository.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 pub struct TufRepoDescription {
@@ -3376,11 +3358,8 @@ pub struct TufRepoDescription {
     /// Information about the artifacts present in the repository.
     pub artifacts: Vec<TufArtifactMeta>,
 
-    // Map for RoT signing information, used in `ArtifactsWithPlan`
-    // Note this covers the RoT bootloader which are also signed
-
-    // rot_by_sign: HashMap<RotSignData, Vec<RotSignTarget>>,
-    // pub rot_by_sign: HashMap<ArtifactId, Vec<u8>>,
+    // Association between an artifact and its RoT signing information.
+    // This also covers the RoT bootloader artifacts which are signed as well.
     pub rots_by_sign: Vec<TufRotBySign>,
 }
 

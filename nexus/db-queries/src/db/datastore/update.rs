@@ -543,8 +543,7 @@ async fn insert_impl(
             .map(|artifact| (&artifact.name, &artifact.version, &artifact.kind))
             .collect();
 
-        // Filter `rots_by_sign` based on the keys in the HashSet.
-        // .into_iter() consumes the original vector. Use .iter() if you need to keep it.
+        // Filter `rots_by_sign` based on the keys in new_artifact_keys.
         let new_rots_by_sign: Vec<TufRotBySign> = rots_by_sign
             .clone()
             .into_iter()

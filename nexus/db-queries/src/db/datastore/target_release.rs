@@ -229,7 +229,6 @@ mod test {
                         hash,
                         size: 0,
                     }],
-                    // TODO-K: Add something useful here?
                     rots_by_sign: vec![],
                 },
             )
