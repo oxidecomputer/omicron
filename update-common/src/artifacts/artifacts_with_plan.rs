@@ -571,11 +571,18 @@ mod tests {
         // At the moment, the repo .zip itself doesn't match because it bakes
         // in timestamps. However, the artifacts inside should match exactly.
         plan1.description.sort_artifacts();
+        plan1.description.sort_rots_by_sign();
         plan2.description.sort_artifacts();
+        plan2.description.sort_rots_by_sign();
 
         assert_eq!(
             plan1.description.artifacts, plan2.description.artifacts,
             "artifacts match"
+        );
+
+        assert_eq!(
+            plan1.description.rots_by_sign, plan2.description.rots_by_sign,
+            "RoTs by sign match"
         );
 
         logctx.cleanup_successful();

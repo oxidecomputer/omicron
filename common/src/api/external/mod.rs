@@ -3389,6 +3389,11 @@ impl TufRepoDescription {
     pub fn sort_artifacts(&mut self) {
         self.artifacts.sort_by(|a, b| a.id.cmp(&b.id));
     }
+
+    /// Sorts the RoTs by sign so that descriptions can be compared.
+    pub fn sort_rots_by_sign(&mut self) {
+        self.rots_by_sign.sort_by(|a, b| a.id.cmp(&b.id));
+    }
 }
 
 /// Metadata about a TUF repository.
