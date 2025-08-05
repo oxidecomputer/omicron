@@ -37,6 +37,7 @@ use nexus_db_lookup::DbConnection;
 use nexus_db_lookup::LookupPath;
 use nexus_db_model::IncompleteNetworkInterface;
 use nexus_db_model::InitialDnsGroup;
+use nexus_db_model::IpVersion;
 use nexus_db_model::PasswordHashString;
 use nexus_db_model::SiloUser;
 use nexus_db_model::SiloUserPasswordHash;
@@ -732,6 +733,7 @@ impl DataStore {
                             &conn,
                             opctx,
                             &authz_service_pool,
+                            &service_pool,
                             &range,
                         )
                         .await
@@ -954,11 +956,15 @@ impl DataStore {
 
         self.rack_insert(opctx, &db::model::Rack::new(rack_id)).await?;
 
-        let internal_pool =
-            db::model::IpPool::new(&IdentityMetadataCreateParams {
+        let internal_pool = db::model::IpPool::new(
+            &IdentityMetadataCreateParams {
                 name: SERVICE_IP_POOL_NAME.parse::<Name>().unwrap(),
                 description: String::from("IP Pool for Oxide Services"),
-            });
+            },
+            // TODO(ben): How can we avoid hardcoding this? Or we can edit
+            // it later when we insert the ranges?
+            IpVersion::V4,
+        );
 
         let internal_pool_id = internal_pool.id();
 

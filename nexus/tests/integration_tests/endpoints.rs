@@ -928,6 +928,7 @@ pub static DEMO_IP_POOL_CREATE: LazyLock<params::IpPoolCreate> =
             name: DEMO_IP_POOL_NAME.clone(),
             description: String::from("an IP pool"),
         },
+        ip_version: nexus_types::external_api::views::IpVersion::V4,
     });
 pub static DEMO_IP_POOL_PROJ_URL: LazyLock<String> = LazyLock::new(|| {
     format!(

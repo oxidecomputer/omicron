@@ -381,12 +381,33 @@ pub struct InternetGatewayIpAddress {
 
 // IP POOLS
 
+/// The IP address version.
+#[derive(Clone, Copy, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IpVersion {
+    V4,
+    V6,
+}
+
+impl IpVersion {
+    pub const fn v4() -> IpVersion {
+        IpVersion::V4
+    }
+}
+
 /// A collection of IP ranges. If a pool is linked to a silo, IP addresses from
 /// the pool can be allocated within that silo
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct IpPool {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
+
+    /// IP address version of the pool.
+    ///
+    /// All ranges in the pool must be from this version. If not specified, this
+    /// defaults to IPv4.
+    #[serde(default = "IpVersion::v4")]
+    pub ip_version: IpVersion,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]

@@ -32,6 +32,8 @@ use std::{net::IpAddr, str::FromStr};
 use url::Url;
 use uuid::Uuid;
 
+use super::views::IpVersion;
+
 macro_rules! path_param {
     ($struct:ident, $param:ident, $name:tt) => {
         #[derive(Serialize, Deserialize, JsonSchema)]
@@ -989,6 +991,12 @@ impl std::fmt::Debug for CertificateCreate {
 pub struct IpPoolCreate {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
+    /// The IP version of the ranges in the pool.
+    ///
+    /// All ranges in the pool must be from this version. If not provided, it
+    /// defaults to IPv4.
+    #[serde(default = "IpVersion::v4")]
+    pub ip_version: IpVersion,
 }
 
 /// Parameters for updating an IP Pool

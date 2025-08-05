@@ -71,7 +71,10 @@ impl super::Nexus {
         opctx: &OpContext,
         pool_params: &params::IpPoolCreate,
     ) -> CreateResult<db::model::IpPool> {
-        let pool = db::model::IpPool::new(&pool_params.identity);
+        let pool = db::model::IpPool::new(
+            &pool_params.identity,
+            pool_params.ip_version.into(),
+        );
         self.db_datastore.ip_pool_create(opctx, pool).await
     }
 
@@ -302,7 +305,7 @@ impl super::Nexus {
         pool_lookup: &lookup::IpPool<'_>,
         range: &IpRange,
     ) -> UpdateResult<db::model::IpPoolRange> {
-        let (.., authz_pool, _db_pool) =
+        let (.., authz_pool, db_pool) =
             pool_lookup.fetch_for(authz::Action::Modify).await?;
 
         if self.db_datastore.ip_pool_is_internal(opctx, &authz_pool).await? {
@@ -316,13 +319,17 @@ impl super::Nexus {
         // would be nice if we could do it in the datastore layer, but we'd
         // have no way of creating IPv6 ranges for the purpose of testing IP
         // pool utilization.
+        //
+        // See https://github.com/oxidecomputer/omicron/issues/8761.
         if matches!(range, IpRange::V6(_)) {
             return Err(Error::invalid_request(
                 "IPv6 ranges are not allowed yet",
             ));
         }
 
-        self.db_datastore.ip_pool_add_range(opctx, &authz_pool, range).await
+        self.db_datastore
+            .ip_pool_add_range(opctx, &authz_pool, &db_pool, range)
+            .await
     }
 
     pub(crate) async fn ip_pool_delete_range(
@@ -375,7 +382,7 @@ impl super::Nexus {
         opctx: &OpContext,
         range: &IpRange,
     ) -> UpdateResult<db::model::IpPoolRange> {
-        let (authz_pool, ..) =
+        let (authz_pool, db_pool) =
             self.db_datastore.ip_pools_service_lookup(opctx).await?;
         opctx.authorize(authz::Action::Modify, &authz_pool).await?;
         // Disallow V6 ranges until IPv6 is fully supported by the networking
@@ -385,12 +392,16 @@ impl super::Nexus {
         // would be nice if we could do it in the datastore layer, but we'd
         // have no way of creating IPv6 ranges for the purpose of testing IP
         // pool utilization.
+        //
+        // See https://github.com/oxidecomputer/omicron/issues/8761.
         if matches!(range, IpRange::V6(_)) {
             return Err(Error::invalid_request(
                 "IPv6 ranges are not allowed yet",
             ));
         }
-        self.db_datastore.ip_pool_add_range(opctx, &authz_pool, range).await
+        self.db_datastore
+            .ip_pool_add_range(opctx, &authz_pool, &db_pool, range)
+            .await
     }
 
     pub(crate) async fn ip_pool_service_delete_range(

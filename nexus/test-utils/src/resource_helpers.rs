@@ -32,6 +32,7 @@ use nexus_types::external_api::views::InternetGatewayIpAddress;
 use nexus_types::external_api::views::InternetGatewayIpPool;
 use nexus_types::external_api::views::IpPool;
 use nexus_types::external_api::views::IpPoolRange;
+use nexus_types::external_api::views::IpVersion;
 use nexus_types::external_api::views::User;
 use nexus_types::external_api::views::VpcSubnet;
 use nexus_types::external_api::views::{Project, Silo, Vpc, VpcRouter};
@@ -250,6 +251,15 @@ pub async fn create_ip_pool(
     pool_name: &str,
     ip_range: Option<IpRange>,
 ) -> (IpPool, IpPoolRange) {
+    let ip_version = ip_range
+        .map(|r| {
+            if r.first_address().is_ipv4() {
+                IpVersion::V4
+            } else {
+                IpVersion::V6
+            }
+        })
+        .unwrap_or(IpVersion::V4);
     let pool = object_create(
         client,
         "/v1/system/ip-pools",
@@ -258,6 +268,7 @@ pub async fn create_ip_pool(
                 name: pool_name.parse().unwrap(),
                 description: String::from("an ip pool"),
             },
+            ip_version,
         },
     )
     .await;

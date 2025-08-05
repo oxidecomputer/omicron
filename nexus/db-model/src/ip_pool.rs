@@ -23,6 +23,54 @@ use omicron_common::api::external;
 use std::net::IpAddr;
 use uuid::Uuid;
 
+impl_enum_type!(
+    IpVersionEnum:
+
+    #[derive(
+        AsExpression,
+        Clone,
+        Copy,
+        Debug,
+        serde::Deserialize,
+        Eq,
+        FromSqlRow,
+        schemars::JsonSchema,
+        PartialEq,
+        serde::Serialize,
+    )]
+    pub enum IpVersion;
+
+    V4 => b"v4"
+    V6 => b"v6"
+);
+
+impl ::std::fmt::Display for IpVersion {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            IpVersion::V4 => "v4",
+            IpVersion::V6 => "v6",
+        })
+    }
+}
+
+impl From<views::IpVersion> for IpVersion {
+    fn from(value: views::IpVersion) -> Self {
+        match value {
+            views::IpVersion::V4 => Self::V4,
+            views::IpVersion::V6 => Self::V6,
+        }
+    }
+}
+
+impl From<IpVersion> for views::IpVersion {
+    fn from(value: IpVersion) -> Self {
+        match value {
+            IpVersion::V4 => Self::V4,
+            IpVersion::V6 => Self::V6,
+        }
+    }
+}
+
 /// An IP Pool is a collection of IP addresses external to the rack.
 ///
 /// IP pools can be external or internal. External IP pools can be associated
@@ -34,26 +82,44 @@ pub struct IpPool {
     #[diesel(embed)]
     pub identity: IpPoolIdentity,
 
+    /// The IP version of the pool.
+    pub ip_version: IpVersion,
+
     /// Child resource generation number, for optimistic concurrency control of
     /// the contained ranges.
     pub rcgen: i64,
 }
 
 impl IpPool {
-    pub fn new(pool_identity: &external::IdentityMetadataCreateParams) -> Self {
+    pub fn new(
+        pool_identity: &external::IdentityMetadataCreateParams,
+        ip_version: IpVersion,
+    ) -> Self {
         Self {
             identity: IpPoolIdentity::new(
                 Uuid::new_v4(),
                 pool_identity.clone(),
             ),
+            ip_version,
             rcgen: 0,
+        }
+    }
+
+    /// Return `true` if the provided IP pool range matches the IP version of
+    /// the pool itself.
+    pub fn range_matches_version(&self, range: &IpRange) -> bool {
+        match (self.ip_version, range.first_address()) {
+            (IpVersion::V4, IpAddr::V4(_)) => true,
+            (IpVersion::V4, IpAddr::V6(_)) => false,
+            (IpVersion::V6, IpAddr::V4(_)) => false,
+            (IpVersion::V6, IpAddr::V6(_)) => true,
         }
     }
 }
 
 impl From<IpPool> for views::IpPool {
     fn from(pool: IpPool) -> Self {
-        Self { identity: pool.identity() }
+        Self { identity: pool.identity(), ip_version: pool.ip_version.into() }
     }
 }
 

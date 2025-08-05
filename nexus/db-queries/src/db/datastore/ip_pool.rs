@@ -1003,11 +1003,14 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         authz_pool: &authz::IpPool,
+        pool: &IpPool,
         range: &IpRange,
     ) -> CreateResult<IpPoolRange> {
         let conn = self.pool_connection_authorized(opctx).await?;
-        Self::ip_pool_add_range_on_connection(&conn, opctx, authz_pool, range)
-            .await
+        Self::ip_pool_add_range_on_connection(
+            &conn, opctx, authz_pool, pool, range,
+        )
+        .await
     }
 
     /// Variant of [Self::ip_pool_add_range] which may be called from a
@@ -1016,11 +1019,23 @@ impl DataStore {
         conn: &async_bb8_diesel::Connection<DbConnection>,
         opctx: &OpContext,
         authz_pool: &authz::IpPool,
+        pool: &IpPool,
         range: &IpRange,
     ) -> CreateResult<IpPoolRange> {
         use nexus_db_schema::schema::ip_pool_range::dsl;
         opctx.authorize(authz::Action::CreateChild, authz_pool).await?;
         let pool_id = authz_pool.id();
+
+        // First ensure the IP range matches the IP version of the pool.
+        if !pool.range_matches_version(range) {
+            let range_version =
+                if matches!(range, IpRange::V4(_)) { "v4" } else { "v6" };
+            return Err(Error::invalid_request(format!(
+                "Cannot add IP ranges of version {} to a {} pool",
+                range_version, pool.ip_version,
+            )));
+        }
+
         let new_range = IpPoolRange::new(range, pool_id);
         let filter_subquery = FilterOverlappingIpRanges { range: new_range };
         let insert_query =
@@ -1151,6 +1166,7 @@ mod test {
     };
     use crate::db::pub_test_utils::TestDatabase;
     use assert_matches::assert_matches;
+    use nexus_db_model::IpVersion;
     use nexus_types::external_api::params;
     use nexus_types::identity::Resource;
     use omicron_common::address::{IpRange, Ipv4Range, Ipv6Range};
@@ -1200,7 +1216,7 @@ mod test {
             description: "".to_string(),
         };
         let pool1_for_silo = datastore
-            .ip_pool_create(&opctx, IpPool::new(&identity))
+            .ip_pool_create(&opctx, IpPool::new(&identity, IpVersion::V4))
             .await
             .expect("Failed to create IP pool");
 
@@ -1286,7 +1302,7 @@ mod test {
             description: "".to_string(),
         };
         let second_silo_default = datastore
-            .ip_pool_create(&opctx, IpPool::new(&identity))
+            .ip_pool_create(&opctx, IpPool::new(&identity, IpVersion::V4))
             .await
             .expect("Failed to create pool");
         let err = datastore
@@ -1346,7 +1362,7 @@ mod test {
             description: "".to_string(),
         };
         let other_pool = datastore
-            .ip_pool_create(&opctx, IpPool::new(&identity))
+            .ip_pool_create(&opctx, IpPool::new(&identity, IpVersion::V4))
             .await
             .expect("Failed to create IP pool");
 
@@ -1405,7 +1421,7 @@ mod test {
             description: "".to_string(),
         };
         let pool = datastore
-            .ip_pool_create(&opctx, IpPool::new(&identity))
+            .ip_pool_create(&opctx, IpPool::new(&identity, IpVersion::V4))
             .await
             .expect("Failed to create IP pool");
         let authz_pool = authz::IpPool::new(
@@ -1430,7 +1446,7 @@ mod test {
             .unwrap(),
         );
         datastore
-            .ip_pool_add_range(&opctx, &authz_pool, &range)
+            .ip_pool_add_range(&opctx, &authz_pool, &pool, &range)
             .await
             .expect("Could not add range");
 
@@ -1493,7 +1509,7 @@ mod test {
             .unwrap(),
         );
         datastore
-            .ip_pool_add_range(&opctx, &authz_pool, &ipv6_range)
+            .ip_pool_add_range(&opctx, &authz_pool, &pool, &ipv6_range)
             .await
             .expect("Could not add range");
 
@@ -1516,7 +1532,7 @@ mod test {
             .unwrap(),
         );
         datastore
-            .ip_pool_add_range(&opctx, &authz_pool, &ipv6_range)
+            .ip_pool_add_range(&opctx, &authz_pool, &pool, &ipv6_range)
             .await
             .expect("Could not add range");
 
@@ -1526,6 +1542,51 @@ mod test {
             .unwrap();
         assert_eq!(max_ips.ipv4, 5);
         assert_eq!(max_ips.ipv6, 1208925819614629174706166);
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn cannot_insert_range_in_pool_with_different_family() {
+        let logctx = dev::test_setup_log(
+            "cannot_insert_range_in_pool_with_different_family",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Create an IPv4 pool
+        let identity = IdentityMetadataCreateParams {
+            name: "pool1-for-silo".parse().unwrap(),
+            description: "".to_string(),
+        };
+        let pool = datastore
+            .ip_pool_create(&opctx, IpPool::new(&identity, IpVersion::V4))
+            .await
+            .expect("Failed to create IP pool");
+        let authz_pool = authz::IpPool::new(
+            authz::FLEET,
+            pool.id(),
+            LookupType::ById(pool.id()),
+        );
+
+        // An ensure we cannot insert a v6 range.
+        let ipv6_range = IpRange::V6(
+            Ipv6Range::new(
+                std::net::Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 1, 21),
+                std::net::Ipv6Addr::new(
+                    0xfd00, 0, 0, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff,
+                ),
+            )
+            .unwrap(),
+        );
+        let res = datastore
+            .ip_pool_add_range(&opctx, &authz_pool, &pool, &ipv6_range)
+            .await;
+        assert!(
+            res.is_err(),
+            "Should have failed to insert a V6 range in a V4 pool"
+        );
 
         db.terminate().await;
         logctx.cleanup_successful();

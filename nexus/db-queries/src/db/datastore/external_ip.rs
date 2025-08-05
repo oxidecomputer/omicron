@@ -1183,12 +1183,12 @@ mod tests {
             Ipv4Addr::new(10, 0, 0, 10),
         ))
         .unwrap();
-        let (service_ip_pool, _) = datastore
+        let (service_ip_pool, db_pool) = datastore
             .ip_pools_service_lookup(opctx)
             .await
             .expect("lookup service ip pool");
         datastore
-            .ip_pool_add_range(opctx, &service_ip_pool, &ip_range)
+            .ip_pool_add_range(opctx, &service_ip_pool, &db_pool, &ip_range)
             .await
             .expect("add range to service ip pool");
 

@@ -50,6 +50,7 @@ use nexus_types::external_api::shared::SiloRole;
 use nexus_types::external_api::views::IpPool;
 use nexus_types::external_api::views::IpPoolRange;
 use nexus_types::external_api::views::IpPoolSiloLink;
+use nexus_types::external_api::views::IpVersion;
 use nexus_types::external_api::views::Silo;
 use nexus_types::external_api::views::SiloIpPool;
 use nexus_types::identity::Resource;
@@ -57,7 +58,6 @@ use nexus_types::silo::INTERNAL_SILO_ID;
 use omicron_common::address::Ipv6Range;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
 use omicron_common::api::external::InstanceState;
-use omicron_common::api::external::LookupType;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::SimpleIdentityOrName;
 use omicron_common::api::external::{IdentityMetadataCreateParams, Name};
@@ -106,11 +106,13 @@ async fn test_ip_pool_basic_crud(cptestctx: &ControlPlaneTestContext) {
             name: String::from(pool_name).parse().unwrap(),
             description: String::from(description),
         },
+        ip_version: IpVersion::V4,
     };
     let created_pool: IpPool =
         object_create(client, ip_pools_url, &params).await;
     assert_eq!(created_pool.identity.name, pool_name);
     assert_eq!(created_pool.identity.description, description);
+    assert_eq!(created_pool.ip_version, IpVersion::V4);
 
     let list = get_ip_pools(client).await;
     assert_eq!(list.len(), 1, "Expected exactly 1 IP pool");
@@ -809,6 +811,7 @@ async fn create_pool(client: &ClientTestContext, name: &str) -> IpPool {
             name: Name::try_from(name.to_string()).unwrap(),
             description: "".to_string(),
         },
+        ip_version: IpVersion::V4,
     };
     NexusRequest::objects_post(client, "/v1/system/ip-pools", &params)
         .authn_as(AuthnMode::PrivilegedUser)
@@ -853,12 +856,13 @@ async fn test_ip_pool_utilization_total(cptestctx: &ControlPlaneTestContext) {
     let datastore = nexus.datastore();
     let log = cptestctx.logctx.log.new(o!());
     let opctx = OpContext::for_tests(log, datastore.clone());
-    let authz_pool = authz::IpPool::new(
-        authz::FLEET,
-        pool.identity.id,
-        LookupType::ByName("p0".to_string()),
-    );
-
+    let by_id = NameOrId::Id(pool.id());
+    let (authz_pool, db_pool) = nexus
+        .ip_pool_lookup(&opctx, &by_id)
+        .expect("should be able to lookup pool we just created")
+        .fetch_for(authz::Action::CreateChild)
+        .await
+        .expect("should be able to fetch pool we just created");
     let big_range = IpRange::V6(
         Ipv6Range::new(
             std::net::Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 0),
@@ -869,7 +873,7 @@ async fn test_ip_pool_utilization_total(cptestctx: &ControlPlaneTestContext) {
         .unwrap(),
     );
     datastore
-        .ip_pool_add_range(&opctx, &authz_pool, &big_range)
+        .ip_pool_add_range(&opctx, &authz_pool, &db_pool, &big_range)
         .await
         .expect("could not add range");
 
@@ -904,6 +908,7 @@ async fn test_ip_pool_range_overlapping_ranges_fails(
             name: String::from(pool_name).parse().unwrap(),
             description: String::from(description),
         },
+        ip_version: IpVersion::V4,
         // silo: None,
         // is_default: false,
     };
@@ -1069,6 +1074,7 @@ async fn test_ip_pool_range_pagination(cptestctx: &ControlPlaneTestContext) {
             name: String::from(pool_name).parse().unwrap(),
             description: String::from(description),
         },
+        ip_version: IpVersion::V4,
     };
     let created_pool: IpPool =
         NexusRequest::objects_post(client, ip_pools_url, &params)
@@ -1080,6 +1086,7 @@ async fn test_ip_pool_range_pagination(cptestctx: &ControlPlaneTestContext) {
             .unwrap();
     assert_eq!(created_pool.identity.name, pool_name);
     assert_eq!(created_pool.identity.description, description);
+    assert_eq!(created_pool.ip_version, IpVersion::V4);
 
     // Add some ranges, out of order. These will be paginated by their first
     // address, which sorts all IPv4 before IPv6, then within protocol versions
@@ -1263,6 +1270,7 @@ async fn test_ip_range_delete_with_allocated_external_ip_fails(
             name: String::from(pool_name).parse().unwrap(),
             description: String::from("right on cue"),
         },
+        ip_version: IpVersion::V4,
     };
     NexusRequest::objects_post(client, ip_pools_url, &params)
         .authn_as(AuthnMode::PrivilegedUser)

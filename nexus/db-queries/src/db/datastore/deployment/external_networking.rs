@@ -592,12 +592,17 @@ mod tests {
             opctx: &OpContext,
             datastore: &DataStore,
         ) {
-            let (ip_pool, _) = datastore
+            let (ip_pool, db_pool) = datastore
                 .ip_pools_service_lookup(&opctx)
                 .await
                 .expect("failed to find service IP pool");
             datastore
-                .ip_pool_add_range(&opctx, &ip_pool, &self.external_ips_range)
+                .ip_pool_add_range(
+                    &opctx,
+                    &ip_pool,
+                    &db_pool,
+                    &self.external_ips_range,
+                )
                 .await
                 .expect("failed to expand service IP pool");
         }

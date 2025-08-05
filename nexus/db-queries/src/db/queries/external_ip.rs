@@ -881,6 +881,7 @@ mod tests {
     use nexus_db_model::InstanceCpuCount;
     use nexus_db_model::IpPoolResource;
     use nexus_db_model::IpPoolResourceType;
+    use nexus_db_model::IpVersion;
     use nexus_sled_agent_shared::inventory::ZoneKind;
     use nexus_types::deployment::OmicronZoneExternalFloatingIp;
     use nexus_types::deployment::OmicronZoneExternalIp;
@@ -920,10 +921,13 @@ mod tests {
             range: IpRange,
             is_default: bool,
         ) -> authz::IpPool {
-            let pool = IpPool::new(&IdentityMetadataCreateParams {
-                name: String::from(name).parse().unwrap(),
-                description: format!("ip pool {}", name),
-            });
+            let pool = IpPool::new(
+                &IdentityMetadataCreateParams {
+                    name: String::from(name).parse().unwrap(),
+                    description: format!("ip pool {}", name),
+                },
+                IpVersion::V4,
+            );
 
             self.db
                 .datastore()
