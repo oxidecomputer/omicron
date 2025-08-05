@@ -3,8 +3,10 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use anyhow::Context;
+use camino::Utf8PathBuf;
 use clap::{Args, Parser, Subcommand};
 use futures::StreamExt;
+use gateway_test_utils::setup::DEFAULT_SP_SIM_CONFIG;
 use libc::SIGINT;
 use nexus_config::NexusConfig;
 use nexus_test_interface::NexusServer;
@@ -45,6 +47,9 @@ struct RunAllArgs {
     /// Nexus external API listen port.  Use `0` to request any available port.
     #[clap(long, action)]
     nexus_listen_port: Option<u16>,
+    /// Override the gateway server configuration file.
+    #[clap(long, default_value = DEFAULT_SP_SIM_CONFIG)]
+    gateway_config: Utf8PathBuf,
 }
 
 impl RunAllArgs {
@@ -77,7 +82,7 @@ impl RunAllArgs {
         println!("omicron-dev: setting up all services ... ");
         let cptestctx = nexus_test_utils::omicron_dev_setup_with_config::<
             omicron_nexus::Server,
-        >(&mut config, 0)
+        >(&mut config, 0, self.gateway_config.clone())
         .await
         .context("error setting up services")?;
 
@@ -95,8 +100,8 @@ impl RunAllArgs {
         println!("omicron-dev: services are running.");
 
         // Print out basic information about what was started.
-        // NOTE: The stdout strings here are not intended to be stable, but they are
-        // used by the test suite.
+        // NOTE: The stdout strings here are not intended to be stable, but they
+        // are used by the test suite.
         let addr = cptestctx.external_client.bind_address;
         println!("omicron-dev: nexus external API:    {:?}", addr);
         println!(
@@ -144,8 +149,9 @@ impl RunAllArgs {
         );
         for (location, gateway) in &cptestctx.gateway {
             println!(
-                "omicron-dev: management gateway:    http://{} ({})",
-                gateway.client.bind_address, location,
+                "omicron-dev: management gateway:    {} ({})",
+                gateway.client.baseurl(),
+                location,
             );
         }
         println!("omicron-dev: silo name:             {}", cptestctx.silo_name,);

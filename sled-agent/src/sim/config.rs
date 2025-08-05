@@ -10,7 +10,7 @@ use dropshot::ConfigDropshot;
 use omicron_uuid_kinds::SledUuid;
 use serde::Deserialize;
 use serde::Serialize;
-pub use sled_hardware_types::Baseboard;
+pub use sled_hardware_types::{Baseboard, SledCpuFamily};
 use std::net::Ipv6Addr;
 use std::net::{IpAddr, SocketAddr};
 
@@ -56,6 +56,12 @@ pub struct ConfigHardware {
     pub hardware_threads: u32,
     pub physical_ram: u64,
     pub reservoir_ram: u64,
+    /// The kind of CPU to report the simulated sled as. In reality this is
+    /// constrained by `baseboard`; a `Baseboard::Gimlet` will only have an
+    /// `SledCpuFamily::AmdMilan`. A future `Baseboard::Cosmo` will *never* have
+    /// a `SledCpuFamily::AmdMilan`. Because the baseboard does not imply a
+    /// specific individual CPU family, though, it's simpler to record here.
+    pub cpu_family: SledCpuFamily,
     pub baseboard: Baseboard,
 }
 
@@ -93,6 +99,7 @@ impl Config {
         nexus_address: Option<SocketAddr>,
         update_directory: Option<&Utf8Path>,
         zpool_config: ZpoolConfig,
+        cpu_family: SledCpuFamily,
     ) -> Config {
         // This IP range is guaranteed by RFC 6666 to discard traffic.
         // For tests that don't use a Nexus, we use this address to simulate a
@@ -133,6 +140,7 @@ impl Config {
                 hardware_threads: TEST_HARDWARE_THREADS,
                 physical_ram: TEST_PHYSICAL_RAM,
                 reservoir_ram: TEST_RESERVOIR_RAM,
+                cpu_family,
                 baseboard: Baseboard::Gimlet {
                     identifier: format!("sim-{}", id),
                     model: String::from("sim-gimlet"),

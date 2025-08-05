@@ -8,6 +8,7 @@ use crate::SledAgentEnumerator;
 use crate::builder::CollectionBuilder;
 use crate::builder::InventoryError;
 use anyhow::Context;
+use anyhow::anyhow;
 use gateway_client::types::GetCfpaParams;
 use gateway_client::types::RotCfpaSlot;
 use gateway_client::types::SpType;
@@ -185,11 +186,63 @@ impl<'a> Collector<'a> {
                 continue;
             };
 
-            // For sled SPs, for each host phase 1 slot, attempt to collect its
-            // hash, if it hasn't been collected already. Generally, we'd only
-            // get here for the first MGS client.  Assuming that one succeeds,
-            // the other(s) will skip this loop.
+            // For sled SPs, collect the currently-active phase 1 slot and the
+            // hash of the contents of both slots, if they haven't been
+            // collected already. Generally, we'd only get here for the first
+            // MGS client.  Assuming that one succeeds, the other(s) will skip
+            // this loop.
             if matches!(sp.type_, SpType::Sled) {
+                if !in_progress
+                    .found_host_phase_1_active_slot_already(&baseboard_id)
+                {
+                    let result = client
+                        .sp_component_active_slot_get(
+                            sp.type_,
+                            sp.slot,
+                            SpComponent::HOST_CPU_BOOT_FLASH.const_as_str(),
+                        )
+                        .await
+                        .with_context(|| {
+                            format!(
+                                "MGS {:?}: SP {sp:?}: phase 1 active slot",
+                                client.baseurl(),
+                            )
+                        })
+                        .and_then(|response| {
+                            M2Slot::from_mgs_firmware_slot(response.slot)
+                                .ok_or_else(|| {
+                                    anyhow!(
+                                        "MGS {:?}: SP {sp:?}: \
+                                         invalid host phase 1 slot {}",
+                                        client.baseurl(),
+                                        response.slot
+                                    )
+                                })
+                        });
+                    match result {
+                        Ok(phase_1_slot) => {
+                            if let Err(error) = in_progress
+                                .found_host_phase_1_active_slot(
+                                    &baseboard_id,
+                                    client.baseurl(),
+                                    phase_1_slot,
+                                )
+                            {
+                                error!(
+                                    log,
+                                    "error reporting host phase 1 active slot: \
+                                     {baseboard_id:?} {phase_1_slot:?} \
+                                     {:?}: {error:#}",
+                                    client.baseurl(),
+                                );
+                            }
+                        }
+                        Err(err) => {
+                            in_progress.found_error(InventoryError::from(err));
+                        }
+                    }
+                }
+
                 for slot in M2Slot::iter() {
                     const PHASE1_HASH_TIMEOUT: Duration =
                         Duration::from_secs(30);
@@ -208,7 +261,8 @@ impl<'a> Collector<'a> {
 
                     let result = client
                         .host_phase_1_flash_hash_calculate_with_timeout(
-                            sp,
+                            sp.type_,
+                            sp.slot,
                             phase1_slot,
                             PHASE1_HASH_TIMEOUT,
                         )
@@ -672,6 +726,7 @@ mod test {
     use nexus_sled_agent_shared::inventory::OmicronZoneConfig;
     use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
     use nexus_sled_agent_shared::inventory::OmicronZoneType;
+    use nexus_sled_agent_shared::inventory::SledCpuFamily;
     use nexus_types::inventory::Collection;
     use omicron_cockroach_metrics::CockroachClusterAdminClient;
     use omicron_common::api::external::Generation;
@@ -913,6 +968,7 @@ mod test {
             None,
             None,
             sim::ZpoolConfig::None,
+            SledCpuFamily::AmdMilan,
         );
 
         let agent =
@@ -1050,8 +1106,7 @@ mod test {
 
         let sled1_url = format!("http://{}/", sled1.http_server.local_addr());
         let sled2_url = format!("http://{}/", sled2.http_server.local_addr());
-        let mgs_url = format!("http://{}/", gwtestctx.client.bind_address);
-        let mgs_client = gateway_client::Client::new(&mgs_url, log.clone());
+        let mgs_client = gwtestctx.client.clone();
         let sled_enum = StaticSledAgentEnumerator::new([sled1_url, sled2_url]);
         // We don't have any mocks for this, and it's unclear how much value
         // there would be in providing them at this juncture.
@@ -1130,10 +1185,8 @@ mod test {
         let sled2_url = format!("http://{}/", sled2.http_server.local_addr());
         let mgs_clients = [&gwtestctx1, &gwtestctx2]
             .into_iter()
-            .map(|g| {
-                let url = format!("http://{}/", g.client.bind_address);
-                gateway_client::Client::new(&url, log.clone())
-            })
+            .map(|g| &g.client)
+            .cloned()
             .collect::<Vec<_>>();
         let sled_enum = StaticSledAgentEnumerator::new([sled1_url, sled2_url]);
         // We don't have any mocks for this, and it's unclear how much value
@@ -1178,10 +1231,7 @@ mod test {
         )
         .await;
         let log = &gwtestctx.logctx.log;
-        let real_client = {
-            let url = format!("http://{}/", gwtestctx.client.bind_address);
-            gateway_client::Client::new(&url, log.clone())
-        };
+        let real_client = gwtestctx.client.clone();
         let bad_client = {
             // This IP range is guaranteed by RFC 6666 to discard traffic.
             let url = "http://[100::1]:12345";
@@ -1243,8 +1293,7 @@ mod test {
 
         let sled1_url = format!("http://{}/", sled1.http_server.local_addr());
         let sledbogus_url = String::from("http://[100::1]:45678");
-        let mgs_url = format!("http://{}/", gwtestctx.client.bind_address);
-        let mgs_client = gateway_client::Client::new(&mgs_url, log.clone());
+        let mgs_client = gwtestctx.client.clone();
         let sled_enum =
             StaticSledAgentEnumerator::new([sled1_url, sledbogus_url]);
         // We don't have any mocks for this, and it's unclear how much value

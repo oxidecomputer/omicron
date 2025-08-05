@@ -21,6 +21,7 @@ use nexus_types::deployment::execution::{
     Overridables, ReconfiguratorExecutionSpec, SharedStepHandle, Sled,
     StepHandle, StepResult, UpdateEngine,
 };
+use nexus_types::quiesce::SagaQuiesceHandle;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use slog::info;
 use slog_error_chain::InlineErrorChain;
@@ -31,8 +32,10 @@ use tokio::sync::watch;
 use update_engine::StepSuccess;
 use update_engine::StepWarning;
 use update_engine::merge_anyhow_list;
+
 mod clickhouse;
 mod cockroachdb;
+mod database;
 mod dns;
 mod omicron_physical_disks;
 mod omicron_sled_config;
@@ -56,6 +59,7 @@ pub struct RealizeArgs<'a> {
     pub sender: mpsc::Sender<Event>,
     pub overrides: Option<&'a Overridables>,
     pub mgs_updates: watch::Sender<PendingMgsUpdates>,
+    pub saga_quiesce: SagaQuiesceHandle,
 }
 
 impl<'a> RealizeArgs<'a> {
@@ -103,6 +107,7 @@ pub struct RequiredRealizeArgs<'a> {
     pub blueprint: &'a Blueprint,
     pub sender: mpsc::Sender<Event>,
     pub mgs_updates: watch::Sender<PendingMgsUpdates>,
+    pub saga_quiesce: SagaQuiesceHandle,
 }
 
 impl<'a> From<RequiredRealizeArgs<'a>> for RealizeArgs<'a> {
@@ -117,6 +122,7 @@ impl<'a> From<RequiredRealizeArgs<'a>> for RealizeArgs<'a> {
             sender: value.sender,
             overrides: None,
             mgs_updates: value.mgs_updates,
+            saga_quiesce: value.saga_quiesce,
         }
     }
 }
@@ -162,6 +168,7 @@ pub async fn realize_blueprint(
         sender,
         overrides,
         mgs_updates,
+        saga_quiesce,
     } = exec_ctx;
 
     let opctx = opctx.child(BTreeMap::from([(
@@ -190,6 +197,13 @@ pub async fn realize_blueprint(
         datastore,
     )
     .into_shared();
+
+    register_deploy_db_metadata_nexus_records_step(
+        &engine.for_component(ExecutionComponent::DeployNexusRecords),
+        &opctx,
+        datastore,
+        blueprint,
+    );
 
     register_deploy_sled_configs_step(
         &engine.for_component(ExecutionComponent::SledAgent),
@@ -262,6 +276,7 @@ pub async fn realize_blueprint(
         datastore,
         blueprint,
         nexus_id,
+        saga_quiesce,
     );
 
     register_cockroachdb_settings_step(
@@ -382,6 +397,32 @@ fn register_sled_list_step<'a>(
             StepSuccess::new(Arc::new(sleds_by_id)).into()
         })
         .register()
+}
+
+fn register_deploy_db_metadata_nexus_records_step<'a>(
+    registrar: &ComponentRegistrar<'_, 'a>,
+    opctx: &'a OpContext,
+    datastore: &'a DataStore,
+    blueprint: &'a Blueprint,
+) {
+    registrar
+        .new_step(
+            ExecutionStepId::Ensure,
+            "Ensure db_metadata_nexus_state records exist",
+            async move |_cx| match database::deploy_db_metadata_nexus_records(
+                opctx, &datastore, &blueprint,
+            )
+            .await
+            {
+                Ok(()) => StepSuccess::new(()).into(),
+                Err(err) => StepWarning::new(
+                    (),
+                    err.context("ensuring db_metadata_nexus_state").to_string(),
+                )
+                .into(),
+            },
+        )
+        .register();
 }
 
 fn register_deploy_sled_configs_step<'a>(
@@ -593,6 +634,7 @@ fn register_reassign_sagas_step<'a>(
     datastore: &'a DataStore,
     blueprint: &'a Blueprint,
     nexus_id: Option<OmicronZoneUuid>,
+    saga_quiesce: SagaQuiesceHandle,
 ) -> StepHandle<bool> {
     registrar
         .new_step(
@@ -604,23 +646,37 @@ fn register_reassign_sagas_step<'a>(
                         .into();
                 };
 
-                // For any expunged Nexus zones, re-assign in-progress sagas to
-                // some other Nexus.  If this fails for some reason, it doesn't
-                // affect anything else.
-                let sec_id = nexus_db_model::SecId::from(nexus_id);
-                let reassigned = sagas::reassign_sagas_from_expunged(
-                    opctx, datastore, blueprint, sec_id,
-                )
-                .await
-                .context("failed to re-assign sagas");
-                match reassigned {
-                    Ok(needs_saga_recovery) => {
-                        Ok(StepSuccess::new(needs_saga_recovery).build())
-                    }
-                    Err(error) => {
-                        Ok(StepWarning::new(false, error.to_string()).build())
-                    }
-                }
+                // Re-assign sagas.
+                Ok(saga_quiesce
+                    .reassign_sagas(async || {
+                        // For any expunged Nexus zones, re-assign in-progress
+                        // sagas to `nexus_id` (which, in practice, is
+                        // ourselves).  If this fails for some reason, it
+                        // doesn't affect anything else.
+                        let sec_id = nexus_db_model::SecId::from(nexus_id);
+                        let reassigned = sagas::reassign_sagas_from_expunged(
+                            opctx, datastore, blueprint, sec_id,
+                        )
+                        .await
+                        .context("failed to re-assign sagas");
+                        match reassigned {
+                            Ok(needs_saga_recovery) => (
+                                StepSuccess::new(needs_saga_recovery).build(),
+                                needs_saga_recovery,
+                            ),
+                            Err(error) => {
+                                // It's possible that we failed after having
+                                // re-assigned sagas in the database.
+                                let maybe_reassigned = true;
+                                (
+                                    StepWarning::new(false, error.to_string())
+                                        .build(),
+                                    maybe_reassigned,
+                                )
+                            }
+                        }
+                    })
+                    .await)
             },
         )
         .register()

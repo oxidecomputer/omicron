@@ -14,13 +14,13 @@ use nexus_types::external_api::views::{self, Silo};
 use nexus_types::external_api::{params, shared};
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_nexus::TestInterfaces;
+use omicron_uuid_kinds::SiloGroupUuid;
 
 use base64::Engine;
 use dropshot::ResultsPage;
 use http::StatusCode;
 use http::method::Method;
 use httptest::{Expectation, Server, matchers::*, responders::*};
-use uuid::Uuid;
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
@@ -1227,7 +1227,8 @@ async fn test_post_saml_response(cptestctx: &ControlPlaneTestContext) {
 
     let silo_group_names: Vec<&str> =
         groups.items.iter().map(|g| g.display_name.as_str()).collect();
-    let silo_group_ids: Vec<Uuid> = groups.items.iter().map(|g| g.id).collect();
+    let silo_group_ids: Vec<SiloGroupUuid> =
+        groups.items.iter().map(|g| g.id).collect();
 
     assert_same_items(silo_group_names, vec!["SRE", "Admins"]);
 

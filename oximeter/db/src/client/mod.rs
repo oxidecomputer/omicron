@@ -1907,6 +1907,7 @@ mod tests {
 
     mod type_mismatch {
         #[derive(oximeter::Target)]
+        #[expect(dead_code)]
         pub struct TestTarget {
             pub name1: uuid::Uuid,
             pub name2: String,
@@ -1983,7 +1984,7 @@ mod tests {
         client.schema.lock().await.clear();
 
         // Insert the new sample
-        client.insert_samples(&[sample.clone()]).await.unwrap();
+        client.insert_samples(std::slice::from_ref(&sample)).await.unwrap();
 
         // The internal map should now contain both the new timeseries schema
         let actual_schema = TimeseriesSchema::from(&sample);
@@ -3549,7 +3550,7 @@ mod tests {
         // the database data hasn't been dropped.
         assert_eq!(0, get_schema_count(&client, None).await);
         let sample = oximeter_test_utils::make_sample();
-        client.insert_samples(&[sample.clone()]).await.unwrap();
+        client.insert_samples(std::slice::from_ref(&sample)).await.unwrap();
         assert_eq!(1, get_schema_count(&client, None).await);
 
         // Re-initialize the database, see that our data still exists

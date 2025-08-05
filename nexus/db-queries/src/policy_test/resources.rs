@@ -11,6 +11,8 @@ use omicron_common::api::external::LookupType;
 use omicron_uuid_kinds::AccessTokenKind;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
+use omicron_uuid_kinds::SiloGroupUuid;
+use omicron_uuid_kinds::SiloUserUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
 use omicron_uuid_kinds::TypedUuid;
 use oso::PolarClass;
@@ -75,9 +77,11 @@ pub async fn make_resources(
     builder.new_resource(authz::DEVICE_AUTH_REQUEST_LIST);
     builder.new_resource(authz::INVENTORY);
     builder.new_resource(authz::IP_POOL_LIST);
+    builder.new_resource(authz::QUIESCE_STATE);
     builder.new_resource(authz::UPDATE_TRUST_ROOT_LIST);
     builder.new_resource(authz::TARGET_RELEASE_CONFIG);
     builder.new_resource(authz::ALERT_CLASS_LIST);
+    builder.new_resource(authz::AUDIT_LOG);
 
     // Silo/organization/project hierarchy
     make_silo(&mut builder, "silo1", main_silo_id, true).await;
@@ -256,7 +260,7 @@ async fn make_silo(
     ));
 
     builder.new_resource(authz::SiloUserList::new(silo.clone()));
-    let silo_user_id = Uuid::new_v4();
+    let silo_user_id = SiloUserUuid::new_v4();
     let silo_user = authz::SiloUser::new(
         silo.clone(),
         silo_user_id,
@@ -269,7 +273,7 @@ async fn make_silo(
         ssh_key_id,
         LookupType::ByName(format!("{}-user-ssh-key", silo_name)),
     ));
-    let silo_group_id = Uuid::new_v4();
+    let silo_group_id = SiloGroupUuid::new_v4();
     builder.new_resource(authz::SiloGroup::new(
         silo.clone(),
         silo_group_id,

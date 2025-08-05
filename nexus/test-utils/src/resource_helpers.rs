@@ -20,7 +20,6 @@ use nexus_types::deployment::Blueprint;
 use nexus_types::external_api::params;
 use nexus_types::external_api::shared;
 use nexus_types::external_api::shared::Baseboard;
-use nexus_types::external_api::shared::IdentityType;
 use nexus_types::external_api::shared::IpRange;
 use nexus_types::external_api::views;
 use nexus_types::external_api::views::AffinityGroup;
@@ -66,6 +65,7 @@ use omicron_test_utils::dev::poll::wait_for_condition;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
+use omicron_uuid_kinds::SiloUserUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use oxnet::Ipv4Net;
@@ -258,6 +258,9 @@ pub async fn create_ip_pool(
                 name: pool_name.parse().unwrap(),
                 description: String::from("an ip pool"),
             },
+            ip_version: ip_range
+                .map(|r| r.version())
+                .unwrap_or_else(views::IpVersion::v4),
         },
     )
     .await;
@@ -1057,35 +1060,29 @@ pub async fn detach_ip_address_from_igw(
         .unwrap();
 }
 
+/// Assert that the utilization of the provided pool matches expectations.
+///
+/// Note that the third argument is the number of _allocated_ addresses as an
+/// integer. This is compared against the count of remaining addresses
+/// internally, which is what the API returns.
 pub async fn assert_ip_pool_utilization(
     client: &ClientTestContext,
     pool_name: &str,
-    ipv4_allocated: u32,
-    ipv4_capacity: u32,
-    ipv6_allocated: u128,
-    ipv6_capacity: u128,
+    allocated: u32,
+    capacity: f64,
 ) {
     let url = format!("/v1/system/ip-pools/{}/utilization", pool_name);
     let utilization: views::IpPoolUtilization = object_get(client, &url).await;
+    let remaining = capacity - f64::from(allocated);
     assert_eq!(
-        utilization.ipv4.allocated, ipv4_allocated,
-        "IP pool '{}': expected {} IPv4 allocated, got {:?}",
-        pool_name, ipv4_allocated, utilization.ipv4.allocated
+        remaining, utilization.remaining,
+        "IP pool '{}': expected {} remaining, got {}",
+        pool_name, remaining, utilization.remaining,
     );
     assert_eq!(
-        utilization.ipv4.capacity, ipv4_capacity,
-        "IP pool '{}': expected {} IPv4 capacity, got {:?}",
-        pool_name, ipv4_capacity, utilization.ipv4.capacity
-    );
-    assert_eq!(
-        utilization.ipv6.allocated, ipv6_allocated,
-        "IP pool '{}': expected {} IPv6 allocated, got {:?}",
-        pool_name, ipv6_allocated, utilization.ipv6.allocated
-    );
-    assert_eq!(
-        utilization.ipv6.capacity, ipv6_capacity,
-        "IP pool '{}': expected {} IPv6 capacity, got {:?}",
-        pool_name, ipv6_capacity, utilization.ipv6.capacity
+        capacity, utilization.capacity,
+        "IP pool '{}': expected {} capacity, got {:?}",
+        pool_name, capacity, utilization.capacity,
     );
 }
 
@@ -1099,7 +1096,7 @@ pub async fn grant_iam<T>(
     client: &ClientTestContext,
     grant_resource_url: &str,
     grant_role: T,
-    grant_user: Uuid,
+    grant_user: SiloUserUuid,
     run_as: AuthnMode,
 ) where
     T: serde::Serialize + serde::de::DeserializeOwned,
@@ -1113,11 +1110,8 @@ pub async fn grant_iam<T>(
             .expect("failed to fetch policy")
             .parsed_body()
             .expect("failed to parse policy");
-    let new_role_assignment = shared::RoleAssignment {
-        identity_type: IdentityType::SiloUser,
-        identity_id: grant_user,
-        role_name: grant_role,
-    };
+    let new_role_assignment =
+        shared::RoleAssignment::for_silo_user(grant_user, grant_role);
     let new_role_assignments = existing_policy
         .role_assignments
         .into_iter()
@@ -1523,7 +1517,7 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
             .expect("Cannot find sled")
     }
 
-    pub fn zpools(&self) -> ZpoolIterator {
+    pub fn zpools(&self) -> ZpoolIterator<'_> {
         ZpoolIterator {
             sleds: &self.sleds,
             sled: self.sleds.keys().next().copied(),

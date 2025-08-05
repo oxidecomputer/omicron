@@ -5,6 +5,7 @@
 //! omdb commands that query or update specific Nexus instances
 
 mod chicken_switches;
+mod quiesce;
 mod update_status;
 
 use crate::Omdb;
@@ -79,6 +80,8 @@ use omicron_uuid_kinds::ParseError;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
+use quiesce::QuiesceArgs;
+use quiesce::cmd_nexus_quiesce;
 use serde::Deserialize;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
@@ -138,6 +141,8 @@ enum NexusCommands {
     MgsUpdates,
     /// interact with oximeter read policy
     OximeterReadPolicy(OximeterReadPolicyArgs),
+    /// view or modify the quiesce status
+    Quiesce(QuiesceArgs),
     /// view sagas, create and complete demo sagas
     Sagas(SagasArgs),
     /// interact with sleds
@@ -177,6 +182,12 @@ struct BackgroundTasksShowArgs {
     /// "all", "dns_external", or "dns_internal".
     #[clap(value_name = "TASK_NAME")]
     tasks: Vec<String>,
+
+    /// Do not display information about whether a task is currently executing.
+    ///
+    /// Useful for test output stability.
+    #[clap(long)]
+    no_executing_info: bool,
 }
 
 #[derive(Debug, Args)]
@@ -718,6 +729,10 @@ impl NexusArgs {
                 }
             },
 
+            NexusCommands::Quiesce(args) => {
+                cmd_nexus_quiesce(&omdb, &client, args).await
+            }
+
             NexusCommands::Sagas(SagasArgs { command }) => {
                 if self.nexus_internal_url.is_none() {
                     eprintln!(
@@ -897,6 +912,10 @@ async fn cmd_nexus_background_tasks_show(
         });
     }
 
+    let opts = BackgroundTasksPrintOpts {
+        show_executing_info: !args.no_executing_info,
+    };
+
     // Some tasks should be grouped and printed together in a certain order,
     // even though their names aren't alphabetical.  Notably, the DNS tasks
     // logically go from config -> servers -> propagation, so we want to print
@@ -909,19 +928,19 @@ async fn cmd_nexus_background_tasks_show(
         "dns_config_external",
         "dns_servers_external",
         "dns_propagation_external",
-        "nat_v4_garbage_collector",
+        "nat_garbage_collector",
         "blueprint_loader",
         "blueprint_executor",
     ] {
         if let Some(bgtask) = tasks.remove(name) {
-            print_task(&bgtask);
+            print_task(&bgtask, &opts);
         } else if selected_all {
             eprintln!("warning: expected to find background task {:?}", name);
         }
     }
 
     for (_, bgtask) in &tasks {
-        print_task(bgtask);
+        print_task(bgtask, &opts);
     }
 
     Ok(())
@@ -990,32 +1009,39 @@ async fn cmd_nexus_background_tasks_activate(
     Ok(())
 }
 
-fn print_task(bgtask: &BackgroundTask) {
+#[derive(Clone, Debug)]
+struct BackgroundTasksPrintOpts {
+    show_executing_info: bool,
+}
+
+fn print_task(bgtask: &BackgroundTask, opts: &BackgroundTasksPrintOpts) {
     println!("task: {:?}", bgtask.name);
     println!(
         "  configured period: every {}",
         humantime::format_duration(bgtask.period.clone().into())
     );
-    print!("  currently executing: ");
-    match &bgtask.current {
-        CurrentStatus::Idle => println!("no"),
-        CurrentStatus::Running(current) => {
-            let elapsed = std::time::SystemTime::from(current.start_time)
-                .elapsed()
-                .map(|s| format!("{:.3}ms", s.as_millis()))
-                .unwrap_or_else(|error| format!("(unknown: {:#})", error));
-            print!(
-                "iter {}, triggered by {}\n",
-                current.iteration,
-                reason_str(&current.reason)
-            );
-            print!(
-                "    started at {}, running for {}\n",
-                humantime::format_rfc3339_millis(current.start_time.into()),
-                elapsed,
-            );
+    if opts.show_executing_info {
+        print!("  currently executing: ");
+        match &bgtask.current {
+            CurrentStatus::Idle => println!("no"),
+            CurrentStatus::Running(current) => {
+                let elapsed = std::time::SystemTime::from(current.start_time)
+                    .elapsed()
+                    .map(|s| format!("{:.3}ms", s.as_millis()))
+                    .unwrap_or_else(|error| format!("(unknown: {:#})", error));
+                print!(
+                    "iter {}, triggered by {}\n",
+                    current.iteration,
+                    reason_str(&current.reason)
+                );
+                print!(
+                    "    started at {}, running for {}\n",
+                    humantime::format_rfc3339_millis(current.start_time.into()),
+                    elapsed,
+                );
+            }
         }
-    };
+    }
 
     print!("  last completed activation: ");
     match &bgtask.last {
@@ -1259,11 +1285,12 @@ fn print_task_blueprint_planner(details: &serde_json::Value) {
                      but could not make it the target: {error}"
             );
         }
-        BlueprintPlannerStatus::Targeted { blueprint_id, .. } => {
+        BlueprintPlannerStatus::Targeted { blueprint_id, report, .. } => {
             println!(
                 "    planned new blueprint {blueprint_id}, \
                      and made it the current target"
             );
+            println!("{report}");
         }
     }
 }
@@ -4045,7 +4072,7 @@ async fn cmd_nexus_support_bundles_list(
         user_comment: String,
     }
     let rows = support_bundles.into_iter().map(|sb| SupportBundleInfo {
-        id: *sb.id,
+        id: sb.id,
         time_created: sb.time_created,
         reason_for_creation: sb.reason_for_creation,
         reason_for_failure: sb

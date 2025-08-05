@@ -20,6 +20,7 @@ use futures::StreamExt;
 use futures::stream::FuturesUnordered;
 use gateway_sp_comms::InMemoryHostPhase2Provider;
 pub use management_switch::LocationConfig;
+pub use management_switch::LocationDescriptionConfig;
 pub use management_switch::LocationDeterminationConfig;
 pub use management_switch::ManagementSwitch;
 pub use management_switch::RetryConfig;
@@ -102,6 +103,12 @@ fn start_dropshot_server(
                 log.new(o!("component" => "dropshot")),
             )
             .config(dropshot)
+            .version_policy(dropshot::VersionPolicy::Dynamic(Box::new(
+                dropshot::ClientSpecifiesVersionInHeader::new(
+                    omicron_common::api::VERSION_HEADER,
+                    gateway_api::VERSION_INITIAL,
+                ),
+            )))
             .start()
             .map_err(|error| {
                 format!(

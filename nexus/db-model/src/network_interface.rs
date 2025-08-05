@@ -321,6 +321,7 @@ pub struct IncompleteNetworkInterface {
     pub ip: Option<std::net::IpAddr>,
     pub mac: Option<external::MacAddr>,
     pub slot: Option<u8>,
+    pub transit_ips: Vec<IpNetwork>,
 }
 
 impl IncompleteNetworkInterface {
@@ -334,6 +335,7 @@ impl IncompleteNetworkInterface {
         ip: Option<std::net::IpAddr>,
         mac: Option<external::MacAddr>,
         slot: Option<u8>,
+        transit_ips: Vec<IpNetwork>,
     ) -> Result<Self, external::Error> {
         if let Some(ip) = ip {
             subnet.check_requestable_addr(ip)?;
@@ -380,6 +382,7 @@ impl IncompleteNetworkInterface {
             ip,
             mac,
             slot,
+            transit_ips,
         })
     }
 
@@ -389,6 +392,7 @@ impl IncompleteNetworkInterface {
         subnet: VpcSubnet,
         identity: external::IdentityMetadataCreateParams,
         ip: Option<std::net::IpAddr>,
+        transit_ips: Vec<IpNetwork>,
     ) -> Result<Self, external::Error> {
         Self::new(
             interface_id,
@@ -399,6 +403,7 @@ impl IncompleteNetworkInterface {
             ip,
             None,
             None,
+            transit_ips,
         )
     }
 
@@ -420,6 +425,7 @@ impl IncompleteNetworkInterface {
             Some(ip),
             Some(mac),
             Some(slot),
+            vec![], // Service interfaces don't use transit_ips
         )
     }
 
@@ -440,6 +446,7 @@ impl IncompleteNetworkInterface {
             ip,
             mac,
             None,
+            vec![], // Probe interfaces don't use transit_ips
         )
     }
 }

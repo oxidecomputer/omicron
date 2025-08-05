@@ -131,6 +131,7 @@ use super::tasks::vpc_routes;
 use super::tasks::webhook_deliverator;
 use crate::Nexus;
 use crate::app::oximeter::PRODUCER_LEASE_DURATION;
+use crate::app::quiesce::NexusQuiesceHandle;
 use crate::app::saga::StartSaga;
 use nexus_background_task_interface::Activator;
 use nexus_background_task_interface::BackgroundTasks;
@@ -380,9 +381,8 @@ impl BackgroundTasksInitializer {
         }
 
         driver.register(TaskDefinition {
-            name: "nat_v4_garbage_collector",
-            description:
-                "prunes soft-deleted IPV4 NAT entries from ipv4_nat_entry \
+            name: "nat_garbage_collector",
+            description: "prunes soft-deleted NAT entries from nat_entry \
                  table based on a predetermined retention policy",
             period: config.nat_cleanup.period_secs,
             task_impl: Box::new(nat_cleanup::Ipv4NatGarbageCollector::new(
@@ -438,6 +438,7 @@ impl BackgroundTasksInitializer {
             nexus_id,
             task_saga_recovery.clone(),
             args.mgs_updates_tx,
+            args.nexus_quiesce,
         );
         let rx_blueprint_exec = blueprint_executor.watcher();
         driver.register(TaskDefinition {
@@ -1028,6 +1029,8 @@ pub struct BackgroundTasksData {
     pub webhook_delivery_client: reqwest::Client,
     /// Channel for configuring pending MGS updates
     pub mgs_updates_tx: watch::Sender<PendingMgsUpdates>,
+    /// handle for controlling Nexus quiesce
+    pub nexus_quiesce: NexusQuiesceHandle,
 }
 
 /// Starts the three DNS-propagation-related background tasks for either

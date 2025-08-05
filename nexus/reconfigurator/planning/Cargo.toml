@@ -9,10 +9,12 @@ workspace = true
 [dependencies]
 anyhow.workspace = true
 clickhouse-admin-types.workspace = true
+cockroach-admin-types.workspace = true
 chrono.workspace = true
 debug-ignore.workspace = true
 daft.workspace = true
 gateway-client.workspace = true
+gateway-types.workspace = true
 iddqd.workspace = true
 id-map.workspace = true
 illumos-utils.workspace = true
@@ -49,7 +51,6 @@ omicron-workspace-hack.workspace = true
 dropshot.workspace = true
 expectorate.workspace = true
 maplit.workspace = true
-omicron-cockroach-metrics.workspace = true
 omicron-common = { workspace = true, features = ["testing"] }
 omicron-test-utils.workspace = true
 proptest.workspace = true

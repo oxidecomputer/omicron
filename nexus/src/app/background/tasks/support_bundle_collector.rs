@@ -1081,32 +1081,41 @@ impl BackgroundTask for SupportBundleCollector {
 }
 
 async fn write_ereport(ereport: Ereport, dir: &Utf8Path) -> anyhow::Result<()> {
-    // Here's where we construct the file path for each ereport JSON file, given
-    // the top-lebel ereport directory path.  Each ereport is stored in a
-    // subdirectory for the serial number of the system that produced the
-    // ereport.  These paths take the following form:
+    // Here's where we construct the file path for each ereport JSON file,
+    // given the top-level ereport directory path.  Each ereport is stored in a
+    // subdirectory for the part and serial numbers of the system that produced
+    // the ereport.  Part numbers must be included in addition to serial
+    // numbers, as the v1 serial scheme only guarantees uniqueness within a
+    // part number.  These paths take the following form:
     //
-    //    {serial_number}/{restart_id}/{ENA}.json
+    //   {part-number}-{serial_number}/{restart_id}/{ENA}.json
     //
-    // We can assume that the restart ID and serial number consist only of
+    // We can assume that the restart ID and ENA consist only of
     // filesystem-safe characters, as the restart ID is known to be a UUID, and
-    // the ENA is just an integer.  For the serial number, which we don't have
-    // full control over --- it came from the ereport metadata --- we must
-    // check that it doesn't contain any characters unsuitable for use in a
-    // filesystem path.
-    let sn = &ereport
+    // the ENA is just an integer.  For the serial and part numbers, which
+    // Nexus doesn't have full control over --- it came from the ereport
+    // metadata --- we must check that it doesn't contain any characters
+    // unsuitable for use in a filesystem path.
+    let pn = ereport
+        .metadata
+        .part_number
+        .as_deref()
+        // If the part or serial numbers contain any unsavoury characters, it
+        // goes in the `unknown_serial` hole! Note that the alleged serial
+        // number from the ereport will still be present in the JSON as a
+        // string, so we're not *lying* about what was received; we're just
+        // giving up on using it in the path.
+        .filter(|&s| is_fs_safe_single_path_component(s))
+        .unwrap_or("unknown_part");
+    let sn = ereport
         .metadata
         .serial_number
         .as_deref()
-        // If the serial number contains any unsavoury characters, it goes in
-        // the `unknown_serial` hole!  Note that the alleged serial number from
-        // the ereport will still be present in the JSON as a string, so we're
-        // not *lying* about what was received; we're just giving up on using it
-        // in the path.
         .filter(|&s| is_fs_safe_single_path_component(s))
         .unwrap_or("unknown_serial");
+
     let dir = dir
-        .join(sn)
+        .join(format!("{pn}-{sn}"))
         // N.B. that we call `into_untyped_uuid()` here, as the `Display`
         // implementation for a typed UUID appends " (ereporter_restart)", which
         // we don't want.
@@ -1116,11 +1125,11 @@ async fn write_ereport(ereport: Ereport, dir: &Utf8Path) -> anyhow::Result<()> {
         .with_context(|| format!("failed to create directory '{dir}'"))?;
     let file_path = dir.join(format!("{}.json", ereport.id.ena));
     let json = serde_json::to_vec(&ereport).with_context(|| {
-        format!("failed to serialize ereport '{sn}:{}'", ereport.id)
+        format!("failed to serialize ereport {pn}:{sn}/{}", ereport.id)
     })?;
     tokio::fs::write(&file_path, json)
         .await
-        .with_context(|| format!("failed to write {file_path}'"))
+        .with_context(|| format!("failed to write '{file_path}'"))
 }
 
 // Takes a directory "dir", and zips the contents into a single zipfile.
@@ -1153,7 +1162,9 @@ fn recursively_add_directory_to_zipfile(
 
         let file_type = entry.file_type()?;
         if file_type.is_file() {
-            let opts = FullFileOptions::default().large_file(true);
+            let opts = FullFileOptions::default()
+                .compression_method(zip::CompressionMethod::Deflated)
+                .large_file(true);
             let src = entry.path();
 
             zip.start_file_from_path(dst, opts)?;
@@ -1701,6 +1712,7 @@ mod test {
                         collector_id: OmicronZoneUuid::new_v4().into(),
                         sled_id: sled_id.into(),
                         sled_serial: HOST_SERIAL.to_string(),
+                        part_number: Some(GIMLET_PN.to_string()),
                         class: Some("ereport.fake.whatever".to_string()),
                         report: serde_json::json!({"hello_world": true}),
                     },
@@ -1712,6 +1724,7 @@ mod test {
                         collector_id: OmicronZoneUuid::new_v4().into(),
                         sled_id: sled_id.into(),
                         sled_serial: HOST_SERIAL.to_string(),
+                        part_number: Some(GIMLET_PN.to_string()),
                         class: Some("ereport.fake.whatever.thingy".to_string()),
                         report: serde_json::json!({"goodbye_world": false}),
                     },
@@ -1734,6 +1747,7 @@ mod test {
                         collector_id: OmicronZoneUuid::new_v4().into(),
                         sled_id: sled_id.into(),
                         sled_serial: HOST_SERIAL.to_string(),
+                        part_number: Some(GIMLET_PN.to_string()),
                         class: Some("ereport.something.hostos_related".to_string()),
                         report: serde_json::json!({"illumos": "very yes", "whatever": 42}),
                     },

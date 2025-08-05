@@ -14,6 +14,7 @@ base64.workspace = true
 chrono.workspace = true
 clap.workspace = true
 clickhouse-admin-types.workspace = true
+cockroach-admin-types.workspace = true
 cookie.workspace = true
 daft.workspace = true
 derive-where.workspace = true
@@ -29,7 +30,6 @@ indent_write.workspace = true
 ipnetwork.workspace = true
 itertools.workspace = true
 newtype_derive.workspace = true
-omicron-cockroach-metrics.workspace = true
 omicron-uuid-kinds.workspace = true
 openssl.workspace = true
 oxql-types.workspace = true
@@ -47,6 +47,7 @@ strum.workspace = true
 tabled.workspace = true
 textwrap.workspace = true
 thiserror.workspace = true
+tokio.workspace = true
 tufaceous-artifact.workspace = true
 newtype-uuid.workspace = true
 update-engine.workspace = true
@@ -69,5 +70,6 @@ tough.workspace = true
 # common to both, put them in `omicron-common` or `nexus-sled-agent-shared`.
 
 [dev-dependencies]
+omicron-test-utils.workspace = true
 proptest.workspace = true
 test-strategy.workspace = true

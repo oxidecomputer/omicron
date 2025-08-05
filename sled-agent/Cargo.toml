@@ -71,7 +71,7 @@ oxnet.workspace = true
 propolis_api_types.workspace = true
 propolis-client.workspace = true
 propolis-mock-server.workspace = true # Only used by the simulated sled agent
-rand = { workspace = true, features = ["getrandom"] }
+rand = { workspace = true, features = ["os_rng"] }
 range-requests.workspace = true
 repo-depot-api.workspace = true
 repo-depot-client.workspace = true

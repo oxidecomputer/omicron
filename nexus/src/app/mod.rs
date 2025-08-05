@@ -54,6 +54,7 @@ mod address_lot;
 mod affinity;
 mod alert;
 mod allow_list;
+mod audit_log;
 pub(crate) mod background;
 mod bfd;
 mod bgp;
@@ -79,6 +80,7 @@ mod network_interface;
 pub(crate) mod oximeter;
 mod probe;
 mod project;
+mod quiesce;
 mod quota;
 mod rack;
 pub(crate) mod saga;
@@ -108,6 +110,7 @@ pub(crate) mod sagas;
 // TODO: When referring to API types, we should try to include
 // the prefix unless it is unambiguous.
 
+use crate::app::quiesce::NexusQuiesceHandle;
 pub(crate) use nexus_db_model::MAX_NICS_PER_INSTANCE;
 pub(crate) use nexus_db_queries::db::queries::disk::MAX_DISKS_PER_INSTANCE;
 use nexus_mgs_updates::DEFAULT_RETRY_TIMEOUT;
@@ -275,6 +278,9 @@ pub struct Nexus {
     // while Nexus is running.
     #[allow(dead_code)]
     repo_depot_resolver: Box<dyn qorb::resolver::Resolver>,
+
+    /// state of overall Nexus quiesce activity
+    quiesce: NexusQuiesceHandle,
 }
 
 impl Nexus {
@@ -326,6 +332,8 @@ impl Nexus {
             sec_store,
         ));
 
+        let quiesce = NexusQuiesceHandle::new(&log, db_datastore.clone());
+
         // It's a bit of a red flag to use an unbounded channel.
         //
         // This particular channel is used to send a Uuid from the saga executor
@@ -354,6 +362,7 @@ impl Nexus {
             Arc::clone(&sec_client),
             log.new(o!("component" => "SagaExecutor")),
             saga_create_tx,
+            quiesce.sagas(),
         ));
 
         // Create a channel for replicating repository artifacts. 16 is a
@@ -503,6 +512,7 @@ impl Nexus {
             mgs_update_status_rx,
             mgs_resolver,
             repo_depot_resolver,
+            quiesce,
         };
 
         // TODO-cleanup all the extra Arcs here seems wrong
@@ -552,6 +562,7 @@ impl Nexus {
                     webhook_delivery_client: task_nexus
                         .webhook_delivery_client
                         .clone(),
+                    nexus_quiesce: task_nexus.quiesce.clone(),
 
                     saga_recovery: SagaRecoveryHelpers {
                         recovery_opctx: saga_recovery_opctx,
@@ -559,6 +570,7 @@ impl Nexus {
                         sec_client: sec_client.clone(),
                         registry: sagas::ACTION_REGISTRY.clone(),
                         sagas_started_rx: saga_recovery_rx,
+                        quiesce: task_nexus.quiesce.sagas(),
                     },
                     tuf_artifact_replication_rx,
                     mgs_updates_tx,
@@ -607,6 +619,14 @@ impl Nexus {
                 }
             };
         }
+    }
+
+    // Waits for Nexus to determine whether sagas are supposed to be quiesced
+    //
+    // This is used by the test suite because most tests assume that sagas are
+    // operational as soon as they start.
+    pub(crate) async fn wait_for_saga_determination(&self) {
+        self.quiesce.sagas().wait_for_determination().await;
     }
 
     pub(crate) async fn external_tls_config(
@@ -1033,7 +1053,7 @@ impl Nexus {
 
     pub(crate) fn demo_sagas(
         &self,
-    ) -> Result<std::sync::MutexGuard<CompletingDemoSagas>, Error> {
+    ) -> Result<std::sync::MutexGuard<'_, CompletingDemoSagas>, Error> {
         self.demo_sagas.lock().map_err(|error| {
             Error::internal_error(&format!(
                 "failed to acquire demo_sagas lock: {:#}",

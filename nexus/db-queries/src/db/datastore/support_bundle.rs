@@ -515,6 +515,7 @@ mod test {
     use crate::db::pub_test_utils::TestDatabase;
     use nexus_db_model::Generation;
     use nexus_db_model::SledBaseboard;
+    use nexus_db_model::SledCpuFamily;
     use nexus_db_model::SledSystemHardware;
     use nexus_db_model::SledUpdate;
     use nexus_db_model::Zpool;
@@ -607,7 +608,7 @@ mod test {
                 SledBaseboard {
                     serial_number: format!(
                         "test-{}",
-                        rand::thread_rng().gen::<u64>()
+                        rand::rng().random::<u64>()
                     ),
                     part_number: "test-pn".to_string(),
                     revision: 0,
@@ -617,6 +618,7 @@ mod test {
                     usable_hardware_threads: 128,
                     usable_physical_ram: (64 << 30).try_into().unwrap(),
                     reservoir_size: (16 << 30).try_into().unwrap(),
+                    cpu_family: SledCpuFamily::AmdMilan,
                 },
                 rack_id,
                 Generation::new(),

@@ -13,6 +13,7 @@ use anyhow::anyhow;
 use chrono::DateTime;
 use chrono::Utc;
 use clickhouse_admin_types::ClickhouseKeeperClusterMembership;
+use cockroach_admin_types::NodeId;
 use gateway_client::types::SpComponentCaboose;
 use gateway_client::types::SpState;
 use gateway_client::types::SpType;
@@ -25,6 +26,7 @@ use nexus_types::inventory::CabooseFound;
 use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::CockroachStatus;
 use nexus_types::inventory::Collection;
+use nexus_types::inventory::HostPhase1ActiveSlot;
 use nexus_types::inventory::HostPhase1FlashHash;
 use nexus_types::inventory::InternalDnsGenerationStatus;
 use nexus_types::inventory::RotPage;
@@ -36,7 +38,6 @@ use nexus_types::inventory::SledAgent;
 use nexus_types::inventory::TimeSync;
 use nexus_types::inventory::Zpool;
 use omicron_cockroach_metrics::CockroachMetric;
-use omicron_cockroach_metrics::NodeId;
 use omicron_cockroach_metrics::PrometheusMetrics;
 use omicron_common::disk::M2Slot;
 use omicron_uuid_kinds::CollectionKind;
@@ -116,6 +117,7 @@ pub struct CollectionBuilder {
     cabooses: BTreeSet<Arc<Caboose>>,
     rot_pages: BTreeSet<Arc<RotPage>>,
     sps: BTreeMap<Arc<BaseboardId>, ServiceProcessor>,
+    host_phase_1_active_slots: BTreeMap<Arc<BaseboardId>, HostPhase1ActiveSlot>,
     host_phase_1_flash_hashes:
         BTreeMap<M2Slot, BTreeMap<Arc<BaseboardId>, HostPhase1FlashHash>>,
     rots: BTreeMap<Arc<BaseboardId>, RotState>,
@@ -153,6 +155,7 @@ impl CollectionBuilder {
             cabooses: BTreeSet::new(),
             rot_pages: BTreeSet::new(),
             sps: BTreeMap::new(),
+            host_phase_1_active_slots: BTreeMap::new(),
             host_phase_1_flash_hashes: BTreeMap::new(),
             rots: BTreeMap::new(),
             cabooses_found: BTreeMap::new(),
@@ -178,6 +181,7 @@ impl CollectionBuilder {
             cabooses: self.cabooses,
             rot_pages: self.rot_pages,
             sps: self.sps,
+            host_phase_1_active_slots: self.host_phase_1_active_slots,
             host_phase_1_flash_hashes: self.host_phase_1_flash_hashes,
             rots: self.rots,
             cabooses_found: self.cabooses_found,
@@ -316,6 +320,63 @@ impl CollectionBuilder {
         }
 
         Some(baseboard)
+    }
+
+    /// Returns true if we already found the active host phase 1 flash slot for
+    /// baseboard `baseboard`
+    ///
+    /// This is used to avoid requesting it multiple times (from multiple MGS
+    /// instances).
+    pub fn found_host_phase_1_active_slot_already(
+        &self,
+        baseboard: &BaseboardId,
+    ) -> bool {
+        self.host_phase_1_active_slots.contains_key(baseboard)
+    }
+
+    /// Record the given host phase 1 active slot found for the given baseboard
+    ///
+    /// The baseboard must previously have been reported using
+    /// `found_sp_state()`.
+    ///
+    /// `source` is an arbitrary string for debugging that describes the MGS
+    /// that reported this data (generally a URL string).
+    pub fn found_host_phase_1_active_slot(
+        &mut self,
+        baseboard: &BaseboardId,
+        source: &str,
+        slot: M2Slot,
+    ) -> Result<(), CollectorBug> {
+        let (baseboard, _) =
+            self.sps.get_key_value(baseboard).ok_or_else(|| {
+                anyhow!(
+                    "reporting host phase 1 active slot for unknown baseboard: \
+                    {baseboard:?} ({slot:?})",
+                )
+            })?;
+        if let Some(previous) = self.host_phase_1_active_slots.insert(
+            baseboard.clone(),
+            HostPhase1ActiveSlot {
+                time_collected: now_db_precision(),
+                source: source.to_owned(),
+                slot,
+            },
+        ) {
+            let error = if previous.slot == slot {
+                anyhow!("reported multiple times (same value)")
+            } else {
+                anyhow!(
+                    "reported host phase 1 flash hash \
+                     (previously {}, now {slot})",
+                    previous.slot,
+                )
+            };
+            Err(CollectorBug::from(
+                error.context(format!("baseboard {baseboard:?}")),
+            ))
+        } else {
+            Ok(())
+        }
     }
 
     /// Returns true if we already found the host phase 1 flash hash for `slot`
@@ -595,6 +656,7 @@ impl CollectionBuilder {
             baseboard_id,
             usable_hardware_threads: inventory.usable_hardware_threads,
             usable_physical_ram: inventory.usable_physical_ram,
+            cpu_family: inventory.cpu_family,
             reservoir_size: inventory.reservoir_size,
             time_collected,
             sled_id,

@@ -2,15 +2,22 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use crate::DbTypedUuid;
+use crate::to_db_typed_uuid;
 use db_macros::Asset;
 use nexus_db_schema::schema::{silo_group, silo_group_membership};
 use nexus_types::external_api::views;
 use nexus_types::identity::Asset;
+use omicron_uuid_kinds::SiloGroupKind;
+use omicron_uuid_kinds::SiloGroupUuid;
+use omicron_uuid_kinds::SiloUserKind;
+use omicron_uuid_kinds::SiloUserUuid;
 use uuid::Uuid;
 
 /// Describes a silo group within the database.
 #[derive(Asset, Queryable, Insertable, Debug, Selectable)]
 #[diesel(table_name = silo_group)]
+#[asset(uuid_kind = SiloGroupKind)]
 pub struct SiloGroup {
     #[diesel(embed)]
     identity: SiloGroupIdentity,
@@ -22,7 +29,7 @@ pub struct SiloGroup {
 }
 
 impl SiloGroup {
-    pub fn new(id: Uuid, silo_id: Uuid, external_id: String) -> Self {
+    pub fn new(id: SiloGroupUuid, silo_id: Uuid, external_id: String) -> Self {
         Self { identity: SiloGroupIdentity::new(id), silo_id, external_id }
     }
 }
@@ -31,13 +38,19 @@ impl SiloGroup {
 #[derive(Queryable, Insertable, Debug, Selectable)]
 #[diesel(table_name = silo_group_membership)]
 pub struct SiloGroupMembership {
-    pub silo_group_id: Uuid,
-    pub silo_user_id: Uuid,
+    pub silo_group_id: DbTypedUuid<SiloGroupKind>,
+    pub silo_user_id: DbTypedUuid<SiloUserKind>,
 }
 
 impl SiloGroupMembership {
-    pub fn new(silo_group_id: Uuid, silo_user_id: Uuid) -> Self {
-        Self { silo_group_id, silo_user_id }
+    pub fn new(
+        silo_group_id: SiloGroupUuid,
+        silo_user_id: SiloUserUuid,
+    ) -> Self {
+        Self {
+            silo_group_id: to_db_typed_uuid(silo_group_id),
+            silo_user_id: to_db_typed_uuid(silo_user_id),
+        }
     }
 }
 

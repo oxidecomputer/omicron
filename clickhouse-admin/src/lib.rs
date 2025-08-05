@@ -68,6 +68,12 @@ pub async fn start_server_admin_server(
         log.new(slog::o!("component" => "dropshot")),
     )
     .config(server_config.dropshot)
+    .version_policy(dropshot::VersionPolicy::Dynamic(Box::new(
+        dropshot::ClientSpecifiesVersionInHeader::new(
+            omicron_common::api::VERSION_HEADER,
+            clickhouse_admin_api::VERSION_INITIAL,
+        ),
+    )))
     .start()
     .map_err(StartError::InitializeHttpServer)
 }
@@ -105,6 +111,12 @@ pub async fn start_keeper_admin_server(
         log.new(slog::o!("component" => "dropshot")),
     )
     .config(server_config.dropshot)
+    .version_policy(dropshot::VersionPolicy::Dynamic(Box::new(
+        dropshot::ClientSpecifiesVersionInHeader::new(
+            omicron_common::api::VERSION_HEADER,
+            clickhouse_admin_api::VERSION_INITIAL,
+        ),
+    )))
     .start()
     .map_err(StartError::InitializeHttpServer)
 }
@@ -142,6 +154,12 @@ pub async fn start_single_admin_server(
         log.new(slog::o!("component" => "dropshot")),
     )
     .config(server_config.dropshot)
+    .version_policy(dropshot::VersionPolicy::Dynamic(Box::new(
+        dropshot::ClientSpecifiesVersionInHeader::new(
+            omicron_common::api::VERSION_HEADER,
+            clickhouse_admin_api::VERSION_INITIAL,
+        ),
+    )))
     .start()
     .map_err(StartError::InitializeHttpServer)
 }

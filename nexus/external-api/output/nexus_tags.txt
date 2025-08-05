@@ -63,14 +63,6 @@ support_bundle_index                     GET      /experimental/v1/system/suppor
 support_bundle_list                      GET      /experimental/v1/system/support-bundles
 support_bundle_update                    PUT      /experimental/v1/system/support-bundles/{bundle_id}
 support_bundle_view                      GET      /experimental/v1/system/support-bundles/{bundle_id}
-system_update_get_repository             GET      /v1/system/update/repository/{system_version}
-system_update_put_repository             PUT      /v1/system/update/repository
-system_update_trust_root_create          POST     /v1/system/update/trust-roots
-system_update_trust_root_delete          DELETE   /v1/system/update/trust-roots/{trust_root_id}
-system_update_trust_root_list            GET      /v1/system/update/trust-roots
-system_update_trust_root_view            GET      /v1/system/update/trust-roots/{trust_root_id}
-target_release_update                    PUT      /v1/system/update/target-release
-target_release_view                      GET      /v1/system/update/target-release
 timeseries_query                         POST     /v1/timeseries/query
 
 API operations found with tag "floating-ips"
@@ -187,6 +179,10 @@ webhook_secrets_add                      POST     /v1/webhook-secrets
 webhook_secrets_delete                   DELETE   /v1/webhook-secrets/{secret_id}
 webhook_secrets_list                     GET      /v1/webhook-secrets
 
+API operations found with tag "system/audit-log"
+OPERATION ID                             METHOD   URL PATH
+audit_log_list                           GET      /v1/system/audit-log
+
 API operations found with tag "system/hardware"
 OPERATION ID                             METHOD   URL PATH
 networking_switch_port_apply_settings    POST     /v1/system/hardware/switch-port/{port}/settings
@@ -239,6 +235,7 @@ networking_address_lot_block_list        GET      /v1/system/networking/address-
 networking_address_lot_create            POST     /v1/system/networking/address-lot
 networking_address_lot_delete            DELETE   /v1/system/networking/address-lot/{address_lot}
 networking_address_lot_list              GET      /v1/system/networking/address-lot
+networking_address_lot_view              GET      /v1/system/networking/address-lot/{address_lot}
 networking_allow_list_update             PUT      /v1/system/networking/allow-list
 networking_allow_list_view               GET      /v1/system/networking/allow-list
 networking_bfd_disable                   POST     /v1/system/networking/bfd-disable
@@ -296,6 +293,17 @@ user_builtin_view                        GET      /v1/system/users-builtin/{user
 API operations found with tag "system/status"
 OPERATION ID                             METHOD   URL PATH
 ping                                     GET      /v1/ping
+
+API operations found with tag "system/update"
+OPERATION ID                             METHOD   URL PATH
+system_update_get_repository             GET      /v1/system/update/repository/{system_version}
+system_update_put_repository             PUT      /v1/system/update/repository
+system_update_trust_root_create          POST     /v1/system/update/trust-roots
+system_update_trust_root_delete          DELETE   /v1/system/update/trust-roots/{trust_root_id}
+system_update_trust_root_list            GET      /v1/system/update/trust-roots
+system_update_trust_root_view            GET      /v1/system/update/trust-roots/{trust_root_id}
+target_release_update                    PUT      /v1/system/update/target-release
+target_release_view                      GET      /v1/system/update/target-release
 
 API operations found with tag "tokens"
 OPERATION ID                             METHOD   URL PATH

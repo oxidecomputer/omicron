@@ -7,7 +7,7 @@
 //! Interface for API requests to an Oximeter metric collection server
 
 progenitor::generate_api!(
-    spec = "../../openapi/oximeter.json",
+    spec = "../../openapi/oximeter/oximeter-latest.json",
     interface = Positional,
     inner_type = slog::Logger,
     pre_hook = (|log: &slog::Logger, request: &reqwest::Request| {

@@ -32,6 +32,7 @@ use omicron_common::api::external::{
 use omicron_common::api::external::{ObjectIdentity, UserId};
 use omicron_test_utils::certificates::CertificateChain;
 use omicron_test_utils::dev::poll::{CondCheckError, wait_for_condition};
+use omicron_uuid_kinds::SiloUserUuid;
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::fmt::Write;
@@ -47,7 +48,6 @@ use nexus_types::external_api::shared::{FleetRole, SiloRole};
 use std::convert::Infallible;
 use std::net::Ipv4Addr;
 use std::time::Duration;
-use uuid::Uuid;
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
@@ -1080,7 +1080,7 @@ async fn test_silo_groups_jit(cptestctx: &ControlPlaneTestContext) {
 
     for group_membership in &group_memberships {
         let (.., db_group) = LookupPath::new(&authn_opctx, nexus.datastore())
-            .silo_group_id(group_membership.silo_group_id)
+            .silo_group_id(group_membership.silo_group_id.into())
             .fetch()
             .await
             .unwrap();
@@ -1209,7 +1209,7 @@ async fn test_silo_groups_remove_from_one_group(
 
     for group_membership in &group_memberships {
         let (.., db_group) = LookupPath::new(&authn_opctx, nexus.datastore())
-            .silo_group_id(group_membership.silo_group_id)
+            .silo_group_id(group_membership.silo_group_id.into())
             .fetch()
             .await
             .unwrap();
@@ -1250,7 +1250,7 @@ async fn test_silo_groups_remove_from_one_group(
 
     for group_membership in &group_memberships {
         let (.., db_group) = LookupPath::new(&authn_opctx, nexus.datastore())
-            .silo_group_id(group_membership.silo_group_id)
+            .silo_group_id(group_membership.silo_group_id.into())
             .fetch()
             .await
             .unwrap();
@@ -1320,7 +1320,7 @@ async fn test_silo_groups_remove_from_both_groups(
 
     for group_membership in &group_memberships {
         let (.., db_group) = LookupPath::new(&authn_opctx, nexus.datastore())
-            .silo_group_id(group_membership.silo_group_id)
+            .silo_group_id(group_membership.silo_group_id.into())
             .fetch()
             .await
             .unwrap();
@@ -1361,7 +1361,7 @@ async fn test_silo_groups_remove_from_both_groups(
 
     for group_membership in &group_memberships {
         let (.., db_group) = LookupPath::new(&authn_opctx, nexus.datastore())
-            .silo_group_id(group_membership.silo_group_id)
+            .silo_group_id(group_membership.silo_group_id.into())
             .fetch()
             .await
             .unwrap();
@@ -1562,7 +1562,8 @@ async fn test_silo_user_views(cptestctx: &ControlPlaneTestContext) {
     silo2_expected_users.sort_by_key(|u| u.id);
 
     let users_by_id = {
-        let mut users_by_id: BTreeMap<Uuid, &views::User> = BTreeMap::new();
+        let mut users_by_id: BTreeMap<SiloUserUuid, &views::User> =
+            BTreeMap::new();
         assert_eq!(users_by_id.insert(silo1_user1_id, &silo1_user1), None);
         assert_eq!(users_by_id.insert(silo1_user2_id, &silo1_user2), None);
         assert_eq!(users_by_id.insert(silo2_user1_id, &silo2_user1), None);
@@ -1719,7 +1720,7 @@ async fn create_jit_user(
 ) -> views::User {
     assert_eq!(silo.identity_mode, shared::SiloIdentityMode::SamlJit);
     let silo_id = silo.identity.id;
-    let silo_user_id = Uuid::new_v4();
+    let silo_user_id = SiloUserUuid::new_v4();
     let authz_silo =
         authz::Silo::new(authz::FLEET, silo_id, LookupType::ById(silo_id));
     let silo_user =
@@ -2004,7 +2005,7 @@ async fn test_local_silo_users(cptestctx: &ControlPlaneTestContext) {
         client,
         &silo1,
         &AuthnMode::SiloUser(admin_user.id),
-        &[admin_user.clone()],
+        std::slice::from_ref(&admin_user),
     )
     .await;
 }

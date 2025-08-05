@@ -48,7 +48,7 @@ use types::ComponentFirmwareHashStatus;
 // call into each other. Since `gateway` is a lower-level service and never
 // calls into Nexus, the current scheme is okay.)
 progenitor::generate_api!(
-    spec = "../../openapi/gateway.json",
+    spec = "../../openapi/gateway/gateway-latest.json",
     interface = Positional,
     inner_type = slog::Logger,
     pre_hook = (|log: &slog::Logger, request: &reqwest::Request| {
@@ -70,6 +70,7 @@ progenitor::generate_api!(
         RotImageError = { derives = [ thiserror::Error, PartialEq, Eq, PartialOrd, Ord] },
         RotState = { derives = [PartialEq, Eq, PartialOrd, Ord] },
         SpComponentCaboose = { derives = [PartialEq, Eq] },
+        SpComponentInfo = { derives = [PartialEq, Eq] },
         SpIdentifier = { derives = [Copy, PartialEq, Hash, Eq] },
         SpIgnition = { derives = [PartialEq, Eq, PartialOrd, Ord] },
         SpIgnitionSystemType = { derives = [Copy, PartialEq, Eq, PartialOrd, Ord] },
@@ -82,6 +83,8 @@ progenitor::generate_api!(
         RotSlot = gateway_types::rot::RotSlot,
         Ena = ereport_types::Ena,
         Ereport = ereport_types::Ereport,
+        Ereports = ereport_types::Ereports,
+        TaskDump = gateway_types::task_dump::TaskDump,
         TypedUuidForEreporterRestartKind = omicron_uuid_kinds::EreporterRestartUuid,
         TypedUuidForMupdateKind = omicron_uuid_kinds::MupdateUuid,
     },
@@ -103,8 +106,8 @@ impl PartialOrd for crate::types::SpIdentifier {
 
 #[derive(Debug, thiserror::Error)]
 pub enum HostPhase1HashError {
-    #[error("timed out waiting for hash calculation")]
-    Timeout,
+    #[error("timed out after {0:?} waiting for hash calculation")]
+    Timeout(Duration),
     #[error("hash calculation failed (phase1 written while hashing?)")]
     ContentsModifiedWhileHashing,
     #[error("failed to send request to {kind}")]
@@ -126,7 +129,8 @@ impl Client {
     /// handful of seconds on real hardware.
     pub async fn host_phase_1_flash_hash_calculate_with_timeout(
         &self,
-        sp: types::SpIdentifier,
+        sp_type: types::SpType,
+        sp_slot: u16,
         phase1_slot: u16,
         timeout: Duration,
     ) -> Result<[u8; 32], HostPhase1HashError> {
@@ -159,8 +163,8 @@ impl Client {
 
         let need_to_start_hashing = match self
             .sp_component_hash_firmware_get(
-                sp.type_,
-                sp.slot,
+                sp_type,
+                sp_slot,
                 PHASE1_FLASH,
                 phase1_slot,
             )
@@ -185,8 +189,8 @@ impl Client {
             // catch a `HashInProgress` error here and return an HTTP success.
             // We'll return any other error.
             self.sp_component_hash_firmware_start(
-                sp.type_,
-                sp.slot,
+                sp_type,
+                sp_slot,
                 PHASE1_FLASH,
                 phase1_slot,
             )
@@ -201,12 +205,12 @@ impl Client {
         loop {
             tokio::time::sleep(SLEEP_BETWEEN_POLLS).await;
             if start.elapsed() > timeout {
-                return Err(HostPhase1HashError::Timeout);
+                return Err(HostPhase1HashError::Timeout(timeout));
             }
             match self
                 .sp_component_hash_firmware_get(
-                    sp.type_,
-                    sp.slot,
+                    sp_type,
+                    sp_slot,
                     PHASE1_FLASH,
                     phase1_slot,
                 )

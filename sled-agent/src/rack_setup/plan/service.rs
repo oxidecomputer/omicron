@@ -26,7 +26,7 @@ use omicron_common::address::{
     RSS_RESERVED_ADDRESSES, ReservedRackSubnet, SLED_PREFIX, get_sled_address,
     get_switch_zone_address,
 };
-use omicron_common::api::external::{MacAddr, Vni};
+use omicron_common::api::external::{Generation, MacAddr, Vni};
 use omicron_common::api::internal::shared::{
     NetworkInterface, NetworkInterfaceKind, SourceNatConfig,
     SourceNatConfigError,
@@ -48,7 +48,7 @@ use omicron_uuid_kinds::{
     DatasetUuid, ExternalIpUuid, GenericUuid, OmicronZoneUuid,
     PhysicalDiskUuid, SledUuid, ZpoolUuid,
 };
-use rand::prelude::SliceRandom;
+use rand::seq::IndexedRandom;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sled_agent_client::{
@@ -570,6 +570,7 @@ impl Plan {
                         // development that it might not be.
                         external_tls: !config.external_certificates.is_empty(),
                         external_dns_servers: config.dns_servers.clone(),
+                        nexus_generation: Generation::new(),
                     },
                 ),
                 filesystem_pool,
@@ -874,7 +875,7 @@ impl SledInfo {
 
     fn alloc_zpool_from_u2s(&self) -> Result<ZpoolName, PlanError> {
         self.u2_zpools
-            .choose(&mut rand::thread_rng())
+            .choose(&mut rand::rng())
             .map(|z| *z)
             .ok_or_else(|| PlanError::NotEnoughSleds)
     }
@@ -1155,6 +1156,7 @@ impl ServicePortBuilder {
 mod tests {
     use super::*;
     use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryStatus;
+    use nexus_sled_agent_shared::inventory::SledCpuFamily;
     use nexus_sled_agent_shared::inventory::ZoneImageResolverInventory;
     use omicron_common::address::IpRange;
     use omicron_common::api::external::ByteCount;
@@ -1372,6 +1374,7 @@ mod tests {
                 baseboard: Baseboard::Unknown,
                 usable_hardware_threads: 32,
                 usable_physical_ram: ByteCount::try_from(1_u64 << 40).unwrap(),
+                cpu_family: SledCpuFamily::AmdMilan,
                 reservoir_size: ByteCount::try_from(1_u64 << 40).unwrap(),
                 disks,
                 zpools: vec![],

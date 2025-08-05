@@ -220,7 +220,7 @@ impl LocalStorage for ConfigReconcilerHandle {
         dataset_name: &String,
     ) -> Result<DatasetProperties, Error> {
         let Some(dataset) = illumos_utils::zfs::Zfs::get_dataset_properties(
-            &[dataset_name.clone()],
+            std::slice::from_ref(dataset_name),
             illumos_utils::zfs::WhichDatasets::SelfOnly,
         )
         .await
@@ -1120,7 +1120,7 @@ mod tests {
         ) -> Result<DatasetProperties, Error> {
             let Some(dataset) =
                 illumos_utils::zfs::Zfs::get_dataset_properties(
-                    &[dataset_name.clone()],
+                    std::slice::from_ref(dataset_name),
                     illumos_utils::zfs::WhichDatasets::SelfOnly,
                 )
                 .await

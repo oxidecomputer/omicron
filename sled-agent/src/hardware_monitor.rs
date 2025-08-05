@@ -8,49 +8,39 @@
 
 use crate::services::ServiceManager;
 use crate::sled_agent::SledAgent;
+use sled_agent_api::OperatorSwitchZonePolicy;
 use sled_agent_config_reconciler::RawDisksSender;
 use sled_hardware::{HardwareManager, HardwareUpdate};
 use sled_hardware_types::Baseboard;
 use sled_storage::disk::RawDisk;
 use slog::Logger;
 use tokio::sync::broadcast::error::RecvError;
-use tokio::sync::{broadcast, oneshot};
+use tokio::sync::{broadcast, oneshot, watch};
 
-// A thin wrapper around the the [`ServiceManager`] that caches the state
-// whether or not the tofino is loaded if the [`ServiceManager`] doesn't exist
-// yet.
-enum TofinoManager {
-    Ready(ServiceManager),
-    NotReady { tofino_loaded: bool },
+/// A handle controlling the behavior of a [`HardwareMonitor`]
+#[derive(Debug, Clone)]
+pub struct HardwareMonitorHandle {
+    switch_zone_policy_tx: watch::Sender<OperatorSwitchZonePolicy>,
 }
 
-impl TofinoManager {
-    pub fn new() -> TofinoManager {
-        TofinoManager::NotReady { tofino_loaded: false }
+impl HardwareMonitorHandle {
+    pub fn current_switch_zone_policy(&self) -> OperatorSwitchZonePolicy {
+        *self.switch_zone_policy_tx.borrow()
     }
 
-    // Must only be called once on the transition from `NotReady` to `Ready`.
-    // Panics otherwise.
-    //
-    // Returns whether the tofino was loaded or not
-    pub fn become_ready(&mut self, service_manager: ServiceManager) -> bool {
-        let tofino_loaded = match self {
-            Self::Ready(_) => panic!("ServiceManager is already available"),
-            Self::NotReady { tofino_loaded } => *tofino_loaded,
-        };
-        *self = Self::Ready(service_manager);
-        tofino_loaded
-    }
-
-    pub fn is_ready(&self) -> bool {
-        match self {
-            TofinoManager::Ready(_) => true,
-            _ => false,
-        }
+    pub fn set_switch_zone_policy(&self, policy: OperatorSwitchZonePolicy) {
+        self.switch_zone_policy_tx.send_if_modified(|p| {
+            if *p != policy {
+                *p = policy;
+                true
+            } else {
+                false
+            }
+        });
     }
 }
 
-// A monitor for hardware events
+/// A monitor for hardware events
 pub struct HardwareMonitor {
     log: Logger,
 
@@ -64,6 +54,9 @@ pub struct HardwareMonitor {
 
     // Receive messages from the [`HardwareManager`]
     hardware_rx: broadcast::Receiver<HardwareUpdate>,
+
+    // Receive the operator's policy controlling the switch zone
+    switch_zone_policy_rx: watch::Receiver<OperatorSwitchZonePolicy>,
 
     // A reference to the hardware manager
     hardware_manager: HardwareManager,
@@ -79,21 +72,22 @@ pub struct HardwareMonitor {
     //  * https://rfd.shared.oxide.computer/rfd/0433
     sled_agent: Option<SledAgent>,
 
-    // The [`ServiceManager`] is instantiated after we start the [`HardwareMonitor`]
-    // task. However, it is only used to load and unload the switch zone when thes
-    // state of the tofino changes. We keep track of the tofino state so that we
-    // can properly load the tofino when the [`ServiceManager`] becomes available
-    // available.
-    tofino_manager: TofinoManager,
+    /// The [`ServiceManager`] is instantiated after [`HardwareMonitor`]. We
+    /// need a handle to it to start and stop the switch zone when our hardware
+    /// or policy changes.
+    service_manager: Option<ServiceManager>,
+
+    /// Whether or not the tofino is loaded.
+    is_tofino_loaded: bool,
 }
 
 impl HardwareMonitor {
-    pub fn new(
+    pub fn spawn(
         log: &Logger,
         hardware_manager: &HardwareManager,
         raw_disks_tx: RawDisksSender,
     ) -> (
-        HardwareMonitor,
+        HardwareMonitorHandle,
         oneshot::Sender<SledAgent>,
         oneshot::Sender<ServiceManager>,
     ) {
@@ -103,28 +97,30 @@ impl HardwareMonitor {
         let baseboard = hardware_manager.baseboard();
         let hardware_rx = hardware_manager.monitor();
         let log = log.new(o!("component" => "HardwareMonitor"));
-        let tofino_manager = TofinoManager::new();
-        (
-            HardwareMonitor {
-                log,
-                baseboard,
-                sled_agent_started_rx,
-                service_manager_ready_rx,
-                hardware_rx,
-                hardware_manager: hardware_manager.clone(),
-                raw_disks_tx,
-                sled_agent: None,
-                tofino_manager,
-            },
-            sled_agent_started_tx,
-            service_manager_ready_tx,
-        )
+        let (switch_zone_policy_tx, switch_zone_policy_rx) =
+            watch::channel(OperatorSwitchZonePolicy::StartIfSwitchPresent);
+        let monitor = HardwareMonitor {
+            log,
+            baseboard,
+            sled_agent_started_rx,
+            service_manager_ready_rx,
+            hardware_rx,
+            switch_zone_policy_rx,
+            hardware_manager: hardware_manager.clone(),
+            raw_disks_tx,
+            sled_agent: None,
+            service_manager: None,
+            is_tofino_loaded: false,
+        };
+        tokio::spawn(monitor.run());
+        let handle = HardwareMonitorHandle { switch_zone_policy_tx };
+        (handle, sled_agent_started_tx, service_manager_ready_tx)
     }
 
     /// Run the main receive loop of the `HardwareMonitor`
     ///
     /// This should be spawned into a tokio task
-    pub async fn run(&mut self) {
+    pub async fn run(mut self) {
         // Check the latest hardware snapshot; we could have missed events
         // between the creation of the hardware manager and our subscription of
         // its monitor.
@@ -140,13 +136,17 @@ impl HardwareMonitor {
                     self.check_latest_hardware_snapshot().await;
                 }
                 Ok(service_manager) = &mut self.service_manager_ready_rx,
-                    if !self.tofino_manager.is_ready() =>
+                    if self.service_manager.is_none() =>
                 {
-                    let tofino_loaded =
-                        self.tofino_manager.become_ready(service_manager);
-                    if tofino_loaded {
-                        self.activate_switch().await;
-                    }
+                    self.service_manager = Some(service_manager);
+
+                    // We may have already loaded the tofino and were waiting on
+                    // the service manager to start the switch zone; do so now.
+                    let policy = self.current_switch_zone_policy();
+                    self.ensure_switch_zone_activated_or_deactivated(
+                        self.is_tofino_loaded,
+                        policy,
+                    ).await;
                 }
                 update = self.hardware_rx.recv() => {
                     info!(
@@ -156,8 +156,25 @@ impl HardwareMonitor {
                     );
                     self.handle_hardware_update(update).await;
                 }
+                Ok(()) = self.switch_zone_policy_rx.changed() => {
+                    let policy = self.current_switch_zone_policy();
+                    info!(
+                        self.log, "Switch zone policy changed; reevaluating";
+                        "policy" => ?policy,
+                    );
+                    self.ensure_switch_zone_activated_or_deactivated(
+                        self.is_tofino_loaded,
+                        policy,
+                    ).await;
+                }
             }
         }
+    }
+
+    // Read the current switch zone policy (and update the watch channel to note
+    // that we've read the current value).
+    fn current_switch_zone_policy(&mut self) -> OperatorSwitchZonePolicy {
+        *self.switch_zone_policy_rx.borrow_and_update()
     }
 
     // Handle an update from the [`HardwareMonitor`]
@@ -167,9 +184,19 @@ impl HardwareMonitor {
     ) {
         match update {
             Ok(update) => match update {
-                HardwareUpdate::TofinoLoaded => self.activate_switch().await,
+                HardwareUpdate::TofinoLoaded => {
+                    let policy = self.current_switch_zone_policy();
+                    self.ensure_switch_zone_activated_or_deactivated(
+                        true, policy,
+                    )
+                    .await
+                }
                 HardwareUpdate::TofinoUnloaded => {
-                    self.deactivate_switch().await
+                    let policy = self.current_switch_zone_policy();
+                    self.ensure_switch_zone_activated_or_deactivated(
+                        false, policy,
+                    )
+                    .await
                 }
                 HardwareUpdate::TofinoDeviceChange => {
                     if let Some(sled_agent) = &mut self.sled_agent {
@@ -202,36 +229,61 @@ impl HardwareMonitor {
         }
     }
 
-    async fn activate_switch(&mut self) {
-        match &mut self.tofino_manager {
-            TofinoManager::Ready(service_manager) => {
-                if let Err(e) = service_manager
-                    .activate_switch(
-                        self.sled_agent
-                            .as_ref()
-                            .map(|sa| sa.switch_zone_underlay_info()),
-                        self.baseboard.clone(),
-                    )
-                    .await
-                {
-                    error!(self.log, "Failed to activate switch"; e);
-                }
-            }
-            TofinoManager::NotReady { tofino_loaded } => {
-                *tofino_loaded = true;
-            }
-        }
-    }
+    async fn ensure_switch_zone_activated_or_deactivated(
+        &mut self,
+        is_tofino_loaded: bool,
+        policy: OperatorSwitchZonePolicy,
+    ) {
+        // Remember whether the tofino is loaded regardless of the action we
+        // take (or don't take) below.
+        self.is_tofino_loaded = is_tofino_loaded;
 
-    async fn deactivate_switch(&mut self) {
-        match &mut self.tofino_manager {
-            TofinoManager::Ready(service_manager) => {
-                if let Err(e) = service_manager.deactivate_switch().await {
-                    warn!(self.log, "Failed to deactivate switch: {e}");
-                }
+        // If we don't have the service manager yet, we can't do anything.
+        let Some(service_manager) = &self.service_manager else {
+            return;
+        };
+
+        // Decide whether to activate or deactivate based on the combination of
+        // `tofino_loaded` and the operator policy.
+        let should_activate = match (is_tofino_loaded, policy) {
+            // We have a tofino and policy says to start the switch zone
+            (true, OperatorSwitchZonePolicy::StartIfSwitchPresent) => {
+                info!(
+                    self.log,
+                    "tofino present and policy allows switch zone; \
+                     will activate it"
+                );
+                true
             }
-            TofinoManager::NotReady { tofino_loaded } => {
-                *tofino_loaded = false;
+            // We have a tofino but policy says to stop the switch zone
+            (true, OperatorSwitchZonePolicy::StopDespiteSwitchPresence) => {
+                info!(
+                    self.log,
+                    "tofino present but policy disables switch zone; \
+                     will deactivate it"
+                );
+                false
+            }
+            // If we don't have a tofino, stop the switch zone regardless of
+            // policy.
+            (false, _) => false,
+        };
+
+        if should_activate {
+            if let Err(e) = service_manager
+                .activate_switch(
+                    self.sled_agent
+                        .as_ref()
+                        .map(|sa| sa.switch_zone_underlay_info()),
+                    self.baseboard.clone(),
+                )
+                .await
+            {
+                error!(self.log, "Failed to activate switch"; e);
+            }
+        } else {
+            if let Err(e) = service_manager.deactivate_switch().await {
+                warn!(self.log, "Failed to deactivate switch: {e}");
             }
         }
     }
@@ -254,11 +306,12 @@ impl HardwareMonitor {
             "disks" => ?self.hardware_manager.disks(),
         );
 
-        if self.hardware_manager.is_scrimlet_driver_loaded() {
-            self.activate_switch().await;
-        } else {
-            self.deactivate_switch().await;
-        }
+        let policy = self.current_switch_zone_policy();
+        self.ensure_switch_zone_activated_or_deactivated(
+            self.hardware_manager.is_scrimlet_driver_loaded(),
+            policy,
+        )
+        .await;
 
         self.raw_disks_tx.set_raw_disks(
             self.hardware_manager.disks().into_values().map(RawDisk::from),

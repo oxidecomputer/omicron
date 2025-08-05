@@ -8,9 +8,12 @@ use std::net::Ipv6Addr;
 
 use internal_dns_resolver::Resolver;
 use nexus_db_queries::{context::OpContext, db::DataStore};
-use nexus_types::deployment::{
-    Blueprint, PendingMgsUpdates,
-    execution::{EventBuffer, Overridables},
+use nexus_types::{
+    deployment::{
+        Blueprint, PendingMgsUpdates,
+        execution::{EventBuffer, Overridables},
+    },
+    quiesce::SagaQuiesceHandle,
 };
 use omicron_uuid_kinds::OmicronZoneUuid;
 use update_engine::TerminalKind;
@@ -37,6 +40,8 @@ pub(crate) async fn realize_blueprint_and_expect(
 
     // This helper function does not support MGS-managed updates.
     let (mgs_updates, _rx) = watch::channel(PendingMgsUpdates::new());
+    // This helper function does not mess with quiescing.
+    let saga_quiesce = SagaQuiesceHandle::new(opctx.log.clone());
     let nexus_id = OmicronZoneUuid::new_v4();
     let output = crate::realize_blueprint(
         RequiredRealizeArgs {
@@ -47,6 +52,7 @@ pub(crate) async fn realize_blueprint_and_expect(
             blueprint,
             sender,
             mgs_updates,
+            saga_quiesce,
         }
         .with_overrides(overrides)
         .as_nexus(OmicronZoneUuid::new_v4()),
@@ -93,13 +99,7 @@ pub fn overridables_for_test(
     for (id_str, switch_location) in scrimlets {
         let sled_id = id_str.parse().unwrap();
         let ip = Ipv6Addr::LOCALHOST;
-        let mgs_port = cptestctx
-            .gateway
-            .get(&switch_location)
-            .unwrap()
-            .client
-            .bind_address
-            .port();
+        let mgs_port = cptestctx.gateway.get(&switch_location).unwrap().port;
         let dendrite_port =
             cptestctx.dendrite.get(&switch_location).unwrap().port;
         let mgd_port = cptestctx.mgd.get(&switch_location).unwrap().port;

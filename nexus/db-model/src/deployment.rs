@@ -10,7 +10,7 @@ use crate::omicron_zone_config::{self, OmicronZoneNic};
 use crate::typed_uuid::DbTypedUuid;
 use crate::{
     ArtifactHash, ByteCount, DbArtifactVersion, DbOximeterReadMode, Generation,
-    MacAddr, Name, SledState, SqlU8, SqlU16, SqlU32, TufArtifact,
+    HwM2Slot, MacAddr, Name, SledState, SqlU8, SqlU16, SqlU32, TufArtifact,
     impl_enum_type, ipv6,
 };
 use anyhow::{Context, Result, anyhow, bail};
@@ -22,12 +22,11 @@ use nexus_db_schema::schema::{
     bp_clickhouse_keeper_zone_id_to_node_id,
     bp_clickhouse_server_zone_id_to_node_id, bp_omicron_dataset,
     bp_omicron_physical_disk, bp_omicron_zone, bp_omicron_zone_nic,
-    bp_oximeter_read_policy, bp_pending_mgs_update_rot,
-    bp_pending_mgs_update_rot_bootloader, bp_pending_mgs_update_sp,
-    bp_sled_metadata, bp_target,
+    bp_oximeter_read_policy, bp_pending_mgs_update_host_phase_1,
+    bp_pending_mgs_update_rot, bp_pending_mgs_update_rot_bootloader,
+    bp_pending_mgs_update_sp, bp_sled_metadata, bp_target,
 };
 use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
-use nexus_types::deployment::BlueprintHostPhase2DesiredContents;
 use nexus_types::deployment::BlueprintHostPhase2DesiredSlots;
 use nexus_types::deployment::BlueprintPhysicalDiskConfig;
 use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
@@ -40,10 +39,16 @@ use nexus_types::deployment::CockroachDbPreserveDowngrade;
 use nexus_types::deployment::ExpectedActiveRotSlot;
 use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdateDetails;
+use nexus_types::deployment::PendingMgsUpdateRotBootloaderDetails;
+use nexus_types::deployment::PendingMgsUpdateRotDetails;
+use nexus_types::deployment::PendingMgsUpdateSpDetails;
 use nexus_types::deployment::{
     BlueprintArtifactVersion, BlueprintDatasetConfig, OximeterReadMode,
 };
 use nexus_types::deployment::{BlueprintDatasetDisposition, ExpectedVersion};
+use nexus_types::deployment::{
+    BlueprintHostPhase2DesiredContents, PendingMgsUpdateHostPhase1Details,
+};
 use nexus_types::deployment::{BlueprintZoneImageSource, blueprint_zone_type};
 use nexus_types::deployment::{
     OmicronZoneExternalFloatingAddr, OmicronZoneExternalFloatingIp,
@@ -76,6 +81,7 @@ pub struct Blueprint {
     pub creator: String,
     pub comment: String,
     pub target_release_minimum_generation: Generation,
+    pub nexus_generation: Generation,
 }
 
 impl From<&'_ nexus_types::deployment::Blueprint> for Blueprint {
@@ -95,6 +101,7 @@ impl From<&'_ nexus_types::deployment::Blueprint> for Blueprint {
             target_release_minimum_generation: Generation(
                 bp.target_release_minimum_generation,
             ),
+            nexus_generation: Generation(bp.nexus_generation),
         }
     }
 }
@@ -108,6 +115,7 @@ impl From<Blueprint> for nexus_types::deployment::BlueprintMetadata {
             external_dns_version: *value.external_dns_version,
             target_release_minimum_generation: *value
                 .target_release_minimum_generation,
+            nexus_generation: *value.nexus_generation,
             cockroachdb_fingerprint: value.cockroachdb_fingerprint,
             cockroachdb_setting_preserve_downgrade:
                 CockroachDbPreserveDowngrade::from_optional_string(
@@ -519,6 +527,7 @@ pub struct BpOmicronZone {
 
     pub image_source: DbBpZoneImageSource,
     pub image_artifact_sha256: Option<ArtifactHash>,
+    pub nexus_generation: Option<Generation>,
 }
 
 impl BpOmicronZone {
@@ -580,6 +589,7 @@ impl BpOmicronZone {
             snat_ip: None,
             snat_first_port: None,
             snat_last_port: None,
+            nexus_generation: None,
         };
 
         match &blueprint_zone.zone_type {
@@ -711,6 +721,7 @@ impl BpOmicronZone {
                 nic,
                 external_tls,
                 external_dns_servers,
+                nexus_generation,
             }) => {
                 // Set the common fields
                 bp_omicron_zone
@@ -728,6 +739,8 @@ impl BpOmicronZone {
                         .map(IpNetwork::from)
                         .collect(),
                 );
+                bp_omicron_zone.nexus_generation =
+                    Some(Generation::from(*nexus_generation));
             }
             BlueprintZoneType::Oximeter(blueprint_zone_type::Oximeter {
                 address,
@@ -933,6 +946,9 @@ impl BpOmicronZone {
                         .into_iter()
                         .map(|i| i.ip())
                         .collect(),
+                    nexus_generation: *self.nexus_generation.ok_or_else(
+                        || anyhow!("expected 'nexus_generation'"),
+                    )?,
                 })
             }
             ZoneType::Oximeter => {
@@ -1337,16 +1353,18 @@ impl BpPendingMgsUpdateComponent for BpPendingMgsUpdateRotBootloader {
             slot_id: **self.sp_slot,
             artifact_hash: self.artifact_sha256.into(),
             artifact_version: (*self.artifact_version).clone(),
-            details: PendingMgsUpdateDetails::RotBootloader {
-                expected_stage0_version: (*self.expected_stage0_version)
-                    .clone(),
-                expected_stage0_next_version: match self
-                    .expected_stage0_next_version
-                {
-                    Some(v) => ExpectedVersion::Version((*v).clone()),
-                    None => ExpectedVersion::NoValidVersion,
+            details: PendingMgsUpdateDetails::RotBootloader(
+                PendingMgsUpdateRotBootloaderDetails {
+                    expected_stage0_version: (*self.expected_stage0_version)
+                        .clone(),
+                    expected_stage0_next_version: match self
+                        .expected_stage0_next_version
+                    {
+                        Some(v) => ExpectedVersion::Version((*v).clone()),
+                        None => ExpectedVersion::NoValidVersion,
+                    },
                 },
-            },
+            ),
         }
     }
 }
@@ -1376,7 +1394,7 @@ impl BpPendingMgsUpdateComponent for BpPendingMgsUpdateSp {
             slot_id: **self.sp_slot,
             artifact_hash: self.artifact_sha256.into(),
             artifact_version: (*self.artifact_version).clone(),
-            details: PendingMgsUpdateDetails::Sp {
+            details: PendingMgsUpdateDetails::Sp(PendingMgsUpdateSpDetails {
                 expected_active_version: (*self.expected_active_version)
                     .clone(),
                 expected_inactive_version: match self.expected_inactive_version
@@ -1384,7 +1402,7 @@ impl BpPendingMgsUpdateComponent for BpPendingMgsUpdateSp {
                     Some(v) => ExpectedVersion::Version((*v).clone()),
                     None => ExpectedVersion::NoValidVersion,
                 },
-            },
+            }),
         }
     }
 }
@@ -1418,7 +1436,7 @@ impl BpPendingMgsUpdateComponent for BpPendingMgsUpdateRot {
             slot_id: **self.sp_slot,
             artifact_hash: self.artifact_sha256.into(),
             artifact_version: (*self.artifact_version).clone(),
-            details: PendingMgsUpdateDetails::Rot {
+            details: PendingMgsUpdateDetails::Rot(PendingMgsUpdateRotDetails {
                 expected_active_slot: ExpectedActiveRotSlot {
                     slot: self.expected_active_slot.into(),
                     version: (*self.expected_active_version).clone(),
@@ -1436,7 +1454,68 @@ impl BpPendingMgsUpdateComponent for BpPendingMgsUpdateRot {
                 expected_transient_boot_preference: self
                     .expected_transient_boot_preference
                     .map(|s| s.into()),
-            },
+            }),
+        }
+    }
+}
+
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = bp_pending_mgs_update_host_phase_1)]
+pub struct BpPendingMgsUpdateHostPhase1 {
+    pub blueprint_id: DbTypedUuid<BlueprintKind>,
+    pub hw_baseboard_id: Uuid,
+    pub sp_type: SpType,
+    pub sp_slot: SpMgsSlot,
+    pub artifact_sha256: ArtifactHash,
+    pub artifact_version: DbArtifactVersion,
+    pub expected_active_phase_1_slot: HwM2Slot,
+    pub expected_boot_disk: HwM2Slot,
+    pub expected_active_phase_1_hash: ArtifactHash,
+    pub expected_active_phase_2_hash: ArtifactHash,
+    pub expected_inactive_phase_1_hash: ArtifactHash,
+    pub expected_inactive_phase_2_hash: ArtifactHash,
+    sled_agent_ip: ipv6::Ipv6Addr,
+    sled_agent_port: SqlU16,
+}
+
+impl BpPendingMgsUpdateComponent for BpPendingMgsUpdateHostPhase1 {
+    fn hw_baseboard_id(&self) -> &Uuid {
+        &self.hw_baseboard_id
+    }
+
+    fn into_generic(self, baseboard_id: Arc<BaseboardId>) -> PendingMgsUpdate {
+        PendingMgsUpdate {
+            baseboard_id,
+            sp_type: self.sp_type.into(),
+            slot_id: **self.sp_slot,
+            artifact_hash: self.artifact_sha256.into(),
+            artifact_version: (*self.artifact_version).clone(),
+            details: PendingMgsUpdateDetails::HostPhase1(
+                PendingMgsUpdateHostPhase1Details {
+                    expected_active_phase_1_slot: self
+                        .expected_active_phase_1_slot
+                        .into(),
+                    expected_boot_disk: self.expected_boot_disk.into(),
+                    expected_active_phase_1_hash: self
+                        .expected_active_phase_1_hash
+                        .into(),
+                    expected_active_phase_2_hash: self
+                        .expected_active_phase_2_hash
+                        .into(),
+                    expected_inactive_phase_1_hash: self
+                        .expected_inactive_phase_1_hash
+                        .into(),
+                    expected_inactive_phase_2_hash: self
+                        .expected_inactive_phase_2_hash
+                        .into(),
+                    sled_agent_address: SocketAddrV6::new(
+                        self.sled_agent_ip.into(),
+                        *self.sled_agent_port,
+                        0,
+                        0,
+                    ),
+                },
+            ),
         }
     }
 }

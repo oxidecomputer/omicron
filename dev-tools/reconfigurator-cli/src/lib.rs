@@ -6,14 +6,16 @@
 
 use anyhow::{Context, anyhow, bail};
 use camino::{Utf8Path, Utf8PathBuf};
+use chrono::{DateTime, Utc};
 use clap::{ArgAction, ValueEnum};
 use clap::{Args, Parser, Subcommand};
 use daft::Diffable;
+use gateway_types::rot::RotSlot;
 use iddqd::IdOrdMap;
 use indent_write::fmt::IndentWriter;
 use internal_dns_types::diff::DnsDiff;
 use itertools::Itertools;
-use log_capture::LogCapture;
+pub use log_capture::LogCapture;
 use nexus_inventory::CollectionBuilder;
 use nexus_reconfigurator_blippy::Blippy;
 use nexus_reconfigurator_blippy::BlippyReportSortKey;
@@ -21,13 +23,12 @@ use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
 use nexus_reconfigurator_planning::example::ExampleSystemBuilder;
 use nexus_reconfigurator_planning::planner::Planner;
 use nexus_reconfigurator_planning::system::{
-    SledBuilder, SledInventoryVisibility, SystemDescription,
+    RotStateOverrides, SledBuilder, SledInventoryVisibility, SystemDescription,
 };
 use nexus_reconfigurator_simulation::{BlueprintId, CollectionId, SimState};
 use nexus_reconfigurator_simulation::{SimStateBuilder, SimTufRepoSource};
 use nexus_reconfigurator_simulation::{SimTufRepoDescription, Simulator};
 use nexus_sled_agent_shared::inventory::ZoneKind;
-use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::execution;
 use nexus_types::deployment::execution::blueprint_external_dns_config;
@@ -42,6 +43,7 @@ use nexus_types::deployment::{
     BlueprintZoneImageSource, PendingMgsUpdateDetails,
 };
 use nexus_types::deployment::{OmicronZoneNic, TargetReleaseDescription};
+use nexus_types::deployment::{PendingMgsUpdateSpDetails, PlanningInput};
 use nexus_types::external_api::views::SledPolicy;
 use nexus_types::external_api::views::SledProvisionPolicy;
 use nexus_types::inventory::CollectionDisplayCliFilter;
@@ -234,9 +236,16 @@ fn process_command(
         Commands::SledUpdateInstallDataset(args) => {
             cmd_sled_update_install_dataset(sim, args)
         }
+        Commands::SledUpdateRot(args) => cmd_sled_update_rot(sim, args),
         Commands::SledUpdateSp(args) => cmd_sled_update_sp(sim, args),
+        Commands::SledUpdateHostPhase1(args) => {
+            cmd_sled_update_host_phase_1(sim, args)
+        }
+        Commands::SledUpdateHostPhase2(args) => {
+            cmd_sled_update_host_phase_2(sim, args)
+        }
         Commands::SledUpdateRotBootloader(args) => {
-            cmd_sled_update_rot_bootlaoder(sim, args)
+            cmd_sled_update_rot_bootloader(sim, args)
         }
         Commands::SiloList => cmd_silo_list(sim),
         Commands::SiloAdd(args) => cmd_silo_add(sim, args),
@@ -292,10 +301,16 @@ enum Commands {
     SledSet(SledSetArgs),
     /// update the install dataset on a sled, simulating a mupdate
     SledUpdateInstallDataset(SledUpdateInstallDatasetArgs),
+    /// simulate updating the sled's RoT versions
+    SledUpdateRot(SledUpdateRotArgs),
     /// simulate updating the sled's RoT Bootloader versions
     SledUpdateRotBootloader(SledUpdateRotBootloaderArgs),
     /// simulate updating the sled's SP versions
     SledUpdateSp(SledUpdateSpArgs),
+    /// simulate updating the sled's host OS phase 1 artifacts
+    SledUpdateHostPhase1(SledUpdateHostPhase1Args),
+    /// simulate updating the sled's host OS phase 2 artifacts
+    SledUpdateHostPhase2(SledUpdateHostPhase2Args),
 
     /// list silos
     SiloList,
@@ -387,6 +402,8 @@ struct SledSetArgs {
 enum SledSetCommand {
     /// set the policy for this sled
     Policy(SledSetPolicyArgs),
+    /// set the Omicron config for this sled from a blueprint
+    OmicronConfig(SledSetOmicronConfigArgs),
     #[clap(flatten)]
     Visibility(SledSetVisibilityCommand),
     /// set the mupdate override for this sled
@@ -398,6 +415,12 @@ struct SledSetPolicyArgs {
     /// the policy to set
     #[clap(value_enum)]
     policy: SledPolicyOpt,
+}
+
+#[derive(Debug, Args)]
+struct SledSetOmicronConfigArgs {
+    /// the blueprint to derive the Omicron config from
+    blueprint: BlueprintIdOpt,
 }
 
 #[derive(Debug, Subcommand)]
@@ -525,6 +548,77 @@ struct SledUpdateSpArgs {
     /// sets the version reported for the SP inactive slot
     #[clap(long, required_unless_present_any = &["active"])]
     inactive: Option<ExpectedVersion>,
+}
+
+#[derive(Debug, Args)]
+struct SledUpdateRotArgs {
+    /// id of the sled
+    sled_id: SledOpt,
+
+    /// sets the version reported for the RoT slot a
+    #[clap(long, required_unless_present_any = &["slot_b"])]
+    slot_a: Option<ExpectedVersion>,
+
+    /// sets the version reported for the RoT slot b
+    #[clap(long, required_unless_present_any = &["slot_a"])]
+    slot_b: Option<ExpectedVersion>,
+
+    /// sets whether we expect the "A" or "B" slot to be active
+    #[clap(long)]
+    active_slot: Option<RotSlot>,
+
+    /// sets the persistent boot preference written into the current
+    /// authoritative CFPA page (ping or pong).
+    #[clap(long)]
+    persistent_boot_preference: Option<RotSlot>,
+
+    /// sets the pending persistent boot preference written into the CFPA
+    /// scratch page that will become the persistent boot preference in the
+    /// authoritative CFPA page upon reboot, unless CFPA update of the
+    /// authoritative page fails for some reason
+    #[clap(long, num_args(0..=1))]
+    pending_persistent_boot_preference: Option<Option<RotSlot>>,
+
+    /// sets the transient boot preference, which overrides persistent
+    /// preference selection for a single boot (unimplemented)
+    #[clap(long, num_args(0..=1),)]
+    transient_boot_preference: Option<Option<RotSlot>>,
+}
+
+#[derive(Debug, Args)]
+struct SledUpdateHostPhase1Args {
+    /// id of the sled
+    sled_id: SledOpt,
+
+    /// sets which phase 1 slot is active
+    #[clap(long, value_parser = parse_m2_slot)]
+    active: Option<M2Slot>,
+
+    /// sets the artifact hash reported for host OS phase 1 slot A
+    #[clap(long)]
+    slot_a: Option<ArtifactHash>,
+
+    /// sets the artifact hash reported for host OS phase 1 slot B
+    #[clap(long)]
+    slot_b: Option<ArtifactHash>,
+}
+
+#[derive(Debug, Args)]
+struct SledUpdateHostPhase2Args {
+    /// id of the sled
+    sled_id: SledOpt,
+
+    /// sets which phase 2 slot is the boot disk
+    #[clap(long, value_parser = parse_m2_slot)]
+    boot_disk: Option<M2Slot>,
+
+    /// sets the artifact hash reported for host OS phase 2 slot A
+    #[clap(long)]
+    slot_a: Option<ArtifactHash>,
+
+    /// sets the artifact hash reported for host OS phase 2 slot B
+    #[clap(long)]
+    slot_b: Option<ArtifactHash>,
 }
 
 #[derive(Debug, Args)]
@@ -1077,6 +1171,27 @@ enum SetArgs {
     },
     /// planner chicken switches
     ChickenSwitches(SetChickenSwitchesArgs),
+    /// timestamp for ignoring impossible MGS updates
+    IgnoreImpossibleMgsUpdatesSince {
+        since: SetIgnoreImpossibleMgsUpdatesSinceArgs,
+    },
+}
+
+#[derive(Debug, Clone)]
+struct SetIgnoreImpossibleMgsUpdatesSinceArgs(DateTime<Utc>);
+
+impl FromStr for SetIgnoreImpossibleMgsUpdatesSinceArgs {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s.eq_ignore_ascii_case("now") {
+            return Ok(Self(Utc::now()));
+        }
+        if let Ok(datetime) = humantime::parse_rfc3339(s) {
+            return Ok(Self(datetime.into()));
+        }
+        bail!("invalid timestamp: expected `now` or an RFC3339 timestamp")
+    }
 }
 
 #[derive(Debug, Args)]
@@ -1358,6 +1473,15 @@ fn cmd_sled_show(
     let stage0_next_version = description.sled_stage0_next_version(sled_id)?;
     let sp_active_version = description.sled_sp_active_version(sled_id)?;
     let sp_inactive_version = description.sled_sp_inactive_version(sled_id)?;
+    let rot_active_slot = description.sled_rot_active_slot(sled_id)?;
+    let rot_slot_a_version = description.sled_rot_slot_a_version(sled_id)?;
+    let rot_slot_b_version = description.sled_rot_slot_b_version(sled_id)?;
+    let rot_persistent_boot_preference =
+        description.sled_rot_persistent_boot_preference(sled_id)?;
+    let rot_pending_persistent_boot_preference =
+        description.sled_rot_pending_persistent_boot_preference(sled_id)?;
+    let rot_transient_boot_preference =
+        description.sled_rot_transient_boot_preference(sled_id)?;
     let planning_input = description
         .to_planning_input_builder()
         .context("failed to generate planning_input builder")?
@@ -1368,14 +1492,32 @@ fn cmd_sled_show(
     swriteln!(s, "sled {} ({}, {})", sled_id, sled.policy, sled.state);
     swriteln!(s, "serial {}", sled.baseboard_id.serial_number);
     swriteln!(s, "subnet {}", sled_resources.subnet.net());
-    swriteln!(s, "RoT bootloader stage 0 version:   {:?}", stage0_version);
+    swriteln!(s, "SP active version: {:?}", sp_active_version);
+    swriteln!(s, "SP inactive version: {:?}", sp_inactive_version);
+    swriteln!(s, "RoT bootloader stage 0 version: {:?}", stage0_version);
     swriteln!(
         s,
         "RoT bootloader stage 0 next version: {:?}",
         stage0_next_version
     );
-    swriteln!(s, "SP active version:   {:?}", sp_active_version);
-    swriteln!(s, "SP inactive version: {:?}", sp_inactive_version);
+    swriteln!(s, "RoT active slot: {}", rot_active_slot);
+    swriteln!(s, "RoT slot A version: {:?}", rot_slot_a_version);
+    swriteln!(s, "RoT slot B version: {:?}", rot_slot_b_version);
+    swriteln!(
+        s,
+        "RoT persistent boot preference: {}",
+        rot_persistent_boot_preference
+    );
+    swriteln!(
+        s,
+        "RoT pending persistent boot preference: {:?}",
+        rot_pending_persistent_boot_preference
+    );
+    swriteln!(
+        s,
+        "RoT transient boot preference: {:?}",
+        rot_transient_boot_preference
+    );
     swriteln!(s, "zpools ({}):", sled_resources.zpools.len());
     for (zpool, disk) in &sled_resources.zpools {
         swriteln!(s, "    {:?}", zpool);
@@ -1403,6 +1545,30 @@ fn cmd_sled_set(
                 state,
             );
             Ok(Some(format!("set sled {sled_id} policy to {policy}")))
+        }
+        SledSetCommand::OmicronConfig(command) => {
+            let resolved_id =
+                system.resolve_blueprint_id(command.blueprint.into())?;
+            let blueprint = system.get_blueprint(&resolved_id)?;
+            let sled_cfg =
+                blueprint.sleds.get(&sled_id).with_context(|| {
+                    format!("sled id {sled_id} not found in blueprint")
+                })?;
+            let omicron_sled_cfg =
+                sled_cfg.clone().into_in_service_sled_config();
+            system
+                .description_mut()
+                .sled_set_omicron_config(sled_id, omicron_sled_cfg)?;
+            sim.commit_and_bump(
+                format!(
+                    "reconfigurator-cli sled-set omicron-config: \
+                     {sled_id} from {resolved_id}",
+                ),
+                state,
+            );
+            Ok(Some(format!(
+                "set sled {sled_id} omicron config from {resolved_id}"
+            )))
         }
         SledSetCommand::Visibility(command) => {
             let new = command.to_visibility();
@@ -1502,7 +1668,7 @@ fn cmd_sled_update_install_dataset(
     )))
 }
 
-fn cmd_sled_update_rot_bootlaoder(
+fn cmd_sled_update_rot_bootloader(
     sim: &mut ReconfiguratorSim,
     args: SledUpdateRotBootloaderArgs,
 ) -> anyhow::Result<Option<String>> {
@@ -1580,6 +1746,161 @@ fn cmd_sled_update_sp(
     );
 
     Ok(Some(format!("set sled {} SP versions: {}", sled_id, labels.join(", "))))
+}
+
+fn cmd_sled_update_rot(
+    sim: &mut ReconfiguratorSim,
+    args: SledUpdateRotArgs,
+) -> anyhow::Result<Option<String>> {
+    let mut labels = Vec::new();
+
+    if let Some(slot_a) = &args.slot_a {
+        labels.push(format!("slot a -> {}", slot_a));
+    }
+    if let Some(slot_b) = &args.slot_b {
+        labels.push(format!("slot b -> {}", slot_b));
+    }
+    if let Some(active_slot) = &args.active_slot {
+        labels.push(format!("active slot -> {}", active_slot));
+    }
+
+    if let Some(persistent_boot_preference) = &args.persistent_boot_preference {
+        labels.push(format!(
+            "persistent boot preference -> {}",
+            persistent_boot_preference
+        ));
+    }
+
+    if let Some(pending_persistent_boot_preference) =
+        &args.pending_persistent_boot_preference
+    {
+        labels.push(format!(
+            "pending persistent boot preference -> {:?}",
+            pending_persistent_boot_preference
+        ));
+    }
+    if let Some(transient_boot_preference) = &args.transient_boot_preference {
+        labels.push(format!(
+            "transient boot preference -> {:?}",
+            transient_boot_preference
+        ));
+    }
+
+    assert!(
+        !labels.is_empty(),
+        "clap configuration requires that at least one argument is specified"
+    );
+
+    let mut state = sim.current_state().to_mut();
+    let system = state.system_mut();
+    let sled_id = args.sled_id.to_sled_id(system.description())?;
+    system.description_mut().sled_update_rot_versions(
+        sled_id,
+        RotStateOverrides {
+            active_slot_override: args.active_slot,
+            slot_a_version_override: args.slot_a,
+            slot_b_version_override: args.slot_b,
+            persistent_boot_preference_override: args
+                .persistent_boot_preference,
+            pending_persistent_boot_preference_override: args
+                .pending_persistent_boot_preference,
+            transient_boot_preference_override: args.transient_boot_preference,
+        },
+    )?;
+
+    sim.commit_and_bump(
+        format!(
+            "reconfigurator-cli sled-update-rot: {sled_id}: {}",
+            labels.join(", "),
+        ),
+        state,
+    );
+
+    Ok(Some(format!("set sled {sled_id} RoT settings: {}", labels.join(", "))))
+}
+
+fn cmd_sled_update_host_phase_1(
+    sim: &mut ReconfiguratorSim,
+    args: SledUpdateHostPhase1Args,
+) -> anyhow::Result<Option<String>> {
+    let SledUpdateHostPhase1Args { sled_id, active, slot_a, slot_b } = args;
+
+    let mut labels = Vec::new();
+    if let Some(active) = active {
+        labels.push(format!("active -> {active:?}"));
+    }
+    if let Some(slot_a) = slot_a {
+        labels.push(format!("A -> {slot_a}"));
+    }
+    if let Some(slot_b) = slot_b {
+        labels.push(format!("B -> {slot_b}"));
+    }
+    if labels.is_empty() {
+        bail!("sled-update-host-phase1 called with no changes");
+    }
+
+    let mut state = sim.current_state().to_mut();
+    let system = state.system_mut();
+    let sled_id = sled_id.to_sled_id(system.description())?;
+    system
+        .description_mut()
+        .sled_update_host_phase_1_artifacts(sled_id, active, slot_a, slot_b)?;
+
+    sim.commit_and_bump(
+        format!(
+            "reconfigurator-cli sled-update-host-phase1: {sled_id}: {}",
+            labels.join(", "),
+        ),
+        state,
+    );
+
+    Ok(Some(format!(
+        "set sled {} host phase 1 details: {}",
+        sled_id,
+        labels.join(", ")
+    )))
+}
+
+fn cmd_sled_update_host_phase_2(
+    sim: &mut ReconfiguratorSim,
+    args: SledUpdateHostPhase2Args,
+) -> anyhow::Result<Option<String>> {
+    let SledUpdateHostPhase2Args { sled_id, boot_disk, slot_a, slot_b } = args;
+
+    let mut labels = Vec::new();
+    if let Some(boot_disk) = boot_disk {
+        labels.push(format!("boot_disk -> {boot_disk:?}"));
+    }
+    if let Some(slot_a) = slot_a {
+        labels.push(format!("A -> {slot_a}"));
+    }
+    if let Some(slot_b) = slot_b {
+        labels.push(format!("B -> {slot_b}"));
+    }
+    if labels.is_empty() {
+        bail!("sled-update-host-phase2 called with no changes");
+    }
+
+    let mut state = sim.current_state().to_mut();
+    let system = state.system_mut();
+    let sled_id = sled_id.to_sled_id(system.description())?;
+    system.description_mut().sled_update_host_phase_2_artifacts(
+        sled_id, boot_disk, slot_a, slot_b,
+    )?;
+
+    sim.commit_and_bump(
+        format!(
+            "reconfigurator-cli sled-update-host-phase2: {sled_id}: {}",
+            labels.join(", "),
+        ),
+        state,
+    );
+
+    Ok(Some(format!(
+        "set sled {} host phase 2 details: {}",
+        sled_id,
+        labels.join(", ")
+    )))
 }
 
 fn cmd_inventory_list(
@@ -1754,14 +2075,14 @@ fn cmd_blueprint_plan(
         &planning_input,
         creator,
         collection,
+        rng,
     )
-    .context("creating planner")?
-    .with_rng(rng);
+    .context("creating planner")?;
 
     let blueprint = planner.plan().context("generating blueprint")?;
     let rv = format!(
-        "generated blueprint {} based on parent blueprint {}",
-        blueprint.id, parent_blueprint.id,
+        "generated blueprint {} based on parent blueprint {}\n{}",
+        blueprint.id, parent_blueprint.id, blueprint.report,
     );
     system.add_blueprint(blueprint)?;
 
@@ -1799,9 +2120,9 @@ fn cmd_blueprint_edit(
         &planning_input,
         &latest_collection,
         creator,
+        rng,
     )
     .context("creating blueprint builder")?;
-    builder.set_rng(rng);
 
     if let Some(comment) = args.comment {
         builder.comment(comment);
@@ -1919,10 +2240,10 @@ fn cmd_blueprint_edit(
                 SpUpdateComponent::Sp {
                     expected_active_version,
                     expected_inactive_version,
-                } => PendingMgsUpdateDetails::Sp {
+                } => PendingMgsUpdateDetails::Sp(PendingMgsUpdateSpDetails {
                     expected_active_version,
                     expected_inactive_version,
-                },
+                }),
             };
 
             let artifact_version = ArtifactVersion::new(version)
@@ -2393,6 +2714,16 @@ fn cmd_set(
                     current.display()
                 )
             }
+        }
+        SetArgs::IgnoreImpossibleMgsUpdatesSince { since } => {
+            state
+                .system_mut()
+                .description_mut()
+                .set_ignore_impossible_mgs_updates_since(since.0);
+            format!(
+                "ignoring impossible MGS updates since {}",
+                humantime::format_rfc3339_millis(since.0.into())
+            )
         }
     };
 

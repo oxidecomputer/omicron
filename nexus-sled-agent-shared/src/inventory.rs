@@ -40,9 +40,9 @@ use omicron_uuid_kinds::{SledUuid, ZpoolUuid};
 use schemars::schema::{Schema, SchemaObject};
 use schemars::{JsonSchema, SchemaGenerator};
 use serde::{Deserialize, Serialize};
-// Export this type for convenience -- this way, dependents don't have to
+// Export these types for convenience -- this way, dependents don't have to
 // depend on sled-hardware-types.
-pub use sled_hardware_types::Baseboard;
+pub use sled_hardware_types::{Baseboard, SledCpuFamily};
 use strum::EnumIter;
 use tufaceous_artifact::{ArtifactHash, KnownArtifactKind};
 
@@ -121,6 +121,7 @@ pub struct Inventory {
     pub baseboard: Baseboard,
     pub usable_hardware_threads: u32,
     pub usable_physical_ram: ByteCount,
+    pub cpu_family: SledCpuFamily,
     pub reservoir_size: ByteCount,
     pub disks: Vec<InventoryDisk>,
     pub zpools: Vec<InventoryZpool>,
@@ -189,6 +190,31 @@ impl ConfigReconcilerInventory {
     /// look at the actual `last_reconciliation` value from the parent
     /// [`Inventory`].
     pub fn debug_assume_success(config: OmicronSledConfig) -> Self {
+        let mut ret = Self {
+            // These fields will be filled in by `debug_update_assume_success`.
+            last_reconciled_config: OmicronSledConfig::default(),
+            external_disks: BTreeMap::new(),
+            datasets: BTreeMap::new(),
+            orphaned_datasets: IdOrdMap::new(),
+            zones: BTreeMap::new(),
+            remove_mupdate_override: None,
+
+            // These fields will not.
+            boot_partitions: BootPartitionContents::debug_assume_success(),
+        };
+
+        ret.debug_update_assume_success(config);
+
+        ret
+    }
+
+    /// Given a sled config, update an existing reconciler result to simulate an
+    /// output that sled-agent could have emitted if reconciliation succeeded.
+    ///
+    /// This method should only be used by tests and dev tools; real code should
+    /// look at the actual `last_reconciliation` value from the parent
+    /// [`Inventory`].
+    pub fn debug_update_assume_success(&mut self, config: OmicronSledConfig) {
         let external_disks = config
             .disks
             .iter()
@@ -211,50 +237,17 @@ impl ConfigReconcilerInventory {
                         RemoveMupdateOverrideBootSuccessInventory::Removed,
                     ),
                     non_boot_message: "mupdate override successfully removed \
-                                   on non-boot disks"
+                                       on non-boot disks"
                         .to_owned(),
                 }
             });
 
-        Self {
-            last_reconciled_config: config,
-            external_disks,
-            datasets,
-            orphaned_datasets: IdOrdMap::new(),
-            zones,
-            boot_partitions: {
-                BootPartitionContents {
-                    boot_disk: Ok(M2Slot::A),
-                    slot_a: Ok(BootPartitionDetails {
-                        header: BootImageHeader {
-                            flags: 0,
-                            data_size: 1000,
-                            image_size: 1000,
-                            target_size: 1000,
-                            sha256: [0; 32],
-                            image_name: "fake from debug_assume_success()"
-                                .to_string(),
-                        },
-                        artifact_hash: ArtifactHash([0x0a; 32]),
-                        artifact_size: 1000,
-                    }),
-                    slot_b: Ok(BootPartitionDetails {
-                        header: BootImageHeader {
-                            flags: 0,
-                            data_size: 1000,
-                            image_size: 1000,
-                            target_size: 1000,
-                            sha256: [1; 32],
-                            image_name: "fake from debug_assume_success()"
-                                .to_string(),
-                        },
-                        artifact_hash: ArtifactHash([0x0b; 32]),
-                        artifact_size: 1000,
-                    }),
-                }
-            },
-            remove_mupdate_override,
-        }
+        self.last_reconciled_config = config;
+        self.external_disks = external_disks;
+        self.datasets = datasets;
+        self.orphaned_datasets = IdOrdMap::new();
+        self.zones = zones;
+        self.remove_mupdate_override = remove_mupdate_override;
     }
 }
 
@@ -273,6 +266,48 @@ pub struct BootPartitionContents {
         schema_with = "SnakeCaseResult::<BootPartitionDetails, String>::json_schema"
     )]
     pub slot_b: Result<BootPartitionDetails, String>,
+}
+
+impl BootPartitionContents {
+    pub fn slot_details(
+        &self,
+        slot: M2Slot,
+    ) -> &Result<BootPartitionDetails, String> {
+        match slot {
+            M2Slot::A => &self.slot_a,
+            M2Slot::B => &self.slot_b,
+        }
+    }
+
+    pub fn debug_assume_success() -> Self {
+        Self {
+            boot_disk: Ok(M2Slot::A),
+            slot_a: Ok(BootPartitionDetails {
+                header: BootImageHeader {
+                    flags: 0,
+                    data_size: 1000,
+                    image_size: 1000,
+                    target_size: 1000,
+                    sha256: [0; 32],
+                    image_name: "fake from debug_assume_success()".to_string(),
+                },
+                artifact_hash: ArtifactHash([0x0a; 32]),
+                artifact_size: 1000,
+            }),
+            slot_b: Ok(BootPartitionDetails {
+                header: BootImageHeader {
+                    flags: 0,
+                    data_size: 1000,
+                    image_size: 1000,
+                    target_size: 1000,
+                    sha256: [1; 32],
+                    image_name: "fake from debug_assume_success()".to_string(),
+                },
+                artifact_hash: ArtifactHash([0x0b; 32]),
+                artifact_size: 1000,
+            }),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
@@ -557,7 +592,7 @@ impl ZoneManifestBootInventory {
     }
 
     /// Returns a displayer for this inventory.
-    pub fn display(&self) -> ZoneManifestBootInventoryDisplay {
+    pub fn display(&self) -> ZoneManifestBootInventoryDisplay<'_> {
         ZoneManifestBootInventoryDisplay { inner: self }
     }
 }

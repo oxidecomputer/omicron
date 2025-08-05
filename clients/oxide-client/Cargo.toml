@@ -26,3 +26,4 @@ thiserror.workspace = true
 tokio = { workspace = true, features = [ "net" ] }
 uuid.workspace = true
 omicron-workspace-hack.workspace = true
+omicron-uuid-kinds.workspace = true

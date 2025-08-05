@@ -29,6 +29,7 @@ use nexus_sled_agent_shared::inventory::InventoryZpool;
 use nexus_sled_agent_shared::inventory::OmicronSledConfig;
 use nexus_sled_agent_shared::inventory::OmicronZonesConfig;
 use nexus_sled_agent_shared::inventory::OrphanedDataset;
+use nexus_sled_agent_shared::inventory::SledCpuFamily;
 use nexus_sled_agent_shared::inventory::SledRole;
 use nexus_sled_agent_shared::inventory::ZoneImageResolverInventory;
 use nexus_types::inventory::BaseboardId;
@@ -215,6 +216,14 @@ pub fn representative() -> Representative {
                 serial_number: String::from("s2"),
             },
         )
+        .unwrap();
+
+    // Report some phase 1 active slots.
+    builder
+        .found_host_phase_1_active_slot(&sled1_bb, "fake MGS 1", M2Slot::A)
+        .unwrap();
+    builder
+        .found_host_phase_1_active_slot(&sled2_bb, "fake MGS 1", M2Slot::B)
         .unwrap();
 
     // Report some phase 1 hashes.
@@ -644,7 +653,7 @@ pub fn representative() -> Representative {
     );
 
     builder.found_cockroach_metrics(
-        omicron_cockroach_metrics::NodeId::new("1".to_string()),
+        cockroach_admin_types::NodeId::new("1".to_string()),
         PrometheusMetrics {
             metrics: BTreeMap::from([(
                 "ranges_underreplicated".to_string(),
@@ -958,6 +967,7 @@ pub fn sled_agent(
         sled_id,
         usable_hardware_threads: 10,
         usable_physical_ram: ByteCount::from(1024 * 1024),
+        cpu_family: SledCpuFamily::AmdMilan,
         disks,
         zpools,
         datasets,

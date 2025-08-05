@@ -29,6 +29,7 @@ use diesel::prelude::*;
 use diesel::query_builder::{QueryFragment, QueryId};
 use diesel::query_dsl::methods::LoadQuery;
 use diesel::{ExpressionMethods, QueryDsl};
+use iddqd::IdOrdMap;
 use nexus_db_errors::{ErrorHandler, public_error_from_diesel};
 use nexus_db_lookup::{DataStoreConnection, DbConnection};
 use omicron_common::api::external::Error;
@@ -38,7 +39,7 @@ use omicron_common::api::external::ResourceType;
 use omicron_common::backoff::{
     BackoffError, retry_notify, retry_policy_internal_service,
 };
-use omicron_uuid_kinds::{GenericUuid, SledUuid};
+use omicron_uuid_kinds::{GenericUuid, OmicronZoneUuid, SledUuid};
 use slog::Logger;
 use std::net::Ipv6Addr;
 use std::num::NonZeroU32;
@@ -49,6 +50,7 @@ mod affinity;
 mod alert;
 mod alert_rx;
 mod allow_list;
+mod audit_log;
 mod auth;
 mod bfd;
 mod bgp;
@@ -71,10 +73,10 @@ mod image;
 pub mod instance;
 mod inventory;
 mod ip_pool;
-mod ipv4_nat_entry;
 mod lldp;
 mod lookup_interface;
 mod migration;
+mod nat_entry;
 mod network_interface;
 mod oximeter;
 mod oximeter_read_policy;
@@ -127,6 +129,7 @@ pub use instance::{
 };
 pub use inventory::DataStoreInventoryTest;
 use nexus_db_model::AllSchemaVersions;
+use nexus_types::internal_api::views::HeldDbClaimInfo;
 pub use oximeter::CollectorReassignment;
 pub use rack::RackInit;
 pub use rack::SledUnderlayAllocationResult;
@@ -148,8 +151,11 @@ pub use volume::*;
 // TODO: This should likely turn into a configuration option.
 pub const REGION_REDUNDANCY_THRESHOLD: usize = 3;
 
-/// The name of the built-in IP pool for Oxide services.
-pub const SERVICE_IP_POOL_NAME: &str = "oxide-service-pool";
+/// The name of the built-in IPv4 IP pool for Oxide services.
+pub const SERVICE_IPV4_POOL_NAME: &str = "oxide-service-pool-v4";
+
+/// The name of the built-in IPv6 IP pool for Oxide services.
+pub const SERVICE_IPV6_POOL_NAME: &str = "oxide-service-pool-v6";
 
 /// "limit" to be used in SQL queries that paginate through large result sets
 ///
@@ -181,6 +187,21 @@ pub trait RunnableQuery<U>:
 impl<U, T> RunnableQuery<U> for T where
     T: RunnableQueryNoReturn + LoadQuery<'static, DbConnection, U>
 {
+}
+
+/// Specifies whether the consumer wants to check whether they're allowed to
+/// access the database based on the `db_metadata_nexus` table.
+#[derive(Debug, Clone, Copy)]
+pub enum IdentityCheckPolicy {
+    /// The consumer wants full access to the database regardless of the current
+    /// upgrade / handoff state.  This would be used by almost all tools and
+    /// tests.
+    DontCare,
+
+    /// The consumer only wants to access the database if it's in the current
+    /// set of Nexus instances that's supposed to be able to access it.  If
+    /// possible and legal, take over access from the existing set.
+    CheckAndTakeover { nexus_id: OmicronZoneUuid },
 }
 
 pub struct DataStore {
@@ -296,6 +317,23 @@ impl DataStore {
         Ok(datastore)
     }
 
+    /// Disables creation of all new database claims
+    ///
+    /// This is currently a one-way trip.  The DataStore cannot be un-quiesced.
+    pub fn quiesce(&self) {
+        self.pool.quiesce();
+    }
+
+    /// Wait for all outstanding claims to be released
+    pub async fn wait_for_quiesced(&self) {
+        self.pool.wait_for_quiesced().await;
+    }
+
+    /// Returns information about held db claims
+    pub fn claims_held(&self) -> IdOrdMap<HeldDbClaimInfo> {
+        self.pool.claims_held()
+    }
+
     /// Terminates the underlying pool, stopping it from connecting to backends.
     pub async fn terminate(&self) {
         self.pool.terminate().await
@@ -347,10 +385,7 @@ impl DataStore {
         opctx: &OpContext,
     ) -> Result<DataStoreConnection, Error> {
         opctx.authorize(authz::Action::Query, &authz::DATABASE).await?;
-        let connection = self.pool.claim().await.map_err(|err| {
-            Error::unavail(&format!("Failed to access DB connection: {err}"))
-        })?;
-        Ok(connection)
+        self.pool_connection_unauthorized().await
     }
 
     /// Returns an unauthorized connection to a connection from the database
@@ -361,10 +396,7 @@ impl DataStore {
     pub(super) async fn pool_connection_unauthorized(
         &self,
     ) -> Result<DataStoreConnection, Error> {
-        let connection = self.pool.claim().await.map_err(|err| {
-            Error::unavail(&format!("Failed to access DB connection: {err}"))
-        })?;
-        Ok(connection)
+        self.pool.claim().await
     }
 
     /// For testing only. This isn't cfg(test) because nexus needs access to it.
@@ -488,12 +520,13 @@ mod test {
         ByteCount, Error, IdentityMetadataCreateParams, LookupType, Name,
     };
     use omicron_test_utils::dev;
+    use omicron_uuid_kinds::CollectionUuid;
     use omicron_uuid_kinds::DatasetUuid;
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::PhysicalDiskUuid;
+    use omicron_uuid_kinds::SiloUserUuid;
     use omicron_uuid_kinds::SledUuid;
     use omicron_uuid_kinds::VolumeUuid;
-    use omicron_uuid_kinds::{CollectionUuid, TypedUuid};
     use std::collections::HashMap;
     use std::collections::HashSet;
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddrV6};
@@ -578,15 +611,16 @@ mod test {
         );
 
         let token = "a_token".to_string();
-        let silo_user_id = Uuid::new_v4();
+        let silo_user_id = SiloUserUuid::new_v4();
 
-        let session = ConsoleSession {
-            id: TypedUuid::new_v4().into(),
-            token: token.clone(),
-            time_created: Utc::now() - Duration::minutes(5),
-            time_last_used: Utc::now() - Duration::minutes(5),
+        let both_times = Utc::now() - Duration::minutes(5);
+
+        let session = ConsoleSession::new_with_times(
+            token.clone(),
             silo_user_id,
-        };
+            both_times,
+            both_times,
+        );
 
         let _ = datastore
             .session_create(&authn_opctx, session.clone())
@@ -612,7 +646,7 @@ mod test {
             .unwrap();
 
         let (.., db_silo_user) = LookupPath::new(&opctx, datastore)
-            .silo_user_id(session.silo_user_id)
+            .silo_user_id(session.silo_user_id())
             .fetch()
             .await
             .unwrap();
@@ -623,7 +657,7 @@ mod test {
             .session_lookup_by_token(&authn_opctx, token.clone())
             .await
             .unwrap();
-        assert_eq!(session.silo_user_id, fetched.silo_user_id);
+        assert_eq!(session.silo_user_id(), fetched.silo_user_id());
         assert_eq!(session.id, fetched.id);
 
         // also try looking it up by ID
@@ -632,7 +666,7 @@ mod test {
             .fetch()
             .await
             .unwrap();
-        assert_eq!(session.silo_user_id, fetched.silo_user_id);
+        assert_eq!(session.silo_user_id(), fetched.silo_user_id());
         assert_eq!(session.token, fetched.token);
 
         // trying to insert the same one again fails
@@ -1737,7 +1771,7 @@ mod test {
             DEFAULT_SILO_ID,
             LookupType::ById(DEFAULT_SILO_ID),
         );
-        let silo_user_id = Uuid::new_v4();
+        let silo_user_id = SiloUserUuid::new_v4();
         datastore
             .silo_user_create(
                 &authz_silo,
@@ -1774,7 +1808,7 @@ mod test {
             .ssh_key_create(&opctx, &authz_user, ssh_key.clone())
             .await
             .unwrap();
-        assert_eq!(created.silo_user_id, ssh_key.silo_user_id);
+        assert_eq!(created.silo_user_id(), ssh_key.silo_user_id());
         assert_eq!(created.public_key, ssh_key.public_key);
 
         // Lookup the key we just created.
@@ -1787,7 +1821,7 @@ mod test {
                 .unwrap();
         assert_eq!(authz_silo.id(), DEFAULT_SILO_ID);
         assert_eq!(authz_silo_user.id(), silo_user_id);
-        assert_eq!(found.silo_user_id, ssh_key.silo_user_id);
+        assert_eq!(found.silo_user_id(), ssh_key.silo_user_id());
         assert_eq!(found.public_key, ssh_key.public_key);
 
         // Trying to insert the same one again fails.

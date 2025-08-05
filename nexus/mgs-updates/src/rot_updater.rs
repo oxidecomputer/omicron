@@ -5,10 +5,6 @@
 //! Module containing types for updating RoTs via MGS.
 
 use super::MgsClients;
-use super::SpComponentUpdateError;
-use super::UpdateProgress;
-use super::common_sp_update::SpComponentUpdater;
-use super::common_sp_update::deliver_update;
 use crate::SpComponentUpdateHelperImpl;
 use crate::common_sp_update::FoundVersion;
 use crate::common_sp_update::PostUpdateError;
@@ -18,193 +14,35 @@ use crate::common_sp_update::error_means_caboose_is_invalid;
 use futures::FutureExt;
 use futures::future::BoxFuture;
 use gateway_client::SpComponent;
+use gateway_client::types::GetRotBootInfoParams;
 use gateway_client::types::RotState;
 use gateway_client::types::SpComponentFirmwareSlot;
 use gateway_client::types::SpType;
-use gateway_types::rot::RotSlot;
+use gateway_messages::RotBootInfo;
 use nexus_types::deployment::PendingMgsUpdate;
-use nexus_types::deployment::PendingMgsUpdateDetails;
+use nexus_types::deployment::PendingMgsUpdateRotDetails;
 use slog::Logger;
-use slog::{debug, info};
-use tokio::sync::watch;
-use uuid::Uuid;
+use slog::{debug, error, info};
+use slog_error_chain::InlineErrorChain;
+use std::time::Duration;
+use std::time::Instant;
+
+pub const WAIT_FOR_BOOT_INFO_TIMEOUT: Duration = Duration::from_secs(120);
+
+const WAIT_FOR_BOOT_INFO_INTERVAL: Duration = Duration::from_secs(10);
 
 type GatewayClientError = gateway_client::Error<gateway_client::types::Error>;
 
-pub struct RotUpdater {
-    log: Logger,
-    progress: watch::Sender<Option<UpdateProgress>>,
-    sp_type: SpType,
-    sp_slot: u16,
-    target_rot_slot: RotSlot,
-    update_id: Uuid,
-    // TODO-clarity maybe a newtype for this? TBD how we get this from
-    // wherever it's stored, which might give us a stronger type already.
-    rot_hubris_archive: Vec<u8>,
+pub struct ReconfiguratorRotUpdater {
+    details: PendingMgsUpdateRotDetails,
 }
 
-impl RotUpdater {
-    pub fn new(
-        sp_type: SpType,
-        sp_slot: u16,
-        target_rot_slot: RotSlot,
-        update_id: Uuid,
-        rot_hubris_archive: Vec<u8>,
-        log: &Logger,
-    ) -> Self {
-        let log = log.new(slog::o!(
-            "component" => "RotUpdater",
-            "sp_type" => format!("{sp_type:?}"),
-            "sp_slot" => sp_slot,
-            "target_rot_slot" => format!("{target_rot_slot:?}"),
-            "update_id" => format!("{update_id}"),
-        ));
-        let progress = watch::Sender::new(None);
-        Self {
-            log,
-            progress,
-            sp_type,
-            sp_slot,
-            target_rot_slot,
-            update_id,
-            rot_hubris_archive,
-        }
-    }
-
-    pub fn progress_watcher(&self) -> watch::Receiver<Option<UpdateProgress>> {
-        self.progress.subscribe()
-    }
-
-    /// Drive this RoT update to completion (or failure).
-    ///
-    /// Only one MGS instance is required to drive an update; however, if
-    /// multiple MGS instances are available and passed to this method and an
-    /// error occurs communicating with one instance, `RotUpdater` will try the
-    /// remaining instances before failing.
-    pub async fn update(
-        mut self,
-        mgs_clients: &mut MgsClients,
-    ) -> Result<(), SpComponentUpdateError> {
-        // Deliver and drive the update to "completion" (which isn't really
-        // complete for the RoT, since we still have to do the steps below after
-        // the delivery of the update completes).
-        deliver_update(&mut self, mgs_clients).await?;
-
-        // The async blocks below want `&self` references, but we take `self`
-        // for API clarity (to start a new update, the caller should construct a
-        // new updater). Create a `&self` ref that we use through the remainder
-        // of this method.
-        let me = &self;
-
-        mgs_clients
-            .try_all_serially(&self.log, |client| async move {
-                me.mark_target_slot_active(&client).await
-            })
-            .await?;
-
-        mgs_clients
-            .try_all_serially(&self.log, |client| async move {
-                me.finalize_update_via_reset(&client).await
-            })
-            .await?;
-
-        // wait for any progress watchers to be dropped before we return;
-        // otherwise, they'll get `RecvError`s when trying to check the current
-        // status
-        self.progress.closed().await;
-
-        Ok(())
-    }
-
-    async fn mark_target_slot_active(
-        &self,
-        client: &gateway_client::Client,
-    ) -> Result<(), GatewayClientError> {
-        // RoT currently doesn't support non-persistent slot swapping, so always
-        // tell it to persist our choice.
-        let persist = true;
-
-        let slot = self.firmware_slot();
-
-        client
-            .sp_component_active_slot_set(
-                self.sp_type,
-                self.sp_slot,
-                self.component(),
-                persist,
-                &SpComponentFirmwareSlot { slot },
-            )
-            .await?;
-
-        // TODO-correctness Should we send some kind of update to
-        // `self.progress`? We already sent `InProgress(1.0)` when the update
-        // finished delivering. Or perhaps we shouldn't even be doing this step
-        // and the reset, and let our caller handle the finalization?
-
-        info!(
-            self.log, "RoT target slot marked active";
-            "mgs_addr" => client.baseurl(),
-        );
-
-        Ok(())
-    }
-
-    async fn finalize_update_via_reset(
-        &self,
-        client: &gateway_client::Client,
-    ) -> Result<(), GatewayClientError> {
-        client
-            .sp_component_reset(self.sp_type, self.sp_slot, self.component())
-            .await?;
-
-        self.progress.send_replace(Some(UpdateProgress::Complete));
-        info!(
-            self.log, "RoT update complete";
-            "mgs_addr" => client.baseurl(),
-        );
-
-        Ok(())
+impl ReconfiguratorRotUpdater {
+    pub fn new(details: PendingMgsUpdateRotDetails) -> Self {
+        Self { details }
     }
 }
 
-impl SpComponentUpdater for RotUpdater {
-    fn component(&self) -> &'static str {
-        SpComponent::ROT.const_as_str()
-    }
-
-    fn target_sp_type(&self) -> SpType {
-        self.sp_type
-    }
-
-    fn target_sp_slot(&self) -> u16 {
-        self.sp_slot
-    }
-
-    fn firmware_slot(&self) -> u16 {
-        match self.target_rot_slot {
-            RotSlot::A => 0,
-            RotSlot::B => 1,
-        }
-    }
-
-    fn update_id(&self) -> Uuid {
-        self.update_id
-    }
-
-    fn update_data(&self) -> Vec<u8> {
-        self.rot_hubris_archive.clone()
-    }
-
-    fn progress(&self) -> &watch::Sender<Option<UpdateProgress>> {
-        &self.progress
-    }
-
-    fn logger(&self) -> &Logger {
-        &self.log
-    }
-}
-
-pub struct ReconfiguratorRotUpdater;
 impl SpComponentUpdateHelperImpl for ReconfiguratorRotUpdater {
     /// Checks if the component is already updated or ready for update
     fn precheck<'a>(
@@ -235,18 +73,12 @@ impl SpComponentUpdateHelperImpl for ReconfiguratorRotUpdater {
                 });
             }
 
-            let PendingMgsUpdateDetails::Rot {
+            let PendingMgsUpdateRotDetails {
                 expected_inactive_version,
                 expected_active_slot,
                 expected_persistent_boot_preference,
                 ..
-            } = &update.details
-            else {
-                unreachable!(
-                    "pending MGS update details within ReconfiguratorRotUpdater \
-                    will always be for the RoT"
-                );
-            };
+            } = &self.details;
 
             let (
                 active, pending_persistent_boot_preference, transient_boot_preference
@@ -382,20 +214,12 @@ impl SpComponentUpdateHelperImpl for ReconfiguratorRotUpdater {
             debug!(log, "attempting to set active slot");
             mgs_clients
                 .try_all_serially(log, move |mgs_client| async move {
-                    let inactive_slot = match &update.details {
-                        PendingMgsUpdateDetails::Rot {
-                            expected_active_slot,
-                            ..
-                        } => expected_active_slot.slot().toggled().to_u16(),
-                        PendingMgsUpdateDetails::Sp { .. }
-                        | PendingMgsUpdateDetails::RotBootloader { .. } => {
-                            unreachable!(
-                                "pending MGS update details within \
-                                 ReconfiguratorRotUpdater will always be \
-                                 for the RoT"
-                            )
-                        }
-                    };
+                    let inactive_slot = self
+                        .details
+                        .expected_active_slot
+                        .slot()
+                        .toggled()
+                        .to_u16();
                     let persist = true;
                     mgs_client
                         .sp_component_active_slot_set(
@@ -406,11 +230,14 @@ impl SpComponentUpdateHelperImpl for ReconfiguratorRotUpdater {
                             &SpComponentFirmwareSlot { slot: inactive_slot },
                         )
                         .await?;
-                    Ok(())
+                    Ok::<_, GatewayClientError>(())
                 })
                 .await?;
 
-            debug!(log, "attempting to reset device");
+            debug!(
+                log,
+                "attempting to reset the device to set a new RoT version"
+            );
             mgs_clients
                 .try_all_serially(log, move |mgs_client| async move {
                     mgs_client
@@ -419,12 +246,99 @@ impl SpComponentUpdateHelperImpl for ReconfiguratorRotUpdater {
                             update.slot_id,
                             SpComponent::ROT.const_as_str(),
                         )
-                        .await?;
-                    Ok(())
+                        .await
                 })
                 .await?;
+
+            // We wait for boot info to ensure a successful reset
+            wait_for_boot_info(
+                log,
+                mgs_clients,
+                update.sp_type,
+                update.slot_id,
+                WAIT_FOR_BOOT_INFO_TIMEOUT,
+            )
+            .await?;
             Ok(())
         }
         .boxed()
+    }
+}
+
+/// Poll the RoT asking for its boot information. This confirms that the RoT has
+/// been succesfully reset
+pub async fn wait_for_boot_info(
+    log: &Logger,
+    mgs_clients: &mut MgsClients,
+    sp_type: SpType,
+    sp_slot: u16,
+    timeout: Duration,
+) -> Result<RotState, PostUpdateError> {
+    let before = Instant::now();
+    loop {
+        debug!(log, "waiting for boot info to confirm a successful reset");
+        match mgs_clients
+            .try_all_serially(log, |mgs_client| async move {
+                mgs_client
+                    .sp_rot_boot_info(
+                        sp_type,
+                        sp_slot,
+                        SpComponent::ROT.const_as_str(),
+                        &GetRotBootInfoParams {
+                            version: RotBootInfo::HIGHEST_KNOWN_VERSION,
+                        },
+                    )
+                    .await
+            })
+            .await
+        {
+            Ok(state) => match state.clone() {
+                RotState::V2 { .. } | RotState::V3 { .. } => {
+                    debug!(log, "successfuly retrieved boot info");
+                    return Ok(state.into_inner());
+                }
+                // The RoT is probably still booting
+                RotState::CommunicationFailed { message } => {
+                    if before.elapsed() >= timeout {
+                        error!(
+                            log,
+                            "failed to get RoT boot info";
+                            "error" => %message
+                        );
+                        return Err(PostUpdateError::FatalError {
+                            error: message,
+                        });
+                    }
+
+                    info!(
+                        log,
+                        "failed getting RoT boot info (will retry)";
+                        "error" => %message,
+                    );
+                    tokio::time::sleep(WAIT_FOR_BOOT_INFO_INTERVAL).await;
+                }
+            },
+            // The RoT might still be booting
+            Err(error) => {
+                let e = InlineErrorChain::new(&error);
+                if before.elapsed() >= timeout {
+                    error!(
+                        log,
+                        "failed to get RoT boot info";
+                        &e,
+                    );
+                    return Err(PostUpdateError::FatalError {
+                        error: e.to_string(),
+                    });
+                }
+
+                info!(
+                    log,
+                    "failed getting RoT boot info (will retry)";
+                    e,
+                );
+                tokio::time::sleep(WAIT_FOR_BOOT_INFO_INTERVAL).await;
+            }
+        }
     }
 }
