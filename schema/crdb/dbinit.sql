@@ -6312,7 +6312,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.host_ereport (
      */
     report JSONB NOT NULL,
 
-    part_number TEXT,
+    part_number STRING(63),
 
     PRIMARY KEY (restart_id, ena)
 );
