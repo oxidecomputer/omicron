@@ -340,8 +340,8 @@ task: "metrics_producer_gc"
     unregisters Oximeter metrics producers that have not renewed their lease
 
 
-task: "nat_v4_garbage_collector"
-    prunes soft-deleted IPV4 NAT entries from ipv4_nat_entry table based on a
+task: "nat_garbage_collector"
+    prunes soft-deleted NAT entries from nat_entry table based on a
     predetermined retention policy
 
 
@@ -487,7 +487,7 @@ task: "dns_propagation_external"
       [::1]:REDACTED_PORT     success     
 
 
-task: "nat_v4_garbage_collector"
+task: "nat_garbage_collector"
   configured period: every <REDACTED_DURATION>s
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
@@ -1034,7 +1034,7 @@ task: "dns_propagation_external"
       [::1]:REDACTED_PORT     success     
 
 
-task: "nat_v4_garbage_collector"
+task: "nat_garbage_collector"
   configured period: every <REDACTED_DURATION>s
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing

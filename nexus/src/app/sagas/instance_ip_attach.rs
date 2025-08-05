@@ -10,7 +10,7 @@ use super::instance_common::{
 use super::{ActionRegistry, NexusActionContext, NexusSaga};
 use crate::app::sagas::declare_saga_actions;
 use crate::app::{authn, authz};
-use nexus_db_model::{IpAttachState, Ipv4NatEntry};
+use nexus_db_model::{IpAttachState, NatEntry};
 use nexus_types::external_api::views;
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid};
@@ -175,7 +175,7 @@ async fn siia_get_instance_state(
 // XXX: Need to abstract over v4 and v6 NAT entries when the time comes.
 async fn siia_nat(
     sagactx: NexusActionContext,
-) -> Result<Option<Ipv4NatEntry>, ActionError> {
+) -> Result<Option<NatEntry>, ActionError> {
     let params = sagactx.saga_params::<Params>()?;
     let sled_id = sagactx
         .lookup::<Option<VmmAndSledIds>>("instance_state")?
@@ -198,7 +198,7 @@ async fn siia_nat_undo(
     let log = sagactx.user_data().log();
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
-    let nat_entry = sagactx.lookup::<Option<Ipv4NatEntry>>("nat_entry")?;
+    let nat_entry = sagactx.lookup::<Option<NatEntry>>("nat_entry")?;
     let opctx = crate::context::op_context_for_saga_action(
         &sagactx,
         &params.serialized_authn,
