@@ -1036,7 +1036,7 @@ INFO sufficient InternalDns zones exist in plan, desired_count: 3, current_count
 INFO added zone to sled, sled_id: 711ac7f8-d19e-4572-bdb9-e9b50f6e362a, kind: ExternalDns
 INFO sufficient Nexus zones exist in plan, desired_count: 3, current_count: 3
 INFO sufficient Oximeter zones exist in plan, desired_count: 0, current_count: 0
-WARN cannot issue more MGS updates (no current artifacts)
+WARN cannot issue more MGS-driven updates (no current artifacts)
 INFO some zones not yet up-to-date, sled_id: 711ac7f8-d19e-4572-bdb9-e9b50f6e362a, zones_currently_updating: [ZoneCurrentlyUpdating { zone_id: fe2d5287-24e3-4071-b214-2640b097a759 (service), zone_kind: ExternalDns, reason: MissingInInventory { bp_image_source: InstallDataset } }]
 INFO will ensure cockroachdb setting, setting: cluster.preserve_downgrade_option, value: DoNotModify
 generated blueprint 9c998c1d-1a7b-440a-ae0c-40f781dea6e2 based on parent blueprint 366b0b68-d80e-4bc1-abd3-dc69837847e0
