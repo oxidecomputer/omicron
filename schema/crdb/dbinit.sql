@@ -6312,6 +6312,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.host_ereport (
      */
     report JSONB NOT NULL,
 
+    part_number TEXT,
+
     PRIMARY KEY (restart_id, ena)
 );
 
@@ -6347,7 +6349,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '173.0.0', NULL)
+    (TRUE, NOW(), NOW(), '174.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
