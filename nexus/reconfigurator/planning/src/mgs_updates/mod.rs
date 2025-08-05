@@ -21,8 +21,8 @@ use thiserror::Error;
 use tufaceous_artifact::ArtifactVersion;
 use tufaceous_artifact::KnownArtifactKind;
 
-/// How to handle an MGS update that has become impossible due to unsatisfied
-/// preconditions.
+/// How to handle an MGS-driven update that has become impossible due to
+/// unsatisfied preconditions.
 #[derive(Debug, Clone, Copy, strum::EnumIter)]
 pub enum ImpossibleUpdatePolicy {
     /// Keep the update in the subsequent blueprint (e.g., because we believe it
@@ -89,8 +89,8 @@ pub fn plan_mgs_updates(
                 ImpossibleUpdatePolicy::Keep => {
                     info!(
                         log,
-                        "keeping apparently-impossible MGS update (waiting \
-                         for recent update to be applied)";
+                        "keeping apparently-impossible MGS-driven update \
+                         (waiting for recent update to be applied)";
                         update
                     );
                     rv.insert(update.clone());
@@ -129,7 +129,10 @@ pub fn plan_mgs_updates(
     // containing artifacts), then we cannot configure more updates.
     let current_artifacts = match current_artifacts {
         TargetReleaseDescription::Initial => {
-            warn!(log, "cannot issue more MGS updates (no current artifacts)");
+            warn!(
+                log,
+                "cannot issue more MGS-driven updates (no current artifacts)",
+            );
             return rv;
         }
         TargetReleaseDescription::TufRepo(description) => description,
@@ -149,7 +152,7 @@ pub fn plan_mgs_updates(
         if rv.len() >= nmax_updates {
             info!(
                 log,
-                "reached maximum number of pending MGS updates";
+                "reached maximum number of pending MGS-driven updates";
                 "max" => nmax_updates
             );
             return rv;
@@ -157,16 +160,16 @@ pub fn plan_mgs_updates(
 
         match try_make_update(log, board, inventory, current_artifacts) {
             Some(update) => {
-                info!(log, "configuring MGS update"; &update);
+                info!(log, "configuring MGS-driven update"; &update);
                 rv.insert(update);
             }
             None => {
-                info!(log, "skipping board for MGS update"; board);
+                info!(log, "skipping board for MGS-driven update"; board);
             }
         }
     }
 
-    info!(log, "ran out of boards for MGS update");
+    info!(log, "ran out of boards for MGS-driven update");
     rv
 }
 
@@ -201,8 +204,8 @@ enum MgsUpdateStatusError {
     NotYetImplemented,
 }
 
-/// Determine the status of a single MGS update based on what's in inventory for
-/// that board.
+/// Determine the status of a single MGS-driven update based on what's in
+/// inventory for that board.
 fn mgs_update_status(
     log: &slog::Logger,
     inventory: &Collection,
@@ -275,7 +278,7 @@ fn mgs_update_status(
     } else if sp_info.sp_slot != update.slot_id {
         warn!(
             log,
-            "baseboard with in-progress MGS update has moved";
+            "baseboard with in-progress MGS-driven update has moved";
             "sp_info" => #?sp_info,
             update,
         );

@@ -47,7 +47,7 @@ use std::fmt;
 use strum::Display;
 use strum::IntoEnumIterator;
 
-/// Amount of time we're willing to let an MGS-managed update set in an
+/// Amount of time we're willing to let an MGS-managed update sit in an
 /// "impossible preconditions" state waiting for it to settle.
 ///
 /// A typical update flow looks something like this:
