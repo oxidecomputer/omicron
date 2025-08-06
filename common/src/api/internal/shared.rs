@@ -1101,56 +1101,6 @@ pub struct SledIdentifiers {
     pub serial: String,
 }
 
-/// Identifies the kind of CPU present on a sled, determined by reading CPUID.
-///
-/// This is intended to broadly support the control plane answering the question
-/// "can I run this instance on that sled?" given an instance with either no or
-/// some CPU platform requirement. It is not enough information for more precise
-/// placement questions - for example, is a CPU a high-frequency part or
-/// many-core part? We don't include Genoa here, but in that CPU family there
-/// are high frequency parts, many-core parts, and large-cache parts. To support
-/// those questions (or satisfactorily answer #8730) we would need to collect
-/// additional information and send it along.
-#[derive(
-    Serialize, Deserialize, Copy, Clone, Debug, PartialEq, Eq, JsonSchema,
-)]
-#[serde(rename_all = "snake_case")]
-pub enum SledCpuFamily {
-    /// The CPU vendor or its family number don't correspond to any of the
-    /// known family variants.
-    Unknown,
-
-    /// AMD Milan processors (or very close). Could be an actual Milan in a
-    /// Gimlet, a close-to-Milan client Zen 3 part, or Zen 4 (for which Milan is
-    /// the greatest common denominator).
-    AmdMilan,
-
-    /// AMD Turin processors (or very close). Could be an actual Turin in a
-    /// Cosmo, or a close-to-Turin client Zen 5 part.
-    AmdTurin,
-
-    /// AMD Turin Dense processors. There are no "Turin Dense-like" CPUs unlike
-    /// other cases, so this means a bona fide Zen 5c Turin Dense part.
-    AmdTurinDense,
-}
-
-impl SledCpuFamily {
-    fn as_str(&self) -> &'static str {
-        match self {
-            SledCpuFamily::Unknown => "unknown",
-            SledCpuFamily::AmdMilan => "amd_milan",
-            SledCpuFamily::AmdTurin => "amd_turin",
-            SledCpuFamily::AmdTurinDense => "amd_turin_dense",
-        }
-    }
-}
-
-impl fmt::Display for SledCpuFamily {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.as_str())
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

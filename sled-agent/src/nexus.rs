@@ -78,10 +78,10 @@ impl ConvertInto<nexus_client::types::Baseboard>
 }
 
 impl ConvertInto<nexus_client::types::SledCpuFamily>
-    for omicron_common::api::internal::shared::SledCpuFamily
+    for sled_hardware_types::SledCpuFamily
 {
     fn convert(self) -> nexus_client::types::SledCpuFamily {
-        use omicron_common::api::internal::shared::SledCpuFamily as SharedSledCpuFamily;
+        use sled_hardware_types::SledCpuFamily as SharedSledCpuFamily;
         match self {
             SharedSledCpuFamily::Unknown => {
                 nexus_client::types::SledCpuFamily::Unknown

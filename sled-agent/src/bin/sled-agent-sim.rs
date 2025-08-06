@@ -13,7 +13,6 @@ use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
 use dropshot::ConfigLoggingLevel;
 use omicron_common::api::internal::nexus::Certificate;
-use omicron_common::api::internal::shared::SledCpuFamily;
 use omicron_common::cmd::CmdError;
 use omicron_common::cmd::fatal;
 use omicron_sled_agent::sim::RssArgs;
@@ -22,7 +21,7 @@ use omicron_sled_agent::sim::{
     run_standalone_server,
 };
 use omicron_uuid_kinds::SledUuid;
-use sled_hardware_types::Baseboard;
+use sled_hardware_types::{Baseboard, SledCpuFamily};
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
 

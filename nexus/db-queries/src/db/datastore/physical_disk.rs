@@ -340,11 +340,10 @@ mod test {
     use nexus_db_lookup::LookupPath;
     use nexus_sled_agent_shared::inventory::{
         Baseboard, ConfigReconcilerInventoryStatus, Inventory, InventoryDisk,
-        SledRole, ZoneImageResolverInventory,
+        SledCpuFamily, SledRole, ZoneImageResolverInventory,
     };
     use nexus_types::identity::Asset;
     use omicron_common::api::external::ByteCount;
-    use omicron_common::api::internal::shared::SledCpuFamily;
     use omicron_common::disk::{DiskIdentity, DiskVariant};
     use omicron_test_utils::dev;
     use std::num::NonZeroU32;

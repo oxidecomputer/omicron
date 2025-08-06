@@ -162,11 +162,9 @@ impl MemoryReservations {
 /// sled-agent does not yet know about libtopo, getting topo snapshots, walking
 /// them, or any of that, so the parsing is performed again here.
 #[cfg(target_arch = "x86_64")]
-pub fn detect_cpu_family(
-    log: &Logger,
-) -> omicron_common::api::internal::shared::SledCpuFamily {
+pub fn detect_cpu_family(log: &Logger) -> sled_hardware_types::SledCpuFamily {
     use core::arch::x86_64::__cpuid_count;
-    use omicron_common::api::internal::shared::SledCpuFamily;
+    use sled_hardware_types::SledCpuFamily;
 
     // Read leaf 0 to figure out the processor's vendor and whether leaf 1
     // (which contains family, model, and stepping information) is available.

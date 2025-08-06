@@ -26,7 +26,7 @@ use omicron_common::update::OmicronZoneManifestSource;
 use omicron_common::{
     api::{
         external::{ByteCount, Generation},
-        internal::shared::{NetworkInterface, SledCpuFamily, SourceNatConfig},
+        internal::shared::{NetworkInterface, SourceNatConfig},
     },
     disk::{DatasetConfig, DiskVariant, OmicronPhysicalDiskConfig},
     update::ArtifactId,
@@ -40,9 +40,9 @@ use omicron_uuid_kinds::{SledUuid, ZpoolUuid};
 use schemars::schema::{Schema, SchemaObject};
 use schemars::{JsonSchema, SchemaGenerator};
 use serde::{Deserialize, Serialize};
-// Export this type for convenience -- this way, dependents don't have to
+// Export these types for convenience -- this way, dependents don't have to
 // depend on sled-hardware-types.
-pub use sled_hardware_types::Baseboard;
+pub use sled_hardware_types::{Baseboard, SledCpuFamily};
 use strum::EnumIter;
 use tufaceous_artifact::{ArtifactHash, KnownArtifactKind};
 

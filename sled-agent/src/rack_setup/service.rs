@@ -1749,12 +1749,11 @@ mod test {
     use nexus_reconfigurator_blippy::{Blippy, BlippyReportSortKey};
     use nexus_sled_agent_shared::inventory::{
         Baseboard, ConfigReconcilerInventoryStatus, Inventory, InventoryDisk,
-        OmicronZoneType, SledRole, ZoneImageResolverInventory,
+        OmicronZoneType, SledCpuFamily, SledRole, ZoneImageResolverInventory,
     };
     use omicron_common::{
         address::{Ipv6Subnet, SLED_PREFIX, get_sled_address},
         api::external::{ByteCount, Generation},
-        api::internal::shared::SledCpuFamily,
         disk::{DiskIdentity, DiskVariant},
     };
     use omicron_uuid_kinds::SledUuid;

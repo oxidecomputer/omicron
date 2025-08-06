@@ -26,13 +26,9 @@ impl_enum_type!(
     AmdTurinDense => b"amd_turin_dense"
 );
 
-impl From<omicron_common::api::internal::shared::SledCpuFamily>
-    for SledCpuFamily
-{
-    fn from(
-        value: omicron_common::api::internal::shared::SledCpuFamily,
-    ) -> Self {
-        use omicron_common::api::internal::shared::SledCpuFamily as InputFamily;
+impl From<nexus_sled_agent_shared::inventory::SledCpuFamily> for SledCpuFamily {
+    fn from(value: nexus_sled_agent_shared::inventory::SledCpuFamily) -> Self {
+        use nexus_sled_agent_shared::inventory::SledCpuFamily as InputFamily;
         match value {
             InputFamily::Unknown => Self::Unknown,
             InputFamily::AmdMilan => Self::AmdMilan,
@@ -42,9 +38,7 @@ impl From<omicron_common::api::internal::shared::SledCpuFamily>
     }
 }
 
-impl From<SledCpuFamily>
-    for omicron_common::api::internal::shared::SledCpuFamily
-{
+impl From<SledCpuFamily> for nexus_sled_agent_shared::inventory::SledCpuFamily {
     fn from(value: SledCpuFamily) -> Self {
         match value {
             SledCpuFamily::Unknown => Self::Unknown,

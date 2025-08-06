@@ -7,11 +7,10 @@
 use crate::updates::ConfigUpdates;
 use camino::Utf8Path;
 use dropshot::ConfigDropshot;
-use omicron_common::api::internal::shared::SledCpuFamily;
 use omicron_uuid_kinds::SledUuid;
 use serde::Deserialize;
 use serde::Serialize;
-pub use sled_hardware_types::Baseboard;
+pub use sled_hardware_types::{Baseboard, SledCpuFamily};
 use std::net::Ipv6Addr;
 use std::net::{IpAddr, SocketAddr};
 
