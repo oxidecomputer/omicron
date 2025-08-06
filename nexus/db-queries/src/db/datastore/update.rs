@@ -332,7 +332,7 @@ async fn insert_impl(
     };
 
     // Since we've inserted a new repo, we also need to insert the
-    // corresponding artifacts and RoTs by sign.
+    // corresponding artifacts.
     let all_artifacts = {
         use nexus_db_schema::schema::tuf_artifact::dsl;
 
@@ -489,7 +489,7 @@ async fn insert_impl(
 
             // Insert new artifacts into the database.
             diesel::insert_into(dsl::tuf_artifact)
-                .values(new_artifacts.clone())
+                .values(new_artifacts)
                 .execute_async(&conn)
                 .await?;
         }
