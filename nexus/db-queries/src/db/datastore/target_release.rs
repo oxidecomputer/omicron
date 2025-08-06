@@ -228,8 +228,8 @@ mod test {
                         },
                         hash,
                         size: 0,
+                        rot_sign: None,
                     }],
-                    rots_by_sign: vec![],
                 },
             )
             .await

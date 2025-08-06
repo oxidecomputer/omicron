@@ -3357,21 +3357,12 @@ pub struct TufRepoDescription {
 
     /// Information about the artifacts present in the repository.
     pub artifacts: Vec<TufArtifactMeta>,
-
-    // Association between an artifact and its RoT signing information.
-    // This also covers the RoT bootloader artifacts which are signed as well.
-    pub rots_by_sign: Vec<TufRotBySign>,
 }
 
 impl TufRepoDescription {
     /// Sorts the artifacts so that descriptions can be compared.
     pub fn sort_artifacts(&mut self) {
         self.artifacts.sort_by(|a, b| a.id.cmp(&b.id));
-    }
-
-    /// Sorts the RoTs by sign so that descriptions can be compared.
-    pub fn sort_rots_by_sign(&mut self) {
-        self.rots_by_sign.sort_by(|a, b| a.id.cmp(&b.id));
     }
 }
 
@@ -3417,18 +3408,10 @@ pub struct TufArtifactMeta {
 
     /// The size of the artifact in bytes.
     pub size: u64,
-}
 
-/// Mapping for RoT signing information in RoT and RoT bootloader artifacts
-///
-/// Found within a `TufRepoDescription`.
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
-pub struct TufRotBySign {
-    /// The artifact ID.
-    pub id: ArtifactId,
-
-    /// The sign (RKTH value) of the artifact.
-    pub sign: Vec<u8>,
+    /// Sign (root key hash table) hash of a signed image. Only applicable to
+    /// RoT or RoT bootloader artifacts.
+    pub rot_sign: Option<Vec<u8>>,
 }
 
 /// Data about a successful TUF repo import into Nexus.

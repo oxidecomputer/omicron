@@ -291,9 +291,7 @@ async fn test_repo_upload() -> Result<()> {
     };
 
     initial_description.sort_artifacts();
-    initial_description.sort_rots_by_sign();
     reupload_description.sort_artifacts();
-    reupload_description.sort_rots_by_sign();
 
     assert_eq!(
         initial_description, reupload_description,
@@ -324,7 +322,6 @@ async fn test_repo_upload() -> Result<()> {
     };
 
     get_description.sort_artifacts();
-    get_description.sort_rots_by_sign();
 
     assert_eq!(
         initial_description, get_description,
@@ -448,11 +445,10 @@ async fn test_repo_upload() -> Result<()> {
         assert_eq!(response.status, TufRepoInsertStatus::Inserted);
         let mut description = response.recorded;
         description.sort_artifacts();
-        description.sort_rots_by_sign();
 
-        // The artifacts and RoTs by sign should be exactly the same as the
-        // 1.0.0 repo we uploaded, other than the installinator document (which
-        // will have system version 2.0.0).
+        // The artifacts should be exactly the same as the 1.0.0 repo we
+        // uploaded, other than the installinator document (which will have
+        // system version 2.0.0).
         let mut installinator_doc_1 = None;
         let filtered_artifacts_1 = initial_description
             .artifacts
@@ -495,7 +491,6 @@ async fn test_repo_upload() -> Result<()> {
             filtered_artifacts_1, filtered_artifacts_2,
             "artifacts for 1.0.0 and 2.0.0 should match"
         );
-        assert_eq!(initial_description.rots_by_sign, description.rots_by_sign);
 
         // Now get the repository that was just uploaded and make sure the
         // artifact list is the same.
@@ -507,12 +502,7 @@ async fn test_repo_upload() -> Result<()> {
                 .parsed_body()?;
         let mut get_description = response.description;
         get_description.sort_artifacts();
-        get_description.sort_rots_by_sign();
 
-        // TODO-K: Test is failing here. I'm not sure why
-        // get_description.rots_by_sign is empty. If I execute
-        // make_get_request(client, "1.0.0".parse().unwrap(), StatusCode::OK)
-        // I do get the contents of rots_by_sign. I need to look into this
         assert_eq!(
             description, get_description,
             "initial description matches fetched description"

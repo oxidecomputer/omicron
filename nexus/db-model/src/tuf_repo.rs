@@ -9,7 +9,7 @@ use chrono::{DateTime, Utc};
 use diesel::sql_types::{Jsonb, Text};
 use diesel::{deserialize::FromSql, serialize::ToSql};
 use nexus_db_schema::schema::{
-    tuf_artifact, tuf_repo, tuf_repo_artifact, tuf_rot_by_sign, tuf_trust_root,
+    tuf_artifact, tuf_repo, tuf_repo_artifact, tuf_trust_root,
 };
 use nexus_types::external_api::shared::TufSignedRootRole;
 use nexus_types::external_api::views;
@@ -39,9 +39,6 @@ pub struct TufRepoDescription {
 
     /// The artifacts.
     pub artifacts: Vec<TufArtifact>,
-
-    /// The RoT and RoT booloader artifacts with sign values
-    pub rots_by_sign: Vec<TufRotBySign>,
 }
 
 impl TufRepoDescription {
@@ -64,11 +61,6 @@ impl TufRepoDescription {
                     TufArtifact::from_external(artifact, generation_added)
                 })
                 .collect(),
-            rots_by_sign: description
-                .rots_by_sign
-                .into_iter()
-                .map(|artifact| TufRotBySign::from_external(artifact))
-                .collect(),
         }
     }
 
@@ -80,11 +72,6 @@ impl TufRepoDescription {
                 .artifacts
                 .into_iter()
                 .map(TufArtifact::into_external)
-                .collect(),
-            rots_by_sign: self
-                .rots_by_sign
-                .into_iter()
-                .map(TufRotBySign::into_external)
                 .collect(),
         }
     }
@@ -168,54 +155,6 @@ impl TufRepo {
 }
 
 #[derive(Queryable, Insertable, Clone, Debug, Selectable, AsChangeset)]
-#[diesel(table_name = tuf_rot_by_sign)]
-pub struct TufRotBySign {
-    pub id: DbTypedUuid<TufArtifactKind>,
-    pub name: String,
-    pub version: DbArtifactVersion,
-    pub kind: String,
-    pub sign: Vec<u8>,
-    pub time_created: DateTime<Utc>,
-    // TODO-K: Do I need generation?
-}
-
-impl TufRotBySign {
-    /// Creates a new `TufRotBySign` ready for insertion.
-    pub fn new(artifact_id: ArtifactId, sign: Vec<u8>) -> Self {
-        Self {
-            id: TypedUuid::new_v4().into(),
-            name: artifact_id.name,
-            version: artifact_id.version.into(),
-            kind: artifact_id.kind.as_str().to_owned(),
-            sign,
-            time_created: Utc::now(),
-        }
-    }
-
-    /// Creates a new `TufRotBySign` ready for insertion from an external
-    /// `TufRotBySign`.
-    ///
-    /// This is not implemented as a `From` impl because we insert new fields
-    /// as part of the process, which `From` doesn't necessarily communicate
-    /// and can be surprising.
-    pub fn from_external(artifact: external::TufRotBySign) -> Self {
-        Self::new(artifact.id, artifact.sign)
-    }
-
-    /// Converts self into [`external::TufRotBySign`].
-    pub fn into_external(self) -> external::TufRotBySign {
-        external::TufRotBySign {
-            id: ArtifactId {
-                name: self.name,
-                version: self.version.into(),
-                kind: ArtifactKind::new(self.kind),
-            },
-            sign: self.sign,
-        }
-    }
-}
-
-#[derive(Queryable, Insertable, Clone, Debug, Selectable, AsChangeset)]
 #[diesel(table_name = tuf_artifact)]
 pub struct TufArtifact {
     pub id: DbTypedUuid<TufArtifactKind>,
@@ -226,6 +165,7 @@ pub struct TufArtifact {
     pub sha256: ArtifactHash,
     artifact_size: i64,
     pub generation_added: Generation,
+    pub rot_sign: Option<Vec<u8>>,
 }
 
 impl TufArtifact {
@@ -245,6 +185,9 @@ impl TufArtifact {
             sha256,
             artifact_size: artifact_size as i64,
             generation_added: generation_added.into(),
+            // TODO-K: Is this what we want?
+            // or should I populate with params
+            rot_sign: None,
         }
     }
 
@@ -276,6 +219,7 @@ impl TufArtifact {
             },
             hash: self.sha256.into(),
             size: self.artifact_size as u64,
+            rot_sign: self.rot_sign,
         }
     }
 

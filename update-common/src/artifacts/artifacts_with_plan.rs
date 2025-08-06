@@ -16,7 +16,6 @@ use futures::Stream;
 use futures::TryStreamExt;
 use omicron_common::api::external::TufRepoDescription;
 use omicron_common::api::external::TufRepoMeta;
-use omicron_common::api::external::TufRotBySign;
 use omicron_common::update::ArtifactId;
 use sha2::{Digest, Sha256};
 use slog::Logger;
@@ -274,17 +273,8 @@ impl ArtifactsWithPlan {
             system_version: artifacts.system_version,
             file_name,
         };
-
-        let mut rots_by_sign = vec![];
-        for (id, sign) in rot_by_sign.clone() {
-            rots_by_sign.push(TufRotBySign { id, sign })
-        }
-
-        let description = TufRepoDescription {
-            repo: repo_meta,
-            artifacts: artifacts_meta,
-            rots_by_sign,
-        };
+        let description =
+            TufRepoDescription { repo: repo_meta, artifacts: artifacts_meta };
 
         Ok(Self {
             description,
@@ -570,18 +560,11 @@ mod tests {
         // At the moment, the repo .zip itself doesn't match because it bakes
         // in timestamps. However, the artifacts inside should match exactly.
         plan1.description.sort_artifacts();
-        plan1.description.sort_rots_by_sign();
         plan2.description.sort_artifacts();
-        plan2.description.sort_rots_by_sign();
 
         assert_eq!(
             plan1.description.artifacts, plan2.description.artifacts,
             "artifacts match"
-        );
-
-        assert_eq!(
-            plan1.description.rots_by_sign, plan2.description.rots_by_sign,
-            "RoTs by sign match"
         );
 
         logctx.cleanup_successful();

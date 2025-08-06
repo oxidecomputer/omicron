@@ -2513,6 +2513,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.tuf_artifact (
     -- The generation number this artifact was added for.
     generation_added INT8 NOT NULL,
 
+    -- Sign (root key hash table) hash of a signed RoT or RoT bootloader image.
+    rot_sign BYTES, -- nullable
+
     CONSTRAINT unique_name_version_kind UNIQUE (name, version, kind)
 );
 
@@ -2532,31 +2535,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.tuf_repo_artifact (
     tuf_artifact_id UUID NOT NULL,
 
     PRIMARY KEY (tuf_repo_id, tuf_artifact_id)
-);
-
--- Describes an individual association between an RoT or RoT bootloader artifact
--- and its sign (RKTH) value from an uploaded TUF repo.
-CREATE TABLE IF NOT EXISTS omicron.public.tuf_rot_by_sign (
-    id UUID PRIMARY KEY,
-    name STRING(63) NOT NULL,
-    version STRING(63) NOT NULL,
-    -- The kind of artifact this is
-    kind STRING(63) NOT NULL,
-    -- The sign (RKTH) value associated with this image
-    sign Bytes NOT NUll,
-    -- The time this rot_by_sign was first recorded
-    time_created TIMESTAMPTZ NOT NULL,
-    CONSTRAINT unique_name_version_kind_sign UNIQUE (name, version, kind, sign)
-);
-
--- Reflects that a particular RoT or RoT bootloader artifact was provided by a
--- particular TUF repo.
--- This is a many-many mapping.
-CREATE TABLE IF NOT EXISTS omicron.public.tuf_repo_rot_by_sign (
-    tuf_repo_id UUID NOT NULL,
-    tuf_rot_by_sign_id UUID NOT NULL,
-
-    PRIMARY KEY (tuf_repo_id, tuf_rot_by_sign_id)
 );
 
 -- Generation number for the current list of TUF artifacts the system wants.
