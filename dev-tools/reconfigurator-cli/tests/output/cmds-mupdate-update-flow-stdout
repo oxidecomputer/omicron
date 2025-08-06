@@ -88,7 +88,7 @@ sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c (role = Gimlet, serial serial1)
     found at:    <REDACTED_TIMESTAMP> from fake sled agent
     address:     [fd00:1122:3344:102::1]:12345
     usable hw threads:   10
-    CPU family:          milan
+    CPU family:          amd_milan
     usable memory (GiB): 0
     reservoir (GiB):     0
     physical disks:
@@ -195,7 +195,7 @@ sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 (role = Gimlet, serial serial0)
     found at:    <REDACTED_TIMESTAMP> from fake sled agent
     address:     [fd00:1122:3344:101::1]:12345
     usable hw threads:   10
-    CPU family:          milan
+    CPU family:          amd_milan
     usable memory (GiB): 0
     reservoir (GiB):     0
     physical disks:
@@ -304,7 +304,7 @@ sled d81c6a84-79b8-4958-ae41-ea46c9b19763 (role = Gimlet, serial serial2)
     found at:    <REDACTED_TIMESTAMP> from fake sled agent
     address:     [fd00:1122:3344:103::1]:12345
     usable hw threads:   10
-    CPU family:          milan
+    CPU family:          amd_milan
     usable memory (GiB): 0
     reservoir (GiB):     0
     physical disks:
