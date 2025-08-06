@@ -69,7 +69,9 @@ pub fn all_apis() -> Vec<ManagedApiConfig> {
         },
         ManagedApiConfig {
             title: "CockroachDB Cluster Admin API",
-            versions: Versions::new_lockstep(semver::Version::new(0, 0, 1)),
+            versions: Versions::new_versioned(
+                cockroach_admin_api::supported_versions(),
+            ),
             description: "API for interacting with the Oxide \
                 control plane's CockroachDB cluster",
             boundary: ApiBoundary::Internal,
