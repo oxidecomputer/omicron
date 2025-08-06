@@ -36,7 +36,9 @@ pub fn all_apis() -> Vec<ManagedApiConfig> {
         },
         ManagedApiConfig {
             title: "ClickHouse Cluster Admin Keeper API",
-            versions: Versions::new_lockstep(semver::Version::new(0, 0, 1)),
+            versions: Versions::new_versioned(
+                clickhouse_admin_api::supported_versions(),
+            ),
             description: "API for interacting with the Oxide \
                 control plane's ClickHouse cluster keepers",
             boundary: ApiBoundary::Internal,
@@ -47,7 +49,9 @@ pub fn all_apis() -> Vec<ManagedApiConfig> {
         },
         ManagedApiConfig {
             title: "ClickHouse Cluster Admin Server API",
-            versions: Versions::new_lockstep(semver::Version::new(0, 0, 1)),
+            versions: Versions::new_versioned(
+                clickhouse_admin_api::supported_versions(),
+            ),
             description: "API for interacting with the Oxide \
                 control plane's ClickHouse cluster replica servers",
             boundary: ApiBoundary::Internal,
@@ -58,7 +62,9 @@ pub fn all_apis() -> Vec<ManagedApiConfig> {
         },
         ManagedApiConfig {
             title: "ClickHouse Single-Node Admin Server API",
-            versions: Versions::new_lockstep(semver::Version::new(0, 0, 1)),
+            versions: Versions::new_versioned(
+                clickhouse_admin_api::supported_versions(),
+            ),
             description: "API for interacting with the Oxide \
                 control plane's single-node ClickHouse database",
             boundary: ApiBoundary::Internal,
