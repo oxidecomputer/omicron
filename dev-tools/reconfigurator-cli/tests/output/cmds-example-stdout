@@ -396,7 +396,7 @@ parent:    02697f74-b14a-4418-90f0-c28b2a3a6aa9
 
  PENDING MGS-MANAGED UPDATES: 0
 
-Nothing to report on planning for blueprint ade5749d-bdf3-4fab-a8ae-00bea01b3a5a.
+Empty planning report for blueprint ade5749d-bdf3-4fab-a8ae-00bea01b3a5a.
 
 
 
@@ -509,7 +509,7 @@ parent:    02697f74-b14a-4418-90f0-c28b2a3a6aa9
 
  PENDING MGS-MANAGED UPDATES: 0
 
-Nothing to report on planning for blueprint ade5749d-bdf3-4fab-a8ae-00bea01b3a5a.
+Empty planning report for blueprint ade5749d-bdf3-4fab-a8ae-00bea01b3a5a.
 
 
 
@@ -1023,7 +1023,7 @@ parent:    02697f74-b14a-4418-90f0-c28b2a3a6aa9
 
  PENDING MGS-MANAGED UPDATES: 0
 
-Nothing to report on planning for blueprint ade5749d-bdf3-4fab-a8ae-00bea01b3a5a.
+Empty planning report for blueprint ade5749d-bdf3-4fab-a8ae-00bea01b3a5a.
 
 
 
@@ -1541,7 +1541,7 @@ COCKROACH STATUS
 INFO skipping noop image source check for all sleds, reason: no target release is currently set
 WARN cannot issue more SP updates (no current artifacts)
 generated blueprint 86db3308-f817-4626-8838-4085949a6a41 based on parent blueprint ade5749d-bdf3-4fab-a8ae-00bea01b3a5a
-Nothing to report on planning for blueprint 86db3308-f817-4626-8838-4085949a6a41.
+Empty planning report for blueprint 86db3308-f817-4626-8838-4085949a6a41.
 
 
 > blueprint-diff ade5749d-bdf3-4fab-a8ae-00bea01b3a5a latest

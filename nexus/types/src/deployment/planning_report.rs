@@ -97,7 +97,7 @@ impl fmt::Display for PlanningReport {
         if self.is_empty() {
             writeln!(
                 f,
-                "Nothing to report on planning for blueprint {}.",
+                "Empty planning report for blueprint {}.",
                 self.blueprint_id,
             )?;
         } else {
