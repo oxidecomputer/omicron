@@ -25386,7 +25386,7 @@
           },
           "sign": {
             "nullable": true,
-            "description": "Sign (root key hash table) hash of a signed image. Only applicable to RoT or RoT bootloader artifacts.",
+            "description": "Contents of the `SIGN` field of a Hubris archive caboose, i.e., an identifier for the set of valid signing keys. Currently only applicable to RoT image and bootloader artifacts, where it will be an LPC55 Root Key Table Hash (RKTH).",
             "type": "array",
             "items": {
               "type": "integer",
