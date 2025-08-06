@@ -38,10 +38,14 @@ impl VmmCpuPlatform {
             // Milan-based instances can run on both Milan and Turin processors.
             // Turin and Turin Dense are equally viable from a features
             // perspective.
-            Self::AmdMilan => {
-                Some(&[SledCpuFamily::AmdMilan, SledCpuFamily::AmdTurin, SledCpuFamily::AmdTurinDense])
+            Self::AmdMilan => Some(&[
+                SledCpuFamily::AmdMilan,
+                SledCpuFamily::AmdTurin,
+                SledCpuFamily::AmdTurinDense,
+            ]),
+            Self::AmdTurin => {
+                Some(&[SledCpuFamily::AmdTurin, SledCpuFamily::AmdTurinDense])
             }
-            Self::AmdTurin => Some(&[SledCpuFamily::AmdTurin, SledCpuFamily::AmdTurinDense]),
 
             // VMMs get the "sled default" CPU platform when an instance starts
             // up on a sled that hasn't reported a well-known CPU family. Assume
