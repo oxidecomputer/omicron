@@ -149,7 +149,9 @@ pub fn all_apis() -> Vec<ManagedApiConfig> {
         },
         ManagedApiConfig {
             title: "Oxide Oximeter API",
-            versions: Versions::new_lockstep(semver::Version::new(0, 0, 1)),
+            versions: Versions::new_versioned(
+                oximeter_api::supported_versions(),
+            ),
             description: "API for interacting with oximeter",
             boundary: ApiBoundary::Internal,
             api_description: oximeter_api_mod::stub_api_description,
