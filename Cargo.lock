@@ -7187,7 +7187,9 @@ dependencies = [
  "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
+ "openapi-manager-types",
  "schemars",
+ "semver 1.0.26",
  "serde",
 ]
 

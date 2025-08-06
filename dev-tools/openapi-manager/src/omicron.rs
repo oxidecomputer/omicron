@@ -138,7 +138,9 @@ pub fn all_apis() -> Vec<ManagedApiConfig> {
         },
         ManagedApiConfig {
             title: "NTP Admin API",
-            versions: Versions::new_lockstep(semver::Version::new(0, 0, 1)),
+            versions: Versions::new_versioned(
+                ntp_admin_api::supported_versions(),
+            ),
             description: "API for interacting with NTP",
             boundary: ApiBoundary::Internal,
             api_description: ntp_admin_api_mod::stub_api_description,
