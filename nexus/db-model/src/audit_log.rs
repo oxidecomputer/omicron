@@ -40,7 +40,17 @@ pub struct AuditLogEntryInitParams {
 impl_enum_type!(
     AuditLogActorKindEnum:
 
-    #[derive(Clone, Copy, Debug, AsExpression, FromSqlRow, Serialize, Deserialize, PartialEq, Eq)]
+    #[derive(
+        Clone,
+        Copy,
+        Debug,
+        AsExpression,
+        FromSqlRow,
+        Serialize,
+        Deserialize,
+        PartialEq,
+        Eq,
+    )]
     pub enum AuditLogActorKind;
 
     // Enum values
@@ -52,7 +62,17 @@ impl_enum_type!(
 impl_enum_type!(
     AuditLogResultKindEnum:
 
-    #[derive(Clone, Copy, Debug, AsExpression, FromSqlRow, Serialize, Deserialize, PartialEq, Eq)]
+    #[derive(
+        Clone,
+        Copy,
+        Debug,
+        AsExpression,
+        FromSqlRow,
+        Serialize,
+        Deserialize,
+        PartialEq,
+        Eq,
+    )]
     pub enum AuditLogResultKind;
 
     // Enum values
@@ -95,7 +115,17 @@ pub struct AuditLogEntryInit {
 
 impl From<AuditLogEntryInitParams> for AuditLogEntryInit {
     fn from(params: AuditLogEntryInitParams) -> Self {
-        let (actor_id, actor_silo_id, actor_kind) = match params.actor {
+        let AuditLogEntryInitParams {
+            request_id,
+            operation_id,
+            request_uri,
+            source_ip,
+            user_agent,
+            actor,
+            access_method,
+        } = params;
+
+        let (actor_id, actor_silo_id, actor_kind) = match actor {
             AuditLogActor::UserBuiltin { user_builtin_id } => {
                 (Some(user_builtin_id), None, AuditLogActorKind::UserBuiltin)
             }
@@ -110,15 +140,15 @@ impl From<AuditLogEntryInitParams> for AuditLogEntryInit {
         Self {
             id: Uuid::new_v4(),
             time_started: Utc::now(),
-            request_id: params.request_id,
-            request_uri: params.request_uri,
-            operation_id: params.operation_id,
+            request_id,
+            request_uri,
+            operation_id,
             actor_id,
             actor_silo_id,
             actor_kind,
-            source_ip: params.source_ip.into(),
-            user_agent: params.user_agent,
-            access_method: params.access_method,
+            source_ip: source_ip.into(),
+            user_agent,
+            access_method,
         }
     }
 }
@@ -169,6 +199,14 @@ pub enum AuditLogCompletion {
         error_code: Option<String>,
         error_message: String,
     },
+    /// This doesn't mean the operation itself timed out (which would be an
+    /// error, and I don't think we even have API timeouts) but rather that the
+    /// attempts to complete the log entry failed (or were never even attempted
+    /// because, e.g., Nexus crashed during the operation), and this entry had
+    /// to be cleaned up later by a background job (which doesn't exist yet)
+    /// after a timeout. Note we represent this result status as "Unknown" in
+    /// the external API because timeout is an implementation detail and makes
+    /// it sound like the operation timed out.
     Timeout,
 }
 
