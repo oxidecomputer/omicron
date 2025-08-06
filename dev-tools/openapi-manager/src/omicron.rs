@@ -169,7 +169,9 @@ pub fn all_apis() -> Vec<ManagedApiConfig> {
         },
         ManagedApiConfig {
             title: "Oxide Sled Agent API",
-            versions: Versions::new_lockstep(semver::Version::new(0, 0, 1)),
+            versions: Versions::new_versioned(
+                sled_agent_api::supported_versions(),
+            ),
             description: "API for interacting with individual sleds",
             boundary: ApiBoundary::Internal,
             api_description: sled_agent_api_mod::stub_api_description,
