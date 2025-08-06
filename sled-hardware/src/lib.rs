@@ -226,8 +226,8 @@ pub fn detect_cpu_family(
         "leaf1.ebx" => format_args!("{:#08x}", leaf_1.ebx),
         "leaf1.ecx" => format_args!("{:#08x}", leaf_1.ecx),
         "leaf1.edx" => format_args!("{:#08x}", leaf_1.edx),
-        "parsed family" => format_args!("{family:#x}"),
-        "parsed model" => format_args!("{model:#x}"),
+        "parsed_family" => format_args!("{family:#x}"),
+        "parsed_model" => format_args!("{model:#x}"),
     );
 
     // Match on the family/model ranges we've detected. Notably client parts are

@@ -1134,14 +1134,20 @@ pub enum SledCpuFamily {
     AmdTurinDense,
 }
 
+impl SledCpuFamily {
+    fn as_str(&self) -> &'static str {
+        match self {
+            SledCpuFamily::Unknown => "unknown",
+            SledCpuFamily::AmdMilan => "amd_milan",
+            SledCpuFamily::AmdTurin => "amd_turin",
+            SledCpuFamily::AmdTurinDense => "amd_turin_dense",
+        }
+    }
+}
+
 impl fmt::Display for SledCpuFamily {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            SledCpuFamily::Unknown => write!(f, "unknown"),
-            SledCpuFamily::AmdMilan => write!(f, "milan"),
-            SledCpuFamily::AmdTurin => write!(f, "turin"),
-            SledCpuFamily::AmdTurinDense => write!(f, "turin_dense"),
-        }
+        write!(f, "{}", self.as_str())
     }
 }
 
