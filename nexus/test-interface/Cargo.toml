@@ -7,6 +7,9 @@ license = "MPL-2.0"
 [lints]
 workspace = true
 
+[build-dependencies]
+omicron-rpaths.workspace = true
+
 [dependencies]
 async-trait.workspace = true
 nexus-config.workspace = true
@@ -14,6 +17,8 @@ nexus-db-queries.workspace = true
 nexus-sled-agent-shared.workspace = true
 nexus-types.workspace = true
 omicron-common.workspace = true
+# See omicron-rpaths for more about the "pq-sys" dependency.
+pq-sys = "*"
 slog.workspace = true
 uuid.workspace = true
 omicron-workspace-hack.workspace = true

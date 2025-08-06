@@ -1364,6 +1364,24 @@ pub struct PendingMgsUpdate {
     pub artifact_version: ArtifactVersion,
 }
 
+impl PendingMgsUpdate {
+    /// Get a short description of this update, suitable for display on a single
+    /// line (e.g., as the `comment` field of a blueprint).
+    pub fn description(&self) -> String {
+        let serial = &self.baseboard_id.serial_number;
+        let sp_type = self.sp_type;
+        let slot_id = self.slot_id;
+        let version = &self.artifact_version;
+        let kind = match &self.details {
+            PendingMgsUpdateDetails::Sp { .. } => "SP",
+            PendingMgsUpdateDetails::Rot { .. } => "RoT",
+            PendingMgsUpdateDetails::RotBootloader { .. } => "RoT bootloader",
+            PendingMgsUpdateDetails::HostPhase1(_) => "host phase 1",
+        };
+        format!("update {sp_type:?} {slot_id} ({serial}) {kind} to {version}")
+    }
+}
+
 impl slog::KV for PendingMgsUpdate {
     fn serialize(
         &self,
