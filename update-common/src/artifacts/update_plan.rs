@@ -464,7 +464,6 @@ impl<'a> UpdatePlanBuilder<'a> {
         Ok(())
     }
 
-    // TODO-K: This is where we construct the artifact?
     async fn add_rot_artifact(
         &mut self,
         artifact_id: ArtifactId,

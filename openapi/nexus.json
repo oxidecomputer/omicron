@@ -25384,6 +25384,16 @@
               }
             ]
           },
+          "rot_sign": {
+            "nullable": true,
+            "description": "Sign (root key hash table) hash of a signed image. Only applicable to RoT or RoT bootloader artifacts.",
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0
+            }
+          },
           "size": {
             "description": "The size of the artifact in bytes.",
             "type": "integer",
@@ -25415,18 +25425,11 @@
                 "$ref": "#/components/schemas/TufRepoMeta"
               }
             ]
-          },
-          "rots_by_sign": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/TufRotBySign"
-            }
           }
         },
         "required": [
           "artifacts",
-          "repo",
-          "rots_by_sign"
+          "repo"
         ]
       },
       "TufRepoGetResponse": {
@@ -25527,33 +25530,6 @@
           "system_version",
           "targets_role_version",
           "valid_until"
-        ]
-      },
-      "TufRotBySign": {
-        "description": "Mapping for RoT signing information in RoT and RoT bootloader artifacts\n\nFound within a `TufRepoDescription`.",
-        "type": "object",
-        "properties": {
-          "id": {
-            "description": "The artifact ID.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/ArtifactId"
-              }
-            ]
-          },
-          "sign": {
-            "description": "The sign (RKTH value) of the artifact.",
-            "type": "array",
-            "items": {
-              "type": "integer",
-              "format": "uint8",
-              "minimum": 0
-            }
-          }
-        },
-        "required": [
-          "id",
-          "sign"
         ]
       },
       "TxEqConfig": {

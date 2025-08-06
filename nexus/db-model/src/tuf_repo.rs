@@ -175,6 +175,7 @@ impl TufArtifact {
         sha256: ArtifactHash,
         artifact_size: u64,
         generation_added: external::Generation,
+        rot_sign: Option<Vec<u8>>,
     ) -> Self {
         Self {
             id: TypedUuid::new_v4().into(),
@@ -185,9 +186,7 @@ impl TufArtifact {
             sha256,
             artifact_size: artifact_size as i64,
             generation_added: generation_added.into(),
-            // TODO-K: Is this what we want?
-            // or should I populate with params
-            rot_sign: None,
+            rot_sign,
         }
     }
 
@@ -206,6 +205,7 @@ impl TufArtifact {
             artifact.hash.into(),
             artifact.size,
             generation_added,
+            artifact.rot_sign,
         )
     }
 
