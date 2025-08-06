@@ -92,7 +92,7 @@ pub fn all_apis() -> Vec<ManagedApiConfig> {
         },
         ManagedApiConfig {
             title: "Oxide Management Gateway Service API",
-            versions: Versions::new_lockstep(semver::Version::new(0, 0, 1)),
+            versions: Versions::new_versioned(gateway_api::supported_versions()),
             description: "API for interacting with the Oxide \
                 control plane's gateway service",
             boundary: ApiBoundary::Internal,
