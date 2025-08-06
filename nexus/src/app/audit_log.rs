@@ -151,13 +151,21 @@ impl super::Nexus {
             |error, delay| {
                 let id = entry.id;
                 count += 1;
-                error!(
+                warn!(
                     self.log,
-                    "failed to complete audit log entry {id}. retry {count} in {delay:?}";
+                    "failed attempt to complete audit log entry {id}. retry {count} in {delay:?}";
                     "error" => ?error
                 );
             },
         )
         .await
+        .map_err(|err| {
+            error!(
+                self.log,
+                "failed all attempts to complete audit log entry {}", entry.id;
+                "error" => ?err
+            );
+            err
+        })
     }
 }
