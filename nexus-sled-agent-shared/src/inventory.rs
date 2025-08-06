@@ -40,9 +40,9 @@ use omicron_uuid_kinds::{SledUuid, ZpoolUuid};
 use schemars::schema::{Schema, SchemaObject};
 use schemars::{JsonSchema, SchemaGenerator};
 use serde::{Deserialize, Serialize};
-// Export this type for convenience -- this way, dependents don't have to
+// Export these types for convenience -- this way, dependents don't have to
 // depend on sled-hardware-types.
-pub use sled_hardware_types::Baseboard;
+pub use sled_hardware_types::{Baseboard, SledCpuFamily};
 use strum::EnumIter;
 use tufaceous_artifact::{ArtifactHash, KnownArtifactKind};
 
@@ -121,6 +121,7 @@ pub struct Inventory {
     pub baseboard: Baseboard,
     pub usable_hardware_threads: u32,
     pub usable_physical_ram: ByteCount,
+    pub cpu_family: SledCpuFamily,
     pub reservoir_size: ByteCount,
     pub disks: Vec<InventoryDisk>,
     pub zpools: Vec<InventoryZpool>,

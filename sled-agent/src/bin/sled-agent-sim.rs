@@ -21,7 +21,7 @@ use omicron_sled_agent::sim::{
     run_standalone_server,
 };
 use omicron_uuid_kinds::SledUuid;
-use sled_hardware_types::Baseboard;
+use sled_hardware_types::{Baseboard, SledCpuFamily};
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
 
@@ -110,6 +110,7 @@ async fn do_run() -> Result<(), CmdError> {
             hardware_threads: 32,
             physical_ram: 64 * (1 << 30),
             reservoir_ram: 32 * (1 << 30),
+            cpu_family: SledCpuFamily::AmdMilan,
             baseboard: Baseboard::Gimlet {
                 identifier: format!("sim-{}", args.uuid),
                 model: String::from("sim-gimlet"),
@@ -122,6 +123,7 @@ async fn do_run() -> Result<(), CmdError> {
             Some(args.nexus_addr),
             Some(tmp.path()),
             ZpoolConfig::TenVirtualU2s,
+            SledCpuFamily::AmdMilan,
         )
     };
 

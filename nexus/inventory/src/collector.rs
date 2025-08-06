@@ -672,6 +672,7 @@ mod test {
     use nexus_sled_agent_shared::inventory::OmicronZoneConfig;
     use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
     use nexus_sled_agent_shared::inventory::OmicronZoneType;
+    use nexus_sled_agent_shared::inventory::SledCpuFamily;
     use nexus_types::inventory::Collection;
     use omicron_cockroach_metrics::CockroachClusterAdminClient;
     use omicron_common::api::external::Generation;
@@ -913,6 +914,7 @@ mod test {
             None,
             None,
             sim::ZpoolConfig::None,
+            SledCpuFamily::AmdMilan,
         );
 
         let agent =

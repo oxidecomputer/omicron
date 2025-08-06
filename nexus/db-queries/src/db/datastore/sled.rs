@@ -309,6 +309,7 @@ impl DataStore {
                     .eq(sled_update.usable_hardware_threads),
                 dsl::usable_physical_ram.eq(sled_update.usable_physical_ram),
                 dsl::reservoir_size.eq(sled_update.reservoir_size),
+                dsl::cpu_family.eq(sled_update.cpu_family),
                 dsl::sled_agent_gen.eq(sled_update.sled_agent_gen),
             ))
             .filter(dsl::sled_agent_gen.lt(sled_update.sled_agent_gen))

@@ -25,6 +25,7 @@ use nexus_db_model::ProjectImage;
 use nexus_db_model::ProjectImageIdentity;
 use nexus_db_model::Resources;
 use nexus_db_model::SledBaseboard;
+use nexus_db_model::SledCpuFamily;
 use nexus_db_model::SledSystemHardware;
 use nexus_db_model::SledUpdate;
 use nexus_db_model::Snapshot;
@@ -77,6 +78,7 @@ pub struct SledSystemHardwareBuilder {
     usable_hardware_threads: u32,
     usable_physical_ram: i64,
     reservoir_size: i64,
+    cpu_family: SledCpuFamily,
 }
 
 impl Default for SledSystemHardwareBuilder {
@@ -86,6 +88,7 @@ impl Default for SledSystemHardwareBuilder {
             usable_hardware_threads: 4,
             usable_physical_ram: 1 << 40,
             reservoir_size: 1 << 39,
+            cpu_family: SledCpuFamily::AmdMilan,
         }
     }
 }
@@ -121,12 +124,18 @@ impl SledSystemHardwareBuilder {
         self
     }
 
+    pub fn cpu_family(&mut self, family: SledCpuFamily) -> &mut Self {
+        self.cpu_family = family;
+        self
+    }
+
     pub fn build(&self) -> SledSystemHardware {
         SledSystemHardware {
             is_scrimlet: self.is_scrimlet,
             usable_hardware_threads: self.usable_hardware_threads,
             usable_physical_ram: self.usable_physical_ram.try_into().unwrap(),
             reservoir_size: self.reservoir_size.try_into().unwrap(),
+            cpu_family: self.cpu_family,
         }
     }
 }

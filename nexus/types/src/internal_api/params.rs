@@ -8,7 +8,7 @@ use crate::deployment::Blueprint;
 use crate::external_api::params::PhysicalDiskKind;
 use crate::external_api::shared::Baseboard;
 use crate::external_api::shared::IpRange;
-use nexus_sled_agent_shared::inventory::SledRole;
+use nexus_sled_agent_shared::inventory::{SledCpuFamily, SledRole};
 use nexus_sled_agent_shared::recovery_silo::RecoverySiloConfig;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Generation;
@@ -55,6 +55,9 @@ pub struct SledAgentInfo {
     ///
     /// Must be smaller than "usable_physical_ram"
     pub reservoir_size: ByteCount,
+
+    /// The family of the sled's CPU.
+    pub cpu_family: SledCpuFamily,
 
     /// The generation number of this request from sled-agent
     pub generation: Generation,

@@ -38,6 +38,7 @@ use nexus_db_queries::db::pub_test_utils::crdb;
 use nexus_sled_agent_shared::inventory::HostPhase2DesiredSlots;
 use nexus_sled_agent_shared::inventory::OmicronSledConfig;
 use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
+use nexus_sled_agent_shared::inventory::SledCpuFamily;
 use nexus_sled_agent_shared::recovery_silo::RecoverySiloConfig;
 use nexus_test_interface::NexusServer;
 use nexus_types::deployment::Blueprint;
@@ -1902,7 +1903,18 @@ pub async fn start_sled_agent(
         Some(nexus_address),
         Some(update_directory),
         sim::ZpoolConfig::None,
+        SledCpuFamily::AmdMilan,
     );
+    start_sled_agent_with_config(log, &config, sled_index, simulated_upstairs)
+        .await
+}
+
+pub async fn start_sled_agent_with_config(
+    log: Logger,
+    config: &sim::Config,
+    sled_index: u16,
+    simulated_upstairs: &Arc<sim::SimulatedUpstairs>,
+) -> Result<sim::Server, String> {
     let server =
         sim::Server::start(&config, &log, true, simulated_upstairs, sled_index)
             .await
