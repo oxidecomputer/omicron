@@ -8,14 +8,15 @@ use http::{Method, StatusCode, header};
 use nexus_db_queries::authn::USER_TEST_PRIVILEGED;
 use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::resource_helpers::{
-    create_console_session, create_local_user, create_project, create_silo,
-    object_create_error, objects_list_page_authz, test_params,
+    DiskTest, create_console_session, create_default_ip_pool, create_disk,
+    create_instance_with, create_local_user, create_project, create_silo,
+    object_create_error, object_delete, objects_list_page_authz, test_params,
 };
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::{params, shared, views};
 use nexus_types::{identity::Asset, silo::DEFAULT_SILO_ID};
 use omicron_common::api::external::{
-    IdentityMetadataCreateParams, Name, UserId,
+    IdentityMetadataCreateParams, InstanceAutoRestartPolicy, Name, UserId,
 };
 use std::str::FromStr;
 
@@ -290,4 +291,100 @@ async fn expect_login_success(
         .execute()
         .await
         .expect("expected successful login, but it failed");
+}
+
+#[nexus_test]
+async fn test_audit_log_create_delete_ops(ctx: &ControlPlaneTestContext) {
+    let client = &ctx.external_client;
+    let t0: DateTime<Utc> = "2024-01-01T00:00:00Z".parse().unwrap();
+
+    // Ensure we start with an empty audit log
+    let init_log = fetch_log(client, t0, None).await;
+    assert_eq!(init_log.items.len(), 0);
+
+    let t1 = Utc::now();
+
+    // Set up disk test infrastructure and create resources with audit logging
+    DiskTest::new(&ctx).await;
+    create_default_ip_pool(client).await;
+    let _project = create_project(client, "test-project").await;
+    let _instance = create_instance_with(
+        client,
+        "test-project",
+        "test-instance",
+        &params::InstanceNetworkInterfaceAttachment::Default,
+        Vec::<params::InstanceDiskAttachment>::new(),
+        Vec::<params::ExternalIpCreate>::new(),
+        false, // start=false, so instance is created in stopped state
+        None::<InstanceAutoRestartPolicy>,
+    )
+    .await;
+    let _disk = create_disk(client, "test-project", "test-disk").await;
+
+    let t2 = Utc::now();
+
+    // Extract delete URLs to variables
+    let instance_del_url = "/v1/instances/test-instance?project=test-project";
+    let disk_del_url = "/v1/disks/test-disk?project=test-project";
+    let subnet_delete_url =
+        "/v1/vpc-subnets/default?project=test-project&vpc=default";
+    let vpc_delete_url = "/v1/vpcs/default?project=test-project";
+    let project_del_url = "/v1/projects/test-project";
+
+    // Delete instance, disk, default subnet, default VPC, and project
+    object_delete(client, instance_del_url).await;
+    object_delete(client, disk_del_url).await;
+    object_delete(client, subnet_delete_url).await;
+    object_delete(client, vpc_delete_url).await;
+    object_delete(client, project_del_url).await;
+
+    let t3 = Utc::now();
+
+    // Fetch and verify all audit log entries in a single call
+    let audit_log = fetch_log(client, t0, None).await;
+    assert_eq!(audit_log.items.len(), 6);
+
+    let items = &audit_log.items;
+
+    // Verify create entries
+    verify_entry(&items[0], "project_create", "/v1/projects", 201, t1, t2);
+    let instances_url = "/v1/instances?project=test-project";
+    verify_entry(&items[1], "instance_create", instances_url, 201, t1, t2);
+    let disks_url = "/v1/disks?project=test-project";
+    verify_entry(&items[2], "disk_create", disks_url, 201, t1, t2);
+
+    // Verify delete entries
+    verify_entry(&items[3], "instance_delete", instance_del_url, 204, t2, t3);
+    verify_entry(&items[4], "disk_delete", disk_del_url, 204, t2, t3);
+    verify_entry(&items[5], "project_delete", project_del_url, 204, t2, t3);
+}
+
+fn verify_entry(
+    entry: &views::AuditLogEntry,
+    operation_id: &str,
+    request_uri: &str,
+    http_status_code: u16,
+    start_time: DateTime<Utc>,
+    end_time: DateTime<Utc>,
+) {
+    // Verify operation-specific fields
+    assert_eq!(entry.operation_id, operation_id);
+    assert_eq!(entry.request_uri, request_uri);
+    assert_eq!(
+        entry.result,
+        views::AuditLogEntryResult::Success { http_status_code }
+    );
+    assert!(entry.time_started >= start_time && entry.time_started <= end_time);
+
+    // Verify fields common to all test-generated entries
+    assert_eq!(
+        entry.actor,
+        views::AuditLogEntryActor::SiloUser {
+            silo_user_id: USER_TEST_PRIVILEGED.id(),
+            silo_id: DEFAULT_SILO_ID,
+        }
+    );
+    assert_eq!(entry.source_ip.to_string(), "127.0.0.1");
+    assert_eq!(entry.access_method, Some("spoof".to_string()));
+    assert!(entry.time_completed > entry.time_started);
 }

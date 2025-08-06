@@ -974,17 +974,26 @@ impl NexusExternalApi for NexusExternalApiImpl {
         path_params: Path<params::ProjectPath>,
     ) -> Result<HttpResponseDeleted, HttpError> {
         let apictx = rqctx.context();
-        let nexus = &apictx.context.nexus;
-        let path = path_params.into_inner();
         let handler = async {
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
-            let project_selector =
-                params::ProjectSelector { project: path.project };
-            let project_lookup =
-                nexus.project_lookup(&opctx, project_selector)?;
-            nexus.project_delete(&opctx, &project_lookup).await?;
-            Ok(HttpResponseDeleted())
+            let nexus = &apictx.context.nexus;
+            let audit = nexus.audit_log_entry_init(&opctx, &rqctx).await?;
+
+            let result = async {
+                let path = path_params.into_inner();
+                let project_selector =
+                    params::ProjectSelector { project: path.project };
+                let project_lookup =
+                    nexus.project_lookup(&opctx, project_selector)?;
+                nexus.project_delete(&opctx, &project_lookup).await?;
+                Ok(HttpResponseDeleted())
+            }
+            .await;
+
+            let _ =
+                nexus.audit_log_entry_complete(&opctx, &audit, &result).await;
+            result
         };
         apictx
             .context
@@ -1862,13 +1871,22 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
             let nexus = &apictx.context.nexus;
-            let query = query_params.into_inner();
-            let params = new_disk.into_inner();
-            let project_lookup = nexus.project_lookup(&opctx, query)?;
-            let disk = nexus
-                .project_create_disk(&opctx, &project_lookup, &params)
-                .await?;
-            Ok(HttpResponseCreated(disk.into()))
+            let audit = nexus.audit_log_entry_init(&opctx, &rqctx).await?;
+
+            let result = async {
+                let query = query_params.into_inner();
+                let params = new_disk.into_inner();
+                let project_lookup = nexus.project_lookup(&opctx, query)?;
+                let disk = nexus
+                    .project_create_disk(&opctx, &project_lookup, &params)
+                    .await?;
+                Ok(HttpResponseCreated(disk.into()))
+            }
+            .await;
+
+            let _ =
+                nexus.audit_log_entry_complete(&opctx, &audit, &result).await;
+            result
         };
         apictx
             .context
@@ -1914,15 +1932,24 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
             let nexus = &apictx.context.nexus;
-            let path = path_params.into_inner();
-            let query = query_params.into_inner();
-            let disk_selector = params::DiskSelector {
-                disk: path.disk,
-                project: query.project,
-            };
-            let disk_lookup = nexus.disk_lookup(&opctx, disk_selector)?;
-            nexus.project_delete_disk(&opctx, &disk_lookup).await?;
-            Ok(HttpResponseDeleted())
+            let audit = nexus.audit_log_entry_init(&opctx, &rqctx).await?;
+
+            let result = async {
+                let path = path_params.into_inner();
+                let query = query_params.into_inner();
+                let disk_selector = params::DiskSelector {
+                    disk: path.disk,
+                    project: query.project,
+                };
+                let disk_lookup = nexus.disk_lookup(&opctx, disk_selector)?;
+                nexus.project_delete_disk(&opctx, &disk_lookup).await?;
+                Ok(HttpResponseDeleted())
+            }
+            .await;
+
+            let _ =
+                nexus.audit_log_entry_complete(&opctx, &audit, &result).await;
+            result
         };
         apictx
             .context
@@ -2096,22 +2123,31 @@ impl NexusExternalApi for NexusExternalApiImpl {
         new_instance: TypedBody<params::InstanceCreate>,
     ) -> Result<HttpResponseCreated<Instance>, HttpError> {
         let apictx = rqctx.context();
-        let nexus = &apictx.context.nexus;
-        let project_selector = query_params.into_inner();
-        let new_instance_params = &new_instance.into_inner();
         let handler = async {
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
-            let project_lookup =
-                nexus.project_lookup(&opctx, project_selector)?;
-            let instance = nexus
-                .project_create_instance(
-                    &opctx,
-                    &project_lookup,
-                    &new_instance_params,
-                )
-                .await?;
-            Ok(HttpResponseCreated(instance.into()))
+            let nexus = &apictx.context.nexus;
+            let audit = nexus.audit_log_entry_init(&opctx, &rqctx).await?;
+
+            let result = async {
+                let project_selector = query_params.into_inner();
+                let new_instance_params = &new_instance.into_inner();
+                let project_lookup =
+                    nexus.project_lookup(&opctx, project_selector)?;
+                let instance = nexus
+                    .project_create_instance(
+                        &opctx,
+                        &project_lookup,
+                        &new_instance_params,
+                    )
+                    .await?;
+                Ok(HttpResponseCreated(instance.into()))
+            }
+            .await;
+
+            let _ =
+                nexus.audit_log_entry_complete(&opctx, &audit, &result).await;
+            result
         };
         apictx
             .context
@@ -2159,20 +2195,31 @@ impl NexusExternalApi for NexusExternalApiImpl {
         path_params: Path<params::InstancePath>,
     ) -> Result<HttpResponseDeleted, HttpError> {
         let apictx = rqctx.context();
-        let nexus = &apictx.context.nexus;
-        let path = path_params.into_inner();
-        let query = query_params.into_inner();
-        let instance_selector = params::InstanceSelector {
-            project: query.project,
-            instance: path.instance,
-        };
         let handler = async {
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
-            let instance_lookup =
-                nexus.instance_lookup(&opctx, instance_selector)?;
-            nexus.project_destroy_instance(&opctx, &instance_lookup).await?;
-            Ok(HttpResponseDeleted())
+            let nexus = &apictx.context.nexus;
+            let audit = nexus.audit_log_entry_init(&opctx, &rqctx).await?;
+
+            let result = async {
+                let path = path_params.into_inner();
+                let query = query_params.into_inner();
+                let instance_selector = params::InstanceSelector {
+                    project: query.project,
+                    instance: path.instance,
+                };
+                let instance_lookup =
+                    nexus.instance_lookup(&opctx, instance_selector)?;
+                nexus
+                    .project_destroy_instance(&opctx, &instance_lookup)
+                    .await?;
+                Ok(HttpResponseDeleted())
+            }
+            .await;
+
+            let _ =
+                nexus.audit_log_entry_complete(&opctx, &audit, &result).await;
+            result
         };
         apictx
             .context
