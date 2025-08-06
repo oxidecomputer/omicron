@@ -6,6 +6,7 @@
 //! partitions.
 
 use crate::InternalDisks;
+use crate::ResolverStatusExt;
 use crate::SledAgentArtifactStore;
 use camino::Utf8Path;
 use camino::Utf8PathBuf;
@@ -15,9 +16,12 @@ use nexus_sled_agent_shared::inventory::BootPartitionDetails;
 use nexus_sled_agent_shared::inventory::HostPhase2DesiredContents;
 use nexus_sled_agent_shared::inventory::HostPhase2DesiredSlots;
 use omicron_common::disk::M2Slot;
+use sled_agent_types::zone_images::ResolverStatus;
 use sled_hardware::PooledDiskError;
 use slog::Logger;
+use slog::error;
 use slog::info;
+use slog::o;
 use slog::warn;
 use slog_error_chain::InlineErrorChain;
 use std::io;
@@ -128,19 +132,27 @@ pub(crate) struct BootPartitionReconciler {
 impl BootPartitionReconciler {
     pub(crate) async fn reconcile<T: SledAgentArtifactStore>(
         &mut self,
+        resolver_status: &ResolverStatus,
         internal_disks: &InternalDisks,
         desired: &HostPhase2DesiredSlots,
         artifact_store: &T,
-        // TODO We should also consider the mupdate override, once that work
-        // lands. Never overwrite the boot partitions while we're in that state.
         log: &Logger,
     ) -> BootPartitionContents {
+        let prepared_slot_a = resolver_status.prepare_host_phase_2_contents(
+            &log.new(o!("slot" => "A")),
+            &desired.slot_a,
+        );
+        let prepared_slot_b = resolver_status.prepare_host_phase_2_contents(
+            &log.new(o!("slot" => "B")),
+            &desired.slot_b,
+        );
+
         let (slot_a, slot_b) = futures::join!(
             Self::reconcile_slot::<_, RawDiskReader, RawDiskWriter>(
                 M2Slot::A,
                 internal_disks,
                 &mut self.cached_slot_a,
-                &desired.slot_a,
+                prepared_slot_a.desired_contents(),
                 artifact_store,
                 log,
             ),
@@ -148,7 +160,7 @@ impl BootPartitionReconciler {
                 M2Slot::B,
                 internal_disks,
                 &mut self.cached_slot_b,
-                &desired.slot_b,
+                prepared_slot_b.desired_contents(),
                 artifact_store,
                 log,
             ),
@@ -334,6 +346,28 @@ impl BootPartitionReconciler {
 
         *cache = Some(details.clone());
         Ok(details)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum HostPhase2PreparedContents<'a> {
+    /// No mupdate override was found, so the desired host phase 2 contents were
+    /// used.
+    NoMupdateOverride(&'a HostPhase2DesiredContents),
+
+    /// A mupdate override was found, so the contents are always set to
+    /// `CurrentContents`.
+    WithMupdateOverride,
+}
+
+impl<'a> HostPhase2PreparedContents<'a> {
+    pub fn desired_contents(&self) -> &'a HostPhase2DesiredContents {
+        match self {
+            Self::NoMupdateOverride(contents) => contents,
+            Self::WithMupdateOverride => {
+                &HostPhase2DesiredContents::CurrentContents
+            }
+        }
     }
 }
 

@@ -63,11 +63,14 @@ where
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct Ereport {
+    #[serde(flatten)]
     pub id: EreportId,
+    #[serde(flatten)]
     pub metadata: EreportMetadata,
     pub reporter: Reporter,
+    #[serde(flatten)]
     pub report: serde_json::Value,
 }
 
@@ -96,7 +99,7 @@ impl From<SpEreport> for Ereport {
                 serial_number,
                 class,
             },
-            reporter: Reporter::Sp { sp_type, slot: sp_slot.0 },
+            reporter: Reporter::Sp { sp_type: sp_type.into(), slot: sp_slot.0 },
             report,
         }
     }
@@ -131,7 +134,7 @@ impl From<HostEreport> for Ereport {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct EreportMetadata {
     pub time_collected: DateTime<Utc>,
     pub time_deleted: Option<DateTime<Utc>>,
@@ -141,22 +144,40 @@ pub struct EreportMetadata {
     pub class: Option<String>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
+#[derive(
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+    Ord,
+    PartialOrd,
+    serde::Serialize,
+    serde::Deserialize,
+)]
 pub enum Reporter {
-    Sp { sp_type: SpType, slot: u16 },
+    Sp { sp_type: nexus_types::inventory::SpType, slot: u16 },
     HostOs { sled: SledUuid },
 }
 
 impl std::fmt::Display for Reporter {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Sp { sp_type: SpType::Sled, slot } => {
+            Self::Sp {
+                sp_type: nexus_types::inventory::SpType::Sled,
+                slot,
+            } => {
                 write!(f, "Sled (SP) {slot:02}")
             }
-            Self::Sp { sp_type: SpType::Switch, slot } => {
+            Self::Sp {
+                sp_type: nexus_types::inventory::SpType::Switch,
+                slot,
+            } => {
                 write!(f, "Switch {slot}")
             }
-            Self::Sp { sp_type: SpType::Power, slot } => {
+            Self::Sp {
+                sp_type: nexus_types::inventory::SpType::Power,
+                slot,
+            } => {
                 write!(f, "PSC {slot}")
             }
             Self::HostOs { sled } => {

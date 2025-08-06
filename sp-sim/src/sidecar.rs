@@ -63,6 +63,8 @@ use std::iter;
 use std::net::SocketAddrV6;
 use std::pin::Pin;
 use std::sync::Arc;
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering;
 use tokio::select;
 use tokio::sync::Mutex as TokioMutex;
 use tokio::sync::mpsc;
@@ -79,6 +81,7 @@ pub struct Sidecar {
     handler: Option<Arc<TokioMutex<Handler>>>,
     commands: mpsc::UnboundedSender<Command>,
     inner_task: Option<JoinHandle<()>>,
+    power_state_changes: Arc<AtomicUsize>,
     responses_sent_count: Option<watch::Receiver<usize>>,
 }
 
@@ -136,10 +139,7 @@ impl SimulatedSp for Sidecar {
         handler.update_state.last_rot_update_data()
     }
 
-    async fn last_host_phase1_update_data(
-        &self,
-        _slot: u16,
-    ) -> Option<Box<[u8]>> {
+    async fn host_phase1_data(&self, _slot: u16) -> Option<Vec<u8>> {
         // sidecars do not have attached hosts
         None
     }
@@ -150,6 +150,10 @@ impl SimulatedSp for Sidecar {
         };
 
         handler.lock().await.update_state.status()
+    }
+
+    fn power_state_changes(&self) -> usize {
+        self.power_state_changes.load(Ordering::Relaxed)
     }
 
     fn responses_sent_count(&self) -> Option<watch::Receiver<usize>> {
@@ -251,6 +255,7 @@ impl Sidecar {
                 EreportState::new(cfg, ereport_log)
             };
 
+            let power_state_changes = Arc::new(AtomicUsize::new(0));
             let (inner, handler, responses_sent_count) = Inner::new(
                 servers,
                 ereport_servers,
@@ -262,6 +267,7 @@ impl Sidecar {
                 log,
                 sidecar.common.old_rot_state,
                 sidecar.common.no_stage0_caboose,
+                Arc::clone(&power_state_changes),
             );
             let inner_task =
                 task::spawn(async move { inner.run().await.unwrap() });
@@ -273,6 +279,7 @@ impl Sidecar {
                 commands,
                 inner_task: Some(inner_task),
                 responses_sent_count: Some(responses_sent_count),
+                power_state_changes,
             })
         } else {
             Ok(Self {
@@ -282,6 +289,7 @@ impl Sidecar {
                 commands,
                 inner_task: None,
                 responses_sent_count: None,
+                power_state_changes: Arc::new(AtomicUsize::new(0)),
             })
         }
     }
@@ -331,6 +339,7 @@ impl Inner {
         log: Logger,
         old_rot_state: bool,
         no_stage0_caboose: bool,
+        power_state_changes: Arc<AtomicUsize>,
     ) -> (Self, Arc<TokioMutex<Handler>>, watch::Receiver<usize>) {
         let [udp0, udp1] = servers;
         let handler = Arc::new(TokioMutex::new(Handler::new(
@@ -340,6 +349,7 @@ impl Inner {
             log,
             old_rot_state,
             no_stage0_caboose,
+            power_state_changes,
         )));
         let responses_sent_count = watch::Sender::new(0);
         let responses_sent_count_rx = responses_sent_count.subscribe();
@@ -481,6 +491,7 @@ struct Handler {
     serial_number: String,
     ignition: FakeIgnition,
     power_state: PowerState,
+    power_state_changes: Arc<AtomicUsize>,
 
     update_state: SimSpUpdate,
     reset_pending: Option<SpComponent>,
@@ -503,6 +514,7 @@ impl Handler {
         log: Logger,
         old_rot_state: bool,
         no_stage0_caboose: bool,
+        power_state_changes: Arc<AtomicUsize>,
     ) -> Self {
         let mut leaked_component_device_strings =
             Vec::with_capacity(components.len());
@@ -529,6 +541,7 @@ impl Handler {
             serial_number,
             ignition,
             power_state: PowerState::A2,
+            power_state_changes,
             update_state: SimSpUpdate::new(
                 BaseboardKind::Sidecar,
                 no_stage0_caboose,
@@ -887,6 +900,12 @@ impl SpHandler for Handler {
             "transition" => ?transition,
         );
         self.power_state = power_state;
+        match transition {
+            gateway_messages::PowerStateTransition::Changed => {
+                self.power_state_changes.fetch_add(1, Ordering::Relaxed);
+            }
+            gateway_messages::PowerStateTransition::Unchanged => (),
+        }
         Ok(transition)
     }
 

@@ -24,6 +24,8 @@ use blueprint_display::BpTableColumn;
 use daft::Diffable;
 use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
+use iddqd::id_ord_map::Entry;
+use iddqd::id_ord_map::RefMut;
 use iddqd::id_upcast;
 use nexus_sled_agent_shared::inventory::HostPhase2DesiredContents;
 use nexus_sled_agent_shared::inventory::HostPhase2DesiredSlots;
@@ -79,6 +81,8 @@ pub use chicken_switches::PlannerChickenSwitches;
 pub use chicken_switches::PlannerChickenSwitchesDiff;
 pub use chicken_switches::PlannerChickenSwitchesDisplay;
 pub use chicken_switches::ReconfiguratorChickenSwitches;
+pub use chicken_switches::ReconfiguratorChickenSwitchesDiff;
+pub use chicken_switches::ReconfiguratorChickenSwitchesDiffDisplay;
 pub use chicken_switches::ReconfiguratorChickenSwitchesDisplay;
 pub use chicken_switches::ReconfiguratorChickenSwitchesParam;
 pub use chicken_switches::ReconfiguratorChickenSwitchesView;
@@ -1301,6 +1305,20 @@ impl PendingMgsUpdates {
         self.by_baseboard.get(baseboard_id)
     }
 
+    pub fn get_mut(
+        &mut self,
+        baseboard_id: &BaseboardId,
+    ) -> Option<RefMut<'_, PendingMgsUpdate>> {
+        self.by_baseboard.get_mut(baseboard_id)
+    }
+
+    pub fn entry(
+        &mut self,
+        baseboard_id: &BaseboardId,
+    ) -> Entry<'_, PendingMgsUpdate> {
+        self.by_baseboard.entry(baseboard_id)
+    }
+
     pub fn remove(
         &mut self,
         baseboard_id: &BaseboardId,
@@ -1344,6 +1362,23 @@ pub struct PendingMgsUpdate {
     /// which artifact to apply to this device
     pub artifact_hash: ArtifactHash,
     pub artifact_version: ArtifactVersion,
+}
+
+impl PendingMgsUpdate {
+    /// Get a short description of this update, suitable for display on a single
+    /// line (e.g., as the `comment` field of a blueprint).
+    pub fn description(&self) -> String {
+        let serial = &self.baseboard_id.serial_number;
+        let sp_type = self.sp_type;
+        let slot_id = self.slot_id;
+        let version = &self.artifact_version;
+        let kind = match &self.details {
+            PendingMgsUpdateDetails::Sp { .. } => "SP",
+            PendingMgsUpdateDetails::Rot { .. } => "RoT",
+            PendingMgsUpdateDetails::RotBootloader { .. } => "RoT bootloader",
+        };
+        format!("update {sp_type:?} {slot_id} ({serial}) {kind} to {version}")
+    }
 }
 
 impl slog::KV for PendingMgsUpdate {

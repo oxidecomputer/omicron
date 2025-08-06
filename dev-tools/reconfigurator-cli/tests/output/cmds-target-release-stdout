@@ -32,6 +32,7 @@ created repo-1.0.0.zip for system version 1.0.0
 > set target-release repo-1.0.0.zip
 INFO extracting uploaded archive to <EXTRACTING_UPLOADED_ARCHIVE_TO_REDACTED>
 INFO created directory to store extracted artifacts, path: <CREATED_DIRECTORY_TO_STORE_EXTRACTED_ARTIFACTS_PATH_REDACTED>
+INFO added artifact, name: installinator_document, kind: installinator_document, version: 1.0.0, hash: c6ae866031d1183094c92cde9d9d1fd5f18356abc81a842ce31471b473fd5582, length: 367
 INFO added artifact, name: SimGimletSp, kind: gimlet_sp, version: 1.0.0, hash: 7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670, length: 747
 INFO added artifact, name: SimRot, kind: gimlet_rot_image_a, version: 1.0.0, hash: 04e4a7fdb84acca92c8fd3235e26d64ea61bef8a5f98202589fd346989c5720a, length: 735
 INFO added artifact, name: SimRot, kind: gimlet_rot_image_b, version: 1.0.0, hash: 04e4a7fdb84acca92c8fd3235e26d64ea61bef8a5f98202589fd346989c5720a, length: 735
@@ -70,6 +71,7 @@ internal DNS generations: 1
 external DNS generations: 1
 target number of Nexus instances: default
 target release (generation 2): 1.0.0 (system-update-v1.0.0.zip)
+    artifact: c6ae866031d1183094c92cde9d9d1fd5f18356abc81a842ce31471b473fd5582 installinator_document (installinator_document version 1.0.0)
     artifact: 7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670 gimlet_sp (SimGimletSp version 1.0.0)
     artifact: 04e4a7fdb84acca92c8fd3235e26d64ea61bef8a5f98202589fd346989c5720a gimlet_rot_image_a (SimRot version 1.0.0)
     artifact: 04e4a7fdb84acca92c8fd3235e26d64ea61bef8a5f98202589fd346989c5720a gimlet_rot_image_b (SimRot version 1.0.0)
@@ -147,6 +149,7 @@ internal DNS generations: 1
 external DNS generations: 1
 target number of Nexus instances: default
 target release (generation 2): 1.0.0 (system-update-v1.0.0.zip)
+    artifact: c6ae866031d1183094c92cde9d9d1fd5f18356abc81a842ce31471b473fd5582 installinator_document (installinator_document version 1.0.0)
     artifact: 7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670 gimlet_sp (SimGimletSp version 1.0.0)
     artifact: 04e4a7fdb84acca92c8fd3235e26d64ea61bef8a5f98202589fd346989c5720a gimlet_rot_image_a (SimRot version 1.0.0)
     artifact: 04e4a7fdb84acca92c8fd3235e26d64ea61bef8a5f98202589fd346989c5720a gimlet_rot_image_b (SimRot version 1.0.0)
@@ -1365,9 +1368,9 @@ INFO sufficient InternalDns zones exist in plan, desired_count: 3, current_count
 INFO sufficient ExternalDns zones exist in plan, desired_count: 3, current_count: 3
 INFO sufficient Nexus zones exist in plan, desired_count: 3, current_count: 3
 INFO sufficient Oximeter zones exist in plan, desired_count: 0, current_count: 0
-INFO SP update impossible (will remove it and re-evaluate board), artifact_version: 1.0.0, artifact_hash: 7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670, expected_inactive_version: NoValidVersion, expected_active_version: 0.0.1, component: sp, sp_slot: 1, sp_type: Sled, serial_number: serial1, part_number: model1
-INFO configuring SP update, artifact_version: 1.0.0, artifact_hash: 7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670, expected_inactive_version: Version(ArtifactVersion("0.5.0")), expected_active_version: 0.0.1, component: sp, sp_slot: 1, sp_type: Sled, serial_number: serial1, part_number: model1
-INFO reached maximum number of pending SP updates, max: 1
+INFO MGS-driven update impossible (will remove it and re-evaluate board), artifact_version: 1.0.0, artifact_hash: 7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670, expected_inactive_version: NoValidVersion, expected_active_version: 0.0.1, component: sp, sp_slot: 1, sp_type: Sled, serial_number: serial1, part_number: model1
+INFO configuring MGS-driven update, artifact_version: 1.0.0, artifact_hash: 7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670, expected_inactive_version: Version(ArtifactVersion("0.5.0")), expected_active_version: 0.0.1, component: sp, sp_slot: 1, sp_type: Sled, serial_number: serial1, part_number: model1
+INFO reached maximum number of pending MGS-driven updates, max: 1
 INFO will ensure cockroachdb setting, setting: cluster.preserve_downgrade_option, value: DoNotModify
 generated blueprint d60afc57-f15d-476c-bd0f-b1071e2bb976 based on parent blueprint 9034c710-3e57-45f3-99e5-4316145e87ac
 
@@ -1949,11 +1952,11 @@ INFO sufficient InternalDns zones exist in plan, desired_count: 3, current_count
 INFO sufficient ExternalDns zones exist in plan, desired_count: 3, current_count: 3
 INFO sufficient Nexus zones exist in plan, desired_count: 3, current_count: 3
 INFO sufficient Oximeter zones exist in plan, desired_count: 0, current_count: 0
-INFO SP update completed (will remove it and re-evaluate board), artifact_version: 1.0.0, artifact_hash: 7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670, expected_inactive_version: NoValidVersion, expected_active_version: 0.0.1, component: sp, sp_slot: 2, sp_type: Sled, serial_number: serial2, part_number: model2
-INFO skipping board for SP update, serial_number: serial2, part_number: model2
-INFO skipping board for SP update, serial_number: serial0, part_number: model0
-INFO skipping board for SP update, serial_number: serial1, part_number: model1
-INFO ran out of boards for SP update
+INFO MGS-driven update completed (will remove it and re-evaluate board), artifact_version: 1.0.0, artifact_hash: 7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670, expected_inactive_version: NoValidVersion, expected_active_version: 0.0.1, component: sp, sp_slot: 2, sp_type: Sled, serial_number: serial2, part_number: model2
+INFO skipping board for MGS-driven update, serial_number: serial2, part_number: model2
+INFO skipping board for MGS-driven update, serial_number: serial0, part_number: model0
+INFO skipping board for MGS-driven update, serial_number: serial1, part_number: model1
+INFO ran out of boards for MGS-driven update
 INFO updating zone image source in-place, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, zone_id: 353b3b65-20f7-48c3-88f7-495bd5d31545, kind: Clickhouse, image_source: artifact: version 1.0.0
 INFO will ensure cockroachdb setting, setting: cluster.preserve_downgrade_option, value: DoNotModify
 generated blueprint c1a0d242-9160-40f4-96ae-61f8f40a0b1b based on parent blueprint 626487fa-7139-45ec-8416-902271fc730b

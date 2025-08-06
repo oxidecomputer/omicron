@@ -6,6 +6,7 @@
 
 use anyhow::{Context, anyhow, bail};
 use camino::{Utf8Path, Utf8PathBuf};
+use chrono::{DateTime, Utc};
 use clap::{ArgAction, ValueEnum};
 use clap::{Args, Parser, Subcommand};
 use daft::Diffable;
@@ -1094,6 +1095,27 @@ enum SetArgs {
     },
     /// planner chicken switches
     ChickenSwitches(SetChickenSwitchesArgs),
+    /// timestamp for ignoring impossible MGS updates
+    IgnoreImpossibleMgsUpdatesSince {
+        since: SetIgnoreImpossibleMgsUpdatesSinceArgs,
+    },
+}
+
+#[derive(Debug, Clone)]
+struct SetIgnoreImpossibleMgsUpdatesSinceArgs(DateTime<Utc>);
+
+impl FromStr for SetIgnoreImpossibleMgsUpdatesSinceArgs {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s.eq_ignore_ascii_case("now") {
+            return Ok(Self(Utc::now()));
+        }
+        if let Ok(datetime) = humantime::parse_rfc3339(s) {
+            return Ok(Self(datetime.into()));
+        }
+        bail!("invalid timestamp: expected `now` or an RFC3339 timestamp")
+    }
 }
 
 #[derive(Debug, Args)]
@@ -2478,6 +2500,16 @@ fn cmd_set(
                     current.display()
                 )
             }
+        }
+        SetArgs::IgnoreImpossibleMgsUpdatesSince { since } => {
+            state
+                .system_mut()
+                .description_mut()
+                .set_ignore_impossible_mgs_updates_since(since.0);
+            format!(
+                "ignoring impossible MGS updates since {}",
+                humantime::format_rfc3339_millis(since.0.into())
+            )
         }
     };
 

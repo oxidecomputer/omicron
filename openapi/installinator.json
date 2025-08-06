@@ -277,6 +277,13 @@
         "description": "Installinator components.",
         "oneOf": [
           {
+            "description": "The installinator document.",
+            "type": "string",
+            "enum": [
+              "installinator_document"
+            ]
+          },
+          {
             "description": "The host phase 2 component.",
             "type": "string",
             "enum": [

@@ -25,7 +25,7 @@ use sha2::{Digest, Sha256};
 use sled_agent_types::zone_images::{
     ArcIoError, ArcSerdeJsonError, ArtifactReadResult,
     InstallMetadataReadError, ZoneManifestArtifactResult,
-    ZoneManifestArtifactsResult,
+    ZoneManifestArtifactsResult, ZoneManifestZoneHashError,
 };
 use tufaceous_artifact::ArtifactHash;
 
@@ -100,18 +100,70 @@ impl WriteInstallDatasetContext {
     }
 
     /// Makes a number of error cases for testing.
-    pub fn make_error_cases(&mut self) {
+    pub fn make_error_cases(&mut self) -> IdOrdMap<ZoneContentError> {
+        let mut errors = IdOrdMap::new();
+
         // cockroachdb.tar.gz is valid.
+
         // For clickhouse, change the size.
-        self.zones.get_mut(&ZoneKind::Clickhouse).unwrap().json_size = 1024;
+        {
+            let mut zone2 = self.zones.get_mut(&ZoneKind::Clickhouse).unwrap();
+            zone2.json_size = 1024;
+            errors
+                .insert_unique(ZoneContentError {
+                    zone_kind: ZoneKind::Clickhouse,
+                    error: ZoneManifestZoneHashError::SizeHashMismatch {
+                        expected_size: zone2.json_size,
+                        expected_hash: zone2.json_hash,
+                        actual_size: zone2.contents.len() as u64,
+                        actual_hash: zone2.json_hash,
+                    },
+                })
+                .unwrap();
+        }
+
         // For crucible, change the hash.
-        self.zones.get_mut(&ZoneKind::Crucible).unwrap().json_hash =
-            ArtifactHash([0; 32]);
+        {
+            let mut zone3 = self.zones.get_mut(&ZoneKind::Crucible).unwrap();
+            let replaced_hash =
+                std::mem::replace(&mut zone3.json_hash, ArtifactHash([0; 32]));
+            errors
+                .insert_unique(ZoneContentError {
+                    zone_kind: ZoneKind::Crucible,
+                    error: ZoneManifestZoneHashError::SizeHashMismatch {
+                        expected_size: zone3.json_size,
+                        expected_hash: zone3.json_hash,
+                        actual_size: zone3.json_size,
+                        actual_hash: replaced_hash,
+                    },
+                })
+                .unwrap();
+        }
+
         // Don't write out internal DNS but include it in the JSON.
         self.zones.get_mut(&ZoneKind::InternalDns).unwrap().write_to_disk =
             false;
+        errors
+            .insert_unique(ZoneContentError {
+                zone_kind: ZoneKind::InternalDns,
+                error: ZoneManifestZoneHashError::ReadArtifact(
+                    ArcIoError::new(io::Error::from(io::ErrorKind::NotFound)),
+                ),
+            })
+            .unwrap();
+
         // Write out nexus but don't include it in the JSON.
         self.zones.get_mut(&ZoneKind::Nexus).unwrap().include_in_json = false;
+        errors
+            .insert_unique(ZoneContentError {
+                zone_kind: ZoneKind::Nexus,
+                error: ZoneManifestZoneHashError::NoArtifactForZoneKind(
+                    ZoneKind::Nexus,
+                ),
+            })
+            .unwrap();
+
+        errors
     }
 
     /// Set to false to not write out the zone manifest to disk.
@@ -264,6 +316,23 @@ impl ZoneContents {
 }
 
 impl IdOrdItem for ZoneContents {
+    type Key<'a> = ZoneKind;
+
+    fn key(&self) -> Self::Key<'_> {
+        self.zone_kind
+    }
+
+    id_upcast!();
+}
+
+/// An error caused by [`WriteInstallDatasetContext::make_error_cases`].
+#[derive(Clone, Debug, PartialEq)]
+pub struct ZoneContentError {
+    zone_kind: ZoneKind,
+    pub error: ZoneManifestZoneHashError,
+}
+
+impl IdOrdItem for ZoneContentError {
     type Key<'a> = ZoneKind;
 
     fn key(&self) -> Self::Key<'_> {

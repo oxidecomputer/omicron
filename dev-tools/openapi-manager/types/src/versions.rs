@@ -106,9 +106,9 @@ impl SupportedVersions {
 /// these, equivalent to:
 ///
 /// ```
-///     const VERSION_ADD_FOOBAR_OPERATION: semver::Version =
+///     pub const VERSION_ADD_FOOBAR_OPERATION: semver::Version =
 ///         semver::Version::new(2, 0, 0);
-///     const VERSION_INITIAL: semver::Version =
+///     pub const VERSION_INITIAL: semver::Version =
 ///         semver::Version::new(1, 0, 0);
 /// ```
 ///
@@ -147,7 +147,7 @@ macro_rules! api_versions {
     ) ),* $(,)? ] ) => {
         openapi_manager_types::paste! {
             $(
-                const [<VERSION_ $name>]: semver::Version =
+                pub const [<VERSION_ $name>]: semver::Version =
                     semver::Version::new($major, 0, 0);
             )*
 
@@ -178,7 +178,7 @@ macro_rules! api_versions_picky {
     ) ),* $(,)? ] ) => {
         openapi_manager_types::paste! {
             $(
-                const [<VERSION_ $name>]: semver::Version =
+                pub const [<VERSION_ $name>]: semver::Version =
                     semver::Version::new($major, $minor, $patch);
             )*
 

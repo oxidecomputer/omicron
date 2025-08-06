@@ -38,6 +38,7 @@ slog-error-chain.workspace = true
 sp-sim.workspace = true
 static_assertions.workspace = true
 strum.workspace = true
+swrite.workspace = true
 thiserror.workspace = true
 tufaceous-artifact.workspace = true
 typed-rng.workspace = true

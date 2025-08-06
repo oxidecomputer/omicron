@@ -7,15 +7,12 @@
 //! These are factored to make it easy to write a variety of different kinds of
 //! tests without having to put together too much boilerplate in each test.
 
-use crate::SpComponentUpdateHelper;
+use crate::common_sp_update::SpComponentUpdateHelper;
 use crate::driver::UpdateAttemptStatusUpdater;
 use crate::driver_update::ApplyUpdateError;
 use crate::driver_update::PROGRESS_TIMEOUT;
 use crate::driver_update::SpComponentUpdate;
 use crate::driver_update::apply_update;
-use crate::rot_bootloader_updater::ReconfiguratorRotBootloaderUpdater;
-use crate::rot_updater::ReconfiguratorRotUpdater;
-use crate::sp_updater::ReconfiguratorSpUpdater;
 use crate::test_util::cabooses_equal;
 use crate::test_util::sp_test_state::SpTestState;
 use crate::test_util::step_through::StepResult;
@@ -36,6 +33,7 @@ use nexus_types::internal_api::views::UpdateCompletedHow;
 use nexus_types::inventory::BaseboardId;
 use omicron_uuid_kinds::SpUpdateUuid;
 use slog::debug;
+use slog_error_chain::InlineErrorChain;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::watch;
@@ -100,11 +98,14 @@ impl UpdateDescription<'_> {
                 .unwrap_or_else(|| sp1.baseboard_id()),
         );
 
-        let details = match &self.override_expected_sp_component {
+        let (details, artifact_has_caboose) = match &self
+            .override_expected_sp_component
+        {
             ExpectedSpComponent::Sp {
                 override_expected_active,
                 override_expected_inactive,
             } => {
+                let has_caboose = true;
                 let expected_active_version = override_expected_active
                     .clone()
                     .unwrap_or_else(|| sp1.expect_sp_active_version());
@@ -112,10 +113,13 @@ impl UpdateDescription<'_> {
                     .clone()
                     .unwrap_or_else(|| sp1.expect_sp_inactive_version());
 
-                PendingMgsUpdateDetails::Sp {
-                    expected_active_version,
-                    expected_inactive_version,
-                }
+                (
+                    PendingMgsUpdateDetails::Sp {
+                        expected_active_version,
+                        expected_inactive_version,
+                    },
+                    has_caboose,
+                )
             }
             ExpectedSpComponent::Rot {
                 override_expected_active_slot,
@@ -124,6 +128,7 @@ impl UpdateDescription<'_> {
                 override_expected_pending_persistent_boot_preference,
                 override_expected_transient_boot_preference,
             } => {
+                let has_caboose = true;
                 let expected_active_slot = override_expected_active_slot
                     .clone()
                     .unwrap_or_else(|| sp1.expected_active_rot_slot());
@@ -145,18 +150,22 @@ impl UpdateDescription<'_> {
                     override_expected_transient_boot_preference
                         .or_else(|| sp1.expect_rot_transient_boot_preference());
 
-                PendingMgsUpdateDetails::Rot {
-                    expected_active_slot,
-                    expected_inactive_version,
-                    expected_persistent_boot_preference,
-                    expected_pending_persistent_boot_preference,
-                    expected_transient_boot_preference,
-                }
+                (
+                    PendingMgsUpdateDetails::Rot {
+                        expected_active_slot,
+                        expected_inactive_version,
+                        expected_persistent_boot_preference,
+                        expected_pending_persistent_boot_preference,
+                        expected_transient_boot_preference,
+                    },
+                    has_caboose,
+                )
             }
             ExpectedSpComponent::RotBootloader {
                 override_expected_stage0,
                 override_expected_stage0_next,
             } => {
+                let has_caboose = true;
                 let expected_stage0_version = override_expected_stage0
                     .clone()
                     .unwrap_or_else(|| sp1.expect_stage0_version());
@@ -165,17 +174,28 @@ impl UpdateDescription<'_> {
                         .clone()
                         .unwrap_or_else(|| sp1.expect_stage0_next_version());
 
-                PendingMgsUpdateDetails::RotBootloader {
-                    expected_stage0_version,
-                    expected_stage0_next_version,
-                }
+                (
+                    PendingMgsUpdateDetails::RotBootloader {
+                        expected_stage0_version,
+                        expected_stage0_next_version,
+                    },
+                    has_caboose,
+                )
             }
         };
 
-        let deployed_caboose = self
-            .artifacts
-            .deployed_caboose(self.artifact_hash)
-            .expect("caboose for generated artifact");
+        // If we expect to have a caboose based on the type of the update, make
+        // sure we do. Host images do not have cabooses; other types do.
+        let deployed_caboose = if artifact_has_caboose {
+            let caboose = self.artifacts.deployed_caboose(self.artifact_hash);
+            assert!(
+                caboose.is_some(),
+                "should have caboose for generated artifact"
+            );
+            caboose
+        } else {
+            None
+        };
 
         // Assemble the driver-level update request.
         let mgs_backends = self.gwtestctx.mgs_backends();
@@ -185,12 +205,20 @@ impl UpdateDescription<'_> {
             slot_id: self.slot_id,
             details,
             artifact_hash: *self.artifact_hash,
-            artifact_version: std::str::from_utf8(
-                deployed_caboose.version().unwrap(),
-            )
-            .unwrap()
-            .parse()
-            .unwrap(),
+            artifact_version: deployed_caboose
+                .map(|caboose| {
+                    std::str::from_utf8(caboose.version().unwrap())
+                        .unwrap()
+                        .parse()
+                        .unwrap()
+                })
+                .unwrap_or_else(|| {
+                    // If we're dealing with an opaque artifact that doesn't
+                    // have a caboose, we don't know its version; stub one out.
+                    // (We also don't _care_ about its version - we work
+                    // entirely in terms of its hash out of necessity.)
+                    "fakeVersionForNonHubrisArtifact-1.0.0".parse().unwrap()
+                }),
         };
 
         let request = sp_update_request.clone();
@@ -229,23 +257,12 @@ impl UpdateDescription<'_> {
                 &request,
                 update_id,
             );
-            let sp_update_helper: Box<
-                dyn SpComponentUpdateHelper + Send + Sync,
-            > = match request.details {
-                PendingMgsUpdateDetails::Sp { .. } => {
-                    Box::new(ReconfiguratorSpUpdater {})
-                }
-                PendingMgsUpdateDetails::Rot { .. } => {
-                    Box::new(ReconfiguratorRotUpdater {})
-                }
-                PendingMgsUpdateDetails::RotBootloader { .. } => {
-                    Box::new(ReconfiguratorRotBootloaderUpdater {})
-                }
-            };
+            let sp_update_helper =
+                SpComponentUpdateHelper::new(&request.details);
             apply_update(
                 artifact_cache,
                 &sp_update,
-                &*sp_update_helper,
+                &sp_update_helper,
                 mgs_backends.clone(),
                 &request,
                 status_updater,
@@ -263,7 +280,7 @@ impl UpdateDescription<'_> {
             slot_id: self.slot_id,
             mgs_client: self.gwtestctx.client(),
             sp1,
-            deployed_caboose: deployed_caboose.clone(),
+            deployed_caboose: deployed_caboose.cloned(),
         }
     }
 }
@@ -284,7 +301,7 @@ pub struct InProgressAttempt {
     // Parameters of the update itself
     sp_type: SpType,
     slot_id: u16,
-    deployed_caboose: hubtools::Caboose,
+    deployed_caboose: Option<hubtools::Caboose>,
 
     // Status of the driver
     // (allows us to run until we get to a specific "status")
@@ -394,7 +411,7 @@ impl InProgressAttempt {
 #[must_use]
 pub struct FinishedUpdateAttempt {
     result: Result<UpdateCompletedHow, ApplyUpdateError>,
-    deployed_caboose: hubtools::Caboose,
+    deployed_caboose: Option<hubtools::Caboose>,
     sp1: SpTestState,
     sp2: SpTestState,
 }
@@ -404,7 +421,7 @@ impl FinishedUpdateAttempt {
         sp_type: SpType,
         slot_id: u16,
         sp1: SpTestState,
-        deployed_caboose: hubtools::Caboose,
+        deployed_caboose: Option<hubtools::Caboose>,
         result: Result<UpdateCompletedHow, ApplyUpdateError>,
         mgs_client: gateway_client::Client,
     ) -> FinishedUpdateAttempt {
@@ -416,12 +433,15 @@ impl FinishedUpdateAttempt {
 
     /// Asserts various conditions associated with successful SP updates.
     pub fn expect_sp_success(&self, expected_result: UpdateCompletedHow) {
-        let how = match self.result {
-            Ok(how) if how == expected_result => how,
-            _ => {
+        let how = match &self.result {
+            Ok(how) => {
+                assert_eq!(*how, expected_result);
+                *how
+            }
+            Err(err) => {
                 panic!(
-                    "unexpected result from apply_update(): {:?}",
-                    self.result,
+                    "unexpected error from apply_update(): {}",
+                    InlineErrorChain::new(&err),
                 );
             }
         };
@@ -430,7 +450,8 @@ impl FinishedUpdateAttempt {
         let sp2 = &self.sp2;
 
         // The active slot should contain what we just updated to.
-        let deployed_caboose = &self.deployed_caboose;
+        let deployed_caboose =
+            self.deployed_caboose.as_ref().expect("SP artifacts have cabooses");
         assert!(cabooses_equal(&sp2.caboose_sp_active, &deployed_caboose));
         // RoT information should not have changed.
         let sp1 = &self.sp1;
@@ -472,7 +493,10 @@ impl FinishedUpdateAttempt {
         let sp2 = &self.sp2;
 
         // The active slot should contain what we just updated to.
-        let deployed_caboose = &self.deployed_caboose;
+        let deployed_caboose = self
+            .deployed_caboose
+            .as_ref()
+            .expect("RoT artifacts have cabooses");
         assert!(cabooses_equal(
             &sp2.expect_caboose_rot_active(),
             &deployed_caboose
@@ -528,7 +552,10 @@ impl FinishedUpdateAttempt {
         let sp2 = &self.sp2;
 
         // The active slot should contain what we just updated to.
-        let deployed_caboose = &self.deployed_caboose;
+        let deployed_caboose = self
+            .deployed_caboose
+            .as_ref()
+            .expect("RoT bootloader artifacts have cabooses");
         assert!(cabooses_equal(&sp2.caboose_stage0, &deployed_caboose));
 
         // RoT information should not have changed.

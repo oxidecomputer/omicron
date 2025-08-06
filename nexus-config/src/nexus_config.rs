@@ -815,11 +815,20 @@ pub struct SpEreportIngesterConfig {
     /// period (in seconds) for periodic activations of this background task
     #[serde_as(as = "DurationSeconds<u64>")]
     pub period_secs: Duration,
+
+    /// disable ereport collection altogether
+    ///
+    /// This is an emergency lever for support / operations.  It should never be
+    /// necessary.
+    ///
+    /// Default: Off
+    #[serde(default)]
+    pub disable: bool,
 }
 
 impl Default for SpEreportIngesterConfig {
     fn default() -> Self {
-        Self { period_secs: Duration::from_secs(30) }
+        Self { period_secs: Duration::from_secs(30), disable: false }
     }
 }
 
@@ -1320,6 +1329,7 @@ mod test {
                         },
                         sp_ereport_ingester: SpEreportIngesterConfig {
                             period_secs: Duration::from_secs(47),
+                            disable: false,
                         },
                     },
                     default_region_allocation_strategy:
