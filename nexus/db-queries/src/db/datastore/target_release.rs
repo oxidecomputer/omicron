@@ -228,7 +228,7 @@ mod test {
                         },
                         hash,
                         size: 0,
-                        rot_sign: None,
+                        sign: None,
                     }],
                 },
             )

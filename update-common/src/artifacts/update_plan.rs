@@ -420,7 +420,14 @@ impl<'a> UpdatePlanBuilder<'a> {
         let (artifact_id, bootloader_caboose) =
             read_hubris_caboose_from_archive(artifact_id, data.clone())?;
 
-        let sign = bootloader_caboose.sign.expect("required SIGN in caboose");
+        let sign = match bootloader_caboose.sign {
+            Some(sign) => sign,
+            None => {
+                return Err(RepositoryError::MissingHubrisCabooseSign(
+                    artifact_id,
+                ));
+            }
+        };
 
         // We restrict the bootloader to exactly one entry per (kind, signature)
         match self
@@ -559,7 +566,14 @@ impl<'a> UpdatePlanBuilder<'a> {
             });
         }
 
-        let sign_a = image_a_caboose.sign.expect("required SIGN in caboose");
+        let sign_a = match image_a_caboose.sign {
+            Some(sign) => sign,
+            None => {
+                return Err(RepositoryError::MissingHubrisCabooseSign(
+                    artifact_id,
+                ));
+            }
+        };
 
         let entry_a = RotSignData { kind: artifact_kind, sign: sign_a.clone() };
 
@@ -586,7 +600,14 @@ impl<'a> UpdatePlanBuilder<'a> {
             }
         };
 
-        let sign_b = image_b_caboose.sign.expect("required SIGN in caboose");
+        let sign_b = match image_b_caboose.sign {
+            Some(sign) => sign,
+            None => {
+                return Err(RepositoryError::MissingHubrisCabooseSign(
+                    artifact_id,
+                ));
+            }
+        };
 
         let entry_b = RotSignData { kind: artifact_kind, sign: sign_b.clone() };
 
@@ -1029,7 +1050,7 @@ impl<'a> UpdatePlanBuilder<'a> {
         tuf_repo_artifact_id: ArtifactId,
         data: ExtractedArtifactDataHandle,
         data_kind: ArtifactKind,
-        rot_sign: Option<Vec<u8>>,
+        sign: Option<Vec<u8>>,
         log: &Logger,
     ) -> Result<(), RepositoryError> {
         use std::collections::hash_map::Entry;
@@ -1072,7 +1093,7 @@ impl<'a> UpdatePlanBuilder<'a> {
             id: artifacts_meta_id,
             hash: data.hash(),
             size: data.file_size() as u64,
-            rot_sign,
+            sign,
         });
         by_hash_slot.insert(data);
 

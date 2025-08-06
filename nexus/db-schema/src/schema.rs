@@ -1415,7 +1415,7 @@ table! {
         sha256 -> Text,
         artifact_size -> Int8,
         generation_added -> Int8,
-        rot_sign -> Nullable<Binary>,
+        sign -> Nullable<Binary>,
     }
 }
 

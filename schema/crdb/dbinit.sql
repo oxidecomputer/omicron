@@ -2514,7 +2514,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.tuf_artifact (
     generation_added INT8 NOT NULL,
 
     -- Sign (root key hash table) hash of a signed RoT or RoT bootloader image.
-    rot_sign BYTES, -- nullable
+    sign BYTES, -- nullable
 
     CONSTRAINT unique_name_version_kind UNIQUE (name, version, kind)
 );

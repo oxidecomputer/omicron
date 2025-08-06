@@ -661,8 +661,8 @@ mod test {
                 kind: kind.into(),
             },
             hash,
-            size: 0,        // unused here
-            rot_sign: None, // unused here
+            size: 0,    // unused here
+            sign: None, // unused here
         }
     }
 

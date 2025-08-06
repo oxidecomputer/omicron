@@ -25384,7 +25384,7 @@
               }
             ]
           },
-          "rot_sign": {
+          "sign": {
             "nullable": true,
             "description": "Sign (root key hash table) hash of a signed image. Only applicable to RoT or RoT bootloader artifacts.",
             "type": "array",

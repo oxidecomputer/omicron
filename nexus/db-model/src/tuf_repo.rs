@@ -165,7 +165,7 @@ pub struct TufArtifact {
     pub sha256: ArtifactHash,
     artifact_size: i64,
     pub generation_added: Generation,
-    pub rot_sign: Option<Vec<u8>>,
+    pub sign: Option<Vec<u8>>,
 }
 
 impl TufArtifact {
@@ -175,7 +175,7 @@ impl TufArtifact {
         sha256: ArtifactHash,
         artifact_size: u64,
         generation_added: external::Generation,
-        rot_sign: Option<Vec<u8>>,
+        sign: Option<Vec<u8>>,
     ) -> Self {
         Self {
             id: TypedUuid::new_v4().into(),
@@ -186,7 +186,7 @@ impl TufArtifact {
             sha256,
             artifact_size: artifact_size as i64,
             generation_added: generation_added.into(),
-            rot_sign,
+            sign,
         }
     }
 
@@ -205,7 +205,7 @@ impl TufArtifact {
             artifact.hash.into(),
             artifact.size,
             generation_added,
-            artifact.rot_sign,
+            artifact.sign,
         )
     }
 
@@ -219,7 +219,7 @@ impl TufArtifact {
             },
             hash: self.sha256.into(),
             size: self.artifact_size as u64,
-            rot_sign: self.rot_sign,
+            sign: self.sign,
         }
     }
 
