@@ -636,7 +636,10 @@ fn register_reassign_sagas_step<'a>(
                         Ok(StepSuccess::new(needs_saga_recovery).build())
                     }
                     Err(error) => {
-                        saga_quiesce.reassignment_finish(true);
+                        // It's possible that we failed after having re-assigned
+                        // sagas in the database.
+                        let maybe_reassigned = true;
+                        saga_quiesce.reassignment_finish(maybe_reassigned);
                         Ok(StepWarning::new(false, error.to_string()).build())
                     }
                 }
