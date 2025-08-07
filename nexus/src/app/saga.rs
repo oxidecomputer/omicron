@@ -241,11 +241,8 @@ impl SagaExecutor {
 
         // Record this new saga in the quiesce state.  This will fail if saga
         // creation is disallowed (e.g., because Nexus is quiescing).
-        //
         // This check should happen before we start the saga running.
-        // We do this in a (small) block to ensure that we drop the lock
-        // immediately.
-        let mut qsaga = match self.quiesce.saga_create(saga_id, &saga_name) {
+        let qsaga = match self.quiesce.saga_create(saga_id, &saga_name) {
             Ok(qsaga) => qsaga,
             Err(error) => {
                 warn!(

@@ -13,6 +13,7 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::Generation;
 use slog::Logger;
 use slog::info;
+use slog::o;
 use slog_error_chain::InlineErrorChain;
 use steno::SagaResult;
 use thiserror::Error;
@@ -201,8 +202,10 @@ impl SagaQuiesceHandle {
         });
 
         if okay {
+            info!(&self.log, "allowing saga re-assignment pass");
             Ok(SagaReassignmentInProgress { q: self.clone() })
         } else {
+            info!(&self.log, "disallowing saga re-assignment pass");
             Err(NoSagasAllowedError)
         }
     }
@@ -210,6 +213,11 @@ impl SagaQuiesceHandle {
     /// Record that we've finished an operation that might assign new sagas to
     /// ourselves.
     fn reassignment_done(&self, maybe_reassigned: bool) {
+        info!(
+            &self.log,
+            "saga re-assignment pass finished";
+            "maybe_reassigned" => maybe_reassigned
+        );
         self.inner.send_modify(|q| {
             assert!(q.reassignment_pending);
             q.reassignment_pending = false;
@@ -239,19 +247,28 @@ impl SagaQuiesceHandle {
             q.recovery_pending = Some(q.reassignment_generation);
         });
 
+        info!(&self.log, "saga recovery pass starting");
         SagaRecoveryInProgress { q: self.clone() }
     }
 
     /// Record that we've finished recovering sagas.
     fn recovery_done(&self, success: bool) {
+        let log = self.log.clone();
         self.inner.send_modify(|q| {
             let Some(generation) = q.recovery_pending.take() else {
                 panic!("cannot finish saga recovery when it was not running");
             };
 
             if success {
+                info!(
+                    &log,
+                    "saga recovery pass finished";
+                    "generation" => generation.to_string()
+                );
                 q.recovered_reassignment_generation = generation;
                 q.first_recovery_complete = true;
+            } else {
+                info!(&log, "saga recovery pass failed");
             }
         });
     }
@@ -284,12 +301,20 @@ impl SagaQuiesceHandle {
         });
 
         if okay {
+            let log = self.log.new(o!("saga_id" => saga_id.to_string()));
+            info!(&log, "tracking newly created saga");
             Ok(NewlyPendingSagaRef {
+                log,
                 quiesce: self.inner.clone(),
                 saga_id,
                 init_finished: false,
             })
         } else {
+            info!(
+                &self.log,
+                "disallowing saga creation";
+                "saga_id" => saga_id.to_string()
+            );
             Err(NoSagasAllowedError)
         }
     }
@@ -319,6 +344,9 @@ impl SagaQuiesceHandle {
         saga_id: steno::SagaId,
         saga_name: &steno::SagaName,
     ) -> NewlyPendingSagaRef {
+        let log = self.log.new(o!("saga_id" => saga_id.to_string()));
+        info!(&log, "tracking newly recovered saga");
+
         self.inner.send_modify(|q| {
             // It's okay to call this more than once, so we ignore the possible
             // error from `insert_unique()`.
@@ -331,6 +359,7 @@ impl SagaQuiesceHandle {
         });
 
         NewlyPendingSagaRef {
+            log,
             quiesce: self.inner.clone(),
             saga_id,
             init_finished: false,
@@ -371,6 +400,7 @@ impl SagaQuiesceInner {
 #[derive(Debug)]
 #[must_use = "must record the saga completion future once the saga is running"]
 pub struct NewlyPendingSagaRef {
+    log: Logger,
     quiesce: watch::Sender<SagaQuiesceInner>,
     saga_id: steno::SagaId,
     init_finished: bool,
@@ -387,7 +417,7 @@ impl NewlyPendingSagaRef {
     /// this structure to update its state to reflect that the saga is no longer
     /// running.
     pub fn saga_completion_future(
-        &mut self,
+        mut self,
         fut: BoxFuture<'static, SagaResult>,
     ) -> BoxFuture<'static, SagaResult> {
         self.init_finished = true;
@@ -410,6 +440,7 @@ impl NewlyPendingSagaRef {
         let qwrap = self.quiesce.clone();
         let completion_task = tokio::spawn(async move {
             let rv = fut.await;
+            info!(self.log, "tracked saga has finished");
             qwrap.send_modify(|q| {
                 q.sagas_pending
                     .remove(&saga_id)
@@ -447,11 +478,16 @@ impl Drop for NewlyPendingSagaRef {
         // bailed out before having started running the saga.  Remove it from
         // the list of sagas that we're tracking.
         if !self.init_finished {
+            info!(
+                self.log,
+                "stopping tracking saga that apparently never started"
+            );
+
             self.quiesce.send_modify(|q| {
                 q.sagas_pending.remove(&self.saga_id).unwrap_or_else(|| {
                     panic!(
                         "NewlyPendingSagaRef dropped, saga completion future \
-                     not recorded, and the saga is not still pending"
+                         not recorded, and the saga is not still pending"
                     )
                 });
             });
@@ -614,7 +650,7 @@ mod test {
 
         // Record a new saga being created and provide it with our emulated
         // completion future.
-        let mut pending = qq
+        let pending = qq
             .saga_create(*SAGA_ID, &SAGA_NAME)
             .expect("create saga while not quiesced");
         let consumer_completion = pending.saga_completion_future(
@@ -844,7 +880,7 @@ mod test {
 
         // Start a recovery pass.  Pretend like we found something.
         let recovery = qq.recovery_start();
-        let mut pending = recovery.record_saga_recovery(*SAGA_ID, &SAGA_NAME);
+        let pending = recovery.record_saga_recovery(*SAGA_ID, &SAGA_NAME);
         let consumer_completion = pending.saga_completion_future(
             async { rx.await.expect("cannot drop this before dropping tx") }
                 .boxed(),
@@ -879,7 +915,7 @@ mod test {
         let qq = SagaQuiesceHandle::new(log.clone());
         // Start a recovery pass.  Pretend like we found something.
         let recovery = qq.recovery_start();
-        let mut pending = recovery.record_saga_recovery(*SAGA_ID, &SAGA_NAME);
+        let pending = recovery.record_saga_recovery(*SAGA_ID, &SAGA_NAME);
         let consumer_completion = pending.saga_completion_future(
             async { rx.await.expect("cannot drop this before dropping tx") }
                 .boxed(),
