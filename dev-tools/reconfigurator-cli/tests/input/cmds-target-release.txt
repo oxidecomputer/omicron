@@ -77,6 +77,7 @@ blueprint-diff 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba 9034c710-3e57-45f3-99e5-4316
 
 # Now we'll change the inactive slot contents of the simulated SP. Like with the
 # RoT, this should make the update impossible and cause the planner to fix it.
+set ignore-impossible-mgs-updates-since now
 sled-update-sp 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c --inactive 0.5.0
 inventory-generate
 blueprint-plan 9034c710-3e57-45f3-99e5-4316145e87ac 0b5efbb3-0b1b-4bbf-b7d8-a2d6fca074c6
