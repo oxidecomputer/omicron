@@ -2502,7 +2502,7 @@ async fn insert_pending_mgs_update(
                     "count" => count,
                     &update.baseboard_id,
                 );
-                return Err(TxnError::BadInsertCount {
+                return Err(InsertTxnError::BadInsertCount {
                     table_name: "bp_pending_mgs_update_host_phase_1",
                     count,
                     baseboard_id: update.baseboard_id.clone(),
