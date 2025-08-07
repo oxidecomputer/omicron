@@ -8,6 +8,7 @@ use crate::SledAgentEnumerator;
 use crate::builder::CollectionBuilder;
 use crate::builder::InventoryError;
 use anyhow::Context;
+use anyhow::anyhow;
 use gateway_client::types::GetCfpaParams;
 use gateway_client::types::RotCfpaSlot;
 use gateway_client::types::SpType;
@@ -185,11 +186,64 @@ impl<'a> Collector<'a> {
                 continue;
             };
 
-            // For sled SPs, for each host phase 1 slot, attempt to collect its
-            // hash, if it hasn't been collected already. Generally, we'd only
-            // get here for the first MGS client.  Assuming that one succeeds,
-            // the other(s) will skip this loop.
+            // For sled SPs, collect the currently-active phase 1 slot and the
+            // hash of the contents of both slots, if they haven't been
+            // collected already. Generally, we'd only get here for the first
+            // MGS client.  Assuming that one succeeds, the other(s) will skip
+            // this loop.
             if matches!(sp.type_, SpType::Sled) {
+                if !in_progress
+                    .found_host_phase_1_active_slot_already(&baseboard_id)
+                {
+                    let result = client
+                        .sp_component_active_slot_get(
+                            sp.type_,
+                            sp.slot,
+                            SpComponent::HOST_CPU_BOOT_FLASH.const_as_str(),
+                        )
+                        .await
+                        .with_context(|| {
+                            format!(
+                                "MGS {:?}: SP {sp:?}: phase 1 active slot",
+                                client.baseurl(),
+                            )
+                        })
+                        .and_then(|response| {
+                            M2Slot::from_mgs_firmware_slot(response.slot)
+                                .ok_or_else(|| {
+                                    anyhow!(
+                                        "MGS {:?}: SP {sp:?}: \
+                                         invalid host phase 1 slot {}",
+                                        client.baseurl(),
+                                        response.slot
+                                    )
+                                })
+                        });
+                    match result {
+                        Ok(phase_1_slot) => {
+                            if let Err(error) = in_progress
+                                .found_host_phase_1_active_slot(
+                                    &baseboard_id,
+                                    client.baseurl(),
+                                    phase_1_slot,
+                                )
+                            {
+                                error!(
+                                    log,
+                                    "error reporting host phase 1 active slot: \
+                                     {baseboard_id:?} {phase_1_slot:?} \
+                                     {:?}: {error:#}",
+                                    client.baseurl(),
+                                );
+                            }
+                        }
+                        Err(err) => {
+                            in_progress
+                                .found_error(InventoryError::from(err));
+                        }
+                    }
+                }
+
                 for slot in M2Slot::iter() {
                     const PHASE1_HASH_TIMEOUT: Duration =
                         Duration::from_secs(30);

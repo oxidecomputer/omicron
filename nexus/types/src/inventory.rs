@@ -412,6 +412,17 @@ pub struct RotState {
     pub stage0next_error: Option<RotImageError>,
 }
 
+/// Describes a host phase 1 flash active slot found from a service processor
+/// during collection
+#[derive(
+    Clone, Debug, Ord, Eq, PartialOrd, PartialEq, Deserialize, Serialize,
+)]
+pub struct HostPhase1ActiveSlot {
+    pub time_collected: DateTime<Utc>,
+    pub source: String,
+    pub slot: M2Slot,
+}
+
 /// Describes a host phase 1 flash hash found from a service processor
 /// during collection
 #[derive(
