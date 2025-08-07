@@ -632,14 +632,14 @@ fn register_reassign_sagas_step<'a>(
                 .context("failed to re-assign sagas");
                 match reassigned {
                     Ok(needs_saga_recovery) => {
-                        saga_quiesce.reassignment_finish(needs_saga_recovery);
+                        saga_quiesce.reassignment_done(needs_saga_recovery);
                         Ok(StepSuccess::new(needs_saga_recovery).build())
                     }
                     Err(error) => {
                         // It's possible that we failed after having re-assigned
                         // sagas in the database.
                         let maybe_reassigned = true;
-                        saga_quiesce.reassignment_finish(maybe_reassigned);
+                        saga_quiesce.reassignment_done(maybe_reassigned);
                         Ok(StepWarning::new(false, error.to_string()).build())
                     }
                 }

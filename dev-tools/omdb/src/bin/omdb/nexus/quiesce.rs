@@ -117,12 +117,12 @@ async fn quiesce_show(
         }
     }
 
-    println!("sagas running: {}", quiesce.sagas_running.len());
-    for saga in &quiesce.sagas_running {
+    println!("sagas running: {}", quiesce.sagas_pending.len());
+    for saga in &quiesce.sagas_pending {
         println!(
-            "    saga {} started at {} ({})",
+            "    saga {} pending since {} ({})",
             saga.saga_id,
-            humantime::format_rfc3339_millis(saga.time_started.into()),
+            humantime::format_rfc3339_millis(saga.time_pending.into()),
             saga.saga_name
         );
     }

@@ -7056,6 +7056,7 @@ dependencies = [
  "omicron-cockroach-metrics",
  "omicron-common",
  "omicron-passwords",
+ "omicron-test-utils",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "openssl",

@@ -107,6 +107,11 @@ impl SagaQuiesceHandle {
             .send_modify(|q| q.new_sagas_allowed = SagasAllowed::Disallowed);
     }
 
+    /// Returns whether sagas are fully quiesced
+    pub fn is_fully_quiesced(&self) -> bool {
+        self.inner.borrow().is_fully_quiesced()
+    }
+
     /// Wait for sagas to be quiesced
     pub async fn wait_for_quiesced(&self) {
         let _ =
@@ -138,7 +143,7 @@ impl SagaQuiesceHandle {
 
     /// Record that we've finished an operation that might assign new sagas to
     /// ourselves.
-    pub fn reassignment_finish(&self, maybe_reassigned: bool) {
+    pub fn reassignment_done(&self, maybe_reassigned: bool) {
         self.inner.send_modify(|q| {
             assert!(q.reassignment_pending);
             q.reassignment_pending = false;
@@ -154,7 +159,7 @@ impl SagaQuiesceHandle {
     /// Record that we've begun recovering sagas.
     ///
     /// Only one of these may be outstanding at a time.  The caller must call
-    /// `saga_recovery_finish()` before starting another one of these.
+    /// `saga_recovery_done()` before starting another one of these.
     pub fn saga_recovery_start(&self) {
         self.inner.send_modify(|q| {
             assert!(q.recovery_pending.is_none());
@@ -274,6 +279,8 @@ impl SagaQuiesceInner {
             // to us that have not been recovered
             && self.reassignment_generation
                 <= self.recovered_reassignment_generation
+            // and blueprint execution is not currently re-assigning stuff to us
+            && !self.reassignment_pending
     }
 }
 
@@ -288,6 +295,7 @@ impl SagaQuiesceInner {
 /// 2. If this object is dropped before that happens, it's assumed that the
 ///    caller failed to start the saga running and the record is cleaned up
 ///    immediately.
+#[derive(Debug)]
 #[must_use = "must record the saga completion future once the saga is running"]
 pub struct NewlyPendingSagaRef {
     quiesce: watch::Sender<SagaQuiesceInner>,
@@ -375,5 +383,409 @@ impl Drop for NewlyPendingSagaRef {
                 });
             });
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use crate::quiesce::SagaQuiesceHandle;
+    use futures::FutureExt;
+    use omicron_test_utils::dev::test_setup_log;
+    use std::sync::LazyLock;
+    use uuid::Uuid;
+
+    static SAGA_ID: LazyLock<steno::SagaId> =
+        LazyLock::new(|| steno::SagaId(Uuid::new_v4()));
+    static SAGA_NAME: LazyLock<steno::SagaName> =
+        LazyLock::new(|| steno::SagaName::new("test-saga"));
+
+    fn saga_result() -> steno::SagaResult {
+        let saga_id = *SAGA_ID;
+        let saga_log = steno::SagaLog::new_empty(*SAGA_ID);
+        steno::SagaResult {
+            saga_id,
+            saga_log,
+            kind: Err(steno::SagaResultErr {
+                error_node_name: steno::NodeName::new("dummy"),
+                error_source: steno::ActionError::InjectedError,
+                undo_failure: None,
+            }),
+        }
+    }
+
+    /// Tests that quiescing when we have never started anything completes
+    /// immediately.
+    #[tokio::test]
+    async fn test_quiesce_noop() {
+        let logctx = test_setup_log("test_quiesce_noop");
+        let log = &logctx.log;
+
+        // Set up a new handle.  Complete the first saga recovery immediately so
+        // that that doesn't block quiescing.
+        let qq = SagaQuiesceHandle::new(log.clone());
+        qq.saga_recovery_start();
+        qq.saga_recovery_done(true);
+
+        // It's still not fully quiesced because we haven't asked it to quiesce
+        // yet.
+        assert!(qq.sagas_pending().is_empty());
+        assert!(!qq.is_fully_quiesced());
+
+        // Now start quiescing.  It should immediately report itself as
+        // quiesced.  There's nothing asynchronous in this path.  (It would be
+        // okay if there were.)
+        qq.quiesce();
+        assert!(qq.is_fully_quiesced());
+
+        // It's not allowed to create sagas or begin re-assignment after
+        // quiescing has started, let alone finished.
+        let _ = qq
+            .record_saga_create(*SAGA_ID, &*SAGA_NAME)
+            .expect_err("cannot create saga after quiescing started");
+        let _ = qq
+            .reassignment_begin()
+            .expect_err("cannot start re-assignment after quiescing started");
+
+        // Waiting for quiesce should complete immediately.
+        qq.wait_for_quiesced().await;
+        assert!(qq.is_fully_quiesced());
+
+        logctx.cleanup_successful();
+    }
+
+    /// Test: quiescing does not block on sagas that never started
+    #[tokio::test]
+    async fn test_quiesce_no_block_on_sagas_not_started() {
+        let logctx =
+            test_setup_log("test_quiesce_no_block_on_sagas_not_started");
+        let log = &logctx.log;
+
+        // Set up a new handle.  Complete the first saga recovery immediately so
+        // that that doesn't block quiescing.
+        let qq = SagaQuiesceHandle::new(log.clone());
+        qq.saga_recovery_start();
+        qq.saga_recovery_done(true);
+
+        // Start recording a new saga being created.
+        let started = qq
+            .record_saga_create(*SAGA_ID, &*SAGA_NAME)
+            .expect("create saga while not quiesced");
+        assert!(!qq.sagas_pending().is_empty());
+
+        // Start quiescing.
+        qq.quiesce();
+        assert!(!qq.is_fully_quiesced());
+
+        // Dropping the returned handle is as good as completing the saga.
+        drop(started);
+        assert!(qq.sagas_pending().is_empty());
+        assert!(qq.is_fully_quiesced());
+        qq.wait_for_quiesced().await;
+        assert!(qq.is_fully_quiesced());
+
+        logctx.cleanup_successful();
+    }
+
+    /// Test: quiescing blocks on sagas created in this process
+    #[tokio::test]
+    async fn test_quiesce_block_on_saga_started() {
+        let logctx = test_setup_log("test_quiesce_block_on_saga_started");
+        let log = &logctx.log;
+
+        // We'll use a oneshot channel to emulate the saga completion future.
+        let (tx, rx) = tokio::sync::oneshot::channel();
+
+        // Set up a new handle.  Complete the first saga recovery immediately so
+        // that that doesn't block quiescing.
+        let qq = SagaQuiesceHandle::new(log.clone());
+        qq.saga_recovery_start();
+        qq.saga_recovery_done(true);
+
+        // Record a new saga being created and provide it with our emulated
+        // completion future.
+        let mut pending = qq
+            .record_saga_create(*SAGA_ID, &*SAGA_NAME)
+            .expect("create saga while not quiesced");
+        let consumer_completion = pending.saga_completion_future(
+            async { rx.await.expect("cannot drop this before dropping tx") }
+                .boxed(),
+        );
+        assert!(!qq.sagas_pending().is_empty());
+
+        // Quiesce should block on the saga finishing.
+        qq.quiesce();
+        assert!(!qq.is_fully_quiesced());
+
+        // "Finish" the saga.
+        tx.send(saga_result()).unwrap();
+
+        // Since this is a single-threaded executor, it should not have been
+        // able to notice that the saga finished yet.  It's not that important
+        // to assert this but it emphasizes that it really is waiting for
+        // something to happen.
+        assert!(!qq.is_fully_quiesced());
+
+        // The consumer's completion future ought to be unblocked now.
+        let _ = consumer_completion.await;
+
+        // Wait for quiescing to finish.  This should be immediate.
+        qq.wait_for_quiesced().await;
+        assert!(qq.sagas_pending().is_empty());
+        assert!(qq.is_fully_quiesced());
+
+        logctx.cleanup_successful();
+    }
+
+    /// Test: quiescing blocks on first round of saga recovery
+    #[tokio::test]
+    async fn test_quiesce_block_on_first_recovery() {
+        let logctx = test_setup_log("test_quiesce_block_on_first_recovery");
+        let log = &logctx.log;
+
+        // Set up a new handle.
+        let qq = SagaQuiesceHandle::new(log.clone());
+
+        // Quiesce should block on recovery having completed successfully once.
+        qq.quiesce();
+        assert!(!qq.is_fully_quiesced());
+
+        // Act like the first recovery failed.  Quiescing should still be
+        // blocked.
+        qq.saga_recovery_start();
+        qq.saga_recovery_done(false);
+        assert!(!qq.is_fully_quiesced());
+
+        // Finish a normal saga recovery.  Quiescing should proceed.
+        // This happens synchronously (though it doesn't have to).
+        qq.saga_recovery_start();
+        qq.saga_recovery_done(true);
+        assert!(qq.is_fully_quiesced());
+        qq.wait_for_quiesced().await;
+        assert!(qq.is_fully_quiesced());
+
+        logctx.cleanup_successful();
+    }
+
+    /// Test: quiescing blocks on outstanding saga re-assignment
+    #[tokio::test]
+    async fn test_quiesce_block_on_reassignment() {
+        let logctx = test_setup_log("test_quiesce_block_on_reassignment");
+        let log = &logctx.log;
+
+        // Set up a new handle.  Complete the first saga recovery immediately so
+        // that that doesn't block quiescing.
+        let qq = SagaQuiesceHandle::new(log.clone());
+        qq.saga_recovery_start();
+        qq.saga_recovery_done(true);
+
+        // Begin saga re-assignment.
+        qq.reassignment_begin().expect("can re-assign when not quiescing");
+
+        // Begin quiescing.
+        qq.quiesce();
+
+        // Quiescing is blocked.
+        assert!(!qq.is_fully_quiesced());
+
+        // When re-assignment finishes *without* having re-assigned anything,
+        // then we're immediately all set.
+        qq.reassignment_done(false);
+        assert!(qq.is_fully_quiesced());
+        qq.wait_for_quiesced().await;
+        assert!(qq.is_fully_quiesced());
+
+        logctx.cleanup_successful();
+    }
+
+    /// Test: when sagas get re-assigned, quiescing is blocked not just on the
+    /// re-assignment finishing, but also a subsequent successful saga recovery.
+    #[tokio::test]
+    async fn test_quiesce_block_on_reassigned_recovery() {
+        let logctx =
+            test_setup_log("test_quiesce_block_on_reassigned_recovery");
+        let log = &logctx.log;
+
+        // Set up a new handle.  Complete the first saga recovery immediately so
+        // that that doesn't block quiescing.
+        let qq = SagaQuiesceHandle::new(log.clone());
+        qq.saga_recovery_start();
+        qq.saga_recovery_done(true);
+
+        // Begin saga re-assignment.
+        qq.reassignment_begin().expect("can re-assign when not quiescing");
+
+        // Begin quiescing.
+        qq.quiesce();
+
+        // Quiescing is blocked.
+        assert!(!qq.is_fully_quiesced());
+
+        // When re-assignment finishes and re-assigned sagas, we're still
+        // blocked.
+        qq.reassignment_done(true);
+        assert!(!qq.is_fully_quiesced());
+
+        // If the next recovery pass fails, we're still blocked.
+        qq.saga_recovery_start();
+        qq.saga_recovery_done(false);
+        assert!(!qq.is_fully_quiesced());
+
+        // Once a recovery pass succeeds, we're good.
+        qq.saga_recovery_start();
+        qq.saga_recovery_done(true);
+        assert!(qq.is_fully_quiesced());
+
+        qq.wait_for_quiesced().await;
+        assert!(qq.is_fully_quiesced());
+
+        logctx.cleanup_successful();
+    }
+
+    /// Test: very similar to test_quiesce_block_on_reassigned_recovery(), but
+    /// it's not enough that saga recovery completes after the re-assignment.
+    /// It must be a saga recovery pass that started after the re-assignment
+    /// completed.
+    #[tokio::test]
+    async fn test_quiesce_block_on_reassigned_concurrent_recovery() {
+        let logctx = test_setup_log(
+            "test_quiesce_block_on_reassigned_concurrent_recovery",
+        );
+        let log = &logctx.log;
+
+        // Set up a new handle.  Complete the first saga recovery immediately so
+        // that that doesn't block quiescing.
+        let qq = SagaQuiesceHandle::new(log.clone());
+        qq.saga_recovery_start();
+        qq.saga_recovery_done(true);
+
+        // Begin saga re-assignment.
+        qq.reassignment_begin().expect("can re-assign when not quiescing");
+
+        // Begin quiescing.
+        qq.quiesce();
+
+        // Quiescing is blocked.
+        assert!(!qq.is_fully_quiesced());
+
+        // Start a recovery pass.
+        qq.saga_recovery_start();
+
+        // When re-assignment finishes and re-assigned sagas, we're still
+        // blocked.
+        qq.reassignment_done(true);
+        assert!(!qq.is_fully_quiesced());
+
+        // Even if this recovery pass succeeds, we're still blocked, because it
+        // started before re-assignment finished and so isn't guaranteed to have
+        // seen all the re-assigned sagas.
+        qq.saga_recovery_done(true);
+        assert!(!qq.is_fully_quiesced());
+
+        // If the next pass fails, we're still blocked.
+        qq.saga_recovery_start();
+        qq.saga_recovery_done(false);
+        assert!(!qq.is_fully_quiesced());
+
+        // Finally, we have a successful pass that unblocks us.
+        qq.saga_recovery_start();
+        qq.saga_recovery_done(true);
+        assert!(qq.is_fully_quiesced());
+        qq.wait_for_quiesced().await;
+        assert!(qq.is_fully_quiesced());
+
+        logctx.cleanup_successful();
+    }
+
+    /// Test: realistic case of a re-assignment that assigns us a saga that we
+    /// need to recover *and* wait for completion.
+    #[tokio::test]
+    async fn test_quiesce_block_on_reassigned_recovered_saga() {
+        let logctx =
+            test_setup_log("test_quiesce_block_on_reassigned_recovered_saga");
+        let log = &logctx.log;
+
+        // We'll use a oneshot channel to emulate the saga completion future.
+        let (tx, rx) = tokio::sync::oneshot::channel();
+
+        // Set up a new handle.  Complete the first saga recovery immediately so
+        // that that doesn't block quiescing.
+        let qq = SagaQuiesceHandle::new(log.clone());
+        qq.saga_recovery_start();
+        qq.saga_recovery_done(true);
+
+        // Begin saga re-assignment.
+        qq.reassignment_begin().expect("can re-assign when not quiescing");
+
+        // Begin quiescing.
+        qq.quiesce();
+
+        // Quiescing is blocked.
+        assert!(!qq.is_fully_quiesced());
+
+        // When re-assignment finishes and re-assigned sagas, we're still
+        // blocked because we haven't run recovery.
+        qq.reassignment_done(true);
+        assert!(!qq.is_fully_quiesced());
+
+        // Start a recovery pass.  Pretend like we found something.
+        qq.saga_recovery_start();
+        let mut pending = qq.record_saga_recovery(*SAGA_ID, &*SAGA_NAME);
+        let consumer_completion = pending.saga_completion_future(
+            async { rx.await.expect("cannot drop this before dropping tx") }
+                .boxed(),
+        );
+        qq.saga_recovery_done(true);
+
+        // We're still not quiesced because that saga is still running.
+        assert!(!qq.is_fully_quiesced());
+
+        // Finish the recovered saga.  That should unblock quiesce.
+        tx.send(saga_result()).unwrap();
+
+        // The consumer's completion future ought to be unblocked now.
+        let _ = consumer_completion.await;
+
+        qq.wait_for_quiesced().await;
+        assert!(qq.is_fully_quiesced());
+
+        logctx.cleanup_successful();
+    }
+
+    /// Test: blocks on recovered sagas
+    #[tokio::test]
+    async fn test_quiesce_block_on_recovered_sagas() {
+        let logctx = test_setup_log("test_quiesce_block_on_recovered_sagas");
+        let log = &logctx.log;
+
+        // We'll use a oneshot channel to emulate the saga completion future.
+        let (tx, rx) = tokio::sync::oneshot::channel();
+
+        // Set up a new handle.
+        let qq = SagaQuiesceHandle::new(log.clone());
+        // Start a recovery pass.  Pretend like we found something.
+        qq.saga_recovery_start();
+        let mut pending = qq.record_saga_recovery(*SAGA_ID, &*SAGA_NAME);
+        let consumer_completion = pending.saga_completion_future(
+            async { rx.await.expect("cannot drop this before dropping tx") }
+                .boxed(),
+        );
+        qq.saga_recovery_done(true);
+
+        // Begin quiescing.
+        qq.quiesce();
+
+        // Quiescing is blocked.
+        assert!(!qq.is_fully_quiesced());
+
+        // Finish the recovered saga.  That should unblock quiesce.
+        tx.send(saga_result()).unwrap();
+
+        qq.wait_for_quiesced().await;
+        assert!(qq.is_fully_quiesced());
+
+        // The consumer's completion future ought to be unblocked now.
+        let _ = consumer_completion.await;
+
+        logctx.cleanup_successful();
     }
 }
