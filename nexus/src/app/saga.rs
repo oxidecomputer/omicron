@@ -48,7 +48,6 @@
 //! * Tests can use any of the lower-level pieces to examine intermediate state
 //!   or inject errors.
 
-use super::quiesce::SagaQuiesceHandle;
 use super::sagas::ACTION_REGISTRY;
 use super::sagas::NexusSaga;
 use crate::Nexus;
@@ -60,6 +59,7 @@ use futures::future::BoxFuture;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_types::internal_api::views::DemoSaga;
+use nexus_types::quiesce::SagaQuiesceHandle;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResult;

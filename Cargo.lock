@@ -7077,6 +7077,7 @@ dependencies = [
  "test-strategy",
  "textwrap",
  "thiserror 2.0.12",
+ "tokio",
  "tough",
  "tufaceous-artifact",
  "unicode-width 0.1.14",

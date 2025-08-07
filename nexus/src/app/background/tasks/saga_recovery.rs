@@ -122,7 +122,6 @@
 
 use crate::Nexus;
 use crate::app::background::BackgroundTask;
-use crate::app::quiesce::SagaQuiesceHandle;
 use crate::app::sagas::NexusSagaType;
 use crate::saga_interface::SagaContext;
 use futures::FutureExt;
@@ -130,6 +129,7 @@ use futures::future::BoxFuture;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::DataStore;
+use nexus_types::quiesce::SagaQuiesceHandle;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::InternalContext;
 use std::collections::BTreeMap;

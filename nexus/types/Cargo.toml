@@ -47,6 +47,7 @@ strum.workspace = true
 tabled.workspace = true
 textwrap.workspace = true
 thiserror.workspace = true
+tokio.workspace = true
 tufaceous-artifact.workspace = true
 newtype-uuid.workspace = true
 update-engine.workspace = true

@@ -27,6 +27,7 @@ use nexus_db_queries::db;
 use nexus_mgs_updates::ArtifactCache;
 use nexus_mgs_updates::MgsUpdateDriver;
 use nexus_types::deployment::PendingMgsUpdates;
+use nexus_types::quiesce::SagaQuiesceHandle;
 use omicron_common::address::DENDRITE_PORT;
 use omicron_common::address::MGD_PORT;
 use omicron_common::address::MGS_PORT;
@@ -114,7 +115,6 @@ pub(crate) use nexus_db_queries::db::queries::disk::MAX_DISKS_PER_INSTANCE;
 use nexus_mgs_updates::DEFAULT_RETRY_TIMEOUT;
 use nexus_types::internal_api::views::MgsUpdateDriverStatus;
 use nexus_types::internal_api::views::QuiesceState;
-use quiesce::SagaQuiesceHandle;
 use sagas::demo::CompletingDemoSagas;
 
 // XXX: Might want to recast as max *floating* IPs, we have at most one
