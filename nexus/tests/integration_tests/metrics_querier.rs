@@ -143,27 +143,6 @@ impl<'a, N> MetricsQuerier<'a, N> {
         self.wait_for_objects(|| endpoint.to_string(), cond).await
     }
 
-    /// Repeatedly fetch a specific disk metric until `cond` returns `Ok(_)`.
-    pub async fn wait_for_disk_metric<F, T>(
-        &self,
-        project_name: &str,
-        disk_name: &str,
-        metric_name: &str,
-        cond: F,
-    ) -> T
-    where
-        F: Fn(Vec<Measurement>) -> Result<T, MetricsNotYet>,
-    {
-        let endpoint = || {
-            format!(
-                "/v1/disks/{disk_name}/metrics/{metric_name}?start_time={:?}&end_time={:?}&project={project_name}",
-                self.ctx.start_time,
-                Utc::now(),
-            )
-        };
-        self.wait_for_objects(endpoint, cond).await
-    }
-
     /// Repeatedly fetch the single newest system metric until `cond` returns
     /// `Ok(_)`.
     pub async fn wait_for_latest_system_metric<F, T>(

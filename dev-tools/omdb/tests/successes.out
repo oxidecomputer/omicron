@@ -110,8 +110,8 @@ SPs FOUND THROUGH IGNITION
 SERVICE PROCESSOR STATES
 
     TYPE   SLOT MODEL            SERIAL      REV HUBRIS           PWR ROT_ACTIVE 
-    Sled   0    i86pc            SimGimlet00 0   0000000000000000 A2  slot A     
-    Sled   1    i86pc            SimGimlet01 0   0000000000000000 A2  slot A     
+    Sled   0    i86pc            SimGimlet00 0   0000000000000000 A0  slot A     
+    Sled   1    i86pc            SimGimlet01 0   0000000000000000 A0  slot A     
     Switch 0    FAKE_SIM_SIDECAR SimSidecar0 0   0000000000000000 A2  slot A     
     Switch 1    FAKE_SIM_SIDECAR SimSidecar1 0   0000000000000000 A2  slot A     
 

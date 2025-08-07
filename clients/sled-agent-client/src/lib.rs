@@ -62,6 +62,7 @@ progenitor::generate_api!(
         InventoryDisk = nexus_sled_agent_shared::inventory::InventoryDisk,
         InventoryZpool = nexus_sled_agent_shared::inventory::InventoryZpool,
         MacAddr = omicron_common::api::external::MacAddr,
+        MupdateOverrideBootInventory = nexus_sled_agent_shared::inventory::MupdateOverrideBootInventory,
         Name = omicron_common::api::external::Name,
         NetworkInterface = omicron_common::api::internal::shared::NetworkInterface,
         OmicronPhysicalDiskConfig = omicron_common::disk::OmicronPhysicalDiskConfig,

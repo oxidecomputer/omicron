@@ -1032,7 +1032,7 @@ Empty planning report for blueprint 366b0b68-d80e-4bc1-abd3-dc69837847e0.
 > # blueprint-plan will place a new external DNS zone, diff DNS to see the new zone has `ns<N>` and NS records.
 > blueprint-plan 366b0b68-d80e-4bc1-abd3-dc69837847e0
 INFO skipping noop image source check for all sleds, reason: no target release is currently set
-WARN cannot issue more SP updates (no current artifacts)
+WARN cannot issue more MGS-driven updates (no current artifacts)
 generated blueprint 9c998c1d-1a7b-440a-ae0c-40f781dea6e2 based on parent blueprint 366b0b68-d80e-4bc1-abd3-dc69837847e0
 Planning report for blueprint 9c998c1d-1a7b-440a-ae0c-40f781dea6e2:
 Chicken switches:

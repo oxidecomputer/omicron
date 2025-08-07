@@ -395,6 +395,19 @@ impl fmt::Display for PlanningNoopImageSourceSkipZoneReason {
 #[derive(
     Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Diffable, JsonSchema,
 )]
+pub struct PlanningMupdateOverrideStepReport {
+    pub override_ids: BTreeMap<SledUuid, MupdateOverrideUuid>,
+}
+
+impl PlanningMupdateOverrideStepReport {
+    pub fn new() -> Self {
+        Self { override_ids: BTreeMap::new() }
+    }
+}
+
+#[derive(
+    Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Diffable, JsonSchema,
+)]
 pub struct PlanningMgsUpdatesStepReport {
     pub pending_mgs_updates: PendingMgsUpdates,
 }
@@ -450,7 +463,27 @@ pub struct PlanningAddSufficientZonesExist {
 #[derive(
     Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Diffable, JsonSchema,
 )]
+#[serde(rename_all = "snake_case", tag = "type")]
+pub enum ZoneAddWaitingOn {
+    /// Waiting on one or more MUPdate overrides to clear.
+    MupdateOverrides,
+}
+
+impl ZoneAddWaitingOn {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::MupdateOverrides => "MUPdate overrides",
+        }
+    }
+}
+
+#[derive(
+    Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Diffable, JsonSchema,
+)]
 pub struct PlanningAddStepReport {
+    /// What are we waiting on to start zone additions?
+    pub waiting_on: Option<ZoneAddWaitingOn>,
+
     pub sleds_without_ntp_zones_in_inventory: BTreeSet<SledUuid>,
     pub sleds_without_zpools_for_ntp_zones: BTreeSet<SledUuid>,
     pub sleds_waiting_for_ntp_zone: BTreeSet<SledUuid>,
@@ -474,6 +507,7 @@ pub struct PlanningAddStepReport {
 impl PlanningAddStepReport {
     pub fn new() -> Self {
         Self {
+            waiting_on: None,
             sleds_without_ntp_zones_in_inventory: BTreeSet::new(),
             sleds_without_zpools_for_ntp_zones: BTreeSet::new(),
             sleds_waiting_for_ntp_zone: BTreeSet::new(),
@@ -486,8 +520,15 @@ impl PlanningAddStepReport {
         }
     }
 
+    pub fn waiting_on(waiting_on: ZoneAddWaitingOn) -> Self {
+        let mut new = Self::new();
+        new.waiting_on = Some(waiting_on);
+        new
+    }
+
     pub fn is_empty(&self) -> bool {
-        self.sleds_without_ntp_zones_in_inventory.is_empty()
+        self.waiting_on.is_none()
+            && self.sleds_without_ntp_zones_in_inventory.is_empty()
             && self.sleds_without_zpools_for_ntp_zones.is_empty()
             && self.sleds_waiting_for_ntp_zone.is_empty()
             && self.sleds_getting_ntp_and_discretionary_zones.is_empty()
@@ -551,6 +592,7 @@ impl PlanningAddStepReport {
 impl fmt::Display for PlanningAddStepReport {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let Self {
+            waiting_on,
             sleds_without_ntp_zones_in_inventory,
             sleds_without_zpools_for_ntp_zones,
             sleds_waiting_for_ntp_zone,
@@ -561,6 +603,10 @@ impl fmt::Display for PlanningAddStepReport {
             sufficient_zones_exist: _,
             discretionary_zones_placed,
         } = self;
+
+        if let Some(waiting_on) = waiting_on {
+            writeln!(f, "* Waiting on {}", waiting_on.as_str())?;
+        }
 
         if !sleds_without_ntp_zones_in_inventory.is_empty() {
             writeln!(
@@ -822,6 +868,9 @@ pub enum ZoneUpdatesWaitingOn {
 
     /// Waiting on updates to RoT / SP / Host OS / etc.
     PendingMgsUpdates,
+
+    /// Waiting on one or more MUPdate overrides to clear.
+    MupdateOverrides,
 }
 
 impl ZoneUpdatesWaitingOn {
@@ -831,6 +880,7 @@ impl ZoneUpdatesWaitingOn {
             Self::PendingMgsUpdates => {
                 "pending MGS updates (RoT / SP / Host OS / etc.)"
             }
+            Self::MupdateOverrides => "MUPdate overrides",
         }
     }
 }
@@ -842,6 +892,7 @@ impl ZoneUpdatesWaitingOn {
 pub enum ZoneUnsafeToShutdown {
     Cockroachdb { reason: CockroachdbUnsafeToShutdown },
     BoundaryNtp { total_boundary_ntp_zones: usize, synchronized_count: usize },
+    InternalDns { total_internal_dns_zones: usize, synchronized_count: usize },
 }
 
 impl fmt::Display for ZoneUnsafeToShutdown {
@@ -852,6 +903,10 @@ impl fmt::Display for ZoneUnsafeToShutdown {
                 total_boundary_ntp_zones: t,
                 synchronized_count: s,
             } => write!(f, "only {s}/{t} boundary NTP zones are synchronized"),
+            Self::InternalDns {
+                total_internal_dns_zones: t,
+                synchronized_count: s,
+            } => write!(f, "only {s}/{t} internal DNS zones are synchronized"),
         }
     }
 }

@@ -538,7 +538,7 @@ T ENA ID                                   PARENT                               
 
 > blueprint-plan ade5749d-bdf3-4fab-a8ae-00bea01b3a5a
 INFO skipping noop image source check for all sleds, reason: no target release is currently set
-WARN cannot issue more SP updates (no current artifacts)
+WARN cannot issue more MGS-driven updates (no current artifacts)
 INFO some zones not yet up-to-date, sled_id: 89d02b1b-478c-401a-8e28-7a26f74fa41b, zones_currently_updating: [ZoneCurrentlyUpdating { zone_id: b3c9c041-d2f0-4767-bdaf-0e52e9d7a013 (service), zone_kind: InternalNtp, reason: MissingInInventory { bp_image_source: InstallDataset } }]
 generated blueprint 86db3308-f817-4626-8838-4085949a6a41 based on parent blueprint ade5749d-bdf3-4fab-a8ae-00bea01b3a5a
 Planning report for blueprint 86db3308-f817-4626-8838-4085949a6a41:
@@ -1202,11 +1202,16 @@ LEDGERED SLED CONFIG
             path on boot disk: /fake/path/install/mupdate_override.json
             no override on boot disk
             no non-boot disks
-    boot disk slot: FAILED TO DETERMINE: constructed via debug_assume_success()
-    slot A details UNAVAILABLE: constructed via debug_assume_success()
-    slot B details UNAVAILABLE: constructed via debug_assume_success()
+    boot disk slot: A
+    slot A details:
+        artifact: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a (1000 bytes)
+        image name: fake from debug_assume_success()
+        phase 2 hash: 0000000000000000000000000000000000000000000000000000000000000000
+    slot B details:
+        artifact: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b (1000 bytes)
+        image name: fake from debug_assume_success()
+        phase 2 hash: 0101010101010101010101010101010101010101010101010101010101010101
     last reconciled config: matches ledgered config
-    no information from NTP for this sled
         no mupdate override to clear
         no orphaned datasets
         all disks reconciled successfully
@@ -1311,11 +1316,16 @@ LEDGERED SLED CONFIG
             path on boot disk: /fake/path/install/mupdate_override.json
             no override on boot disk
             no non-boot disks
-    boot disk slot: FAILED TO DETERMINE: constructed via debug_assume_success()
-    slot A details UNAVAILABLE: constructed via debug_assume_success()
-    slot B details UNAVAILABLE: constructed via debug_assume_success()
+    boot disk slot: A
+    slot A details:
+        artifact: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a (1000 bytes)
+        image name: fake from debug_assume_success()
+        phase 2 hash: 0000000000000000000000000000000000000000000000000000000000000000
+    slot B details:
+        artifact: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b (1000 bytes)
+        image name: fake from debug_assume_success()
+        phase 2 hash: 0101010101010101010101010101010101010101010101010101010101010101
     last reconciled config: matches ledgered config
-    no information from NTP for this sled
         no mupdate override to clear
         no orphaned datasets
         all disks reconciled successfully
@@ -1513,11 +1523,16 @@ LEDGERED SLED CONFIG
             path on boot disk: /fake/path/install/mupdate_override.json
             no override on boot disk
             no non-boot disks
-    boot disk slot: FAILED TO DETERMINE: constructed via debug_assume_success()
-    slot A details UNAVAILABLE: constructed via debug_assume_success()
-    slot B details UNAVAILABLE: constructed via debug_assume_success()
+    boot disk slot: A
+    slot A details:
+        artifact: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a (1000 bytes)
+        image name: fake from debug_assume_success()
+        phase 2 hash: 0000000000000000000000000000000000000000000000000000000000000000
+    slot B details:
+        artifact: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b (1000 bytes)
+        image name: fake from debug_assume_success()
+        phase 2 hash: 0101010101010101010101010101010101010101010101010101010101010101
     last reconciled config: matches ledgered config
-    no information from NTP for this sled
         no mupdate override to clear
         no orphaned datasets
         all disks reconciled successfully
@@ -1533,13 +1548,21 @@ COCKROACH STATUS
     no cockroach status retrieved
 
 
+NTP STATUS
+    No NTP zones reported timesync information
+
+INTERNAL DNS STATUS
+    Zone 4692cc31-6eb6-437c-9634-9688663d06ae: Internal DNS generation @ 1
+    Zone 587da9e8-8fc0-4854-b585-070741a7b00d: Internal DNS generation @ 1
+    Zone ffbf02f0-261d-4723-b613-eb861245acbd: Internal DNS generation @ 1
+
 
 
 > # Plan a blueprint run -- this will cause zones and disks on the expunged
 > # sled to be expunged.
 > blueprint-plan latest
 INFO skipping noop image source check for all sleds, reason: no target release is currently set
-WARN cannot issue more SP updates (no current artifacts)
+WARN cannot issue more MGS-driven updates (no current artifacts)
 generated blueprint 86db3308-f817-4626-8838-4085949a6a41 based on parent blueprint ade5749d-bdf3-4fab-a8ae-00bea01b3a5a
 Empty planning report for blueprint 86db3308-f817-4626-8838-4085949a6a41.
 

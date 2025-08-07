@@ -29,10 +29,11 @@ use qorb::resolver::Resolver;
 use qorb::resolvers::fixed::FixedResolver;
 use slog::{info, o, warn};
 use std::collections::BTreeMap;
-use std::fmt::Write;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
+use swrite::SWrite;
+use swrite::swriteln;
 use tokio::sync::watch;
 use tufaceous_artifact::ArtifactHash;
 use tufaceous_artifact::ArtifactVersion;
@@ -295,33 +296,34 @@ fn cmd_config(
     let configured = updater_state.requests_tx.borrow();
 
     let mut s = String::new();
-    writeln!(&mut s, "configured updates ({}):", configured.len())?;
+    swriteln!(s, "configured updates ({}):", configured.len());
     for update in &*configured {
         let baseboard_id = &update.baseboard_id;
-        writeln!(
-            &mut s,
+        swriteln!(
+            s,
             "    part {} serial {} (type {:?} slot {}):",
             baseboard_id.part_number,
             baseboard_id.serial_number,
             update.sp_type,
             update.slot_id,
-        )?;
-        writeln!(&mut s, "        artifact hash: {}", update.artifact_hash)?;
-        writeln!(
-            &mut s,
+        );
+        swriteln!(s, "        artifact hash: {}", update.artifact_hash);
+        swriteln!(
+            s,
             "        user-provided artifact version: {}",
             update.artifact_version,
-        )?;
+        );
         match &update.details {
             PendingMgsUpdateDetails::Sp {
                 expected_active_version,
                 expected_inactive_version,
             } => {
-                writeln!(
-                    &mut s,
+                swriteln!(
+                    s,
                     "        preconditions: active slot {:?}, inactive slot {:?}",
-                    expected_active_version, expected_inactive_version,
-                )?;
+                    expected_active_version,
+                    expected_inactive_version,
+                );
             }
             PendingMgsUpdateDetails::Rot {
                 expected_active_slot,
@@ -330,8 +332,8 @@ fn cmd_config(
                 expected_pending_persistent_boot_preference,
                 expected_transient_boot_preference,
             } => {
-                writeln!(
-                    &mut s,
+                swriteln!(
+                    s,
                     "        preconditions: expected active slot {:?}
                                             expected active version {:?}
                                             expected inactive version {:?}
@@ -342,21 +344,22 @@ fn cmd_config(
                     expected_inactive_version, expected_persistent_boot_preference,
                     expected_pending_persistent_boot_preference,
                     expected_transient_boot_preference,
-                )?;
+                );
             }
             PendingMgsUpdateDetails::RotBootloader {
                 expected_stage0_version,
                 expected_stage0_next_version,
             } => {
-                writeln!(
-                    &mut s,
+                swriteln!(
+                    s,
                     "        preconditions: stage 0 {:?}, stage 0 next {:?}",
-                    expected_stage0_version, expected_stage0_next_version,
-                )?;
+                    expected_stage0_version,
+                    expected_stage0_next_version,
+                );
             }
         }
 
-        writeln!(&mut s)?;
+        swriteln!(s);
     }
 
     Ok(Some(s))

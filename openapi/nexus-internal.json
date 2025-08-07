@@ -6479,6 +6479,15 @@
             "additionalProperties": {
               "$ref": "#/components/schemas/PlanningAddSufficientZonesExist"
             }
+          },
+          "waiting_on": {
+            "nullable": true,
+            "description": "What are we waiting on to start zone additions?",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ZoneAddWaitingOn"
+              }
+            ]
           }
         },
         "required": [
@@ -8671,6 +8680,25 @@
           "next_attempt_time"
         ]
       },
+      "ZoneAddWaitingOn": {
+        "oneOf": [
+          {
+            "description": "Waiting on one or more MUPdate overrides to clear.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "mupdate_overrides"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          }
+        ]
+      },
       "ZoneStatus": {
         "type": "object",
         "properties": {
@@ -8735,6 +8763,32 @@
               "total_boundary_ntp_zones",
               "type"
             ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "synchronized_count": {
+                "type": "integer",
+                "format": "uint",
+                "minimum": 0
+              },
+              "total_internal_dns_zones": {
+                "type": "integer",
+                "format": "uint",
+                "minimum": 0
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "internal_dns"
+                ]
+              }
+            },
+            "required": [
+              "synchronized_count",
+              "total_internal_dns_zones",
+              "type"
+            ]
           }
         ]
       },
@@ -8763,6 +8817,21 @@
                 "type": "string",
                 "enum": [
                   "pending_mgs_updates"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "Waiting on one or more MUPdate overrides to clear.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "mupdate_overrides"
                 ]
               }
             },
