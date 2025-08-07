@@ -679,7 +679,7 @@ mod test {
             create_storage_sec_and_context(&log, db_datastore.clone(), sec_id);
         let sec_log = log.new(o!("component" => "SEC"));
         let opctx = OpContext::for_tests(
-            log,
+            log.clone(),
             Arc::clone(&db_datastore) as Arc<dyn nexus_auth::storage::Storage>,
         );
         let saga_recovery_opctx =
@@ -768,7 +768,7 @@ mod test {
             create_storage_sec_and_context(&log, db_datastore.clone(), sec_id);
         let sec_log = log.new(o!("component" => "SEC"));
         let opctx = OpContext::for_tests(
-            log,
+            log.clone(),
             Arc::clone(&db_datastore) as Arc<dyn nexus_auth::storage::Storage>,
         );
         let saga_recovery_opctx =

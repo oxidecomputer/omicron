@@ -814,7 +814,7 @@ impl QuiesceState {
 pub struct PendingSagaInfo {
     pub saga_id: steno::SagaId,
     pub saga_name: steno::SagaName,
-    pub time_started: DateTime<Utc>,
+    pub time_pending: DateTime<Utc>,
     /// If true, we know the saga needs to be recovered.  It may or may not be
     /// running already.
     ///

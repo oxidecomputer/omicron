@@ -98,7 +98,7 @@ struct SagaQuiesceInner {
 impl SagaQuiesceHandle {
     pub fn new(log: Logger) -> SagaQuiesceHandle {
         SagaQuiesceHandle {
-            inner: Mutex::new(SagaQuiesceInner {
+            inner: Arc::new(Mutex::new(SagaQuiesceInner {
                 log,
                 new_sagas_allowed: SagasAllowed::Allowed,
                 sagas_pending: IdOrdMap::new(),
@@ -107,7 +107,7 @@ impl SagaQuiesceHandle {
                 reassignment_pending: false,
                 recovered_reassignment_generation: Generation::new(),
                 recovery_pending: None,
-            }),
+            })),
         }
     }
 
@@ -117,9 +117,9 @@ impl SagaQuiesceHandle {
     pub fn quiesce(&self) {
         // Log this before changing the config to make sure this message
         // appears before messages from code paths that saw this change.
-        let q = self.inner.lock().unwrap();
+        let mut q = self.inner.lock().unwrap();
         info!(&q.log, "starting saga quiesce");
-        q.sagas_allowed = SagasAllowed::Disallowed;
+        q.new_sagas_allowed = SagasAllowed::Disallowed;
     }
 
     /// Wait for sagas to be quiesced
@@ -160,19 +160,20 @@ impl SagaQuiesceHandle {
     /// Only one of these may be outstanding at a time.  The caller must call
     /// `reassignment_finish()` before starting another one of these.
     pub fn reassignment_begin(&self) -> Result<(), NoSagasAllowedError> {
-        let q = self.inner.lock().unwrap();
+        let mut q = self.inner.lock().unwrap();
         if q.new_sagas_allowed != SagasAllowed::Allowed {
             return Err(NoSagasAllowedError);
         }
 
         assert!(!q.reassignment_pending);
         q.reassignment_pending = true;
+        Ok(())
     }
 
     /// Record that we've finished an operation that might assign new sagas to
     /// ourselves.
     pub fn reassignment_finish(&self, maybe_reassigned: bool) {
-        let q = self.inner.lock().unwrap();
+        let mut q = self.inner.lock().unwrap();
         assert!(q.reassignment_pending);
         q.reassignment_pending = false;
 
@@ -188,14 +189,14 @@ impl SagaQuiesceHandle {
     /// Only one of these may be outstanding at a time.  The caller must call
     /// `saga_recovery_finish()` before starting another one of these.
     pub fn saga_recovery_start(&self) {
-        let q = self.inner.lock().unwrap();
+        let mut q = self.inner.lock().unwrap();
         assert!(q.recovery_pending.is_none());
         q.recovery_pending = Some(q.reassignment_generation);
     }
 
     /// Record that we've finished recovering sagas.
     pub fn saga_recovery_done(&self, success: bool) {
-        let q = self.inner.lock().unwrap();
+        let mut q = self.inner.lock().unwrap();
         let Some(generation) = q.recovery_pending.take() else {
             panic!("cannot finish saga recovery when it was not running");
         };
@@ -217,7 +218,7 @@ impl SagaQuiesceHandle {
         saga_id: steno::SagaId,
         saga_name: &steno::SagaName,
     ) -> Result<NewlyPendingSagaRef, NoSagasAllowedError> {
-        let q = self.inner.lock().unwrap();
+        let mut q = self.inner.lock().unwrap();
         if q.new_sagas_allowed != SagasAllowed::Allowed {
             return Err(NoSagasAllowedError);
         }
@@ -264,10 +265,10 @@ impl SagaQuiesceHandle {
         saga_id: steno::SagaId,
         saga_name: &steno::SagaName,
     ) -> NewlyPendingSagaRef {
-        let q = self.inner.lock().unwrap();
+        let mut q = self.inner.lock().unwrap();
         // It's okay to call this more than once, so we ignore the possible
         // error from `insert_unique()`.
-        let _ = self.sagas_pending.insert_unique(PendingSagaInfo {
+        let _ = q.sagas_pending.insert_unique(PendingSagaInfo {
             saga_id,
             saga_name: saga_name.clone(),
             time_pending: Utc::now(),
@@ -310,7 +311,7 @@ impl NewlyPendingSagaRef {
     /// this structure to update its state to reflect that the saga is no longer
     /// running.
     pub fn saga_completion_future(
-        self,
+        &mut self,
         fut: BoxFuture<'static, SagaResult>,
     ) -> BoxFuture<'static, SagaResult> {
         self.init_finished = true;
@@ -330,9 +331,10 @@ impl NewlyPendingSagaRef {
         // This is the task we spawn off to wait for the saga to finish and
         // update our state.  (The state update happens when `saga_ref` is
         // dropped.)
+        let qwrap = self.quiesce.clone();
         let completion_task = tokio::spawn(async move {
             let rv = fut.await;
-            let q = self.quiesce.lock().unwrap();
+            let mut q = qwrap.lock().unwrap();
             q.sagas_pending
                 .remove(&saga_id)
                 .expect("saga should have been running");
@@ -368,7 +370,7 @@ impl Drop for NewlyPendingSagaRef {
         // bailed out before having started running the saga.  Remove it from
         // the list of sagas that we're tracking.
         if !self.init_finished {
-            let q = self.quiesce.lock().unwrap();
+            let mut q = self.quiesce.lock().unwrap();
             q.sagas_pending.remove(&self.saga_id).unwrap_or_else(|| {
                 panic!(
                     "NewlyPendingSagaRef dropped, saga completion future \
@@ -411,9 +413,9 @@ impl super::Nexus {
     ) -> LookupResult<QuiesceStatus> {
         opctx.authorize(authz::Action::Read, &authz::QUIESCE_STATE).await?;
         let state = self.quiesce.borrow().clone();
-        let sagas_running = self.sagas.sagas_running();
+        let sagas_pending = self.saga_quiesce.sagas_pending();
         let db_claims = self.datastore().claims_held();
-        Ok(QuiesceStatus { state, sagas_running, db_claims })
+        Ok(QuiesceStatus { state, sagas_pending, db_claims })
     }
 }
 
