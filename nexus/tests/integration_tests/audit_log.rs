@@ -66,7 +66,7 @@ async fn test_audit_log_list(ctx: &ControlPlaneTestContext) {
 
     // we have to do this rigmarole instead of using create_project in order to
     // get the user agent header in there and to use a session cookie to test
-    // the access_method field
+    // the auth_method field
     let body = &params::ProjectCreate {
         identity: IdentityMetadataCreateParams {
             name: "test-proj2".parse().unwrap(),
@@ -95,7 +95,7 @@ async fn test_audit_log_list(ctx: &ControlPlaneTestContext) {
     assert_eq!(e1.operation_id, "project_create");
     assert_eq!(e1.source_ip.to_string(), "127.0.0.1");
     assert_eq!(e1.user_agent, None); // no user agent passed by default
-    assert_eq!(e1.access_method, Some("spoof".to_string()));
+    assert_eq!(e1.auth_method, Some("spoof".to_string()));
     assert!(e1.time_started >= t1 && e1.time_started <= t2);
     assert!(e1.time_completed > e1.time_started);
     assert_eq!(
@@ -111,7 +111,7 @@ async fn test_audit_log_list(ctx: &ControlPlaneTestContext) {
     assert_eq!(e2.operation_id, "login_local");
     assert_eq!(e2.source_ip.to_string(), "127.0.0.1");
     assert_eq!(e2.user_agent, None); // no user agent passed by default
-    assert_eq!(e2.access_method, None);
+    assert_eq!(e2.auth_method, None);
     assert!(e2.time_started >= t2 && e2.time_started <= t3);
     assert!(e2.time_completed > e2.time_started);
 
@@ -131,12 +131,12 @@ async fn test_audit_log_list(ctx: &ControlPlaneTestContext) {
         .parsed_body::<views::CurrentUser>()
         .unwrap();
 
-    // third one was done with the session cookie, reflected in access_method
+    // third one was done with the session cookie, reflected in auth_method
     assert_eq!(e3.request_uri, "/v1/projects");
     assert_eq!(e3.operation_id, "project_create");
     assert_eq!(e3.source_ip.to_string(), "127.0.0.1");
     assert_eq!(e3.user_agent.as_ref().unwrap(), "A pretend user agent string");
-    assert_eq!(e3.access_method, Some("session_cookie".to_string()));
+    assert_eq!(e3.auth_method, Some("session_cookie".to_string()));
     assert!(e3.time_started >= t3 && e3.time_started <= t4);
     assert!(e3.time_completed > e3.time_started);
     assert_eq!(
@@ -385,6 +385,6 @@ fn verify_entry(
         }
     );
     assert_eq!(entry.source_ip.to_string(), "127.0.0.1");
-    assert_eq!(entry.access_method, Some("spoof".to_string()));
+    assert_eq!(entry.auth_method, Some("spoof".to_string()));
     assert!(entry.time_completed > entry.time_started);
 }

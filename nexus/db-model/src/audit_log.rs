@@ -34,7 +34,7 @@ pub struct AuditLogEntryInitParams {
     pub source_ip: IpAddr,
     pub user_agent: Option<String>,
     pub actor: AuditLogActor,
-    pub access_method: Option<String>,
+    pub auth_method: Option<String>,
 }
 
 impl_enum_type!(
@@ -110,7 +110,7 @@ pub struct AuditLogEntryInit {
 
     /// API token or session cookie. Optional because it will not be defined
     /// on unauthenticated requests like login attempts.
-    pub access_method: Option<String>,
+    pub auth_method: Option<String>,
 }
 
 impl From<AuditLogEntryInitParams> for AuditLogEntryInit {
@@ -122,7 +122,7 @@ impl From<AuditLogEntryInitParams> for AuditLogEntryInit {
             source_ip,
             user_agent,
             actor,
-            access_method,
+            auth_method,
         } = params;
 
         let (actor_id, actor_silo_id, actor_kind) = match actor {
@@ -148,7 +148,7 @@ impl From<AuditLogEntryInitParams> for AuditLogEntryInit {
             actor_kind,
             source_ip: source_ip.into(),
             user_agent,
-            access_method,
+            auth_method,
         }
     }
 }
@@ -171,7 +171,7 @@ pub struct AuditLogEntry {
     pub actor_kind: AuditLogActorKind,
 
     /// The name of the authn scheme used. None if unauthenticated.
-    pub access_method: Option<String>,
+    pub auth_method: Option<String>,
 
     // Fields that are not present on init
     /// Time log entry was completed with info about result of operation
@@ -294,7 +294,7 @@ impl TryFrom<AuditLogEntry> for views::AuditLogEntry {
                     views::AuditLogEntryActor::Unauthenticated
                 }
             },
-            access_method: entry.access_method,
+            auth_method: entry.auth_method,
             time_completed: entry.time_completed,
             result: match entry.result_kind {
                 AuditLogResultKind::Success => {

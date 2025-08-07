@@ -17,7 +17,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.audit_log (
     -- actor kind indicating builtin user, silo user, or unauthenticated
     actor_kind omicron.public.audit_log_actor_kind NOT NULL,
     -- The name of the authn scheme used
-    access_method STRING,
+    auth_method STRING,
 
     -- below are fields we can only fill in after the operation
 

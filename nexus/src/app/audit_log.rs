@@ -106,7 +106,7 @@ impl super::Nexus {
             source_ip: rqctx.request.remote_addr().ip(),
             user_agent,
             actor,
-            access_method: opctx.authn.scheme_used().map(|s| s.to_string()),
+            auth_method: opctx.authn.scheme_used().map(|s| s.to_string()),
         };
         self.db_datastore.audit_log_entry_init(opctx, entry_params.into()).await
     }

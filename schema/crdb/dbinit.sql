@@ -5775,7 +5775,7 @@ CREATE TYPE IF NOT EXISTS omicron.public.audit_log_actor_kind AS ENUM (
 
 CREATE TYPE IF NOT EXISTS omicron.public.audit_log_result_kind AS ENUM (
     'success',
-    'error', 
+    'error',
     -- represents the case where we had to clean up a row and artificially
     -- complete it in order to get it into the log (because entries don't show
     -- up in the log until they're completed)
@@ -5801,7 +5801,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.audit_log (
     -- actor kind indicating builtin user, silo user, or unauthenticated
     actor_kind omicron.public.audit_log_actor_kind NOT NULL,
     -- The name of the authn scheme used
-    access_method STRING,
+    auth_method STRING,
 
     -- below are fields we can only fill in after the operation
 
@@ -5811,7 +5811,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.audit_log (
     -- only present on errors
     error_code STRING,
     error_message STRING,
-    
+
     -- result kind indicating success, error, or timeout
     result_kind omicron.public.audit_log_result_kind,
 
@@ -5878,7 +5878,7 @@ SELECT
     actor_id,
     actor_silo_id,
     actor_kind,
-    access_method,
+    auth_method,
     time_completed,
     http_status_code,
     error_code,

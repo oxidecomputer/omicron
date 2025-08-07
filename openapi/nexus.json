@@ -14563,13 +14563,13 @@
         "description": "Audit log entry",
         "type": "object",
         "properties": {
-          "access_method": {
-            "nullable": true,
-            "description": "Indicates whether request was made with an API token or session cookie. Optional because it will not be defined on unauthenticated requests like login attempts.",
-            "type": "string"
-          },
           "actor": {
             "$ref": "#/components/schemas/AuditLogEntryActor"
+          },
+          "auth_method": {
+            "nullable": true,
+            "description": "How the user authenticated the request. Possible values are \"session_cookie\" and \"access_token\". Optional because it will not be defined on unauthenticated requests like login attempts.",
+            "type": "string"
           },
           "id": {
             "description": "Unique identifier for the audit log entry",
