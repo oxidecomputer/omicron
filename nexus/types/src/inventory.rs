@@ -106,6 +106,13 @@ pub struct Collection {
     /// table.
     #[serde_as(as = "Vec<(_, _)>")]
     pub sps: BTreeMap<Arc<BaseboardId>, ServiceProcessor>,
+    /// all host phase 1 active slots, keyed by baseboard id
+    ///
+    /// In practice, these will be inserted into the
+    /// `inv_host_phase_1_active_slot` table.
+    #[serde_as(as = "Vec<(_, _)>")]
+    pub host_phase_1_active_slots:
+        BTreeMap<Arc<BaseboardId>, HostPhase1ActiveSlot>,
     /// all host phase 1 flash hashes, keyed first by the phase 1 slot, then the
     /// baseboard id of the sled where they were found
     ///

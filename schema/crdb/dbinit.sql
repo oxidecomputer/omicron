@@ -3517,6 +3517,25 @@ CREATE TYPE IF NOT EXISTS omicron.public.hw_m2_slot AS ENUM (
     'B'
 );
 
+-- host phase 1 active slots found
+CREATE TABLE IF NOT EXISTS omicron.public.inv_host_phase_1_active_slot (
+    -- where this observation came from
+    -- (foreign key into `inv_collection` table)
+    inv_collection_id UUID NOT NULL,
+    -- which system this SP reports it is part of
+    -- (foreign key into `hw_baseboard_id` table)
+    hw_baseboard_id UUID NOT NULL,
+    -- when this observation was made
+    time_collected TIMESTAMPTZ NOT NULL,
+    -- which MGS instance reported this data
+    source TEXT NOT NULL,
+
+    -- active phase 1 slot
+    slot omicron.public.hw_m2_slot NOT NULL,
+
+    PRIMARY KEY (inv_collection_id, hw_baseboard_id)
+);
+
 -- host phase 1 flash hashes found
 -- There are usually two rows here for each row in inv_service_processor, but
 -- not necessarily (either or both slots' hash collection may fail).
@@ -6350,7 +6369,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '174.0.0', NULL)
+    (TRUE, NOW(), NOW(), '175.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

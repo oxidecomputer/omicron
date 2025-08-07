@@ -181,6 +181,7 @@ impl CollectionBuilder {
             cabooses: self.cabooses,
             rot_pages: self.rot_pages,
             sps: self.sps,
+            host_phase_1_active_slots: self.host_phase_1_active_slots,
             host_phase_1_flash_hashes: self.host_phase_1_flash_hashes,
             rots: self.rots,
             cabooses_found: self.cabooses_found,

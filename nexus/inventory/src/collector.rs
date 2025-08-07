@@ -238,8 +238,7 @@ impl<'a> Collector<'a> {
                             }
                         }
                         Err(err) => {
-                            in_progress
-                                .found_error(InventoryError::from(err));
+                            in_progress.found_error(InventoryError::from(err));
                         }
                     }
                 }
