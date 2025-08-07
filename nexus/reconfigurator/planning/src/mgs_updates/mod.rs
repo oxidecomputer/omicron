@@ -4,6 +4,7 @@
 
 //! Facilities for making choices about MGS-managed updates
 
+mod host_phase_1;
 mod rot;
 mod rot_bootloader;
 mod sp;
@@ -230,6 +231,7 @@ fn mgs_update_status(
     update: &PendingMgsUpdate,
 ) -> Result<MgsUpdateStatus, MgsUpdateStatusError> {
     let baseboard_id = &update.baseboard_id;
+    let desired_artifact_hash = update.artifact_hash;
     let desired_version = &update.artifact_version;
 
     // Check the contents of the target of `update` against what we expect
@@ -274,13 +276,22 @@ fn mgs_update_status(
                 .caboose_for(CabooseWhich::SpSlot1, baseboard_id)
                 .map(|c| c.caboose.version.as_ref());
 
-            Ok(mgs_update_status_sp(
+            mgs_update_status_sp(
                 desired_version,
                 expected_active_version,
                 expected_inactive_version,
                 &active_caboose.caboose.version,
                 found_inactive_version,
-            ))
+            )
+        }
+        PendingMgsUpdateDetails::HostPhase1(details) => {
+            host_phase_1::update_status(
+                baseboard_id,
+                desired_artifact_hash,
+                inventory,
+                details,
+                log,
+            )?
         }
         PendingMgsUpdateDetails::Rot {
             expected_active_slot,
@@ -346,18 +357,15 @@ fn mgs_update_status(
                 found_inactive_version,
             ))
         }
-        PendingMgsUpdateDetails::HostPhase1(_) => {
-            return Err(MgsUpdateStatusError::NotYetImplemented);
-        }
     };
 
     // If we're able to reach a clear determination based on the status alone,
     // great.  Return that.
     if matches!(
         update_status,
-        Err(_) | Ok(MgsUpdateStatus::Done) | Ok(MgsUpdateStatus::Impossible)
+        MgsUpdateStatus::Done | MgsUpdateStatus::Impossible
     ) {
-        return update_status;
+        return Ok(update_status);
     }
 
     // If based on the status we're only able to determine that the update is
@@ -387,7 +395,7 @@ fn mgs_update_status(
         );
         Ok(MgsUpdateStatus::Impossible)
     } else {
-        update_status
+        Ok(update_status)
     }
 }
 
@@ -449,9 +457,8 @@ fn try_make_update(
     current_artifacts: &TufRepoDescription,
 ) -> Option<PendingMgsUpdate> {
     // We try MGS-driven update components in a hardcoded priority order until
-    // any of them returns `Some`. The order is described in RFD 565 section
-    // "Update Sequence". For now, we only plan SP, RoT and RoT bootloader
-    // updates. When implemented, host OS updates will be the last to try.
+    // any of them returns `Some`.  The order is described in RFD 565 section
+    // "Update Sequence".
     try_make_update_rot_bootloader(
         log,
         baseboard_id,
@@ -463,6 +470,14 @@ fn try_make_update(
     })
     .or_else(|| {
         try_make_update_sp(log, baseboard_id, inventory, current_artifacts)
+    })
+    .or_else(|| {
+        host_phase_1::try_make_update(
+            log,
+            baseboard_id,
+            inventory,
+            current_artifacts,
+        )
     })
 }
 
