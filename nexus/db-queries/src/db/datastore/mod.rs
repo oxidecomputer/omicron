@@ -298,7 +298,7 @@ impl DataStore {
                     }
                     Err(e) => {
                         let err = slog_error_chain::InlineErrorChain::new(&e);
-                        warn!(log, "Failed to ensure schema version"; "error" => &err);
+                        warn!(log, "Failed to ensure schema version"; &err);
                         return Err(BackoffError::transient(err.to_string()));
                     }
                 };
