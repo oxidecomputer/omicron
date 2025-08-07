@@ -6,7 +6,7 @@
 
 use crate::MgsClients;
 use crate::SpComponentUpdateError;
-use crate::SpComponentUpdateHelper;
+use crate::SpComponentUpdateHelperImpl;
 use crate::UpdateProgress;
 use crate::common_sp_update::FoundVersion;
 use crate::common_sp_update::PostUpdateError;
@@ -152,7 +152,7 @@ impl SpComponentUpdater for SpUpdater {
 }
 
 pub struct ReconfiguratorSpUpdater;
-impl SpComponentUpdateHelper for ReconfiguratorSpUpdater {
+impl SpComponentUpdateHelperImpl for ReconfiguratorSpUpdater {
     /// Checks if the component is already updated or ready for update
     fn precheck<'a>(
         &'a self,
@@ -189,7 +189,7 @@ impl SpComponentUpdateHelper for ReconfiguratorSpUpdater {
                         .sp_component_caboose_get(
                             update.sp_type,
                             update.slot_id,
-                            &SpComponent::SP_ITSELF.to_string(),
+                            SpComponent::SP_ITSELF.const_as_str(),
                             0,
                         )
                         .await
@@ -241,7 +241,7 @@ impl SpComponentUpdateHelper for ReconfiguratorSpUpdater {
                         .sp_component_caboose_get(
                             update.sp_type,
                             update.slot_id,
-                            &SpComponent::SP_ITSELF.to_string(),
+                            SpComponent::SP_ITSELF.const_as_str(),
                             1,
                         )
                         .await
@@ -282,7 +282,7 @@ impl SpComponentUpdateHelper for ReconfiguratorSpUpdater {
                         .sp_component_reset(
                             update.sp_type,
                             update.slot_id,
-                            &SpComponent::SP_ITSELF.to_string(),
+                            SpComponent::SP_ITSELF.const_as_str(),
                         )
                         .await?;
                     Ok(())

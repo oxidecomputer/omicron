@@ -6,6 +6,7 @@
 //! associated inventory collections and blueprints
 
 use anyhow::{Context, anyhow, bail, ensure};
+use chrono::DateTime;
 use chrono::Utc;
 use gateway_client::types::RotState;
 use gateway_client::types::SpComponentCaboose;
@@ -120,6 +121,7 @@ pub struct SystemDescription {
     tuf_repo: TufRepoPolicy,
     old_repo: TufRepoPolicy,
     chicken_switches: PlannerChickenSwitches,
+    ignore_impossible_mgs_updates_since: DateTime<Utc>,
 }
 
 impl SystemDescription {
@@ -203,6 +205,7 @@ impl SystemDescription {
             old_repo: TufRepoPolicy::initial(),
             chicken_switches:
                 PlannerChickenSwitches::default_for_system_description(),
+            ignore_impossible_mgs_updates_since: Utc::now(),
         }
     }
 
@@ -657,6 +660,14 @@ impl SystemDescription {
         self
     }
 
+    pub fn set_ignore_impossible_mgs_updates_since(
+        &mut self,
+        since: DateTime<Utc>,
+    ) -> &mut Self {
+        self.ignore_impossible_mgs_updates_since = since;
+        self
+    }
+
     pub fn target_release(&self) -> &TufRepoPolicy {
         &self.tuf_repo
     }
@@ -832,6 +843,9 @@ impl SystemDescription {
             self.internal_dns_version,
             self.external_dns_version,
             CockroachDbSettings::empty(),
+        );
+        builder.set_ignore_impossible_mgs_updates_since(
+            self.ignore_impossible_mgs_updates_since,
         );
 
         for sled in self.sleds.values() {

@@ -19,6 +19,7 @@ use omicron_common::disk::M2Slot;
 use sled_agent_types::zone_images::ResolverStatus;
 use sled_hardware::PooledDiskError;
 use slog::Logger;
+use slog::error;
 use slog::info;
 use slog::o;
 use slog::warn;
@@ -348,6 +349,7 @@ impl BootPartitionReconciler {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum HostPhase2PreparedContents<'a> {
     /// No mupdate override was found, so the desired host phase 2 contents were
     /// used.

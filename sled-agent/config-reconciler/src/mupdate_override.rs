@@ -19,6 +19,8 @@ use sled_agent_types::zone_images::RAMDISK_IMAGE_PATH;
 use sled_agent_types::zone_images::ResolverStatus;
 use sled_agent_types::zone_images::ZoneImageLocationError;
 use slog::error;
+use slog::info;
+use slog::warn;
 use slog_error_chain::InlineErrorChain;
 use tufaceous_artifact::ArtifactHash;
 
@@ -68,6 +70,32 @@ impl ResolverStatusExt for ResolverStatus {
     ) -> OmicronZoneFileSource {
         match image_source {
             OmicronZoneImageSource::InstallDataset => {
+                match &self.mupdate_override.boot_disk_override {
+                    Ok(Some(override_info)) => {
+                        // No change needed.
+                        info!(
+                            log,
+                            "mupdate override active, and image source \
+                             is already set to InstallDataset, so no action \
+                             needed";
+                            "mupdate_override_id" => %override_info.mupdate_uuid,
+                        );
+                    }
+                    Ok(None) => {
+                        // No mupdate override is active.
+                    }
+                    Err(error) => {
+                        warn!(
+                            log,
+                            "error obtaining mupdate override with image \
+                            source set to InstallDataset -- this has no \
+                            impact on the image source but is an error that \
+                            should be fixed";
+                            "error" => InlineErrorChain::new(error),
+                        );
+                    }
+                }
+
                 let file_name = zone_kind.artifact_in_install_dataset();
 
                 // There's always at least one image path (the RAM disk below).
@@ -102,22 +130,87 @@ impl ResolverStatusExt for ResolverStatus {
                 }
             }
             OmicronZoneImageSource::Artifact { hash } => {
-                // TODO: implement mupdate override here.
-                //
-                // Search both artifact datasets. This iterator starts with the
-                // dataset for the boot disk (if it exists), and then is followed
-                // by all other disks.
-                let search_paths =
-                    internal_disks.all_artifact_datasets().collect();
-                OmicronZoneFileSource {
-                    // TODO: with mupdate overrides, return InstallDataset here
-                    location: OmicronZoneImageLocation::Artifact {
-                        hash: Ok(*hash),
-                    },
-                    file_source: ZoneImageFileSource {
-                        file_name: hash.to_string(),
-                        search_paths,
-                    },
+                match &self.mupdate_override.boot_disk_override {
+                    Ok(Some(override_info)) => {
+                        // A mupdate override is currently active. Use the
+                        // install dataset hash as the location.
+                        let mut search_paths = Vec::new();
+                        let install_dataset_hash = install_dataset_hash(
+                            log,
+                            self,
+                            zone_kind,
+                            &internal_disks,
+                            |path| {
+                                search_paths.push(path);
+                            },
+                        );
+
+                        // Do *not* add the RAM disk to search_paths, because
+                        // the only situation where that happens is in a
+                        // particular development workflow (a4x2) which does not
+                        // support MUPdates.
+
+                        info!(
+                            log,
+                            "mupdate override active, \
+                             redirecting Artifact source to InstallDataset";
+                            "artifact_hash" => %hash,
+                            "mupdate_override_id" => %override_info.mupdate_uuid,
+                            "install_dataset_hash" => ?install_dataset_hash,
+                            "search_paths" => ?search_paths,
+                        );
+
+                        OmicronZoneFileSource {
+                            location:
+                                OmicronZoneImageLocation::InstallDataset {
+                                    hash: install_dataset_hash,
+                                },
+                            file_source: ZoneImageFileSource {
+                                file_name: zone_kind
+                                    .artifact_in_install_dataset()
+                                    .to_owned(),
+                                search_paths,
+                            },
+                        }
+                    }
+                    Ok(None) => {
+                        // Search both artifact datasets. This iterator starts
+                        // with the dataset for the boot disk (if it exists),
+                        // and then is followed by all other disks.
+                        let search_paths =
+                            internal_disks.all_artifact_datasets().collect();
+                        OmicronZoneFileSource {
+                            location: OmicronZoneImageLocation::Artifact {
+                                hash: Ok(*hash),
+                            },
+                            file_source: ZoneImageFileSource {
+                                file_name: hash.to_string(),
+                                search_paths,
+                            },
+                        }
+                    }
+                    Err(error) => {
+                        // An error occurred while obtaining the mupdate
+                        // override. Bubble this up along with an empty
+                        // search_paths (which will always fail).
+                        error!(
+                            log,
+                            "error obtaining mupdate override with \
+                             Artifact source -- returning empty search \
+                             paths which will always fail";
+                            "zone_kind" => zone_kind.report_str(),
+                            "error" => InlineErrorChain::new(error),
+                        );
+                        OmicronZoneFileSource {
+                            location: OmicronZoneImageLocation::Artifact {
+                                hash: Err(error.clone()),
+                            },
+                            file_source: ZoneImageFileSource {
+                                file_name: hash.to_string(),
+                                search_paths: Vec::new(),
+                            },
+                        }
+                    }
                 }
             }
         }
@@ -125,11 +218,71 @@ impl ResolverStatusExt for ResolverStatus {
 
     fn prepare_host_phase_2_contents<'a>(
         &self,
-        #[expect(unused)] log: &slog::Logger,
+        log: &slog::Logger,
         desired: &'a HostPhase2DesiredContents,
     ) -> HostPhase2PreparedContents<'a> {
-        // TODO: Implement mupdate override logic.
-        HostPhase2PreparedContents::NoMupdateOverride(desired)
+        match desired {
+            HostPhase2DesiredContents::CurrentContents => {
+                match &self.mupdate_override.boot_disk_override {
+                    Ok(Some(override_info)) => {
+                        // No change needed.
+                        info!(
+                            log,
+                            "mupdate override active, and host \
+                             phase 2 contents are already set to \
+                             CurrentContents, so no action needed";
+                            "mupdate_override_id" => %override_info.mupdate_uuid,
+                        );
+                        HostPhase2PreparedContents::WithMupdateOverride
+                    }
+                    Ok(None) => {
+                        // No mupdate override is active.
+                        HostPhase2PreparedContents::NoMupdateOverride(desired)
+                    }
+                    Err(error) => {
+                        warn!(
+                            log,
+                            "error obtaining mupdate override with desired host \
+                             phase 2 source set to CurrentContents -- \
+                             this has no impact on host phase 2 contents but is \
+                             an error that should be fixed";
+                            "error" => InlineErrorChain::new(error),
+                        );
+                        HostPhase2PreparedContents::WithMupdateOverride
+                    }
+                }
+            }
+            HostPhase2DesiredContents::Artifact { hash } => {
+                match &self.mupdate_override.boot_disk_override {
+                    Ok(Some(override_info)) => {
+                        // Redirect to CurrentContents.
+                        info!(
+                            log,
+                            "mupdate override active, redirecting host phase 2 \
+                             desired contents from Artifact to CurrentContents";
+                            "mupdate_override_id" => %override_info.mupdate_uuid,
+                            "artifact_hash" => %hash,
+                        );
+                        HostPhase2PreparedContents::WithMupdateOverride
+                    }
+                    Ok(None) => {
+                        // No mupdate override is active.
+                        HostPhase2PreparedContents::NoMupdateOverride(desired)
+                    }
+                    Err(error) => {
+                        error!(
+                            log,
+                            "error obtaining mupdate override with desired \
+                             host phase 2 source set to Artifact -- \
+                             returning CurrentContents as a precaution";
+                            "error" => InlineErrorChain::new(error),
+                            "original_desired_hash" => %hash,
+                        );
+                        HostPhase2PreparedContents::WithMupdateOverride
+                    }
+                }
+            }
+        }
     }
 }
 

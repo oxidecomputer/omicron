@@ -13,12 +13,12 @@ use illumos_utils::zpool::PathInPool;
 use illumos_utils::zpool::ZpoolOrRamdisk;
 use key_manager::StorageKeyRequester;
 use nexus_sled_agent_shared::inventory::BootPartitionContents as BootPartitionContentsInventory;
-use nexus_sled_agent_shared::inventory::ClearMupdateOverrideInventory;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventory;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryResult;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryStatus;
 use nexus_sled_agent_shared::inventory::OmicronSledConfig;
 use nexus_sled_agent_shared::inventory::OrphanedDataset;
+use nexus_sled_agent_shared::inventory::RemoveMupdateOverrideInventory;
 use omicron_common::disk::DatasetKind;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
@@ -214,7 +214,7 @@ struct LatestReconciliationResult {
     zones_inventory: BTreeMap<OmicronZoneUuid, ConfigReconcilerInventoryResult>,
     timesync_status: TimeSyncStatus,
     boot_partitions: BootPartitionContentsInventory,
-    clear_mupdate_override: Option<ClearMupdateOverrideInventory>,
+    remove_mupdate_override: Option<RemoveMupdateOverrideInventory>,
 }
 
 impl LatestReconciliationResult {
@@ -226,7 +226,7 @@ impl LatestReconciliationResult {
             orphaned_datasets: self.orphaned_datasets.clone(),
             zones: self.zones_inventory.clone(),
             boot_partitions: self.boot_partitions.clone(),
-            clear_mupdate_override: self.clear_mupdate_override.clone(),
+            remove_mupdate_override: self.remove_mupdate_override.clone(),
         }
     }
 
@@ -434,11 +434,11 @@ impl ReconcilerTask {
         // other parts of reconciliation), but the argument for this is somewhat
         // non-trivial. See
         // https://rfd.shared.oxide.computer/rfd/556#sa_reconciler_error_handling.
-        let clear_mupdate_override =
+        let remove_mupdate_override =
             if let Some(override_id) = sled_config.remove_mupdate_override {
                 Some(
                     sled_agent_facilities
-                        .clear_mupdate_override(override_id, &internal_disks),
+                        .remove_mupdate_override(override_id, &internal_disks),
                 )
             } else {
                 None
@@ -594,7 +594,7 @@ impl ReconcilerTask {
             zones_inventory: self.zones.to_inventory(),
             timesync_status,
             boot_partitions: boot_partitions.into_inventory(),
-            clear_mupdate_override: clear_mupdate_override
+            remove_mupdate_override: remove_mupdate_override
                 .map(|v| v.to_inventory()),
         };
         self.reconciler_result_tx.send_modify(|r| {
