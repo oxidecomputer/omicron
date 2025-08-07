@@ -25,6 +25,7 @@ oxide-tokio-rt.workspace = true
 qorb.workspace = true
 serde_json.workspace = true
 slog.workspace = true
+swrite.workspace = true
 tokio = { workspace = true, features = [ "full" ] }
 tufaceous-artifact.workspace = true
 omicron-workspace-hack.workspace = true

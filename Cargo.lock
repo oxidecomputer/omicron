@@ -4839,7 +4839,7 @@ dependencies = [
 [[package]]
 name = "illumos-sys-hdrs"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=2d095de2258aa0653d669b72c741f26e608c81a6#2d095de2258aa0653d669b72c741f26e608c81a6"
+source = "git+https://github.com/oxidecomputer/opte?rev=6a5d3f336685a2aeb291962ae7f583b9355f3022#6a5d3f336685a2aeb291962ae7f583b9355f3022"
 dependencies = [
  "bitflags 2.9.1",
 ]
@@ -5442,7 +5442,7 @@ dependencies = [
 [[package]]
 name = "kstat-macro"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=2d095de2258aa0653d669b72c741f26e608c81a6#2d095de2258aa0653d669b72c741f26e608c81a6"
+source = "git+https://github.com/oxidecomputer/opte?rev=6a5d3f336685a2aeb291962ae7f583b9355f3022#6a5d3f336685a2aeb291962ae7f583b9355f3022"
 dependencies = [
  "quote",
  "syn 2.0.104",
@@ -6487,7 +6487,9 @@ name = "nexus-db-schema"
 version = "0.1.0"
 dependencies = [
  "diesel",
+ "omicron-rpaths",
  "omicron-workspace-hack",
+ "pq-sys",
 ]
 
 [[package]]
@@ -6815,6 +6817,7 @@ dependencies = [
  "sp-sim",
  "static_assertions",
  "strum 0.27.2",
+ "swrite",
  "test-strategy",
  "thiserror 2.0.12",
  "tufaceous-artifact",
@@ -6952,8 +6955,10 @@ dependencies = [
  "nexus-sled-agent-shared",
  "nexus-types",
  "omicron-common",
+ "omicron-rpaths",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
+ "pq-sys",
  "slog",
  "uuid",
 ]
@@ -8748,7 +8753,7 @@ dependencies = [
 [[package]]
 name = "opte"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=2d095de2258aa0653d669b72c741f26e608c81a6#2d095de2258aa0653d669b72c741f26e608c81a6"
+source = "git+https://github.com/oxidecomputer/opte?rev=6a5d3f336685a2aeb291962ae7f583b9355f3022#6a5d3f336685a2aeb291962ae7f583b9355f3022"
 dependencies = [
  "bitflags 2.9.1",
  "dyn-clone",
@@ -8757,6 +8762,7 @@ dependencies = [
  "kstat-macro",
  "opte-api",
  "postcard",
+ "ref-cast",
  "serde",
  "tabwriter",
  "version_check",
@@ -8766,7 +8772,7 @@ dependencies = [
 [[package]]
 name = "opte-api"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=2d095de2258aa0653d669b72c741f26e608c81a6#2d095de2258aa0653d669b72c741f26e608c81a6"
+source = "git+https://github.com/oxidecomputer/opte?rev=6a5d3f336685a2aeb291962ae7f583b9355f3022#6a5d3f336685a2aeb291962ae7f583b9355f3022"
 dependencies = [
  "illumos-sys-hdrs",
  "ingot",
@@ -8779,7 +8785,7 @@ dependencies = [
 [[package]]
 name = "opte-ioctl"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=2d095de2258aa0653d669b72c741f26e608c81a6#2d095de2258aa0653d669b72c741f26e608c81a6"
+source = "git+https://github.com/oxidecomputer/opte?rev=6a5d3f336685a2aeb291962ae7f583b9355f3022#6a5d3f336685a2aeb291962ae7f583b9355f3022"
 dependencies = [
  "libc",
  "libnet",
@@ -8874,7 +8880,7 @@ dependencies = [
 [[package]]
 name = "oxide-vpc"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=2d095de2258aa0653d669b72c741f26e608c81a6#2d095de2258aa0653d669b72c741f26e608c81a6"
+source = "git+https://github.com/oxidecomputer/opte?rev=6a5d3f336685a2aeb291962ae7f583b9355f3022#6a5d3f336685a2aeb291962ae7f583b9355f3022"
 dependencies = [
  "cfg-if",
  "illumos-sys-hdrs",
@@ -10871,6 +10877,7 @@ dependencies = [
  "qorb",
  "serde_json",
  "slog",
+ "swrite",
  "tokio",
  "tufaceous-artifact",
 ]
@@ -13718,6 +13725,8 @@ dependencies = [
  "bytes",
  "futures-core",
  "futures-sink",
+ "futures-util",
+ "hashbrown 0.15.4",
  "pin-project-lite",
  "slab",
  "tokio",
@@ -14132,7 +14141,7 @@ dependencies = [
 [[package]]
 name = "tufaceous"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#c269f5704d39eb4234e67e18be10d424ef23ac77"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#570f7cbd227a6522afdf6cc0c2bfafb08f2efdbd"
 dependencies = [
  "anyhow",
  "camino",
@@ -14153,7 +14162,7 @@ dependencies = [
 [[package]]
 name = "tufaceous-artifact"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#c269f5704d39eb4234e67e18be10d424ef23ac77"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#570f7cbd227a6522afdf6cc0c2bfafb08f2efdbd"
 dependencies = [
  "daft",
  "hex",
@@ -14170,7 +14179,7 @@ dependencies = [
 [[package]]
 name = "tufaceous-brand-metadata"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#c269f5704d39eb4234e67e18be10d424ef23ac77"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#570f7cbd227a6522afdf6cc0c2bfafb08f2efdbd"
 dependencies = [
  "semver 1.0.26",
  "serde",
@@ -14182,7 +14191,7 @@ dependencies = [
 [[package]]
 name = "tufaceous-lib"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#c269f5704d39eb4234e67e18be10d424ef23ac77"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#570f7cbd227a6522afdf6cc0c2bfafb08f2efdbd"
 dependencies = [
  "anyhow",
  "async-trait",

@@ -73,7 +73,7 @@ use nexus_db_model::{
 };
 use nexus_db_model::{HwPowerState, InvZoneManifestNonBoot};
 use nexus_db_model::{HwRotSlot, InvMupdateOverrideNonBoot};
-use nexus_db_model::{InvCaboose, InvClearMupdateOverride};
+use nexus_db_model::{InvCaboose, InvRemoveMupdateOverride};
 use nexus_db_schema::enums::HwM2SlotEnum;
 use nexus_db_schema::enums::HwRotSlotEnum;
 use nexus_db_schema::enums::RotImageErrorEnum;
@@ -3789,8 +3789,8 @@ impl DataStore {
                         BootPartitionContents { boot_disk, slot_a, slot_b }
                     };
 
-                    let clear_mupdate_override = reconciler
-                        .clear_mupdate_override
+                    let remove_mupdate_override = reconciler
+                        .remove_mupdate_override
                         .into_inventory()
                         .map_err(|err| {
                             Error::internal_error(&format!("{err:#}"))
@@ -3812,7 +3812,7 @@ impl DataStore {
                             .remove(&sled_id)
                             .unwrap_or_default(),
                         boot_partitions,
-                        clear_mupdate_override,
+                        remove_mupdate_override,
                     })
                 })
                 .transpose()?;
@@ -4036,8 +4036,8 @@ impl ConfigReconcilerRows {
                     )?
                 };
             last_reconciliation_config_id = Some(last_reconciled_config);
-            let clear_mupdate_override = InvClearMupdateOverride::new(
-                last_reconciliation.clear_mupdate_override.as_ref(),
+            let remove_mupdate_override = InvRemoveMupdateOverride::new(
+                last_reconciliation.remove_mupdate_override.as_ref(),
             );
 
             self.config_reconcilers.push(InvSledConfigReconciler::new(
@@ -4057,7 +4057,7 @@ impl ConfigReconcilerRows {
                     .as_ref()
                     .err()
                     .cloned(),
-                clear_mupdate_override,
+                remove_mupdate_override,
             ));
 
             // Boot partition _errors_ are kept in `InvSledConfigReconciler`
@@ -4310,8 +4310,8 @@ mod test {
     use nexus_sled_agent_shared::inventory::BootPartitionDetails;
     use nexus_sled_agent_shared::inventory::OrphanedDataset;
     use nexus_sled_agent_shared::inventory::{
-        BootImageHeader, ClearMupdateOverrideBootSuccessInventory,
-        ClearMupdateOverrideInventory,
+        BootImageHeader, RemoveMupdateOverrideBootSuccessInventory,
+        RemoveMupdateOverrideInventory,
     };
     use nexus_sled_agent_shared::inventory::{
         ConfigReconcilerInventory, ConfigReconcilerInventoryResult,
@@ -5174,10 +5174,10 @@ mod test {
                             artifact_size: 456789,
                         }),
                     },
-                    clear_mupdate_override: Some(
-                        ClearMupdateOverrideInventory {
+                    remove_mupdate_override: Some(
+                        RemoveMupdateOverrideInventory {
                             boot_disk_result: Ok(
-                                ClearMupdateOverrideBootSuccessInventory::Cleared,
+                                RemoveMupdateOverrideBootSuccessInventory::Removed,
                             ),
                             non_boot_message: "simulated non-boot message"
                                 .to_owned(),

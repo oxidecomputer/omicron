@@ -29,6 +29,7 @@ use diesel::prelude::*;
 use diesel::query_builder::{QueryFragment, QueryId};
 use diesel::query_dsl::methods::LoadQuery;
 use diesel::{ExpressionMethods, QueryDsl};
+use iddqd::IdOrdMap;
 use nexus_db_errors::{ErrorHandler, public_error_from_diesel};
 use nexus_db_lookup::{DataStoreConnection, DbConnection};
 use omicron_common::api::external::Error;
@@ -121,7 +122,7 @@ mod zpool;
 pub use address_lot::AddressLotCreateResult;
 pub use dns::DataStoreDnsTest;
 pub use dns::DnsVersionUpdateBuilder;
-use iddqd::IdOrdMap;
+pub use ereport::EreportFilters;
 pub use instance::{
     InstanceAndActiveVmm, InstanceGestalt, InstanceStateComputer,
 };
