@@ -213,17 +213,29 @@ async fn update_watched() {
     // Start one, but pause it while waiting for the update to upload.
     in_progress1.run_until_status(UpdateAttemptStatus::UpdateWaiting).await;
 
-    // Run the other.
+    // Run the other; it should complete successfully.
     let finished2 = in_progress2.finish().await;
+    finished2.expect_host_phase_1_success(UpdateCompletedHow::CompletedUpdate);
 
     // Now finish the first update.
     let finished1 = in_progress1.finish().await;
 
-    // Both should succeed, but with different codes.
-    finished1.expect_host_phase_1_success(
-        UpdateCompletedHow::WaitedForConcurrentUpdate,
-    );
-    finished2.expect_host_phase_1_success(UpdateCompletedHow::CompletedUpdate);
+    // Because we're using "reset the SP" as our final host phase 1 update step,
+    // there are two likely ways it can complete in production. It's in its
+    // "poll for upload complete" loop. It might see that update2's upload
+    // completes (if it catches it between the upload completing and the other
+    // update resetting the SP) or it might see a "lost update" error (if its
+    // next-to-last poll sees the upload still in progress and its last poll
+    // sees no upload in progress at all, because of the SP reset).
+    //
+    // The corresponding SP update step pauses the update futures in a way that
+    // it sees the first variant, which results in a success with
+    // `UpdateCompletedHow::WaitedForConcurrentUpdate`. The way we've structured
+    // this test causes us to see the second: this update should fail with
+    // `ApplyUpdateError::SpUpdateLost`.
+    finished1.expect_failure(&|error, _sp1, _sp2| {
+        assert_matches!(error, ApplyUpdateError::SpUpdateLost);
+    });
 
     artifacts.teardown().await;
     phase2ctx.teardown().await;
@@ -317,35 +329,16 @@ async fn update_takeover() {
     // to A0; i.e., perform a host reset).
     assert_eq!(target_sp_sim.power_state_changes(), 2);
 
-    // Now resume the second update. It should recognize that a takeover
-    // happened and that an update is completed.
+    // Now resume the second update. Because we're using "SP reset" to reset the
+    // host, this will find that the update has been lost.
     let finished2 = in_progress2.finish().await;
-    finished2.expect_host_phase_1_success(UpdateCompletedHow::CompletedUpdate);
+    finished2.expect_failure(&|error, _sp1, _sp2| {
+        assert_matches!(error, ApplyUpdateError::SpUpdateLost);
+    });
 
     // Finishing this second update should _not_ perform another reset of the
-    // host; it should have realized that the update was already complete.
-    //
-    // However, it currently does. We've gone through this sequence:
-    //
-    // 1. update1 uploads the artifact with its update ID; the SP update status
-    //    is `Completed(update_id_1)`
-    // 2. update2 uploads the artifact with its update ID; the SP update status
-    //    is `Completed(update_id_2)`
-    // 3. update1 waits for update 2 to make progress, then performs a takeover,
-    //    then finishes the update (i.e., reboots the host)
-    // 4. update2 resumes polling the update status; it sees
-    //    `Completed(update_id_2)`, so believe it's still in charge, and so
-    //    performs another host reset.
-    //
-    // Fixing this probably requires some support from the SP: we should tie the
-    // update finialization steps (changing the active slot and power cycling
-    // the host) to the update ID used to deliver the artifact. If we do that,
-    // ideally we could uncomment this assertion.
-    //
-    // The toplevel issue for related SP work is
-    // https://github.com/oxidecomputer/hubris/issues/2178.
-    //
-    // assert_eq!(target_sp_sim.power_state_changes(), 2);
+    // host.
+    assert_eq!(target_sp_sim.power_state_changes(), 2);
 
     artifacts.teardown().await;
     phase2ctx.teardown().await;

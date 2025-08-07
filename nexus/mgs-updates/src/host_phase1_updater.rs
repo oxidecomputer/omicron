@@ -126,7 +126,6 @@ use futures::FutureExt as _;
 use futures::future::BoxFuture;
 use gateway_client::HostPhase1HashError;
 use gateway_client::SpComponent;
-use gateway_client::types::PowerState;
 use gateway_client::types::SpComponentFirmwareSlot;
 use gateway_client::types::SpType;
 use nexus_sled_agent_shared::inventory::BootPartitionContents;
@@ -150,14 +149,6 @@ use uuid::Uuid;
 // take a few seconds, so set something very generous here that would indicate
 // something very wrong.
 const PHASE_1_HASHING_TIMEOUT: Duration = Duration::from_secs(60);
-
-// To reset the host, we have to tell the SP to go to PowerState::A2 then back
-// to PowerState::A0. We sleep briefly in between those transitions. (It's not
-// clear to me whether we _need_ to do this; presumably the SP should enforce
-// that if so? But this is copied from how `pilot sp cycle` is implemented.) We
-// could also consider implementing a more idempotent "reset" operation on the
-// SP side.
-const POWER_CYCLE_SLEEP: Duration = Duration::from_secs(1);
 
 type GatewayClientError = gateway_client::Error<gateway_client::types::Error>;
 
@@ -656,30 +647,25 @@ impl ReconfiguratorHostPhase1Updater {
             })
             .await?;
 
-        debug!(log, "attempting to put sled in A2");
+        // We know want to reboot the host. Ideally we would send a "reset the
+        // host" command here, but that's not currently provided by the SP
+        // (included in https://github.com/oxidecomputer/hubris/issues/2178). We
+        // could do what `pilot sp cycle` does and send the sled to A2, sleep
+        // briefly, then send the sled to A0, but this causes problems if we're
+        // trying to reset the sled on which we're currently running! We'll send
+        // our own sled to A2, but then we won't be around to send us back to
+        // A0, and there's currently no other mechanism where some other Nexus
+        // could recover this and power our sled back on. As a stopgap, we'll
+        // ask the _SP_ to reset: this is a single request and has the side
+        // effect of also rebooting the host.
+        debug!(log, "resetting sled (via SP reset)");
         mgs_clients
             .try_all_serially(log, |mgs_client| async move {
                 mgs_client
-                    .sp_power_state_set(
+                    .sp_component_reset(
                         update.sp_type,
                         update.slot_id,
-                        PowerState::A2,
-                    )
-                    .await
-            })
-            .await?;
-
-        debug!(log, "sleeping briefly before powering sled back on");
-        tokio::time::sleep(POWER_CYCLE_SLEEP).await;
-
-        debug!(log, "attempting to put sled in A2");
-        mgs_clients
-            .try_all_serially(log, |mgs_client| async move {
-                mgs_client
-                    .sp_power_state_set(
-                        update.sp_type,
-                        update.slot_id,
-                        PowerState::A0,
+                        SpComponent::SP_ITSELF.const_as_str(),
                     )
                     .await
             })
