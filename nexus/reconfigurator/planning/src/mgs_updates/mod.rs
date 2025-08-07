@@ -750,8 +750,6 @@ fn try_make_update_rot(
             }
 
             let Some(artifact_sign) = &a.sign else {
-                // TODO-K: remove log
-                warn!(log, "MISSING ARTIFACT SIGN. RKTH: {rkth}");
                 return false;
             };
             let Ok(artifact_sign) = String::from_utf8(artifact_sign.to_vec())
@@ -759,13 +757,12 @@ fn try_make_update_rot(
                 return false;
             };
             if artifact_sign != *rkth {
-                // TODO-K: remove log
-                warn!(log, "ARTIFACT_SIGN: {artifact_sign}");
-                warn!(log, "RKTH: {rkth}");
                 return false;
             }
 
-            match active_slot {
+            // We'll be updating the inactive slot, so we choose the artifact
+            // based on the inactive slot's kind.
+            match active_slot.toggled() {
                 RotSlot::A => {
                     let slot_a_artifacts = [
                         ArtifactKind::GIMLET_ROT_IMAGE_A,
@@ -774,6 +771,13 @@ fn try_make_update_rot(
                     ];
 
                     if slot_a_artifacts.contains(&a.id.kind) {
+                        warn!(
+                            log,
+                            "CHOSE: name {} sign {} kind {}",
+                            a.id.name,
+                            artifact_sign,
+                            a.id.kind
+                        );
                         return true;
                     }
                 }
@@ -785,6 +789,13 @@ fn try_make_update_rot(
                     ];
 
                     if slot_b_artifacts.contains(&a.id.kind) {
+                        warn!(
+                            log,
+                            "CHOSE: name {} sign {} kind {}",
+                            a.id.name,
+                            artifact_sign,
+                            a.id.kind
+                        );
                         return true;
                     }
                 }
@@ -922,8 +933,18 @@ mod test {
     const ARTIFACT_HASH_SP_PSC_B: ArtifactHash = ArtifactHash([9; 32]);
     /// Hash of fake artifact for fake psc-c SP
     const ARTIFACT_HASH_SP_PSC_C: ArtifactHash = ArtifactHash([10; 32]);
-    /// Hash of fake artifact for fake oxide-rot-1 RoT
-    const ARTIFACT_HASH_OXIDE_ROT_1: ArtifactHash = ArtifactHash([13; 32]);
+    /// Hash of fake artifact for fake gimlet RoT slot A
+    const ARTIFACT_HASH_ROT_GIMLET_A: ArtifactHash = ArtifactHash([13; 32]);
+    /// Hash of fake artifact for fake gimlet RoT slot B
+    const ARTIFACT_HASH_ROT_GIMLET_B: ArtifactHash = ArtifactHash([14; 32]);
+    /// Hash of fake artifact for fake psc RoT slot A
+    const ARTIFACT_HASH_ROT_PSC_A: ArtifactHash = ArtifactHash([17; 32]);
+    /// Hash of fake artifact for fake psc RoT slot B
+    const ARTIFACT_HASH_ROT_PSC_B: ArtifactHash = ArtifactHash([18; 32]);
+    /// Hash of fake artifact for fake switch RoT slot A
+    const ARTIFACT_HASH_ROT_SWITCH_A: ArtifactHash = ArtifactHash([21; 32]);
+    /// Hash of fake artifact for fake switch RoT slot B
+    const ARTIFACT_HASH_ROT_SWITCH_B: ArtifactHash = ArtifactHash([22; 32]);
 
     // unused artifact hashes
 
@@ -956,10 +977,19 @@ mod test {
             "sidecar-c" => ARTIFACT_HASH_SP_SIDECAR_C,
             "psc-b" => ARTIFACT_HASH_SP_PSC_B,
             "psc-c" => ARTIFACT_HASH_SP_PSC_C,
-            "oxide-rot-1" => ARTIFACT_HASH_OXIDE_ROT_1,
-            // TODO-K: figure out how to have artifacts for different RoTs and
-            // bootloaders which have the same board name.
             _ => panic!("test bug: no artifact for board {board:?}"),
+        }
+    }
+
+    fn test_artifact_for_artifact_kind(kind: ArtifactKind) -> ArtifactHash {
+        match kind.as_str() {
+            "gimlet_rot_image_a" => ARTIFACT_HASH_ROT_GIMLET_A,
+            "gimlet_rot_image_b" => ARTIFACT_HASH_ROT_GIMLET_B,
+            "psc_rot_image_a" => ARTIFACT_HASH_ROT_PSC_A,
+            "psc_rot_image_b" => ARTIFACT_HASH_ROT_PSC_B,
+            "switch_rot_image_a" => ARTIFACT_HASH_ROT_SWITCH_A,
+            "switch_rot_image_b" => ARTIFACT_HASH_ROT_SWITCH_B,
+            _ => panic!("test bug: no artifact for artifact kind {kind:?}"),
         }
     }
 
@@ -979,17 +1009,43 @@ mod test {
     /// - switch 1: sidecar-c, oxide-rot-1
     /// - psc 0: psc-b, oxide-rot-1
     /// - psc 1: psc-c, oxide-rot-1
-    fn test_collection_config()
-    -> BTreeMap<(SpType, u16), (&'static str, &'static str, &'static str)> {
+    fn test_collection_config() -> BTreeMap<
+        (SpType, u16),
+        (&'static str, &'static str, &'static str, &'static str),
+    > {
         BTreeMap::from([
-            ((SpType::Sled, 0), ("sled_0", "gimlet-d", "oxide-rot-1")),
-            ((SpType::Sled, 1), ("sled_1", "gimlet-e", "oxide-rot-1")),
-            ((SpType::Sled, 2), ("sled_2", "gimlet-e", "oxide-rot-1")),
-            ((SpType::Sled, 3), ("sled_3", "gimlet-e", "oxide-rot-1")),
-            ((SpType::Switch, 0), ("switch_0", "sidecar-b", "oxide-rot-1")),
-            ((SpType::Switch, 1), ("switch_1", "sidecar-c", "oxide-rot-1")),
-            ((SpType::Power, 0), ("power_0", "psc-b", "oxide-rot-1")),
-            ((SpType::Power, 1), ("power_1", "psc-c", "oxide-rot-1")),
+            (
+                (SpType::Sled, 0),
+                ("sled_0", "gimlet-d", "oxide-rot-1", ROT_SIGN_GIMLET),
+            ),
+            (
+                (SpType::Sled, 1),
+                ("sled_1", "gimlet-e", "oxide-rot-1", ROT_SIGN_GIMLET),
+            ),
+            (
+                (SpType::Sled, 2),
+                ("sled_2", "gimlet-e", "oxide-rot-1", ROT_SIGN_GIMLET),
+            ),
+            (
+                (SpType::Sled, 3),
+                ("sled_3", "gimlet-e", "oxide-rot-1", ROT_SIGN_GIMLET),
+            ),
+            (
+                (SpType::Switch, 0),
+                ("switch_0", "sidecar-b", "oxide-rot-1", ROT_SIGN_SWITCH),
+            ),
+            (
+                (SpType::Switch, 1),
+                ("switch_1", "sidecar-c", "oxide-rot-1", ROT_SIGN_SWITCH),
+            ),
+            (
+                (SpType::Power, 0),
+                ("power_0", "psc-b", "oxide-rot-1", ROT_SIGN_PSC),
+            ),
+            (
+                (SpType::Power, 1),
+                ("power_1", "psc-c", "oxide-rot-1", ROT_SIGN_PSC),
+            ),
         ])
     }
 
@@ -1001,7 +1057,10 @@ mod test {
         test_collection_config()
             .into_iter()
             .flat_map(
-                |((sp_type, slot_id), (serial, sp_board_name, rot_board_name))| {
+                |(
+                    (sp_type, slot_id),
+                    (serial, sp_board_name, rot_board_name, ..),
+                )| {
                     [
                         (
                             (sp_type, slot_id, MgsUpdateComponent::Sp),
@@ -1083,37 +1142,45 @@ mod test {
             make_artifact(
                 "oxide-rot-1",
                 ArtifactKind::GIMLET_ROT_IMAGE_A,
-                test_artifact_for_board("oxide-rot-1"),
+                test_artifact_for_artifact_kind(
+                    ArtifactKind::GIMLET_ROT_IMAGE_A,
+                ),
                 Some(ROT_SIGN_GIMLET.into()),
             ),
             make_artifact(
                 "oxide-rot-1",
                 ArtifactKind::GIMLET_ROT_IMAGE_B,
-                test_artifact_for_board("oxide-rot-1"),
+                test_artifact_for_artifact_kind(
+                    ArtifactKind::GIMLET_ROT_IMAGE_B,
+                ),
                 Some(ROT_SIGN_GIMLET.into()),
             ),
             make_artifact(
                 "oxide-rot-1",
                 ArtifactKind::PSC_ROT_IMAGE_A,
-                test_artifact_for_board("oxide-rot-1"),
+                test_artifact_for_artifact_kind(ArtifactKind::PSC_ROT_IMAGE_A),
                 Some(ROT_SIGN_PSC.into()),
             ),
             make_artifact(
                 "oxide-rot-1",
                 ArtifactKind::PSC_ROT_IMAGE_B,
-                test_artifact_for_board("oxide-rot-1"),
+                test_artifact_for_artifact_kind(ArtifactKind::PSC_ROT_IMAGE_B),
                 Some(ROT_SIGN_PSC.into()),
             ),
             make_artifact(
                 "oxide-rot-1",
                 ArtifactKind::SWITCH_ROT_IMAGE_A,
-                test_artifact_for_board("oxide-rot-1"),
+                test_artifact_for_artifact_kind(
+                    ArtifactKind::SWITCH_ROT_IMAGE_A,
+                ),
                 Some(ROT_SIGN_SWITCH.into()),
             ),
             make_artifact(
                 "oxide-rot-1",
                 ArtifactKind::SWITCH_ROT_IMAGE_B,
-                test_artifact_for_board("oxide-rot-1"),
+                test_artifact_for_artifact_kind(
+                    ArtifactKind::SWITCH_ROT_IMAGE_B,
+                ),
                 Some(ROT_SIGN_SWITCH.into()),
             ),
         ];
@@ -1195,7 +1262,7 @@ mod test {
         let test_config = test_collection_config();
         for (
             (sp_type, sp_slot),
-            (serial, caboose_sp_board, caboose_rot_board),
+            (serial, caboose_sp_board, caboose_rot_board, rkth),
         ) in test_config
         {
             let sp_state = SpState {
@@ -1240,7 +1307,7 @@ mod test {
                         epoch: None,
                         git_commit: String::from("unused"),
                         name: caboose_rot_board.to_string(),
-                        sign: Some(ROT_SIGN_GIMLET.to_string()),
+                        sign: Some(rkth.to_string()),
                         version: active_rot_version.as_str().to_string(),
                     },
                 )
@@ -1279,7 +1346,7 @@ mod test {
                             epoch: None,
                             git_commit: String::from("unused"),
                             name: caboose_rot_board.to_string(),
-                            sign: Some(ROT_SIGN_GIMLET.to_string()),
+                            sign: Some(rkth.to_string()),
                             version: inactive_rot_version.as_str().to_string(),
                         },
                     )
@@ -1342,7 +1409,7 @@ mod test {
         assert_eq!(first_update.baseboard_id.serial_number, "sled_0");
         assert_eq!(first_update.sp_type, SpType::Sled);
         assert_eq!(first_update.slot_id, 0);
-        assert_eq!(first_update.artifact_hash, ARTIFACT_HASH_OXIDE_ROT_1);
+        assert_eq!(first_update.artifact_hash, ARTIFACT_HASH_ROT_GIMLET_B);
         assert_eq!(first_update.artifact_version, ARTIFACT_VERSION_2);
 
         // Test that when an update is already pending, and nothing changes
@@ -1415,7 +1482,7 @@ mod test {
         assert_eq!(next_update.baseboard_id.serial_number, "switch_1");
         assert_eq!(next_update.sp_type, SpType::Switch);
         assert_eq!(next_update.slot_id, 1);
-        assert_eq!(next_update.artifact_hash, ARTIFACT_HASH_OXIDE_ROT_1);
+        assert_eq!(next_update.artifact_hash, ARTIFACT_HASH_ROT_SWITCH_B);
         assert_eq!(next_update.artifact_version, ARTIFACT_VERSION_2);
 
         // Finally, test that when all RoTs and SPs are in spec, then no updates
