@@ -129,6 +129,8 @@ use futures::future::BoxFuture;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::DataStore;
+use nexus_types::quiesce::SagaQuiesceHandle;
+use nexus_types::quiesce::SagaRecoveryInProgress;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::InternalContext;
 use std::collections::BTreeMap;
@@ -144,6 +146,7 @@ pub struct SagaRecoveryHelpers<N: MakeSagaContext> {
     pub sec_client: Arc<steno::SecClient>,
     pub registry: Arc<steno::ActionRegistry<N::SagaType>>,
     pub sagas_started_rx: mpsc::UnboundedReceiver<SagaId>,
+    pub quiesce: SagaQuiesceHandle,
 }
 
 /// Background task that recovers sagas assigned to this Nexus
@@ -161,6 +164,8 @@ pub struct SagaRecovery<N: MakeSagaContext> {
     sec_id: db::SecId,
     /// OpContext used for saga recovery
     saga_recovery_opctx: OpContext,
+    /// Quiesce state
+    quiesce: SagaQuiesceHandle,
 
     // state required to resume a saga
     /// handle to Steno, which actually resumes the saga
@@ -204,6 +209,7 @@ impl<N: MakeSagaContext> SagaRecovery<N> {
         SagaRecovery {
             datastore,
             sec_id,
+            quiesce: helpers.quiesce,
             saga_recovery_opctx: helpers.recovery_opctx,
             maker: helpers.maker,
             sec_client: helpers.sec_client,
@@ -227,6 +233,16 @@ impl<N: MakeSagaContext> SagaRecovery<N> {
     )> {
         let log = &opctx.log;
         let datastore = &self.datastore;
+
+        // Record when saga recovery starts.  This must happen before we list
+        // sagas in order to track which sagas we're guaranteed to see (or not)
+        // from a concurrent re-assignment of sagas.  See `SagaQuiesceHandle`
+        // for details.
+        //
+        // Note: it's critical that we call `saga_recovery_done()` before we
+        // return.  (We do not rely on RAII for this because we need to provide
+        // an explicit signal about whether the operation succeeded.)
+        let recovery = self.quiesce.recovery_start();
 
         // Fetch the list of not-yet-finished sagas that are assigned to
         // this Nexus instance.
@@ -267,17 +283,19 @@ impl<N: MakeSagaContext> SagaRecovery<N> {
                 );
                 self.recovery_check_done(log, &plan).await;
                 let (execution, future) =
-                    self.recovery_execute(log, &plan).await;
+                    self.recovery_execute(log, &plan, &recovery).await;
                 self.rest_state.update_after_pass(&plan, &execution);
                 let last_pass_success =
                     nexus_saga_recovery::LastPassSuccess::new(
                         &plan, &execution,
                     );
                 self.status.update_after_pass(&plan, execution, nstarted);
+                recovery.recovery_done(true);
                 Some((future, last_pass_success))
             }
             Err(error) => {
                 self.status.update_after_failure(&error, nstarted);
+                recovery.recovery_done(false);
                 None
             }
         }
@@ -326,6 +344,7 @@ impl<N: MakeSagaContext> SagaRecovery<N> {
         &self,
         bgtask_log: &slog::Logger,
         plan: &nexus_saga_recovery::Plan,
+        recovery: &SagaRecoveryInProgress,
     ) -> (nexus_saga_recovery::Execution, BoxFuture<'static, Result<(), Error>>)
     {
         let mut builder = nexus_saga_recovery::ExecutionBuilder::new();
@@ -339,7 +358,10 @@ impl<N: MakeSagaContext> SagaRecovery<N> {
         for (saga_id, saga) in plan.sagas_needing_recovery() {
             let saga_log = self.maker.make_saga_log(*saga_id, &saga.name);
             builder.saga_recovery_start(*saga_id, saga_log.clone());
-            match self.recover_one_saga(bgtask_log, &saga_log, saga).await {
+            match self
+                .recover_one_saga(bgtask_log, &saga_log, saga, recovery)
+                .await
+            {
                 Ok(completion_future) => {
                     builder.saga_recovery_success(*saga_id);
                     completion_futures.push(completion_future);
@@ -366,6 +388,7 @@ impl<N: MakeSagaContext> SagaRecovery<N> {
         bgtask_logger: &slog::Logger,
         saga_logger: &slog::Logger,
         saga: &nexus_db_model::Saga,
+        recovery: &SagaRecoveryInProgress,
     ) -> Result<BoxFuture<'static, Result<(), Error>>, Error> {
         let datastore = &self.datastore;
         let saga_id: SagaId = saga.id.into();
@@ -398,6 +421,9 @@ impl<N: MakeSagaContext> SagaRecovery<N> {
                     error
                 ))
             })?;
+        let saga_completion = recovery
+            .record_saga_recovery(saga_id, &steno::SagaName::new(&saga.name))
+            .saga_completion_future(saga_completion);
 
         trace!(&bgtask_logger, "recovering saga: starting the saga";
             "saga_id" => %saga_id
@@ -660,7 +686,7 @@ mod test {
             create_storage_sec_and_context(&log, db_datastore.clone(), sec_id);
         let sec_log = log.new(o!("component" => "SEC"));
         let opctx = OpContext::for_tests(
-            log,
+            log.clone(),
             Arc::clone(&db_datastore) as Arc<dyn nexus_auth::storage::Storage>,
         );
         let saga_recovery_opctx =
@@ -693,6 +719,7 @@ mod test {
         // operations and completes.
         let sec_client = Arc::new(sec_client);
         let (_, sagas_started_rx) = tokio::sync::mpsc::unbounded_channel();
+        let quiesce = SagaQuiesceHandle::new(log.clone());
         let mut task = SagaRecovery::new(
             db_datastore.clone(),
             sec_id,
@@ -702,6 +729,7 @@ mod test {
                 sec_client: sec_client.clone(),
                 registry: registry_create(),
                 sagas_started_rx,
+                quiesce,
             },
         );
 
@@ -747,7 +775,7 @@ mod test {
             create_storage_sec_and_context(&log, db_datastore.clone(), sec_id);
         let sec_log = log.new(o!("component" => "SEC"));
         let opctx = OpContext::for_tests(
-            log,
+            log.clone(),
             Arc::clone(&db_datastore) as Arc<dyn nexus_auth::storage::Storage>,
         );
         let saga_recovery_opctx =
@@ -769,6 +797,7 @@ mod test {
         // Go through recovery.  We should not find or recover this saga.
         let sec_client = Arc::new(sec_client);
         let (_, sagas_started_rx) = tokio::sync::mpsc::unbounded_channel();
+        let quiesce = SagaQuiesceHandle::new(log.clone());
         let mut task = SagaRecovery::new(
             db_datastore.clone(),
             sec_id,
@@ -778,6 +807,7 @@ mod test {
                 sec_client: sec_client.clone(),
                 registry: registry_create(),
                 sagas_started_rx,
+                quiesce,
             },
         );
 

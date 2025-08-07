@@ -6270,6 +6270,33 @@
           "by_baseboard"
         ]
       },
+      "PendingSagaInfo": {
+        "description": "Describes a pending saga (for debugging why quiesce is stuck)",
+        "type": "object",
+        "properties": {
+          "recovered": {
+            "description": "If true, we know the saga needs to be recovered.  It may or may not be running already.\n\nIf false, this saga was created in this Nexus process's lifetime.  It's still running.",
+            "type": "boolean"
+          },
+          "saga_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "saga_name": {
+            "type": "string"
+          },
+          "time_pending": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "recovered",
+          "saga_id",
+          "saga_name",
+          "time_pending"
+        ]
+      },
       "PhysicalDiskKind": {
         "description": "Describes the form factor of physical disks.",
         "type": "string",
@@ -6791,14 +6818,14 @@
             },
             "uniqueItems": true
           },
-          "sagas_running": {
+          "sagas_pending": {
             "title": "IdOrdMap",
-            "description": "what sagas are currently running\n\nThis should only be non-empty when state is `Running` or `WaitingForSagas`.  Entries here prevent transitioning from `WaitingForSagas` to `WaitingForDb`.",
+            "description": "what sagas are currently running or known needing to be recovered\n\nThis should only be non-empty when state is `Running` or `WaitingForSagas`.  Entries here prevent transitioning from `WaitingForSagas` to `WaitingForDb`.",
             "x-rust-type": {
               "crate": "iddqd",
               "parameters": [
                 {
-                  "$ref": "#/components/schemas/RunningSagaInfo"
+                  "$ref": "#/components/schemas/PendingSagaInfo"
                 }
               ],
               "path": "iddqd::IdOrdMap",
@@ -6806,7 +6833,7 @@
             },
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/RunningSagaInfo"
+              "$ref": "#/components/schemas/PendingSagaInfo"
             },
             "uniqueItems": true
           },
@@ -6821,7 +6848,7 @@
         },
         "required": [
           "db_claims",
-          "sagas_running",
+          "sagas_pending",
           "state"
         ]
       },
@@ -7208,28 +7235,6 @@
         "required": [
           "destination",
           "nexthop"
-        ]
-      },
-      "RunningSagaInfo": {
-        "description": "Describes a running saga (for debugging why quiesce is stuck)",
-        "type": "object",
-        "properties": {
-          "saga_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "saga_name": {
-            "type": "string"
-          },
-          "time_started": {
-            "type": "string",
-            "format": "date-time"
-          }
-        },
-        "required": [
-          "saga_id",
-          "saga_name",
-          "time_started"
         ]
       },
       "Saga": {

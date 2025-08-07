@@ -88,7 +88,7 @@ progenitor::generate_api!(
     }
 );
 
-impl IdOrdItem for types::RunningSagaInfo {
+impl IdOrdItem for types::PendingSagaInfo {
     type Key<'a> = Uuid;
 
     fn key(&self) -> Self::Key<'_> {
