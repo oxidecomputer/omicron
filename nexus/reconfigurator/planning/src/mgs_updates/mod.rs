@@ -1373,7 +1373,7 @@ mod test {
             &BTreeMap::from([((SpType::Sled, 0), ARTIFACT_VERSION_1)]),
             ExpectedVersion::NoValidVersion,
             ARTIFACT_VERSION_2,
-            &BTreeMap::from([((SpType::Sled, 0), ARTIFACT_VERSION_1)]),
+            &BTreeMap::new(),
             ExpectedVersion::NoValidVersion,
         );
         let current_boards = &collection.baseboards;
@@ -1391,9 +1391,8 @@ mod test {
         );
         assert!(updates.is_empty());
 
-        // Test that when a TUF repo is specified and one RoT and SP are
-        // outdated, then it's configured with an update (and the update looks
-        // correct).
+        // Test that when a TUF repo is specified and one SP is outdated, then
+        // it's configured with an update (and the update looks correct).
         let repo = make_tuf_repo();
         let updates = plan_mgs_updates(
             log,
@@ -1409,7 +1408,7 @@ mod test {
         assert_eq!(first_update.baseboard_id.serial_number, "sled_0");
         assert_eq!(first_update.sp_type, SpType::Sled);
         assert_eq!(first_update.slot_id, 0);
-        assert_eq!(first_update.artifact_hash, ARTIFACT_HASH_ROT_GIMLET_B);
+        assert_eq!(first_update.artifact_hash, ARTIFACT_HASH_SP_GIMLET_D);
         assert_eq!(first_update.artifact_version, ARTIFACT_VERSION_2);
 
         // Test that when an update is already pending, and nothing changes
@@ -1425,6 +1424,34 @@ mod test {
             impossible_update_policy,
         );
         assert_eq!(updates, later_updates);
+
+        // Now we make sure the RoT is updated as well
+        let later_collection = make_collection(
+            ARTIFACT_VERSION_2,
+            &BTreeMap::new(),
+            ExpectedVersion::NoValidVersion,
+            ARTIFACT_VERSION_2,
+            &BTreeMap::from([((SpType::Sled, 0), ARTIFACT_VERSION_1)]),
+            ExpectedVersion::NoValidVersion,
+        );
+        let later_updates = plan_mgs_updates(
+            log,
+            &later_collection,
+            current_boards,
+            &updates,
+            &TargetReleaseDescription::TufRepo(repo.clone()),
+            nmax_updates,
+            impossible_update_policy,
+        );
+        assert_eq!(later_updates.len(), 1);
+        let next_update =
+            later_updates.iter().next().expect("at least one update");
+        assert_ne!(first_update, next_update);
+        assert_eq!(next_update.baseboard_id.serial_number, "sled_0");
+        assert_eq!(next_update.sp_type, SpType::Sled);
+        assert_eq!(next_update.slot_id, 0);
+        assert_eq!(next_update.artifact_hash, ARTIFACT_HASH_ROT_GIMLET_B);
+        assert_eq!(next_update.artifact_version, ARTIFACT_VERSION_2);
 
         // Test that when two updates for two SpTypes are needed, but one is
         // already pending, then the other one is *not* started (because it
@@ -1455,9 +1482,11 @@ mod test {
         assert_eq!(updates, later_updates);
 
         // At this point, we're ready to test that when the first SpType update
-        // completes, then the second one *is* started.  This tests two
-        // different things: first that we noticed the first one completed, and
-        // second that we noticed another thing needed an update
+        // completes, then the second one *is* started.  This tests three
+        // different things: first that we noticed the first one completed,
+        // second that we noticed another thing needed an update, and third that
+        // the planner schedules the updates in the correct order: first RoT,
+        // and second SP.
         let later_collection = make_collection(
             ARTIFACT_VERSION_2,
             &BTreeMap::from([((SpType::Switch, 1), ARTIFACT_VERSION_1)]),
@@ -1483,6 +1512,34 @@ mod test {
         assert_eq!(next_update.sp_type, SpType::Switch);
         assert_eq!(next_update.slot_id, 1);
         assert_eq!(next_update.artifact_hash, ARTIFACT_HASH_ROT_SWITCH_B);
+        assert_eq!(next_update.artifact_version, ARTIFACT_VERSION_2);
+
+        // Same test but for SP only.
+        let later_collection = make_collection(
+            ARTIFACT_VERSION_2,
+            &BTreeMap::from([((SpType::Switch, 1), ARTIFACT_VERSION_1)]),
+            ExpectedVersion::NoValidVersion,
+            ARTIFACT_VERSION_2,
+            &BTreeMap::new(),
+            ExpectedVersion::NoValidVersion,
+        );
+        let later_updates = plan_mgs_updates(
+            log,
+            &later_collection,
+            current_boards,
+            &updates,
+            &TargetReleaseDescription::TufRepo(repo.clone()),
+            nmax_updates,
+            impossible_update_policy,
+        );
+        assert_eq!(later_updates.len(), 1);
+        let next_update =
+            later_updates.iter().next().expect("at least one update");
+        assert_ne!(first_update, next_update);
+        assert_eq!(next_update.baseboard_id.serial_number, "switch_1");
+        assert_eq!(next_update.sp_type, SpType::Switch);
+        assert_eq!(next_update.slot_id, 1);
+        assert_eq!(next_update.artifact_hash, ARTIFACT_HASH_SP_SIDECAR_C);
         assert_eq!(next_update.artifact_version, ARTIFACT_VERSION_2);
 
         // Finally, test that when all RoTs and SPs are in spec, then no updates
@@ -1792,7 +1849,16 @@ mod test {
         let mut expected_updates: BTreeMap<_, _> = test_config()
             .into_iter()
             .map(|(k, (serial, board_name))| {
-                (k, (serial, test_artifact_for_board(board_name)))
+                if board_name == "oxide-rot-1" {
+                    let kind = match k.0 {
+                        SpType::Sled => ArtifactKind::GIMLET_ROT_IMAGE_B,
+                        SpType::Power => ArtifactKind::PSC_ROT_IMAGE_B,
+                        SpType::Switch => ArtifactKind::SWITCH_ROT_IMAGE_B,
+                    };
+                    (k, (serial, test_artifact_for_artifact_kind(kind)))
+                } else {
+                    (k, (serial, test_artifact_for_board(board_name)))
+                }
             })
             .collect();
 
@@ -1890,7 +1956,16 @@ mod test {
         let mut expected_updates: BTreeMap<_, _> = test_config()
             .into_iter()
             .map(|(k, (serial, board_name))| {
-                (k, (serial, test_artifact_for_board(board_name)))
+                if board_name == "oxide-rot-1" {
+                    let kind = match k.0 {
+                        SpType::Sled => ArtifactKind::GIMLET_ROT_IMAGE_B,
+                        SpType::Power => ArtifactKind::PSC_ROT_IMAGE_B,
+                        SpType::Switch => ArtifactKind::SWITCH_ROT_IMAGE_B,
+                    };
+                    (k, (serial, test_artifact_for_artifact_kind(kind)))
+                } else {
+                    (k, (serial, test_artifact_for_board(board_name)))
+                }
             })
             .collect();
 
