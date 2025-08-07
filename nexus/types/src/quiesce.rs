@@ -66,7 +66,26 @@ impl From<NoSagasAllowedError> for Error {
 #[derive(Debug, Clone)]
 pub struct SagaQuiesceHandle {
     log: Logger,
-    // XXX-dap TODO-doc
+
+    // As the name implies, the SagaQuiesceHandle itself is a (cloneable) handle
+    // to the real underlying state.  The real state is stored in this watch
+    // channel.  In practice, we use this more like a Mutex (or even an RwLock).
+    // But the `watch` channel gives us two advantages over Mutex or RwLock:
+    //
+    // (1) It's hard to hang onto the "lock" for too long, at least as a writer,
+    //     because you only ever have the write lock inside a closure (e.g.,
+    //     `send_modify`).  That closure can't be async.  This is a good thing.
+    //     It means we only hold the write lock for very brief periods while we
+    //     mutate the data, using it to protect data and not code.
+    //
+    // (2) `watch::Receiver` provides a really handy `wait_for()` method` that
+    //     we use in `wait_for_quiesced()`.  Besides being convenient, this
+    //     would be surprisingly hard for us to implement ourselves with a
+    //     `Mutex`.  Traditionally, you'd use a combination Mutex/Condvar for
+    //     this.  But we'd want to use a `std` Mutex (since tokio Mutex's
+    //     cancellation behavior is abysmal), but we don't want to block on a
+    //     std `Condvar` in an async thread.  There are options here (e.g.,
+    //     `block_on`), but they're not pleasant.
     inner: watch::Sender<SagaQuiesceInner>,
 }
 
@@ -257,8 +276,6 @@ impl SagaQuiesceHandle {
     /// actually run and finish it.  We do still want to prevent ourselves from
     /// taking on sagas needing recovery -- that's why we fail
     /// `reassignment_start()` when saga creation is disallowed.
-    // XXX-dap is that right?  do we really want to block re-assignment of
-    // sagas?
     fn record_saga_recovery(
         &self,
         saga_id: steno::SagaId,
