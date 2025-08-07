@@ -1534,6 +1534,9 @@ mod test {
             ARTIFACT_VERSION_2,
             &BTreeMap::from([((SpType::Sled, 0), ARTIFACT_VERSION_1)]),
             ExpectedVersion::Version(ARTIFACT_VERSION_1_5),
+            ARTIFACT_VERSION_2,
+            &BTreeMap::new(),
+            ExpectedVersion::Version(ARTIFACT_VERSION_1_5),
         );
         let current_boards = &collection.baseboards;
         let initial_updates = PendingMgsUpdates::new();
@@ -1588,6 +1591,9 @@ mod test {
             ARTIFACT_VERSION_2,
             &BTreeMap::from([((SpType::Sled, 0), ARTIFACT_VERSION_1)]),
             ExpectedVersion::NoValidVersion,
+            ARTIFACT_VERSION_2,
+            &BTreeMap::new(),
+            ExpectedVersion::Version(ARTIFACT_VERSION_1_5),
         );
 
         // If we plan with `ImpossibleUpdatePolicy::Keep`, we should _not_
