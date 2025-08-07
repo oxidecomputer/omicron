@@ -6242,7 +6242,7 @@ async fn test_can_start_instance_with_cpu_platform(
         Some(nexus_address),
         Some(&camino::Utf8Path::new("/an/unused/update/directory")),
         omicron_sled_agent::sim::ZpoolConfig::None,
-        nexus_client::types::SledCpuFamily::AmdTurin,
+        nexus_sled_agent_shared::inventory::SledCpuFamily::AmdTurin,
     );
 
     // We have to hold on to the new simulated sled-agent otherwise it will be immediately dropped
