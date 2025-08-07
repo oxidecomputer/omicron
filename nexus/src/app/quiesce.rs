@@ -22,7 +22,6 @@ use omicron_common::api::external::UpdateResult;
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
 use std::sync::Arc;
-use std::sync::Mutex;
 use std::time::Instant;
 use steno::SagaResult;
 use thiserror::Error;
@@ -75,16 +74,13 @@ impl From<NoSagasAllowedError> for Error {
 // sagas running within this process.
 #[derive(Debug, Clone)]
 pub struct SagaQuiesceHandle {
-    // This is a standard Mutex rather than a tokio one.  That's intentional:
-    // the tokio one is very difficult to use in the face of cancellation.
-    // Users of this mutex only keep it held for very brief periods.
-    inner: Arc<Mutex<SagaQuiesceInner>>,
+    log: Logger,
+    // XXX-dap TODO-doc
+    inner: watch::Sender<SagaQuiesceInner>,
 }
 
 #[derive(Debug, Clone)]
 struct SagaQuiesceInner {
-    log: Logger,
-
     new_sagas_allowed: SagasAllowed,
     sagas_pending: IdOrdMap<PendingSagaInfo>,
     first_recovery_complete: bool,
@@ -97,18 +93,16 @@ struct SagaQuiesceInner {
 
 impl SagaQuiesceHandle {
     pub fn new(log: Logger) -> SagaQuiesceHandle {
-        SagaQuiesceHandle {
-            inner: Arc::new(Mutex::new(SagaQuiesceInner {
-                log,
-                new_sagas_allowed: SagasAllowed::Allowed,
-                sagas_pending: IdOrdMap::new(),
-                first_recovery_complete: false,
-                reassignment_generation: Generation::new(),
-                reassignment_pending: false,
-                recovered_reassignment_generation: Generation::new(),
-                recovery_pending: None,
-            })),
-        }
+        let (inner, _) = watch::channel(SagaQuiesceInner {
+            new_sagas_allowed: SagasAllowed::Allowed,
+            sagas_pending: IdOrdMap::new(),
+            first_recovery_complete: false,
+            reassignment_generation: Generation::new(),
+            reassignment_pending: false,
+            recovered_reassignment_generation: Generation::new(),
+            recovery_pending: None,
+        });
+        SagaQuiesceHandle { log, inner }
     }
 
     /// Disallow new sagas from being started or re-assigned to this Nexus
@@ -117,42 +111,20 @@ impl SagaQuiesceHandle {
     pub fn quiesce(&self) {
         // Log this before changing the config to make sure this message
         // appears before messages from code paths that saw this change.
-        let mut q = self.inner.lock().unwrap();
-        info!(&q.log, "starting saga quiesce");
-        q.new_sagas_allowed = SagasAllowed::Disallowed;
+        info!(&self.log, "starting saga quiesce");
+        self.inner
+            .send_modify(|q| q.new_sagas_allowed = SagasAllowed::Disallowed);
     }
 
     /// Wait for sagas to be quiesced
     pub async fn wait_for_quiesced(&self) {
-        loop {
-            if self.is_fully_quiesced() {
-                return;
-            }
-
-            todo!(); // XXX-dap uh oh
-        }
+        let _ =
+            self.inner.subscribe().wait_for(|q| q.is_fully_quiesced()).await;
     }
 
     /// Returns information about running sagas (involves a clone)
     pub fn sagas_pending(&self) -> IdOrdMap<PendingSagaInfo> {
-        let q = self.inner.lock().unwrap();
-        q.sagas_pending.clone()
-    }
-
-    /// Returns whether sagas are fully and permanently quiesced
-    pub fn is_fully_quiesced(&self) -> bool {
-        let q = self.inner.lock().unwrap();
-        // No new sagas may be created
-        q.new_sagas_allowed == SagasAllowed::Disallowed
-            // and there are none currently running
-            && q.sagas_pending.is_empty()
-            // and there are none from a previous lifetime that still need to be
-            // recovered
-            && q.first_recovery_complete
-            // and there are none that blueprint execution may have re-assigned
-            // to us that have not been recovered
-            && q.reassignment_generation
-                <= q.recovered_reassignment_generation
+        self.inner.borrow().sagas_pending.clone()
     }
 
     /// Record that we're beginning an operation that might assign sagas to us.
@@ -160,28 +132,32 @@ impl SagaQuiesceHandle {
     /// Only one of these may be outstanding at a time.  The caller must call
     /// `reassignment_finish()` before starting another one of these.
     pub fn reassignment_begin(&self) -> Result<(), NoSagasAllowedError> {
-        let mut q = self.inner.lock().unwrap();
-        if q.new_sagas_allowed != SagasAllowed::Allowed {
-            return Err(NoSagasAllowedError);
-        }
+        let okay = self.inner.send_if_modified(|q| {
+            if q.new_sagas_allowed != SagasAllowed::Allowed {
+                return false;
+            }
 
-        assert!(!q.reassignment_pending);
-        q.reassignment_pending = true;
-        Ok(())
+            assert!(!q.reassignment_pending);
+            q.reassignment_pending = true;
+            true
+        });
+
+        if okay { Ok(()) } else { Err(NoSagasAllowedError) }
     }
 
     /// Record that we've finished an operation that might assign new sagas to
     /// ourselves.
     pub fn reassignment_finish(&self, maybe_reassigned: bool) {
-        let mut q = self.inner.lock().unwrap();
-        assert!(q.reassignment_pending);
-        q.reassignment_pending = false;
+        self.inner.send_modify(|q| {
+            assert!(q.reassignment_pending);
+            q.reassignment_pending = false;
 
-        if maybe_reassigned {
-            // XXX-dap double-check that this is the right time to do this,
-            // particularly in the very first generation
-            q.reassignment_generation = q.reassignment_generation.next();
-        }
+            if maybe_reassigned {
+                // XXX-dap double-check that this is the right time to do this,
+                // particularly in the very first generation
+                q.reassignment_generation = q.reassignment_generation.next();
+            }
+        });
     }
 
     /// Record that we've begun recovering sagas.
@@ -189,22 +165,24 @@ impl SagaQuiesceHandle {
     /// Only one of these may be outstanding at a time.  The caller must call
     /// `saga_recovery_finish()` before starting another one of these.
     pub fn saga_recovery_start(&self) {
-        let mut q = self.inner.lock().unwrap();
-        assert!(q.recovery_pending.is_none());
-        q.recovery_pending = Some(q.reassignment_generation);
+        self.inner.send_modify(|q| {
+            assert!(q.recovery_pending.is_none());
+            q.recovery_pending = Some(q.reassignment_generation);
+        });
     }
 
     /// Record that we've finished recovering sagas.
     pub fn saga_recovery_done(&self, success: bool) {
-        let mut q = self.inner.lock().unwrap();
-        let Some(generation) = q.recovery_pending.take() else {
-            panic!("cannot finish saga recovery when it was not running");
-        };
+        self.inner.send_modify(|q| {
+            let Some(generation) = q.recovery_pending.take() else {
+                panic!("cannot finish saga recovery when it was not running");
+            };
 
-        if success {
-            q.recovered_reassignment_generation = generation;
-            q.first_recovery_complete = true;
-        }
+            if success {
+                q.recovered_reassignment_generation = generation;
+                q.first_recovery_complete = true;
+            }
+        });
     }
 
     /// Report that a saga has started running
@@ -218,24 +196,31 @@ impl SagaQuiesceHandle {
         saga_id: steno::SagaId,
         saga_name: &steno::SagaName,
     ) -> Result<NewlyPendingSagaRef, NoSagasAllowedError> {
-        let mut q = self.inner.lock().unwrap();
-        if q.new_sagas_allowed != SagasAllowed::Allowed {
-            return Err(NoSagasAllowedError);
-        }
+        let okay = self.inner.send_if_modified(|q| {
+            if q.new_sagas_allowed != SagasAllowed::Allowed {
+                return false;
+            }
 
-        q.sagas_pending
-            .insert_unique(PendingSagaInfo {
+            q.sagas_pending
+                .insert_unique(PendingSagaInfo {
+                    saga_id,
+                    saga_name: saga_name.clone(),
+                    time_pending: Utc::now(),
+                    recovered: false,
+                })
+                .expect("created saga should have unique id");
+            true
+        });
+
+        if okay {
+            Ok(NewlyPendingSagaRef {
+                quiesce: self.inner.clone(),
                 saga_id,
-                saga_name: saga_name.clone(),
-                time_pending: Utc::now(),
-                recovered: false,
+                init_finished: false,
             })
-            .expect("created saga should have unique id");
-        Ok(NewlyPendingSagaRef {
-            quiesce: self.inner.clone(),
-            saga_id,
-            init_finished: false,
-        })
+        } else {
+            Err(NoSagasAllowedError)
+        }
     }
 
     /// Report that the given saga is being recovered
@@ -265,20 +250,39 @@ impl SagaQuiesceHandle {
         saga_id: steno::SagaId,
         saga_name: &steno::SagaName,
     ) -> NewlyPendingSagaRef {
-        let mut q = self.inner.lock().unwrap();
-        // It's okay to call this more than once, so we ignore the possible
-        // error from `insert_unique()`.
-        let _ = q.sagas_pending.insert_unique(PendingSagaInfo {
-            saga_id,
-            saga_name: saga_name.clone(),
-            time_pending: Utc::now(),
-            recovered: true,
+        self.inner.send_modify(|q| {
+            // It's okay to call this more than once, so we ignore the possible
+            // error from `insert_unique()`.
+            let _ = q.sagas_pending.insert_unique(PendingSagaInfo {
+                saga_id,
+                saga_name: saga_name.clone(),
+                time_pending: Utc::now(),
+                recovered: true,
+            });
         });
+
         NewlyPendingSagaRef {
             quiesce: self.inner.clone(),
             saga_id,
             init_finished: false,
         }
+    }
+}
+
+impl SagaQuiesceInner {
+    /// Returns whether sagas are fully and permanently quiesced
+    pub fn is_fully_quiesced(&self) -> bool {
+        // No new sagas may be created
+        self.new_sagas_allowed == SagasAllowed::Disallowed
+            // and there are none currently running
+            && self.sagas_pending.is_empty()
+            // and there are none from a previous lifetime that still need to be
+            // recovered
+            && self.first_recovery_complete
+            // and there are none that blueprint execution may have re-assigned
+            // to us that have not been recovered
+            && self.reassignment_generation
+                <= self.recovered_reassignment_generation
     }
 }
 
@@ -295,7 +299,7 @@ impl SagaQuiesceHandle {
 ///    immediately.
 #[must_use = "must record the saga completion future once the saga is running"]
 pub struct NewlyPendingSagaRef {
-    quiesce: Arc<Mutex<SagaQuiesceInner>>,
+    quiesce: watch::Sender<SagaQuiesceInner>,
     saga_id: steno::SagaId,
     init_finished: bool,
 }
@@ -334,10 +338,11 @@ impl NewlyPendingSagaRef {
         let qwrap = self.quiesce.clone();
         let completion_task = tokio::spawn(async move {
             let rv = fut.await;
-            let mut q = qwrap.lock().unwrap();
-            q.sagas_pending
-                .remove(&saga_id)
-                .expect("saga should have been running");
+            qwrap.send_modify(|q| {
+                q.sagas_pending
+                    .remove(&saga_id)
+                    .expect("saga should have been running");
+            });
             rv
         });
 
@@ -370,12 +375,13 @@ impl Drop for NewlyPendingSagaRef {
         // bailed out before having started running the saga.  Remove it from
         // the list of sagas that we're tracking.
         if !self.init_finished {
-            let mut q = self.quiesce.lock().unwrap();
-            q.sagas_pending.remove(&self.saga_id).unwrap_or_else(|| {
-                panic!(
-                    "NewlyPendingSagaRef dropped, saga completion future \
+            self.quiesce.send_modify(|q| {
+                q.sagas_pending.remove(&self.saga_id).unwrap_or_else(|| {
+                    panic!(
+                        "NewlyPendingSagaRef dropped, saga completion future \
                      not recorded, and the saga is not still pending"
-                )
+                    )
+                });
             });
         }
     }
