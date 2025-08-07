@@ -1086,7 +1086,8 @@ mod test {
                 kind,
             },
             hash,
-            size: 0, // unused here
+            size: 0,    // unused here
+            sign: None, // unused here
         }
     }
 
