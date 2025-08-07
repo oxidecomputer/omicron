@@ -160,15 +160,21 @@ impl SagaQuiesceHandle {
     ///
     /// Only one of these may be outstanding at a time.  The caller must call
     /// `saga_recovery_done()` before starting another one of these.
-    pub fn saga_recovery_start(&self) {
+    pub fn recovery_start(&self) -> SagaRecoveryInProgress {
         self.inner.send_modify(|q| {
-            assert!(q.recovery_pending.is_none());
+            assert!(
+                q.recovery_pending.is_none(),
+                "recovery_start() called twice without intervening \
+                 recovery_done()"
+            );
             q.recovery_pending = Some(q.reassignment_generation);
         });
+
+        SagaRecoveryInProgress { q: self.clone() }
     }
 
     /// Record that we've finished recovering sagas.
-    pub fn saga_recovery_done(&self, success: bool) {
+    fn recovery_done(&self, success: bool) {
         self.inner.send_modify(|q| {
             let Some(generation) = q.recovery_pending.take() else {
                 panic!("cannot finish saga recovery when it was not running");
@@ -187,7 +193,7 @@ impl SagaQuiesceHandle {
     ///
     /// Callers must also call `saga_completion_future()` to make sure it's
     /// recorded when this saga finishes.
-    pub fn record_saga_create(
+    pub fn saga_create(
         &self,
         saga_id: steno::SagaId,
         saga_name: &steno::SagaName,
@@ -241,7 +247,7 @@ impl SagaQuiesceHandle {
     /// `reassignment_start()` when saga creation is disallowed.
     // XXX-dap is that right?  do we really want to block re-assignment of
     // sagas?
-    pub fn record_saga_recovery(
+    fn record_saga_recovery(
         &self,
         saga_id: steno::SagaId,
         saga_name: &steno::SagaName,
@@ -386,6 +392,28 @@ impl Drop for NewlyPendingSagaRef {
     }
 }
 
+/// Token representing that saga recovery is in-progress
+///
+/// Consumers **must** explicitly call `recovery_done()` before dropping this.
+#[must_use = "You must call recovery_done() after recovery_start()"]
+pub struct SagaRecoveryInProgress {
+    q: SagaQuiesceHandle,
+}
+
+impl SagaRecoveryInProgress {
+    pub fn recovery_done(self, success: bool) {
+        self.q.recovery_done(success)
+    }
+
+    pub fn record_saga_recovery(
+        &self,
+        saga_id: steno::SagaId,
+        saga_name: &steno::SagaName,
+    ) -> NewlyPendingSagaRef {
+        self.q.record_saga_recovery(saga_id, saga_name)
+    }
+}
+
 #[cfg(test)]
 mod test {
     use crate::quiesce::SagaQuiesceHandle;
@@ -423,8 +451,8 @@ mod test {
         // Set up a new handle.  Complete the first saga recovery immediately so
         // that that doesn't block quiescing.
         let qq = SagaQuiesceHandle::new(log.clone());
-        qq.saga_recovery_start();
-        qq.saga_recovery_done(true);
+        let recovery = qq.recovery_start();
+        recovery.recovery_done(true);
 
         // It's still not fully quiesced because we haven't asked it to quiesce
         // yet.
@@ -440,7 +468,7 @@ mod test {
         // It's not allowed to create sagas or begin re-assignment after
         // quiescing has started, let alone finished.
         let _ = qq
-            .record_saga_create(*SAGA_ID, &*SAGA_NAME)
+            .saga_create(*SAGA_ID, &*SAGA_NAME)
             .expect_err("cannot create saga after quiescing started");
         let _ = qq
             .reassignment_begin()
@@ -463,12 +491,12 @@ mod test {
         // Set up a new handle.  Complete the first saga recovery immediately so
         // that that doesn't block quiescing.
         let qq = SagaQuiesceHandle::new(log.clone());
-        qq.saga_recovery_start();
-        qq.saga_recovery_done(true);
+        let recovery = qq.recovery_start();
+        recovery.recovery_done(true);
 
         // Start recording a new saga being created.
         let started = qq
-            .record_saga_create(*SAGA_ID, &*SAGA_NAME)
+            .saga_create(*SAGA_ID, &*SAGA_NAME)
             .expect("create saga while not quiesced");
         assert!(!qq.sagas_pending().is_empty());
 
@@ -498,13 +526,13 @@ mod test {
         // Set up a new handle.  Complete the first saga recovery immediately so
         // that that doesn't block quiescing.
         let qq = SagaQuiesceHandle::new(log.clone());
-        qq.saga_recovery_start();
-        qq.saga_recovery_done(true);
+        let recovery = qq.recovery_start();
+        recovery.recovery_done(true);
 
         // Record a new saga being created and provide it with our emulated
         // completion future.
         let mut pending = qq
-            .record_saga_create(*SAGA_ID, &*SAGA_NAME)
+            .saga_create(*SAGA_ID, &*SAGA_NAME)
             .expect("create saga while not quiesced");
         let consumer_completion = pending.saga_completion_future(
             async { rx.await.expect("cannot drop this before dropping tx") }
@@ -551,14 +579,14 @@ mod test {
 
         // Act like the first recovery failed.  Quiescing should still be
         // blocked.
-        qq.saga_recovery_start();
-        qq.saga_recovery_done(false);
+        let recovery = qq.recovery_start();
+        recovery.recovery_done(false);
         assert!(!qq.is_fully_quiesced());
 
         // Finish a normal saga recovery.  Quiescing should proceed.
         // This happens synchronously (though it doesn't have to).
-        qq.saga_recovery_start();
-        qq.saga_recovery_done(true);
+        let recovery = qq.recovery_start();
+        recovery.recovery_done(true);
         assert!(qq.is_fully_quiesced());
         qq.wait_for_quiesced().await;
         assert!(qq.is_fully_quiesced());
@@ -575,8 +603,8 @@ mod test {
         // Set up a new handle.  Complete the first saga recovery immediately so
         // that that doesn't block quiescing.
         let qq = SagaQuiesceHandle::new(log.clone());
-        qq.saga_recovery_start();
-        qq.saga_recovery_done(true);
+        let recovery = qq.recovery_start();
+        recovery.recovery_done(true);
 
         // Begin saga re-assignment.
         qq.reassignment_begin().expect("can re-assign when not quiescing");
@@ -608,8 +636,8 @@ mod test {
         // Set up a new handle.  Complete the first saga recovery immediately so
         // that that doesn't block quiescing.
         let qq = SagaQuiesceHandle::new(log.clone());
-        qq.saga_recovery_start();
-        qq.saga_recovery_done(true);
+        let recovery = qq.recovery_start();
+        recovery.recovery_done(true);
 
         // Begin saga re-assignment.
         qq.reassignment_begin().expect("can re-assign when not quiescing");
@@ -626,13 +654,13 @@ mod test {
         assert!(!qq.is_fully_quiesced());
 
         // If the next recovery pass fails, we're still blocked.
-        qq.saga_recovery_start();
-        qq.saga_recovery_done(false);
+        let recovery = qq.recovery_start();
+        recovery.recovery_done(false);
         assert!(!qq.is_fully_quiesced());
 
         // Once a recovery pass succeeds, we're good.
-        qq.saga_recovery_start();
-        qq.saga_recovery_done(true);
+        let recovery = qq.recovery_start();
+        recovery.recovery_done(true);
         assert!(qq.is_fully_quiesced());
 
         qq.wait_for_quiesced().await;
@@ -655,8 +683,8 @@ mod test {
         // Set up a new handle.  Complete the first saga recovery immediately so
         // that that doesn't block quiescing.
         let qq = SagaQuiesceHandle::new(log.clone());
-        qq.saga_recovery_start();
-        qq.saga_recovery_done(true);
+        let recovery = qq.recovery_start();
+        recovery.recovery_done(true);
 
         // Begin saga re-assignment.
         qq.reassignment_begin().expect("can re-assign when not quiescing");
@@ -668,7 +696,7 @@ mod test {
         assert!(!qq.is_fully_quiesced());
 
         // Start a recovery pass.
-        qq.saga_recovery_start();
+        let recovery = qq.recovery_start();
 
         // When re-assignment finishes and re-assigned sagas, we're still
         // blocked.
@@ -678,17 +706,17 @@ mod test {
         // Even if this recovery pass succeeds, we're still blocked, because it
         // started before re-assignment finished and so isn't guaranteed to have
         // seen all the re-assigned sagas.
-        qq.saga_recovery_done(true);
+        recovery.recovery_done(true);
         assert!(!qq.is_fully_quiesced());
 
         // If the next pass fails, we're still blocked.
-        qq.saga_recovery_start();
-        qq.saga_recovery_done(false);
+        let recovery = qq.recovery_start();
+        recovery.recovery_done(false);
         assert!(!qq.is_fully_quiesced());
 
         // Finally, we have a successful pass that unblocks us.
-        qq.saga_recovery_start();
-        qq.saga_recovery_done(true);
+        let recovery = qq.recovery_start();
+        recovery.recovery_done(true);
         assert!(qq.is_fully_quiesced());
         qq.wait_for_quiesced().await;
         assert!(qq.is_fully_quiesced());
@@ -710,8 +738,8 @@ mod test {
         // Set up a new handle.  Complete the first saga recovery immediately so
         // that that doesn't block quiescing.
         let qq = SagaQuiesceHandle::new(log.clone());
-        qq.saga_recovery_start();
-        qq.saga_recovery_done(true);
+        let recovery = qq.recovery_start();
+        recovery.recovery_done(true);
 
         // Begin saga re-assignment.
         qq.reassignment_begin().expect("can re-assign when not quiescing");
@@ -728,13 +756,13 @@ mod test {
         assert!(!qq.is_fully_quiesced());
 
         // Start a recovery pass.  Pretend like we found something.
-        qq.saga_recovery_start();
-        let mut pending = qq.record_saga_recovery(*SAGA_ID, &*SAGA_NAME);
+        let recovery = qq.recovery_start();
+        let mut pending = recovery.record_saga_recovery(*SAGA_ID, &*SAGA_NAME);
         let consumer_completion = pending.saga_completion_future(
             async { rx.await.expect("cannot drop this before dropping tx") }
                 .boxed(),
         );
-        qq.saga_recovery_done(true);
+        recovery.recovery_done(true);
 
         // We're still not quiesced because that saga is still running.
         assert!(!qq.is_fully_quiesced());
@@ -763,13 +791,13 @@ mod test {
         // Set up a new handle.
         let qq = SagaQuiesceHandle::new(log.clone());
         // Start a recovery pass.  Pretend like we found something.
-        qq.saga_recovery_start();
-        let mut pending = qq.record_saga_recovery(*SAGA_ID, &*SAGA_NAME);
+        let recovery = qq.recovery_start();
+        let mut pending = recovery.record_saga_recovery(*SAGA_ID, &*SAGA_NAME);
         let consumer_completion = pending.saga_completion_future(
             async { rx.await.expect("cannot drop this before dropping tx") }
                 .boxed(),
         );
-        qq.saga_recovery_done(true);
+        recovery.recovery_done(true);
 
         // Begin quiescing.
         qq.quiesce();

@@ -245,19 +245,18 @@ impl SagaExecutor {
         // This check should happen before we start the saga running.
         // We do this in a (small) block to ensure that we drop the lock
         // immediately.
-        let mut qsaga =
-            match self.quiesce.record_saga_create(saga_id, &saga_name) {
-                Ok(qsaga) => qsaga,
-                Err(error) => {
-                    warn!(
-                        &self.log,
-                        "error creating new saga";
-                        "saga_name" => saga_name.to_string(),
-                        InlineErrorChain::new(&error)
-                    );
-                    return Err(Error::from(error));
-                }
-            };
+        let mut qsaga = match self.quiesce.saga_create(saga_id, &saga_name) {
+            Ok(qsaga) => qsaga,
+            Err(error) => {
+                warn!(
+                    &self.log,
+                    "error creating new saga";
+                    "saga_name" => saga_name.to_string(),
+                    InlineErrorChain::new(&error)
+                );
+                return Err(Error::from(error));
+            }
+        };
 
         // Construct the context necessary to execute this saga.
         let nexus = self.nexus()?;

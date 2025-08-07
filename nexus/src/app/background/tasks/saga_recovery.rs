@@ -130,6 +130,7 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::DataStore;
 use nexus_types::quiesce::SagaQuiesceHandle;
+use nexus_types::quiesce::SagaRecoveryInProgress;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::InternalContext;
 use std::collections::BTreeMap;
@@ -237,9 +238,11 @@ impl<N: MakeSagaContext> SagaRecovery<N> {
         // sagas in order to track which sagas we're guaranteed to see (or not)
         // from a concurrent re-assignment of sagas.  See `SagaQuiesceHandle`
         // for details.
-        // XXX-dap could return something whose Drop invokes _done() so that if
-        // we bail early, we don't have to remember to call it?
-        self.quiesce.saga_recovery_start();
+        //
+        // Note: it's critical that we call `saga_recovery_done()` before we
+        // return.  (We do not rely on RAII for this because we need to provide
+        // an explicit signal about whether the operation succeeded.)
+        let recovery = self.quiesce.recovery_start();
 
         // Fetch the list of not-yet-finished sagas that are assigned to
         // this Nexus instance.
@@ -280,19 +283,19 @@ impl<N: MakeSagaContext> SagaRecovery<N> {
                 );
                 self.recovery_check_done(log, &plan).await;
                 let (execution, future) =
-                    self.recovery_execute(log, &plan).await;
+                    self.recovery_execute(log, &plan, &recovery).await;
                 self.rest_state.update_after_pass(&plan, &execution);
                 let last_pass_success =
                     nexus_saga_recovery::LastPassSuccess::new(
                         &plan, &execution,
                     );
                 self.status.update_after_pass(&plan, execution, nstarted);
-                self.quiesce.saga_recovery_done(true);
+                recovery.recovery_done(true);
                 Some((future, last_pass_success))
             }
             Err(error) => {
                 self.status.update_after_failure(&error, nstarted);
-                self.quiesce.saga_recovery_done(false);
+                recovery.recovery_done(false);
                 None
             }
         }
@@ -341,6 +344,7 @@ impl<N: MakeSagaContext> SagaRecovery<N> {
         &self,
         bgtask_log: &slog::Logger,
         plan: &nexus_saga_recovery::Plan,
+        recovery: &SagaRecoveryInProgress,
     ) -> (nexus_saga_recovery::Execution, BoxFuture<'static, Result<(), Error>>)
     {
         let mut builder = nexus_saga_recovery::ExecutionBuilder::new();
@@ -354,7 +358,10 @@ impl<N: MakeSagaContext> SagaRecovery<N> {
         for (saga_id, saga) in plan.sagas_needing_recovery() {
             let saga_log = self.maker.make_saga_log(*saga_id, &saga.name);
             builder.saga_recovery_start(*saga_id, saga_log.clone());
-            match self.recover_one_saga(bgtask_log, &saga_log, saga).await {
+            match self
+                .recover_one_saga(bgtask_log, &saga_log, saga, recovery)
+                .await
+            {
                 Ok(completion_future) => {
                     builder.saga_recovery_success(*saga_id);
                     completion_futures.push(completion_future);
@@ -381,6 +388,7 @@ impl<N: MakeSagaContext> SagaRecovery<N> {
         bgtask_logger: &slog::Logger,
         saga_logger: &slog::Logger,
         saga: &nexus_db_model::Saga,
+        recovery: &SagaRecoveryInProgress,
     ) -> Result<BoxFuture<'static, Result<(), Error>>, Error> {
         let datastore = &self.datastore;
         let saga_id: SagaId = saga.id.into();
@@ -413,8 +421,7 @@ impl<N: MakeSagaContext> SagaRecovery<N> {
                     error
                 ))
             })?;
-        let saga_completion = self
-            .quiesce
+        let saga_completion = recovery
             .record_saga_recovery(saga_id, &steno::SagaName::new(&saga.name))
             .saga_completion_future(saga_completion);
 
