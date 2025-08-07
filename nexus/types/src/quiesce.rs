@@ -91,13 +91,48 @@ pub struct SagaQuiesceHandle {
 
 #[derive(Debug, Clone)]
 struct SagaQuiesceInner {
+    /// current policy: are we allowed to *create* new sagas?
+    ///
+    /// This also affects re-assigning sagas from expunged Nexus instances to
+    /// ourselves.  It does **not** affect saga recovery.
     new_sagas_allowed: SagasAllowed,
+
+    /// list of sagas we need to wait to complete before quiescing
+    ///
+    /// These are basically running sagas.  They may have been created in this
+    /// Nexus process lifetime or created in another process and then recovered
+    /// in this one.
     sagas_pending: IdOrdMap<PendingSagaInfo>,
+
+    /// whether at least one recovery pass has successfully completed
+    ///
+    /// We have to track this because we can't quiesce until we know we've
+    /// recovered all outstanding sagas.
     first_recovery_complete: bool,
+
+    /// generation number for the saga reassignment
+    ///
+    /// This gets bumped whenever a saga reassignment operation completes that
+    /// may have re-assigned us some sagas.  It's used to keep track of when
+    /// we've recovered all sagas that could be assigned to us.
     reassignment_generation: Generation,
+
+    /// whether there is a saga reassignment operation happening
+    ///
+    /// These operatinos may assign new sagas to Nexus that must be recovered
+    /// and completed before quiescing can finish.
     reassignment_pending: bool,
 
+    /// "saga reassignment generation number" that was "caught up to" by the
+    /// last recovery pass
+    ///
+    /// This is used with `reassignment_generation` to help us know when we've
+    /// recovered all the sagas that may have been assigned to us during a
+    /// given reassignment pass.  See `reassignment_done()` for details.
     recovered_reassignment_generation: Generation,
+
+    /// whether a saga recovery operation is ongoing, and if one is, what
+    /// `reassignment_generation` was when it started
     recovery_pending: Option<Generation>,
 }
 
@@ -179,9 +214,12 @@ impl SagaQuiesceHandle {
             assert!(q.reassignment_pending);
             q.reassignment_pending = false;
 
+            // If we may have assigned new sagas to ourselves, bump the
+            // generation number.  We won't quiesce until a recovery pass has
+            // finished that *started* with this generation number.  So this
+            // ensures that we won't quiesce until any sagas that may have been
+            // assigned to us have been recovered.
             if maybe_reassigned {
-                // XXX-dap double-check that this is the right time to do this,
-                // particularly in the very first generation
                 q.reassignment_generation = q.reassignment_generation.next();
             }
         });
