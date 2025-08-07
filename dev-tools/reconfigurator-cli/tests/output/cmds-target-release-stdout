@@ -216,7 +216,8 @@ INFO sufficient InternalDns zones exist in plan, desired_count: 3, current_count
 INFO sufficient ExternalDns zones exist in plan, desired_count: 3, current_count: 3
 INFO sufficient Nexus zones exist in plan, desired_count: 3, current_count: 3
 INFO sufficient Oximeter zones exist in plan, desired_count: 0, current_count: 0
-INFO configuring MGS-driven update, artifact_version: 1.0.0, artifact_hash: 04e4a7fdb84acca92c8fd3235e26d64ea61bef8a5f98202589fd346989c5720a, expected_transient_boot_preference: None, expected_pending_persistent_boot_preference: None, expected_persistent_boot_preference: A, expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: NoValidVersion, component: rot, sp_slot: 0, sp_type: Sled, serial_number: serial0, part_number: model0
+WARN cannot configure RoT update for board (missing sign in caboose from inventory), serial_number: serial0, part_number: model0
+INFO configuring MGS-driven update, artifact_version: 1.0.0, artifact_hash: 7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670, expected_inactive_version: NoValidVersion, expected_active_version: 0.0.1, component: sp, sp_slot: 0, sp_type: Sled, serial_number: serial0, part_number: model0
 INFO reached maximum number of pending MGS-driven updates, max: 1
 INFO will ensure cockroachdb setting, setting: cluster.preserve_downgrade_option, value: DoNotModify
 generated blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1 based on parent blueprint dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21
@@ -241,10 +242,10 @@ to:   blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
  PENDING MGS UPDATES:
 
     Pending MGS-managed updates (all baseboards):
-    -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-    sp_type   slot   part_number   serial_number   artifact_hash                                                      artifact_version   details                                                                                                                                                                                                                                                                           
-    -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-+   sled      0      model0        serial0         04e4a7fdb84acca92c8fd3235e26d64ea61bef8a5f98202589fd346989c5720a   1.0.0              Rot { expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: NoValidVersion, expected_persistent_boot_preference: A, expected_pending_persistent_boot_preference: None, expected_transient_boot_preference: None }
+    ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+    sp_type   slot   part_number   serial_number   artifact_hash                                                      artifact_version   details                                                                                            
+    ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
++   sled      0      model0        serial0         7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670   1.0.0              Sp { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: NoValidVersion }
 
 
 internal DNS:
@@ -401,7 +402,7 @@ INFO sufficient InternalDns zones exist in plan, desired_count: 3, current_count
 INFO sufficient ExternalDns zones exist in plan, desired_count: 3, current_count: 3
 INFO sufficient Nexus zones exist in plan, desired_count: 3, current_count: 3
 INFO sufficient Oximeter zones exist in plan, desired_count: 0, current_count: 0
-INFO MGS-driven update not yet completed (will keep it), artifact_version: 1.0.0, artifact_hash: 04e4a7fdb84acca92c8fd3235e26d64ea61bef8a5f98202589fd346989c5720a, expected_transient_boot_preference: None, expected_pending_persistent_boot_preference: None, expected_persistent_boot_preference: A, expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: NoValidVersion, component: rot, sp_slot: 0, sp_type: Sled, serial_number: serial0, part_number: model0
+INFO MGS-driven update not yet completed (will keep it), artifact_version: 1.0.0, artifact_hash: 7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670, expected_inactive_version: NoValidVersion, expected_active_version: 0.0.1, component: sp, sp_slot: 0, sp_type: Sled, serial_number: serial0, part_number: model0
 INFO reached maximum number of pending MGS-driven updates, max: 1
 INFO will ensure cockroachdb setting, setting: cluster.preserve_downgrade_option, value: DoNotModify
 generated blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4 based on parent blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
@@ -587,8 +588,7 @@ INFO sufficient InternalDns zones exist in plan, desired_count: 3, current_count
 INFO sufficient ExternalDns zones exist in plan, desired_count: 3, current_count: 3
 INFO sufficient Nexus zones exist in plan, desired_count: 3, current_count: 3
 INFO sufficient Oximeter zones exist in plan, desired_count: 0, current_count: 0
-INFO MGS-driven update completed (will remove it and re-evaluate board), artifact_version: 1.0.0, artifact_hash: 04e4a7fdb84acca92c8fd3235e26d64ea61bef8a5f98202589fd346989c5720a, expected_transient_boot_preference: None, expected_pending_persistent_boot_preference: None, expected_persistent_boot_preference: A, expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: NoValidVersion, component: rot, sp_slot: 0, sp_type: Sled, serial_number: serial0, part_number: model0
-INFO configuring MGS-driven update, artifact_version: 1.0.0, artifact_hash: 7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670, expected_inactive_version: NoValidVersion, expected_active_version: 0.0.1, component: sp, sp_slot: 0, sp_type: Sled, serial_number: serial0, part_number: model0
+INFO MGS-driven update not yet completed (will keep it), artifact_version: 1.0.0, artifact_hash: 7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670, expected_inactive_version: NoValidVersion, expected_active_version: 0.0.1, component: sp, sp_slot: 0, sp_type: Sled, serial_number: serial0, part_number: model0
 INFO reached maximum number of pending MGS-driven updates, max: 1
 INFO will ensure cockroachdb setting, setting: cluster.preserve_downgrade_option, value: DoNotModify
 generated blueprint af934083-59b5-4bf6-8966-6fb5292c29e1 based on parent blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4
@@ -609,15 +609,6 @@ to:   blueprint af934083-59b5-4bf6-8966-6fb5292c29e1
  OXIMETER SETTINGS:
     generation:   1 (unchanged)
     read from::   SingleNode (unchanged)
-
- PENDING MGS UPDATES:
-
-    Pending MGS-managed updates (all baseboards):
-    ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-    sp_type   slot   part_number   serial_number   artifact_hash                                                        artifact_version   details                                                                                                                                                                                                                                                                             
-    ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-*   sled      0      model0        serial0         - 04e4a7fdb84acca92c8fd3235e26d64ea61bef8a5f98202589fd346989c5720a   1.0.0              - Rot { expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: NoValidVersion, expected_persistent_boot_preference: A, expected_pending_persistent_boot_preference: None, expected_transient_boot_preference: None }
-     └─                                            + 7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670                      + Sp { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: NoValidVersion }                                                                                                                                                                               
 
 
 internal DNS:
@@ -785,8 +776,10 @@ INFO sufficient ExternalDns zones exist in plan, desired_count: 3, current_count
 INFO sufficient Nexus zones exist in plan, desired_count: 3, current_count: 3
 INFO sufficient Oximeter zones exist in plan, desired_count: 0, current_count: 0
 INFO MGS-driven update completed (will remove it and re-evaluate board), artifact_version: 1.0.0, artifact_hash: 7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670, expected_inactive_version: NoValidVersion, expected_active_version: 0.0.1, component: sp, sp_slot: 0, sp_type: Sled, serial_number: serial0, part_number: model0
+WARN cannot configure RoT update for board (missing sign in caboose from inventory), serial_number: serial0, part_number: model0
 INFO skipping board for MGS-driven update, serial_number: serial0, part_number: model0
-INFO configuring MGS-driven update, artifact_version: 1.0.0, artifact_hash: 04e4a7fdb84acca92c8fd3235e26d64ea61bef8a5f98202589fd346989c5720a, expected_transient_boot_preference: None, expected_pending_persistent_boot_preference: None, expected_persistent_boot_preference: A, expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: NoValidVersion, component: rot, sp_slot: 1, sp_type: Sled, serial_number: serial1, part_number: model1
+WARN cannot configure RoT update for board (missing sign in caboose from inventory), serial_number: serial1, part_number: model1
+INFO configuring MGS-driven update, artifact_version: 1.0.0, artifact_hash: 7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670, expected_inactive_version: NoValidVersion, expected_active_version: 0.0.1, component: sp, sp_slot: 1, sp_type: Sled, serial_number: serial1, part_number: model1
 INFO reached maximum number of pending MGS-driven updates, max: 1
 INFO will ensure cockroachdb setting, setting: cluster.preserve_downgrade_option, value: DoNotModify
 generated blueprint df06bb57-ad42-4431-9206-abff322896c7 based on parent blueprint af934083-59b5-4bf6-8966-6fb5292c29e1
@@ -811,11 +804,11 @@ to:   blueprint df06bb57-ad42-4431-9206-abff322896c7
  PENDING MGS UPDATES:
 
     Pending MGS-managed updates (all baseboards):
-    -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-    sp_type   slot   part_number   serial_number   artifact_hash                                                      artifact_version   details                                                                                                                                                                                                                                                                           
-    -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
--   sled      0      model0        serial0         7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670   1.0.0              Sp { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: NoValidVersion }                                                                                                                                                                               
-+   sled      1      model1        serial1         04e4a7fdb84acca92c8fd3235e26d64ea61bef8a5f98202589fd346989c5720a   1.0.0              Rot { expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: NoValidVersion, expected_persistent_boot_preference: A, expected_pending_persistent_boot_preference: None, expected_transient_boot_preference: None }
+    ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+    sp_type   slot   part_number   serial_number   artifact_hash                                                      artifact_version   details                                                                                            
+    ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-   sled      0      model0        serial0         7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670   1.0.0              Sp { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: NoValidVersion }
++   sled      1      model1        serial1         7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670   1.0.0              Sp { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: NoValidVersion }
 
 
 internal DNS:
@@ -984,8 +977,7 @@ INFO sufficient InternalDns zones exist in plan, desired_count: 3, current_count
 INFO sufficient ExternalDns zones exist in plan, desired_count: 3, current_count: 3
 INFO sufficient Nexus zones exist in plan, desired_count: 3, current_count: 3
 INFO sufficient Oximeter zones exist in plan, desired_count: 0, current_count: 0
-INFO MGS-driven update impossible (will remove it and re-evaluate board), artifact_version: 1.0.0, artifact_hash: 04e4a7fdb84acca92c8fd3235e26d64ea61bef8a5f98202589fd346989c5720a, expected_transient_boot_preference: None, expected_pending_persistent_boot_preference: None, expected_persistent_boot_preference: A, expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: NoValidVersion, component: rot, sp_slot: 1, sp_type: Sled, serial_number: serial1, part_number: model1
-INFO configuring MGS-driven update, artifact_version: 1.0.0, artifact_hash: 04e4a7fdb84acca92c8fd3235e26d64ea61bef8a5f98202589fd346989c5720a, expected_transient_boot_preference: None, expected_pending_persistent_boot_preference: None, expected_persistent_boot_preference: A, expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: Version(ArtifactVersion("0.5.0")), component: rot, sp_slot: 1, sp_type: Sled, serial_number: serial1, part_number: model1
+INFO MGS-driven update not yet completed (will keep it), artifact_version: 1.0.0, artifact_hash: 7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670, expected_inactive_version: NoValidVersion, expected_active_version: 0.0.1, component: sp, sp_slot: 1, sp_type: Sled, serial_number: serial1, part_number: model1
 INFO reached maximum number of pending MGS-driven updates, max: 1
 INFO will ensure cockroachdb setting, setting: cluster.preserve_downgrade_option, value: DoNotModify
 generated blueprint 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba based on parent blueprint df06bb57-ad42-4431-9206-abff322896c7
@@ -1006,15 +998,6 @@ to:   blueprint 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba
  OXIMETER SETTINGS:
     generation:   1 (unchanged)
     read from::   SingleNode (unchanged)
-
- PENDING MGS UPDATES:
-
-    Pending MGS-managed updates (all baseboards):
-    --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-    sp_type   slot   part_number   serial_number   artifact_hash                                                      artifact_version   details                                                                                                                                                                                                                                                                                                
-    --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-*   sled      1      model1        serial1         04e4a7fdb84acca92c8fd3235e26d64ea61bef8a5f98202589fd346989c5720a   1.0.0              - Rot { expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: NoValidVersion, expected_persistent_boot_preference: A, expected_pending_persistent_boot_preference: None, expected_transient_boot_preference: None }                   
-     └─                                                                                                                                  + Rot { expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: Version(ArtifactVersion("0.5.0")), expected_persistent_boot_preference: A, expected_pending_persistent_boot_preference: None, expected_transient_boot_preference: None }
 
 
 internal DNS:
@@ -1178,8 +1161,7 @@ INFO sufficient InternalDns zones exist in plan, desired_count: 3, current_count
 INFO sufficient ExternalDns zones exist in plan, desired_count: 3, current_count: 3
 INFO sufficient Nexus zones exist in plan, desired_count: 3, current_count: 3
 INFO sufficient Oximeter zones exist in plan, desired_count: 0, current_count: 0
-INFO MGS-driven update completed (will remove it and re-evaluate board), artifact_version: 1.0.0, artifact_hash: 04e4a7fdb84acca92c8fd3235e26d64ea61bef8a5f98202589fd346989c5720a, expected_transient_boot_preference: None, expected_pending_persistent_boot_preference: None, expected_persistent_boot_preference: A, expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: Version(ArtifactVersion("0.5.0")), component: rot, sp_slot: 1, sp_type: Sled, serial_number: serial1, part_number: model1
-INFO configuring MGS-driven update, artifact_version: 1.0.0, artifact_hash: 7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670, expected_inactive_version: NoValidVersion, expected_active_version: 0.0.1, component: sp, sp_slot: 1, sp_type: Sled, serial_number: serial1, part_number: model1
+INFO MGS-driven update not yet completed (will keep it), artifact_version: 1.0.0, artifact_hash: 7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670, expected_inactive_version: NoValidVersion, expected_active_version: 0.0.1, component: sp, sp_slot: 1, sp_type: Sled, serial_number: serial1, part_number: model1
 INFO reached maximum number of pending MGS-driven updates, max: 1
 INFO will ensure cockroachdb setting, setting: cluster.preserve_downgrade_option, value: DoNotModify
 generated blueprint 9034c710-3e57-45f3-99e5-4316145e87ac based on parent blueprint 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba
@@ -1200,15 +1182,6 @@ to:   blueprint 9034c710-3e57-45f3-99e5-4316145e87ac
  OXIMETER SETTINGS:
     generation:   1 (unchanged)
     read from::   SingleNode (unchanged)
-
- PENDING MGS UPDATES:
-
-    Pending MGS-managed updates (all baseboards):
-    ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-    sp_type   slot   part_number   serial_number   artifact_hash                                                        artifact_version   details                                                                                                                                                                                                                                                                                                
-    ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-*   sled      1      model1        serial1         - 04e4a7fdb84acca92c8fd3235e26d64ea61bef8a5f98202589fd346989c5720a   1.0.0              - Rot { expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: Version(ArtifactVersion("0.5.0")), expected_persistent_boot_preference: A, expected_pending_persistent_boot_preference: None, expected_transient_boot_preference: None }
-     └─                                            + 7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670                      + Sp { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: NoValidVersion }                                                                                                                                                                                                  
 
 
 internal DNS:
@@ -1376,6 +1349,7 @@ INFO sufficient ExternalDns zones exist in plan, desired_count: 3, current_count
 INFO sufficient Nexus zones exist in plan, desired_count: 3, current_count: 3
 INFO sufficient Oximeter zones exist in plan, desired_count: 0, current_count: 0
 INFO MGS-driven update impossible (will remove it and re-evaluate board), artifact_version: 1.0.0, artifact_hash: 7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670, expected_inactive_version: NoValidVersion, expected_active_version: 0.0.1, component: sp, sp_slot: 1, sp_type: Sled, serial_number: serial1, part_number: model1
+WARN cannot configure RoT update for board (missing sign in caboose from inventory), serial_number: serial1, part_number: model1
 INFO configuring MGS-driven update, artifact_version: 1.0.0, artifact_hash: 7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670, expected_inactive_version: Version(ArtifactVersion("0.5.0")), expected_active_version: 0.0.1, component: sp, sp_slot: 1, sp_type: Sled, serial_number: serial1, part_number: model1
 INFO reached maximum number of pending MGS-driven updates, max: 1
 INFO will ensure cockroachdb setting, setting: cluster.preserve_downgrade_option, value: DoNotModify
@@ -1570,9 +1544,12 @@ INFO sufficient ExternalDns zones exist in plan, desired_count: 3, current_count
 INFO sufficient Nexus zones exist in plan, desired_count: 3, current_count: 3
 INFO sufficient Oximeter zones exist in plan, desired_count: 0, current_count: 0
 INFO MGS-driven update completed (will remove it and re-evaluate board), artifact_version: 1.0.0, artifact_hash: 7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670, expected_inactive_version: Version(ArtifactVersion("0.5.0")), expected_active_version: 0.0.1, component: sp, sp_slot: 1, sp_type: Sled, serial_number: serial1, part_number: model1
+WARN cannot configure RoT update for board (missing sign in caboose from inventory), serial_number: serial1, part_number: model1
 INFO skipping board for MGS-driven update, serial_number: serial1, part_number: model1
+WARN cannot configure RoT update for board (missing sign in caboose from inventory), serial_number: serial0, part_number: model0
 INFO skipping board for MGS-driven update, serial_number: serial0, part_number: model0
-INFO configuring MGS-driven update, artifact_version: 1.0.0, artifact_hash: 04e4a7fdb84acca92c8fd3235e26d64ea61bef8a5f98202589fd346989c5720a, expected_transient_boot_preference: None, expected_pending_persistent_boot_preference: None, expected_persistent_boot_preference: A, expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: NoValidVersion, component: rot, sp_slot: 2, sp_type: Sled, serial_number: serial2, part_number: model2
+WARN cannot configure RoT update for board (missing sign in caboose from inventory), serial_number: serial2, part_number: model2
+INFO configuring MGS-driven update, artifact_version: 1.0.0, artifact_hash: 7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670, expected_inactive_version: NoValidVersion, expected_active_version: 0.0.1, component: sp, sp_slot: 2, sp_type: Sled, serial_number: serial2, part_number: model2
 INFO ran out of boards for MGS-driven update
 INFO will ensure cockroachdb setting, setting: cluster.preserve_downgrade_option, value: DoNotModify
 generated blueprint a5a8f242-ffa5-473c-8efd-2acf2dc0b736 based on parent blueprint d60afc57-f15d-476c-bd0f-b1071e2bb976
@@ -1597,11 +1574,11 @@ to:   blueprint a5a8f242-ffa5-473c-8efd-2acf2dc0b736
  PENDING MGS UPDATES:
 
     Pending MGS-managed updates (all baseboards):
-    -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-    sp_type   slot   part_number   serial_number   artifact_hash                                                      artifact_version   details                                                                                                                                                                                                                                                                           
-    -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
--   sled      1      model1        serial1         7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670   1.0.0              Sp { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: Version(ArtifactVersion("0.5.0")) }                                                                                                                                                            
-+   sled      2      model2        serial2         04e4a7fdb84acca92c8fd3235e26d64ea61bef8a5f98202589fd346989c5720a   1.0.0              Rot { expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: NoValidVersion, expected_persistent_boot_preference: A, expected_pending_persistent_boot_preference: None, expected_transient_boot_preference: None }
+    -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+    sp_type   slot   part_number   serial_number   artifact_hash                                                      artifact_version   details                                                                                                               
+    -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-   sled      1      model1        serial1         7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670   1.0.0              Sp { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: Version(ArtifactVersion("0.5.0")) }
++   sled      2      model2        serial2         7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670   1.0.0              Sp { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: NoValidVersion }                   
 
 
 internal DNS:
@@ -1765,8 +1742,7 @@ INFO sufficient InternalDns zones exist in plan, desired_count: 3, current_count
 INFO sufficient ExternalDns zones exist in plan, desired_count: 3, current_count: 3
 INFO sufficient Nexus zones exist in plan, desired_count: 3, current_count: 3
 INFO sufficient Oximeter zones exist in plan, desired_count: 0, current_count: 0
-INFO MGS-driven update completed (will remove it and re-evaluate board), artifact_version: 1.0.0, artifact_hash: 04e4a7fdb84acca92c8fd3235e26d64ea61bef8a5f98202589fd346989c5720a, expected_transient_boot_preference: None, expected_pending_persistent_boot_preference: None, expected_persistent_boot_preference: A, expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: NoValidVersion, component: rot, sp_slot: 2, sp_type: Sled, serial_number: serial2, part_number: model2
-INFO configuring MGS-driven update, artifact_version: 1.0.0, artifact_hash: 7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670, expected_inactive_version: NoValidVersion, expected_active_version: 0.0.1, component: sp, sp_slot: 2, sp_type: Sled, serial_number: serial2, part_number: model2
+INFO MGS-driven update not yet completed (will keep it), artifact_version: 1.0.0, artifact_hash: 7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670, expected_inactive_version: NoValidVersion, expected_active_version: 0.0.1, component: sp, sp_slot: 2, sp_type: Sled, serial_number: serial2, part_number: model2
 INFO reached maximum number of pending MGS-driven updates, max: 1
 INFO will ensure cockroachdb setting, setting: cluster.preserve_downgrade_option, value: DoNotModify
 generated blueprint 626487fa-7139-45ec-8416-902271fc730b based on parent blueprint a5a8f242-ffa5-473c-8efd-2acf2dc0b736
@@ -1787,15 +1763,6 @@ to:   blueprint 626487fa-7139-45ec-8416-902271fc730b
  OXIMETER SETTINGS:
     generation:   1 (unchanged)
     read from::   SingleNode (unchanged)
-
- PENDING MGS UPDATES:
-
-    Pending MGS-managed updates (all baseboards):
-    ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-    sp_type   slot   part_number   serial_number   artifact_hash                                                        artifact_version   details                                                                                                                                                                                                                                                                             
-    ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-*   sled      2      model2        serial2         - 04e4a7fdb84acca92c8fd3235e26d64ea61bef8a5f98202589fd346989c5720a   1.0.0              - Rot { expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: NoValidVersion, expected_persistent_boot_preference: A, expected_pending_persistent_boot_preference: None, expected_transient_boot_preference: None }
-     └─                                            + 7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670                      + Sp { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: NoValidVersion }                                                                                                                                                                               
 
 
 internal DNS:
@@ -1960,8 +1927,11 @@ INFO sufficient ExternalDns zones exist in plan, desired_count: 3, current_count
 INFO sufficient Nexus zones exist in plan, desired_count: 3, current_count: 3
 INFO sufficient Oximeter zones exist in plan, desired_count: 0, current_count: 0
 INFO MGS-driven update completed (will remove it and re-evaluate board), artifact_version: 1.0.0, artifact_hash: 7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670, expected_inactive_version: NoValidVersion, expected_active_version: 0.0.1, component: sp, sp_slot: 2, sp_type: Sled, serial_number: serial2, part_number: model2
+WARN cannot configure RoT update for board (missing sign in caboose from inventory), serial_number: serial2, part_number: model2
 INFO skipping board for MGS-driven update, serial_number: serial2, part_number: model2
+WARN cannot configure RoT update for board (missing sign in caboose from inventory), serial_number: serial0, part_number: model0
 INFO skipping board for MGS-driven update, serial_number: serial0, part_number: model0
+WARN cannot configure RoT update for board (missing sign in caboose from inventory), serial_number: serial1, part_number: model1
 INFO skipping board for MGS-driven update, serial_number: serial1, part_number: model1
 INFO ran out of boards for MGS-driven update
 INFO updating zone image source in-place, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, zone_id: 353b3b65-20f7-48c3-88f7-495bd5d31545, kind: Clickhouse, image_source: artifact: version 1.0.0
