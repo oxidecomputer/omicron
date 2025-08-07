@@ -272,10 +272,13 @@ mod test {
     use crate::app::background::tasks::inventory_collection::InventoryCollector;
     use nexus_inventory::now_db_precision;
     use nexus_test_utils_macros::nexus_test;
-    use nexus_types::{deployment::{
-        PendingMgsUpdates, PlannerChickenSwitches,
-        ReconfiguratorChickenSwitches,
-    }, quiesce::SagaQuiesceHandle};
+    use nexus_types::{
+        deployment::{
+            PendingMgsUpdates, PlannerChickenSwitches,
+            ReconfiguratorChickenSwitches,
+        },
+        quiesce::SagaQuiesceHandle,
+    };
     use omicron_uuid_kinds::OmicronZoneUuid;
 
     type ControlPlaneTestContext =
