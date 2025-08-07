@@ -613,13 +613,16 @@ fn register_reassign_sagas_step<'a>(
 
                 // Check if we're allowed to do this.  If we're quiescing, we
                 // don't want to assign any new sagas to ourselves.
-                if let Err(error) = saga_quiesce.reassignment_begin() {
-                    return StepSkipped::new(
-                        false,
-                        InlineErrorChain::new(&error).to_string(),
-                    )
-                    .into();
-                }
+                let reassignment = match saga_quiesce.reassignment_start() {
+                    Ok(reassignment) => reassignment,
+                    Err(error) => {
+                        return StepSkipped::new(
+                            false,
+                            InlineErrorChain::new(&error).to_string(),
+                        )
+                        .into();
+                    }
+                };
 
                 // For any expunged Nexus zones, re-assign in-progress sagas to
                 // some other Nexus.  If this fails for some reason, it doesn't
@@ -632,14 +635,14 @@ fn register_reassign_sagas_step<'a>(
                 .context("failed to re-assign sagas");
                 match reassigned {
                     Ok(needs_saga_recovery) => {
-                        saga_quiesce.reassignment_done(needs_saga_recovery);
+                        reassignment.reassignment_done(needs_saga_recovery);
                         Ok(StepSuccess::new(needs_saga_recovery).build())
                     }
                     Err(error) => {
                         // It's possible that we failed after having re-assigned
                         // sagas in the database.
                         let maybe_reassigned = true;
-                        saga_quiesce.reassignment_done(maybe_reassigned);
+                        reassignment.reassignment_done(maybe_reassigned);
                         Ok(StepWarning::new(false, error.to_string()).build())
                     }
                 }

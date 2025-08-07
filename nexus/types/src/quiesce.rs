@@ -126,24 +126,36 @@ impl SagaQuiesceHandle {
     /// Record that we're beginning an operation that might assign sagas to us.
     ///
     /// Only one of these may be outstanding at a time.  The caller must call
-    /// `reassignment_finish()` before starting another one of these.
-    pub fn reassignment_begin(&self) -> Result<(), NoSagasAllowedError> {
+    /// `reassignment_done()` on the returned value before starting another one
+    /// of these.
+    pub fn reassignment_start(
+        &self,
+    ) -> Result<SagaReassignmentInProgress, NoSagasAllowedError> {
         let okay = self.inner.send_if_modified(|q| {
+            assert!(
+                !q.reassignment_pending,
+                "two calls to reassignment_start() without intervening call \
+                 to reassignment_done()"
+            );
+
             if q.new_sagas_allowed != SagasAllowed::Allowed {
                 return false;
             }
 
-            assert!(!q.reassignment_pending);
             q.reassignment_pending = true;
             true
         });
 
-        if okay { Ok(()) } else { Err(NoSagasAllowedError) }
+        if okay {
+            Ok(SagaReassignmentInProgress { q: self.clone() })
+        } else {
+            Err(NoSagasAllowedError)
+        }
     }
 
     /// Record that we've finished an operation that might assign new sagas to
     /// ourselves.
-    pub fn reassignment_done(&self, maybe_reassigned: bool) {
+    fn reassignment_done(&self, maybe_reassigned: bool) {
         self.inner.send_modify(|q| {
             assert!(q.reassignment_pending);
             q.reassignment_pending = false;
@@ -414,6 +426,22 @@ impl SagaRecoveryInProgress {
     }
 }
 
+/// Token representing that saga re-assignment is in-progress
+///
+/// Consumers **must** explicitly call `reassignment_done()` before dropping
+/// this.
+#[derive(Debug)]
+#[must_use = "You must call reassignment_done() after reassignment_start()"]
+pub struct SagaReassignmentInProgress {
+    q: SagaQuiesceHandle,
+}
+
+impl SagaReassignmentInProgress {
+    pub fn reassignment_done(self, maybe_reassigned: bool) {
+        self.q.reassignment_done(maybe_reassigned)
+    }
+}
+
 #[cfg(test)]
 mod test {
     use crate::quiesce::SagaQuiesceHandle;
@@ -471,7 +499,7 @@ mod test {
             .saga_create(*SAGA_ID, &*SAGA_NAME)
             .expect_err("cannot create saga after quiescing started");
         let _ = qq
-            .reassignment_begin()
+            .reassignment_start()
             .expect_err("cannot start re-assignment after quiescing started");
 
         // Waiting for quiesce should complete immediately.
@@ -607,7 +635,8 @@ mod test {
         recovery.recovery_done(true);
 
         // Begin saga re-assignment.
-        qq.reassignment_begin().expect("can re-assign when not quiescing");
+        let reassignment =
+            qq.reassignment_start().expect("can re-assign when not quiescing");
 
         // Begin quiescing.
         qq.quiesce();
@@ -617,7 +646,7 @@ mod test {
 
         // When re-assignment finishes *without* having re-assigned anything,
         // then we're immediately all set.
-        qq.reassignment_done(false);
+        reassignment.reassignment_done(false);
         assert!(qq.is_fully_quiesced());
         qq.wait_for_quiesced().await;
         assert!(qq.is_fully_quiesced());
@@ -640,7 +669,8 @@ mod test {
         recovery.recovery_done(true);
 
         // Begin saga re-assignment.
-        qq.reassignment_begin().expect("can re-assign when not quiescing");
+        let reassignment =
+            qq.reassignment_start().expect("can re-assign when not quiescing");
 
         // Begin quiescing.
         qq.quiesce();
@@ -650,7 +680,7 @@ mod test {
 
         // When re-assignment finishes and re-assigned sagas, we're still
         // blocked.
-        qq.reassignment_done(true);
+        reassignment.reassignment_done(true);
         assert!(!qq.is_fully_quiesced());
 
         // If the next recovery pass fails, we're still blocked.
@@ -687,7 +717,8 @@ mod test {
         recovery.recovery_done(true);
 
         // Begin saga re-assignment.
-        qq.reassignment_begin().expect("can re-assign when not quiescing");
+        let reassignment =
+            qq.reassignment_start().expect("can re-assign when not quiescing");
 
         // Begin quiescing.
         qq.quiesce();
@@ -700,7 +731,7 @@ mod test {
 
         // When re-assignment finishes and re-assigned sagas, we're still
         // blocked.
-        qq.reassignment_done(true);
+        reassignment.reassignment_done(true);
         assert!(!qq.is_fully_quiesced());
 
         // Even if this recovery pass succeeds, we're still blocked, because it
@@ -742,7 +773,8 @@ mod test {
         recovery.recovery_done(true);
 
         // Begin saga re-assignment.
-        qq.reassignment_begin().expect("can re-assign when not quiescing");
+        let reassignment =
+            qq.reassignment_start().expect("can re-assign when not quiescing");
 
         // Begin quiescing.
         qq.quiesce();
@@ -752,7 +784,7 @@ mod test {
 
         // When re-assignment finishes and re-assigned sagas, we're still
         // blocked because we haven't run recovery.
-        qq.reassignment_done(true);
+        reassignment.reassignment_done(true);
         assert!(!qq.is_fully_quiesced());
 
         // Start a recovery pass.  Pretend like we found something.
