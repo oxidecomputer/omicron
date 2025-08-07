@@ -1623,7 +1623,9 @@ pub struct AuditLogEntry {
 
     /// Request ID for tracing requests through the system
     pub request_id: String,
-    /// Full URL of the request
+    /// URI of the request, truncated at 500 characters. Will only include
+    /// host and scheme for HTTP/2 requests, otherwise will be a path and query
+    /// params.
     pub request_uri: String,
     /// API endpoint ID, e.g., `project_create`
     pub operation_id: String,

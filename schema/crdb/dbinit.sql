@@ -5788,7 +5788,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.audit_log (
     -- request IDs are UUIDs but let's give them a little extra space
     -- https://github.com/oxidecomputer/dropshot/blob/83f78e7/dropshot/src/server.rs#L743
     request_id STRING(63) NOT NULL,
-    request_uri STRING NOT NULL,
+    request_uri STRING(512) NOT NULL,
     operation_id STRING(512) NOT NULL,
     source_ip INET NOT NULL,
     -- Pulled from request header if present and truncated
@@ -5801,7 +5801,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.audit_log (
     -- actor kind indicating builtin user, silo user, or unauthenticated
     actor_kind omicron.public.audit_log_actor_kind NOT NULL,
     -- The name of the authn scheme used
-    auth_method STRING,
+    auth_method STRING(63),
 
     -- below are fields we can only fill in after the operation
 

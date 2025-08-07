@@ -20,12 +20,12 @@ use crate::context::ApiContext;
 
 /// Truncate a str to at most `max` bytes, but make sure not to cut any chars
 /// in half.
-fn safe_truncate(s: &str, max: usize) -> &str {
+fn safe_truncate(s: &str, max: usize) -> String {
     let mut end = s.len().min(max);
     while !s.is_char_boundary(end) {
         end -= 1; // back up until we hit a boundary
     }
-    &s[..end]
+    s[..end].to_string()
 }
 
 impl super::Nexus {
@@ -84,6 +84,21 @@ impl super::Nexus {
         self.audit_log_entry_init_inner(&opctx, actor, rqctx).await
     }
 
+    // A note on the handling of request URI: request.request.uri() is a
+    // http::Uri, which contains the scheme and host only if they are in the
+    // HTTP request line itself, i.e., only for HTTP/2 requests. So for HTTP/1.1
+    // requests, all we'll have is a path. We are truncating it because it can
+    // be arbitrarily long in theory, and we don't want to let people jam very
+    // long strings into the DB.
+    //
+    // We could use the authority_for_request helper defined elsewhere to pull
+    // the authority out of either the URI or the host header as appropriate
+    // and log that in a dedicated column. In that case I think we would want
+    // to log uri().path_and_query() instead of the full URI -- the only problem
+    // is that path_and_query() returns an option, so we'd need to decide what
+    // to fall back to, though in practice I don't think it's possible for it to
+    // come back as `None` because every operation we audit log has a path.
+
     async fn audit_log_entry_init_inner(
         &self,
         opctx: &OpContext,
@@ -97,12 +112,12 @@ impl super::Nexus {
             .headers()
             .get(http::header::USER_AGENT)
             .and_then(|value| value.to_str().ok())
-            .map(|s| safe_truncate(s, 255).to_string());
+            .map(|s| safe_truncate(s, 256));
 
         let entry_params = AuditLogEntryInitParams {
             request_id: rqctx.request_id.clone(),
             operation_id: rqctx.endpoint.operation_id.clone(),
-            request_uri: rqctx.request.uri().to_string(),
+            request_uri: safe_truncate(&rqctx.request.uri().to_string(), 512),
             source_ip: rqctx.request.remote_addr().ip(),
             user_agent,
             actor,

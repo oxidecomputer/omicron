@@ -73,10 +73,14 @@ async fn test_audit_log_list(ctx: &ControlPlaneTestContext) {
             description: "a pier".to_string(),
         },
     };
-    RequestBuilder::new(client, Method::POST, "/v1/projects")
+    let long_user_agent = "A".repeat(300);
+    let long_query_value = "B".repeat(600);
+    let long_uri =
+        format!("/v1/projects?very_long_parameter={}", long_query_value);
+    RequestBuilder::new(client, Method::POST, &long_uri)
         .body(Some(&body))
         .header(header::COOKIE, session_cookie.clone())
-        .header("User-Agent", "A pretend user agent string")
+        .header("User-Agent", &long_user_agent)
         .expect_status(Some(StatusCode::CREATED))
         .execute()
         .await
@@ -132,10 +136,13 @@ async fn test_audit_log_list(ctx: &ControlPlaneTestContext) {
         .unwrap();
 
     // third one was done with the session cookie, reflected in auth_method
-    assert_eq!(e3.request_uri, "/v1/projects");
+    assert_eq!(e3.request_uri.len(), 512);
+    assert!(
+        e3.request_uri.starts_with("/v1/projects?very_long_parameter=BBBBB")
+    );
     assert_eq!(e3.operation_id, "project_create");
     assert_eq!(e3.source_ip.to_string(), "127.0.0.1");
-    assert_eq!(e3.user_agent.as_ref().unwrap(), "A pretend user agent string");
+    assert_eq!(e3.user_agent.clone().unwrap(), "A".repeat(256));
     assert_eq!(e3.auth_method, Some("session_cookie".to_string()));
     assert!(e3.time_started >= t3 && e3.time_started <= t4);
     assert!(e3.time_completed > e3.time_started);
@@ -179,7 +186,7 @@ async fn test_audit_log_list(ctx: &ControlPlaneTestContext) {
     // when we use the next page cursor we should get e2
     let url = format!(
         "/v1/system/audit-log?page_token={}&limit=1",
-        log.next_page.unwrap()
+        log.next_page.clone().unwrap()
     );
     let log =
         objects_list_page_authz::<views::AuditLogEntry>(client, &url).await;
