@@ -231,6 +231,7 @@ async fn create_resources_in_test_suite_silo(client: &ClientTestContext) {
         external_ips: vec![],
         disks: vec![],
         boot_disk: None,
+        cpu_platform: None,
         start: true,
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
