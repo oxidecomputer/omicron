@@ -77,8 +77,13 @@ pub(super) fn update_status(
     details: &PendingMgsUpdateHostPhase1Details,
     log: &Logger,
 ) -> Result<MgsUpdateStatus, MgsUpdateStatusError> {
-    // TODO get actual active phase 1 slot
-    let active_phase_1_slot = M2Slot::A;
+    let active_phase_1_slot = inventory
+        .host_phase_1_active_slot_for(baseboard_id)
+        .ok_or_else(|| {
+            // TODO-fixme
+            MgsUpdateStatusError::MissingSpInfo
+        })?
+        .slot;
 
     let active_phase_1_hash = inventory
         .host_phase_1_flash_hash_for(active_phase_1_slot, baseboard_id)
@@ -293,8 +298,17 @@ pub(super) fn try_make_update(
             }
         };
 
-    // TODO get actual active phase 1 slot
-    let active_phase_1_slot = M2Slot::A;
+    let Some(active_phase_1_slot) =
+        inventory.host_phase_1_active_slot_for(baseboard_id).map(|s| s.slot)
+    else {
+        warn!(
+            log,
+            "cannot configure host OS update for board \
+             (inventory missing current active host phase 1 slot)";
+            baseboard_id,
+        );
+        return None;
+    };
 
     // TODO-correctness What should we do if the active phase 1 slot doesn't
     // match the boot disk? That means the active phase 1 slot has been changed
