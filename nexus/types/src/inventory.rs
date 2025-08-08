@@ -471,6 +471,26 @@ pub enum CabooseWhich {
     Stage0Next,
 }
 
+impl CabooseWhich {
+    pub fn toggled_slot(&self) -> Self {
+        match self {
+            CabooseWhich::RotSlotA => CabooseWhich::RotSlotB,
+            CabooseWhich::RotSlotB => CabooseWhich::RotSlotA,
+            CabooseWhich::SpSlot0 => CabooseWhich::SpSlot1,
+            CabooseWhich::SpSlot1 => CabooseWhich::SpSlot0,
+            CabooseWhich::Stage0 => CabooseWhich::Stage0Next,
+            CabooseWhich::Stage0Next => CabooseWhich::Stage0,
+        }
+    }
+
+    pub fn from_rot_slot(slot: RotSlot) -> Self {
+        match slot {
+            RotSlot::A => CabooseWhich::RotSlotA,
+            RotSlot::B => CabooseWhich::RotSlotB,
+        }
+    }
+}
+
 /// Root of trust page contents found during a collection
 ///
 /// These are normalized in the database.  Each distinct `RotPage` is assigned a

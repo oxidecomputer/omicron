@@ -797,6 +797,12 @@ impl SimSystemBuilderInner {
                     let sp_inactive = primary_collection
                         .caboose_for(CabooseWhich::SpSlot1, baseboard_id)
                         .map(|c| c.caboose.clone());
+                    let rot_slot_a = primary_collection
+                        .caboose_for(CabooseWhich::RotSlotA, baseboard_id)
+                        .map(|c| c.caboose.clone());
+                    let rot_slot_b = primary_collection
+                        .caboose_for(CabooseWhich::RotSlotB, baseboard_id)
+                        .map(|c| c.caboose.clone());
                     if let (Some(inv_sp), Some(inv_rot)) = (inv_sp, inv_rot) {
                         Some(SledHwInventory {
                             baseboard_id: &baseboard_id,
@@ -808,6 +814,8 @@ impl SimSystemBuilderInner {
                             sp_host_phase_1_hash_flash,
                             sp_active,
                             sp_inactive,
+                            rot_slot_a,
+                            rot_slot_b,
                         })
                     } else {
                         None
