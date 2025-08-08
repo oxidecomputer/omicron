@@ -13,5 +13,7 @@ dropshot.workspace = true
 omicron-common.workspace = true
 omicron-uuid-kinds.workspace = true
 omicron-workspace-hack.workspace = true
+openapi-manager-types.workspace = true
 schemars.workspace = true
+semver.workspace = true
 serde.workspace = true
