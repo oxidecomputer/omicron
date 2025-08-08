@@ -1025,7 +1025,7 @@ async fn test_floating_ip_attach_fail_between_projects(
             },
             ncpus: InstanceCpuCount(4),
             memory: ByteCount::from_gibibytes_u32(1),
-            hostname: "the-host".parse().unwrap(),
+            hostname: Some("the-host".parse().unwrap()),
             user_data:
                 b"#cloud-config\nsystem_info:\n  default_user:\n    name: oxide"
                     .to_vec(),

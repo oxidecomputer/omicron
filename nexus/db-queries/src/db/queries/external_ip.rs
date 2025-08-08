@@ -996,7 +996,7 @@ mod tests {
                 identity: IdentityMetadataCreateParams { name: String::from(name).parse().unwrap(), description: format!("instance {}", name) },
                 ncpus: InstanceCpuCount(omicron_common::api::external::InstanceCpuCount(1)).into(),
                 memory: ByteCount(omicron_common::api::external::ByteCount::from_gibibytes_u32(1)).into(),
-                hostname: "test".parse().unwrap(),
+                hostname: Some("test".parse().unwrap()),
                 ssh_public_keys: None,
                 user_data: vec![],
                 network_interfaces: Default::default(),

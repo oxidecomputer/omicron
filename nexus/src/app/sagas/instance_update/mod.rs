@@ -1569,7 +1569,7 @@ mod test {
                 },
                 ncpus: InstanceCpuCount(1),
                 memory: ByteCount::from_gibibytes_u32(1),
-                hostname: INSTANCE_NAME.parse().unwrap(),
+                hostname: Some(INSTANCE_NAME.parse().unwrap()),
                 user_data: b"#cloud-config".to_vec(),
                 ssh_public_keys: Some(Vec::new()),
                 network_interfaces:

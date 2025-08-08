@@ -19918,6 +19918,7 @@
             }
           },
           "hostname": {
+            "nullable": true,
             "description": "The hostname to be assigned to the instance",
             "allOf": [
               {
@@ -19977,7 +19978,6 @@
         },
         "required": [
           "description",
-          "hostname",
           "memory",
           "name",
           "ncpus"
