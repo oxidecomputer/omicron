@@ -661,7 +661,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             Ok(HttpResponseOk(ScanById::results_page(
                 &query,
                 users,
-                &|_, user: &User| user.id,
+                &|_, user: &User| user.id.into_untyped_uuid(),
             )?))
         };
         apictx
@@ -6804,7 +6804,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             Ok(HttpResponseOk(ScanById::results_page(
                 &query,
                 users.into_iter().map(|i| i.into()).collect(),
-                &|_, user: &User| user.id,
+                &|_, user: &User| user.id.into_untyped_uuid(),
             )?))
         };
         apictx
@@ -6951,7 +6951,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             Ok(HttpResponseOk(ScanById::results_page(
                 &query,
                 groups,
-                &|_, group: &Group| group.id,
+                &|_, group: &Group| group.id.into_untyped_uuid(),
             )?))
         };
         apictx
@@ -7084,7 +7084,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             Ok(HttpResponseOk(ScanById::results_page(
                 &query,
                 groups,
-                &|_, group: &views::Group| group.id,
+                &|_, group: &views::Group| group.id.into_untyped_uuid(),
             )?))
         };
         apictx
@@ -7111,12 +7111,23 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .authn
                 .actor_required()
                 .internal_context("listing current user's ssh keys")?;
+
+            let silo_user_id = match actor.silo_user_id() {
+                Some(silo_user_id) => silo_user_id,
+                None => {
+                    return Err(Error::non_resourcetype_not_found(
+                        "could not find silo user",
+                    ))?;
+                }
+            };
+
             let ssh_keys = nexus
-                .ssh_keys_list(&opctx, actor.actor_id(), &paginated_by)
+                .ssh_keys_list(&opctx, silo_user_id, &paginated_by)
                 .await?
                 .into_iter()
                 .map(SshKey::from)
                 .collect::<Vec<SshKey>>();
+
             Ok(HttpResponseOk(ScanByNameOrId::results_page(
                 &query,
                 ssh_keys,
@@ -7143,9 +7154,20 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .authn
                 .actor_required()
                 .internal_context("creating ssh key for current user")?;
+
+            let silo_user_id = match actor.silo_user_id() {
+                Some(silo_user_id) => silo_user_id,
+                None => {
+                    return Err(Error::non_resourcetype_not_found(
+                        "could not find silo user",
+                    ))?;
+                }
+            };
+
             let ssh_key = nexus
-                .ssh_key_create(&opctx, actor.actor_id(), new_key.into_inner())
+                .ssh_key_create(&opctx, silo_user_id, new_key.into_inner())
                 .await?;
+
             Ok(HttpResponseCreated(ssh_key.into()))
         };
         apictx
@@ -7169,15 +7191,24 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .authn
                 .actor_required()
                 .internal_context("fetching one of current user's ssh keys")?;
-            let ssh_key_selector = params::SshKeySelector {
-                silo_user_id: actor.actor_id(),
-                ssh_key: path.ssh_key,
+
+            let silo_user_id = match actor.silo_user_id() {
+                Some(silo_user_id) => silo_user_id,
+                None => {
+                    return Err(Error::non_resourcetype_not_found(
+                        "could not find silo user",
+                    ))?;
+                }
             };
+
+            let ssh_key_selector =
+                params::SshKeySelector { silo_user_id, ssh_key: path.ssh_key };
+
             let ssh_key_lookup =
                 nexus.ssh_key_lookup(&opctx, &ssh_key_selector)?;
-            let (.., silo_user, _, ssh_key) = ssh_key_lookup.fetch().await?;
-            // Ensure the SSH key exists in the current silo
-            assert_eq!(silo_user.id(), actor.actor_id());
+
+            let (.., ssh_key) = ssh_key_lookup.fetch().await?;
+
             Ok(HttpResponseOk(ssh_key.into()))
         };
         apictx
@@ -7201,15 +7232,24 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .authn
                 .actor_required()
                 .internal_context("deleting one of current user's ssh keys")?;
-            let ssh_key_selector = params::SshKeySelector {
-                silo_user_id: actor.actor_id(),
-                ssh_key: path.ssh_key,
+
+            let silo_user_id = match actor.silo_user_id() {
+                Some(silo_user_id) => silo_user_id,
+                None => {
+                    return Err(Error::non_resourcetype_not_found(
+                        "could not find silo user",
+                    ))?;
+                }
             };
+
+            let ssh_key_selector =
+                params::SshKeySelector { silo_user_id, ssh_key: path.ssh_key };
+
             let ssh_key_lookup =
                 nexus.ssh_key_lookup(&opctx, &ssh_key_selector)?;
-            nexus
-                .ssh_key_delete(&opctx, actor.actor_id(), &ssh_key_lookup)
-                .await?;
+
+            nexus.ssh_key_delete(&opctx, silo_user_id, &ssh_key_lookup).await?;
+
             Ok(HttpResponseDeleted())
         };
         apictx
@@ -8083,13 +8123,24 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let &actor = opctx.authn.actor_required().internal_context(
                 "creating new device auth session for current user",
             )?;
+
+            let silo_user_id = match actor.silo_user_id() {
+                Some(silo_user_id) => silo_user_id,
+                None => {
+                    return Err(Error::non_resourcetype_not_found(
+                        "could not find silo user",
+                    ))?;
+                }
+            };
+
             let _token = nexus
                 .device_auth_request_verify(
                     &opctx,
                     params.user_code,
-                    actor.actor_id(),
+                    silo_user_id,
                 )
                 .await?;
+
             Ok(HttpResponseUpdatedNoContent())
         };
         apictx

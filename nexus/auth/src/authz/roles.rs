@@ -39,6 +39,7 @@ use crate::authn;
 use crate::context::OpContext;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ResourceType;
+use omicron_uuid_kinds::GenericUuid;
 use slog::trace;
 use std::collections::BTreeSet;
 use uuid::Uuid;
@@ -160,7 +161,14 @@ async fn load_directly_attached_roles(
             .role_asgn_list_for(
                 opctx,
                 actor.into(),
-                actor.actor_id(),
+                match &actor {
+                    authn::Actor::SiloUser { silo_user_id, .. } => {
+                        silo_user_id.into_untyped_uuid()
+                    }
+                    authn::Actor::UserBuiltin { user_builtin_id, .. } => {
+                        user_builtin_id.into_untyped_uuid()
+                    }
+                },
                 resource_type,
                 resource_id,
             )

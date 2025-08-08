@@ -18,7 +18,10 @@ use omicron_common::api::external::{
     Digest, Error, FailureDomain, IdentityMetadata, InstanceState, Name,
     ObjectIdentity, SimpleIdentity, SimpleIdentityOrName,
 };
-use omicron_uuid_kinds::{AlertReceiverUuid, AlertUuid};
+use omicron_uuid_kinds::AlertReceiverUuid;
+use omicron_uuid_kinds::AlertUuid;
+use omicron_uuid_kinds::SiloGroupUuid;
+use omicron_uuid_kinds::SiloUserUuid;
 use oxnet::{Ipv4Net, Ipv6Net};
 use schemars::JsonSchema;
 use semver::Version;
@@ -939,7 +942,8 @@ impl fmt::Display for PhysicalDiskState {
 /// View of a User
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 pub struct User {
-    pub id: Uuid,
+    pub id: SiloUserUuid,
+
     /** Human-readable name that can identify the user */
     pub display_name: String,
 
@@ -965,7 +969,7 @@ pub struct CurrentUser {
 /// View of a Group
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 pub struct Group {
-    pub id: Uuid,
+    pub id: SiloGroupUuid,
 
     /// Human-readable name that can identify the group
     pub display_name: String,
@@ -999,7 +1003,7 @@ pub struct SshKey {
     pub identity: IdentityMetadata,
 
     /// The user to whom this key belongs
-    pub silo_user_id: Uuid,
+    pub silo_user_id: SiloUserUuid,
 
     /// SSH public key, e.g., `"ssh-ed25519 AAAAC3NzaC..."`
     pub public_key: String,

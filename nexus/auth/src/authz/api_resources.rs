@@ -1126,7 +1126,7 @@ authz_resource! {
 authz_resource! {
     name = "UserBuiltin",
     parent = "Fleet",
-    primary_key = Uuid,
+    primary_key = { uuid_kind = BuiltInUserKind },
     roles_allowed = false,
     polar_snippet = FleetChild,
 }
@@ -1154,7 +1154,7 @@ impl ApiResourceWithRolesType for Silo {
 authz_resource! {
     name = "SiloUser",
     parent = "Silo",
-    primary_key = Uuid,
+    primary_key = { uuid_kind = SiloUserKind },
     roles_allowed = false,
     polar_snippet = Custom,
 }
@@ -1162,7 +1162,7 @@ authz_resource! {
 authz_resource! {
     name = "SiloGroup",
     parent = "Silo",
-    primary_key = Uuid,
+    primary_key = { uuid_kind = SiloGroupKind },
     roles_allowed = false,
     polar_snippet = Custom,
 }

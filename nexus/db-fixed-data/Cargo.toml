@@ -21,3 +21,4 @@ nexus-db-model.workspace = true
 nexus-types.workspace = true
 omicron-common.workspace = true
 omicron-workspace-hack.workspace = true
+omicron-uuid-kinds.workspace = true

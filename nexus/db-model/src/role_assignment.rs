@@ -7,6 +7,9 @@ use anyhow::anyhow;
 use nexus_db_schema::schema::role_assignment;
 use nexus_types::external_api::shared;
 use omicron_common::api::external::Error;
+use omicron_uuid_kinds::BuiltInUserUuid;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::SiloUserUuid;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -80,6 +83,38 @@ impl RoleAssignment {
             resource_id,
             role_name: String::from(role_name),
         }
+    }
+
+    /// Creates a new database RoleAssignment object for a silo user
+    pub fn new_for_silo_user(
+        user_id: SiloUserUuid,
+        resource_type: omicron_common::api::external::ResourceType,
+        resource_id: Uuid,
+        role_name: &str,
+    ) -> Self {
+        Self::new(
+            IdentityType::SiloUser,
+            user_id.into_untyped_uuid(),
+            resource_type,
+            resource_id,
+            role_name,
+        )
+    }
+
+    /// Creates a new database RoleAssignment object for a built-in user
+    pub fn new_for_builtin_user(
+        user_id: BuiltInUserUuid,
+        resource_type: omicron_common::api::external::ResourceType,
+        resource_id: Uuid,
+        role_name: &str,
+    ) -> Self {
+        Self::new(
+            IdentityType::UserBuiltin,
+            user_id.into_untyped_uuid(),
+            resource_type,
+            resource_id,
+            role_name,
+        )
     }
 }
 

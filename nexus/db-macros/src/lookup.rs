@@ -33,6 +33,9 @@ pub struct Input {
     /// ordered list of resources that are ancestors of this resource, starting
     /// with the top of the hierarchy
     /// (e.g., for an Instance, this would be `[ "Silo", "Project" ]`
+    ///
+    /// if the resource name has a * as the last character, the primary key is a
+    /// typed uuid.
     ancestors: Vec<String>,
     /// whether lookup by name is supported (usually within the parent collection)
     lookup_by_name: bool,
@@ -138,22 +141,22 @@ impl Config {
     fn for_input(input: Input) -> syn::Result<Config> {
         let resource = Resource::for_name(&input.name);
 
+        let ancestors: Vec<Resource> =
+            input.ancestors.iter().map(|s| Resource::for_name(s)).collect();
+
         let mut path_types: Vec<_> =
-            input.ancestors.iter().map(|a| format_ident!("{}", a)).collect();
+            ancestors.iter().map(|r| format_ident!("{}", r.name)).collect();
         path_types.push(resource.name.clone());
 
-        let mut path_authz_names: Vec<_> = input
-            .ancestors
+        let mut path_authz_names: Vec<_> = ancestors
             .iter()
-            .map(|a| {
-                format_ident!("authz_{}", heck::AsSnakeCase(&a).to_string())
-            })
+            .map(|r| format_ident!("{}", r.authz_name))
             .collect();
         path_authz_names.push(resource.authz_name.clone());
 
-        let parent = input.ancestors.last().map(|s| Resource::for_name(s));
+        let parent = ancestors.last().cloned();
         let silo_restricted = !input.visible_outside_silo
-            && input.ancestors.iter().any(|s| s == "Silo");
+            && ancestors.iter().any(|r| r.name == "Silo");
 
         let primary_key_columns: Vec<_> = input
             .primary_key_columns
@@ -176,6 +179,7 @@ impl Config {
 
 /// Information about a resource (either the one we're generating or an
 /// ancestor in its path)
+#[derive(Clone)]
 struct Resource {
     /// PascalCase resource name itself (e.g., `Project`)
     ///
@@ -185,14 +189,25 @@ struct Resource {
     name_as_snake: String,
     /// identifier for an authz object for this resource (e.g., `authz_project`)
     authz_name: syn::Ident,
+    /// the primary key uses a typed uuid
+    primary_key_is_typed_uuid: bool,
 }
 
 impl Resource {
     fn for_name(name: &str) -> Resource {
+        let (name, primary_key_is_typed_uuid) =
+            if name.chars().last() == Some('*') {
+                let name = &name[0..(name.len() - 1)];
+                (name, true)
+            } else {
+                (name, false)
+            };
+        assert!(!name.contains("*"));
+
         let name_as_snake = heck::AsSnakeCase(&name).to_string();
         let name = format_ident!("{}", name);
         let authz_name = format_ident!("authz_{}", name_as_snake);
-        Resource { name, authz_name, name_as_snake }
+        Resource { name, authz_name, name_as_snake, primary_key_is_typed_uuid }
     }
 }
 
@@ -784,13 +799,33 @@ fn generate_database_functions(config: &Config) -> TokenStream {
         (
             quote! { #parent_authz_name: &authz::#parent_resource_name, },
             quote! { #parent_authz_name, },
-            quote! {
-                let (#(#ancestors_authz_names,)* _) =
-                    #parent_resource_name::lookup_by_id_no_authz(
-                        opctx, datastore, &db_row.#parent_id.into()
-                    ).await?;
+            // If the parent's id is a typed uuid, there will be a method
+            // converting the db typed uuid into an "external" typed uuid. Use
+            // that for `lookup_by_id_no_authz`.
+            if p.primary_key_is_typed_uuid {
+                quote! {
+                    let (#(#ancestors_authz_names,)* _) =
+                        #parent_resource_name::lookup_by_id_no_authz(
+                            opctx, datastore, &db_row.#parent_id()
+                        ).await?;
+                }
+            } else {
+                quote! {
+                    let (#(#ancestors_authz_names,)* _) =
+                        #parent_resource_name::lookup_by_id_no_authz(
+                            opctx, datastore, &db_row.#parent_id.into()
+                        ).await?;
+                }
             },
-            quote! { .filter(dsl::#parent_id.eq(#parent_authz_name.id())) },
+            // If the parent's id is a typed uuid, then the `to_db_typed_uuid`
+            // method is required to convert to the db typed uuid
+            if p.primary_key_is_typed_uuid {
+                quote! { .filter(dsl::#parent_id.eq(
+                    ::nexus_db_model::to_db_typed_uuid(#parent_authz_name.id())
+                )) }
+            } else {
+                quote! { .filter(dsl::#parent_id.eq(#parent_authz_name.id())) }
+            },
             quote! { #parent_authz_name },
         )
     } else {
