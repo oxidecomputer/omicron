@@ -1623,15 +1623,15 @@ pub struct AuditLogEntry {
 
     /// Request ID for tracing requests through the system
     pub request_id: String,
-    /// URI of the request, truncated at 500 characters. Will only include
-    /// host and scheme for HTTP/2 requests, otherwise will be a path and query
-    /// params.
+    /// URI of the request, truncated to 512 characters. Will only include host
+    /// and scheme for HTTP/2 requests. For HTTP/1.1, the URI will consist of
+    /// only the path and query.
     pub request_uri: String,
     /// API endpoint ID, e.g., `project_create`
     pub operation_id: String,
     /// IP address that made the request
     pub source_ip: IpAddr,
-    /// User agent string from the request
+    /// User agent string from the request, truncated to 256 characters.
     pub user_agent: Option<String>,
 
     pub actor: AuditLogEntryActor,

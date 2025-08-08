@@ -14585,7 +14585,7 @@
             "type": "string"
           },
           "request_uri": {
-            "description": "Full URL of the request",
+            "description": "URI of the request, truncated to 512 characters. Will only include host and scheme for HTTP/2 requests. For HTTP/1.1, the URI will consist of only the path and query.",
             "type": "string"
           },
           "result": {
@@ -14613,7 +14613,7 @@
           },
           "user_agent": {
             "nullable": true,
-            "description": "User agent string from the request",
+            "description": "User agent string from the request, truncated to 256 characters.",
             "type": "string"
           }
         },

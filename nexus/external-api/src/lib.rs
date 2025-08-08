@@ -1,7 +1,6 @@
 use std::collections::BTreeMap;
 
 use anyhow::anyhow;
-use chrono::{DateTime, Utc};
 use dropshot::Body;
 use dropshot::{
     EmptyScanParams, EndpointTagPolicy, Header, HttpError,
@@ -19,7 +18,7 @@ use nexus_types::{
 };
 use omicron_common::api::external::{
     http_pagination::{
-        PageSelector, PaginatedById, PaginatedByName, PaginatedByNameOrId,
+        PaginatedById, PaginatedByName, PaginatedByNameOrId,
         PaginatedByTimeAndId,
     },
     *,
@@ -4038,8 +4037,3 @@ pub type IpPoolRangePaginationParams =
 /// Type used to paginate request to list timeseries schema
 pub type TimeseriesSchemaPaginationParams =
     PaginationParams<EmptyScanParams, oximeter_types::TimeseriesName>;
-
-pub type AuditLogPaginationParams = PaginationParams<
-    params::AuditLog,
-    PageSelector<params::AuditLog, DateTime<Utc>>,
->;

@@ -98,6 +98,9 @@ impl super::Nexus {
     // is that path_and_query() returns an option, so we'd need to decide what
     // to fall back to, though in practice I don't think it's possible for it to
     // come back as `None` because every operation we audit log has a path.
+    //
+    // We should also consider redacting query strings or at least building in
+    // some tooling to help us make sure we're not logging anything sensitive.
 
     async fn audit_log_entry_init_inner(
         &self,
@@ -114,6 +117,18 @@ impl super::Nexus {
             .and_then(|value| value.to_str().ok())
             .map(|s| safe_truncate(s, 256));
 
+        let auth_method = match actor {
+            // practically speaking, there is currently no operation that will
+            // cause this method to be called with a built-in user
+            AuditLogActor::UserBuiltin { .. }
+            | AuditLogActor::SiloUser { .. } => {
+                opctx.authn.scheme_used().map(|s| s.to_string())
+            }
+            // if we tried to pull it off the opctx this would be None anyway,
+            // but it's better to be explicit
+            AuditLogActor::Unauthenticated => None,
+        };
+
         let entry_params = AuditLogEntryInitParams {
             request_id: rqctx.request_id.clone(),
             operation_id: rqctx.endpoint.operation_id.clone(),
@@ -121,14 +136,16 @@ impl super::Nexus {
             source_ip: rqctx.request.remote_addr().ip(),
             user_agent,
             actor,
-            auth_method: opctx.authn.scheme_used().map(|s| s.to_string()),
+            auth_method,
         };
         self.db_datastore.audit_log_entry_init(opctx, entry_params.into()).await
     }
 
     /// Complete an existing audit log entry with result info like end time,
     /// HTTP status code, error message, etc. Note we retry write failures
-    /// because we really want this to go through.
+    /// because we really want this to go through, but the caller should
+    /// ignore error results because we do not want such a failure to fail the
+    /// operation.
     pub(crate) async fn audit_log_entry_complete<R: HttpResponse>(
         &self,
         opctx: &OpContext,
