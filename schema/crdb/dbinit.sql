@@ -4800,7 +4800,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_oximeter_read_policy (
 -- Blueprint information related to pending RoT bootloader upgrades.
 CREATE TABLE IF NOT EXISTS omicron.public.bp_pending_mgs_update_rot_bootloader (
     -- Foreign key into the `blueprint` table
-    blueprint_id UUID,
+    blueprint_id UUID NOT NULL,
     -- identify of the device to be updated
     -- (foreign key into the `hw_baseboard_id` table)
     hw_baseboard_id UUID NOT NULL,
@@ -4821,7 +4821,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_pending_mgs_update_rot_bootloader (
 -- Blueprint information related to pending SP upgrades.
 CREATE TABLE IF NOT EXISTS omicron.public.bp_pending_mgs_update_sp (
     -- Foreign key into the `blueprint` table
-    blueprint_id UUID,
+    blueprint_id UUID NOT NULL,
     -- identify of the device to be updated
     -- (foreign key into the `hw_baseboard_id` table)
     hw_baseboard_id UUID NOT NULL,
@@ -4842,7 +4842,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_pending_mgs_update_sp (
 -- Blueprint information related to pending RoT upgrades.
 CREATE TABLE IF NOT EXISTS omicron.public.bp_pending_mgs_update_rot (
     -- Foreign key into the `blueprint` table
-    blueprint_id UUID,
+    blueprint_id UUID NOT NULL,
     -- identify of the device to be updated
     -- (foreign key into the `hw_baseboard_id` table)
     hw_baseboard_id UUID NOT NULL,
@@ -4867,7 +4867,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_pending_mgs_update_rot (
 -- Blueprint information related to pending host OS phase 1 updates.
 CREATE TABLE IF NOT EXISTS omicron.public.bp_pending_mgs_update_host_phase_1 (
     -- Foreign key into the `blueprint` table
-    blueprint_id UUID,
+    blueprint_id UUID NOT NULL,
     -- identify of the device to be updated
     -- (foreign key into the `hw_baseboard_id` table)
     hw_baseboard_id UUID NOT NULL,
