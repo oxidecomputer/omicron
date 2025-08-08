@@ -1153,7 +1153,7 @@ fn recursively_add_directory_to_zipfile(
 
         let file_type = entry.file_type()?;
         if file_type.is_file() {
-            let opts = FullFileOptions::default();
+            let opts = FullFileOptions::default().large_file(true);
             let src = entry.path();
 
             zip.start_file_from_path(dst, opts)?;
