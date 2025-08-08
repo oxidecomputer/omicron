@@ -28,6 +28,7 @@ use nexus_types::inventory::BaseboardId;
 use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::Collection;
 use omicron_common::api::external::TufRepoDescription;
+use omicron_common::disk::M2Slot;
 use slog::{error, info, warn};
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeSet;
@@ -221,6 +222,19 @@ enum MgsUpdateStatusError {
     MissingActiveCaboose,
     #[error("no RoT state found in inventory")]
     MissingRotState,
+    #[error("no active host phase 1 slot found in inventory")]
+    MissingHostPhase1ActiveSlot,
+    #[error("no host phase 1 hash found in inventory for slot {0:?}")]
+    MissingHostPhase1FlashHash(M2Slot),
+    #[error("no sled-agent config reconciler result found in inventory")]
+    MissingSledAgentLastReconciliation,
+    #[error("sled-agent reported an error determining boot disk: {0}")]
+    SledAgentErrorDeterminingBootDisk(String),
+    #[error(
+        "sled-agent reported an error determining boot partition contents \
+         for slot {slot}: {err}"
+    )]
+    SledAgentErrorDeterminingBootPartitionDetails { slot: M2Slot, err: String },
     #[error("not yet implemented")]
     NotYetImplemented,
     #[error("unable to parse input into ArtifactVersion: {0:?}")]

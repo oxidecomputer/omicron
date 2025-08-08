@@ -79,17 +79,15 @@ pub(super) fn update_status(
 ) -> Result<MgsUpdateStatus, MgsUpdateStatusError> {
     let active_phase_1_slot = inventory
         .host_phase_1_active_slot_for(baseboard_id)
-        .ok_or_else(|| {
-            // TODO-fixme
-            MgsUpdateStatusError::MissingSpInfo
-        })?
+        .ok_or_else(|| MgsUpdateStatusError::MissingHostPhase1ActiveSlot)?
         .slot;
 
     let active_phase_1_hash = inventory
         .host_phase_1_flash_hash_for(active_phase_1_slot, baseboard_id)
         .ok_or_else(|| {
-            // TODO-fixme
-            MgsUpdateStatusError::MissingSpInfo
+            MgsUpdateStatusError::MissingHostPhase1FlashHash(
+                active_phase_1_slot,
+            )
         })?
         .hash;
 
@@ -105,16 +103,15 @@ pub(super) fn update_status(
 
     let last_reconciliation =
         sled_agent.last_reconciliation.as_ref().ok_or_else(|| {
-            // TODO-fixme
-            MgsUpdateStatusError::MissingSpInfo
+            MgsUpdateStatusError::MissingSledAgentLastReconciliation
         })?;
-    let boot_disk =
-        *last_reconciliation.boot_partitions.boot_disk.as_ref().map_err(
-            |_| {
-                // TODO-fixme
-                MgsUpdateStatusError::MissingSpInfo
-            },
-        )?;
+    let boot_disk = *last_reconciliation
+        .boot_partitions
+        .boot_disk
+        .as_ref()
+        .map_err(|err| {
+            MgsUpdateStatusError::SledAgentErrorDeterminingBootDisk(err.clone())
+        })?;
 
     // If we find the desired artifact in the active slot _and_ we see that
     // sled-agent has successfully booted from that same slot, we're done.
@@ -167,9 +164,11 @@ pub(super) fn update_status(
         .boot_partitions
         .slot_details(boot_disk)
         .as_ref()
-        .map_err(|_| {
-            // TODO-fixme
-            MgsUpdateStatusError::MissingSpInfo
+        .map_err(|err| {
+            MgsUpdateStatusError::SledAgentErrorDeterminingBootPartitionDetails {
+                slot: boot_disk,
+                err: err.clone(),
+            }
         })?
         .artifact_hash;
     if active_phase_2_hash != *expected_active_phase_2_hash {
@@ -187,9 +186,11 @@ pub(super) fn update_status(
         .boot_partitions
         .slot_details(boot_disk.toggled())
         .as_ref()
-        .map_err(|_| {
-            // TODO-fixme
-            MgsUpdateStatusError::MissingSpInfo
+        .map_err(|err| {
+            MgsUpdateStatusError::SledAgentErrorDeterminingBootPartitionDetails {
+                slot: boot_disk.toggled(),
+                err: err.clone(),
+            }
         })?
         .artifact_hash;
     if inactive_phase_2_hash != *expected_inactive_phase_2_hash {
@@ -218,8 +219,9 @@ pub(super) fn update_status(
             baseboard_id,
         )
         .ok_or_else(|| {
-            // TODO-fixme
-            MgsUpdateStatusError::MissingSpInfo
+            MgsUpdateStatusError::MissingHostPhase1FlashHash(
+                active_phase_1_slot.toggled(),
+            )
         })?
         .hash;
     if inactive_phase_1_hash == *expected_inactive_phase_1_hash {
