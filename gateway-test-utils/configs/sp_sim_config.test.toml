@@ -55,7 +55,7 @@ restart_id = "0d3e464a-666e-4687-976f-90e31238be8b"
 task_name = "task_thermal_server"
 task_gen = 1
 uptime = 1235
-class = "oxide.sidecar.thermal.sensor_read_error"
+k = "oxide.sidecar.thermal.sensor_read_error"
 sensor = { id = "dev-1", device = "fake-tmp-sensor", location = "South", presence = "Failed" }
 error = "DeviceError"
 
@@ -209,14 +209,14 @@ restart_id = "af1ebf85-36ba-4c31-bbec-b9825d6d9d8b"
 task_name = "task_apollo_server"
 task_gen = 13
 uptime = 1233
-class = "gov.nasa.apollo.o2_tanks.stir.begin"
+k = "gov.nasa.apollo.o2_tanks.stir.begin"
 message = "stirring the tanks"
 
 [[simulated_sps.gimlet.ereport_config.ereports]]
 task_name = "drv_ae35_server"
 task_gen = 1
 uptime = 1234
-class = "io.discovery.ae35.fault"
+k = "io.discovery.ae35.fault"
 message = "i've just picked up a fault in the AE-35 unit"
 de = { scheme = "fmd", authority = { product-id = "HAL-9000-series computer", server-id = "HAL 9000"}, mod-name = "ae35-diagnosis" }
 hours_to_failure = 72
@@ -225,7 +225,7 @@ hours_to_failure = 72
 task_name = "task_apollo_server"
 task_gen = 13
 uptime = 1237
-class = "gov.nasa.apollo.fault"
+k = "gov.nasa.apollo.fault"
 message = "houston, we have a problem"
 crew = ["Lovell", "Swigert", "Haise"]
 
@@ -233,14 +233,14 @@ crew = ["Lovell", "Swigert", "Haise"]
 task_name = "drv_thingy_server"
 task_gen = 2
 uptime = 1240
-class = "flagrant_error"
+k = "flagrant_error"
 computer = false
 
 [[simulated_sps.gimlet.ereport_config.ereports]]
 task_name = "task_latex_server"
 task_gen = 1
 uptime = 1245
-class = "overfull_hbox"
+k = "overfull_hbox"
 badness  = 10000
 
 [[simulated_sps.gimlet]]

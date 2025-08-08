@@ -82,7 +82,7 @@ mod sled0 {
             "hubris_task_gen": 13,
             "hubris_uptime_ms": 1233,
             "ereport_message_version": 0,
-            "class": "gov.nasa.apollo.o2_tanks.stir.begin",
+            "k": "gov.nasa.apollo.o2_tanks.stir.begin",
             "message": "stirring the tanks",
         }
     }
@@ -96,7 +96,7 @@ mod sled0 {
             "hubris_task_gen": 1,
             "hubris_uptime_ms": 1234,
             "ereport_message_version": 0,
-            "class": "io.discovery.ae35.fault",
+            "k": "io.discovery.ae35.fault",
             "message": "i've just picked up a fault in the AE-35 unit",
             "de": {
                 "scheme": "fmd",
@@ -119,7 +119,7 @@ mod sled0 {
             "hubris_task_gen": 13,
             "hubris_uptime_ms": 1237,
             "ereport_message_version": 0,
-            "class": "gov.nasa.apollo.fault",
+            "k": "gov.nasa.apollo.fault",
             "message": "houston, we have a problem",
             "crew": [
                 "Lovell",
@@ -139,7 +139,7 @@ mod sled0 {
             "hubris_task_gen": 2,
             "hubris_uptime_ms": 1240,
             "ereport_message_version": 0,
-            "class": "flagrant_error",
+            "k": "flagrant_error",
             "computer": false,
         }
     }
@@ -154,7 +154,7 @@ mod sled0 {
             "hubris_task_gen": 1,
             "hubris_uptime_ms": 1245,
             "ereport_message_version": 0,
-            "class": "overfull_hbox",
+            "k": "overfull_hbox",
             "badness": 10000,
         }
     }
