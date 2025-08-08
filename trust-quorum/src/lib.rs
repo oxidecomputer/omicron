@@ -9,6 +9,7 @@
 //! All persistent state and all networking is managed outside of this
 //! implementation.
 
+use daft::Diffable;
 use derive_more::Display;
 use serde::{Deserialize, Serialize};
 
@@ -22,16 +23,19 @@ mod node_ctx;
 mod persistent_state;
 mod validators;
 pub use configuration::Configuration;
-pub use coordinator_state::{CoordinatorOperation, CoordinatorState};
+pub use coordinator_state::{
+    CoordinatorOperation, CoordinatorState, CoordinatorStateDiff,
+};
+pub use validators::ValidatedReconfigureMsgDiff;
 mod alarm;
 
 pub use alarm::Alarm;
 pub use crypto::RackSecret;
 pub use messages::*;
-pub use node::Node;
+pub use node::{Node, NodeDiff};
 // public only for docs.
 pub use node_ctx::NodeHandlerCtx;
-pub use node_ctx::{NodeCallerCtx, NodeCommonCtx, NodeCtx};
+pub use node_ctx::{NodeCallerCtx, NodeCommonCtx, NodeCtx, NodeCtxDiff};
 pub use persistent_state::{PersistentState, PersistentStateSummary};
 
 #[derive(
@@ -46,7 +50,9 @@ pub use persistent_state::{PersistentState, PersistentStateSummary};
     Serialize,
     Deserialize,
     Display,
+    Diffable,
 )]
+#[daft(leaf)]
 pub struct Epoch(pub u64);
 
 impl Epoch {
@@ -69,7 +75,9 @@ impl Epoch {
     Serialize,
     Deserialize,
     Display,
+    Diffable,
 )]
+#[daft(leaf)]
 pub struct Threshold(pub u8);
 
 /// A unique identifier for a given trust quorum member.
@@ -80,8 +88,17 @@ pub struct Threshold(pub u8);
 ///
 /// See RFDs 303 and 308 for more details.
 #[derive(
-    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Serialize,
+    Deserialize,
+    Diffable,
 )]
+#[daft(leaf)]
 pub struct PlatformId {
     part_number: String,
     serial_number: String,
@@ -108,7 +125,9 @@ impl PlatformId {
 }
 
 /// A container to make messages between trust quorum nodes routable
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Diffable)]
+#[cfg_attr(feature = "danger_partial_eq_ct_wrapper", derive(PartialEq, Eq))]
+#[daft(leaf)]
 pub struct Envelope {
     pub to: PlatformId,
     pub from: PlatformId,

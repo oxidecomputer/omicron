@@ -6,7 +6,9 @@
 
 use crate::{
     Alarm, Envelope, PeerMsg, PeerMsgKind, PersistentState, PlatformId,
+    persistent_state::PersistentStateDiff,
 };
+use daft::{BTreeSetDiff, Diffable, Leaf};
 use std::collections::BTreeSet;
 
 /// An API shared by [`NodeCallerCtx`] and [`NodeHandlerCtx`]
@@ -67,6 +69,8 @@ pub trait NodeHandlerCtx: NodeCommonCtx {
 /// We separate access to this context via different APIs; namely [`NodeCallerCtx`]
 /// and [`NodeHandlerCtx`]. This statically prevents both the caller and
 /// [`crate::Node`] internals from performing improper mutations.
+#[derive(Debug, Clone, Diffable)]
+#[cfg_attr(feature = "danger_partial_eq_ct_wrapper", derive(PartialEq, Eq))]
 pub struct NodeCtx {
     /// The unique hardware ID of a sled
     platform_id: PlatformId,
@@ -88,6 +92,34 @@ pub struct NodeCtx {
 
     /// Any alarms that have occurred
     alarms: BTreeSet<Alarm>,
+}
+
+// For diffs we want to allow access to all fields, but not make them public in
+// the `NodeCtx` type itself.
+impl<'daft> NodeCtxDiff<'daft> {
+    pub fn platform_id(&self) -> Leaf<&PlatformId> {
+        self.platform_id
+    }
+
+    pub fn persistent_state(&self) -> &PersistentStateDiff<'daft> {
+        &self.persistent_state
+    }
+
+    pub fn persistent_state_changed(&self) -> Leaf<&bool> {
+        self.persistent_state_changed
+    }
+
+    pub fn outgoing(&self) -> Leaf<&[Envelope]> {
+        self.outgoing
+    }
+
+    pub fn connected(&self) -> &BTreeSetDiff<'daft, PlatformId> {
+        &self.connected
+    }
+
+    pub fn alarms(&self) -> &BTreeSetDiff<'daft, Alarm> {
+        &self.alarms
+    }
 }
 
 impl NodeCtx {

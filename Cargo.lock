@@ -13788,6 +13788,27 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8df9b6e13f2d32c91b9bd719c00d1958837bc7dec474d94952798cc8e69eeec3"
 
 [[package]]
+name = "tqdb"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "camino",
+ "clap",
+ "colored",
+ "daft",
+ "iddqd",
+ "omicron-repl-utils",
+ "omicron-workspace-hack",
+ "reconfigurator-cli",
+ "reedline",
+ "serde_json",
+ "slog",
+ "tabled 0.15.0",
+ "trust-quorum",
+ "trust-quorum-test-utils",
+]
+
+[[package]]
 name = "tracing"
 version = "0.1.40"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -13951,6 +13972,7 @@ dependencies = [
 name = "trust-quorum"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "assert_matches",
  "bcs",
  "bootstore",
@@ -13958,6 +13980,7 @@ dependencies = [
  "chacha20poly1305",
  "daft",
  "derive_more",
+ "dropshot",
  "gfss",
  "hex",
  "hkdf",
@@ -13969,6 +13992,7 @@ dependencies = [
  "rand 0.8.5",
  "secrecy 0.10.3",
  "serde",
+ "serde_json",
  "serde_with",
  "sha3",
  "slog",
@@ -13978,8 +14002,26 @@ dependencies = [
  "test-strategy",
  "thiserror 2.0.12",
  "tokio",
+ "trust-quorum-test-utils",
  "uuid",
  "zeroize",
+]
+
+[[package]]
+name = "trust-quorum-test-utils"
+version = "0.1.0"
+dependencies = [
+ "camino",
+ "daft",
+ "dropshot",
+ "gfss",
+ "iddqd",
+ "omicron-uuid-kinds",
+ "omicron-workspace-hack",
+ "serde",
+ "serde_json",
+ "slog",
+ "trust-quorum",
 ]
 
 [[package]]

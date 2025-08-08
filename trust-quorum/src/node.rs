@@ -23,6 +23,7 @@ use crate::{
     Alarm, Configuration, CoordinatorState, Epoch, NodeHandlerCtx, PlatformId,
     messages::*,
 };
+use daft::{Diffable, Leaf};
 use gfss::shamir::Share;
 use omicron_uuid_kinds::RackUuid;
 use slog::{Logger, error, info, o, warn};
@@ -32,7 +33,9 @@ use slog::{Logger, error, info, o, warn};
 /// This is a `sans-io` implementation that is deterministic (except for
 /// `RackSecretGeneration`, which currently hardcodes use of an OsRng). This
 /// style is primarily for testing purposes.
+#[derive(Debug, Clone, Diffable)]
 pub struct Node {
+    #[daft(ignore)]
     log: Logger,
 
     /// In memory state for when this node is coordinating a reconfiguration
@@ -42,6 +45,29 @@ pub struct Node {
     /// share for a committed epoch.
     key_share_computer: Option<KeyShareComputer>,
 }
+
+// For diffs we want to allow access to all fields, but not make them public in
+// the `Node` type itself.
+impl NodeDiff<'_> {
+    pub fn coordinator_state(&self) -> Leaf<Option<&CoordinatorState>> {
+        self.coordinator_state
+    }
+
+    pub fn key_share_computer(&self) -> Leaf<Option<&KeyShareComputer>> {
+        self.key_share_computer
+    }
+}
+
+#[cfg(feature = "danger_partial_eq_ct_wrapper")]
+impl PartialEq for Node {
+    fn eq(&self, other: &Self) -> bool {
+        self.coordinator_state == other.coordinator_state
+            && self.key_share_computer == other.key_share_computer
+    }
+}
+
+#[cfg(feature = "danger_partial_eq_ct_wrapper")]
+impl Eq for Node {}
 
 impl Node {
     pub fn new(log: &Logger, ctx: &mut impl NodeHandlerCtx) -> Node {
