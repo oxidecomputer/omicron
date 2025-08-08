@@ -80,18 +80,35 @@ impl<'a> Collector<'a> {
         // keeps the code simpler.
 
         debug!(&self.log, "begin collection");
+        let start_time = std::time::Instant::now();
 
+        let step_start = std::time::Instant::now();
         self.collect_all_mgs().await;
+        debug!(&self.log, "collect_all_mgs completed"; "duration" => ?step_start.elapsed());
+
+        let step_start = std::time::Instant::now();
         self.collect_all_sled_agents().await;
+        debug!(&self.log, "collect_all_sled_agents completed"; "duration" => ?step_start.elapsed());
+
+        let step_start = std::time::Instant::now();
         self.collect_all_keepers().await;
+        debug!(&self.log, "collect_all_keepers completed"; "duration" => ?step_start.elapsed());
+
+        let step_start = std::time::Instant::now();
         self.collect_all_cockroach().await;
+        debug!(&self.log, "collect_all_cockroach completed"; "duration" => ?step_start.elapsed());
 
         // The following must be called after "collect_all_sled_agents",
         // or they'll see an empty set of services.
+        let step_start = std::time::Instant::now();
         self.collect_all_timesync().await;
-        self.collect_all_dns_generations().await;
+        debug!(&self.log, "collect_all_timesync completed"; "duration" => ?step_start.elapsed());
 
-        debug!(&self.log, "finished collection");
+        let step_start = std::time::Instant::now();
+        self.collect_all_dns_generations().await;
+        debug!(&self.log, "collect_all_dns_generations completed"; "duration" => ?step_start.elapsed());
+
+        debug!(&self.log, "finished collection"; "total_duration" => ?start_time.elapsed());
 
         Ok(self.in_progress.build())
     }
@@ -462,7 +479,21 @@ impl<'a> Collector<'a> {
                 let url = format!("http://{addr}");
                 let log = self.log.new(o!("ntp_admin_url" => url.clone()));
 
-                (cfg.id, ntp_admin_client::Client::new(&url, log))
+                let timeout = Duration::from_secs(5);
+                let reqwest_client = reqwest::ClientBuilder::new()
+                    .connect_timeout(timeout)
+                    .timeout(timeout)
+                    .build()
+                    .expect("Failed to build HTTP client");
+
+                (
+                    cfg.id,
+                    ntp_admin_client::Client::new_with_client(
+                        &url,
+                        reqwest_client,
+                        log,
+                    ),
+                )
             })
             .collect();
 
