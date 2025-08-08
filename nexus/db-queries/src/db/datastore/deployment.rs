@@ -2420,7 +2420,7 @@ async fn insert_pending_mgs_update(
             let db_expected_active_phase_1_slot =
                 HwM2Slot::from(*expected_active_phase_1_slot)
                     .into_sql::<HwM2SlotEnum>();
-            let db_expected_active_boot_disk =
+            let db_expected_boot_disk =
                 HwM2Slot::from(*expected_boot_disk).into_sql::<HwM2SlotEnum>();
             let db_expected_active_phase_1_hash =
                 ArtifactHash(*expected_active_phase_1_hash)
@@ -2453,7 +2453,7 @@ async fn insert_pending_mgs_update(
                     db_artifact_hash,
                     db_artifact_version,
                     db_expected_active_phase_1_slot,
-                    db_expected_active_boot_disk,
+                    db_expected_boot_disk,
                     db_expected_active_phase_1_hash,
                     db_expected_active_phase_2_hash,
                     db_expected_inactive_phase_1_hash,
@@ -2524,7 +2524,7 @@ async fn insert_pending_mgs_update(
                 _artifact_sha256,
                 _artifact_version,
                 _expected_active_phase_1_slot,
-                _expected_active_boot_disk,
+                _expected_boot_disk,
                 _expected_active_phase_1_hash,
                 _expected_active_phase_2_hash,
                 _expected_inactive_phase_1_hash,
