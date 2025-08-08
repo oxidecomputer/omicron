@@ -270,13 +270,41 @@ impl Ingester {
                         &opctx.log,
                         MISSING_VPD,
                     );
-                    let class = get_sp_metadata_string(
-                        "class",
-                        &ereport,
-                        &restart_id,
-                        &opctx.log,
-                        "",
-                    );
+
+                    let class = match ereport
+                        .data
+                        // "k" (for "kind") is used as an abbreviation of
+                        // "class" to save 4 bytes of ereport.
+                        .get("k")
+                        .or_else(|| ereport.data.get("class"))
+                    {
+                        Some(serde_json::Value::String(class)) => {
+                            Some(class.to_string())
+                        }
+                        Some(v) => {
+                            slog::warn!(
+                                &opctx.log,
+                                "malformed ereport: value for 'k'/'class' \
+                                 should be a string, but found: {v:?}";
+                                "ena" => ?ereport.ena,
+                                "restart_id" => ?restart_id,
+                            );
+                            None
+                        }
+                        None if ereport.data.contains_key("lost") => {
+                            // Tjis is a loss record! I know this!
+                            Some("loss".to_string())
+                        }
+                        None => {
+                            slog::warn!(
+                                &opctx.log,
+                                "ereport missing 'k'/'class' key";
+                                "ena" => ?ereport.ena,
+                                "restart_id" => ?restart_id,
+                            );
+                            None
+                        }
+                    };
 
                     db::model::SpEreport {
                         restart_id: restart_id.into(),
@@ -538,7 +566,7 @@ mod tests {
                     "hubris_task_gen": 13,
                     "hubris_uptime_ms": 1233,
                     "ereport_message_version": 0,
-                    "class": "gov.nasa.apollo.o2_tanks.stir.begin",
+                    "k": "gov.nasa.apollo.o2_tanks.stir.begin",
                     "message": "stirring the tanks",
                 }),
             ),
@@ -553,7 +581,7 @@ mod tests {
                     "hubris_task_gen": 1,
                     "hubris_uptime_ms": 1234,
                     "ereport_message_version": 0,
-                    "class": "io.discovery.ae35.fault",
+                    "k": "io.discovery.ae35.fault",
                     "message": "i've just picked up a fault in the AE-35 unit",
                     "de": {
                         "scheme": "fmd",
@@ -577,7 +605,7 @@ mod tests {
                     "hubris_task_gen": 13,
                     "hubris_uptime_ms": 1237,
                     "ereport_message_version": 0,
-                    "class": "gov.nasa.apollo.fault",
+                    "k": "gov.nasa.apollo.fault",
                     "message": "houston, we have a problem",
                     "crew": [
                         "Lovell",
@@ -597,7 +625,7 @@ mod tests {
                     "hubris_task_gen": 2,
                     "hubris_uptime_ms": 1240,
                     "ereport_message_version": 0,
-                    "class": "flagrant_error",
+                    "k": "flagrant_error",
                     "computer": false,
                 }),
             ),
@@ -612,7 +640,7 @@ mod tests {
                     "hubris_task_gen": 1,
                     "hubris_uptime_ms": 1245,
                     "ereport_message_version": 0,
-                    "class": "overfull_hbox",
+                    "k": "overfull_hbox",
                     "badness": 10000,
                 }),
             ),
