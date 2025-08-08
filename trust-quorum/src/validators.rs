@@ -7,6 +7,7 @@
 use crate::configuration::ConfigurationError;
 use crate::messages::ReconfigureMsg;
 use crate::{Epoch, PersistentStateSummary, PlatformId, Threshold};
+use daft::{BTreeSetDiff, Diffable, Leaf};
 use omicron_uuid_kinds::RackUuid;
 use slog::{Logger, error, info, warn};
 use std::collections::BTreeSet;
@@ -124,7 +125,7 @@ pub enum ReconfigurationError {
 /// A `ReconfigureMsg` that has been determined to be valid for the remainder
 /// of code paths. We encode this check into a type in a "parse, don't validate"
 /// manner.
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq, Diffable)]
 pub struct ValidatedReconfigureMsg {
     rack_id: RackUuid,
     epoch: Epoch,
@@ -135,6 +136,34 @@ pub struct ValidatedReconfigureMsg {
     // This is not included in the original `ReconfigureMsg`. It's implicit
     // in the node that Nexus sends the request to.
     coordinator_id: PlatformId,
+}
+
+// For diffs we want to allow access to all fields, but not make them public in
+// the `ValidatedReconfigureMsg` type itself.
+impl<'daft> ValidatedReconfigureMsgDiff<'daft> {
+    pub fn rack_id(&self) -> Leaf<&RackUuid> {
+        self.rack_id
+    }
+
+    pub fn epoch(&self) -> Leaf<&Epoch> {
+        self.epoch
+    }
+
+    pub fn last_committed_epoch(&self) -> Leaf<Option<&Epoch>> {
+        self.last_committed_epoch
+    }
+
+    pub fn members(&self) -> &BTreeSetDiff<'daft, PlatformId> {
+        &self.members
+    }
+
+    pub fn threshold(&self) -> Leaf<&Threshold> {
+        self.threshold
+    }
+
+    pub fn coordinator_id(&self) -> Leaf<&PlatformId> {
+        self.coordinator_id
+    }
 }
 
 impl PartialEq<ValidatedReconfigureMsg> for ReconfigureMsg {

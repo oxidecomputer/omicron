@@ -4,12 +4,14 @@
 
 //! State of a reconfiguration coordinator inside a [`crate::Node`]
 
-use crate::NodeHandlerCtx;
+use crate::configuration::ConfigurationDiff;
 use crate::crypto::{
     LrtqShare, PlaintextRackSecrets, Sha3_256Digest, ShareDigestLrtq,
 };
 use crate::validators::{ReconfigurationError, ValidatedReconfigureMsg};
 use crate::{Configuration, Epoch, PeerMsgKind, PlatformId, RackSecret};
+use crate::{NodeHandlerCtx, ValidatedReconfigureMsgDiff};
+use daft::{Diffable, Leaf};
 use gfss::shamir::Share;
 use slog::{Logger, error, info, o, warn};
 use std::collections::{BTreeMap, BTreeSet};
@@ -27,7 +29,9 @@ use std::mem;
 /// allows progress to always be made with a full linearization of epochs.
 ///
 /// We allow some unused fields before we complete the coordination code
+#[derive(Clone, Debug, Diffable)]
 pub struct CoordinatorState {
+    #[daft(ignore)]
     log: Logger,
 
     /// A copy of the message used to start this reconfiguration
@@ -40,6 +44,34 @@ pub struct CoordinatorState {
     /// What is the coordinator currently doing
     op: CoordinatorOperation,
 }
+
+// For diffs we want to allow access to all fields, but not make them public in
+// the `CoordinatorState` type itself.
+impl<'daft> CoordinatorStateDiff<'daft> {
+    pub fn reconfigure_msg(&self) -> &ValidatedReconfigureMsgDiff<'daft> {
+        &self.reconfigure_msg
+    }
+
+    pub fn configuration(&self) -> &ConfigurationDiff<'daft> {
+        &self.configuration
+    }
+
+    pub fn op(&self) -> Leaf<&CoordinatorOperation> {
+        self.op
+    }
+}
+
+#[cfg(feature = "danger_partial_eq_ct_wrapper")]
+impl PartialEq for CoordinatorState {
+    fn eq(&self, other: &Self) -> bool {
+        self.reconfigure_msg == other.reconfigure_msg
+            && self.configuration == other.configuration
+            && self.op == other.op
+    }
+}
+
+#[cfg(feature = "danger_partial_eq_ct_wrapper")]
+impl Eq for CoordinatorState {}
 
 impl CoordinatorState {
     /// Start coordinating a reconfiguration for a brand new trust quorum
@@ -467,6 +499,8 @@ impl CoordinatorState {
 }
 
 /// What should the coordinator be doing?
+#[derive(Clone, Debug, Diffable)]
+#[cfg_attr(feature = "danger_partial_eq_ct_wrapper", derive(PartialEq, Eq))]
 pub enum CoordinatorOperation {
     CollectShares {
         old_epoch: Epoch,

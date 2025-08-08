@@ -14,7 +14,7 @@ use iddqd::IdOrdMap;
 use indent_write::fmt::IndentWriter;
 use internal_dns_types::diff::DnsDiff;
 use itertools::Itertools;
-use log_capture::LogCapture;
+pub use log_capture::LogCapture;
 use nexus_inventory::CollectionBuilder;
 use nexus_reconfigurator_blippy::Blippy;
 use nexus_reconfigurator_blippy::BlippyReportSortKey;
