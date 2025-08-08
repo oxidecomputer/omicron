@@ -44,6 +44,7 @@ use nexus_types::external_api::views::FloatingIp;
 use nexus_types::identity::Resource;
 use omicron_common::address::IpRange;
 use omicron_common::address::Ipv4Range;
+use omicron_common::address::NUM_SOURCE_NAT_PORTS;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
@@ -54,6 +55,8 @@ use omicron_common::api::external::Name;
 use omicron_common::api::external::NameOrId;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
+use oxide_client::types::ExternalIpResultsPage;
+use oxide_client::types::IpPoolRangeResultsPage;
 use uuid::Uuid;
 
 type ControlPlaneTestContext =
@@ -778,18 +781,19 @@ async fn test_external_ip_live_attach_detach(
             instance_simulate(nexus, &instance_id).await;
         }
 
-        // Verify that each instance has no external IPs.
+        // Verify that each instance has only an SNAT external IP.
+        let eips = fetch_instance_external_ips(
+            client,
+            INSTANCE_NAMES[i],
+            PROJECT_NAME,
+        )
+        .await;
+        assert_eq!(eips.len(), 1, "Expected exactly 1 SNAT external IP");
         assert_eq!(
-            fetch_instance_external_ips(
-                client,
-                INSTANCE_NAMES[i],
-                PROJECT_NAME
-            )
-            .await
-            .len(),
-            0
+            eips[0].kind(),
+            shared::IpKind::SNat,
+            "Expected exactly 1 SNAT external IP"
         );
-
         instances.push(instance);
     }
 
@@ -816,7 +820,7 @@ async fn test_external_ip_live_attach_detach(
             fetch_instance_external_ips(client, instance_name, PROJECT_NAME)
                 .await;
 
-        assert_eq!(eip_list.len(), 2);
+        assert_eq!(eip_list.len(), 3);
         assert!(eip_list.contains(&eph_resp));
         assert!(
             eip_list
@@ -857,7 +861,8 @@ async fn test_external_ip_live_attach_detach(
             fetch_instance_external_ips(client, instance_name, PROJECT_NAME)
                 .await;
 
-        assert_eq!(eip_list.len(), 0);
+        // We still have 1 SNAT IP
+        assert_eq!(eip_list.len(), 1);
         assert_eq!(fip.ip, fip_resp.ip);
 
         // Check for idempotency: repeat requests should return same values for FIP,
@@ -907,8 +912,21 @@ async fn test_external_ip_live_attach_detach(
     let instance_name = instances[0].identity.name.as_str();
     let eip_list =
         fetch_instance_external_ips(client, instance_name, PROJECT_NAME).await;
-    assert_eq!(eip_list.len(), 1);
-    assert_eq!(eip_list[0].ip(), fips[0].ip);
+    assert_eq!(eip_list.len(), 2, "Expected a Floating and SNAT IP");
+    assert_eq!(
+        eip_list
+            .iter()
+            .find_map(|eip| {
+                if eip.kind() == shared::IpKind::Floating {
+                    Some(eip.ip())
+                } else {
+                    None
+                }
+            })
+            .expect("Should have a Floating IP"),
+        fips[0].ip,
+        "Floating IP object's IP address is not correct",
+    );
 
     // now the other way: floating IP by ID and instance by name
     let floating_ip_id = fips[1].identity.id;
@@ -934,8 +952,21 @@ async fn test_external_ip_live_attach_detach(
 
     let eip_list =
         fetch_instance_external_ips(client, instance_name, PROJECT_NAME).await;
-    assert_eq!(eip_list.len(), 1);
-    assert_eq!(eip_list[0].ip(), fips[1].ip);
+    assert_eq!(eip_list.len(), 2, "Expect a Floating and SNAT IP");
+    assert_eq!(
+        eip_list
+            .iter()
+            .find_map(|eip| {
+                if eip.kind() == shared::IpKind::Floating {
+                    Some(eip.ip())
+                } else {
+                    None
+                }
+            })
+            .expect("Should have a Floating IP"),
+        fips[1].ip,
+        "Floating IP object's IP address is not correct",
+    );
 
     // none of that changed the number of allocated IPs
     assert_ip_pool_utilization(client, "default", 3, 65536, 0, 0).await;
@@ -1221,6 +1252,74 @@ async fn test_external_ip_attach_ephemeral_at_pool_exhaustion(
     )
     .await;
     assert_eq!(eph_resp_2, eph_resp);
+}
+
+#[nexus_test]
+async fn can_list_instance_snat_ip(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+
+    let pool = create_default_ip_pool(&client).await;
+    let _project = create_project(client, PROJECT_NAME).await;
+
+    // Get the first address in the pool.
+    let range = NexusRequest::object_get(
+        client,
+        &format!("/v1/system/ip-pools/{}/ranges", pool.identity.id),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap_or_else(|e| panic!("failed to get IP pool range: {e}"))
+    .parsed_body::<IpPoolRangeResultsPage>()
+    .unwrap_or_else(|e| panic!("failed to parse IP pool range: {e}"));
+    assert_eq!(range.items.len(), 1, "Should have 1 range in the pool");
+    let oxide_client::types::IpRange::V4(oxide_client::types::Ipv4Range {
+        first,
+        ..
+    }) = &range.items[0].range
+    else {
+        panic!("Expected IPv4 range, found {:?}", &range.items[0]);
+    };
+    let expected_ip = IpAddr::V4(*first);
+
+    // Create a running instance with only an SNAT IP address.
+    let instance_name = INSTANCE_NAMES[0];
+    let instance =
+        instance_for_external_ips(client, instance_name, true, false, &[])
+            .await;
+    let url = format!("/v1/instances/{}/external-ips", instance.identity.id);
+    let page = NexusRequest::object_get(client, &url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap_or_else(|e| {
+            panic!("failed to make \"get\" request to {url}: {e}")
+        })
+        .parsed_body::<ExternalIpResultsPage>()
+        .unwrap_or_else(|e| {
+            panic!("failed to make \"get\" request to {url}: {e}")
+        });
+    let ips = page.items;
+    assert_eq!(
+        ips.len(),
+        1,
+        "Instance should have been created with exactly 1 IP"
+    );
+    let oxide_client::types::ExternalIp::Snat {
+        ip,
+        ip_pool_id,
+        first_port,
+        last_port,
+    } = &ips[0]
+    else {
+        panic!("Expected an SNAT external IP, found {:?}", &ips[0]);
+    };
+    assert_eq!(ip_pool_id, &pool.identity.id);
+    assert_eq!(ip, &expected_ip);
+
+    // Port ranges are half-open on the right, e.g., [0, 16384).
+    assert_eq!(*first_port, 0);
+    assert_eq!(*last_port, NUM_SOURCE_NAT_PORTS - 1);
 }
 
 pub async fn floating_ip_get(

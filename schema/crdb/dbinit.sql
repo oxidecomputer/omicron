@@ -2513,6 +2513,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.tuf_artifact (
     -- The generation number this artifact was added for.
     generation_added INT8 NOT NULL,
 
+    -- Sign (root key hash table) hash of a signed RoT or RoT bootloader image.
+    sign BYTES, -- nullable
+
     CONSTRAINT unique_name_version_kind UNIQUE (name, version, kind)
 );
 
@@ -3514,6 +3517,25 @@ CREATE TYPE IF NOT EXISTS omicron.public.hw_m2_slot AS ENUM (
     'B'
 );
 
+-- host phase 1 active slots found
+CREATE TABLE IF NOT EXISTS omicron.public.inv_host_phase_1_active_slot (
+    -- where this observation came from
+    -- (foreign key into `inv_collection` table)
+    inv_collection_id UUID NOT NULL,
+    -- which system this SP reports it is part of
+    -- (foreign key into `hw_baseboard_id` table)
+    hw_baseboard_id UUID NOT NULL,
+    -- when this observation was made
+    time_collected TIMESTAMPTZ NOT NULL,
+    -- which MGS instance reported this data
+    source TEXT NOT NULL,
+
+    -- active phase 1 slot
+    slot omicron.public.hw_m2_slot NOT NULL,
+
+    PRIMARY KEY (inv_collection_id, hw_baseboard_id)
+);
+
 -- host phase 1 flash hashes found
 -- There are usually two rows here for each row in inv_service_processor, but
 -- not necessarily (either or both slots' hash collection may fail).
@@ -3736,6 +3758,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_sled_agent (
     PRIMARY KEY (inv_collection_id, sled_id)
 );
 
+-- This type name starts with "clear_" for legacy reasons. Prefer "remove" in
+-- the future.
 CREATE TYPE IF NOT EXISTS omicron.public.clear_mupdate_override_boot_success
 AS ENUM (
     'cleared',
@@ -3779,22 +3803,25 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_sled_config_reconciler (
     boot_partition_a_error TEXT,
     boot_partition_b_error TEXT,
 
-    -- Success clearing the mupdate override.
+    -- The names below start with "clear_" for legacy reasons. Prefer "remove"
+    -- in the future.
+    --
+    -- Success removing the mupdate override.
     clear_mupdate_override_boot_success omicron.public.clear_mupdate_override_boot_success,
-    -- Error clearing the mupdate override.
+    -- Error removing the mupdate override.
     clear_mupdate_override_boot_error TEXT,
 
-    -- A message describing the result clearing the mupdate override on the
-    -- non-boot disk.
+    -- A message describing the result removing the mupdate override on the
+    -- non-boot disk (success or error).
     clear_mupdate_override_non_boot_message TEXT,
 
     -- Three cases:
     --
-    -- 1. No clear_mupdate_override instruction was passed in. All three
+    -- 1. No remove_mupdate_override instruction was passed in. All three
     --    columns are NULL.
-    -- 2. Clearing the override was successful. boot_success is NOT NULL,
+    -- 2. Removing the override was successful. boot_success is NOT NULL,
     --    boot_error is NULL, and non_boot_message is NOT NULL.
-    -- 3. Clearing the override failed. boot_success is NULL, boot_error is
+    -- 3. Removing the override failed. boot_success is NULL, boot_error is
     --    NOT NULL, and non_boot_message is NOT NULL.
     CONSTRAINT clear_mupdate_override_consistency CHECK (
         (clear_mupdate_override_boot_success IS NULL
@@ -6342,7 +6369,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '174.0.0', NULL)
+    (TRUE, NOW(), NOW(), '176.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

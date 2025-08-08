@@ -7,12 +7,16 @@
 
 use super::MgsClients;
 use super::UpdateProgress;
+use crate::rot_bootloader_updater::ReconfiguratorRotBootloaderUpdater;
+use crate::rot_updater::ReconfiguratorRotUpdater;
+use crate::sp_updater::ReconfiguratorSpUpdater;
 use futures::future::BoxFuture;
 use gateway_client::types::SpType;
 use gateway_client::types::SpUpdateStatus;
 use gateway_types::rot::RotSlot;
 use nexus_types::deployment::ExpectedVersion;
 use nexus_types::deployment::PendingMgsUpdate;
+use nexus_types::deployment::PendingMgsUpdateDetails;
 use slog::Logger;
 use slog::{debug, error, info, warn};
 use std::time::Duration;
@@ -250,8 +254,12 @@ fn status_is_complete(
     }
 }
 
-/// Provides helper functions used while updating a particular SP component
-pub trait SpComponentUpdateHelper {
+/// Implementors provide helper functions used while updating a particular SP
+/// component
+///
+/// This trait is object safe; consumers should use `SpComponentUpdateError`,
+/// which wraps an implementor of this trait.
+pub trait SpComponentUpdateHelperImpl {
     /// Checks if the component is already updated or ready for update
     fn precheck<'a>(
         &'a self,
@@ -268,6 +276,51 @@ pub trait SpComponentUpdateHelper {
         mgs_clients: &'a mut MgsClients,
         update: &'a PendingMgsUpdate,
     ) -> BoxFuture<'a, Result<(), PostUpdateError>>;
+}
+
+/// Provides helper functions used while updating a particular SP component
+pub struct SpComponentUpdateHelper {
+    inner: Box<dyn SpComponentUpdateHelperImpl + Send + Sync>,
+}
+
+impl SpComponentUpdateHelper {
+    /// Construct a update helper for a specific kind of update
+    pub fn new(details: &PendingMgsUpdateDetails) -> Self {
+        let inner: Box<dyn SpComponentUpdateHelperImpl + Send + Sync> =
+            match details {
+                PendingMgsUpdateDetails::Sp { .. } => {
+                    Box::new(ReconfiguratorSpUpdater {})
+                }
+                PendingMgsUpdateDetails::Rot { .. } => {
+                    Box::new(ReconfiguratorRotUpdater {})
+                }
+                PendingMgsUpdateDetails::RotBootloader { .. } => {
+                    Box::new(ReconfiguratorRotBootloaderUpdater {})
+                }
+            };
+        Self { inner }
+    }
+
+    /// Checks if the component is already updated or ready for update
+    pub async fn precheck(
+        &self,
+        log: &slog::Logger,
+        mgs_clients: &mut MgsClients,
+        update: &PendingMgsUpdate,
+    ) -> Result<PrecheckStatus, PrecheckError> {
+        self.inner.precheck(log, mgs_clients, update).await
+    }
+
+    /// Attempts once to perform any post-update actions (e.g., reset the
+    /// device)
+    pub async fn post_update(
+        &self,
+        log: &slog::Logger,
+        mgs_clients: &mut MgsClients,
+        update: &PendingMgsUpdate,
+    ) -> Result<(), PostUpdateError> {
+        self.inner.post_update(log, mgs_clients, update).await
+    }
 }
 
 /// Describes the live state of the component before the update begins
@@ -304,8 +357,10 @@ pub enum PrecheckError {
         found_serial: String,
     },
 
-    #[error("expected to find active slot {expected:?}, but found {found:?}")]
-    WrongActiveSlot { expected: RotSlot, found: RotSlot },
+    #[error(
+        "expected to find active RoT slot {expected:?}, but found {found:?}"
+    )]
+    WrongActiveRotSlot { expected: RotSlot, found: RotSlot },
 
     #[error(
         "expected to find active version {:?}, but found {found:?}",

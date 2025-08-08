@@ -64,7 +64,7 @@ async fn test_host_phase1_updater_updates_sled() {
 
         // Ensure the SP received the complete update.
         let last_update_image = mgstestctx.simrack.gimlets[sp_slot as usize]
-            .last_host_phase1_update_data(target_host_slot)
+            .host_phase1_data(target_host_slot)
             .await
             .expect("simulated host phase1 did not receive an update");
 
@@ -150,7 +150,7 @@ async fn test_host_phase1_updater_remembers_successful_mgs_instance() {
     host_phase1_updater.update(&mut mgs_clients).await.expect("update failed");
 
     let last_update_image = mgstestctx.simrack.gimlets[sp_slot as usize]
-        .last_host_phase1_update_data(target_host_slot)
+        .host_phase1_data(target_host_slot)
         .await
         .expect("simulated host phase1 did not receive an update");
 
@@ -361,7 +361,7 @@ async fn test_host_phase1_updater_switches_mgs_instances_on_failure() {
     );
 
     let last_update_image = mgstestctx.simrack.gimlets[sp_slot as usize]
-        .last_host_phase1_update_data(target_host_slot)
+        .host_phase1_data(target_host_slot)
         .await
         .expect("simulated host phase1 did not receive an update");
 
@@ -460,7 +460,7 @@ async fn test_host_phase1_updater_delivers_progress() {
     do_update_task.await.expect("update task panicked").expect("update failed");
 
     let last_update_image = target_sp
-        .last_host_phase1_update_data(target_host_slot)
+        .host_phase1_data(target_host_slot)
         .await
         .expect("simulated host phase1 did not receive an update");
 

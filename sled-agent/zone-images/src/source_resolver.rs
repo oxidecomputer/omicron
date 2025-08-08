@@ -4,28 +4,21 @@
 
 //! Zone image lookup.
 
-use crate::RAMDISK_IMAGE_PATH;
-use crate::install_dataset_file_name;
 use crate::mupdate_override::AllMupdateOverrides;
-use crate::ramdisk_file_source;
 use crate::zone_manifest::AllZoneManifests;
 use camino::Utf8PathBuf;
-use illumos_utils::running_zone::ZoneImageFileSource;
 use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
 use omicron_uuid_kinds::MupdateOverrideUuid;
 use sled_agent_config_reconciler::InternalDisks;
 use sled_agent_config_reconciler::InternalDisksWithBootDisk;
-use sled_agent_types::zone_images::ClearMupdateOverrideResult;
-use sled_agent_types::zone_images::MupdateOverrideReadError;
+use sled_agent_types::zone_images::RemoveMupdateOverrideResult;
 use sled_agent_types::zone_images::ResolverStatus;
-use slog::error;
 use slog::o;
-use slog_error_chain::InlineErrorChain;
 use std::sync::Arc;
 use std::sync::Mutex;
 
 /// A zone image source.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ZoneImageSource {
     /// An Omicron zone.
     Omicron(OmicronZoneImageSource),
@@ -63,36 +56,21 @@ impl ZoneImageSourceResolver {
         let inner = self.inner.lock().unwrap();
         let zone_manifest = inner.zone_manifests.status();
         let mupdate_override = inner.mupdate_overrides.status();
+        let image_directory_override = inner.image_directory_override.clone();
 
-        ResolverStatus { mupdate_override, zone_manifest }
-    }
-
-    /// Returns a [`ZoneImageFileSource`] consisting of the file name, plus a
-    /// list of potential paths to search, for a zone image.
-    pub fn file_source_for(
-        &self,
-        zone_type: &str,
-        image_source: &ZoneImageSource,
-        internal_disks: InternalDisks,
-    ) -> Result<ZoneImageFileSource, MupdateOverrideReadError> {
-        match image_source {
-            ZoneImageSource::Ramdisk => {
-                // RAM disk images are always stored on the RAM disk path.
-                Ok(ramdisk_file_source(zone_type))
-            }
-            ZoneImageSource::Omicron(image_source) => {
-                let inner = self.inner.lock().unwrap();
-                inner.file_source_for(zone_type, image_source, internal_disks)
-            }
+        ResolverStatus {
+            mupdate_override,
+            zone_manifest,
+            image_directory_override,
         }
     }
 
-    /// Clears out the mupdate override field and files on disk.
-    pub fn clear_mupdate_override(
+    /// Removes the mupdate override field and files on disk.
+    pub fn remove_mupdate_override(
         &self,
         override_id: MupdateOverrideUuid,
         internal_disks: &InternalDisks,
-    ) -> ClearMupdateOverrideResult {
+    ) -> RemoveMupdateOverrideResult {
         let mut inner = self.inner.lock().unwrap();
         let ret =
             inner.mupdate_overrides.clear_override(override_id, internal_disks);
@@ -132,92 +110,6 @@ impl ResolverInner {
             mupdate_overrides,
         }
     }
-
-    fn file_source_for(
-        &self,
-        zone_type: &str,
-        image_source: &OmicronZoneImageSource,
-        internal_disks: InternalDisks,
-    ) -> Result<ZoneImageFileSource, MupdateOverrideReadError> {
-        match image_source {
-            OmicronZoneImageSource::InstallDataset => {
-                let file_name = install_dataset_file_name(zone_type);
-                // Look for the image in the RAM disk first. Note that install
-                // dataset images are not stored on the RAM disk in production,
-                // just in development or test workflows.
-                let mut zone_image_paths =
-                    vec![Utf8PathBuf::from(RAMDISK_IMAGE_PATH)];
-
-                // Inject an image path if requested by a test.
-                if let Some(path) = &self.image_directory_override {
-                    zone_image_paths.push(path.clone());
-                };
-
-                // Any zones not part of the RAM disk are managed via the
-                // zone manifest.
-                //
-                // XXX: we ask for the boot zpool to be passed in here. But
-                // `AllZoneImages` also caches the boot zpool. How should we
-                // reconcile the two?
-                if let Some(path) = internal_disks.boot_disk_install_dataset() {
-                    match self.zone_manifests.boot_disk_result() {
-                        Ok(result) => {
-                            match result.data.get(file_name.as_str()) {
-                                Some(result) => {
-                                    if result.is_valid() {
-                                        zone_image_paths.push(path);
-                                    } else {
-                                        // If the zone is not valid, we refuse to start
-                                        // it.
-                                        error!(
-                                            self.log,
-                                            "zone {} is not valid in the zone manifest, \
-                                             not returning it as a source",
-                                            file_name;
-                                            "error" => %result.display()
-                                        );
-                                    }
-                                }
-                                None => {
-                                    error!(
-                                        self.log,
-                                        "zone {} is not present in the boot disk zone manifest",
-                                        file_name,
-                                    );
-                                }
-                            }
-                        }
-                        Err(error) => {
-                            error!(
-                                self.log,
-                                "error parsing boot disk zone manifest, not returning \
-                                 install dataset as a source";
-                                "error" => InlineErrorChain::new(error),
-                            );
-                        }
-                    }
-                }
-
-                Ok(ZoneImageFileSource {
-                    file_name,
-                    search_paths: zone_image_paths,
-                })
-            }
-            OmicronZoneImageSource::Artifact { hash } => {
-                // TODO: implement mupdate override here.
-                //
-                // Search both artifact datasets. This iterator starts with the
-                // dataset for the boot disk (if it exists), and then is followed
-                // by all other disks.
-                let search_paths =
-                    internal_disks.all_artifact_datasets().collect();
-                Ok(ZoneImageFileSource {
-                    file_name: hash.to_string(),
-                    search_paths,
-                })
-            }
-        }
-    }
 }
 
 #[cfg(test)]
@@ -228,19 +120,34 @@ mod tests {
 
     use camino_tempfile_ext::prelude::*;
     use dropshot::{ConfigLogging, ConfigLoggingLevel, test_util::LogContext};
-    use sled_agent_zone_images_examples::{
-        BOOT_PATHS, BOOT_UUID, WriteInstallDatasetContext,
+    use nexus_sled_agent_shared::inventory::{
+        HostPhase2DesiredContents, ZoneKind,
     };
+    use omicron_common::zone_images::ZoneImageFileSource;
+    use sled_agent_config_reconciler::{
+        HostPhase2PreparedContents, ResolverStatusExt,
+    };
+    use sled_agent_types::zone_images::{
+        MupdateOverrideReadError, OmicronZoneFileSource,
+        OmicronZoneImageLocation, RAMDISK_IMAGE_PATH, ZoneImageLocationError,
+        ZoneManifestReadError, ZoneManifestZoneHashError,
+    };
+    use sled_agent_zone_images_examples::{
+        BOOT_PATHS, BOOT_UUID, WriteInstallDatasetContext, deserialize_error,
+    };
+    use tufaceous_artifact::ArtifactHash;
 
-    /// Test source resolver behavior when the zone manifest is invalid.
+    /// Test source resolver behavior when the zone manifest is missing.
     #[test]
     fn file_source_zone_manifest_invalid() {
         let logctx = LogContext::new(
-            "source_resolver_file_source_zone_manifest_invalid",
+            "source_resolver_file_source_zone_manifest_missing",
             &ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Debug },
         );
         let dir = Utf8TempDir::new().unwrap();
-        dir.child(&BOOT_PATHS.install_dataset).create_dir_all().unwrap();
+
+        // Create an empty non-boot file (read error).
+        dir.child(&BOOT_PATHS.zones_json).touch().unwrap();
 
         let internal_disks_rx =
             make_internal_disks_rx(dir.path(), BOOT_UUID, &[]);
@@ -248,34 +155,39 @@ mod tests {
             &logctx.log,
             internal_disks_rx.current_with_boot_disk(),
         );
+        let status = resolver.status();
 
-        // RAM disk image sources should work as expected.
-        let ramdisk_source = resolver
-            .file_source_for(
-                "zone1",
-                &ZoneImageSource::Ramdisk,
-                internal_disks_rx.current(),
-            )
-            .unwrap();
-        assert_eq!(ramdisk_source, ramdisk_file_source("zone1"));
+        let file_source = status.omicron_file_source(
+            &logctx.log,
+            ZoneKind::CockroachDb,
+            &OmicronZoneImageSource::InstallDataset,
+            &internal_disks_rx.current(),
+        );
 
-        let file_source = resolver
-            .file_source_for(
-                "zone1",
-                &ZoneImageSource::Omicron(
-                    OmicronZoneImageSource::InstallDataset,
-                ),
-                internal_disks_rx.current(),
-            )
-            .unwrap();
-
-        // Because the zone manifest is missing, the file source should not
+        // Because the zone manifest is invalid, the file source should not
         // return the install dataset.
         assert_eq!(
             file_source,
-            ZoneImageFileSource {
-                file_name: install_dataset_file_name("zone1"),
-                search_paths: vec![Utf8PathBuf::from(RAMDISK_IMAGE_PATH)]
+            OmicronZoneFileSource {
+                location: OmicronZoneImageLocation::InstallDataset {
+                    hash: Err(ZoneImageLocationError::ZoneHash(
+                        ZoneManifestZoneHashError::ReadBootDisk(
+                            ZoneManifestReadError::InstallMetadata(
+                                deserialize_error(
+                                    dir.path(),
+                                    &BOOT_PATHS.zones_json,
+                                    "",
+                                ),
+                            ),
+                        ),
+                    )),
+                },
+                file_source: ZoneImageFileSource {
+                    file_name: ZoneKind::CockroachDb
+                        .artifact_in_install_dataset()
+                        .to_owned(),
+                    search_paths: vec![Utf8PathBuf::from(RAMDISK_IMAGE_PATH)],
+                },
             }
         );
 
@@ -291,7 +203,9 @@ mod tests {
         );
         let dir = Utf8TempDir::new().unwrap();
         let mut cx = WriteInstallDatasetContext::new_basic();
-        cx.make_error_cases();
+        let errors = cx.make_error_cases();
+
+        let manifest = cx.zone_manifest();
 
         cx.write_to(&dir.child(&BOOT_PATHS.install_dataset)).unwrap();
 
@@ -302,57 +216,291 @@ mod tests {
             internal_disks_rx.current_with_boot_disk(),
         );
 
-        // The resolver should not fail for ramdisk images.
-        let file_source = resolver
-            .file_source_for(
-                "fake-zone",
-                &ZoneImageSource::Ramdisk,
-                internal_disks_rx.current(),
-            )
-            .unwrap();
-        assert_eq!(file_source, ramdisk_file_source("fake-zone"));
+        let status = resolver.status();
 
-        // zone1.tar.gz is valid.
-        let file_source = resolver
-            .file_source_for(
-                "zone1",
-                &ZoneImageSource::Omicron(
-                    OmicronZoneImageSource::InstallDataset,
-                ),
-                internal_disks_rx.current(),
-            )
-            .unwrap();
+        // The cockroach zone is valid.
+        let file_source = status.omicron_file_source(
+            &logctx.log,
+            ZoneKind::CockroachDb,
+            &OmicronZoneImageSource::InstallDataset,
+            &internal_disks_rx.current(),
+        );
         assert_eq!(
             file_source,
-            ZoneImageFileSource {
-                file_name: "zone1.tar.gz".to_string(),
-                search_paths: vec![
-                    Utf8PathBuf::from(RAMDISK_IMAGE_PATH),
-                    dir.path().join(&BOOT_PATHS.install_dataset)
-                ]
+            OmicronZoneFileSource {
+                location: OmicronZoneImageLocation::InstallDataset {
+                    hash: Ok(manifest
+                        .zones
+                        .get(
+                            ZoneKind::CockroachDb.artifact_in_install_dataset()
+                        )
+                        .unwrap()
+                        .hash)
+                },
+                file_source: ZoneImageFileSource {
+                    file_name: ZoneKind::CockroachDb
+                        .artifact_in_install_dataset()
+                        .to_string(),
+                    search_paths: vec![
+                        dir.path().join(&BOOT_PATHS.install_dataset),
+                        Utf8PathBuf::from(RAMDISK_IMAGE_PATH),
+                    ]
+                },
             },
         );
 
-        // zone2, zone3, zone4 and zone5 aren't valid, and none of them will
-        // return the install dataset path.
-        for zone_name in ["zone2", "zone3", "zone4", "zone5"] {
-            let file_source = resolver
-                .file_source_for(
-                    zone_name,
-                    &ZoneImageSource::Omicron(
-                        OmicronZoneImageSource::InstallDataset,
-                    ),
-                    internal_disks_rx.current(),
-                )
-                .unwrap();
+        // Clickhouse, Crucible, InternalDns and Nexus aren't valid, and none of
+        // them will return the install dataset path.
+        for zone_kind in [
+            ZoneKind::Clickhouse,
+            ZoneKind::Crucible,
+            ZoneKind::InternalDns,
+            ZoneKind::Nexus,
+        ] {
+            let error = errors.get(&zone_kind).unwrap();
+            let file_source = status.omicron_file_source(
+                &logctx.log,
+                zone_kind,
+                &OmicronZoneImageSource::InstallDataset,
+                &internal_disks_rx.current(),
+            );
             assert_eq!(
                 file_source,
-                ZoneImageFileSource {
-                    file_name: install_dataset_file_name(zone_name),
-                    search_paths: vec![Utf8PathBuf::from(RAMDISK_IMAGE_PATH)]
+                OmicronZoneFileSource {
+                    location: OmicronZoneImageLocation::InstallDataset {
+                        hash: Err(ZoneImageLocationError::ZoneHash(
+                            error.error.clone()
+                        )),
+                    },
+                    file_source: ZoneImageFileSource {
+                        file_name: zone_kind
+                            .artifact_in_install_dataset()
+                            .to_owned(),
+                        search_paths: vec![Utf8PathBuf::from(
+                            RAMDISK_IMAGE_PATH
+                        )]
+                    },
                 }
             );
         }
+
+        logctx.cleanup_successful();
+    }
+
+    /// Test file source and prepare behavior when there's a mupdate override in
+    /// place.
+    #[test]
+    fn lookup_with_mupdate_override() {
+        let logctx = LogContext::new(
+            "lookup_with_mupdate_override",
+            &ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Debug },
+        );
+
+        let dir = Utf8TempDir::new().unwrap();
+        let cx = WriteInstallDatasetContext::new_basic();
+        let manifest = cx.zone_manifest();
+
+        // Write the install dataset.
+        cx.write_to(&dir.child(&BOOT_PATHS.install_dataset)).unwrap();
+
+        let internal_disks_rx =
+            make_internal_disks_rx(dir.path(), BOOT_UUID, &[]);
+        let resolver = ZoneImageSourceResolver::new(
+            &logctx.log,
+            internal_disks_rx.current_with_boot_disk(),
+        );
+
+        let status = resolver.status();
+
+        // Artifact should be overridden since a mupdate override is present.
+        let artifact_source = OmicronZoneImageSource::Artifact {
+            // The hash isn't important here.
+            hash: ArtifactHash([0; 32]),
+        };
+
+        // Look up the file source.
+        let file_source = status.omicron_file_source(
+            &logctx.log,
+            ZoneKind::CockroachDb,
+            &artifact_source,
+            &internal_disks_rx.current(),
+        );
+
+        assert_eq!(
+            file_source,
+            OmicronZoneFileSource {
+                location: OmicronZoneImageLocation::InstallDataset {
+                    // The hash should be looked up from the zone manifest.
+                    hash: Ok(manifest
+                        .zones
+                        .get(
+                            ZoneKind::CockroachDb.artifact_in_install_dataset()
+                        )
+                        .unwrap()
+                        .hash),
+                },
+                file_source: ZoneImageFileSource {
+                    file_name: ZoneKind::CockroachDb
+                        .artifact_in_install_dataset()
+                        .to_owned(),
+                    search_paths: vec![
+                        dir.path().join(&BOOT_PATHS.install_dataset),
+                    ],
+                },
+            }
+        );
+
+        // Look up host phase 2 contents.
+        let prepared_contents = status.prepare_host_phase_2_contents(
+            &logctx.log,
+            &HostPhase2DesiredContents::CurrentContents,
+        );
+        assert_eq!(
+            prepared_contents,
+            HostPhase2PreparedContents::WithMupdateOverride
+        );
+        assert_eq!(
+            prepared_contents.desired_contents(),
+            &HostPhase2DesiredContents::CurrentContents
+        );
+
+        let desired =
+            HostPhase2DesiredContents::Artifact { hash: ArtifactHash([2; 32]) };
+        let prepared_contents =
+            status.prepare_host_phase_2_contents(&logctx.log, &desired);
+        assert_eq!(
+            prepared_contents,
+            HostPhase2PreparedContents::WithMupdateOverride,
+        );
+        assert_eq!(
+            prepared_contents.desired_contents(),
+            &HostPhase2DesiredContents::CurrentContents
+        );
+
+        logctx.cleanup_successful();
+    }
+
+    /// Test source resolver behavior when an error occurred while obtaining the
+    /// mupdate override.
+    #[test]
+    fn lookup_with_mupdate_override_error() {
+        let logctx = LogContext::new(
+            "lookup_with_mupdate_override_error",
+            &ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Debug },
+        );
+
+        let dir = Utf8TempDir::new().unwrap();
+        let cx = WriteInstallDatasetContext::new_basic();
+        let manifest = cx.zone_manifest();
+
+        // Write the install dataset.
+        cx.write_to(&dir.child(&BOOT_PATHS.install_dataset)).unwrap();
+        // Introduce an error with the mupdate override JSON (this is a
+        // deserialization error).
+        dir.child(&BOOT_PATHS.mupdate_override_json).write_str("").unwrap();
+
+        let internal_disks_rx =
+            make_internal_disks_rx(dir.path(), BOOT_UUID, &[]);
+        let resolver = ZoneImageSourceResolver::new(
+            &logctx.log,
+            internal_disks_rx.current_with_boot_disk(),
+        );
+
+        let status = resolver.status();
+
+        // Artifact image sources should return an error.
+        let artifact_hash = ArtifactHash([0; 32]);
+        let artifact_source =
+            OmicronZoneImageSource::Artifact { hash: artifact_hash };
+        let file_source = status.omicron_file_source(
+            &logctx.log,
+            ZoneKind::CockroachDb,
+            &artifact_source,
+            &internal_disks_rx.current(),
+        );
+
+        assert_eq!(
+            file_source,
+            OmicronZoneFileSource {
+                location: OmicronZoneImageLocation::Artifact {
+                    // The hash should be looked up from the zone manifest.
+                    hash: Err(MupdateOverrideReadError::InstallMetadata(
+                        deserialize_error(
+                            dir.path(),
+                            &BOOT_PATHS.mupdate_override_json,
+                            "",
+                        )
+                    )),
+                },
+                file_source: ZoneImageFileSource {
+                    file_name: artifact_hash.to_string(),
+                    // The search paths will be empty, causing zone startup to
+                    // fail.
+                    search_paths: vec![],
+                },
+            }
+        );
+
+        // InstallDataset zones should not return an error because they don't
+        // consider the mupdate override.
+        let file_source = status.omicron_file_source(
+            &logctx.log,
+            ZoneKind::CockroachDb,
+            &OmicronZoneImageSource::InstallDataset,
+            &internal_disks_rx.current(),
+        );
+
+        assert_eq!(
+            file_source,
+            OmicronZoneFileSource {
+                location: OmicronZoneImageLocation::InstallDataset {
+                    // The hash should be looked up from the zone manifest.
+                    hash: Ok(manifest
+                        .zones
+                        .get(
+                            ZoneKind::CockroachDb.artifact_in_install_dataset()
+                        )
+                        .unwrap()
+                        .hash),
+                },
+                file_source: ZoneImageFileSource {
+                    file_name: ZoneKind::CockroachDb
+                        .artifact_in_install_dataset()
+                        .to_owned(),
+                    search_paths: vec![
+                        dir.path().join(&BOOT_PATHS.install_dataset),
+                        Utf8PathBuf::from(RAMDISK_IMAGE_PATH),
+                    ],
+                },
+            }
+        );
+
+        // Look up host phase 2 contents.
+        let prepared_contents = status.prepare_host_phase_2_contents(
+            &logctx.log,
+            &HostPhase2DesiredContents::CurrentContents,
+        );
+        assert_eq!(
+            prepared_contents,
+            HostPhase2PreparedContents::WithMupdateOverride
+        );
+        assert_eq!(
+            prepared_contents.desired_contents(),
+            &HostPhase2DesiredContents::CurrentContents
+        );
+
+        let desired =
+            HostPhase2DesiredContents::Artifact { hash: ArtifactHash([2; 32]) };
+        let prepared_contents =
+            status.prepare_host_phase_2_contents(&logctx.log, &desired);
+        assert_eq!(
+            prepared_contents,
+            HostPhase2PreparedContents::WithMupdateOverride,
+        );
+        assert_eq!(
+            prepared_contents.desired_contents(),
+            &HostPhase2DesiredContents::CurrentContents
+        );
 
         logctx.cleanup_successful();
     }

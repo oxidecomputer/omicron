@@ -6,6 +6,7 @@
 //! associated inventory collections and blueprints
 
 use anyhow::{Context, anyhow, bail, ensure};
+use chrono::DateTime;
 use chrono::Utc;
 use gateway_client::types::RotState;
 use gateway_client::types::SpComponentCaboose;
@@ -25,6 +26,7 @@ use nexus_sled_agent_shared::inventory::MupdateOverrideBootInventory;
 use nexus_sled_agent_shared::inventory::OmicronSledConfig;
 use nexus_sled_agent_shared::inventory::SledRole;
 use nexus_sled_agent_shared::inventory::ZoneImageResolverInventory;
+use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_sled_agent_shared::inventory::ZoneManifestBootInventory;
 use nexus_types::deployment::ClickhousePolicy;
 use nexus_types::deployment::CockroachDbClusterVersion;
@@ -119,6 +121,7 @@ pub struct SystemDescription {
     tuf_repo: TufRepoPolicy,
     old_repo: TufRepoPolicy,
     chicken_switches: PlannerChickenSwitches,
+    ignore_impossible_mgs_updates_since: DateTime<Utc>,
 }
 
 impl SystemDescription {
@@ -202,6 +205,7 @@ impl SystemDescription {
             old_repo: TufRepoPolicy::initial(),
             chicken_switches:
                 PlannerChickenSwitches::default_for_system_description(),
+            ignore_impossible_mgs_updates_since: Utc::now(),
         }
     }
 
@@ -656,6 +660,14 @@ impl SystemDescription {
         self
     }
 
+    pub fn set_ignore_impossible_mgs_updates_since(
+        &mut self,
+        since: DateTime<Utc>,
+    ) -> &mut Self {
+        self.ignore_impossible_mgs_updates_since = since;
+        self
+    }
+
     pub fn target_release(&self) -> &TufRepoPolicy {
         &self.tuf_repo
     }
@@ -725,6 +737,16 @@ impl SystemDescription {
                         )?;
                 }
 
+                if let Some(active_slot) = s.sp_host_phase_1_active_slot() {
+                    builder
+                        .found_host_phase_1_active_slot(
+                            &baseboard_id,
+                            "fake MGS 1",
+                            active_slot,
+                        )
+                        .context("recording SP host phase 1 active slot")?;
+                }
+
                 for (m2_slot, hash) in s.sp_host_phase_1_hash_flash() {
                     builder
                         .found_host_phase_1_flash_hash(
@@ -773,12 +795,30 @@ impl SystemDescription {
                 }
             }
 
+            let sled_inventory = s.sled_agent_inventory();
             builder
-                .found_sled_inventory(
-                    "fake sled agent",
-                    s.sled_agent_inventory().clone(),
-                )
+                .found_sled_inventory("fake sled agent", sled_inventory.clone())
                 .context("recording sled agent")?;
+
+            // Create responses we'd expect from all internal DNS zones, if
+            // they successfully receive their expected most-recent set of data.
+            if let Some(config) = sled_inventory.ledgered_sled_config.as_ref() {
+                for zone in &config.zones {
+                    if matches!(zone.zone_type.kind(), ZoneKind::InternalDns) {
+                        builder.found_internal_dns_generation_status(
+                            nexus_types::inventory::InternalDnsGenerationStatus {
+                                zone_id: zone.id,
+                                generation: self.internal_dns_version,
+                            }
+                        ).unwrap();
+                    }
+
+                    // TODO: We may want to include responses from Boundary NTP
+                    // and CockroachDb zones here too - but neither of those are
+                    // currently part of the example system, so their synthetic
+                    // responses to inventory collection aren't necessary yet.
+                }
+            }
         }
 
         Ok(builder)
@@ -813,6 +853,9 @@ impl SystemDescription {
             self.internal_dns_version,
             self.external_dns_version,
             CockroachDbSettings::empty(),
+        );
+        builder.set_ignore_impossible_mgs_updates_since(
+            self.ignore_impossible_mgs_updates_since,
         );
 
         for sled in self.sleds.values() {
@@ -948,6 +991,7 @@ pub struct SledHwInventory<'a> {
     pub rot: &'a nexus_types::inventory::RotState,
     pub stage0: Option<Arc<nexus_types::inventory::Caboose>>,
     pub stage0_next: Option<Arc<nexus_types::inventory::Caboose>>,
+    pub sp_host_phase_1_active_slot: Option<M2Slot>,
     pub sp_host_phase_1_hash_flash: BTreeMap<M2Slot, ArtifactHash>,
     pub sp_active: Option<Arc<nexus_types::inventory::Caboose>>,
     pub sp_inactive: Option<Arc<nexus_types::inventory::Caboose>>,
@@ -968,6 +1012,7 @@ pub struct Sled {
     resources: SledResources,
     stage0_caboose: Option<Arc<nexus_types::inventory::Caboose>>,
     stage0_next_caboose: Option<Arc<nexus_types::inventory::Caboose>>,
+    sp_host_phase_1_active_slot: Option<M2Slot>,
     sp_host_phase_1_hash_flash: BTreeMap<M2Slot, ArtifactHash>,
     sp_active_caboose: Option<Arc<nexus_types::inventory::Caboose>>,
     sp_inactive_caboose: Option<Arc<nexus_types::inventory::Caboose>>,
@@ -1123,6 +1168,7 @@ impl Sled {
                 Self::default_rot_bootloader_caboose(String::from("0.0.1")),
             )),
             stage0_next_caboose: None,
+            sp_host_phase_1_active_slot: Some(M2Slot::A),
             sp_host_phase_1_hash_flash: [
                 (M2Slot::A, ArtifactHash([1; 32])),
                 (M2Slot::B, ArtifactHash([2; 32])),
@@ -1167,6 +1213,8 @@ impl Sled {
             inventory_sp.as_ref().and_then(|hw| hw.stage0.clone());
         let stage0_next_caboose =
             inventory_sp.as_ref().and_then(|hw| hw.stage0_next.clone());
+        let sp_host_phase_1_active_slot =
+            inventory_sp.as_ref().and_then(|hw| hw.sp_host_phase_1_active_slot);
         let sp_host_phase_1_hash_flash = inventory_sp
             .as_ref()
             .map(|hw| hw.sp_host_phase_1_hash_flash.clone())
@@ -1286,6 +1334,7 @@ impl Sled {
             resources: sled_resources,
             stage0_caboose,
             stage0_next_caboose,
+            sp_host_phase_1_active_slot,
             sp_host_phase_1_hash_flash,
             sp_active_caboose,
             sp_inactive_caboose,
@@ -1313,6 +1362,10 @@ impl Sled {
 
     pub fn sp_state(&self) -> Option<&(u16, SpState)> {
         self.inventory_sp.as_ref()
+    }
+
+    pub fn sp_host_phase_1_active_slot(&self) -> Option<M2Slot> {
+        self.sp_host_phase_1_active_slot
     }
 
     pub fn sp_host_phase_1_hash_flash(

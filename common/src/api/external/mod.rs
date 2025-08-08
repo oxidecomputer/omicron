@@ -2058,7 +2058,6 @@ impl FromStr for L4PortRange {
                     .parse::<NonZeroU16>()
                     .map_err(|e| L4PortRangeError::Value(right.into(), e))?
                     .into();
-
                 Ok(L4PortRange { first, last })
             }
         }
@@ -3409,6 +3408,12 @@ pub struct TufArtifactMeta {
 
     /// The size of the artifact in bytes.
     pub size: u64,
+
+    /// Contents of the `SIGN` field of a Hubris archive caboose, i.e.,
+    /// an identifier for the set of valid signing keys. Currently only
+    /// applicable to RoT image and bootloader artifacts, where it will
+    /// be an LPC55 Root Key Table Hash (RKTH).
+    pub sign: Option<Vec<u8>>,
 }
 
 /// Data about a successful TUF repo import into Nexus.
