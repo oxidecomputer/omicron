@@ -23,6 +23,8 @@ use tufaceous_artifact::KnownArtifactKind;
 
 mod host_phase_1;
 
+pub(crate) use host_phase_1::PendingHostPhase2Changes;
+
 /// How to handle an MGS-driven update that has become impossible due to
 /// unsatisfied preconditions.
 #[derive(Debug, Clone, Copy, strum::EnumIter)]
@@ -51,7 +53,7 @@ pub enum ImpossibleUpdatePolicy {
 ///
 /// By current policy, `nmax_updates` is always 1, but the implementation here
 /// supports more than one update per invocation.
-pub fn plan_mgs_updates(
+pub(crate) fn plan_mgs_updates(
     log: &slog::Logger,
     inventory: &Collection,
     current_boards: &BTreeSet<Arc<BaseboardId>>,
@@ -59,8 +61,9 @@ pub fn plan_mgs_updates(
     current_artifacts: &TargetReleaseDescription,
     nmax_updates: usize,
     impossible_update_policy: ImpossibleUpdatePolicy,
-) -> PendingMgsUpdates {
+) -> (PendingMgsUpdates, PendingHostPhase2Changes) {
     let mut rv = PendingMgsUpdates::new();
+    let mut host_phase_2_changes = PendingHostPhase2Changes::default();
     let mut boards_preferred = BTreeSet::new();
 
     // Determine the status of all currently pending updates by comparing what
@@ -135,7 +138,7 @@ pub fn plan_mgs_updates(
                 log,
                 "cannot issue more MGS-driven updates (no current artifacts)",
             );
-            return rv;
+            return (rv, host_phase_2_changes);
         }
         TargetReleaseDescription::TufRepo(description) => description,
     };
@@ -157,13 +160,14 @@ pub fn plan_mgs_updates(
                 "reached maximum number of pending MGS-driven updates";
                 "max" => nmax_updates
             );
-            return rv;
+            return (rv, host_phase_2_changes);
         }
 
         match try_make_update(log, board, inventory, current_artifacts) {
-            Some(update) => {
+            Some((update, mut host_phase_2)) => {
                 info!(log, "configuring MGS-driven update"; &update);
                 rv.insert(update);
+                host_phase_2_changes.append(&mut host_phase_2);
             }
             None => {
                 info!(log, "skipping board for MGS-driven update"; board);
@@ -172,7 +176,7 @@ pub fn plan_mgs_updates(
     }
 
     info!(log, "ran out of boards for MGS-driven update");
-    rv
+    (rv, host_phase_2_changes)
 }
 
 #[derive(Debug)]
@@ -380,20 +384,22 @@ fn try_make_update(
     baseboard_id: &Arc<BaseboardId>,
     inventory: &Collection,
     current_artifacts: &TufRepoDescription,
-) -> Option<PendingMgsUpdate> {
+) -> Option<(PendingMgsUpdate, PendingHostPhase2Changes)> {
     // TODO When we add support for planning RoT, RoT bootloader, and host OS
     // updates, we'll try these in a hardcoded priority order until any of them
     // returns `Some`.  The order is described in RFD 565 section "Update
     // Sequence".  For now, we only plan SP updates.
-    try_make_update_sp(log, baseboard_id, inventory, current_artifacts).or_else(
-        || {
-            host_phase_1::try_make_update(
-                log,
-                baseboard_id,
-                inventory,
-                current_artifacts,
-            )
-        },
+    if let Some(update) =
+        try_make_update_sp(log, baseboard_id, inventory, current_artifacts)
+    {
+        return Some((update, PendingHostPhase2Changes::default()));
+    }
+
+    host_phase_1::try_make_update(
+        log,
+        baseboard_id,
+        inventory,
+        current_artifacts,
     )
 }
 
@@ -832,7 +838,7 @@ mod test {
         let initial_updates = PendingMgsUpdates::new();
         let nmax_updates = 1;
         let impossible_update_policy = ImpossibleUpdatePolicy::Reevaluate;
-        let updates = plan_mgs_updates(
+        let (updates, _host_phase_2) = plan_mgs_updates(
             log,
             &collection,
             current_boards,
@@ -846,7 +852,7 @@ mod test {
         // Test that when a TUF repo is specified and one SP is outdated, then
         // it's configured with an update (and the update looks correct).
         let repo = make_tuf_repo();
-        let updates = plan_mgs_updates(
+        let (updates, _host_phase_2) = plan_mgs_updates(
             log,
             &collection,
             current_boards,
@@ -866,7 +872,7 @@ mod test {
         // Test that when an update is already pending, and nothing changes
         // about the state of the world (i.e., the inventory), then the planner
         // makes no changes.
-        let later_updates = plan_mgs_updates(
+        let (later_updates, _host_phase_2) = plan_mgs_updates(
             log,
             &collection,
             current_boards,
@@ -888,7 +894,7 @@ mod test {
             ]),
             ExpectedVersion::NoValidVersion,
         );
-        let later_updates = plan_mgs_updates(
+        let (later_updates, _host_phase_2) = plan_mgs_updates(
             log,
             &later_collection,
             current_boards,
@@ -908,7 +914,7 @@ mod test {
             &BTreeMap::from([((SpType::Switch, 1), ARTIFACT_VERSION_1)]),
             ExpectedVersion::NoValidVersion,
         );
-        let later_updates = plan_mgs_updates(
+        let (later_updates, _host_phase_2) = plan_mgs_updates(
             log,
             &later_collection,
             current_boards,
@@ -934,7 +940,7 @@ mod test {
             &BTreeMap::new(),
             ExpectedVersion::NoValidVersion,
         );
-        let later_updates = plan_mgs_updates(
+        let (later_updates, _host_phase_2) = plan_mgs_updates(
             log,
             &updated_collection,
             current_boards,
@@ -952,7 +958,7 @@ mod test {
             &BTreeMap::from([((SpType::Sled, 0), ARTIFACT_VERSION_1)]),
             ExpectedVersion::NoValidVersion,
         );
-        let updates = plan_mgs_updates(
+        let (updates, _host_phase_2) = plan_mgs_updates(
             log,
             &collection,
             &BTreeSet::new(),
@@ -962,7 +968,7 @@ mod test {
             impossible_update_policy,
         );
         assert!(updates.is_empty());
-        let updates = plan_mgs_updates(
+        let (updates, _host_phase_2) = plan_mgs_updates(
             log,
             &collection,
             &collection.baseboards,
@@ -999,7 +1005,7 @@ mod test {
             &BTreeMap::from([((SpType::Sled, 0), ARTIFACT_VERSION_1)]),
             ExpectedVersion::Version(ARTIFACT_VERSION_1),
         );
-        let new_updates = plan_mgs_updates(
+        let (new_updates, _host_phase_2) = plan_mgs_updates(
             log,
             &collection,
             &collection.baseboards,
@@ -1038,7 +1044,7 @@ mod test {
             &BTreeMap::from([((SpType::Sled, 0), ARTIFACT_VERSION_1_5)]),
             ExpectedVersion::NoValidVersion,
         );
-        let new_updates = plan_mgs_updates(
+        let (new_updates, _host_phase_2) = plan_mgs_updates(
             log,
             &collection,
             &collection.baseboards,
@@ -1099,7 +1105,7 @@ mod test {
         // they're both the same.
         let mut updates = None;
         for impossible_update_policy in ImpossibleUpdatePolicy::iter() {
-            let planned_updates = plan_mgs_updates(
+            let (planned_updates, _host_phase_2) = plan_mgs_updates(
                 log,
                 &collection,
                 current_boards,
@@ -1145,7 +1151,7 @@ mod test {
         // If we plan with `ImpossibleUpdatePolicy::Keep`, we should _not_
         // replace the update, even though its preconditions are no longer
         // valid.
-        let keep_updates = plan_mgs_updates(
+        let (keep_updates, _host_phase_2) = plan_mgs_updates(
             log,
             &collection,
             current_boards,
@@ -1158,7 +1164,7 @@ mod test {
 
         // On the other hand, if we plan with
         // `ImpossibleUpdatePolicy::Reevaluate`, we should replace the update.
-        let reeval_updates = plan_mgs_updates(
+        let (reeval_updates, _host_phase_2) = plan_mgs_updates(
             log,
             &collection,
             current_boards,
@@ -1231,7 +1237,7 @@ mod test {
 
             // Run the planner and verify that we got one of our expected
             // updates.
-            let new_updates = plan_mgs_updates(
+            let (new_updates, _host_phase_2) = plan_mgs_updates(
                 log,
                 &collection,
                 current_boards,
@@ -1262,7 +1268,7 @@ mod test {
             &exceptions,
             ExpectedVersion::NoValidVersion,
         );
-        let last_updates = plan_mgs_updates(
+        let (last_updates, _host_phase_2) = plan_mgs_updates(
             log,
             &collection,
             &collection.baseboards,
@@ -1300,7 +1306,7 @@ mod test {
             &BTreeMap::new(),
             ExpectedVersion::NoValidVersion,
         );
-        let all_updates = plan_mgs_updates(
+        let (all_updates, _host_phase_2) = plan_mgs_updates(
             log,
             &collection,
             &collection.baseboards,
@@ -1321,7 +1327,7 @@ mod test {
             &BTreeMap::new(),
             ExpectedVersion::NoValidVersion,
         );
-        let all_updates_done = plan_mgs_updates(
+        let (all_updates_done, _host_phase_2) = plan_mgs_updates(
             log,
             &collection,
             &collection.baseboards,
@@ -1377,7 +1383,7 @@ mod test {
         );
         let nmax_updates = 1;
         let impossible_update_policy = ImpossibleUpdatePolicy::Reevaluate;
-        let updates = plan_mgs_updates(
+        let (updates, _host_phase_2) = plan_mgs_updates(
             log,
             &collection,
             &collection.baseboards,
@@ -1400,7 +1406,7 @@ mod test {
 
         // Plan again.  The configured update should be updated to reflect the
         // new location.
-        let new_updates = plan_mgs_updates(
+        let (new_updates, _host_phase_2) = plan_mgs_updates(
             log,
             &collection,
             &collection.baseboards,

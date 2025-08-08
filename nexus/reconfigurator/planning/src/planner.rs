@@ -225,7 +225,7 @@ impl<'a> Planner<'a> {
             // If do_plan_mupdate_override returns Waiting, we don't plan *any*
             // additional steps until the system has recovered.
             if let UpdateStepResult::ContinueToNextStep =
-                self.do_plan_mgs_updates()
+                self.do_plan_mgs_updates()?
             {
                 self.do_plan_zone_updates()?;
             }
@@ -1114,7 +1114,7 @@ impl<'a> Planner<'a> {
 
     /// Update at most one MGS-managed device (SP, RoT, etc.), if any are out of
     /// date.
-    fn do_plan_mgs_updates(&mut self) -> UpdateStepResult {
+    fn do_plan_mgs_updates(&mut self) -> Result<UpdateStepResult, Error> {
         // Determine which baseboards we will consider updating.
         //
         // Sleds may be present but not adopted as part of the control plane.
@@ -1158,7 +1158,7 @@ impl<'a> Planner<'a> {
             } else {
                 ImpossibleUpdatePolicy::Reevaluate
             };
-        let next = plan_mgs_updates(
+        let (next, host_phase_2_changes) = plan_mgs_updates(
             &self.log,
             &self.inventory,
             &included_baseboards,
@@ -1176,6 +1176,8 @@ impl<'a> Planner<'a> {
                 self.blueprint.comment(update.description());
             }
         }
+        self.blueprint
+            .sled_apply_pending_host_phase_2_changes(host_phase_2_changes)?;
 
         // TODO This is not quite right.  See oxidecomputer/omicron#8285.
         let rv = if next.is_empty() {
@@ -1184,7 +1186,7 @@ impl<'a> Planner<'a> {
             UpdateStepResult::Waiting
         };
         self.blueprint.pending_mgs_updates_replace_all(next);
-        rv
+        Ok(rv)
     }
 
     /// Update at most one existing zone to use a new image source.
