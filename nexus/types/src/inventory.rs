@@ -183,6 +183,13 @@ pub struct Collection {
 }
 
 impl Collection {
+    pub fn host_phase_1_active_slot_for(
+        &self,
+        baseboard_id: &BaseboardId,
+    ) -> Option<&HostPhase1ActiveSlot> {
+        self.host_phase_1_active_slots.get(baseboard_id)
+    }
+
     pub fn host_phase_1_flash_hash_for(
         &self,
         slot: M2Slot,
