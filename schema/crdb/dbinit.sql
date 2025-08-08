@@ -5821,18 +5821,22 @@ CREATE TABLE IF NOT EXISTS omicron.public.audit_log (
         OR (time_completed IS NOT NULL AND result_kind IS NOT NULL)
     ),
 
-    -- make sure we always have a status code for success and error results.
-    -- in other words, the only times http_status_code is allowed to be null is
-    -- when either there is no result yet or the result is a timeout
-    CONSTRAINT status_code_present_for_success_error CHECK (
-        result_kind = 'timeout'
-        OR result_kind IS NULL
-        OR http_status_code IS NOT NULL
-    ),
-
-    -- when result_kind is error, we always have an error message
-    CONSTRAINT message_present_for_error CHECK (
-        result_kind != 'error' OR error_message IS NOT NULL
+    -- Enforce consistency between result_kind and related fields:
+    -- 'timeout': no HTTP status or error details
+    -- 'success': requires HTTP status, no error details
+    -- 'error': requires HTTP status and error message
+    -- other/NULL: no HTTP status or error details
+    CONSTRAINT result_kind_state_consistency CHECK (
+        CASE result_kind
+            WHEN 'timeout' THEN http_status_code IS NULL AND error_code IS NULL
+                AND error_message IS NULL
+            WHEN 'success' THEN error_code IS NULL AND error_message IS NULL AND
+                http_status_code IS NOT NULL
+            WHEN 'error' THEN http_status_code IS NOT NULL AND error_message IS
+                NOT NULL
+            ELSE http_status_code IS NULL AND error_code IS NULL AND error_message
+                IS NULL
+        END
     ),
 
     -- Ensure valid actor ID combinations
