@@ -1627,7 +1627,7 @@ impl slog::KV for PendingMgsUpdateHostPhase1Details {
     ) -> slog::Result {
         let Self {
             expected_active_phase_1_slot,
-            expected_boot_disk: expected_active_boot_disk,
+            expected_boot_disk,
             expected_active_phase_1_hash,
             expected_active_phase_2_hash,
             expected_inactive_phase_1_hash,
@@ -1639,8 +1639,8 @@ impl slog::KV for PendingMgsUpdateHostPhase1Details {
             &format!("{expected_active_phase_1_slot:?}"),
         )?;
         serializer.emit_str(
-            Key::from("expected_active_boot_disk"),
-            &format!("{expected_active_boot_disk:?}"),
+            Key::from("expected_boot_disk"),
+            &format!("{expected_boot_disk:?}"),
         )?;
         serializer.emit_str(
             Key::from("expected_active_phase_1_hash"),
