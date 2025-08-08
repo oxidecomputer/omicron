@@ -56,6 +56,10 @@ enum ZoneCommands {
 enum BootstoreCommands {
     /// Show the internal state of the local bootstore node
     Status,
+
+    /// Read the network config
+    ReadNetworkConfigCache,
+    WriteNetworkConfig,
 }
 
 #[derive(Debug, Subcommand)]
@@ -105,6 +109,12 @@ impl SledAgentArgs {
             SledAgentCommands::Bootstore(BootstoreCommands::Status) => {
                 cmd_bootstore_status(&client).await
             }
+            SledAgentCommands::Bootstore(
+                BootstoreCommands::ReadNetworkConfigCache,
+            ) => cmd_read_network_config_cache(&client).await,
+            SledAgentCommands::Bootstore(
+                BootstoreCommands::WriteNetworkConfig,
+            ) => cmd_write_network_config(&client).await,
             SledAgentCommands::ChickenSwitch(
                 ChickenSwitchCommands::DestroyOrphans(DestroyOrphansArgs {
                     command: DestroyOrphansCommands::Get,
@@ -151,11 +161,50 @@ async fn cmd_zones_list(
     Ok(())
 }
 
+/// Runs `omdb sled-agent bootstore read-network-config-cache`
+async fn cmd_read_network_config_cache(
+    client: &sled_agent_client::Client,
+) -> Result<(), anyhow::Error> {
+    let config_cache = client
+        .read_network_bootstore_config_cache()
+        .await
+        .context("bootstore network config")?;
+
+    let out = serde_json::json!(*config_cache);
+
+    println!("{out}");
+
+    Ok(())
+}
+
+/// Runs `omdb sled-agent bootstore read-network-config-cache`
+async fn cmd_write_network_config(
+    client: &sled_agent_client::Client,
+) -> Result<(), anyhow::Error> {
+    let config = sled_agent_client::types::EarlyNetworkConfig {
+        body: todo!(),
+        generation: todo!(),
+        schema_version: todo!(),
+    };
+    let config_cache = client
+        .write_network_bootstore_config(&config)
+        .await
+        .context("bootstore network config")?;
+
+    println!("{config_cache:#?}");
+
+    Ok(())
+}
+
 /// Runs `omdb sled-agent bootstore status`
 async fn cmd_bootstore_status(
     client: &sled_agent_client::Client,
 ) -> Result<(), anyhow::Error> {
     let status = client.bootstore_status().await.context("bootstore status")?;
+    let config_cache = client
+        .read_network_bootstore_config_cache()
+        .await
+        .context("bootstore network config")?;
     println!("fsm ledger generation: {}", status.fsm_ledger_generation);
     println!(
         "network config ledger generation: {:?}",
