@@ -3045,13 +3045,11 @@ mod tests {
         let counts = BlueprintTableCounts::new(datastore, blueprint_id).await;
 
         // All tables should be empty (no exceptions for deleted blueprints)
-        for table_name in counts.counts.keys() {
-            let count = counts.count(table_name).unwrap();
-            assert_eq!(
-                count, 0,
-                "nonzero row count for blueprint {blueprint_id} in table {table_name}"
-            );
-        }
+        assert!(
+            counts.all_empty(),
+            "Blueprint {blueprint_id} not fully deleted. Non-empty tables: {:?}",
+            counts.non_empty_tables()
+        );
 
         // Verify no new blueprint tables were added without updating this function
         if let Err(msg) = counts.verify_all_tables_covered(datastore).await {
@@ -4573,10 +4571,6 @@ mod tests {
             self.counts.values().all(|&count| count == 0)
         }
 
-        /// Returns true if all tables are non-empty (>0 rows).
-        fn all_non_empty(&self) -> bool {
-            self.counts.values().all(|&count| count > 0)
-        }
 
         /// Returns a list of table names that are empty.
         fn empty_tables(&self) -> Vec<String> {
@@ -4606,10 +4600,6 @@ mod tests {
                 .collect()
         }
 
-        /// Get the count for a specific table.
-        fn count(&self, table_name: &str) -> Option<i64> {
-            self.counts.get(table_name).copied()
-        }
 
         /// Get all table names that were checked.
         fn tables_checked(&self) -> BTreeSet<&str> {
@@ -4676,17 +4666,17 @@ mod tests {
         ];
 
         // Check that all non-exception tables have at least one row
-        for table_name in counts.counts.keys() {
-            if exception_tables.contains(&table_name.as_str()) {
-                continue;
-            }
-
-            let count = counts.count(table_name).unwrap();
-            assert!(
-                count > 0,
-                "expected at least one row for blueprint {blueprint_id} in table {table_name}, found 0",
-            );
-        }
+        let empty_tables = counts.empty_tables();
+        let problematic_tables: Vec<_> = empty_tables
+            .into_iter()
+            .filter(|table| !exception_tables.contains(&table.as_str()))
+            .collect();
+        
+        assert!(
+            problematic_tables.is_empty(),
+            "Expected tables to be populated for blueprint {blueprint_id}: {:?}",
+            problematic_tables
+        );
 
         // Verify no new blueprint tables were added without updating this function
         if let Err(msg) = counts.verify_all_tables_covered(datastore).await {
