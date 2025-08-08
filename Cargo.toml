@@ -141,6 +141,8 @@ members = [
     "test-utils",
     "trust-quorum",
     "trust-quorum/gfss",
+    "trust-quorum/test-utils",
+    "trust-quorum/tqdb",
     "typed-rng",
     "update-common",
     "update-engine",
@@ -298,6 +300,8 @@ default-members = [
     "sp-sim",
     "trust-quorum",
     "trust-quorum/gfss",
+    "trust-quorum/test-utils",
+    "trust-quorum/tqdb",
     "test-utils",
     "typed-rng",
     "update-common",
@@ -460,6 +464,8 @@ gateway-test-utils = { path = "gateway-test-utils" }
 gateway-types = { path = "gateway-types" }
 gethostname = "0.5.0"
 gfss = { path = "trust-quorum/gfss" }
+trust-quorum = { path = "trust-quorum" }
+trust-quorum-test-utils = { path = "trust-quorum/test-utils" }
 glob = "0.3.2"
 guppy = "0.17.19"
 headers = "0.4.1"

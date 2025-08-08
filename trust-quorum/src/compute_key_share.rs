@@ -19,6 +19,7 @@ use std::collections::BTreeMap;
 
 /// In memory state that tracks retrieval of key shares in order to compute
 /// this node's key share for a given configuration.
+#[derive(Debug, Clone)]
 pub struct KeyShareComputer {
     log: Logger,
 
@@ -27,6 +28,17 @@ pub struct KeyShareComputer {
 
     collected_shares: BTreeMap<PlatformId, Share>,
 }
+
+#[cfg(feature = "danger_partial_eq_ct_wrapper")]
+impl PartialEq for KeyShareComputer {
+    fn eq(&self, other: &Self) -> bool {
+        self.config == other.config
+            && self.collected_shares == other.collected_shares
+    }
+}
+
+#[cfg(feature = "danger_partial_eq_ct_wrapper")]
+impl Eq for KeyShareComputer {}
 
 impl KeyShareComputer {
     pub fn new(
