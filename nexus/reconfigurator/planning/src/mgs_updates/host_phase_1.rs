@@ -6,19 +6,69 @@
 
 use super::MgsUpdateStatus;
 use super::MgsUpdateStatusError;
+use nexus_types::deployment::BlueprintArtifactVersion;
+use nexus_types::deployment::BlueprintHostPhase2DesiredContents;
 use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdateDetails;
 use nexus_types::deployment::PendingMgsUpdateHostPhase1Details;
 use nexus_types::inventory::BaseboardId;
 use nexus_types::inventory::Collection;
+use omicron_common::api::external::TufArtifactMeta;
 use omicron_common::api::external::TufRepoDescription;
 use omicron_common::disk::M2Slot;
+use omicron_uuid_kinds::SledUuid;
 use slog::Logger;
 use slog::error;
 use slog::warn;
+use std::collections::BTreeMap;
 use std::sync::Arc;
 use tufaceous_artifact::ArtifactHash;
 use tufaceous_artifact::ArtifactKind;
+
+#[derive(Debug, Default)]
+pub(crate) struct PendingHostPhase2Changes {
+    by_sled: BTreeMap<SledUuid, (M2Slot, BlueprintHostPhase2DesiredContents)>,
+}
+
+impl PendingHostPhase2Changes {
+    fn insert(
+        &mut self,
+        sled_id: SledUuid,
+        slot: M2Slot,
+        artifact: &TufArtifactMeta,
+    ) {
+        let contents = BlueprintHostPhase2DesiredContents::Artifact {
+            version: BlueprintArtifactVersion::Available {
+                version: artifact.id.version.clone(),
+            },
+            hash: artifact.hash,
+        };
+        let previous = self.by_sled.insert(sled_id, (slot, contents));
+        assert!(
+            previous.is_none(),
+            "recorded multiple changes for sled {sled_id}"
+        );
+    }
+
+    pub(super) fn append(&mut self, other: &mut Self) {
+        let expected_count = self.by_sled.len() + other.by_sled.len();
+        self.by_sled.append(&mut other.by_sled);
+        assert_eq!(
+            self.by_sled.len(),
+            expected_count,
+            "appended PendingHostPhase2Changes with duplicate sled IDs"
+        );
+    }
+
+    pub(crate) fn into_iter(
+        self,
+    ) -> impl Iterator<Item = (SledUuid, M2Slot, BlueprintHostPhase2DesiredContents)>
+    {
+        self.by_sled
+            .into_iter()
+            .map(|(sled_id, (slot, contents))| (sled_id, slot, contents))
+    }
+}
 
 pub(super) fn update_status(
     baseboard_id: &Arc<BaseboardId>,
@@ -179,7 +229,7 @@ pub(super) fn try_make_update(
     baseboard_id: &Arc<BaseboardId>,
     inventory: &Collection,
     current_artifacts: &TufRepoDescription,
-) -> Option<PendingMgsUpdate> {
+) -> Option<(PendingMgsUpdate, PendingHostPhase2Changes)> {
     let Some(sp_info) = inventory.sps.get(baseboard_id) else {
         warn!(
             log,
@@ -351,25 +401,38 @@ pub(super) fn try_make_update(
             }
         };
 
-    // TODO-correctness Update this sled's `BlueprintSledConfig` and set the
-    // desired inactive phase 2 artifact to `phase_2_artifact.hash`
+    // Before we can proceed with the phase 1 update, we need sled-agent to
+    // write the corresponding phase 2 artifact to its inactive disk. This
+    // requires us updating its `OmicronSledConfig`. We don't thread the
+    // blueprint editor all the way down to this point, so instead we'll return
+    // the set of host phase 2 changes we want the planner to make on our
+    // behalf.
+    let mut pending_host_phase_2_changes = PendingHostPhase2Changes::default();
+    pending_host_phase_2_changes.insert(
+        sled_agent.sled_id,
+        boot_disk.toggled(),
+        phase_2_artifact,
+    );
 
-    Some(PendingMgsUpdate {
-        baseboard_id: baseboard_id.clone(),
-        sp_type: sp_info.sp_type,
-        slot_id: sp_info.sp_slot,
-        details: PendingMgsUpdateDetails::HostPhase1(
-            PendingMgsUpdateHostPhase1Details {
-                expected_active_phase_1_slot: active_phase_1_slot,
-                expected_boot_disk: boot_disk,
-                expected_active_phase_1_hash: active_phase_1_hash,
-                expected_active_phase_2_hash: active_phase_2_hash,
-                expected_inactive_phase_1_hash: inactive_phase_1_hash,
-                expected_inactive_phase_2_hash: phase_2_artifact.hash,
-                sled_agent_address: sled_agent.sled_agent_address,
-            },
-        ),
-        artifact_hash: phase_1_artifact.hash,
-        artifact_version: phase_1_artifact.id.version.clone(),
-    })
+    Some((
+        PendingMgsUpdate {
+            baseboard_id: baseboard_id.clone(),
+            sp_type: sp_info.sp_type,
+            slot_id: sp_info.sp_slot,
+            details: PendingMgsUpdateDetails::HostPhase1(
+                PendingMgsUpdateHostPhase1Details {
+                    expected_active_phase_1_slot: active_phase_1_slot,
+                    expected_boot_disk: boot_disk,
+                    expected_active_phase_1_hash: active_phase_1_hash,
+                    expected_active_phase_2_hash: active_phase_2_hash,
+                    expected_inactive_phase_1_hash: inactive_phase_1_hash,
+                    expected_inactive_phase_2_hash: phase_2_artifact.hash,
+                    sled_agent_address: sled_agent.sled_agent_address,
+                },
+            ),
+            artifact_hash: phase_1_artifact.hash,
+            artifact_version: phase_1_artifact.id.version.clone(),
+        },
+        pending_host_phase_2_changes,
+    ))
 }

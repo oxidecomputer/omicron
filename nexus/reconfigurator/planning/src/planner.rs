@@ -187,7 +187,7 @@ impl<'a> Planner<'a> {
         // Only plan MGS-based updates updates if there are no outstanding
         // MUPdate overrides.
         let mgs_updates = if plan_mupdate_override_res.is_empty() {
-            self.do_plan_mgs_updates()
+            self.do_plan_mgs_updates()?
         } else {
             PlanningMgsUpdatesStepReport::new(PendingMgsUpdates::new())
         };
@@ -1117,7 +1117,9 @@ impl<'a> Planner<'a> {
 
     /// Update at most one MGS-managed device (SP, RoT, etc.), if any are out of
     /// date.
-    fn do_plan_mgs_updates(&mut self) -> PlanningMgsUpdatesStepReport {
+    fn do_plan_mgs_updates(
+        &mut self,
+    ) -> Result<PlanningMgsUpdatesStepReport, Error> {
         // Determine which baseboards we will consider updating.
         //
         // Sleds may be present but not adopted as part of the control plane.
@@ -1162,7 +1164,7 @@ impl<'a> Planner<'a> {
             } else {
                 ImpossibleUpdatePolicy::Reevaluate
             };
-        let next = plan_mgs_updates(
+        let (next, host_phase_2_changes) = plan_mgs_updates(
             &self.log,
             &self.inventory,
             &included_baseboards,
@@ -1180,9 +1182,11 @@ impl<'a> Planner<'a> {
                 self.blueprint.comment(update.description());
             }
         }
+        self.blueprint
+            .sled_apply_pending_host_phase_2_changes(host_phase_2_changes)?;
 
         self.blueprint.pending_mgs_updates_replace_all(next.clone());
-        PlanningMgsUpdatesStepReport::new(next)
+        Ok(PlanningMgsUpdatesStepReport::new(next))
     }
 
     /// Update at most one existing zone to use a new image source.
