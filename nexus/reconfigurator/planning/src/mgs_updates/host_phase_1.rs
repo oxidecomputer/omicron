@@ -246,6 +246,29 @@ pub(super) fn try_make_update(
     // TODO get actual active phase 1 slot
     let active_phase_1_slot = M2Slot::A;
 
+    // TODO-correctness What should we do if the active phase 1 slot doesn't
+    // match the boot disk? That means the active phase 1 slot has been changed
+    // since the last time the sled booted, which should only happen at the very
+    // end of a host OS update just before the sled is rebooted. It's possible
+    // (albeit unlikely) we collected inventory in that window; we don't want to
+    // plan a new update for this sled if it's about to reboot into some other
+    // update.
+    //
+    // If there are other ways we could get a mismatch between the active phase
+    // 1 slot and the boot disk, they'll induce a support case to recover, given
+    // this current implementation. As far as we know they shouldn't happen.
+    if active_phase_1_slot != boot_disk {
+        warn!(
+            log,
+            "cannot configure host OS update for board (active phase 1 slot \
+             doesn't match boot disk; is the sled already being updated?)";
+            baseboard_id,
+            "active_phase_1_slot" => ?active_phase_1_slot,
+            "boot_disk" => ?boot_disk,
+        );
+        return None;
+    }
+
     let Some(active_phase_1_hash) = inventory
         .host_phase_1_flash_hash_for(active_phase_1_slot, baseboard_id)
         .map(|h| h.hash)
