@@ -54,6 +54,7 @@ use nexus_db_model::BpOmicronZone;
 use nexus_db_model::BpOmicronZoneNic;
 use nexus_db_model::BpOximeterReadPolicy;
 use nexus_db_model::BpPendingMgsUpdateComponent;
+use nexus_db_model::BpPendingMgsUpdateHostPhase1;
 use nexus_db_model::BpPendingMgsUpdateRot;
 use nexus_db_model::BpPendingMgsUpdateRotBootloader;
 use nexus_db_model::BpPendingMgsUpdateSp;
@@ -62,12 +63,15 @@ use nexus_db_model::BpTarget;
 use nexus_db_model::DbArtifactVersion;
 use nexus_db_model::DbTypedUuid;
 use nexus_db_model::HwBaseboardId;
+use nexus_db_model::HwM2Slot;
 use nexus_db_model::HwRotSlot;
+use nexus_db_model::Ipv6Addr;
 use nexus_db_model::SpMgsSlot;
 use nexus_db_model::SpType;
 use nexus_db_model::SqlU16;
 use nexus_db_model::TufArtifact;
 use nexus_db_model::to_db_typed_uuid;
+use nexus_db_schema::enums::HwM2SlotEnum;
 use nexus_db_schema::enums::HwRotSlotEnum;
 use nexus_db_schema::enums::SpTypeEnum;
 use nexus_types::deployment::Blueprint;
@@ -80,6 +84,7 @@ use nexus_types::deployment::ExpectedVersion;
 use nexus_types::deployment::OximeterReadMode;
 use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdateDetails;
+use nexus_types::deployment::PendingMgsUpdateHostPhase1Details;
 use nexus_types::deployment::PendingMgsUpdates;
 use nexus_types::inventory::BaseboardId;
 use omicron_common::api::external::DataPageParams;
@@ -1191,9 +1196,51 @@ impl DataStore {
             }
         }
 
+        // Load all pending host_phase_1 updates.
+        let mut pending_updates_host_phase_1 = Vec::new();
+        {
+            #[rustfmt::skip]
+            use nexus_db_schema::schema::bp_pending_mgs_update_host_phase_1::dsl;
+
+            let mut paginator = Paginator::new(
+                SQL_BATCH_SIZE,
+                dropshot::PaginationOrder::Ascending,
+            );
+            while let Some(p) = paginator.next() {
+                let batch = paginated(
+                    dsl::bp_pending_mgs_update_host_phase_1,
+                    dsl::hw_baseboard_id,
+                    &p.current_pagparams(),
+                )
+                .filter(dsl::blueprint_id.eq(to_db_typed_uuid(blueprint_id)))
+                .select(BpPendingMgsUpdateHostPhase1::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+
+                paginator = p.found_batch(&batch, &|d| d.hw_baseboard_id);
+                for row in batch {
+                    pending_updates_host_phase_1.push(row);
+                }
+            }
+        }
+
         // Collect the unique baseboard ids referenced by pending updates.
-        let baseboard_id_ids: BTreeSet<_> =
-            pending_updates_sp.iter().map(|s| s.hw_baseboard_id).collect();
+        let baseboard_id_ids: BTreeSet<_> = pending_updates_sp
+            .iter()
+            .map(|s| s.hw_baseboard_id)
+            .chain(pending_updates_rot.iter().map(|s| s.hw_baseboard_id))
+            .chain(
+                pending_updates_rot_bootloader
+                    .iter()
+                    .map(|s| s.hw_baseboard_id),
+            )
+            .chain(
+                pending_updates_host_phase_1.iter().map(|s| s.hw_baseboard_id),
+            )
+            .collect();
         // Fetch the corresponding baseboard records.
         let baseboards_by_id: BTreeMap<_, _> = {
             use nexus_db_schema::schema::hw_baseboard_id::dsl;
@@ -1254,6 +1301,14 @@ impl DataStore {
                 &blueprint_id,
             )?;
         }
+        for row in pending_updates_host_phase_1 {
+            process_update_row(
+                row,
+                &baseboards_by_id,
+                &mut pending_mgs_updates,
+                &blueprint_id,
+            )?;
+        }
 
         Ok(Blueprint {
             id: blueprint_id,
@@ -1293,7 +1348,26 @@ impl DataStore {
         let conn = self.pool_connection_authorized(opctx).await?;
         let err = OptionalError::new();
 
-        let (
+        // Helper to pack and unpack all the counts of rows we delete in the
+        // transaction below (exclusively used for logging).
+        struct NumRowsDeleted {
+            nblueprints: usize,
+            nsled_metadata: usize,
+            nphysical_disks: usize,
+            ndatasets: usize,
+            nzones: usize,
+            nnics: usize,
+            nclickhouse_cluster_configs: usize,
+            nclickhouse_keepers: usize,
+            nclickhouse_servers: usize,
+            noximeter_policy: usize,
+            npending_mgs_updates_sp: usize,
+            npending_mgs_updates_rot: usize,
+            npending_mgs_updates_rot_bootloader: usize,
+            npending_mgs_updates_host_phase_1: usize,
+        }
+
+        let NumRowsDeleted {
             nblueprints,
             nsled_metadata,
             nphysical_disks,
@@ -1307,7 +1381,8 @@ impl DataStore {
             npending_mgs_updates_sp,
             npending_mgs_updates_rot,
             npending_mgs_updates_rot_bootloader,
-        ) = self
+            npending_mgs_updates_host_phase_1,
+        } = self
             .transaction_retry_wrapper("blueprint_delete")
             .transaction(&conn, |conn| {
                 let err = err.clone();
@@ -1534,7 +1609,22 @@ impl DataStore {
                         .await?
                     };
 
-                    Ok((
+                    let npending_mgs_updates_host_phase_1 = {
+                        // Skip rustfmt because it bails out on this long line.
+                        #[rustfmt::skip]
+                        use nexus_db_schema::schema::
+                            bp_pending_mgs_update_host_phase_1::dsl;
+                        diesel::delete(
+                            dsl::bp_pending_mgs_update_host_phase_1.filter(
+                                dsl::blueprint_id
+                                    .eq(to_db_typed_uuid(blueprint_id)),
+                            ),
+                        )
+                        .execute_async(&conn)
+                        .await?
+                    };
+
+                    Ok(NumRowsDeleted {
                         nblueprints,
                         nsled_metadata,
                         nphysical_disks,
@@ -1548,7 +1638,8 @@ impl DataStore {
                         npending_mgs_updates_sp,
                         npending_mgs_updates_rot,
                         npending_mgs_updates_rot_bootloader,
-                    ))
+                        npending_mgs_updates_host_phase_1,
+                    })
                 }
             })
             .await
@@ -1573,6 +1664,8 @@ impl DataStore {
             "npending_mgs_updates_rot" => npending_mgs_updates_rot,
             "npending_mgs_updates_rot_bootloader" =>
             npending_mgs_updates_rot_bootloader,
+            "npending_mgs_updates_host_phase_1" =>
+            npending_mgs_updates_host_phase_1,
         );
 
         Ok(())
@@ -2302,8 +2395,144 @@ async fn insert_pending_mgs_update(
                 _expected_stage0_next_version,
             ) = update_dsl::bp_pending_mgs_update_rot_bootloader::all_columns();
         }
-        // TODO implement
-        PendingMgsUpdateDetails::HostPhase1(_) => (),
+        PendingMgsUpdateDetails::HostPhase1(
+            PendingMgsUpdateHostPhase1Details {
+                expected_active_phase_1_slot,
+                expected_boot_disk,
+                expected_active_phase_1_hash,
+                expected_active_phase_2_hash,
+                expected_inactive_phase_1_hash,
+                expected_inactive_phase_2_hash,
+                sled_agent_address,
+            },
+        ) => {
+            let db_blueprint_id = DbTypedUuid::from(blueprint_id)
+                .into_sql::<diesel::sql_types::Uuid>();
+            let db_sp_type =
+                SpType::from(update.sp_type).into_sql::<SpTypeEnum>();
+            let db_slot_id = SpMgsSlot::from(SqlU16::from(update.slot_id))
+                .into_sql::<diesel::sql_types::Int4>();
+            let db_artifact_hash = ArtifactHash::from(update.artifact_hash)
+                .into_sql::<diesel::sql_types::Text>();
+            let db_artifact_version =
+                DbArtifactVersion::from(update.artifact_version.clone())
+                    .into_sql::<diesel::sql_types::Text>();
+            let db_expected_active_phase_1_slot =
+                HwM2Slot::from(*expected_active_phase_1_slot)
+                    .into_sql::<HwM2SlotEnum>();
+            let db_expected_boot_disk =
+                HwM2Slot::from(*expected_boot_disk).into_sql::<HwM2SlotEnum>();
+            let db_expected_active_phase_1_hash =
+                ArtifactHash(*expected_active_phase_1_hash)
+                    .into_sql::<diesel::sql_types::Text>();
+            let db_expected_active_phase_2_hash =
+                ArtifactHash(*expected_active_phase_2_hash)
+                    .into_sql::<diesel::sql_types::Text>();
+            let db_expected_inactive_phase_1_hash =
+                ArtifactHash(*expected_inactive_phase_1_hash)
+                    .into_sql::<diesel::sql_types::Text>();
+            let db_expected_inactive_phase_2_hash =
+                ArtifactHash(*expected_inactive_phase_2_hash)
+                    .into_sql::<diesel::sql_types::Text>();
+            let db_sled_agent_ip = Ipv6Addr::from(sled_agent_address.ip())
+                .into_sql::<diesel::sql_types::Inet>();
+            let db_sled_agent_port =
+                SqlU16(sled_agent_address.port()).into_sql::<sql_types::Int4>();
+
+            use nexus_db_schema::schema::hw_baseboard_id::dsl as baseboard_dsl;
+            // Skip formatting to prevent rustfmt bailing out.
+            #[rustfmt::skip]
+            use nexus_db_schema::schema::bp_pending_mgs_update_host_phase_1::dsl
+                as update_dsl;
+            let selection = nexus_db_schema::schema::hw_baseboard_id::table
+                .select((
+                    db_blueprint_id,
+                    baseboard_dsl::id,
+                    db_sp_type,
+                    db_slot_id,
+                    db_artifact_hash,
+                    db_artifact_version,
+                    db_expected_active_phase_1_slot,
+                    db_expected_boot_disk,
+                    db_expected_active_phase_1_hash,
+                    db_expected_active_phase_2_hash,
+                    db_expected_inactive_phase_1_hash,
+                    db_expected_inactive_phase_2_hash,
+                    db_sled_agent_ip,
+                    db_sled_agent_port,
+                ))
+                .filter(
+                    baseboard_dsl::part_number
+                        .eq(update.baseboard_id.part_number.clone()),
+                )
+                .filter(
+                    baseboard_dsl::serial_number
+                        .eq(update.baseboard_id.serial_number.clone()),
+                );
+            let count = diesel::insert_into(
+                update_dsl::bp_pending_mgs_update_host_phase_1,
+            )
+            .values(selection)
+            .into_columns((
+                update_dsl::blueprint_id,
+                update_dsl::hw_baseboard_id,
+                update_dsl::sp_type,
+                update_dsl::sp_slot,
+                update_dsl::artifact_sha256,
+                update_dsl::artifact_version,
+                update_dsl::expected_active_phase_1_slot,
+                update_dsl::expected_boot_disk,
+                update_dsl::expected_active_phase_1_hash,
+                update_dsl::expected_active_phase_2_hash,
+                update_dsl::expected_inactive_phase_1_hash,
+                update_dsl::expected_inactive_phase_2_hash,
+                update_dsl::sled_agent_ip,
+                update_dsl::sled_agent_port,
+            ))
+            .execute_async(conn)
+            .await?;
+            if count != 1 {
+                // As with `PendingMgsUpdateDetails::Sp`, this should be
+                // impossible in practice.
+                error!(
+                    log,
+                    "blueprint insertion: unexpectedly tried to \
+                     insert wrong number of rows into \
+                     bp_pending_mgs_update_host_phase_1 (aborting transaction)";
+                    "count" => count,
+                    &update.baseboard_id,
+                );
+                return Err(InsertTxnError::BadInsertCount {
+                    table_name: "bp_pending_mgs_update_host_phase_1",
+                    count,
+                    baseboard_id: update.baseboard_id.clone(),
+                });
+            }
+
+            // This statement is just here to force a compilation error if the
+            // set of columns in `bp_pending_mgs_update_host_phase_1` changes
+            // because that will affect the correctness of the above statement.
+            //
+            // If you're here because of a compile error, you might be changing
+            // the `bp_pending_mgs_update_host_phase_1` table. Update the
+            // statement below and be sure to update the code above, too!
+            let (
+                _blueprint_id,
+                _hw_baseboard_id,
+                _sp_type,
+                _sp_slot,
+                _artifact_sha256,
+                _artifact_version,
+                _expected_active_phase_1_slot,
+                _expected_boot_disk,
+                _expected_active_phase_1_hash,
+                _expected_active_phase_2_hash,
+                _expected_inactive_phase_1_hash,
+                _expected_inactive_phase_2_hash,
+                _sled_agent_ip,
+                _sled_agent_port,
+            ) = update_dsl::bp_pending_mgs_update_host_phase_1::all_columns();
+        }
     }
     Ok(())
 }
@@ -2757,6 +2986,7 @@ mod tests {
     use omicron_common::api::internal::shared::NetworkInterface;
     use omicron_common::api::internal::shared::NetworkInterfaceKind;
     use omicron_common::disk::DiskIdentity;
+    use omicron_common::disk::M2Slot;
     use omicron_common::update::ArtifactId;
     use omicron_common::zpool_name::ZpoolName;
     use omicron_test_utils::dev;
@@ -2840,6 +3070,7 @@ mod tests {
             query_count!(bp_pending_mgs_update_sp, blueprint_id),
             query_count!(bp_pending_mgs_update_rot, blueprint_id),
             query_count!(bp_pending_mgs_update_rot_bootloader, blueprint_id),
+            query_count!(bp_pending_mgs_update_host_phase_1, blueprint_id),
         ] {
             let count: i64 = result.unwrap();
             assert_eq!(
@@ -3485,6 +3716,13 @@ mod tests {
             .blueprint_insert(&opctx, &blueprint3)
             .await
             .expect("failed to insert blueprint");
+        assert_eq!(
+            blueprint3,
+            datastore
+                .blueprint_read(&opctx, &authz_blueprint3)
+                .await
+                .expect("failed to read collection back")
+        );
         let bp3_target = BlueprintTarget {
             target_id: blueprint3.id,
             enabled: true,
@@ -3523,10 +3761,18 @@ mod tests {
             artifact_version: "2.0.0".parse().unwrap(),
         });
         let blueprint4 = builder.build();
+        let authz_blueprint4 = authz_blueprint_from_id(blueprint4.id);
         datastore
             .blueprint_insert(&opctx, &blueprint4)
             .await
             .expect("failed to insert blueprint");
+        assert_eq!(
+            blueprint4,
+            datastore
+                .blueprint_read(&opctx, &authz_blueprint4)
+                .await
+                .expect("failed to read collection back")
+        );
         let bp4_target = BlueprintTarget {
             target_id: blueprint4.id,
             enabled: true,
@@ -3538,6 +3784,90 @@ mod tests {
             .unwrap();
         datastore.blueprint_delete(&opctx, &authz_blueprint3).await.unwrap();
         ensure_blueprint_fully_deleted(&datastore, blueprint3.id).await;
+
+        // We now make sure we can build and insert a blueprint containing a
+        // host phase 1 MGS update
+        let mut builder = BlueprintBuilder::new_based_on(
+            &logctx.log,
+            &blueprint4,
+            &planning_input,
+            &collection,
+            "dummy",
+        )
+        .expect("failed to create builder");
+
+        // Configure a host phase 1 update
+        let (baseboard_id, sp) =
+            collection.sps.iter().next().expect("at least one SP");
+        builder.pending_mgs_update_insert(PendingMgsUpdate {
+            baseboard_id: baseboard_id.clone(),
+            sp_type: sp.sp_type,
+            slot_id: sp.sp_slot,
+            details: PendingMgsUpdateDetails::HostPhase1(
+                PendingMgsUpdateHostPhase1Details {
+                    expected_active_phase_1_slot: M2Slot::A,
+                    expected_boot_disk: M2Slot::B,
+                    expected_active_phase_1_hash: ArtifactHash([1; 32]),
+                    expected_active_phase_2_hash: ArtifactHash([2; 32]),
+                    expected_inactive_phase_1_hash: ArtifactHash([3; 32]),
+                    expected_inactive_phase_2_hash: ArtifactHash([4; 32]),
+                    sled_agent_address: "[::1]:12345".parse().unwrap(),
+                },
+            ),
+            artifact_hash: ArtifactHash([72; 32]),
+            artifact_version: "2.0.0".parse().unwrap(),
+        });
+        let blueprint5 = builder.build();
+        let authz_blueprint5 = authz_blueprint_from_id(blueprint5.id);
+        datastore
+            .blueprint_insert(&opctx, &blueprint5)
+            .await
+            .expect("failed to insert blueprint");
+        assert_eq!(
+            blueprint5,
+            datastore
+                .blueprint_read(&opctx, &authz_blueprint5)
+                .await
+                .expect("failed to read collection back")
+        );
+        let bp5_target = BlueprintTarget {
+            target_id: blueprint5.id,
+            enabled: true,
+            time_made_target: now_db_precision(),
+        };
+        datastore
+            .blueprint_target_set_current(&opctx, bp5_target)
+            .await
+            .unwrap();
+        datastore.blueprint_delete(&opctx, &authz_blueprint4).await.unwrap();
+        ensure_blueprint_fully_deleted(&datastore, blueprint4.id).await;
+
+        // Now make a new blueprint (with no meaningful changes) to ensure we
+        // can delete the last test blueprint we generated above.
+        let blueprint6 = BlueprintBuilder::new_based_on(
+            &logctx.log,
+            &blueprint5,
+            &planning_input,
+            &collection,
+            "dummy",
+        )
+        .expect("failed to create builder")
+        .build();
+        datastore
+            .blueprint_insert(&opctx, &blueprint6)
+            .await
+            .expect("failed to insert blueprint");
+        let bp6_target = BlueprintTarget {
+            target_id: blueprint6.id,
+            enabled: true,
+            time_made_target: now_db_precision(),
+        };
+        datastore
+            .blueprint_target_set_current(&opctx, bp6_target)
+            .await
+            .unwrap();
+        datastore.blueprint_delete(&opctx, &authz_blueprint5).await.unwrap();
+        ensure_blueprint_fully_deleted(&datastore, blueprint5.id).await;
 
         // Clean up.
         db.terminate().await;
