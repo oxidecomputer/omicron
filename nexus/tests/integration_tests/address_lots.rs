@@ -15,7 +15,7 @@ use nexus_types::external_api::params::{
 };
 use omicron_common::api::external::{
     AddressLot, AddressLotBlock, AddressLotCreateResponse, AddressLotKind,
-    IdentityMetadataCreateParams,
+    AddressLotViewResponse, IdentityMetadataCreateParams,
 };
 use std::net::IpAddr;
 
@@ -75,6 +75,25 @@ async fn test_address_lot_basic_crud(ctx: &ControlPlaneTestContext) {
     );
     assert_eq!(
         blocks[0].last_address,
+        "203.0.113.20".parse::<IpAddr>().unwrap()
+    );
+
+    // View a single lot by name
+    let view_lot = NexusRequest::object_get(
+        client,
+        "/v1/system/networking/address-lot/parkinglot",
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute_and_parse_unwrap::<AddressLotViewResponse>()
+    .await;
+    assert_eq!(view_lot.lot.identity.name, "parkinglot");
+    assert_eq!(view_lot.blocks.len(), params.blocks.len());
+    assert_eq!(
+        view_lot.blocks[0].first_address,
+        "203.0.113.10".parse::<IpAddr>().unwrap()
+    );
+    assert_eq!(
+        view_lot.blocks[0].last_address,
         "203.0.113.20".parse::<IpAddr>().unwrap()
     );
 

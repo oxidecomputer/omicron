@@ -74,7 +74,7 @@ impl super::Nexus {
         self: &Arc<Self>,
         opctx: &OpContext,
         address_lot: &lookup::AddressLot<'_>,
-        pagparams: &DataPageParams<'_, Uuid>,
+        pagparams: Option<&DataPageParams<'_, Uuid>>,
     ) -> ListResultVec<AddressLotBlock> {
         let (.., authz_address_lot) =
             address_lot.lookup_for(authz::Action::ListChildren).await?;

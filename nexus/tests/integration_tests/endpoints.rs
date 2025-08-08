@@ -2734,7 +2734,7 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                 url: &DEMO_ADDRESS_LOT_URL,
                 visibility: Visibility::Protected,
                 unprivileged_access: UnprivilegedAccess::None,
-                allowed_methods: vec![AllowedMethod::Delete],
+                allowed_methods: vec![AllowedMethod::GetNonexistent, AllowedMethod::Delete],
             },
             VerifyEndpoint {
                 url: &DEMO_ADDRESS_LOT_BLOCKS_URL,

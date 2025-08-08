@@ -248,13 +248,18 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         authz_address_lot: &authz::AddressLot,
-        pagparams: &DataPageParams<'_, Uuid>,
+        pagparams: Option<&DataPageParams<'_, Uuid>>,
     ) -> ListResultVec<AddressLotBlock> {
         use nexus_db_schema::schema::address_lot_block::dsl;
 
         let conn = self.pool_connection_authorized(opctx).await?;
 
-        paginated(dsl::address_lot_block, dsl::id, &pagparams)
+        let table = match pagparams {
+            Some(params) => paginated(dsl::address_lot_block, dsl::id, &params),
+            None => dsl::address_lot_block.into_boxed(),
+        };
+
+        table
             .filter(dsl::address_lot_id.eq(authz_address_lot.id()))
             .select(AddressLotBlock::as_select())
             .load_async(&*conn)
