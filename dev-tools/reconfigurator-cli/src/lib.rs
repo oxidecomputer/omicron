@@ -1416,9 +1416,9 @@ fn cmd_sled_show(
     swriteln!(s, "sled {} ({}, {})", sled_id, sled.policy, sled.state);
     swriteln!(s, "serial {}", sled.baseboard_id.serial_number);
     swriteln!(s, "subnet {}", sled_resources.subnet.net());
-    swriteln!(s, "SP active version:   {:?}", sp_active_version);
+    swriteln!(s, "SP active version: {:?}", sp_active_version);
     swriteln!(s, "SP inactive version: {:?}", sp_inactive_version);
-    swriteln!(s, "RoT bootloader stage 0 version:   {:?}", stage0_version);
+    swriteln!(s, "RoT bootloader stage 0 version: {:?}", stage0_version);
     swriteln!(
         s,
         "RoT bootloader stage 0 next version: {:?}",

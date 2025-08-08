@@ -406,7 +406,23 @@ fn mgs_update_status_rot(
     expected_inactive_version: &ExpectedVersion,
     found_inactive_version: Option<&str>,
 ) -> MgsUpdateStatus {
-    if &found.active_slot.version() == desired_version {
+    let RotUpdateState {
+        active_slot: found_active_slot,
+        persistent_boot_preference: found_persistent_boot_preference,
+        pending_persistent_boot_preference:
+            found_pending_persistent_boot_preference,
+        transient_boot_preference: found_transient_boot_preference,
+    } = found;
+
+    let RotUpdateState {
+        active_slot: expected_active_slot,
+        persistent_boot_preference: expected_persistent_boot_preference,
+        pending_persistent_boot_preference:
+            expected_pending_persistent_boot_preference,
+        transient_boot_preference: expected_transient_boot_preference,
+    } = expected;
+
+    if &found_active_slot.version() == desired_version {
         // If we find the desired version in the active slot, we're done.
         return MgsUpdateStatus::Done;
     }
@@ -424,15 +440,15 @@ fn mgs_update_status_rot(
     // Transient boot preference is not in use yet, if we find that it is set we
     // should not proceed. Once https://github.com/oxidecomputer/hubris/pull/2050
     // is implemented, we should revist this check
-    if found.active_slot.version() != expected.active_slot.version()
-        || found.persistent_boot_preference
-            != expected.persistent_boot_preference
-        || found.pending_persistent_boot_preference
-            != expected.pending_persistent_boot_preference
-        || found.transient_boot_preference != expected.transient_boot_preference
-        || found.persistent_boot_preference != found.active_slot.slot
-        || found.transient_boot_preference.is_some()
-        || expected.transient_boot_preference.is_some()
+    if found_active_slot.version() != expected_active_slot.version()
+        || found_persistent_boot_preference
+            != expected_persistent_boot_preference
+        || found_pending_persistent_boot_preference
+            != expected_pending_persistent_boot_preference
+        || found_transient_boot_preference != expected_transient_boot_preference
+        || found_persistent_boot_preference != found_active_slot.slot
+        || found_transient_boot_preference.is_some()
+        || expected_transient_boot_preference.is_some()
     {
         return MgsUpdateStatus::Impossible;
     }
@@ -444,13 +460,13 @@ fn mgs_update_status_rot(
     // https://github.com/oxidecomputer/omicron/issues/8414 for context
     // about when we'll be able to know whether an it's an ongoing update
     // or an RoT in a failed state.
-    if found.pending_persistent_boot_preference.is_some() {
+    if found_pending_persistent_boot_preference.is_some() {
         return MgsUpdateStatus::NotDone;
     }
 
     // If there is a mismatch between the expected active slot and the found
     // active slot then an update is not done.
-    if found.active_slot.slot != expected.active_slot.slot {
+    if found_active_slot.slot != expected_active_slot.slot {
         return MgsUpdateStatus::NotDone;
     }
 
@@ -695,13 +711,8 @@ fn try_make_update_rot(
 
     let active_slot = rot_state.active_slot;
 
-    let active_caboose = match active_slot {
-        RotSlot::A => CabooseWhich::RotSlotA,
-        RotSlot::B => CabooseWhich::RotSlotB,
-    };
-
-    let Some(active_caboose) =
-        inventory.caboose_for(active_caboose, baseboard_id)
+    let Some(active_caboose) = inventory
+        .caboose_for(CabooseWhich::from_rot_slot(active_slot), baseboard_id)
     else {
         warn!(
             log,
@@ -771,13 +782,6 @@ fn try_make_update_rot(
                     ];
 
                     if slot_a_artifacts.contains(&a.id.kind) {
-                        warn!(
-                            log,
-                            "CHOSE: name {} sign {} kind {}",
-                            a.id.name,
-                            artifact_sign,
-                            a.id.kind
-                        );
                         return true;
                     }
                 }
@@ -789,13 +793,6 @@ fn try_make_update_rot(
                     ];
 
                     if slot_b_artifacts.contains(&a.id.kind) {
-                        warn!(
-                            log,
-                            "CHOSE: name {} sign {} kind {}",
-                            a.id.name,
-                            artifact_sign,
-                            a.id.kind
-                        );
                         return true;
                     }
                 }
@@ -836,13 +833,11 @@ fn try_make_update_rot(
     };
 
     // Begin configuring an update.
-    let inactive_caboose = match active_slot.toggled() {
-        RotSlot::A => CabooseWhich::RotSlotA,
-        RotSlot::B => CabooseWhich::RotSlotB,
-    };
-
     let expected_inactive_version = match inventory
-        .caboose_for(inactive_caboose, baseboard_id)
+        .caboose_for(
+            CabooseWhich::from_rot_slot(active_slot.toggled()),
+            baseboard_id,
+        )
         .map(|c| c.caboose.version.parse::<ArtifactVersion>())
         .transpose()
     {

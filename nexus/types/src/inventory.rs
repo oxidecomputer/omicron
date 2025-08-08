@@ -457,6 +457,13 @@ impl CabooseWhich {
             CabooseWhich::Stage0Next => CabooseWhich::Stage0,
         }
     }
+
+    pub fn from_rot_slot(slot: RotSlot) -> Self {
+        match slot {
+            RotSlot::A => CabooseWhich::RotSlotA,
+            RotSlot::B => CabooseWhich::RotSlotB,
+        }
+    }
 }
 
 /// Root of trust page contents found during a collection

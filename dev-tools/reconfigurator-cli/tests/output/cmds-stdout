@@ -28,9 +28,9 @@ dde1c0e2-b10d-4621-b420-f179f7a7a00a serial0 10      fd00:1122:3344:101::/64
 sled dde1c0e2-b10d-4621-b420-f179f7a7a00a (in service, active)
 serial serial0
 subnet fd00:1122:3344:101::/64
-SP active version:   Some("0.0.1")
+SP active version: Some("0.0.1")
 SP inactive version: None
-RoT bootloader stage 0 version:   Some("0.0.1")
+RoT bootloader stage 0 version: Some("0.0.1")
 RoT bootloader stage 0 next version: None
 RoT active slot: A
 RoT slot A version: Some("0.0.2")
@@ -83,9 +83,9 @@ set sled dde1c0e2-b10d-4621-b420-f179f7a7a00a RoT settings: slot a -> 1.0.0
 sled dde1c0e2-b10d-4621-b420-f179f7a7a00a (in service, active)
 serial serial0
 subnet fd00:1122:3344:101::/64
-SP active version:   Some("0.0.1")
+SP active version: Some("0.0.1")
 SP inactive version: None
-RoT bootloader stage 0 version:   Some("0.0.1")
+RoT bootloader stage 0 version: Some("0.0.1")
 RoT bootloader stage 0 next version: None
 RoT active slot: A
 RoT slot A version: Some("1.0.0")
@@ -123,9 +123,9 @@ set sled dde1c0e2-b10d-4621-b420-f179f7a7a00a RoT settings: slot b -> 2.0.0
 sled dde1c0e2-b10d-4621-b420-f179f7a7a00a (in service, active)
 serial serial0
 subnet fd00:1122:3344:101::/64
-SP active version:   Some("0.0.1")
+SP active version: Some("0.0.1")
 SP inactive version: None
-RoT bootloader stage 0 version:   Some("0.0.1")
+RoT bootloader stage 0 version: Some("0.0.1")
 RoT bootloader stage 0 next version: None
 RoT active slot: A
 RoT slot A version: Some("1.0.0")
@@ -163,9 +163,9 @@ set sled dde1c0e2-b10d-4621-b420-f179f7a7a00a RoT settings: slot a -> 3.0.0
 sled dde1c0e2-b10d-4621-b420-f179f7a7a00a (in service, active)
 serial serial0
 subnet fd00:1122:3344:101::/64
-SP active version:   Some("0.0.1")
+SP active version: Some("0.0.1")
 SP inactive version: None
-RoT bootloader stage 0 version:   Some("0.0.1")
+RoT bootloader stage 0 version: Some("0.0.1")
 RoT bootloader stage 0 next version: None
 RoT active slot: A
 RoT slot A version: Some("3.0.0")
@@ -203,9 +203,9 @@ set sled dde1c0e2-b10d-4621-b420-f179f7a7a00a RoT settings: slot a -> 4.0.0, slo
 sled dde1c0e2-b10d-4621-b420-f179f7a7a00a (in service, active)
 serial serial0
 subnet fd00:1122:3344:101::/64
-SP active version:   Some("0.0.1")
+SP active version: Some("0.0.1")
 SP inactive version: None
-RoT bootloader stage 0 version:   Some("0.0.1")
+RoT bootloader stage 0 version: Some("0.0.1")
 RoT bootloader stage 0 next version: None
 RoT active slot: A
 RoT slot A version: Some("4.0.0")
@@ -243,9 +243,9 @@ set sled dde1c0e2-b10d-4621-b420-f179f7a7a00a RoT settings: slot a -> 4.0.0, slo
 sled dde1c0e2-b10d-4621-b420-f179f7a7a00a (in service, active)
 serial serial0
 subnet fd00:1122:3344:101::/64
-SP active version:   Some("0.0.1")
+SP active version: Some("0.0.1")
 SP inactive version: None
-RoT bootloader stage 0 version:   Some("0.0.1")
+RoT bootloader stage 0 version: Some("0.0.1")
 RoT bootloader stage 0 next version: None
 RoT active slot: A
 RoT slot A version: Some("4.0.0")
@@ -286,9 +286,9 @@ set sled dde1c0e2-b10d-4621-b420-f179f7a7a00a SP versions: active -> 1.0.0
 sled dde1c0e2-b10d-4621-b420-f179f7a7a00a (in service, active)
 serial serial0
 subnet fd00:1122:3344:101::/64
-SP active version:   Some("1.0.0")
+SP active version: Some("1.0.0")
 SP inactive version: None
-RoT bootloader stage 0 version:   Some("0.0.1")
+RoT bootloader stage 0 version: Some("0.0.1")
 RoT bootloader stage 0 next version: None
 RoT active slot: A
 RoT slot A version: Some("4.0.0")
@@ -326,9 +326,9 @@ set sled dde1c0e2-b10d-4621-b420-f179f7a7a00a SP versions: inactive -> 2.0.0
 sled dde1c0e2-b10d-4621-b420-f179f7a7a00a (in service, active)
 serial serial0
 subnet fd00:1122:3344:101::/64
-SP active version:   Some("1.0.0")
+SP active version: Some("1.0.0")
 SP inactive version: Some("2.0.0")
-RoT bootloader stage 0 version:   Some("0.0.1")
+RoT bootloader stage 0 version: Some("0.0.1")
 RoT bootloader stage 0 next version: None
 RoT active slot: A
 RoT slot A version: Some("4.0.0")
@@ -366,9 +366,9 @@ set sled dde1c0e2-b10d-4621-b420-f179f7a7a00a SP versions: active -> 3.0.0
 sled dde1c0e2-b10d-4621-b420-f179f7a7a00a (in service, active)
 serial serial0
 subnet fd00:1122:3344:101::/64
-SP active version:   Some("3.0.0")
+SP active version: Some("3.0.0")
 SP inactive version: Some("2.0.0")
-RoT bootloader stage 0 version:   Some("0.0.1")
+RoT bootloader stage 0 version: Some("0.0.1")
 RoT bootloader stage 0 next version: None
 RoT active slot: A
 RoT slot A version: Some("4.0.0")
@@ -406,9 +406,9 @@ set sled dde1c0e2-b10d-4621-b420-f179f7a7a00a SP versions: active -> 4.0.0, inac
 sled dde1c0e2-b10d-4621-b420-f179f7a7a00a (in service, active)
 serial serial0
 subnet fd00:1122:3344:101::/64
-SP active version:   Some("4.0.0")
+SP active version: Some("4.0.0")
 SP inactive version: None
-RoT bootloader stage 0 version:   Some("0.0.1")
+RoT bootloader stage 0 version: Some("0.0.1")
 RoT bootloader stage 0 next version: None
 RoT active slot: A
 RoT slot A version: Some("4.0.0")
@@ -446,9 +446,9 @@ set sled dde1c0e2-b10d-4621-b420-f179f7a7a00a SP versions: active -> 4.0.0, inac
 sled dde1c0e2-b10d-4621-b420-f179f7a7a00a (in service, active)
 serial serial0
 subnet fd00:1122:3344:101::/64
-SP active version:   Some("4.0.0")
+SP active version: Some("4.0.0")
 SP inactive version: Some("5.0.0")
-RoT bootloader stage 0 version:   Some("0.0.1")
+RoT bootloader stage 0 version: Some("0.0.1")
 RoT bootloader stage 0 next version: None
 RoT active slot: A
 RoT slot A version: Some("4.0.0")
@@ -489,9 +489,9 @@ set sled dde1c0e2-b10d-4621-b420-f179f7a7a00a RoT bootloader versions: stage0 ->
 sled dde1c0e2-b10d-4621-b420-f179f7a7a00a (in service, active)
 serial serial0
 subnet fd00:1122:3344:101::/64
-SP active version:   Some("4.0.0")
+SP active version: Some("4.0.0")
 SP inactive version: Some("5.0.0")
-RoT bootloader stage 0 version:   Some("1.0.0")
+RoT bootloader stage 0 version: Some("1.0.0")
 RoT bootloader stage 0 next version: None
 RoT active slot: A
 RoT slot A version: Some("4.0.0")
@@ -529,9 +529,9 @@ set sled dde1c0e2-b10d-4621-b420-f179f7a7a00a RoT bootloader versions: stage0_ne
 sled dde1c0e2-b10d-4621-b420-f179f7a7a00a (in service, active)
 serial serial0
 subnet fd00:1122:3344:101::/64
-SP active version:   Some("4.0.0")
+SP active version: Some("4.0.0")
 SP inactive version: Some("5.0.0")
-RoT bootloader stage 0 version:   Some("1.0.0")
+RoT bootloader stage 0 version: Some("1.0.0")
 RoT bootloader stage 0 next version: Some("2.0.0")
 RoT active slot: A
 RoT slot A version: Some("4.0.0")
@@ -569,9 +569,9 @@ set sled dde1c0e2-b10d-4621-b420-f179f7a7a00a RoT bootloader versions: stage0 ->
 sled dde1c0e2-b10d-4621-b420-f179f7a7a00a (in service, active)
 serial serial0
 subnet fd00:1122:3344:101::/64
-SP active version:   Some("4.0.0")
+SP active version: Some("4.0.0")
 SP inactive version: Some("5.0.0")
-RoT bootloader stage 0 version:   Some("3.0.0")
+RoT bootloader stage 0 version: Some("3.0.0")
 RoT bootloader stage 0 next version: Some("2.0.0")
 RoT active slot: A
 RoT slot A version: Some("4.0.0")
@@ -609,9 +609,9 @@ set sled dde1c0e2-b10d-4621-b420-f179f7a7a00a RoT bootloader versions: stage0 ->
 sled dde1c0e2-b10d-4621-b420-f179f7a7a00a (in service, active)
 serial serial0
 subnet fd00:1122:3344:101::/64
-SP active version:   Some("4.0.0")
+SP active version: Some("4.0.0")
 SP inactive version: Some("5.0.0")
-RoT bootloader stage 0 version:   Some("4.0.0")
+RoT bootloader stage 0 version: Some("4.0.0")
 RoT bootloader stage 0 next version: None
 RoT active slot: A
 RoT slot A version: Some("4.0.0")
@@ -649,9 +649,9 @@ set sled dde1c0e2-b10d-4621-b420-f179f7a7a00a RoT bootloader versions: stage0 ->
 sled dde1c0e2-b10d-4621-b420-f179f7a7a00a (in service, active)
 serial serial0
 subnet fd00:1122:3344:101::/64
-SP active version:   Some("4.0.0")
+SP active version: Some("4.0.0")
 SP inactive version: Some("5.0.0")
-RoT bootloader stage 0 version:   Some("4.0.0")
+RoT bootloader stage 0 version: Some("4.0.0")
 RoT bootloader stage 0 next version: Some("5.0.0")
 RoT active slot: A
 RoT slot A version: Some("4.0.0")
@@ -721,9 +721,9 @@ result:
 sled dde1c0e2-b10d-4621-b420-f179f7a7a00a (in service, active)
 serial serial0
 subnet fd00:1122:3344:101::/64
-SP active version:   Some("4.0.0")
+SP active version: Some("4.0.0")
 SP inactive version: Some("5.0.0")
-RoT bootloader stage 0 version:   Some("4.0.0")
+RoT bootloader stage 0 version: Some("4.0.0")
 RoT bootloader stage 0 next version: Some("5.0.0")
 RoT active slot: A
 RoT slot A version: Some("4.0.0")

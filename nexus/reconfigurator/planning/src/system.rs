@@ -615,13 +615,13 @@ impl SystemDescription {
     pub fn sled_rot_active_slot(
         &self,
         sled_id: SledUuid,
-    ) -> anyhow::Result<&RotSlot> {
+    ) -> anyhow::Result<RotSlot> {
         let sp_state = self.sled_sp_state(sled_id)?;
         sp_state
             .ok_or_else(|| {
                 anyhow!("failed to retrieve SP state from sled id: {sled_id}")
             })
-            .and_then(|(_hw_slot, sp_state)| match &sp_state.rot {
+            .and_then(|(_hw_slot, sp_state)| match sp_state.rot.clone() {
                 RotState::V2 { active, .. } | RotState::V3 { active, .. } => {
                     Ok(active)
                 }
@@ -635,13 +635,13 @@ impl SystemDescription {
     pub fn sled_rot_persistent_boot_preference(
         &self,
         sled_id: SledUuid,
-    ) -> anyhow::Result<&RotSlot> {
+    ) -> anyhow::Result<RotSlot> {
         let sp_state = self.sled_sp_state(sled_id)?;
         sp_state
             .ok_or_else(|| {
                 anyhow!("failed to retrieve SP state from sled id: {sled_id}")
             })
-            .and_then(|(_hw_slot, sp_state)| match &sp_state.rot {
+            .and_then(|(_hw_slot, sp_state)| match sp_state.rot.clone() {
                 RotState::V2 { persistent_boot_preference, .. }
                 | RotState::V3 { persistent_boot_preference, .. } => {
                     Ok(persistent_boot_preference)
@@ -656,13 +656,13 @@ impl SystemDescription {
     pub fn sled_rot_pending_persistent_boot_preference(
         &self,
         sled_id: SledUuid,
-    ) -> anyhow::Result<&Option<RotSlot>> {
+    ) -> anyhow::Result<Option<RotSlot>> {
         let sp_state = self.sled_sp_state(sled_id)?;
         sp_state
             .ok_or_else(|| {
                 anyhow!("failed to retrieve SP state from sled id: {sled_id}")
             })
-            .and_then(|(_hw_slot, sp_state)| match &sp_state.rot {
+            .and_then(|(_hw_slot, sp_state)| match sp_state.rot.clone() {
                 RotState::V2 { pending_persistent_boot_preference, .. }
                 | RotState::V3 { pending_persistent_boot_preference, .. } => {
                     Ok(pending_persistent_boot_preference)
@@ -677,13 +677,13 @@ impl SystemDescription {
     pub fn sled_rot_transient_boot_preference(
         &self,
         sled_id: SledUuid,
-    ) -> anyhow::Result<&Option<RotSlot>> {
+    ) -> anyhow::Result<Option<RotSlot>> {
         let sp_state = self.sled_sp_state(sled_id)?;
         sp_state
             .ok_or_else(|| {
                 anyhow!("failed to retrieve SP state from sled id: {sled_id}")
             })
-            .and_then(|(_hw_slot, sp_state)| match &sp_state.rot {
+            .and_then(|(_hw_slot, sp_state)| match sp_state.rot.clone() {
                 RotState::V2 { transient_boot_preference, .. }
                 | RotState::V3 { transient_boot_preference, .. } => {
                     Ok(transient_boot_preference)
@@ -1577,7 +1577,6 @@ impl Sled {
     /// Update the reported RoT bootloader versions
     ///
     /// If either field is `None`, that field is _unchanged_.
-    // Note that this means there's no way to _unset_ the version.
     fn set_rot_bootloader_versions(
         &mut self,
         stage0_version: Option<ArtifactVersion>,
