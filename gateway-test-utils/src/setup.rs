@@ -98,6 +98,30 @@ pub async fn test_setup(
     .await
 }
 
+pub async fn test_setup_metrics_disabled(
+    test_name: &str,
+    sp_port: SpPort,
+) -> GatewayTestContext {
+    let (mut server_config, sp_sim_config) = load_test_config();
+    match server_config.metrics.as_mut() {
+        Some(cfg) => {
+            cfg.disabled = true;
+        }
+        None => {
+            server_config.metrics =
+                Some(MetricsConfig { disabled: true, ..Default::default() });
+        }
+    }
+    test_setup_with_config(
+        test_name,
+        sp_port,
+        server_config,
+        &sp_sim_config,
+        None,
+    )
+    .await
+}
+
 fn expected_location(
     config: &omicron_gateway::Config,
     sp_port: SpPort,

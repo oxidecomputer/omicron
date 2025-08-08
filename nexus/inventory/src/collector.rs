@@ -261,7 +261,8 @@ impl<'a> Collector<'a> {
 
                     let result = client
                         .host_phase_1_flash_hash_calculate_with_timeout(
-                            sp,
+                            sp.type_,
+                            sp.slot,
                             phase1_slot,
                             PHASE1_HASH_TIMEOUT,
                         )
