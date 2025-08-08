@@ -613,38 +613,41 @@ fn register_reassign_sagas_step<'a>(
 
                 // Check if we're allowed to do this.  If we're quiescing, we
                 // don't want to assign any new sagas to ourselves.
-                let reassignment = match saga_quiesce.reassignment_start() {
-                    Ok(reassignment) => reassignment,
-                    Err(error) => {
-                        return StepSkipped::new(
-                            false,
-                            InlineErrorChain::new(&error).to_string(),
-                        )
-                        .into();
+                let result = saga_quiesce.reassign_if_possible(async || {
+                    // For any expunged Nexus zones, re-assign in-progress sagas
+                    // to some other Nexus.  If this fails for some reason, it
+                    // doesn't affect anything else.
+                    let sec_id = nexus_db_model::SecId::from(nexus_id);
+                    let reassigned = sagas::reassign_sagas_from_expunged(
+                        opctx, datastore, blueprint, sec_id,
+                    )
+                    .await
+                    .context("failed to re-assign sagas");
+                    match reassigned {
+                        Ok(needs_saga_recovery) => (
+                            StepSuccess::new(needs_saga_recovery).build(),
+                            needs_saga_recovery,
+                        ),
+                        Err(error) => {
+                            // It's possible that we failed after having
+                            // re-assigned sagas in the database.
+                            let maybe_reassigned = true;
+                            (
+                                StepWarning::new(false, error.to_string())
+                                    .build(),
+                                maybe_reassigned,
+                            )
+                        }
                     }
-                };
+                });
 
-                // For any expunged Nexus zones, re-assign in-progress sagas to
-                // some other Nexus.  If this fails for some reason, it doesn't
-                // affect anything else.
-                let sec_id = nexus_db_model::SecId::from(nexus_id);
-                let reassigned = sagas::reassign_sagas_from_expunged(
-                    opctx, datastore, blueprint, sec_id,
-                )
-                .await
-                .context("failed to re-assign sagas");
-                match reassigned {
-                    Ok(needs_saga_recovery) => {
-                        reassignment.reassignment_done(needs_saga_recovery);
-                        Ok(StepSuccess::new(needs_saga_recovery).build())
-                    }
-                    Err(error) => {
-                        // It's possible that we failed after having re-assigned
-                        // sagas in the database.
-                        let maybe_reassigned = true;
-                        reassignment.reassignment_done(maybe_reassigned);
-                        Ok(StepWarning::new(false, error.to_string()).build())
-                    }
+                match result.await {
+                    Ok(step_result) => Ok(step_result),
+                    Err(error) => StepSkipped::new(
+                        false,
+                        InlineErrorChain::new(&error).to_string(),
+                    )
+                    .into(),
                 }
             },
         )

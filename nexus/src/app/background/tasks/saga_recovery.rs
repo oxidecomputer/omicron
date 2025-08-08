@@ -157,6 +157,14 @@ pub struct SagaRecoveryHelpers<N: MakeSagaContext> {
 /// Nexus has been expunged) and to handle retries for sagas whose previous
 /// recovery failed.
 pub struct SagaRecovery<N: MakeSagaContext> {
+    /// Quiesce state
+    quiesce: SagaQuiesceHandle,
+
+    /// rest of the state
+    inner: SagaRecoveryInner<N>,
+}
+
+struct SagaRecoveryInner<N: MakeSagaContext> {
     datastore: Arc<DataStore>,
     /// Unique identifier for this Saga Execution Coordinator
     ///
@@ -164,8 +172,6 @@ pub struct SagaRecovery<N: MakeSagaContext> {
     sec_id: db::SecId,
     /// OpContext used for saga recovery
     saga_recovery_opctx: OpContext,
-    /// Quiesce state
-    quiesce: SagaQuiesceHandle,
 
     // state required to resume a saga
     /// handle to Steno, which actually resumes the saga
@@ -193,8 +199,8 @@ impl<N: MakeSagaContext> BackgroundTask for SagaRecovery<N> {
         async {
             // We don't need the future that's returned by activate_internal().
             // That's only used by the test suite.
-            let _ = self.activate_internal(opctx).await;
-            serde_json::to_value(&self.status).unwrap()
+            let _ = self.inner.activate_internal(opctx, &self.quiesce).await;
+            serde_json::to_value(&self.inner.status).unwrap()
         }
         .boxed()
     }
@@ -207,19 +213,23 @@ impl<N: MakeSagaContext> SagaRecovery<N> {
         helpers: SagaRecoveryHelpers<N>,
     ) -> SagaRecovery<N> {
         SagaRecovery {
-            datastore,
-            sec_id,
             quiesce: helpers.quiesce,
-            saga_recovery_opctx: helpers.recovery_opctx,
-            maker: helpers.maker,
-            sec_client: helpers.sec_client,
-            registry: helpers.registry,
-            sagas_started_rx: helpers.sagas_started_rx,
-            rest_state: nexus_saga_recovery::RestState::new(),
-            status: nexus_saga_recovery::Report::new(),
+            inner: SagaRecoveryInner {
+                datastore,
+                sec_id,
+                saga_recovery_opctx: helpers.recovery_opctx,
+                maker: helpers.maker,
+                sec_client: helpers.sec_client,
+                registry: helpers.registry,
+                sagas_started_rx: helpers.sagas_started_rx,
+                rest_state: nexus_saga_recovery::RestState::new(),
+                status: nexus_saga_recovery::Report::new(),
+            },
         }
     }
+}
 
+impl<N: MakeSagaContext> SagaRecoveryInner<N> {
     /// Invoked for each activation of the background task
     ///
     /// This internal version exists solely to expose some information about
@@ -227,12 +237,12 @@ impl<N: MakeSagaContext> SagaRecovery<N> {
     async fn activate_internal(
         &mut self,
         opctx: &OpContext,
+        quiesce: &SagaQuiesceHandle,
     ) -> Option<(
         BoxFuture<'static, Result<(), Error>>,
         nexus_saga_recovery::LastPassSuccess,
     )> {
         let log = &opctx.log;
-        let datastore = &self.datastore;
 
         // Record when saga recovery starts.  This must happen before we list
         // sagas in order to track which sagas we're guaranteed to see (or not)
@@ -242,63 +252,68 @@ impl<N: MakeSagaContext> SagaRecovery<N> {
         // Note: it's critical that we call `saga_recovery_done()` before we
         // return.  (We do not rely on RAII for this because we need to provide
         // an explicit signal about whether the operation succeeded.)
-        let recovery = self.quiesce.recovery_start();
+        quiesce
+            .recover(async |recovery| {
+                let datastore = &self.datastore;
 
-        // Fetch the list of not-yet-finished sagas that are assigned to
-        // this Nexus instance.
-        let result = list_sagas_in_progress(
-            &self.saga_recovery_opctx,
-            datastore,
-            self.sec_id,
-        )
-        .await;
+                // Fetch the list of not-yet-finished sagas that are assigned to
+                // this Nexus instance.
+                let result = list_sagas_in_progress(
+                    &self.saga_recovery_opctx,
+                    datastore,
+                    self.sec_id,
+                )
+                .await;
 
-        // Process any newly-created sagas, adding them to our set of sagas
-        // to ignore during recovery.  We never want to try to recover a
-        // saga that was created within this Nexus's lifetime.
-        //
-        // We do this even if the previous step failed in order to avoid
-        // letting the channel queue build up.  In practice, it shouldn't
-        // really matter.
-        //
-        // But given that we're doing this, it's critical that we do it
-        // *after* having fetched the candidate sagas from the database.
-        // It's okay if one of these newly-created sagas doesn't show up in
-        // the candidate list (because it hadn't actually started at the
-        // point where we fetched the candidate list).  The reverse is not
-        // okay: if we did this step before fetching candidates, and a saga
-        // was immediately created and showed up in our candidate list, we'd
-        // erroneously conclude that it needed to be recovered when in fact
-        // it was already running.
-        let nstarted = self
-            .rest_state
-            .update_started_sagas(log, &mut self.sagas_started_rx);
+                // Process any newly-created sagas, adding them to our set of sagas
+                // to ignore during recovery.  We never want to try to recover a
+                // saga that was created within this Nexus's lifetime.
+                //
+                // We do this even if the previous step failed in order to avoid
+                // letting the channel queue build up.  In practice, it shouldn't
+                // really matter.
+                //
+                // But given that we're doing this, it's critical that we do it
+                // *after* having fetched the candidate sagas from the database.
+                // It's okay if one of these newly-created sagas doesn't show up in
+                // the candidate list (because it hadn't actually started at the
+                // point where we fetched the candidate list).  The reverse is not
+                // okay: if we did this step before fetching candidates, and a saga
+                // was immediately created and showed up in our candidate list, we'd
+                // erroneously conclude that it needed to be recovered when in fact
+                // it was already running.
+                let nstarted = self
+                    .rest_state
+                    .update_started_sagas(log, &mut self.sagas_started_rx);
 
-        match result {
-            Ok(db_sagas) => {
-                let plan = nexus_saga_recovery::Plan::new(
-                    log,
-                    &self.rest_state,
-                    db_sagas,
-                );
-                self.recovery_check_done(log, &plan).await;
-                let (execution, future) =
-                    self.recovery_execute(log, &plan, &recovery).await;
-                self.rest_state.update_after_pass(&plan, &execution);
-                let last_pass_success =
-                    nexus_saga_recovery::LastPassSuccess::new(
-                        &plan, &execution,
-                    );
-                self.status.update_after_pass(&plan, execution, nstarted);
-                recovery.recovery_done(true);
-                Some((future, last_pass_success))
-            }
-            Err(error) => {
-                self.status.update_after_failure(&error, nstarted);
-                recovery.recovery_done(false);
-                None
-            }
-        }
+                match result {
+                    Ok(db_sagas) => {
+                        let plan = nexus_saga_recovery::Plan::new(
+                            log,
+                            &self.rest_state,
+                            db_sagas,
+                        );
+                        self.recovery_check_done(log, &plan).await;
+                        let (execution, future) =
+                            self.recovery_execute(log, &plan, &recovery).await;
+                        self.rest_state.update_after_pass(&plan, &execution);
+                        let last_pass_success =
+                            nexus_saga_recovery::LastPassSuccess::new(
+                                &plan, &execution,
+                            );
+                        self.status
+                            .update_after_pass(&plan, execution, nstarted);
+                        //recovery.recovery_done(true);
+                        (Some((future, last_pass_success)), true)
+                    }
+                    Err(error) => {
+                        self.status.update_after_failure(&error, nstarted);
+                        //recovery.recovery_done(false);
+                        (None, false)
+                    }
+                }
+            })
+            .await
     }
 
     /// Check that for each saga that we inferred was done, Steno agrees
@@ -734,7 +749,7 @@ mod test {
         );
 
         let Some((completion_future, last_pass_success)) =
-            task.activate_internal(&opctx).await
+            task.inner.activate_internal(&opctx, &task.quiesce).await
         else {
             panic!("saga recovery failed");
         };
@@ -811,7 +826,8 @@ mod test {
             },
         );
 
-        let Some((_, last_pass_success)) = task.activate_internal(&opctx).await
+        let Some((_, last_pass_success)) =
+            task.inner.activate_internal(&opctx, &task.quiesce).await
         else {
             panic!("saga recovery failed");
         };

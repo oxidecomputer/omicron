@@ -178,12 +178,25 @@ impl SagaQuiesceHandle {
         self.inner.borrow().sagas_pending.clone()
     }
 
+    pub async fn reassign_if_possible<F, T>(
+        &self,
+        f: F,
+    ) -> Result<T, NoSagasAllowedError>
+    where
+        F: AsyncFnOnce() -> (T, bool),
+    {
+        let in_progress = self.reassignment_start()?;
+        let (result, maybe_reassigned) = f().await;
+        in_progress.reassignment_done(maybe_reassigned);
+        Ok(result)
+    }
+
     /// Record that we're beginning an operation that might assign sagas to us.
     ///
     /// Only one of these may be outstanding at a time.  The caller must call
     /// `reassignment_done()` on the returned value before starting another one
     /// of these.
-    pub fn reassignment_start(
+    fn reassignment_start(
         &self,
     ) -> Result<SagaReassignmentInProgress, NoSagasAllowedError> {
         let okay = self.inner.send_if_modified(|q| {
@@ -233,11 +246,21 @@ impl SagaQuiesceHandle {
         });
     }
 
+    pub async fn recover<F, T>(&self, f: F) -> T
+    where
+        F: AsyncFnOnce(&SagaRecoveryInProgress) -> (T, bool),
+    {
+        let in_progress = self.recovery_start();
+        let (result, success) = f(&in_progress).await;
+        in_progress.recovery_done(success);
+        result
+    }
+
     /// Record that we've begun recovering sagas.
     ///
     /// Only one of these may be outstanding at a time.  The caller must call
     /// `saga_recovery_done()` before starting another one of these.
-    pub fn recovery_start(&self) -> SagaRecoveryInProgress {
+    fn recovery_start(&self) -> SagaRecoveryInProgress {
         self.inner.send_modify(|q| {
             assert!(
                 q.recovery_pending.is_none(),
