@@ -3,5 +3,6 @@
 -- sled record was hard deleted), leave it null.
 SET LOCAL disallow_full_table_scans = off;
 UPDATE omicron.public.host_ereport
-    SET host_ereport.part_number = sled.part_number
-    FROM host_ereport INNER JOIN sled ON host_ereport.sled_id = sled.id;
+    SET part_number = sled.part_number
+    FROM sled
+    WHERE host_ereport.sled_id = sled.id;
