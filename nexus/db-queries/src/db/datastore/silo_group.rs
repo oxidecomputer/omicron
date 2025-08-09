@@ -12,6 +12,7 @@ use crate::db::IncompleteOnConflictExt;
 use crate::db::datastore::RunnableQueryNoReturn;
 use crate::db::model::SiloGroup;
 use crate::db::model::SiloGroupMembership;
+use crate::db::model::to_db_typed_uuid;
 use crate::db::pagination::paginated;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
@@ -27,6 +28,8 @@ use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::UpdateResult;
+use omicron_uuid_kinds::SiloGroupUuid;
+use omicron_uuid_kinds::SiloUserUuid;
 use uuid::Uuid;
 
 impl DataStore {
@@ -90,13 +93,13 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         authz_silo: &authz::Silo,
-        silo_user_id: Uuid,
+        silo_user_id: SiloUserUuid,
     ) -> ListResultVec<SiloGroupMembership> {
         opctx.authorize(authz::Action::ListChildren, authz_silo).await?;
 
         use nexus_db_schema::schema::silo_group_membership::dsl;
         dsl::silo_group_membership
-            .filter(dsl::silo_user_id.eq(silo_user_id))
+            .filter(dsl::silo_user_id.eq(to_db_typed_uuid(silo_user_id)))
             .select(SiloGroupMembership::as_returning())
             .get_results_async(&*self.pool_connection_authorized(opctx).await?)
             .await
@@ -116,12 +119,21 @@ impl DataStore {
             .actor_required()
             .internal_context("fetching current user's group memberships")?;
 
+        let silo_user_id = match actor.silo_user_id() {
+            Some(silo_user_id) => silo_user_id,
+            None => {
+                return Err(Error::non_resourcetype_not_found(
+                    "could not find silo user",
+                ))?;
+            }
+        };
+
         use nexus_db_schema::schema::{
             silo_group as sg, silo_group_membership as sgm,
         };
         paginated(sg::dsl::silo_group, sg::id, pagparams)
             .inner_join(sgm::table.on(sgm::silo_group_id.eq(sg::id)))
-            .filter(sgm::silo_user_id.eq(actor.actor_id()))
+            .filter(sgm::silo_user_id.eq(to_db_typed_uuid(silo_user_id)))
             .filter(sg::time_deleted.is_null())
             .select(SiloGroup::as_returning())
             .get_results_async(&*self.pool_connection_authorized(opctx).await?)
@@ -142,7 +154,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         authz_silo_user: &authz::SiloUser,
-        silo_group_ids: Vec<Uuid>,
+        silo_group_ids: Vec<SiloGroupUuid>,
     ) -> UpdateResult<()> {
         opctx.authorize(authz::Action::Modify, authz_silo_user).await?;
 
@@ -157,7 +169,10 @@ impl DataStore {
                     // Delete existing memberships for user
                     let silo_user_id = authz_silo_user.id();
                     diesel::delete(dsl::silo_group_membership)
-                        .filter(dsl::silo_user_id.eq(silo_user_id))
+                        .filter(
+                            dsl::silo_user_id
+                                .eq(to_db_typed_uuid(silo_user_id)),
+                        )
                         .execute_async(&conn)
                         .await?;
 
@@ -167,8 +182,8 @@ impl DataStore {
                     > = silo_group_ids
                         .iter()
                         .map(|group_id| db::model::SiloGroupMembership {
-                            silo_group_id: *group_id,
-                            silo_user_id,
+                            silo_group_id: to_db_typed_uuid(*group_id),
+                            silo_user_id: to_db_typed_uuid(silo_user_id),
                         })
                         .collect();
 
@@ -194,7 +209,7 @@ impl DataStore {
         #[derive(Debug, thiserror::Error)]
         enum SiloDeleteError {
             #[error("group {0} still has memberships")]
-            GroupStillHasMemberships(Uuid),
+            GroupStillHasMemberships(SiloGroupUuid),
         }
         type TxnError = TransactionError<SiloDeleteError>;
 
@@ -211,7 +226,7 @@ impl DataStore {
                     silo_group_membership::dsl::silo_group_membership
                         .filter(
                             silo_group_membership::dsl::silo_group_id
-                                .eq(group_id),
+                                .eq(to_db_typed_uuid(group_id)),
                         )
                         .select(SiloGroupMembership::as_returning())
                         .limit(1)
@@ -227,7 +242,7 @@ impl DataStore {
                 // Delete silo group
                 use nexus_db_schema::schema::silo_group::dsl;
                 diesel::update(dsl::silo_group)
-                    .filter(dsl::id.eq(group_id))
+                    .filter(dsl::id.eq(to_db_typed_uuid(group_id)))
                     .filter(dsl::time_deleted.is_null())
                     .set(dsl::time_deleted.eq(Utc::now()))
                     .execute_async(&conn)

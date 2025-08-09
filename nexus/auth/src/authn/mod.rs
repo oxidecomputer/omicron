@@ -44,6 +44,8 @@ use nexus_types::external_api::shared::FleetRole;
 use nexus_types::external_api::shared::SiloRole;
 use nexus_types::identity::Asset;
 use omicron_common::api::external::LookupType;
+use omicron_uuid_kinds::BuiltInUserUuid;
+use omicron_uuid_kinds::SiloUserUuid;
 use serde::Deserialize;
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -197,7 +199,7 @@ impl Context {
         Context::context_for_builtin_user(USER_SERVICE_BALANCER.id)
     }
 
-    fn context_for_builtin_user(user_builtin_id: Uuid) -> Context {
+    fn context_for_builtin_user(user_builtin_id: BuiltInUserUuid) -> Context {
         Context {
             kind: Kind::Authenticated(
                 Details { actor: Actor::UserBuiltin { user_builtin_id } },
@@ -239,7 +241,7 @@ impl Context {
     /// Returns an authenticated context for the specific Silo user. Not marked
     /// as #[cfg(test)] so that this is available in integration tests.
     pub fn for_test_user(
-        silo_user_id: Uuid,
+        silo_user_id: SiloUserUuid,
         silo_id: Uuid,
         silo_authn_policy: SiloAuthnPolicy,
     ) -> Context {
@@ -311,35 +313,35 @@ mod test {
         // The privileges are (or will be) verified in authz tests.
         let authn = Context::privileged_test_user();
         let actor = authn.actor().unwrap();
-        assert_eq!(actor.actor_id(), USER_TEST_PRIVILEGED.id());
+        assert_eq!(actor.silo_user_id(), Some(USER_TEST_PRIVILEGED.id()));
 
         let authn = Context::unprivileged_test_user();
         let actor = authn.actor().unwrap();
-        assert_eq!(actor.actor_id(), USER_TEST_UNPRIVILEGED.id());
+        assert_eq!(actor.silo_user_id(), Some(USER_TEST_UNPRIVILEGED.id()));
 
         let authn = Context::internal_read();
         let actor = authn.actor().unwrap();
-        assert_eq!(actor.actor_id(), USER_INTERNAL_READ.id);
+        assert_eq!(actor.built_in_user_id(), Some(USER_INTERNAL_READ.id));
 
         let authn = Context::external_authn();
         let actor = authn.actor().unwrap();
-        assert_eq!(actor.actor_id(), USER_EXTERNAL_AUTHN.id);
+        assert_eq!(actor.built_in_user_id(), Some(USER_EXTERNAL_AUTHN.id));
 
         let authn = Context::internal_db_init();
         let actor = authn.actor().unwrap();
-        assert_eq!(actor.actor_id(), USER_DB_INIT.id);
+        assert_eq!(actor.built_in_user_id(), Some(USER_DB_INIT.id));
 
         let authn = Context::internal_service_balancer();
         let actor = authn.actor().unwrap();
-        assert_eq!(actor.actor_id(), USER_SERVICE_BALANCER.id);
+        assert_eq!(actor.built_in_user_id(), Some(USER_SERVICE_BALANCER.id));
 
         let authn = Context::internal_saga_recovery();
         let actor = authn.actor().unwrap();
-        assert_eq!(actor.actor_id(), USER_SAGA_RECOVERY.id);
+        assert_eq!(actor.built_in_user_id(), Some(USER_SAGA_RECOVERY.id));
 
         let authn = Context::internal_api();
         let actor = authn.actor().unwrap();
-        assert_eq!(actor.actor_id(), USER_INTERNAL_API.id);
+        assert_eq!(actor.built_in_user_id(), Some(USER_INTERNAL_API.id));
     }
 }
 
@@ -366,18 +368,11 @@ pub struct Details {
 /// Who is performing an operation
 #[derive(Clone, Copy, Deserialize, Eq, PartialEq, Serialize)]
 pub enum Actor {
-    UserBuiltin { user_builtin_id: Uuid },
-    SiloUser { silo_user_id: Uuid, silo_id: Uuid },
+    UserBuiltin { user_builtin_id: BuiltInUserUuid },
+    SiloUser { silo_user_id: SiloUserUuid, silo_id: Uuid },
 }
 
 impl Actor {
-    pub fn actor_id(&self) -> Uuid {
-        match self {
-            Actor::UserBuiltin { user_builtin_id, .. } => *user_builtin_id,
-            Actor::SiloUser { silo_user_id, .. } => *silo_user_id,
-        }
-    }
-
     pub fn silo_id(&self) -> Option<Uuid> {
         match self {
             Actor::UserBuiltin { .. } => None,
@@ -385,10 +380,17 @@ impl Actor {
         }
     }
 
-    pub fn silo_user_id(&self) -> Option<Uuid> {
+    pub fn silo_user_id(&self) -> Option<SiloUserUuid> {
         match self {
             Actor::UserBuiltin { .. } => None,
             Actor::SiloUser { silo_user_id, .. } => Some(*silo_user_id),
+        }
+    }
+
+    pub fn built_in_user_id(&self) -> Option<BuiltInUserUuid> {
+        match self {
+            Actor::UserBuiltin { user_builtin_id } => Some(*user_builtin_id),
+            Actor::SiloUser { .. } => None,
         }
     }
 }

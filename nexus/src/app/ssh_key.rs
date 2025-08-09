@@ -12,8 +12,8 @@ use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::http_pagination::PaginatedBy;
+use omicron_uuid_kinds::SiloUserUuid;
 use ref_cast::RefCast;
-use uuid::Uuid;
 
 impl super::Nexus {
     // SSH Keys
@@ -46,7 +46,7 @@ impl super::Nexus {
     pub(crate) async fn ssh_key_create(
         &self,
         opctx: &OpContext,
-        silo_user_id: Uuid,
+        silo_user_id: SiloUserUuid,
         params: params::SshKeyCreate,
     ) -> CreateResult<db::model::SshKey> {
         let ssh_key = db::model::SshKey::new(silo_user_id, params);
@@ -61,7 +61,7 @@ impl super::Nexus {
     pub(crate) async fn ssh_keys_list(
         &self,
         opctx: &OpContext,
-        silo_user_id: Uuid,
+        silo_user_id: SiloUserUuid,
         page_params: &PaginatedBy<'_>,
     ) -> ListResultVec<SshKey> {
         let (.., authz_user) = LookupPath::new(opctx, self.datastore())
@@ -88,7 +88,7 @@ impl super::Nexus {
     pub(crate) async fn ssh_key_delete(
         &self,
         opctx: &OpContext,
-        silo_user_id: Uuid,
+        silo_user_id: SiloUserUuid,
         ssh_key_lookup: &lookup::SshKey<'_>,
     ) -> DeleteResult {
         let (.., authz_silo_user, authz_ssh_key) =

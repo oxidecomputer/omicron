@@ -6,6 +6,7 @@ use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::views::UserBuiltin;
+use omicron_uuid_kinds::GenericUuid;
 use std::collections::BTreeMap;
 
 type ControlPlaneTestContext =
@@ -29,18 +30,24 @@ async fn test_users_builtin(cptestctx: &ControlPlaneTestContext) {
             .collect::<BTreeMap<String, UserBuiltin>>();
 
     let u = users.remove(&authn::USER_DB_INIT.name.to_string()).unwrap();
-    assert_eq!(u.identity.id, authn::USER_DB_INIT.id);
+    assert_eq!(u.identity.id, authn::USER_DB_INIT.id.into_untyped_uuid());
     let u =
         users.remove(&authn::USER_SERVICE_BALANCER.name.to_string()).unwrap();
-    assert_eq!(u.identity.id, authn::USER_SERVICE_BALANCER.id);
+    assert_eq!(
+        u.identity.id,
+        authn::USER_SERVICE_BALANCER.id.into_untyped_uuid()
+    );
     let u = users.remove(&authn::USER_INTERNAL_API.name.to_string()).unwrap();
-    assert_eq!(u.identity.id, authn::USER_INTERNAL_API.id);
+    assert_eq!(u.identity.id, authn::USER_INTERNAL_API.id.into_untyped_uuid());
     let u = users.remove(&authn::USER_INTERNAL_READ.name.to_string()).unwrap();
-    assert_eq!(u.identity.id, authn::USER_INTERNAL_READ.id);
+    assert_eq!(u.identity.id, authn::USER_INTERNAL_READ.id.into_untyped_uuid());
     let u = users.remove(&authn::USER_EXTERNAL_AUTHN.name.to_string()).unwrap();
-    assert_eq!(u.identity.id, authn::USER_EXTERNAL_AUTHN.id);
+    assert_eq!(
+        u.identity.id,
+        authn::USER_EXTERNAL_AUTHN.id.into_untyped_uuid()
+    );
     let u = users.remove(&authn::USER_SAGA_RECOVERY.name.to_string()).unwrap();
-    assert_eq!(u.identity.id, authn::USER_SAGA_RECOVERY.id);
+    assert_eq!(u.identity.id, authn::USER_SAGA_RECOVERY.id.into_untyped_uuid());
     assert!(users.is_empty(), "found unexpected built-in users");
 
     // TODO-coverage add test for fetching individual users, including invalid

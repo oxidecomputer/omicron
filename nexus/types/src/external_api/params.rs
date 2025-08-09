@@ -17,6 +17,8 @@ use omicron_common::api::external::{
     RouteDestination, RouteTarget, UserId,
 };
 use omicron_common::disk::DiskVariant;
+use omicron_uuid_kinds::SiloGroupUuid;
+use omicron_uuid_kinds::SiloUserUuid;
 use oxnet::{IpNet, Ipv4Net, Ipv6Net};
 use parse_display::Display;
 use schemars::JsonSchema;
@@ -45,11 +47,15 @@ macro_rules! path_param {
 
 macro_rules! id_path_param {
     ($struct:ident, $param:ident, $name:tt) => {
+        id_path_param!($struct, $param, $name, Uuid);
+    };
+
+    ($struct:ident, $param:ident, $name:tt, $uuid_type:ident) => {
         #[derive(Serialize, Deserialize, JsonSchema)]
         pub struct $struct {
             #[doc = "ID of the "]
             #[doc = $name]
-            pub $param: Uuid,
+            pub $param: $uuid_type,
         }
     };
 }
@@ -95,8 +101,8 @@ path_param!(ProbePath, probe, "probe");
 path_param!(CertificatePath, certificate, "certificate");
 
 id_path_param!(SupportBundlePath, bundle_id, "support bundle");
-id_path_param!(GroupPath, group_id, "group");
-id_path_param!(UserPath, user_id, "user");
+id_path_param!(GroupPath, group_id, "group", SiloGroupUuid);
+id_path_param!(UserPath, user_id, "user", SiloUserUuid);
 id_path_param!(TokenPath, token_id, "token");
 id_path_param!(TufTrustRootPath, trust_root_id, "trust root");
 
@@ -181,7 +187,7 @@ pub struct OptionalSiloSelector {
 #[derive(Deserialize, JsonSchema)]
 pub struct UserParam {
     /// The user's internal ID
-    pub user_id: Uuid,
+    pub user_id: SiloUserUuid,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
@@ -198,7 +204,7 @@ pub struct SamlIdentityProviderSelector {
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct SshKeySelector {
     /// ID of the silo user
-    pub silo_user_id: Uuid,
+    pub silo_user_id: SiloUserUuid,
     /// Name or ID of the SSH key
     pub ssh_key: NameOrId,
 }
@@ -2291,7 +2297,7 @@ pub struct SnapshotCreate {
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct OptionalGroupSelector {
-    pub group: Option<Uuid>,
+    pub group: Option<SiloGroupUuid>,
 }
 
 // BUILT-IN USERS
