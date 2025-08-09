@@ -5,6 +5,7 @@
 //! omdb commands that query or update specific Nexus instances
 
 mod chicken_switches;
+mod quiesce;
 mod update_status;
 
 use crate::Omdb;
@@ -79,6 +80,8 @@ use omicron_uuid_kinds::ParseError;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
+use quiesce::QuiesceArgs;
+use quiesce::cmd_nexus_quiesce;
 use serde::Deserialize;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
@@ -138,6 +141,8 @@ enum NexusCommands {
     MgsUpdates,
     /// interact with oximeter read policy
     OximeterReadPolicy(OximeterReadPolicyArgs),
+    /// view or modify the quiesce status
+    Quiesce(QuiesceArgs),
     /// view sagas, create and complete demo sagas
     Sagas(SagasArgs),
     /// interact with sleds
@@ -717,6 +722,10 @@ impl NexusArgs {
                         .await
                 }
             },
+
+            NexusCommands::Quiesce(args) => {
+                cmd_nexus_quiesce(&omdb, &client, args).await
+            }
 
             NexusCommands::Sagas(SagasArgs { command }) => {
                 if self.nexus_internal_url.is_none() {
