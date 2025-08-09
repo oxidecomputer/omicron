@@ -2,6 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use crate::deployment::PlanningReport;
 use crate::external_api::views;
 use chrono::DateTime;
 use chrono::Utc;
@@ -480,6 +481,7 @@ impl slog::KV for DebugDatasetsRendezvousStats {
 }
 
 /// The status of a `blueprint_planner` background task activation.
+#[allow(clippy::large_enum_variant)]
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub enum BlueprintPlannerStatus {
     /// Automatic blueprint planning has been explicitly disabled
@@ -499,7 +501,11 @@ pub enum BlueprintPlannerStatus {
 
     /// Planing succeeded, and we saved and made the new blueprint the
     /// current target.
-    Targeted { parent_blueprint_id: BlueprintUuid, blueprint_id: BlueprintUuid },
+    Targeted {
+        parent_blueprint_id: BlueprintUuid,
+        blueprint_id: BlueprintUuid,
+        report: PlanningReport,
+    },
 }
 
 /// The status of a `alert_dispatcher` background task activation.

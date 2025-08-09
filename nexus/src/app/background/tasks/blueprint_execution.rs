@@ -196,7 +196,7 @@ mod test {
         BlueprintTarget, BlueprintZoneConfig, BlueprintZoneDisposition,
         BlueprintZoneImageSource, BlueprintZoneType,
         CockroachDbPreserveDowngrade, OximeterReadMode, PendingMgsUpdates,
-        blueprint_zone_type,
+        PlanningReport, blueprint_zone_type,
     };
     use nexus_types::external_api::views::SledState;
     use omicron_common::api::external;
@@ -276,6 +276,7 @@ mod test {
             time_created: chrono::Utc::now(),
             creator: "test".to_string(),
             comment: "test blueprint".to_string(),
+            report: PlanningReport::new(id),
         };
 
         datastore

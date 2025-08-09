@@ -433,9 +433,9 @@ impl ExampleSystemBuilder {
             &base_input,
             &collection,
             "test suite",
+            rng.blueprint2_rng,
         )
         .unwrap();
-        builder.set_rng(rng.blueprint2_rng);
 
         // Add as many external IPs as is necessary for external DNS zones. We
         // pick addresses in the TEST-NET-2 (RFC 5737) range.
