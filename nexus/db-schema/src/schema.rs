@@ -2664,6 +2664,8 @@ table! {
         class -> Nullable<Text>,
 
         report -> Jsonb,
+
+        part_number -> Nullable<Text>,
     }
 }
 
