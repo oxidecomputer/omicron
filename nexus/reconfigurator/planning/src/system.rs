@@ -737,6 +737,16 @@ impl SystemDescription {
                         )?;
                 }
 
+                if let Some(active_slot) = s.sp_host_phase_1_active_slot() {
+                    builder
+                        .found_host_phase_1_active_slot(
+                            &baseboard_id,
+                            "fake MGS 1",
+                            active_slot,
+                        )
+                        .context("recording SP host phase 1 active slot")?;
+                }
+
                 for (m2_slot, hash) in s.sp_host_phase_1_hash_flash() {
                     builder
                         .found_host_phase_1_flash_hash(
@@ -981,6 +991,7 @@ pub struct SledHwInventory<'a> {
     pub rot: &'a nexus_types::inventory::RotState,
     pub stage0: Option<Arc<nexus_types::inventory::Caboose>>,
     pub stage0_next: Option<Arc<nexus_types::inventory::Caboose>>,
+    pub sp_host_phase_1_active_slot: Option<M2Slot>,
     pub sp_host_phase_1_hash_flash: BTreeMap<M2Slot, ArtifactHash>,
     pub sp_active: Option<Arc<nexus_types::inventory::Caboose>>,
     pub sp_inactive: Option<Arc<nexus_types::inventory::Caboose>>,
@@ -1001,6 +1012,7 @@ pub struct Sled {
     resources: SledResources,
     stage0_caboose: Option<Arc<nexus_types::inventory::Caboose>>,
     stage0_next_caboose: Option<Arc<nexus_types::inventory::Caboose>>,
+    sp_host_phase_1_active_slot: Option<M2Slot>,
     sp_host_phase_1_hash_flash: BTreeMap<M2Slot, ArtifactHash>,
     sp_active_caboose: Option<Arc<nexus_types::inventory::Caboose>>,
     sp_inactive_caboose: Option<Arc<nexus_types::inventory::Caboose>>,
@@ -1156,6 +1168,7 @@ impl Sled {
                 Self::default_rot_bootloader_caboose(String::from("0.0.1")),
             )),
             stage0_next_caboose: None,
+            sp_host_phase_1_active_slot: Some(M2Slot::A),
             sp_host_phase_1_hash_flash: [
                 (M2Slot::A, ArtifactHash([1; 32])),
                 (M2Slot::B, ArtifactHash([2; 32])),
@@ -1200,6 +1213,8 @@ impl Sled {
             inventory_sp.as_ref().and_then(|hw| hw.stage0.clone());
         let stage0_next_caboose =
             inventory_sp.as_ref().and_then(|hw| hw.stage0_next.clone());
+        let sp_host_phase_1_active_slot =
+            inventory_sp.as_ref().and_then(|hw| hw.sp_host_phase_1_active_slot);
         let sp_host_phase_1_hash_flash = inventory_sp
             .as_ref()
             .map(|hw| hw.sp_host_phase_1_hash_flash.clone())
@@ -1319,6 +1334,7 @@ impl Sled {
             resources: sled_resources,
             stage0_caboose,
             stage0_next_caboose,
+            sp_host_phase_1_active_slot,
             sp_host_phase_1_hash_flash,
             sp_active_caboose,
             sp_inactive_caboose,
@@ -1346,6 +1362,10 @@ impl Sled {
 
     pub fn sp_state(&self) -> Option<&(u16, SpState)> {
         self.inventory_sp.as_ref()
+    }
+
+    pub fn sp_host_phase_1_active_slot(&self) -> Option<M2Slot> {
+        self.sp_host_phase_1_active_slot
     }
 
     pub fn sp_host_phase_1_hash_flash(
