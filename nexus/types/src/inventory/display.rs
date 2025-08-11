@@ -413,9 +413,6 @@ fn display_devices(
         writeln!(f, "    power:    {:?}", sp.power_state)?;
         writeln!(f, "    revision: {}", sp.baseboard_revision)?;
         write!(f, "    MGS slot: {:?} {}", sp.sp_type, sp.sp_slot)?;
-        if let SpType::Sled = sp.sp_type {
-            write!(f, " (cubby {})", sp.sp_slot)?;
-        }
         writeln!(f, "")?;
         writeln!(
             f,
@@ -425,30 +422,42 @@ fn display_devices(
             sp.source
         )?;
 
-        #[derive(Tabled)]
-        #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
-        struct HostPhase1FlashHashRow {
-            slot: String,
-            hash: String,
-        }
+        if sp.sp_type == SpType::Sled {
+            #[derive(Tabled)]
+            #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+            struct HostPhase1FlashHashRow {
+                slot: String,
+                hash: String,
+            }
 
-        writeln!(f, "    host phase 1 hashes:")?;
-        let host_phase1_hash_rows: Vec<_> = M2Slot::iter()
-            .filter_map(|s| {
-                collection
-                    .host_phase_1_flash_hash_for(s, baseboard_id)
-                    .map(|h| (s, h))
-            })
-            .map(|(slot, phase1)| HostPhase1FlashHashRow {
-                slot: format!("{slot:?}"),
-                hash: phase1.hash.to_string(),
-            })
-            .collect();
-        let table = tabled::Table::new(host_phase1_hash_rows)
-            .with(tabled::settings::Style::empty())
-            .with(tabled::settings::Padding::new(0, 1, 0, 0))
-            .to_string();
-        writeln!(f, "{}", textwrap::indent(&table.to_string(), "        "))?;
+            let active_slot =
+                match collection.host_phase_1_active_slot_for(baseboard_id) {
+                    Some(s) => Cow::Owned(format!("{:?}", s.slot)),
+                    None => Cow::Borrowed("unknown (not collected)"),
+                };
+            writeln!(f, "    host phase 1 active slot: {active_slot}")?;
+            writeln!(f, "    host phase 1 hashes:")?;
+            let host_phase1_hash_rows: Vec<_> = M2Slot::iter()
+                .filter_map(|s| {
+                    collection
+                        .host_phase_1_flash_hash_for(s, baseboard_id)
+                        .map(|h| (s, h))
+                })
+                .map(|(slot, phase1)| HostPhase1FlashHashRow {
+                    slot: format!("{slot:?}"),
+                    hash: phase1.hash.to_string(),
+                })
+                .collect();
+            let table = tabled::Table::new(host_phase1_hash_rows)
+                .with(tabled::settings::Style::empty())
+                .with(tabled::settings::Padding::new(0, 1, 0, 0))
+                .to_string();
+            writeln!(
+                f,
+                "{}",
+                textwrap::indent(&table.to_string(), "        ")
+            )?;
+        }
 
         #[derive(Tabled)]
         #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
