@@ -123,8 +123,32 @@ blueprint-diff latest
 # planner starts working.
 sled-set serial1 mupdate-override unset
 inventory-generate
+
+# This will attempt to update the first sled's host OS. Walk through that update
+# and the host OS of the two other sleds.
 blueprint-plan latest latest
 blueprint-show latest
+blueprint-diff latest
+sled-update-host-phase2 serial0 --boot-disk B --slot-b 0c0362b640cece5b9a5e86d8fa683bd2eb84c3e7f90731f597197d604ffa76e3
+sled-update-host-phase1 serial0 --active B --slot-b 44714733af7600b30a50bfd2cbaf707ff7ee9724073ff70a6732e55a88864cf6
+inventory-generate
+
+# Second sled host OS
+blueprint-plan latest latest
+blueprint-diff latest
+sled-update-host-phase2 serial1 --boot-disk B --slot-b 0c0362b640cece5b9a5e86d8fa683bd2eb84c3e7f90731f597197d604ffa76e3
+sled-update-host-phase1 serial1 --active B --slot-b 44714733af7600b30a50bfd2cbaf707ff7ee9724073ff70a6732e55a88864cf6
+inventory-generate
+
+# Third sled host OS
+blueprint-plan latest latest
+blueprint-diff latest
+sled-update-host-phase2 serial2 --boot-disk B --slot-b 0c0362b640cece5b9a5e86d8fa683bd2eb84c3e7f90731f597197d604ffa76e3
+sled-update-host-phase1 serial2 --active B --slot-b 44714733af7600b30a50bfd2cbaf707ff7ee9724073ff70a6732e55a88864cf6
+inventory-generate
+
+# All host OS updates complete
+blueprint-plan latest latest
 blueprint-diff latest
 
 # Test that the add-zones-with-mupdate-override chicken switch works as
