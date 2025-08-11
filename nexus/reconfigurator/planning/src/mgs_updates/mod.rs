@@ -1942,7 +1942,7 @@ mod test {
             impossible_update_policy,
         );
         // `all_updates` counts each update per SpType. This means an update for
-        // SP and RoT for the same SpType count as a sinlge update. For
+        // SP and RoT for the same SpType count as a single update. For
         // `expected_updates`, each component update counts as an update, so the
         // amount of `all_updates` should be half of `expected_updates`.
         assert_eq!(all_updates.len(), expected_updates.len() / 2);
