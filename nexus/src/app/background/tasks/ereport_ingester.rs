@@ -292,7 +292,7 @@ impl Ingester {
                             None
                         }
                         None if ereport.data.contains_key("lost") => {
-                            // Tjis is a loss record! I know this!
+                            // This is a loss record! I know this!
                             Some("loss".to_string())
                         }
                         None => {
