@@ -298,7 +298,7 @@ impl Ingester {
                         (None, Some(serde_json::Value::Number(_))) => {
                             Some("ereport.data_loss.certain".to_string())
                         }
-                        None => {
+                        (None, _) => {
                             slog::warn!(
                                 &opctx.log,
                                 "ereport missing 'k'/'class' key";
