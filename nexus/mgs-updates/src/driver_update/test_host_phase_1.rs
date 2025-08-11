@@ -237,6 +237,15 @@ async fn update_watched() {
         assert_matches!(error, ApplyUpdateError::SpUpdateLost);
     });
 
+    // Attempting the first update again should realize the update is already
+    // complete.
+    desc1
+        .setup()
+        .await
+        .finish()
+        .await
+        .expect_host_phase_1_success(UpdateCompletedHow::FoundNoChangesNeeded);
+
     artifacts.teardown().await;
     phase2ctx.teardown().await;
     gwtestctx.teardown().await;
