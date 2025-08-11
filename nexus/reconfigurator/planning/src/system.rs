@@ -589,9 +589,7 @@ impl SystemDescription {
         &self,
         sled_id: SledUuid,
     ) -> anyhow::Result<Option<&(u16, SpState)>> {
-        let sled = self.sleds.get(&sled_id).with_context(|| {
-            format!("attempted to access sled {} not found in system", sled_id)
-        })?;
+        let sled = self.get_sled(sled_id)?;
         Ok(sled.sp_state())
     }
 
@@ -604,10 +602,7 @@ impl SystemDescription {
         slot_a_version: Option<ExpectedVersion>,
         slot_b_version: Option<ExpectedVersion>,
     ) -> anyhow::Result<&mut Self> {
-        let sled = self.sleds.get_mut(&sled_id).with_context(|| {
-            format!("attempted to access sled {} not found in system", sled_id)
-        })?;
-        let sled = Arc::make_mut(sled);
+        let sled = self.get_sled_mut(sled_id)?;
         sled.set_rot_versions(slot_a_version, slot_b_version);
         Ok(self)
     }
@@ -699,9 +694,7 @@ impl SystemDescription {
         &self,
         sled_id: SledUuid,
     ) -> anyhow::Result<Option<&str>> {
-        let sled = self.sleds.get(&sled_id).with_context(|| {
-            format!("attempted to access sled {} not found in system", sled_id)
-        })?;
+        let sled = self.get_sled(sled_id)?;
         Ok(sled.rot_slot_a_caboose().map(|c| c.version.as_ref()))
     }
 
@@ -709,9 +702,7 @@ impl SystemDescription {
         &self,
         sled_id: SledUuid,
     ) -> anyhow::Result<Option<&str>> {
-        let sled = self.sleds.get(&sled_id).with_context(|| {
-            format!("attempted to access sled {} not found in system", sled_id)
-        })?;
+        let sled = self.get_sled(sled_id)?;
         Ok(sled.rot_slot_b_caboose().map(|c| c.version.as_ref()))
     }
 
