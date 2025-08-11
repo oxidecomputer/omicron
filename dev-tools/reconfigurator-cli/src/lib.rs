@@ -1758,9 +1758,9 @@ fn cmd_sled_update_host_phase_1(
     let mut state = sim.current_state().to_mut();
     let system = state.system_mut();
     let sled_id = sled_id.to_sled_id(system.description())?;
-    system.description_mut().sled_update_host_phase_1_artifacts(
-        sled_id, active, slot_a, slot_b,
-    )?;
+    system
+        .description_mut()
+        .sled_update_host_phase_1_artifacts(sled_id, active, slot_a, slot_b)?;
 
     sim.commit_and_bump(
         format!(
