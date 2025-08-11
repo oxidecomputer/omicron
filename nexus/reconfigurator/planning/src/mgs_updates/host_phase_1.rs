@@ -17,6 +17,7 @@ use omicron_common::api::external::TufArtifactMeta;
 use omicron_common::api::external::TufRepoDescription;
 use omicron_common::disk::M2Slot;
 use omicron_uuid_kinds::SledUuid;
+use slog::debug;
 use slog::Logger;
 use slog::error;
 use slog::warn;
@@ -131,7 +132,12 @@ pub(super) fn update_status(
         expected_active_phase_1_hash,
         expected_active_phase_2_hash,
         expected_inactive_phase_1_hash,
-        expected_inactive_phase_2_hash,
+        // We don't need to check the inactive phase 2 hash at all: if it
+        // doesn't match, we're not done, and if it does match, we're still not
+        // done: this is a precondition on performing the phase 1 update, so
+        // most of our checks are in terms of that. (We'll still check the boot
+        // disk and active phase 2 from sled-agent to look for completion.)
+        expected_inactive_phase_2_hash: _,
         sled_agent_address,
     } = details;
 
@@ -173,28 +179,6 @@ pub(super) fn update_status(
         .artifact_hash;
     if active_phase_2_hash != *expected_active_phase_2_hash {
         return Ok(MgsUpdateStatus::Impossible);
-    }
-
-    // Checking the expected inactive phase 2 hash is a little weird. When we
-    // plan this update, we set this field to the new OS phase 2 (i.e., the one
-    // that is paired with `desired_artifact`), because we need sled-agent to
-    // write that part of the image before we start trying to update the phase
-    // 1. Therefore, if the actual inactive phase 2 hash doesn't match the
-    // expected one, the update is `NotDone`, because we're still waiting on
-    // sled-agent to write it.
-    let inactive_phase_2_hash = last_reconciliation
-        .boot_partitions
-        .slot_details(boot_disk.toggled())
-        .as_ref()
-        .map_err(|err| {
-            MgsUpdateStatusError::SledAgentErrorDeterminingBootPartitionDetails {
-                slot: boot_disk.toggled(),
-                err: err.clone(),
-            }
-        })?
-        .artifact_hash;
-    if inactive_phase_2_hash != *expected_inactive_phase_2_hash {
-        return Ok(MgsUpdateStatus::NotDone);
     }
 
     // If the inactive phase 1 hash doesn't match what we expect, we won't be
@@ -416,6 +400,17 @@ pub(super) fn try_make_update(
                 return None;
             }
         };
+
+    // If the artifact matches what's deployed, then no update is needed. We
+    // only need to look at the running phase 2; that tells us what we're
+    // _actually_ running. The currently-active phase 1 should certainly match
+    // it; what should we do if it's different? (That should be impossible! It
+    // would mean the active phase 1 contents have changed in such a way that
+    // this sled will fail to boot if it were rebooted now.)
+    if active_phase_2_hash == phase_2_artifact.hash {
+        debug!(log, "no host OS update needed for board"; baseboard_id);
+        return None;
+    }
 
     // Before we can proceed with the phase 1 update, we need sled-agent to
     // write the corresponding phase 2 artifact to its inactive disk. This

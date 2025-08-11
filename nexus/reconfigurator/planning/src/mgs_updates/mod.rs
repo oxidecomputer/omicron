@@ -235,8 +235,6 @@ enum MgsUpdateStatusError {
          for slot {slot}: {err}"
     )]
     SledAgentErrorDeterminingBootPartitionDetails { slot: M2Slot, err: String },
-    #[error("not yet implemented")]
-    NotYetImplemented,
     #[error("unable to parse input into ArtifactVersion: {0:?}")]
     FailedArtifactVersionParse(ArtifactVersionError),
 }
@@ -272,13 +270,13 @@ fn mgs_update_status(
                 .caboose_for(CabooseWhich::Stage0Next, baseboard_id)
                 .map(|c| c.caboose.version.as_ref());
 
-            Ok(mgs_update_status_rot_bootloader(
+            mgs_update_status_rot_bootloader(
                 desired_version,
                 expected_stage0_version,
                 expected_stage0_next_version,
                 &stage0_caboose.caboose.version,
                 found_stage0_next_version,
-            ))
+            )
         }
         PendingMgsUpdateDetails::Sp {
             expected_active_version,
@@ -367,13 +365,13 @@ fn mgs_update_status(
                 transient_boot_preference: rot_state.transient_boot_preference,
             };
 
-            Ok(mgs_update_status_rot(
+            mgs_update_status_rot(
                 desired_version,
                 expected,
                 found,
                 expected_inactive_version,
                 found_inactive_version,
-            ))
+            )
         }
     };
 
