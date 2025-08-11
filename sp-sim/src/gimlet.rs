@@ -922,9 +922,14 @@ impl Handler {
                 *stored_power_state = match power_state {
                     PowerState::A0 => {
                         let slot = self
-                    .update_state
-                    .component_get_active_slot(SpComponent::HOST_CPU_BOOT_FLASH)
-                    .expect("can always get active slot for valid component");
+                            .update_state
+                            .component_get_active_slot(
+                                SpComponent::HOST_CPU_BOOT_FLASH,
+                            )
+                            .expect(
+                                "can always get active slot for \
+                                 valid component",
+                            );
                         let slot = M2Slot::from_mgs_firmware_slot(slot)
                             .expect("sp-sim ensures host slot is always valid");
                         GimletPowerState::A0(slot)
