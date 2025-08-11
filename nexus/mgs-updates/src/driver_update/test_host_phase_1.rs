@@ -23,11 +23,15 @@ use sp_sim::SimulatedSp;
 use std::time::Duration;
 use tufaceous_artifact::ArtifactHash;
 
+/// Emulates sled agent inventory (which reports the contents of both "phase 2"
+/// slots) for a bunch of sleds
 struct HostPhase2TestContexts {
     sleds: Vec<HostPhase2TestContext>,
 }
 
 impl HostPhase2TestContexts {
+    /// Emulates "phase 2" inventory for all the sleds in the simulated rack in
+    /// `gwtestctx`
     fn new(gwtestctx: &GatewayTestContext) -> Self {
         let sleds = gwtestctx
             .simrack
@@ -264,7 +268,7 @@ async fn update_takeover() {
     let phase2ctx = HostPhase2TestContexts::new(&gwtestctx);
 
     // See the notes in update_watched(). We start the same way, but this time
-    // we pause the second test once it starts its upload and resume the first
+    // we pause the second update once it starts its upload and resume the first
     // update; it should perform a takeover.
     let host_phase_2_state = phase2ctx.sleds[1].state_rx();
     let target_sp_sim = &gwtestctx.simrack.gimlets[1];
@@ -369,7 +373,7 @@ async fn basic_failures() {
 
     // We use `fff...fff` as our fake non-matching artifact hash in several
     // tests below; get the actual artifact hashes reported by our test setup
-    // and ensure none of them match that.
+    // and ensure none of them matches that.
     let (active_phase_1_hash, inactive_phase_1_hash, phase_1_slot) = {
         let sp_init = SpTestState::load(&gwtestctx.client(), SpType::Sled, 1)
             .await
