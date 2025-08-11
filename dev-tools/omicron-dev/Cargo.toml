@@ -12,6 +12,7 @@ omicron-rpaths.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+camino.workspace = true
 clap.workspace = true
 dropshot.workspace = true
 futures.workspace = true

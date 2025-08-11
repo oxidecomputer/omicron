@@ -61,7 +61,8 @@ static FAKE_NON_SEMVER_ZONE_FILE_NAMES: &[&str] = &[
 // multi_thread is required.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_updates() {
-    let gateway = gateway_setup::test_setup("test_updates", SpPort::One).await;
+    let gateway =
+        gateway_setup::test_setup("test_updates", SpPort::One, None).await;
     let wicketd_testctx = WicketdTestContext::setup(gateway).await;
     let log = wicketd_testctx.log();
 
@@ -302,6 +303,7 @@ async fn test_installinator_fetch() {
     let gateway = gateway_setup::test_setup(
         "test_installinator_fetch_no_installinator_document",
         SpPort::One,
+        None,
     )
     .await;
     let wicketd_testctx = WicketdTestContext::setup(gateway).await;
@@ -356,6 +358,7 @@ async fn test_installinator_fetch_no_installinator_document() {
     let gateway = gateway_setup::test_setup(
         "test_installinator_fetch_no_installinator_document",
         SpPort::One,
+        None,
     )
     .await;
     let wicketd_testctx = WicketdTestContext::setup(gateway).await;
@@ -692,6 +695,7 @@ async fn test_update_races() {
     let gateway = gateway_setup::test_setup(
         "test_artifact_upload_while_updating",
         SpPort::One,
+        None,
     )
     .await;
     let wicketd_testctx = WicketdTestContext::setup(gateway).await;

@@ -5,6 +5,7 @@
 // Copyright 2022 Oxide Computer Company
 
 use camino::Utf8Path;
+use camino::Utf8PathBuf;
 use dropshot::test_util::ClientTestContext;
 use dropshot::test_util::LogContext;
 use gateway_messages::SpPort;
@@ -62,8 +63,10 @@ impl GatewayTestContext {
     }
 }
 
-// TODO-K: load a test config with a specific sp_sim file
-pub fn load_test_config() -> (omicron_gateway::Config, sp_sim::Config) {
+pub fn load_test_config(
+    // TODO-K: This could just be a string if it makes nexus tests macro easier
+    sp_sim_config_file_path: Option<Utf8PathBuf>,
+) -> (omicron_gateway::Config, sp_sim::Config) {
     // The test configs are located relative to the directory this file is in.
     // TODO: embed these with include_str! instead?
     let manifest_dir = Utf8Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -74,8 +77,11 @@ pub fn load_test_config() -> (omicron_gateway::Config, sp_sim::Config) {
             Err(e) => panic!("failed to load MGS config: {e}"),
         };
 
-    let sp_sim_config_file_path =
-        manifest_dir.join("configs/sp_sim_config.test.toml");
+    let sp_sim_config_file_path = if let Some(dir) = sp_sim_config_file_path {
+        manifest_dir.join(dir)
+    } else {
+        manifest_dir.join("configs/sp_sim_config.test.toml")
+    };
     let sp_sim_config =
         match sp_sim::Config::from_file(&sp_sim_config_file_path) {
             Ok(config) => config,
@@ -87,8 +93,11 @@ pub fn load_test_config() -> (omicron_gateway::Config, sp_sim::Config) {
 pub async fn test_setup(
     test_name: &str,
     sp_port: SpPort,
+    // TODO-K: Instead of option have the default config file be a constant?
+    sp_sim_config_file_path: Option<Utf8PathBuf>,
 ) -> GatewayTestContext {
-    let (server_config, sp_sim_config) = load_test_config();
+    let (server_config, sp_sim_config) =
+        load_test_config(sp_sim_config_file_path);
     test_setup_with_config(
         test_name,
         sp_port,

@@ -64,6 +64,7 @@ async fn test_host_phase1_hashing() {
     let mgstestctx = mgs_setup::test_setup(
         "test_host_phase1_updater_updates_sled",
         SpPort::One,
+        None,
     )
     .await;
 

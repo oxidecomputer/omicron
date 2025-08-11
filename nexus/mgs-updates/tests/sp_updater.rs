@@ -48,9 +48,12 @@ fn make_fake_sp_archive_with_caboose(caboose: &hubtools::Caboose) -> Vec<u8> {
 #[tokio::test]
 async fn test_sp_updater_updates_sled() {
     // Start MGS + Sim SP.
-    let mgstestctx =
-        mgs_setup::test_setup("test_sp_updater_updates_sled", SpPort::One)
-            .await;
+    let mgstestctx = mgs_setup::test_setup(
+        "test_sp_updater_updates_sled",
+        SpPort::One,
+        None,
+    )
+    .await;
 
     // Configure an MGS client.
     let mgs_client = mgstestctx.client();
@@ -160,9 +163,12 @@ async fn test_sp_updater_updates_sled() {
 #[tokio::test]
 async fn test_sp_updater_updates_switch() {
     // Start MGS + Sim SP.
-    let mgstestctx =
-        mgs_setup::test_setup("test_sp_updater_updates_switch", SpPort::One)
-            .await;
+    let mgstestctx = mgs_setup::test_setup(
+        "test_sp_updater_updates_switch",
+        SpPort::One,
+        None,
+    )
+    .await;
 
     // Configure an MGS client.
     let mgs_client = mgstestctx.client();
@@ -275,6 +281,7 @@ async fn test_sp_updater_remembers_successful_mgs_instance() {
     let mgstestctx = mgs_setup::test_setup(
         "test_sp_updater_remembers_successful_mgs_instance",
         SpPort::One,
+        None,
     )
     .await;
 
@@ -374,6 +381,7 @@ async fn test_sp_updater_switches_mgs_instances_on_failure() {
     let mgstestctx = mgs_setup::test_setup(
         "test_sp_updater_switches_mgs_instances_on_failure",
         SpPort::One,
+        None,
     )
     .await;
     let mgs_bind_addr = mgstestctx.client.bind_address;
@@ -567,7 +575,7 @@ async fn test_sp_updater_switches_mgs_instances_on_failure() {
 async fn test_sp_updater_delivers_progress() {
     // Start MGS + Sim SP.
     let mgstestctx = {
-        let (mut mgs_config, sp_sim_config) = mgs_setup::load_test_config();
+        let (mut mgs_config, sp_sim_config) = mgs_setup::load_test_config(None);
         // Enabling SP metrics collection makes this alread-flaky test even
         // flakier, so let's just turn it off.
         // TODO(eliza): it would be nice if we didn't have to disable metrics in

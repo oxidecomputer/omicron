@@ -255,6 +255,14 @@ impl Sidecar {
                 EreportState::new(cfg, ereport_log)
             };
 
+            let update_state = SimSpUpdate::new(
+                BaseboardKind::Sidecar,
+                sidecar.common.no_stage0_caboose,
+                // sidecar doesn't have phase 1 flash; any policy is fine
+                HostFlashHashPolicy::assume_already_hashed(),
+                sidecar.common.cabooses.clone(),
+            );
+
             let power_state_changes = Arc::new(AtomicUsize::new(0));
             let (inner, handler, responses_sent_count) = Inner::new(
                 servers,
@@ -266,7 +274,7 @@ impl Sidecar {
                 commands_rx,
                 log,
                 sidecar.common.old_rot_state,
-                sidecar.common.no_stage0_caboose,
+                update_state,
                 Arc::clone(&power_state_changes),
             );
             let inner_task =
@@ -338,7 +346,8 @@ impl Inner {
         commands: mpsc::UnboundedReceiver<Command>,
         log: Logger,
         old_rot_state: bool,
-        no_stage0_caboose: bool,
+        //no_stage0_caboose: bool,
+        update_state: SimSpUpdate,
         power_state_changes: Arc<AtomicUsize>,
     ) -> (Self, Arc<TokioMutex<Handler>>, watch::Receiver<usize>) {
         let [udp0, udp1] = servers;
@@ -348,7 +357,7 @@ impl Inner {
             ignition,
             log,
             old_rot_state,
-            no_stage0_caboose,
+            update_state,
             power_state_changes,
         )));
         let responses_sent_count = watch::Sender::new(0);
@@ -513,7 +522,8 @@ impl Handler {
         ignition: FakeIgnition,
         log: Logger,
         old_rot_state: bool,
-        no_stage0_caboose: bool,
+        //no_stage0_caboose: bool,
+        update_state: SimSpUpdate,
         power_state_changes: Arc<AtomicUsize>,
     ) -> Self {
         let mut leaked_component_device_strings =
@@ -542,14 +552,7 @@ impl Handler {
             ignition,
             power_state: PowerState::A2,
             power_state_changes,
-            update_state: SimSpUpdate::new(
-                BaseboardKind::Sidecar,
-                no_stage0_caboose,
-                // sidecar doesn't have phase 1 flash; any policy is fine
-                HostFlashHashPolicy::assume_already_hashed(),
-                // TODO-K: For now none, change later
-                None,
-            ),
+            update_state,
             reset_pending: None,
             should_fail_to_respond_signal: None,
             old_rot_state,

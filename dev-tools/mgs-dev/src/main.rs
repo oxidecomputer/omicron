@@ -4,6 +4,7 @@
 
 //! Developer tool for running MGS.
 
+use camino::Utf8PathBuf;
 use clap::{Args, Parser, Subcommand};
 use futures::StreamExt;
 use libc::SIGINT;
@@ -43,6 +44,9 @@ struct MgsRunArgs {
     /// Oximeter producer.
     #[clap(long)]
     nexus_address: Option<SocketAddr>,
+    /// Override the sp-sim configuration file.
+    #[clap(long)]
+    sp_sim_config_file: Option<Utf8PathBuf>,
 }
 
 impl MgsRunArgs {
@@ -54,7 +58,9 @@ impl MgsRunArgs {
 
         println!("mgs-dev: setting up MGS ... ");
         let (mut mgs_config, sp_sim_config) =
-            gateway_test_utils::setup::load_test_config();
+            gateway_test_utils::setup::load_test_config(
+                self.sp_sim_config_file.clone(),
+            );
         if let Some(addr) = self.nexus_address {
             mgs_config.metrics =
                 Some(gateway_test_utils::setup::MetricsConfig {

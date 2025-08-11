@@ -90,8 +90,8 @@ async fn test_nexus_boots_before_dendrite() {
     // inside of Nexus initialization.  We must use MGS_PORT here because Nexus
     // hardcodes it.
     info!(&log, "Starting MGS");
-    builder.start_gateway(SwitchLocation::Switch0, Some(MGS_PORT)).await;
-    builder.start_gateway(SwitchLocation::Switch1, None).await;
+    builder.start_gateway(SwitchLocation::Switch0, Some(MGS_PORT), None).await;
+    builder.start_gateway(SwitchLocation::Switch1, None, None).await;
     info!(&log, "Started MGS");
 
     let populate = true;

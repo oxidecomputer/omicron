@@ -17,7 +17,7 @@ use gateway_types::component::SpType;
 
 #[tokio::test]
 async fn component_list() {
-    let testctx = setup::test_setup("component_list", SpPort::One).await;
+    let testctx = setup::test_setup("component_list", SpPort::One, None).await;
     let client = &testctx.client;
     let simrack = &testctx.simrack;
 

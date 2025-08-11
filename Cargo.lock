@@ -6071,6 +6071,7 @@ name = "mgs-dev"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "camino",
  "clap",
  "futures",
  "gateway-messages",
@@ -7680,6 +7681,7 @@ name = "omicron-dev"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "camino",
  "clap",
  "dropshot",
  "expectorate",

@@ -85,47 +85,6 @@ serial_number = "SimGimlet00"
 manufacturing_root_cert_seed = "01de01de01de01de01de01de01de01de01de01de01de01de01de01de01de01de"
 device_id_cert_seed = "01de000000000000000000000000000000000000000000000000000000000002"
 
-# TODO-K: Fix these up or remove
-# [simulated_sps.gimlet.cabooses.sp_slot_0]
-# board = "1"
-# git_commit = "2"
-# name = "3"
-# version = "4"
-# 
-# [simulated_sps.gimlet.cabooses.sp_slot_1]
-# board = "5"
-# git_commit = "6"
-# name = "7"
-# version = "8"
-# 
-# [simulated_sps.gimlet.cabooses.rot_slot_a]
-# board = "9"
-# git_commit = "10"
-# name = "11"
-# version = "12"
-# sign = "13"
-# 
-# [simulated_sps.gimlet.cabooses.rot_slot_b]
-# board = "14"
-# git_commit = "15"
-# name = "16"
-# version = "17"
-# sign = "18"
-# 
-# [simulated_sps.gimlet.cabooses.stage0]
-# board = "19"
-# git_commit = "20"
-# name = "21"
-# version = "22"
-# sign = "23"
-# 
-# [simulated_sps.gimlet.cabooses.stage0_next]
-# board = "24"
-# git_commit = "25"
-# name = "26"
-# version = "27"
-# sign = "28"
-
 [[simulated_sps.gimlet.network_config]]
 [simulated_sps.gimlet.network_config.simulated]
 bind_addr = "[::1]:0"

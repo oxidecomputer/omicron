@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use anyhow::Context;
+use camino::Utf8PathBuf;
 use clap::{Args, Parser, Subcommand};
 use futures::StreamExt;
 use libc::SIGINT;
@@ -45,6 +46,9 @@ struct RunAllArgs {
     /// Nexus external API listen port.  Use `0` to request any available port.
     #[clap(long, action)]
     nexus_listen_port: Option<u16>,
+    /// Override the gateway server configuration file.
+    #[clap(long)]
+    gateway_config: Option<Utf8PathBuf>,
 }
 
 impl RunAllArgs {
@@ -77,7 +81,7 @@ impl RunAllArgs {
         println!("omicron-dev: setting up all services ... ");
         let cptestctx = nexus_test_utils::omicron_dev_setup_with_config::<
             omicron_nexus::Server,
-        >(&mut config, 0)
+        >(&mut config, 0, self.gateway_config.clone())
         .await
         .context("error setting up services")?;
 
