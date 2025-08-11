@@ -2664,6 +2664,8 @@ table! {
         class -> Nullable<Text>,
 
         report -> Jsonb,
+
+        part_number -> Nullable<Text>,
     }
 }
 
@@ -2685,3 +2687,45 @@ table! {
     }
 }
 allow_tables_to_appear_in_same_query!(user_data_export, snapshot, image);
+
+table! {
+    audit_log (id) {
+        id -> Uuid,
+        time_started -> Timestamptz,
+        request_id -> Text,
+        request_uri -> Text,
+        operation_id -> Text,
+        source_ip -> Inet,
+        user_agent -> Nullable<Text>,
+        actor_id -> Nullable<Uuid>,
+        actor_silo_id -> Nullable<Uuid>,
+        actor_kind -> crate::enums::AuditLogActorKindEnum,
+        auth_method -> Nullable<Text>,
+        time_completed -> Nullable<Timestamptz>,
+        http_status_code -> Nullable<Int4>, // SqlU16
+        error_code -> Nullable<Text>,
+        error_message -> Nullable<Text>,
+        result_kind -> Nullable<crate::enums::AuditLogResultKindEnum>,
+    }
+}
+
+table! {
+    audit_log_complete (id) {
+        id -> Uuid,
+        time_started -> Timestamptz,
+        request_id -> Text,
+        request_uri -> Text,
+        operation_id -> Text,
+        source_ip -> Inet,
+        user_agent -> Nullable<Text>,
+        actor_id -> Nullable<Uuid>,
+        actor_silo_id -> Nullable<Uuid>,
+        actor_kind -> crate::enums::AuditLogActorKindEnum,
+        auth_method -> Nullable<Text>,
+        time_completed -> Timestamptz,
+        http_status_code -> Nullable<Int4>, // SqlU16
+        error_code -> Nullable<Text>,
+        error_message -> Nullable<Text>,
+        result_kind -> crate::enums::AuditLogResultKindEnum,
+    }
+}

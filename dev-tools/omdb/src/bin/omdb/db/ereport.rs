@@ -369,6 +369,7 @@ async fn cmd_db_ereport_info(
     println!("\n{:=<80}", "== EREPORT ");
     serde_json::to_writer_pretty(std::io::stdout(), &report)
         .with_context(|| format!("failed to serialize ereport: {report:?}"))?;
+    println!();
 
     Ok(())
 }

@@ -925,6 +925,7 @@ pub enum ResourceType {
     Alert,
     AlertReceiver,
     AllowList,
+    AuditLogEntry,
     BackgroundTask,
     BgpConfig,
     BgpAnnounceSet,
