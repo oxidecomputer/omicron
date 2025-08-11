@@ -4,7 +4,21 @@
 
 //! Module containing types for updating host OS phase1 images via MGS.
 //!
-//! Reconfigurator-driven OS updates are complicated because it has to
+//! OS images are divided into phase 1 and phase 2. Phase 1 is small (~32 MiB)
+//! and is written to SPI flash by the SP. Updates to phase 1 therefore must be
+//! delivered via MGS. Phase 2 is large and is written to a slice of an internal
+//! disk. Updates to phase 2 are delivered via sled-agent.
+//!
+//! These images must be paired together; a phase 1 image contains a hash
+//! of the expected phase 2 that completes it.
+//!
+//! There are two phase 1 slots (A and B, or 0 and 1), and there are two
+//! internal disks (A and B). When a sled boots, the OS will ask the SP which
+//! phase 1 slot is active, and it will look for the paired phase 2 image in the
+//! corresponding A or B disk's boot slice. If the paired phase 2 is not present
+//! on the matching disk, the OS will fail to boot.
+//!
+//! Reconfigurator-driven OS updates are complicated because they have to
 //! coordinate sled-agent writing the paired phase 2 _before_ we reboot the sled
 //! with a new phase 1. To walk through a typical update, we'll describe three
 //! OS versions:
@@ -35,8 +49,9 @@
 //!    * The sled config sets the desired phase 2 for slot B to X2 (i.e., we
 //!      want to write the new phase 2 to the currently-inactive slot)
 //!
-//!    * Insert a `PendingMgsUpdate` for phase 1, written by
-//!      `ReconfiguratorHostPhase1Updater` in this module, with these values:
+//!    * Insert a `PendingMgsUpdate` for phase 1, which will be written to the
+//!      actual slot by `ReconfiguratorHostPhase1Updater` in this module, with
+//!      these values:
 //!      - expected phase 1 active slot: A
 //!      - expected boot disk: A
 //!      - expected active slot phase 1: Y1
@@ -72,7 +87,8 @@
 //!    - slot B contains X1+X2
 //!
 //!    A precheck at this point will return `WrongInactiveArtifact`, as X1 no
-//!    longer matches the expected value Z1.
+//!    longer matches the expected value Z1. Rebooting in this state still
+//!    results in coming up on version Y.
 //!
 //! 7. We run our post_update. This has three substeps; it's important to
 //!    separate these out to ensure we handle takeovers correctly if the Nexus
@@ -94,17 +110,16 @@
 //!      that its boot disk matches the currently-active slot. A precheck at
 //!      this point will fail with `MismatchedHostOsActiveSlot`, because the
 //!      sled's boot disk (A) doesn't match the active phase 1 slot (B).
+//!      Rebooting in this state will result in the sled coming up on version X
+//!      (i.e., a reboot now will finish the update).
 //!
-//!    * We power off the host (i.e., go to PowerState::A2). This does not
-//!      change the state of the sled, except that we can no longer talk to
-//!      sled-agent and therefore no longer have a report of the boot disk.
-//!
-//!      A precheck at this point will fail with `SledAgentInventory`, because
-//!      we won't be able to fetch inventory from sled-agent on a powered-off
-//!      sled.
-//!
-//!    * We power on the host (i.e., go to PowerState::A0). Once it comes back,
-//!      the state of the sled will be:
+//!    * We want to restart the host at this point, but currently the SP doesn't
+//!      expose a single "restart the host" operation. As a stopgap, we instead
+//!      reset the _SP_, specifically for the side effect that this also
+//!      restarts the host. While the host is booting, a precheck will fail with
+//!      `SledAgentInventory`, because we won't be able to fetch inventory from
+//!      sled-agent on a still-booting host. Once the OS finishes booting and
+//!      sled-agent has started, the state of the sled will be:
 //!
 //!      - active phase 1 slot: B
 //!      - boot disk: B
@@ -391,7 +406,7 @@ impl ReconfiguratorHostPhase1Updater {
         );
 
         // If the artifact hash in the currently-active slot matches the one
-        // we're trying to set, the the phase 1 update is complete. We need to
+        // we're trying to set, then the phase 1 update is complete. We need to
         // confirm that we've finished `post_update()` though (i.e., we've
         // rebooted the sled); contact sled agent and confirm it booted from
         // this same active slot.

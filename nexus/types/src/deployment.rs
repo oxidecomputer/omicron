@@ -1573,6 +1573,9 @@ impl slog::KV for PendingMgsUpdateDetails {
 }
 
 /// Describes the host-phase-1-specific details of a PendingMgsUpdate
+///
+/// For an overview of Reconfigurator-driven host OS updates, see the module
+/// comments in `nexus_mgs_updates::host_phase_1_updater`.
 #[derive(
     Clone, Debug, Eq, PartialEq, JsonSchema, Deserialize, Serialize, Diffable,
 )]
