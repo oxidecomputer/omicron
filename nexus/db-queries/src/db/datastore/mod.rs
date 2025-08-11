@@ -120,7 +120,9 @@ pub mod webhook_delivery;
 mod zpool;
 
 pub use address_lot::AddressLotCreateResult;
-pub use db_metadata::UpdateConfiguration;
+pub use db_metadata::{
+    ConsumerPolicy, SchemaAction, SchemaRefuseReason, SchemaVersionStatus,
+};
 pub use dns::DataStoreDnsTest;
 pub use dns::DnsVersionUpdateBuilder;
 pub use ereport::EreportFilters;
@@ -249,60 +251,84 @@ impl DataStore {
                     }
                 }
 
-                let config = if let Some(all_versions) = config {
-                    crate::db::datastore::UpdateConfiguration::Enabled {
-                        all_versions,
-                        ignore_quiesce: false,
-                    }
+                // Observe the schema
+                let schema_status = datastore.check_schema_version(&EXPECTED_VERSION).await
+                    .map_err(|err| {
+                        warn!(log, "Failed to check schema version"; &err);
+                        BackoffError::transient(err.to_string())
+                    })?;
+
+                let (policy, all_versions) = if let Some(all_versions) = config {
+                    (ConsumerPolicy::UpdateGracefully, Some(all_versions))
                 } else {
-                    crate::db::datastore::UpdateConfiguration::Disabled
+                    (ConsumerPolicy::FailOnMismatch, None)
                 };
 
-                match datastore
-                    .ensure_schema(&log, EXPECTED_VERSION, config)
-                    .await
-                {
-                    Ok(()) => return Ok(()),
-                    Err(db_metadata::EnsureSchemaError::NexusTooOld { handoff }) => {
-                        if handoff {
-                            // We are running an out-of-date schema, but still
-                            // need to participate in handoff.
-                            //
-                            // TODO(https://github.com/oxidecomputer/omicron/issues/8501):
-                            // This should be implemented by contacting other
-                            // Nexus instances, verifying that quiescing has
-                            // completed, and setting "quiesce_complete" once
-                            // that has completed.
-                            //
-                            // NOTE: We shouldn't hit this condition until any
-                            // deployed Nexuses start setting the "quiesce"
-                            // booleans of omicron.public.db_metadata to true.
-                            error!(log, "Schema handoff from old -> new Nexus is not yet implemented");
-                            return Err(BackoffError::permanent(format!(
-                                "Nexus @ schema {EXPECTED_VERSION} needs to \
-                                 handoff, but not it is not implemented"
-                            )));
-                        } else {
-                            // We are running an out-of-date schema, and no
-                            // longer need to participate in handoff (e.g.,
-                            // maybe we participated in handoff, rebooted, and
-                            // the schema has progressed since then).
-                            error!(
-                                log,
-                                "Our database schema appears too old";
-                                "version" => ?EXPECTED_VERSION
-                            );
-                            return Err(BackoffError::permanent(format!(
-                                "Schema {EXPECTED_VERSION:?} is too old"
-                            )));
-                        }
+                // Determine what action to take based on policy
+                let action = SchemaAction::new(schema_status.clone(), policy);
+                match action {
+                    SchemaAction::Ready => {
+                        info!(log, "Database schema version is up to date");
+                        return Ok(());
                     }
-                    Err(e) => {
-                        let err = slog_error_chain::InlineErrorChain::new(&e);
-                        warn!(log, "Failed to ensure schema version"; &err);
-                        return Err(BackoffError::transient(err.to_string()));
+                    SchemaAction::Quiesce => {
+                        // We are running an out-of-date schema, but still
+                        // need to participate in handoff.
+                        //
+                        // TODO(https://github.com/oxidecomputer/omicron/issues/8501):
+                        // This should be implemented by contacting other
+                        // Nexus instances, verifying that quiescing has
+                        // completed, and setting "quiesce_complete" once
+                        // that has completed.
+                        //
+                        // NOTE: We shouldn't hit this condition until any
+                        // deployed Nexuses start setting the "quiesce"
+                        // booleans of omicron.public.db_metadata to true.
+                        error!(log, "Schema handoff from old -> new Nexus is not yet implemented");
+                        return Err(BackoffError::permanent(format!(
+                            "Nexus @ schema {EXPECTED_VERSION} needs to \
+                             handoff, but not it is not implemented"
+                        )));
                     }
-                };
+                    SchemaAction::Wait => {
+                        warn!(
+                            log,
+                            "Schema version is older than desired; waiting for quiesce to complete"
+                        );
+                        return Err(BackoffError::transient(
+                            "Waiting for quiesce to complete".to_string()
+                        ));
+                    }
+                    SchemaAction::Update => {
+                        return datastore
+                            .ensure_schema(&log, EXPECTED_VERSION, policy, all_versions)
+                            .await
+                            .map_err(|err| {
+                                let err = slog_error_chain::InlineErrorChain::new(&err);
+                                BackoffError::transient(
+                                    format!("Failed to ensure schema: {err}")
+                                )
+                            });
+                    }
+                    SchemaAction::Refuse { reason: SchemaRefuseReason::OutOfDate } => {
+                        warn!(
+                            log,
+                            "Schema version is older than desired; waiting for operator to update schema"
+                        );
+                        return Err(BackoffError::transient(
+                            "Waiting for operator-controlled schema update".to_string()
+                        ));
+                    }
+                    SchemaAction::Refuse { reason: SchemaRefuseReason::TooNew } => {
+                        warn!(
+                            log,
+                            "Refusing to access too-new database";
+                        );
+                        return Err(BackoffError::permanent(
+                            "Refusing to access too-new database".to_string()
+                        ));
+                    }
+                }
             },
             |_, _| {},
         )
