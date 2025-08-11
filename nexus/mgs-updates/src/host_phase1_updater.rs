@@ -662,7 +662,7 @@ impl ReconfiguratorHostPhase1Updater {
             })
             .await?;
 
-        // We know want to reboot the host. Ideally we would send a "reset the
+        // We now want to reboot the host. Ideally we would send a "reset the
         // host" command here, but that's not currently provided by the SP
         // (included in https://github.com/oxidecomputer/hubris/issues/2178). We
         // could do what `pilot sp cycle` does and send the sled to A2, sleep
