@@ -418,7 +418,8 @@ impl SagaQuiesceHandle {
 
         self.inner.send_modify(|q| {
             // It's okay to call this more than once, so we ignore the possible
-            // error from `insert_unique()`.
+            // error from `insert_unique()`.  (`insert_overwrite()` would reset
+            // the `time_pending`, which we don't want.)
             let _ = q.sagas_pending.insert_unique(PendingSagaInfo {
                 saga_id,
                 saga_name: saga_name.clone(),
