@@ -107,7 +107,7 @@ tempfile.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["full"] }
 tokio-postgres = { workspace = true, features = ["with-serde_json-1"] }
-tokio-util = { workspace = true, features = ["codec"] }
+tokio-util = { workspace = true, features = ["codec", "rt"] }
 tough.workspace = true
 tufaceous-artifact.workspace = true
 usdt.workspace = true

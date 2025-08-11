@@ -56,11 +56,8 @@ impl TestArtifacts {
         let mut builder = HubrisArchiveBuilder::with_fake_image();
         builder.write_caboose(sp_gimlet_artifact_caboose.as_slice()).unwrap();
         let sp_gimlet_artifact = builder.build_to_vec().unwrap();
-        let sp_gimlet_artifact_hash = {
-            let mut digest = sha2::Sha256::default();
-            digest.update(&sp_gimlet_artifact);
-            ArtifactHash(digest.finalize().into())
-        };
+        let sp_gimlet_artifact_hash =
+            ArtifactHash(sha2::Sha256::digest(&sp_gimlet_artifact).into());
 
         // Make an SP update artifact for SimSidecar
         let sp_sidecar_artifact_caboose = CabooseBuilder::default()
@@ -72,11 +69,8 @@ impl TestArtifacts {
         let mut builder = HubrisArchiveBuilder::with_fake_image();
         builder.write_caboose(sp_sidecar_artifact_caboose.as_slice()).unwrap();
         let sp_sidecar_artifact = builder.build_to_vec().unwrap();
-        let sp_sidecar_artifact_hash = {
-            let mut digest = sha2::Sha256::default();
-            digest.update(&sp_sidecar_artifact);
-            ArtifactHash(digest.finalize().into())
-        };
+        let sp_sidecar_artifact_hash =
+            ArtifactHash(sha2::Sha256::digest(&sp_sidecar_artifact).into());
 
         // Make an RoT update artifact for SimGimlet.
         let rot_gimlet_artifact_caboose = CabooseBuilder::default()
@@ -88,11 +82,8 @@ impl TestArtifacts {
         let mut builder = HubrisArchiveBuilder::with_fake_image();
         builder.write_caboose(rot_gimlet_artifact_caboose.as_slice()).unwrap();
         let rot_gimlet_artifact = builder.build_to_vec().unwrap();
-        let rot_gimlet_artifact_hash = {
-            let mut digest = sha2::Sha256::default();
-            digest.update(&rot_gimlet_artifact);
-            ArtifactHash(digest.finalize().into())
-        };
+        let rot_gimlet_artifact_hash =
+            ArtifactHash(sha2::Sha256::digest(&rot_gimlet_artifact).into());
 
         // Make an RoT update artifact for SimSidecar
         let rot_sidecar_artifact_caboose = CabooseBuilder::default()
@@ -104,11 +95,8 @@ impl TestArtifacts {
         let mut builder = HubrisArchiveBuilder::with_fake_image();
         builder.write_caboose(rot_sidecar_artifact_caboose.as_slice()).unwrap();
         let rot_sidecar_artifact = builder.build_to_vec().unwrap();
-        let rot_sidecar_artifact_hash = {
-            let mut digest = sha2::Sha256::default();
-            digest.update(&rot_sidecar_artifact);
-            ArtifactHash(digest.finalize().into())
-        };
+        let rot_sidecar_artifact_hash =
+            ArtifactHash(sha2::Sha256::digest(&rot_sidecar_artifact).into());
 
         // Make an RoT bootloader update artifact for SimGimlet.
         let rot_bootloader_gimlet_artifact_caboose = CabooseBuilder::default()
@@ -122,11 +110,9 @@ impl TestArtifacts {
             .write_caboose(rot_bootloader_gimlet_artifact_caboose.as_slice())
             .unwrap();
         let rot_bootloader_gimlet_artifact = builder.build_to_vec().unwrap();
-        let rot_bootloader_gimlet_artifact_hash = {
-            let mut digest = sha2::Sha256::default();
-            digest.update(&rot_bootloader_gimlet_artifact);
-            ArtifactHash(digest.finalize().into())
-        };
+        let rot_bootloader_gimlet_artifact_hash = ArtifactHash(
+            sha2::Sha256::digest(&rot_bootloader_gimlet_artifact).into(),
+        );
 
         // Make an RoT bootloader update artifact for SimSidecar
         let rot_bootloader_sidecar_artifact_caboose = CabooseBuilder::default()
@@ -140,11 +126,9 @@ impl TestArtifacts {
             .write_caboose(rot_bootloader_sidecar_artifact_caboose.as_slice())
             .unwrap();
         let rot_bootloader_sidecar_artifact = builder.build_to_vec().unwrap();
-        let rot_bootloader_sidecar_artifact_hash = {
-            let mut digest = sha2::Sha256::default();
-            digest.update(&rot_bootloader_sidecar_artifact);
-            ArtifactHash(digest.finalize().into())
-        };
+        let rot_bootloader_sidecar_artifact_hash = ArtifactHash(
+            sha2::Sha256::digest(&rot_bootloader_sidecar_artifact).into(),
+        );
 
         // Assemble a map of artifact hash to artifact contents.
         let artifact_data = [

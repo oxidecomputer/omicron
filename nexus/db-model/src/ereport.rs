@@ -63,11 +63,14 @@ where
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct Ereport {
+    #[serde(flatten)]
     pub id: EreportId,
+    #[serde(flatten)]
     pub metadata: EreportMetadata,
     pub reporter: Reporter,
+    #[serde(flatten)]
     pub report: serde_json::Value,
 }
 
@@ -96,7 +99,7 @@ impl From<SpEreport> for Ereport {
                 serial_number,
                 class,
             },
-            reporter: Reporter::Sp { sp_type, slot: sp_slot.0 },
+            reporter: Reporter::Sp { sp_type: sp_type.into(), slot: sp_slot.0 },
             report,
         }
     }
@@ -114,6 +117,7 @@ impl From<HostEreport> for Ereport {
             sled_id,
             class,
             report,
+            part_number,
         } = host_report;
         Ereport {
             id: EreportId { restart_id: restart_id.into(), ena: ena.into() },
@@ -121,7 +125,7 @@ impl From<HostEreport> for Ereport {
                 time_collected,
                 time_deleted,
                 collector_id: collector_id.into(),
-                part_number: None, // TODO
+                part_number,
                 serial_number: Some(sled_serial),
                 class,
             },
@@ -131,7 +135,7 @@ impl From<HostEreport> for Ereport {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct EreportMetadata {
     pub time_collected: DateTime<Utc>,
     pub time_deleted: Option<DateTime<Utc>>,
@@ -141,22 +145,40 @@ pub struct EreportMetadata {
     pub class: Option<String>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
+#[derive(
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+    Ord,
+    PartialOrd,
+    serde::Serialize,
+    serde::Deserialize,
+)]
 pub enum Reporter {
-    Sp { sp_type: SpType, slot: u16 },
+    Sp { sp_type: nexus_types::inventory::SpType, slot: u16 },
     HostOs { sled: SledUuid },
 }
 
 impl std::fmt::Display for Reporter {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Sp { sp_type: SpType::Sled, slot } => {
+            Self::Sp {
+                sp_type: nexus_types::inventory::SpType::Sled,
+                slot,
+            } => {
                 write!(f, "Sled (SP) {slot:02}")
             }
-            Self::Sp { sp_type: SpType::Switch, slot } => {
+            Self::Sp {
+                sp_type: nexus_types::inventory::SpType::Switch,
+                slot,
+            } => {
                 write!(f, "Switch {slot}")
             }
-            Self::Sp { sp_type: SpType::Power, slot } => {
+            Self::Sp {
+                sp_type: nexus_types::inventory::SpType::Power,
+                slot,
+            } => {
                 write!(f, "PSC {slot}")
             }
             Self::HostOs { sled } => {
@@ -232,4 +254,10 @@ pub struct HostEreport {
     pub class: Option<String>,
 
     pub report: serde_json::Value,
+
+    // It's a shame this has to be nullable, while the serial is not. However,
+    // this field was added in a migration, and we have to be able to handle the
+    // case where a sled record was hard-deleted when backfilling the ereport
+    // table's part_number column. Sad.
+    pub part_number: Option<String>,
 }

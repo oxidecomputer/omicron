@@ -236,6 +236,24 @@ pub struct SupportBundleCollectionReport {
 
     /// True iff the bundle was successfully made 'active' in the database.
     pub activated_in_db_ok: bool,
+
+    /// Status of host OS ereport collection.
+    pub host_ereports: SupportBundleEreportStatus,
+
+    /// Status of SP ereport collection.
+    pub sp_ereports: SupportBundleEreportStatus,
+}
+
+#[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub enum SupportBundleEreportStatus {
+    /// Ereports were not requested for this bundle.
+    NotRequested,
+
+    /// Ereports were collected successfully.
+    Collected { n_collected: usize },
+
+    /// Ereport collection failed, though some ereports may have been written.
+    Failed { n_collected: usize, error: String },
 }
 
 impl SupportBundleCollectionReport {
@@ -245,6 +263,8 @@ impl SupportBundleCollectionReport {
             listed_in_service_sleds: false,
             listed_sps: false,
             activated_in_db_ok: false,
+            host_ereports: SupportBundleEreportStatus::NotRequested,
+            sp_ereports: SupportBundleEreportStatus::NotRequested,
         }
     }
 }
