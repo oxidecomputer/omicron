@@ -2,6 +2,9 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+//! Helpers that implement sled-agent side of host OS updates, used to test host
+//! phase 1 updates.
+
 use anyhow::Context as _;
 use dropshot::ConfigDropshot;
 use dropshot::HttpServer;
@@ -17,11 +20,22 @@ use std::net::SocketAddrV6;
 use tokio::sync::watch;
 use tufaceous_artifact::ArtifactHash;
 
+/// Current state of a fake sled-agent.
 #[derive(Debug)]
 pub struct HostPhase2State {
+    /// The address on which this fake sled-agent is running the sled-agent API
+    /// dropshot server.
     pub sled_agent_address: SocketAddrV6,
+
+    /// The current phase 2 artifact in slot A.
     pub slot_a_artifact: ArtifactHash,
+
+    /// The current phase 2 artifact in slot B.
     pub slot_b_artifact: ArtifactHash,
+
+    // Internal channel; we use this to decide whether to pretend our fake
+    // sled-agent is "powered on". We can't really fake "powered off" very well,
+    // but we'll at least return an HTTP 500 instead of a 200.
     sp_sim_power_state: watch::Receiver<GimletPowerState>,
 }
 
@@ -55,12 +69,32 @@ impl HostPhase2State {
     }
 }
 
+/// A single fake sled-agent.
 pub struct HostPhase2TestContext {
+    /// The inner state, including the phase 2 artifact hashes and a
+    /// `watch::Receiver` connected to an sp-sim instance's power state.
+    ///
+    /// We don't currently expose a way to change its phase 2 artifact hashes
+    /// (nor do we need one for our existing tests). We keep this in a watch
+    /// channel anyway to simplify management of the `sled_agent_address` (see
+    /// the guts of `new()` below), and to leave the door open for future
+    /// changes where we do want to be able to mutate the phase 2 hashes in
+    /// tests.
     state: watch::Sender<HostPhase2State>,
+
+    /// Handle to the dropshot server for our fake sled-agent.
     sled_agent_server: HttpServer<HostPhase2SledAgentContext>,
 }
 
 impl HostPhase2TestContext {
+    /// Construct a new fake sled-agent that responds to the `/inventory`
+    /// endpoint with sufficient fidelity for testing host OS phase 1 updates.
+    ///
+    /// The responses this fake sled-agent make will depend on the value in
+    /// `sp_sim_power_state` when the request is received. In particular, if the
+    /// simulated SP is powered off, we will return an HTTP 500. (A real
+    /// sled-agent wouldn't respond at all, but that's a little tricky for us to
+    /// do; returning a 500 is good enough for our tests.)
     pub fn new(
         log: &Logger,
         sp_sim_power_state: watch::Receiver<GimletPowerState>,
