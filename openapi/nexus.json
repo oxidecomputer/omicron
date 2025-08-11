@@ -14631,8 +14631,7 @@
                 ]
               },
               "user_builtin_id": {
-                "type": "string",
-                "format": "uuid"
+                "$ref": "#/components/schemas/TypedUuidForBuiltInUserKind"
               }
             },
             "required": [
@@ -14654,8 +14653,7 @@
                 "format": "uuid"
               },
               "silo_user_id": {
-                "type": "string",
-                "format": "uuid"
+                "$ref": "#/components/schemas/TypedUuidForSiloUserKind"
               }
             },
             "required": [
@@ -25905,6 +25903,10 @@
         "format": "uuid"
       },
       "TypedUuidForAlertReceiverKind": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "TypedUuidForBuiltInUserKind": {
         "type": "string",
         "format": "uuid"
       },
