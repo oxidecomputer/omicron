@@ -271,17 +271,17 @@ impl Ingester {
                         MISSING_VPD,
                     );
 
-                    let class = match ereport
+                    let class = ereport
                         .data
                         // "k" (for "kind") is used as an abbreviation of
                         // "class" to save 4 bytes of ereport.
                         .get("k")
-                        .or_else(|| ereport.data.get("class"))
-                    {
-                        Some(serde_json::Value::String(class)) => {
+                        .or_else(|| ereport.data.get("class"));
+                    let class = match (class, ereport.data.get("lost")) {
+                        (Some(serde_json::Value::String(class)), _) => {
                             Some(class.to_string())
                         }
-                        Some(v) => {
+                        (Some(v), _) => {
                             slog::warn!(
                                 &opctx.log,
                                 "malformed ereport: value for 'k'/'class' \
@@ -291,9 +291,12 @@ impl Ingester {
                             );
                             None
                         }
-                        None if ereport.data.contains_key("lost") => {
-                            // This is a loss record! I know this!
-                            Some("loss".to_string())
+                        // This is a loss record! I know this!
+                        (None, Some(serde_json::Value::Null)) => {
+                            Some("ereport.data_loss.possible".to_string())
+                        }
+                        (None, Some(serde_json::Value::Number(_))) => {
+                            Some("ereport.data_loss.certain".to_string())
                         }
                         None => {
                             slog::warn!(
@@ -559,7 +562,7 @@ mod tests {
         let sled0_ereports = [
             sled0.ereport(
                 1,
-                "loss",
+                "ereport.data_loss.possible",
                 serde_json::json!({
                     "hubris_archive_id": "ffffffff",
                     "hubris_version": "0.0.2",
@@ -661,7 +664,7 @@ mod tests {
         let sled1_ereports = [
             sled1.ereport(
                 1,
-                "loss",
+                "ereport.data_loss.possible",
                 serde_json::json!({
                     "hubris_archive_id": "ffffffff",
                     "hubris_version": "0.0.2",
