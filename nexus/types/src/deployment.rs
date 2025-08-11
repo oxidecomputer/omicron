@@ -1587,7 +1587,8 @@ pub struct PendingMgsUpdateHostPhase1Details {
     pub expected_active_phase_1_slot: M2Slot,
     /// Which slot the host OS most recently booted from.
     pub expected_boot_disk: M2Slot,
-    /// The hash of the currently-active phase 1 artifact.
+    /// The hash of the phase 1 slot specified by
+    /// `expected_active_phase_1_hash`.
     ///
     /// We should always be able to fetch this. Even if the phase 1 contents
     /// themselves have been corrupted (very scary for the active slot!), the SP
@@ -1600,12 +1601,12 @@ pub struct PendingMgsUpdateHostPhase1Details {
     /// planner wouldn't stage an update without knowing the current version, so
     /// if something has gone wrong in the meantime we won't proceede either.
     pub expected_active_phase_2_hash: ArtifactHash,
-    /// The hash of the currently-inactive phase 1 artifact.
+    /// The hash of the phase 1 slot specified by toggling
+    /// `expected_active_phase_1_slot` to the other slot.
     ///
     /// We should always be able to fetch this. Even if the phase 1 contents
     /// of the inactive slot are entirely bogus, the SP can still hash those
     /// contents.
-    /// can still hash those contents.
     pub expected_inactive_phase_1_hash: ArtifactHash,
     /// The hash of the currently-inactive phase 2 artifact.
     ///
@@ -1627,7 +1628,7 @@ impl slog::KV for PendingMgsUpdateHostPhase1Details {
     ) -> slog::Result {
         let Self {
             expected_active_phase_1_slot,
-            expected_boot_disk: expected_active_boot_disk,
+            expected_boot_disk,
             expected_active_phase_1_hash,
             expected_active_phase_2_hash,
             expected_inactive_phase_1_hash,
@@ -1639,8 +1640,8 @@ impl slog::KV for PendingMgsUpdateHostPhase1Details {
             &format!("{expected_active_phase_1_slot:?}"),
         )?;
         serializer.emit_str(
-            Key::from("expected_active_boot_disk"),
-            &format!("{expected_active_boot_disk:?}"),
+            Key::from("expected_boot_disk"),
+            &format!("{expected_boot_disk:?}"),
         )?;
         serializer.emit_str(
             Key::from("expected_active_phase_1_hash"),
