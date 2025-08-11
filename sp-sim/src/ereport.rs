@@ -1,6 +1,7 @@
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
+//
 
 use crate::config::Ereport;
 use crate::config::EreportConfig;
@@ -11,6 +12,7 @@ use gateway_ereport_messages::Request;
 use gateway_ereport_messages::ResponseHeader;
 use gateway_ereport_messages::ResponseHeaderV0;
 use gateway_ereport_messages::RestartId;
+use std::collections::BTreeMap;
 use std::collections::VecDeque;
 use std::io::Cursor;
 use std::net::SocketAddrV6;
@@ -69,15 +71,21 @@ impl EreportState {
             "n_ereports" => ereports.len(),
             "metadata" => ?metadata,
         );
-        let ereports: VecDeque<_> = ereports
-            .into_iter()
-            .enumerate()
-            .map(|(i, ereport)| {
-                // DON'T EMIT ENA 0
-                let ena = Ena::new(i as u64 + 1);
-                ereport.to_entry(ena)
-            })
-            .collect();
+
+        let ereports: VecDeque<_> =
+            // The ereport queue always begins with an initial loss record. This
+            // is used to indicate that the SP has restarted, and any ereports
+            // that were previously buffered but not ingested *may* have been
+            // lost.
+            std::iter::once(Ereport::loss_internal(None))
+                .chain(ereports.into_iter())
+                .enumerate()
+                .map(|(i, ereport)| {
+                    // DON'T EMIT ENA 0
+                    let ena = Ena::new(i as u64 + 1);
+                    ereport.to_entry(ena)
+                })
+                .collect();
         let restart_id = RestartId::new(restart_id.as_u128());
         let next_ena = Ena::new(ereports.len() as u64);
         Self { ereports, next_ena, restart_id, meta: metadata, log }
@@ -110,7 +118,12 @@ impl EreportState {
         self.restart_id = RestartId::new(restart_id.as_u128());
         self.meta = metadata;
         self.ereports.clear();
-        self.next_ena = Ena::new(1);
+        // Initial loss record. This is used to indicate that the SP has
+        // restarted, and any ereports that were previously buffered but not
+        // ingested *may* have been lost.
+        self.ereports
+            .push_back(Ereport::loss_internal(None).to_entry(Ena::new(1)));
+        self.next_ena = Ena::new(2);
     }
 
     pub(crate) fn append_ereport(&mut self, ereport: Ereport) -> Ena {
@@ -144,7 +157,7 @@ impl EreportState {
         );
 
         // If we "restarted", encode the current metadata map, and start at ENA
-        // 0.
+        // 1.
         let (meta_map, start_ena) = if req.restart_id != self.restart_id {
             slog::info!(
                 self.log,
@@ -321,5 +334,33 @@ impl Ereport {
             ),
         };
         EreportListEntry { ena, ereport: self, bytes }
+    }
+
+    /// Returns a new loss report representing a (simulated) loss of `lost`
+    /// ereports.
+    pub fn new_loss(lost: u32) -> Self {
+        Self::loss_internal(Some(lost))
+    }
+
+    fn loss_internal(amount: Option<u32>) -> Self {
+        let mut data = BTreeMap::new();
+        match amount {
+            Some(amount) => data.insert(
+                "lost".to_string(),
+                serde_cbor::Value::Integer(amount as i128),
+            ),
+            None => data.insert("lost".to_string(), serde_cbor::Value::Null),
+        };
+        Self {
+            task_name: "packrat".to_string(),
+            // Packrat shouldn't restart --- if we were asked to simulate a
+            // restart, it's the *whole SP* that has restarted.
+            task_gen: 0,
+            // TODO(eliza): it would be nice to have a simulated Hubris uptime
+            // that's always advanced as new ereports are inserted, but
+            // currently, the tests don't care about this, so whatever.
+            uptime: 666,
+            data,
+        }
     }
 }
