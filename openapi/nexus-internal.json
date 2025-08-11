@@ -6198,7 +6198,7 @@
                 ]
               },
               "expected_active_phase_1_hash": {
-                "description": "The hash of the currently-active phase 1 artifact.\n\nWe should always be able to fetch this. Even if the phase 1 contents themselves have been corrupted (very scary for the active slot!), the SP can still hash those contents.",
+                "description": "The hash of the phase 1 slot specified by `expected_active_phase_1_hash`.\n\nWe should always be able to fetch this. Even if the phase 1 contents themselves have been corrupted (very scary for the active slot!), the SP can still hash those contents.",
                 "type": "string",
                 "format": "hex string (32 bytes)"
               },
@@ -6224,7 +6224,7 @@
                 ]
               },
               "expected_inactive_phase_1_hash": {
-                "description": "The hash of the currently-inactive phase 1 artifact.\n\nWe should always be able to fetch this. Even if the phase 1 contents of the inactive slot are entirely bogus, the SP can still hash those contents. can still hash those contents.",
+                "description": "The hash of the phase 1 slot specified by toggling `expected_active_phase_1_slot` to the other slot.\n\nWe should always be able to fetch this. Even if the phase 1 contents of the inactive slot are entirely bogus, the SP can still hash those contents.",
                 "type": "string",
                 "format": "hex string (32 bytes)"
               },
