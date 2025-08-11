@@ -1263,6 +1263,10 @@ pub static DEMO_UPDATE_TRUST_ROOT_CREATE: LazyLock<serde_json::Value> =
             .unwrap()
     });
 
+pub static AUDIT_LOG_URL: LazyLock<String> = LazyLock::new(|| {
+    String::from("/v1/system/audit-log?start_time=2025-01-01T00:00:00Z")
+});
+
 /// Describes an API endpoint to be verified by the "unauthorized" test
 ///
 /// These structs are also used to check whether we're covering all endpoints in
@@ -3009,6 +3013,13 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
             },
             VerifyEndpoint {
                 url: &ALERT_CLASSES_URL,
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Get],
+            },
+            // Audit log
+            VerifyEndpoint {
+                url: &AUDIT_LOG_URL,
                 visibility: Visibility::Public,
                 unprivileged_access: UnprivilegedAccess::None,
                 allowed_methods: vec![AllowedMethod::Get],

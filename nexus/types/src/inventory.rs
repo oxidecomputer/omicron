@@ -106,6 +106,13 @@ pub struct Collection {
     /// table.
     #[serde_as(as = "Vec<(_, _)>")]
     pub sps: BTreeMap<Arc<BaseboardId>, ServiceProcessor>,
+    /// all host phase 1 active slots, keyed by baseboard id
+    ///
+    /// In practice, these will be inserted into the
+    /// `inv_host_phase_1_active_slot` table.
+    #[serde_as(as = "Vec<(_, _)>")]
+    pub host_phase_1_active_slots:
+        BTreeMap<Arc<BaseboardId>, HostPhase1ActiveSlot>,
     /// all host phase 1 flash hashes, keyed first by the phase 1 slot, then the
     /// baseboard id of the sled where they were found
     ///
@@ -176,6 +183,13 @@ pub struct Collection {
 }
 
 impl Collection {
+    pub fn host_phase_1_active_slot_for(
+        &self,
+        baseboard_id: &BaseboardId,
+    ) -> Option<&HostPhase1ActiveSlot> {
+        self.host_phase_1_active_slots.get(baseboard_id)
+    }
+
     pub fn host_phase_1_flash_hash_for(
         &self,
         slot: M2Slot,
@@ -410,6 +424,17 @@ pub struct RotState {
     pub slot_b_error: Option<RotImageError>,
     pub stage0_error: Option<RotImageError>,
     pub stage0next_error: Option<RotImageError>,
+}
+
+/// Describes a host phase 1 flash active slot found from a service processor
+/// during collection
+#[derive(
+    Clone, Debug, Ord, Eq, PartialOrd, PartialEq, Deserialize, Serialize,
+)]
+pub struct HostPhase1ActiveSlot {
+    pub time_collected: DateTime<Utc>,
+    pub source: String,
+    pub slot: M2Slot,
 }
 
 /// Describes a host phase 1 flash hash found from a service processor

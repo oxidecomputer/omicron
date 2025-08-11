@@ -1030,8 +1030,9 @@ Sled serial0
     part number: model0
     power:    A2
     revision: 0
-    MGS slot: Sled 0 (cubby 0)
+    MGS slot: Sled 0
     found at: <REDACTED_TIMESTAMP> from fake MGS 1
+    host phase 1 active slot: A
     host phase 1 hashes:
         SLOT HASH                                                             
         A    0101010101010101010101010101010101010101010101010101010101010101 
@@ -1053,8 +1054,9 @@ Sled serial1
     part number: model1
     power:    A2
     revision: 0
-    MGS slot: Sled 1 (cubby 1)
+    MGS slot: Sled 1
     found at: <REDACTED_TIMESTAMP> from fake MGS 1
+    host phase 1 active slot: A
     host phase 1 hashes:
         SLOT HASH                                                             
         A    0101010101010101010101010101010101010101010101010101010101010101 
@@ -1076,8 +1078,9 @@ Sled serial2
     part number: model2
     power:    A2
     revision: 0
-    MGS slot: Sled 2 (cubby 2)
+    MGS slot: Sled 2
     found at: <REDACTED_TIMESTAMP> from fake MGS 1
+    host phase 1 active slot: A
     host phase 1 hashes:
         SLOT HASH                                                             
         A    0101010101010101010101010101010101010101010101010101010101010101 
