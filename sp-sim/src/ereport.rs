@@ -78,7 +78,7 @@ impl EreportState {
             // that were previously buffered but not ingested *may* have been
             // lost.
             std::iter::once(Ereport::loss_internal(None))
-                .chain(ereports.into_iter())
+                .chain(ereports)
                 .enumerate()
                 .map(|(i, ereport)| {
                     // DON'T EMIT ENA 0
@@ -347,7 +347,7 @@ impl Ereport {
         match amount {
             Some(amount) => data.insert(
                 "lost".to_string(),
-                serde_cbor::Value::Integer(amount as i128),
+                serde_cbor::Value::Integer(i128::from(amount)),
             ),
             None => data.insert("lost".to_string(), serde_cbor::Value::Null),
         };
