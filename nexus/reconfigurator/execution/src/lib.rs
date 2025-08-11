@@ -611,8 +611,9 @@ fn register_reassign_sagas_step<'a>(
                         .into();
                 };
 
-                // Check if we're allowed to do this.  If we're quiescing, we
-                // don't want to assign any new sagas to ourselves.
+                // Re-assign sagas, but only if we're allowed to.  If Nexus is
+                // quiescing, we don't want to assign any new sagas to
+                // ourselves.
                 let result = saga_quiesce.reassign_if_possible(async || {
                     // For any expunged Nexus zones, re-assign in-progress sagas
                     // to some other Nexus.  If this fails for some reason, it
@@ -642,7 +643,12 @@ fn register_reassign_sagas_step<'a>(
                 });
 
                 match result.await {
+                    // Re-assignment is allowed, and we did try.  It may or may
+                    // not have succeeded.  Either way, that's reflected in
+                    // `step_result`.
                     Ok(step_result) => Ok(step_result),
+                    // Re-assignment is disallowed.  Report this step skipped
+                    // with an explanation of why.
                     Err(error) => StepSkipped::new(
                         false,
                         InlineErrorChain::new(&error).to_string(),

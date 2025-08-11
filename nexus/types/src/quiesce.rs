@@ -178,6 +178,32 @@ impl SagaQuiesceHandle {
         self.inner.borrow().sagas_pending.clone()
     }
 
+    /// Record an operation that might assign sagas to this Nexus
+    ///
+    /// If reassignment is currently allowed, `f` will be invoked to potentially
+    /// re-assign sagas.  `f` returns `(T, bool)`, where `T` is whatever value
+    /// you want and is returned back from this function.  The boolean indicates
+    /// whether any sagas may have been assigned to the current Nexus.
+    ///
+    /// If reassignment is currently disallowed (because Nexus is quiescing),
+    /// `f` is not invoked and an error describing this condition is returned.
+    ///
+    /// Only one of these may be outstanding at a time.  It should not be called
+    /// concurrently.  This is easy today because this is only invoked by a few
+    /// callers, all in different programs, and each of these callers is in its
+    /// own singleton context in its program (e.g., a Nexus background task).
+    ///
+    /// This function exists because quiescing must block on:
+    ///
+    /// - any re-assigned sagas being recovered and then completed (so we need
+    ///   to know if a re-assignment may have assigned any sagas to us), and
+    /// - there must be no outstanding re-assignment operations (since that
+    ///   would create new sagas that we need to wait for)
+    // We expose this function and not
+    // `reassignment_start()`/`reassignment_done()` because it's harder to
+    // mis-use (e.g., by forgetting to call `reassignment_done()`).  But we keep
+    // the other two functions around because it's easier to write tests against
+    // those.
     pub async fn reassign_if_possible<F, T>(
         &self,
         f: F,
@@ -191,11 +217,10 @@ impl SagaQuiesceHandle {
         Ok(result)
     }
 
-    /// Record that we're beginning an operation that might assign sagas to us.
+    /// Record that we've begun a re-assignment operation.
     ///
     /// Only one of these may be outstanding at a time.  The caller must call
-    /// `reassignment_done()` on the returned value before starting another one
-    /// of these.
+    /// `reassignment_done()` before starting another one of these.
     fn reassignment_start(
         &self,
     ) -> Result<SagaReassignmentInProgress, NoSagasAllowedError> {
@@ -203,7 +228,8 @@ impl SagaQuiesceHandle {
             assert!(
                 !q.reassignment_pending,
                 "two calls to reassignment_start() without intervening call \
-                 to reassignment_done()"
+                 to reassignment_done() (concurrent calls to \
+                 reassign_if_possible()?)"
             );
 
             if q.new_sagas_allowed != SagasAllowed::Allowed {
@@ -246,6 +272,26 @@ impl SagaQuiesceHandle {
         });
     }
 
+    /// Record that we've begun recovering sagas.
+    ///
+    /// `f(recovery)` will be invoked to proceed with recovery.  For each
+    /// recovered saga, the caller should invoke
+    /// `recovery.record_saga_recovery()`.  When finished, `f` returns `(T,
+    /// bool)`, where `T` is whatever value you want and is returned back from
+    /// this function.  The boolean indicates whether saga recovery was fully
+    /// successful.  That is, the boolean should be true only if the caller is
+    /// sure that any sagas that were eligible for recovery when `f` was invoked
+    /// have been recovered.  (It is possible some sagas became newly eligible
+    /// for recovery while `f` was running.  That's not the caller's
+    /// responsibility to deal with.)
+    ///
+    /// Only one of these operations may be outstanding at a time.  This
+    /// function should not be called concurrently.  (This is easy today because
+    /// there's only one caller and it's in a Nexus background task.)
+    // We expose this function and not `recovery_start()`/`recovery_done()`
+    // because it's harder to mis-use (e.g., by forgetting to call
+    // `recovery_done()`).  But we keep the other two functions around because
+    // it's easier to write tests against those.
     pub async fn recover<F, T>(&self, f: F) -> T
     where
         F: AsyncFnOnce(&SagaRecoveryInProgress) -> (T, bool),
@@ -265,7 +311,7 @@ impl SagaQuiesceHandle {
             assert!(
                 q.recovery_pending.is_none(),
                 "recovery_start() called twice without intervening \
-                 recovery_done()"
+                 recovery_done() (concurrent calls to recover()?)",
             );
             q.recovery_pending = Some(q.reassignment_generation);
         });
@@ -361,7 +407,7 @@ impl SagaQuiesceHandle {
     /// blocker for quiesce, whether it's running or not.  So we need to
     /// actually run and finish it.  We do still want to prevent ourselves from
     /// taking on sagas needing recovery -- that's why we fail
-    /// `reassignment_start()` when saga creation is disallowed.
+    /// `reassign_if_possible()` when saga creation is disallowed.
     fn record_saga_recovery(
         &self,
         saga_id: steno::SagaId,
@@ -527,7 +573,7 @@ pub struct SagaRecoveryInProgress {
 }
 
 impl SagaRecoveryInProgress {
-    pub fn recovery_done(self, success: bool) {
+    fn recovery_done(self, success: bool) {
         self.q.recovery_done(success)
     }
 
@@ -546,12 +592,12 @@ impl SagaRecoveryInProgress {
 /// this.
 #[derive(Debug)]
 #[must_use = "You must call reassignment_done() after reassignment_start()"]
-pub struct SagaReassignmentInProgress {
+struct SagaReassignmentInProgress {
     q: SagaQuiesceHandle,
 }
 
 impl SagaReassignmentInProgress {
-    pub fn reassignment_done(self, maybe_reassigned: bool) {
+    fn reassignment_done(self, maybe_reassigned: bool) {
         self.q.reassignment_done(maybe_reassigned)
     }
 }

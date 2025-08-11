@@ -248,10 +248,6 @@ impl<N: MakeSagaContext> SagaRecoveryInner<N> {
         // sagas in order to track which sagas we're guaranteed to see (or not)
         // from a concurrent re-assignment of sagas.  See `SagaQuiesceHandle`
         // for details.
-        //
-        // Note: it's critical that we call `saga_recovery_done()` before we
-        // return.  (We do not rely on RAII for this because we need to provide
-        // an explicit signal about whether the operation succeeded.)
         quiesce
             .recover(async |recovery| {
                 let datastore = &self.datastore;
@@ -303,12 +299,10 @@ impl<N: MakeSagaContext> SagaRecoveryInner<N> {
                             );
                         self.status
                             .update_after_pass(&plan, execution, nstarted);
-                        //recovery.recovery_done(true);
                         (Some((future, last_pass_success)), true)
                     }
                     Err(error) => {
                         self.status.update_after_failure(&error, nstarted);
-                        //recovery.recovery_done(false);
                         (None, false)
                     }
                 }
