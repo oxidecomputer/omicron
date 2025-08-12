@@ -585,6 +585,127 @@ impl SystemDescription {
         Ok(sled.sp_inactive_caboose().map(|c| c.version.as_ref()))
     }
 
+    pub fn sled_sp_state(
+        &self,
+        sled_id: SledUuid,
+    ) -> anyhow::Result<Option<&(u16, SpState)>> {
+        let sled = self.get_sled(sled_id)?;
+        Ok(sled.sp_state())
+    }
+
+    /// Update the RoT versions reported for a sled.
+    ///
+    /// Where `None` is provided, no changes are made.
+    pub fn sled_update_rot_versions(
+        &mut self,
+        sled_id: SledUuid,
+        slot_a_version: Option<ExpectedVersion>,
+        slot_b_version: Option<ExpectedVersion>,
+    ) -> anyhow::Result<&mut Self> {
+        let sled = self.get_sled_mut(sled_id)?;
+        sled.set_rot_versions(slot_a_version, slot_b_version);
+        Ok(self)
+    }
+
+    pub fn sled_rot_active_slot(
+        &self,
+        sled_id: SledUuid,
+    ) -> anyhow::Result<RotSlot> {
+        let sp_state = self.sled_sp_state(sled_id)?;
+        sp_state
+            .ok_or_else(|| {
+                anyhow!("failed to retrieve SP state from sled id: {sled_id}")
+            })
+            .and_then(|(_hw_slot, sp_state)| match sp_state.rot.clone() {
+                RotState::V2 { active, .. } | RotState::V3 { active, .. } => {
+                    Ok(active)
+                }
+                RotState::CommunicationFailed { message } => Err(anyhow!(
+                    "failed to retrieve active RoT slot due to \
+                        communication failure: {message}"
+                )),
+            })
+    }
+
+    pub fn sled_rot_persistent_boot_preference(
+        &self,
+        sled_id: SledUuid,
+    ) -> anyhow::Result<RotSlot> {
+        let sp_state = self.sled_sp_state(sled_id)?;
+        sp_state
+            .ok_or_else(|| {
+                anyhow!("failed to retrieve SP state from sled id: {sled_id}")
+            })
+            .and_then(|(_hw_slot, sp_state)| match sp_state.rot.clone() {
+                RotState::V2 { persistent_boot_preference, .. }
+                | RotState::V3 { persistent_boot_preference, .. } => {
+                    Ok(persistent_boot_preference)
+                }
+                RotState::CommunicationFailed { message } => Err(anyhow!(
+                    "failed to retrieve persistent boot preference slot \
+                        due to communication failure: {message}"
+                )),
+            })
+    }
+
+    pub fn sled_rot_pending_persistent_boot_preference(
+        &self,
+        sled_id: SledUuid,
+    ) -> anyhow::Result<Option<RotSlot>> {
+        let sp_state = self.sled_sp_state(sled_id)?;
+        sp_state
+            .ok_or_else(|| {
+                anyhow!("failed to retrieve SP state from sled id: {sled_id}")
+            })
+            .and_then(|(_hw_slot, sp_state)| match sp_state.rot.clone() {
+                RotState::V2 { pending_persistent_boot_preference, .. }
+                | RotState::V3 { pending_persistent_boot_preference, .. } => {
+                    Ok(pending_persistent_boot_preference)
+                }
+                RotState::CommunicationFailed { message } => Err(anyhow!(
+                    "failed to retrieve pending persistent boot \
+                        preference slot due to communication failure: {message}"
+                )),
+            })
+    }
+
+    pub fn sled_rot_transient_boot_preference(
+        &self,
+        sled_id: SledUuid,
+    ) -> anyhow::Result<Option<RotSlot>> {
+        let sp_state = self.sled_sp_state(sled_id)?;
+        sp_state
+            .ok_or_else(|| {
+                anyhow!("failed to retrieve SP state from sled id: {sled_id}")
+            })
+            .and_then(|(_hw_slot, sp_state)| match sp_state.rot.clone() {
+                RotState::V2 { transient_boot_preference, .. }
+                | RotState::V3 { transient_boot_preference, .. } => {
+                    Ok(transient_boot_preference)
+                }
+                RotState::CommunicationFailed { message } => Err(anyhow!(
+                    "failed to retrieve transient boot preference slot \
+                        due to communication failure: {message}"
+                )),
+            })
+    }
+
+    pub fn sled_rot_slot_a_version(
+        &self,
+        sled_id: SledUuid,
+    ) -> anyhow::Result<Option<&str>> {
+        let sled = self.get_sled(sled_id)?;
+        Ok(sled.rot_slot_a_caboose().map(|c| c.version.as_ref()))
+    }
+
+    pub fn sled_rot_slot_b_version(
+        &self,
+        sled_id: SledUuid,
+    ) -> anyhow::Result<Option<&str>> {
+        let sled = self.get_sled(sled_id)?;
+        Ok(sled.rot_slot_b_caboose().map(|c| c.version.as_ref()))
+    }
+
     /// Set a sled's mupdate override field.
     ///
     /// Returns the previous value, or previous error if set.
@@ -793,6 +914,42 @@ impl SystemDescription {
                         )
                         .context("recording SP inactive caboose")?;
                 }
+
+                if let Some(slot_a) = &s.rot_slot_a_caboose() {
+                    builder
+                        .found_caboose(
+                            &baseboard_id,
+                            CabooseWhich::RotSlotA,
+                            "fake MGS 1",
+                            SpComponentCaboose {
+                                board: slot_a.board.clone(),
+                                epoch: None,
+                                git_commit: slot_a.git_commit.clone(),
+                                name: slot_a.name.clone(),
+                                sign: slot_a.sign.clone(),
+                                version: slot_a.version.clone(),
+                            },
+                        )
+                        .context("recording RoT slot a caboose")?;
+                }
+
+                if let Some(slot_b) = &s.rot_slot_b_caboose() {
+                    builder
+                        .found_caboose(
+                            &baseboard_id,
+                            CabooseWhich::RotSlotB,
+                            "fake MGS 1",
+                            SpComponentCaboose {
+                                board: slot_b.board.clone(),
+                                epoch: None,
+                                git_commit: slot_b.git_commit.clone(),
+                                name: slot_b.name.clone(),
+                                sign: slot_b.sign.clone(),
+                                version: slot_b.version.clone(),
+                            },
+                        )
+                        .context("recording RoT slot b caboose")?;
+                }
             }
 
             let sled_inventory = s.sled_agent_inventory();
@@ -995,6 +1152,8 @@ pub struct SledHwInventory<'a> {
     pub sp_host_phase_1_hash_flash: BTreeMap<M2Slot, ArtifactHash>,
     pub sp_active: Option<Arc<nexus_types::inventory::Caboose>>,
     pub sp_inactive: Option<Arc<nexus_types::inventory::Caboose>>,
+    pub rot_slot_a: Option<Arc<nexus_types::inventory::Caboose>>,
+    pub rot_slot_b: Option<Arc<nexus_types::inventory::Caboose>>,
 }
 
 /// Our abstract description of a `Sled`
@@ -1016,6 +1175,8 @@ pub struct Sled {
     sp_host_phase_1_hash_flash: BTreeMap<M2Slot, ArtifactHash>,
     sp_active_caboose: Option<Arc<nexus_types::inventory::Caboose>>,
     sp_inactive_caboose: Option<Arc<nexus_types::inventory::Caboose>>,
+    rot_slot_a_caboose: Option<Arc<nexus_types::inventory::Caboose>>,
+    rot_slot_b_caboose: Option<Arc<nexus_types::inventory::Caboose>>,
 }
 
 impl Sled {
@@ -1179,6 +1340,10 @@ impl Sled {
                 String::from("0.0.1"),
             ))),
             sp_inactive_caboose: None,
+            rot_slot_a_caboose: Some(Arc::new(Self::default_rot_caboose(
+                String::from("0.0.2"),
+            ))),
+            rot_slot_b_caboose: None,
         }
     }
 
@@ -1223,6 +1388,10 @@ impl Sled {
             inventory_sp.as_ref().and_then(|hw| hw.sp_active.clone());
         let sp_inactive_caboose =
             inventory_sp.as_ref().and_then(|hw| hw.sp_inactive.clone());
+        let rot_slot_a_caboose =
+            inventory_sp.as_ref().and_then(|hw| hw.rot_slot_a.clone());
+        let rot_slot_b_caboose =
+            inventory_sp.as_ref().and_then(|hw| hw.rot_slot_b.clone());
         let inventory_sp = inventory_sp.map(|sledhw| {
             // RotStateV3 unconditionally sets all of these
             let sp_state = if sledhw.rot.slot_a_sha3_256_digest.is_some()
@@ -1338,6 +1507,8 @@ impl Sled {
             sp_host_phase_1_hash_flash,
             sp_active_caboose,
             sp_inactive_caboose,
+            rot_slot_a_caboose,
+            rot_slot_b_caboose,
         }
     }
 
@@ -1380,6 +1551,14 @@ impl Sled {
         &self.inventory_sled_agent
     }
 
+    fn rot_slot_a_caboose(&self) -> Option<&Caboose> {
+        self.rot_slot_a_caboose.as_deref()
+    }
+
+    fn rot_slot_b_caboose(&self) -> Option<&Caboose> {
+        self.rot_slot_b_caboose.as_deref()
+    }
+
     fn sp_active_caboose(&self) -> Option<&Caboose> {
         self.sp_active_caboose.as_deref()
     }
@@ -1409,7 +1588,6 @@ impl Sled {
     /// Update the reported RoT bootloader versions
     ///
     /// If either field is `None`, that field is _unchanged_.
-    // Note that this means there's no way to _unset_ the version.
     fn set_rot_bootloader_versions(
         &mut self,
         stage0_version: Option<ArtifactVersion>,
@@ -1495,6 +1673,56 @@ impl Sled {
         }
     }
 
+    /// Update the reported RoT versions
+    ///
+    /// If either field is `None`, that field is _unchanged_.
+    // Note that this means there's no way to _unset_ the version.
+    fn set_rot_versions(
+        &mut self,
+        slot_a_version: Option<ExpectedVersion>,
+        slot_b_version: Option<ExpectedVersion>,
+    ) {
+        if let Some(slot_a_version) = slot_a_version {
+            match slot_a_version {
+                ExpectedVersion::NoValidVersion => {
+                    self.rot_slot_a_caboose = None;
+                }
+                ExpectedVersion::Version(v) => {
+                    match &mut self.rot_slot_a_caboose {
+                        Some(caboose) => {
+                            Arc::make_mut(caboose).version = v.to_string()
+                        }
+                        new @ None => {
+                            *new = Some(Arc::new(Self::default_rot_caboose(
+                                v.to_string(),
+                            )));
+                        }
+                    }
+                }
+            }
+        }
+
+        if let Some(slot_b_version) = slot_b_version {
+            match slot_b_version {
+                ExpectedVersion::NoValidVersion => {
+                    self.rot_slot_b_caboose = None;
+                }
+                ExpectedVersion::Version(v) => {
+                    match &mut self.rot_slot_b_caboose {
+                        Some(caboose) => {
+                            Arc::make_mut(caboose).version = v.to_string()
+                        }
+                        new @ None => {
+                            *new = Some(Arc::new(Self::default_rot_caboose(
+                                v.to_string(),
+                            )));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     fn default_rot_bootloader_caboose(version: String) -> Caboose {
         let board = sp_sim::SIM_ROT_STAGE0_BOARD.to_string();
         Caboose {
@@ -1508,6 +1736,17 @@ impl Sled {
 
     fn default_sp_caboose(version: String) -> Caboose {
         let board = sp_sim::SIM_GIMLET_BOARD.to_string();
+        Caboose {
+            board: board.clone(),
+            git_commit: String::from("unknown"),
+            name: board,
+            version: version.to_string(),
+            sign: None,
+        }
+    }
+
+    fn default_rot_caboose(version: String) -> Caboose {
+        let board = sp_sim::SIM_ROT_BOARD.to_string();
         Caboose {
             board: board.clone(),
             git_commit: String::from("unknown"),
