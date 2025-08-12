@@ -687,7 +687,6 @@ mod test {
         Sp,
         Rot,
         RotBootloader,
-        #[allow(unused)]
         HostOs,
     }
 
@@ -1866,7 +1865,8 @@ mod test {
                             .is_none()
                     );
                 }
-                PendingMgsUpdateDetails::RotBootloader { .. } => {
+                PendingMgsUpdateDetails::RotBootloader { .. }
+                | PendingMgsUpdateDetails::HostPhase1(_) => {
                     unimplemented!()
                 }
             }
@@ -1990,6 +1990,9 @@ mod test {
                 MgsUpdateComponent::RotBootloader
             }
             PendingMgsUpdateDetails::Sp { .. } => MgsUpdateComponent::Sp,
+            PendingMgsUpdateDetails::HostPhase1(_) => {
+                MgsUpdateComponent::HostOs
+            }
         };
         println!("found update: {} slot {}", sp_type, sp_slot);
         let (expected_serial, expected_artifact) = expected_updates
@@ -1998,20 +2001,20 @@ mod test {
         assert_eq!(update.artifact_hash, expected_artifact);
         assert_eq!(update.artifact_version, ARTIFACT_VERSION_2);
         assert_eq!(update.baseboard_id.serial_number, *expected_serial);
-        let (expected_active_version, expected_inactive_version) = match &update
-            .details
-        {
-            PendingMgsUpdateDetails::Rot {
-                expected_active_slot,
-                expected_inactive_version,
-                ..
-            } => (&expected_active_slot.version, expected_inactive_version),
-            PendingMgsUpdateDetails::Sp {
-                expected_active_version,
-                expected_inactive_version,
-            } => (expected_active_version, expected_inactive_version),
-            PendingMgsUpdateDetails::RotBootloader { .. } => unimplemented!(),
-        };
+        let (expected_active_version, expected_inactive_version) =
+            match &update.details {
+                PendingMgsUpdateDetails::Rot {
+                    expected_active_slot,
+                    expected_inactive_version,
+                    ..
+                } => (&expected_active_slot.version, expected_inactive_version),
+                PendingMgsUpdateDetails::Sp {
+                    expected_active_version,
+                    expected_inactive_version,
+                } => (expected_active_version, expected_inactive_version),
+                PendingMgsUpdateDetails::RotBootloader { .. }
+                | PendingMgsUpdateDetails::HostPhase1(_) => unimplemented!(),
+            };
         assert_eq!(*expected_active_version, ARTIFACT_VERSION_1);
         assert_eq!(*expected_inactive_version, ExpectedVersion::NoValidVersion);
     }
