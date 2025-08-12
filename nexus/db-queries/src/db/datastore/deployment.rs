@@ -2302,6 +2302,8 @@ async fn insert_pending_mgs_update(
                 _expected_stage0_next_version,
             ) = update_dsl::bp_pending_mgs_update_rot_bootloader::all_columns();
         }
+        // TODO implement
+        PendingMgsUpdateDetails::HostPhase1(_) => (),
     }
     Ok(())
 }

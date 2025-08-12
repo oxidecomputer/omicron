@@ -422,7 +422,7 @@ derive_more = "0.99.20"
 derive-where = "1.5.0"
 dev-tools-common = { path = "dev-tools/common" }
 # Having the i-implement-... feature here makes diesel go away from the workspace-hack
-diesel = { version = "2.2.11", features = ["i-implement-a-third-party-backend-and-opt-into-breaking-changes", "postgres", "r2d2", "chrono", "serde_json", "network-address", "uuid"] }
+diesel = { version = "2.2.12", features = ["i-implement-a-third-party-backend-and-opt-into-breaking-changes", "postgres", "r2d2", "chrono", "serde_json", "network-address", "uuid"] }
 diesel-dtrace = "0.4.2"
 digest = "0.10.7"
 dns-server = { path = "dns-server" }
@@ -637,7 +637,7 @@ propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "23
 propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "23b06c2f452a97fac1dc12561d8451ce876d7c5a" }
 # NOTE: see above!
 proptest = "1.7.0"
-qorb = "0.4.0"
+qorb = "0.4.1"
 quote = "1.0"
 # Some dependencies still require rand 0.8.x.
 rand08 = { package = "rand", version = "0.8.5" }

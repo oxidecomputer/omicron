@@ -21,15 +21,18 @@ use nexus_types::deployment::ExpectedActiveRotSlot;
 use nexus_types::deployment::ExpectedVersion;
 use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdateDetails;
+use nexus_types::deployment::PendingMgsUpdateHostPhase1Details;
 use nexus_types::deployment::PendingMgsUpdates;
 use nexus_types::internal_api::views::MgsUpdateDriverStatus;
 use nexus_types::inventory::BaseboardId;
+use omicron_common::disk::M2Slot;
 use omicron_repl_utils::run_repl_on_stdin;
 use qorb::resolver::Resolver;
 use qorb::resolvers::fixed::FixedResolver;
 use slog::{info, o, warn};
 use std::collections::BTreeMap;
 use std::net::SocketAddr;
+use std::net::SocketAddrV6;
 use std::sync::Arc;
 use std::time::Duration;
 use swrite::SWrite;
@@ -278,6 +281,9 @@ struct TopLevelArgs {
     command: Commands,
 }
 
+// Clippy wants us to box `SetArgs`, but that makes matches slightly more
+// awkward. This is just a dev/test tool; big variants are fine.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Subcommand)]
 enum Commands {
     /// Show configured updates
@@ -357,6 +363,26 @@ fn cmd_config(
                     expected_stage0_next_version,
                 );
             }
+            PendingMgsUpdateDetails::HostPhase1(
+                PendingMgsUpdateHostPhase1Details {
+                    expected_active_phase_1_slot,
+                    expected_boot_disk,
+                    expected_active_phase_1_hash,
+                    expected_active_phase_2_hash,
+                    expected_inactive_phase_1_hash,
+                    expected_inactive_phase_2_hash,
+                    sled_agent_address,
+                },
+            ) => {
+                swriteln!(s,"        preconditions: expected active phase 1 slot {expected_active_phase_1_slot:?}
+                                                    expected boot disk {expected_boot_disk:?}
+                                                    expected active phase 1 artifact {expected_active_phase_1_hash}
+                                                    expected active phase 2 artifact {expected_active_phase_2_hash}
+                                                    expected inactive phase 1 artifact {expected_inactive_phase_1_hash}
+                                                    expected inactive phase 2 artifact {expected_inactive_phase_2_hash}
+                                                    sled_agent_address {sled_agent_address}",
+                );
+            }
         }
 
         swriteln!(s);
@@ -430,6 +456,22 @@ enum Component {
         #[arg(long, short = 'i')]
         expected_stage0_next_version: ExpectedVersion,
     },
+    HostPhase1 {
+        #[arg(long)]
+        expected_active_phase_1_slot: M2Slot,
+        #[arg(long)]
+        expected_boot_disk: M2Slot,
+        #[arg(long)]
+        expected_slot_a_phase_1_hash: ArtifactHash,
+        #[arg(long)]
+        expected_slot_a_phase_2_hash: ArtifactHash,
+        #[arg(long)]
+        expected_slot_b_phase_1_hash: ArtifactHash,
+        #[arg(long)]
+        expected_slot_b_phase_2_hash: ArtifactHash,
+        #[arg(long)]
+        sled_agent_address: SocketAddrV6,
+    },
 }
 
 fn cmd_set(
@@ -497,6 +539,52 @@ fn cmd_set(
                 expected_stage0_version,
                 expected_stage0_next_version,
             },
+            Component::HostPhase1 {
+                expected_active_phase_1_slot,
+                expected_boot_disk,
+                expected_slot_a_phase_1_hash,
+                expected_slot_a_phase_2_hash,
+                expected_slot_b_phase_1_hash,
+                expected_slot_b_phase_2_hash,
+                sled_agent_address,
+            } => {
+                let (
+                    expected_active_phase_1_hash,
+                    expected_inactive_phase_1_hash,
+                ) = match expected_active_phase_1_slot {
+                    M2Slot::A => (
+                        expected_slot_a_phase_1_hash,
+                        expected_slot_b_phase_1_hash,
+                    ),
+                    M2Slot::B => (
+                        expected_slot_b_phase_1_hash,
+                        expected_slot_a_phase_1_hash,
+                    ),
+                };
+                let (
+                    expected_active_phase_2_hash,
+                    expected_inactive_phase_2_hash,
+                ) = match expected_active_phase_1_slot {
+                    M2Slot::A => (
+                        expected_slot_a_phase_2_hash,
+                        expected_slot_b_phase_2_hash,
+                    ),
+                    M2Slot::B => (
+                        expected_slot_b_phase_2_hash,
+                        expected_slot_a_phase_2_hash,
+                    ),
+                };
+                let details = PendingMgsUpdateHostPhase1Details {
+                    expected_active_phase_1_slot,
+                    expected_boot_disk,
+                    expected_active_phase_1_hash,
+                    expected_active_phase_2_hash,
+                    expected_inactive_phase_1_hash,
+                    expected_inactive_phase_2_hash,
+                    sled_agent_address,
+                };
+                PendingMgsUpdateDetails::HostPhase1(details)
+            }
         },
         artifact_hash: args.artifact_hash,
         artifact_version: ArtifactVersion::new(args.version)
