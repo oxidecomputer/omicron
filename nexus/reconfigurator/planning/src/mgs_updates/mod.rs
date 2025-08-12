@@ -833,7 +833,7 @@ mod test {
         let initial_updates = PendingMgsUpdates::new();
         let nmax_updates = 1;
         let impossible_update_policy = ImpossibleUpdatePolicy::Reevaluate;
-        let updates = plan_mgs_updates(
+        let (updates, _host_phase_2) = plan_mgs_updates(
             log,
             &collection,
             current_boards,
@@ -847,7 +847,7 @@ mod test {
         // Test that when a TUF repo is specified and one RoT is outdated, then
         // it's configured with an update (and the update looks correct).
         let repo = test_boards.tuf_repo();
-        let updates = plan_mgs_updates(
+        let (updates, _host_phase_2) = plan_mgs_updates(
             log,
             &collection,
             current_boards,
@@ -867,7 +867,7 @@ mod test {
         // Test that when an update is already pending, and nothing changes
         // about the state of the world (i.e., the inventory), then the planner
         // makes no changes.
-        let later_updates = plan_mgs_updates(
+        let (later_updates, _host_phase_2) = plan_mgs_updates(
             log,
             &collection,
             current_boards,
@@ -889,7 +889,7 @@ mod test {
             .rot_active_version_exception(SpType::Sled, 0, ARTIFACT_VERSION_1)
             .rot_active_version_exception(SpType::Switch, 1, ARTIFACT_VERSION_1)
             .build();
-        let later_updates = plan_mgs_updates(
+        let (later_updates, _host_phase_2) = plan_mgs_updates(
             log,
             &later_collection,
             current_boards,
@@ -914,7 +914,7 @@ mod test {
             .sp_active_version_exception(SpType::Switch, 1, ARTIFACT_VERSION_1)
             .rot_active_version_exception(SpType::Switch, 1, ARTIFACT_VERSION_1)
             .build();
-        let later_updates = plan_mgs_updates(
+        let (later_updates, _host_phase_2) = plan_mgs_updates(
             log,
             &later_collection,
             current_boards,
@@ -941,7 +941,7 @@ mod test {
                 ExpectedVersion::NoValidVersion,
             )
             .build();
-        let later_updates = plan_mgs_updates(
+        let (later_updates, _host_phase_2) = plan_mgs_updates(
             log,
             &updated_collection,
             current_boards,
@@ -961,7 +961,7 @@ mod test {
             )
             .rot_active_version_exception(SpType::Sled, 0, ARTIFACT_VERSION_1)
             .build();
-        let updates = plan_mgs_updates(
+        let (updates, _host_phase_2) = plan_mgs_updates(
             log,
             &collection,
             &BTreeSet::new(),
@@ -971,7 +971,7 @@ mod test {
             impossible_update_policy,
         );
         assert!(updates.is_empty());
-        let updates = plan_mgs_updates(
+        let (updates, _host_phase_2) = plan_mgs_updates(
             log,
             &collection,
             &collection.baseboards,
@@ -1011,7 +1011,7 @@ mod test {
             )
             .rot_active_version_exception(SpType::Sled, 0, ARTIFACT_VERSION_1)
             .build();
-        let new_updates = plan_mgs_updates(
+        let (new_updates, _host_phase_2) = plan_mgs_updates(
             log,
             &collection,
             &collection.baseboards,
@@ -1053,7 +1053,7 @@ mod test {
             )
             .rot_active_version_exception(SpType::Sled, 0, ARTIFACT_VERSION_1_5)
             .build();
-        let new_updates = plan_mgs_updates(
+        let (new_updates, _host_phase_2) = plan_mgs_updates(
             log,
             &collection,
             &collection.baseboards,
