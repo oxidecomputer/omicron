@@ -10,7 +10,7 @@ version = "1.0.0"
 source = { kind = "fake", size = "1MiB" }
 
 [[artifact.gimlet_rot]]
-name = "fake-gimlet-rot"
+name = "SimRot"
 version = "1.0.0"
 [artifact.gimlet_rot.source]
 kind = "composite-rot"
