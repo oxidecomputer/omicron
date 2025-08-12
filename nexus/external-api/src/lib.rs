@@ -1630,6 +1630,17 @@ pub trait NexusExternalApi {
         query_params: Query<PaginatedByNameOrId>,
     ) -> Result<HttpResponseOk<ResultsPage<AddressLot>>, HttpError>;
 
+    /// Fetch address lot
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/networking/address-lot/{address_lot}",
+        tags = ["system/networking"],
+    }]
+    async fn networking_address_lot_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::AddressLotPath>,
+    ) -> Result<HttpResponseOk<AddressLotViewResponse>, HttpError>;
+
     /// List blocks in address lot
     #[endpoint {
         method = GET,
