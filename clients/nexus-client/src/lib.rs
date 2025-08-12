@@ -5,7 +5,10 @@
 //! Interface for making API requests to the Oxide control plane at large
 //! from within the control plane
 
+use iddqd::IdOrdItem;
+use iddqd::id_upcast;
 use std::collections::HashMap;
+use uuid::Uuid;
 
 progenitor::generate_api!(
     spec = "../../openapi/nexus-internal.json",
@@ -84,6 +87,26 @@ progenitor::generate_api!(
         Baseboard = { derives = [PartialEq, Eq] }
     }
 );
+
+impl IdOrdItem for types::RunningSagaInfo {
+    type Key<'a> = Uuid;
+
+    fn key(&self) -> Self::Key<'_> {
+        self.saga_id
+    }
+
+    id_upcast!();
+}
+
+impl IdOrdItem for types::HeldDbClaimInfo {
+    type Key<'a> = u64;
+
+    fn key(&self) -> Self::Key<'_> {
+        self.id
+    }
+
+    id_upcast!();
+}
 
 impl omicron_common::api::external::ClientError for types::Error {
     fn message(&self) -> String {

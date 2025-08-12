@@ -1364,6 +1364,24 @@ pub struct PendingMgsUpdate {
     pub artifact_version: ArtifactVersion,
 }
 
+impl PendingMgsUpdate {
+    /// Get a short description of this update, suitable for display on a single
+    /// line (e.g., as the `comment` field of a blueprint).
+    pub fn description(&self) -> String {
+        let serial = &self.baseboard_id.serial_number;
+        let sp_type = self.sp_type;
+        let slot_id = self.slot_id;
+        let version = &self.artifact_version;
+        let kind = match &self.details {
+            PendingMgsUpdateDetails::Sp { .. } => "SP",
+            PendingMgsUpdateDetails::Rot { .. } => "RoT",
+            PendingMgsUpdateDetails::RotBootloader { .. } => "RoT bootloader",
+            PendingMgsUpdateDetails::HostPhase1(_) => "host phase 1",
+        };
+        format!("update {sp_type:?} {slot_id} ({serial}) {kind} to {version}")
+    }
+}
+
 impl slog::KV for PendingMgsUpdate {
     fn serialize(
         &self,
@@ -1471,12 +1489,17 @@ pub enum PendingMgsUpdateDetails {
         /// expected contents of the stage 0 next
         expected_stage0_next_version: ExpectedVersion,
     },
+    /// the host OS is being updated
+    ///
+    /// We write the phase 1 via MGS, and have a precheck condition that
+    /// sled-agent has already written the matching phase 2.
+    HostPhase1(PendingMgsUpdateHostPhase1Details),
 }
 
 impl slog::KV for PendingMgsUpdateDetails {
     fn serialize(
         &self,
-        _record: &slog::Record,
+        record: &slog::Record,
         serializer: &mut dyn slog::Serializer,
     ) -> slog::Result {
         match self {
@@ -1541,7 +1564,109 @@ impl slog::KV for PendingMgsUpdateDetails {
                     &format!("{:?}", expected_stage0_next_version),
                 )
             }
+            PendingMgsUpdateDetails::HostPhase1(details) => {
+                serializer.emit_str(Key::from("component"), "host_phase_1")?;
+                slog::KV::serialize(details, record, serializer)
+            }
         }
+    }
+}
+
+/// Describes the host-phase-1-specific details of a PendingMgsUpdate
+///
+/// For an overview of Reconfigurator-driven host OS updates, see the module
+/// comments in `nexus_mgs_updates::host_phase_1_updater`.
+#[derive(
+    Clone, Debug, Eq, PartialEq, JsonSchema, Deserialize, Serialize, Diffable,
+)]
+#[serde(rename_all = "snake_case")]
+pub struct PendingMgsUpdateHostPhase1Details {
+    /// Which slot is currently active according to the SP.
+    ///
+    /// This controls which slot will be used the next time the sled boots; it
+    /// will _usually_ match `boot_disk`, but differs in the window of time
+    /// between telling the SP to change which slot to use and the host OS
+    /// rebooting to actually use that slot.
+    pub expected_active_phase_1_slot: M2Slot,
+    /// Which slot the host OS most recently booted from.
+    pub expected_boot_disk: M2Slot,
+    /// The hash of the phase 1 slot specified by
+    /// `expected_active_phase_1_hash`.
+    ///
+    /// We should always be able to fetch this. Even if the phase 1 contents
+    /// themselves have been corrupted (very scary for the active slot!), the SP
+    /// can still hash those contents.
+    pub expected_active_phase_1_hash: ArtifactHash,
+    /// The hash of the currently-active phase 2 artifact.
+    ///
+    /// It's possible sled-agent won't be able to report this value, but that
+    /// would indicate that we don't know the version currently running. The
+    /// planner wouldn't stage an update without knowing the current version, so
+    /// if something has gone wrong in the meantime we won't proceede either.
+    pub expected_active_phase_2_hash: ArtifactHash,
+    /// The hash of the phase 1 slot specified by toggling
+    /// `expected_active_phase_1_slot` to the other slot.
+    ///
+    /// We should always be able to fetch this. Even if the phase 1 contents
+    /// of the inactive slot are entirely bogus, the SP can still hash those
+    /// contents.
+    pub expected_inactive_phase_1_hash: ArtifactHash,
+    /// The hash of the currently-inactive phase 2 artifact.
+    ///
+    /// It's entirely possible that a sled needing a host OS update has no valid
+    /// artifact in its inactive slot. However, a precondition for us performing
+    /// a phase 1 update is that `sled-agent` on the target sled has already
+    /// written the paired phase 2 artifact to the inactive slot; therefore, we
+    /// don't need to be able to represent an invalid inactive slot.
+    pub expected_inactive_phase_2_hash: ArtifactHash,
+    /// Address for contacting sled-agent to check phase 2 contents.
+    pub sled_agent_address: SocketAddrV6,
+}
+
+impl slog::KV for PendingMgsUpdateHostPhase1Details {
+    fn serialize(
+        &self,
+        _record: &slog::Record,
+        serializer: &mut dyn slog::Serializer,
+    ) -> slog::Result {
+        let Self {
+            expected_active_phase_1_slot,
+            expected_boot_disk,
+            expected_active_phase_1_hash,
+            expected_active_phase_2_hash,
+            expected_inactive_phase_1_hash,
+            expected_inactive_phase_2_hash,
+            sled_agent_address,
+        } = self;
+        serializer.emit_str(
+            Key::from("expected_active_phase_1_slot"),
+            &format!("{expected_active_phase_1_slot:?}"),
+        )?;
+        serializer.emit_str(
+            Key::from("expected_boot_disk"),
+            &format!("{expected_boot_disk:?}"),
+        )?;
+        serializer.emit_str(
+            Key::from("expected_active_phase_1_hash"),
+            &format!("{expected_active_phase_1_hash}"),
+        )?;
+        serializer.emit_str(
+            Key::from("expected_active_phase_2_hash"),
+            &format!("{expected_active_phase_2_hash}"),
+        )?;
+        serializer.emit_str(
+            Key::from("expected_inactive_phase_1_hash"),
+            &format!("{expected_inactive_phase_1_hash}"),
+        )?;
+        serializer.emit_str(
+            Key::from("expected_inactive_phase_2_hash"),
+            &format!("{expected_inactive_phase_2_hash}"),
+        )?;
+        serializer.emit_str(
+            Key::from("sled_agent_address"),
+            &sled_agent_address.to_string(),
+        )?;
+        Ok(())
     }
 }
 

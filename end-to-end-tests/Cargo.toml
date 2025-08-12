@@ -9,7 +9,6 @@ workspace = true
 
 [dependencies]
 anyhow = { workspace = true, features = ["backtrace"] }
-async-trait.workspace = true
 base64.workspace = true
 bytes.workspace = true
 chrono.workspace = true
@@ -26,7 +25,6 @@ oxide-tokio-rt.workspace = true
 rand.workspace = true
 reqwest = { workspace = true, features = ["cookies"] }
 russh = "0.54.0"
-russh-keys = "0.45.0"
 serde.workspace = true
 serde_json.workspace = true
 sled-agent-types.workspace = true

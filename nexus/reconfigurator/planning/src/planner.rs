@@ -14,6 +14,7 @@ use crate::blueprint_builder::Error;
 use crate::blueprint_builder::Operation;
 use crate::blueprint_editor::DisksEditError;
 use crate::blueprint_editor::SledEditError;
+use crate::mgs_updates::ImpossibleUpdatePolicy;
 use crate::mgs_updates::plan_mgs_updates;
 use crate::planner::image_source::NoopConvertZoneStatus;
 use crate::planner::omicron_zone_placement::PlacementError;
@@ -1130,6 +1131,7 @@ impl<'a> Planner<'a> {
             .all_sleds(SledFilter::SpsUpdatedByReconfigurator)
             .map(|(_sled_id, details)| &details.baseboard_id)
             .collect();
+
         let included_baseboards =
             self.inventory
                 .sps
@@ -1149,14 +1151,32 @@ impl<'a> Planner<'a> {
         let current_updates =
             &self.blueprint.parent_blueprint().pending_mgs_updates;
         let current_artifacts = self.input.tuf_repo().description();
+        let impossible_update_policy =
+            if self.blueprint.parent_blueprint().time_created
+                >= self.input.ignore_impossible_mgs_updates_since()
+            {
+                ImpossibleUpdatePolicy::Keep
+            } else {
+                ImpossibleUpdatePolicy::Reevaluate
+            };
         let next = plan_mgs_updates(
             &self.log,
             &self.inventory,
             &included_baseboards,
-            &current_updates,
+            current_updates,
             current_artifacts,
             NUM_CONCURRENT_MGS_UPDATES,
+            impossible_update_policy,
         );
+        if next != *current_updates {
+            // This will only add comments if our set of updates changed _and_
+            // we have at least one update. If we went from "some updates" to
+            // "no updates", that's not really comment-worthy; presumably we'll
+            // do something else comment-worthy in a subsequent step.
+            for update in next.iter() {
+                self.blueprint.comment(update.description());
+            }
+        }
 
         // TODO This is not quite right.  See oxidecomputer/omicron#8285.
         let rv = if next.is_empty() {
@@ -5512,6 +5532,7 @@ pub(crate) mod test {
                 },
                 hash: ArtifactHash([0; 32]),
                 size: 0,
+                sign: None,
             }
         };
     }
