@@ -7876,6 +7876,7 @@ dependencies = [
  "hyper-rustls",
  "hyper-staticfile",
  "id-map",
+ "iddqd",
  "illumos-utils",
  "internal-dns-resolver",
  "internal-dns-types",
