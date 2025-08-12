@@ -211,8 +211,6 @@ enum MgsUpdateStatusError {
     MissingActiveCaboose,
     #[error("no RoT state found in inventory")]
     MissingRotState,
-    #[error("not yet implemented")]
-    NotYetImplemented,
     #[error("unable to parse input into ArtifactVersion: {0:?}")]
     FailedArtifactVersionParse(ArtifactVersionError),
 }
@@ -634,6 +632,7 @@ fn try_make_update_rot_bootloader(
                 Some(
                     KnownArtifactKind::GimletRot
                     | KnownArtifactKind::Host
+                    | KnownArtifactKind::InstallinatorDocument
                     | KnownArtifactKind::Trampoline
                     | KnownArtifactKind::ControlPlane
                     | KnownArtifactKind::Zone
