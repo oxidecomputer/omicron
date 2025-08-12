@@ -248,7 +248,7 @@ async fn test_nexus_does_not_boot_without_valid_schema() {
             .expect_err("Nexus should have failed to start");
 
         assert!(
-            err.contains("Failed to read valid DB schema"),
+            err.contains("Datastore should not be used"),
             "Saw error: {err}"
         );
 

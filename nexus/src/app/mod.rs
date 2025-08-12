@@ -310,12 +310,14 @@ impl Nexus {
             .map(|s| AllSchemaVersions::load(&s.schema_dir))
             .transpose()
             .map_err(|error| format!("{error:#}"))?;
+        let nexus_id = Some(config.deployment.id);
         let db_datastore = Arc::new(
             db::DataStore::new_with_timeout(
                 &log,
                 Arc::clone(&pool),
                 all_versions.as_ref(),
                 config.pkg.tunables.load_timeout,
+                nexus_id,
             )
             .await?,
         );
