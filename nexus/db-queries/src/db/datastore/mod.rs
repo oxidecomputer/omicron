@@ -50,6 +50,7 @@ mod affinity;
 mod alert;
 mod alert_rx;
 mod allow_list;
+mod audit_log;
 mod auth;
 mod bfd;
 mod bgp;

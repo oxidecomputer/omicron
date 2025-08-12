@@ -30,8 +30,8 @@ use nexus_db_schema::schema::inv_zone_manifest_zone;
 use nexus_db_schema::schema::{
     hw_baseboard_id, inv_caboose, inv_clickhouse_keeper_membership,
     inv_cockroachdb_status, inv_collection, inv_collection_error, inv_dataset,
-    inv_host_phase_1_flash_hash, inv_internal_dns,
-    inv_last_reconciliation_dataset_result,
+    inv_host_phase_1_active_slot, inv_host_phase_1_flash_hash,
+    inv_internal_dns, inv_last_reconciliation_dataset_result,
     inv_last_reconciliation_disk_result,
     inv_last_reconciliation_orphaned_dataset,
     inv_last_reconciliation_zone_result, inv_mupdate_override_non_boot,
@@ -62,6 +62,7 @@ use nexus_sled_agent_shared::inventory::{
     ConfigReconcilerInventoryResult, OmicronSledConfig, OmicronZoneConfig,
     OmicronZoneDataset, OmicronZoneImageSource, OmicronZoneType,
 };
+use nexus_types::inventory::HostPhase1ActiveSlot;
 use nexus_types::inventory::{
     BaseboardId, Caboose, CockroachStatus, Collection,
     InternalDnsGenerationStatus, NvmeFirmware, PowerState, RotPage, RotSlot,
@@ -782,6 +783,28 @@ impl From<InvRootOfTrust> for nexus_types::inventory::RotState {
             stage0next_error: row
                 .stage0next_error
                 .map(nexus_types::inventory::RotImageError::from),
+        }
+    }
+}
+
+/// See [`nexus_types::inventory::HostPhase1ActiveSlot`].
+#[derive(Queryable, Clone, Debug, Selectable)]
+#[diesel(table_name = inv_host_phase_1_active_slot)]
+pub struct InvHostPhase1ActiveSlot {
+    pub inv_collection_id: Uuid,
+    pub hw_baseboard_id: Uuid,
+    pub time_collected: DateTime<Utc>,
+    pub source: String,
+
+    pub slot: HwM2Slot,
+}
+
+impl From<InvHostPhase1ActiveSlot> for HostPhase1ActiveSlot {
+    fn from(value: InvHostPhase1ActiveSlot) -> Self {
+        Self {
+            time_collected: value.time_collected,
+            source: value.source,
+            slot: value.slot.into(),
         }
     }
 }

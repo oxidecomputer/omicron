@@ -42,10 +42,16 @@ T ENA ID                                   PARENT                               
 sled 2eb69596-f081-4e2d-9425-9994926e0832 (in service, active)
 serial serial1
 subnet fd00:1122:3344:102::/64
-RoT bootloader stage 0 version:   Some("0.0.1")
-RoT bootloader stage 0 next version: None
-SP active version:   Some("0.0.1")
+SP active version: Some("0.0.1")
 SP inactive version: None
+RoT bootloader stage 0 version: Some("0.0.1")
+RoT bootloader stage 0 next version: None
+RoT active slot: A
+RoT slot A version: Some("0.0.2")
+RoT slot B version: None
+RoT persistent boot preference: A
+RoT pending persistent boot preference: None
+RoT transient boot preference: None
 zpools (10):
     055c4910-b641-46d9-b52d-313aae9d9cbf (zpool)
     SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-055c4910-b641-46d9-b52d-313aae9d9cbf" }, disk_id: 6a0cb52f-5cc2-48a5-9f44-ac8dea3ac45b (physical_disk), policy: InService, state: Active }
@@ -429,10 +435,16 @@ T ENA ID                                   PARENT                               
 sled 89d02b1b-478c-401a-8e28-7a26f74fa41b (in service, active)
 serial serial0
 subnet fd00:1122:3344:101::/64
-RoT bootloader stage 0 version:   Some("0.0.1")
-RoT bootloader stage 0 next version: None
-SP active version:   Some("0.0.1")
+SP active version: Some("0.0.1")
 SP inactive version: None
+RoT bootloader stage 0 version: Some("0.0.1")
+RoT bootloader stage 0 next version: None
+RoT active slot: A
+RoT slot A version: Some("0.0.2")
+RoT slot B version: None
+RoT persistent boot preference: A
+RoT pending persistent boot preference: None
+RoT transient boot preference: None
 zpools (4):
     0477165a-a72e-4814-b8d6-74aa02cb2040 (zpool)
     SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-0477165a-a72e-4814-b8d6-74aa02cb2040" }, disk_id: 6a5a31ab-4edc-44e0-a7a1-4190bfe582f7 (physical_disk), policy: InService, state: Active }
@@ -1030,16 +1042,18 @@ Sled serial0
     part number: model0
     power:    A2
     revision: 0
-    MGS slot: Sled 0 (cubby 0)
+    MGS slot: Sled 0
     found at: <REDACTED_TIMESTAMP> from fake MGS 1
+    host phase 1 active slot: A
     host phase 1 hashes:
         SLOT HASH                                                             
         A    0101010101010101010101010101010101010101010101010101010101010101 
         B    0202020202020202020202020202020202020202020202020202020202020202 
     cabooses:
-        SLOT    BOARD        NAME         VERSION GIT_COMMIT SIGN 
-        SpSlot0 SimGimletSp  SimGimletSp  0.0.1   unknown    n/a  
-        Stage0  SimRotStage0 SimRotStage0 0.0.1   unknown    n/a  
+        SLOT     BOARD        NAME         VERSION GIT_COMMIT SIGN 
+        SpSlot0  SimGimletSp  SimGimletSp  0.0.1   unknown    n/a  
+        RotSlotA SimRot       SimRot       0.0.2   unknown    n/a  
+        Stage0   SimRotStage0 SimRotStage0 0.0.1   unknown    n/a  
     RoT pages:
         SLOT DATA_BASE64 
     RoT: active slot: slot A
@@ -1053,16 +1067,18 @@ Sled serial1
     part number: model1
     power:    A2
     revision: 0
-    MGS slot: Sled 1 (cubby 1)
+    MGS slot: Sled 1
     found at: <REDACTED_TIMESTAMP> from fake MGS 1
+    host phase 1 active slot: A
     host phase 1 hashes:
         SLOT HASH                                                             
         A    0101010101010101010101010101010101010101010101010101010101010101 
         B    0202020202020202020202020202020202020202020202020202020202020202 
     cabooses:
-        SLOT    BOARD        NAME         VERSION GIT_COMMIT SIGN 
-        SpSlot0 SimGimletSp  SimGimletSp  0.0.1   unknown    n/a  
-        Stage0  SimRotStage0 SimRotStage0 0.0.1   unknown    n/a  
+        SLOT     BOARD        NAME         VERSION GIT_COMMIT SIGN 
+        SpSlot0  SimGimletSp  SimGimletSp  0.0.1   unknown    n/a  
+        RotSlotA SimRot       SimRot       0.0.2   unknown    n/a  
+        Stage0   SimRotStage0 SimRotStage0 0.0.1   unknown    n/a  
     RoT pages:
         SLOT DATA_BASE64 
     RoT: active slot: slot A
@@ -1076,16 +1092,18 @@ Sled serial2
     part number: model2
     power:    A2
     revision: 0
-    MGS slot: Sled 2 (cubby 2)
+    MGS slot: Sled 2
     found at: <REDACTED_TIMESTAMP> from fake MGS 1
+    host phase 1 active slot: A
     host phase 1 hashes:
         SLOT HASH                                                             
         A    0101010101010101010101010101010101010101010101010101010101010101 
         B    0202020202020202020202020202020202020202020202020202020202020202 
     cabooses:
-        SLOT    BOARD        NAME         VERSION GIT_COMMIT SIGN 
-        SpSlot0 SimGimletSp  SimGimletSp  0.0.1   unknown    n/a  
-        Stage0  SimRotStage0 SimRotStage0 0.0.1   unknown    n/a  
+        SLOT     BOARD        NAME         VERSION GIT_COMMIT SIGN 
+        SpSlot0  SimGimletSp  SimGimletSp  0.0.1   unknown    n/a  
+        RotSlotA SimRot       SimRot       0.0.2   unknown    n/a  
+        Stage0   SimRotStage0 SimRotStage0 0.0.1   unknown    n/a  
     RoT pages:
         SLOT DATA_BASE64 
     RoT: active slot: slot A
