@@ -202,6 +202,16 @@ impl LocationMap {
         })
     }
 
+    /// Get the slot number for our local sled.
+    pub(super) fn local_sled(&self) -> u16 {
+        self.local_sled
+    }
+
+    /// Get whether our config told us it's okay to reset our local sled.
+    pub(super) fn allow_local_sled_sp_reset(&self) -> bool {
+        self.allow_local_sled_sp_reset
+    }
+
     /// Get the ID of a given port.
     ///
     /// Panics if `port` was not present in the list of ports provided when

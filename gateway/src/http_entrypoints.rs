@@ -475,9 +475,28 @@ impl GatewayApi for GatewayImpl {
             let sp = apictx.mgmt_switch.sp(sp_id)?;
             let component = component_from_str(&component)?;
 
+            // Our config may specifically disallow resetting the SP of our
+            // local sled. This is because resetting our local SP after an
+            // update doesn't work: `reset_component_trigger` below will issue a
+            // "reset with watchdog", wait for the SP to come back, then send a
+            // "disarm the watchdog" message. But if we've reset our own local
+            // sled, we won't be alive to disarm the watchdog, which will result
+            // in the SP (erroneously) rolling back the update. (In production
+            // we always disable this; it's a config option to allow for
+            // dev/test environments that don't need this.)
+            if component == SpComponent::SP_ITSELF
+                && !apictx.mgmt_switch.allowed_to_reset_sp(sp_id)?
+            {
+                return Err(HttpError::for_bad_request(
+                    None,
+                    "MGS will not reset its own sled's SP".to_string(),
+                ));
+            }
+
             sp.reset_component_prepare(component)
                 // We always want to run with the watchdog when resetting as
-                // disabling the watchdog should be considered a debug only feature
+                // disabling the watchdog should be considered a debug only
+                // feature
                 .and_then(|()| sp.reset_component_trigger(component, false))
                 .await
                 .map_err(|err| SpCommsError::SpCommunicationFailed {
