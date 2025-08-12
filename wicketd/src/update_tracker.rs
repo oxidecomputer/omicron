@@ -65,6 +65,7 @@ use tufaceous_artifact::ArtifactVersion;
 use update_common::artifacts::ArtifactIdData;
 use update_common::artifacts::ArtifactsWithPlan;
 use update_common::artifacts::ControlPlaneZonesMode;
+
 use update_common::artifacts::UpdatePlan;
 use update_common::artifacts::VerificationMode;
 use update_engine::AbortHandle;
@@ -1367,11 +1368,38 @@ impl UpdateDriver {
                 UpdateStepId::SettingInstallinatorImageId,
                 "Setting installinator image ID",
                 async move |_cx| {
-                    let installinator_image_id = InstallinatorImageId {
-                        control_plane: plan.control_plane_hash.to_string(),
-                        host_phase_2: plan.host_phase_2_hash.to_string(),
-                        update_id: update_cx.update_id,
-                    };
+                    let installinator_image_id =
+                        match plan.installinator_doc_hash {
+                            Some(hash) => {
+                                // In this case (for newer TUF repos), we set the
+                                // host phase 2 hash to the document hash, and the
+                                // control plane hash to all zeroes. The latter acts
+                                // as an indication to installinator that the former
+                                // is actually a document hash.
+                                InstallinatorImageId {
+                                    host_phase_2: hash.to_string(),
+                                    control_plane: ArtifactHash([0; 32])
+                                        .to_string(),
+                                    update_id: update_cx.update_id,
+                                }
+                            }
+                            None => {
+                                // For older TUF repos, we follow the previous
+                                // logic.
+                                //
+                                // TODO-cleanup: Once we no longer support older TUF
+                                // repos, we can remove this logic.
+                                InstallinatorImageId {
+                                    host_phase_2: plan
+                                        .host_phase_2_hash
+                                        .to_string(),
+                                    control_plane: plan
+                                        .control_plane_hash
+                                        .to_string(),
+                                    update_id: update_cx.update_id,
+                                }
+                            }
+                        };
                     update_cx
                         .mgs_client
                         .sp_installinator_image_id_set(

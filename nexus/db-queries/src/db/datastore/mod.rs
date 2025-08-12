@@ -49,6 +49,7 @@ mod affinity;
 mod alert;
 mod alert_rx;
 mod allow_list;
+mod audit_log;
 mod auth;
 mod bfd;
 mod bgp;
@@ -121,6 +122,7 @@ mod zpool;
 pub use address_lot::AddressLotCreateResult;
 pub use dns::DataStoreDnsTest;
 pub use dns::DnsVersionUpdateBuilder;
+pub use ereport::EreportFilters;
 pub use instance::{
     InstanceAndActiveVmm, InstanceGestalt, InstanceStateComputer,
 };

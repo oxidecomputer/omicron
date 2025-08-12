@@ -42,10 +42,16 @@ T ENA ID                                   PARENT                               
 sled 2eb69596-f081-4e2d-9425-9994926e0832 (in service, active)
 serial serial1
 subnet fd00:1122:3344:102::/64
-RoT bootloader stage 0 version:   Some("0.0.1")
-RoT bootloader stage 0 next version: None
-SP active version:   Some("0.0.1")
+SP active version: Some("0.0.1")
 SP inactive version: None
+RoT bootloader stage 0 version: Some("0.0.1")
+RoT bootloader stage 0 next version: None
+RoT active slot: A
+RoT slot A version: Some("0.0.2")
+RoT slot B version: None
+RoT persistent boot preference: A
+RoT pending persistent boot preference: None
+RoT transient boot preference: None
 zpools (10):
     055c4910-b641-46d9-b52d-313aae9d9cbf (zpool)
     SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-055c4910-b641-46d9-b52d-313aae9d9cbf" }, disk_id: 6a0cb52f-5cc2-48a5-9f44-ac8dea3ac45b (physical_disk), policy: InService, state: Active }
@@ -429,10 +435,16 @@ T ENA ID                                   PARENT                               
 sled 89d02b1b-478c-401a-8e28-7a26f74fa41b (in service, active)
 serial serial0
 subnet fd00:1122:3344:101::/64
-RoT bootloader stage 0 version:   Some("0.0.1")
-RoT bootloader stage 0 next version: None
-SP active version:   Some("0.0.1")
+SP active version: Some("0.0.1")
 SP inactive version: None
+RoT bootloader stage 0 version: Some("0.0.1")
+RoT bootloader stage 0 next version: None
+RoT active slot: A
+RoT slot A version: Some("0.0.2")
+RoT slot B version: None
+RoT persistent boot preference: A
+RoT pending persistent boot preference: None
+RoT transient boot preference: None
 zpools (4):
     0477165a-a72e-4814-b8d6-74aa02cb2040 (zpool)
     SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-0477165a-a72e-4814-b8d6-74aa02cb2040" }, disk_id: 6a5a31ab-4edc-44e0-a7a1-4190bfe582f7 (physical_disk), policy: InService, state: Active }
@@ -543,7 +555,7 @@ WARN failed to place all new desired InternalDns zones, placed: 0, wanted_to_pla
 INFO sufficient ExternalDns zones exist in plan, desired_count: 0, current_count: 0
 WARN failed to place all new desired Nexus zones, placed: 0, wanted_to_place: 3
 INFO sufficient Oximeter zones exist in plan, desired_count: 0, current_count: 0
-WARN cannot issue more SP updates (no current artifacts)
+WARN cannot issue more MGS-driven updates (no current artifacts)
 INFO some zones not yet up-to-date, sled_id: 89d02b1b-478c-401a-8e28-7a26f74fa41b, zones_currently_updating: [ZoneCurrentlyUpdating { zone_id: b3c9c041-d2f0-4767-bdaf-0e52e9d7a013 (service), zone_kind: InternalNtp, reason: MissingInInventory { bp_image_source: InstallDataset } }]
 INFO will ensure cockroachdb setting, setting: cluster.preserve_downgrade_option, value: DoNotModify
 generated blueprint 86db3308-f817-4626-8838-4085949a6a41 based on parent blueprint ade5749d-bdf3-4fab-a8ae-00bea01b3a5a
@@ -1030,16 +1042,18 @@ Sled serial0
     part number: model0
     power:    A2
     revision: 0
-    MGS slot: Sled 0 (cubby 0)
+    MGS slot: Sled 0
     found at: <REDACTED_TIMESTAMP> from fake MGS 1
+    host phase 1 active slot: A
     host phase 1 hashes:
         SLOT HASH                                                             
         A    0101010101010101010101010101010101010101010101010101010101010101 
         B    0202020202020202020202020202020202020202020202020202020202020202 
     cabooses:
-        SLOT    BOARD        NAME         VERSION GIT_COMMIT SIGN 
-        SpSlot0 SimGimletSp  SimGimletSp  0.0.1   unknown    n/a  
-        Stage0  SimRotStage0 SimRotStage0 0.0.1   unknown    n/a  
+        SLOT     BOARD        NAME         VERSION GIT_COMMIT SIGN 
+        SpSlot0  SimGimletSp  SimGimletSp  0.0.1   unknown    n/a  
+        RotSlotA SimRot       SimRot       0.0.2   unknown    n/a  
+        Stage0   SimRotStage0 SimRotStage0 0.0.1   unknown    n/a  
     RoT pages:
         SLOT DATA_BASE64 
     RoT: active slot: slot A
@@ -1053,16 +1067,18 @@ Sled serial1
     part number: model1
     power:    A2
     revision: 0
-    MGS slot: Sled 1 (cubby 1)
+    MGS slot: Sled 1
     found at: <REDACTED_TIMESTAMP> from fake MGS 1
+    host phase 1 active slot: A
     host phase 1 hashes:
         SLOT HASH                                                             
         A    0101010101010101010101010101010101010101010101010101010101010101 
         B    0202020202020202020202020202020202020202020202020202020202020202 
     cabooses:
-        SLOT    BOARD        NAME         VERSION GIT_COMMIT SIGN 
-        SpSlot0 SimGimletSp  SimGimletSp  0.0.1   unknown    n/a  
-        Stage0  SimRotStage0 SimRotStage0 0.0.1   unknown    n/a  
+        SLOT     BOARD        NAME         VERSION GIT_COMMIT SIGN 
+        SpSlot0  SimGimletSp  SimGimletSp  0.0.1   unknown    n/a  
+        RotSlotA SimRot       SimRot       0.0.2   unknown    n/a  
+        Stage0   SimRotStage0 SimRotStage0 0.0.1   unknown    n/a  
     RoT pages:
         SLOT DATA_BASE64 
     RoT: active slot: slot A
@@ -1076,16 +1092,18 @@ Sled serial2
     part number: model2
     power:    A2
     revision: 0
-    MGS slot: Sled 2 (cubby 2)
+    MGS slot: Sled 2
     found at: <REDACTED_TIMESTAMP> from fake MGS 1
+    host phase 1 active slot: A
     host phase 1 hashes:
         SLOT HASH                                                             
         A    0101010101010101010101010101010101010101010101010101010101010101 
         B    0202020202020202020202020202020202020202020202020202020202020202 
     cabooses:
-        SLOT    BOARD        NAME         VERSION GIT_COMMIT SIGN 
-        SpSlot0 SimGimletSp  SimGimletSp  0.0.1   unknown    n/a  
-        Stage0  SimRotStage0 SimRotStage0 0.0.1   unknown    n/a  
+        SLOT     BOARD        NAME         VERSION GIT_COMMIT SIGN 
+        SpSlot0  SimGimletSp  SimGimletSp  0.0.1   unknown    n/a  
+        RotSlotA SimRot       SimRot       0.0.2   unknown    n/a  
+        Stage0   SimRotStage0 SimRotStage0 0.0.1   unknown    n/a  
     RoT pages:
         SLOT DATA_BASE64 
     RoT: active slot: slot A
@@ -1194,11 +1212,16 @@ LEDGERED SLED CONFIG
             path on boot disk: /fake/path/install/mupdate_override.json
             no override on boot disk
             no non-boot disks
-    boot disk slot: FAILED TO DETERMINE: constructed via debug_assume_success()
-    slot A details UNAVAILABLE: constructed via debug_assume_success()
-    slot B details UNAVAILABLE: constructed via debug_assume_success()
+    boot disk slot: A
+    slot A details:
+        artifact: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a (1000 bytes)
+        image name: fake from debug_assume_success()
+        phase 2 hash: 0000000000000000000000000000000000000000000000000000000000000000
+    slot B details:
+        artifact: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b (1000 bytes)
+        image name: fake from debug_assume_success()
+        phase 2 hash: 0101010101010101010101010101010101010101010101010101010101010101
     last reconciled config: matches ledgered config
-    no information from NTP for this sled
         no mupdate override to clear
         no orphaned datasets
         all disks reconciled successfully
@@ -1303,11 +1326,16 @@ LEDGERED SLED CONFIG
             path on boot disk: /fake/path/install/mupdate_override.json
             no override on boot disk
             no non-boot disks
-    boot disk slot: FAILED TO DETERMINE: constructed via debug_assume_success()
-    slot A details UNAVAILABLE: constructed via debug_assume_success()
-    slot B details UNAVAILABLE: constructed via debug_assume_success()
+    boot disk slot: A
+    slot A details:
+        artifact: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a (1000 bytes)
+        image name: fake from debug_assume_success()
+        phase 2 hash: 0000000000000000000000000000000000000000000000000000000000000000
+    slot B details:
+        artifact: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b (1000 bytes)
+        image name: fake from debug_assume_success()
+        phase 2 hash: 0101010101010101010101010101010101010101010101010101010101010101
     last reconciled config: matches ledgered config
-    no information from NTP for this sled
         no mupdate override to clear
         no orphaned datasets
         all disks reconciled successfully
@@ -1505,11 +1533,16 @@ LEDGERED SLED CONFIG
             path on boot disk: /fake/path/install/mupdate_override.json
             no override on boot disk
             no non-boot disks
-    boot disk slot: FAILED TO DETERMINE: constructed via debug_assume_success()
-    slot A details UNAVAILABLE: constructed via debug_assume_success()
-    slot B details UNAVAILABLE: constructed via debug_assume_success()
+    boot disk slot: A
+    slot A details:
+        artifact: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a (1000 bytes)
+        image name: fake from debug_assume_success()
+        phase 2 hash: 0000000000000000000000000000000000000000000000000000000000000000
+    slot B details:
+        artifact: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b (1000 bytes)
+        image name: fake from debug_assume_success()
+        phase 2 hash: 0101010101010101010101010101010101010101010101010101010101010101
     last reconciled config: matches ledgered config
-    no information from NTP for this sled
         no mupdate override to clear
         no orphaned datasets
         all disks reconciled successfully
@@ -1524,6 +1557,14 @@ KEEPER MEMBERSHIP
 COCKROACH STATUS
     no cockroach status retrieved
 
+
+NTP STATUS
+    No NTP zones reported timesync information
+
+INTERNAL DNS STATUS
+    Zone 4692cc31-6eb6-437c-9634-9688663d06ae: Internal DNS generation @ 1
+    Zone 587da9e8-8fc0-4854-b585-070741a7b00d: Internal DNS generation @ 1
+    Zone ffbf02f0-261d-4723-b613-eb861245acbd: Internal DNS generation @ 1
 
 
 
@@ -1541,7 +1582,7 @@ INFO sufficient InternalDns zones exist in plan, desired_count: 3, current_count
 INFO sufficient ExternalDns zones exist in plan, desired_count: 3, current_count: 3
 INFO sufficient Nexus zones exist in plan, desired_count: 3, current_count: 3
 INFO sufficient Oximeter zones exist in plan, desired_count: 0, current_count: 0
-WARN cannot issue more SP updates (no current artifacts)
+WARN cannot issue more MGS-driven updates (no current artifacts)
 INFO all zones up-to-date
 INFO will ensure cockroachdb setting, setting: cluster.preserve_downgrade_option, value: DoNotModify
 generated blueprint 86db3308-f817-4626-8838-4085949a6a41 based on parent blueprint ade5749d-bdf3-4fab-a8ae-00bea01b3a5a

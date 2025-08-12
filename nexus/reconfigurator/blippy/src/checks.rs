@@ -8,6 +8,7 @@ use crate::blippy::SledKind;
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::BlueprintDatasetConfig;
 use nexus_types::deployment::BlueprintDatasetDisposition;
+use nexus_types::deployment::BlueprintHostPhase2DesiredContents;
 use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
 use nexus_types::deployment::BlueprintSledConfig;
 use nexus_types::deployment::BlueprintZoneConfig;
@@ -21,6 +22,8 @@ use omicron_common::address::DnsSubnet;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX;
 use omicron_common::disk::DatasetKind;
+use omicron_common::disk::M2Slot;
+use omicron_uuid_kinds::MupdateOverrideUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use std::collections::BTreeMap;
@@ -314,6 +317,10 @@ impl<'a> DatasetsBySledCache<'a> {
 
         let mut by_zpool = BTreeMap::new();
         for dataset in sled_config.datasets.iter() {
+            if dataset.disposition.is_expunged() {
+                continue;
+            }
+
             let by_kind: &mut BTreeMap<_, _> =
                 by_zpool.entry(dataset.pool.id()).or_default();
 
@@ -577,15 +584,51 @@ fn check_mupdate_override(blippy: &mut Blippy<'_>) {
                 }
             }
 
-            // TODO: The host phase 2 contents should be set to CurrentContents
-            // (waiting for
-            // https://github.com/oxidecomputer/omicron/issues/8542).
+            // The host phase 2 contents should be set to CurrentContents.
+            check_mupdate_override_host_phase_2_contents(
+                blippy,
+                sled_id,
+                mupdate_override_id,
+                M2Slot::A,
+                &sled.host_phase_2.slot_a,
+            );
+            check_mupdate_override_host_phase_2_contents(
+                blippy,
+                sled_id,
+                mupdate_override_id,
+                M2Slot::B,
+                &sled.host_phase_2.slot_b,
+            );
 
             // TODO: PendingMgsUpdates for this sled should be empty. Mapping
             // sled IDs to their MGS identifiers (baseboard ID) requires a map
             // that's not currently part of the blueprint. We may want to either
             // include that map in the blueprint, or pass it in via blippy.
         }
+    }
+}
+
+fn check_mupdate_override_host_phase_2_contents(
+    blippy: &mut Blippy<'_>,
+    sled_id: SledUuid,
+    mupdate_override_id: MupdateOverrideUuid,
+    slot: M2Slot,
+    contents: &BlueprintHostPhase2DesiredContents,
+) {
+    match contents {
+        BlueprintHostPhase2DesiredContents::Artifact { version, hash } => {
+            blippy.push_sled_note(
+                sled_id,
+                Severity::Fatal,
+                SledKind::MupdateOverrideWithHostPhase2Artifact {
+                    mupdate_override_id,
+                    slot,
+                    version: version.clone(),
+                    hash: *hash,
+                },
+            );
+        }
+        BlueprintHostPhase2DesiredContents::CurrentContents => {}
     }
 }
 
@@ -1224,6 +1267,57 @@ mod tests {
     }
 
     #[test]
+    fn test_zpool_with_expunged_duplicate_dataset_kinds() {
+        static TEST_NAME: &str =
+            "test_zpool_with_expunged_duplicate_dataset_kinds";
+        let logctx = test_setup_log(TEST_NAME);
+        let (_, _, mut blueprint) = example(&logctx.log, TEST_NAME);
+
+        let mut by_kind = BTreeMap::new();
+
+        // Loop over the datasets until we find a dataset kind that already
+        // exists on a different zpool, then copy it over.
+        //
+        // When we make the copy, also mark it expunged.
+        //
+        // By marking the dataset expunged, we should not see "duplicate dataset
+        // kind" errors.
+        let mut found_duplicate = false;
+        'outer: for (_, sled_config) in blueprint.sleds.iter_mut() {
+            for mut dataset in sled_config.datasets.iter_mut() {
+                if let Some(prev) =
+                    by_kind.insert(dataset.kind.clone(), dataset.clone())
+                {
+                    dataset.pool = prev.pool;
+                    dataset.disposition = BlueprintDatasetDisposition::Expunged;
+
+                    found_duplicate = true;
+                    break 'outer;
+                }
+            }
+        }
+        assert!(found_duplicate);
+
+        let report =
+            Blippy::new(&blueprint).into_report(BlippyReportSortKey::Kind);
+        eprintln!("{}", report.display());
+        for note in report.notes() {
+            match &note.kind {
+                Kind::Sled { kind, .. } => match kind {
+                    SledKind::ZpoolWithDuplicateDatasetKinds { .. } => {
+                        panic!(
+                            "Saw unexpected duplicate dataset kind note: {note:?}"
+                        );
+                    }
+                    _ => (),
+                },
+            }
+        }
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
     fn test_zpool_missing_default_datasets() {
         static TEST_NAME: &str = "test_zpool_missing_default_datasets";
         let logctx = test_setup_log(TEST_NAME);
@@ -1637,7 +1731,7 @@ mod tests {
         sled.remove_mupdate_override = Some(mupdate_override_id);
 
         // Find a zone and set it to use an artifact image source.
-        let kind = {
+        let artifact_zone_kind = {
             let mut zone = sled
                 .zones
                 .iter_mut()
@@ -1661,16 +1755,60 @@ mod tests {
             }
         };
 
-        let expected_note = Note {
-            severity: Severity::Fatal,
-            kind: Kind::Sled { sled_id, kind },
+        // Also set the host phase 2 contents.
+        let host_phase_2_a_kind = {
+            let version = BlueprintArtifactVersion::Available {
+                version: ArtifactVersion::new_const("123"),
+            };
+            let hash = ArtifactHash([2u8; 32]);
+            sled.host_phase_2.slot_a =
+                BlueprintHostPhase2DesiredContents::Artifact {
+                    version: version.clone(),
+                    hash,
+                };
+            SledKind::MupdateOverrideWithHostPhase2Artifact {
+                mupdate_override_id,
+                slot: M2Slot::A,
+                version,
+                hash,
+            }
         };
+
+        let host_phase_2_b_kind = {
+            let version = BlueprintArtifactVersion::Unknown;
+            let hash = ArtifactHash([3u8; 32]);
+            sled.host_phase_2.slot_b =
+                BlueprintHostPhase2DesiredContents::Artifact {
+                    version: version.clone(),
+                    hash,
+                };
+            SledKind::MupdateOverrideWithHostPhase2Artifact {
+                mupdate_override_id,
+                slot: M2Slot::B,
+                version,
+                hash,
+            }
+        };
+
+        let expected_notes = vec![
+            Note {
+                severity: Severity::Fatal,
+                kind: Kind::Sled { sled_id, kind: artifact_zone_kind },
+            },
+            Note {
+                severity: Severity::Fatal,
+                kind: Kind::Sled { sled_id, kind: host_phase_2_a_kind },
+            },
+            Note {
+                severity: Severity::Fatal,
+                kind: Kind::Sled { sled_id, kind: host_phase_2_b_kind },
+            },
+        ];
 
         let report =
             Blippy::new(&blueprint).into_report(BlippyReportSortKey::Kind);
         eprintln!("{}", report.display());
-        assert_eq!(report.notes().len(), 1, "exactly one note expected");
-        assert_eq!(report.notes()[0], expected_note);
+        assert_eq!(report.notes(), &expected_notes);
 
         logctx.cleanup_successful();
     }

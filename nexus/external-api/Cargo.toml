@@ -9,6 +9,7 @@ workspace = true
 
 [dependencies]
 anyhow.workspace = true
+chrono.workspace = true
 dropshot.workspace = true
 http.workspace = true
 hyper.workspace = true

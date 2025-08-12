@@ -54,6 +54,7 @@ mod address_lot;
 mod affinity;
 mod alert;
 mod allow_list;
+mod audit_log;
 pub(crate) mod background;
 mod bfd;
 mod bgp;

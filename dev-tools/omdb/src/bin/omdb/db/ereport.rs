@@ -155,7 +155,10 @@ async fn cmd_db_ereport_list(
                 restart_id: restart_id.into_untyped_uuid(),
                 ena: ena.into(),
                 class: class.clone(),
-                source: db::model::Reporter::Sp { sp_type, slot: sp_slot.0 },
+                source: db::model::Reporter::Sp {
+                    sp_type: sp_type.into(),
+                    slot: sp_slot.0,
+                },
                 serial: serial_number.as_deref(),
                 part_number: part_number.as_deref(),
             }
@@ -366,6 +369,7 @@ async fn cmd_db_ereport_info(
     println!("\n{:=<80}", "== EREPORT ");
     serde_json::to_writer_pretty(std::io::stdout(), &report)
         .with_context(|| format!("failed to serialize ereport: {report:?}"))?;
+    println!();
 
     Ok(())
 }
@@ -547,7 +551,10 @@ async fn cmd_db_ereporters(
             )| {
                 ReporterRow {
                     first_seen,
-                    identity: db::model::Reporter::Sp { slot: slot.0, sp_type },
+                    identity: db::model::Reporter::Sp {
+                        slot: slot.0,
+                        sp_type: sp_type.into(),
+                    },
                     serial,
                     part_number,
                     id: restart_id,

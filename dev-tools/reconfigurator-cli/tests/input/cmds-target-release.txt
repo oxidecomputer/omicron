@@ -53,6 +53,7 @@ blueprint-diff 58d5e830-0884-47d8-a7cd-b2b3751adeb4 af934083-59b5-4bf6-8966-6fb5
 # Like before, collect inventory from it and use that collection for the next step.
 # This should report that the update completed, remove that update, and add one
 # for another sled.
+set ignore-impossible-mgs-updates-since now
 sled-update-sp 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 --active 1.0.0
 inventory-generate
 blueprint-plan af934083-59b5-4bf6-8966-6fb5292c29e1 61f451b3-2121-4ed6-91c7-a550054f6c21
