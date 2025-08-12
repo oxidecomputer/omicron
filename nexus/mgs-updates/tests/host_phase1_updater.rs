@@ -24,7 +24,7 @@ use uuid::Uuid;
 
 fn make_fake_host_phase1_image() -> Vec<u8> {
     let mut image = vec![0; 128];
-    rand::thread_rng().fill_bytes(&mut image);
+    rand::rng().fill_bytes(&mut image);
     image
 }
 

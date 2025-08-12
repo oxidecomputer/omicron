@@ -52,6 +52,7 @@ use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use oxnet::Ipv6Net;
+use rand::seq::IndexedRandom;
 use sled_agent_types::rack_init::RecoverySiloConfig;
 use slog::{Drain, Logger, info};
 use std::collections::BTreeMap;
@@ -377,9 +378,8 @@ pub async fn run_standalone_server(
 
     let all_u2_zpools = server.sled_agent.get_zpools();
     let get_random_zpool = || {
-        use rand::seq::SliceRandom;
         let pool = all_u2_zpools
-            .choose(&mut rand::thread_rng())
+            .choose(&mut rand::rng())
             .expect("No external zpools found, but we need one");
         ZpoolName::new_external(ZpoolUuid::from_untyped_uuid(pool.id))
     };

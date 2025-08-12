@@ -10,7 +10,7 @@ use derive_more::From;
 use gfss::shamir::{self, CombineError, SecretShares, Share, SplitError};
 use hkdf::Hkdf;
 use omicron_uuid_kinds::RackUuid;
-use rand::RngCore;
+use rand::TryRngCore;
 use rand::rngs::OsRng;
 use secrecy::{ExposeSecret, SecretBox};
 use serde::{Deserialize, Serialize};
@@ -201,7 +201,8 @@ impl RackSecret {
         let mut rng = OsRng;
         let mut data = Box::new([0u8; SECRET_LEN]);
         while data.ct_eq(&[0u8; SECRET_LEN]).into() {
-            rng.fill_bytes(&mut *data);
+            rng.try_fill_bytes(&mut *data)
+                .expect("fetched random bytes from OsRng");
         }
         RackSecret { secret: RackSecretData(SecretBox::new(data)) }
     }
@@ -247,7 +248,7 @@ impl Salt {
     pub fn new() -> Salt {
         let mut rng = OsRng;
         let mut salt = [0u8; 32];
-        rng.fill_bytes(&mut salt);
+        rng.try_fill_bytes(&mut salt).expect("fetched random bytes from OsRng");
         Salt(salt)
     }
 }
