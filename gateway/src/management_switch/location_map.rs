@@ -62,8 +62,8 @@ pub struct SwitchPortDescription {
     pub ignition_target: u8,
 
     /// Map defining the logical identifier of the SP connected to this port for
-    /// each of the possible locations where MGS is running (see
-    /// [`LocationConfig::names`]).
+    /// each of the possible locations where MGS is running. Each key of this
+    /// map must match a [`LocationDescriptionConfig::name`].
     pub location: HashMap<String, SpIdentifier>,
 }
 
