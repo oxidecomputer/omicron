@@ -50,6 +50,7 @@ use gateway_types::task_dump::TaskDump;
 use gateway_types::update::HostPhase2Progress;
 use gateway_types::update::HostPhase2RecoveryImageId;
 use gateway_types::update::InstallinatorImageId;
+use gateway_types::update::SpComponentResetError;
 use gateway_types::update::SpUpdateStatus;
 use omicron_uuid_kinds::GenericUuid;
 use std::io::Cursor;
@@ -467,12 +468,12 @@ impl GatewayApi for GatewayImpl {
     async fn sp_component_reset(
         rqctx: RequestContext<Self::Context>,
         path: Path<PathSpComponent>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    ) -> Result<HttpResponseUpdatedNoContent, SpComponentResetError> {
         let apictx = rqctx.context();
         let PathSpComponent { sp, component } = path.into_inner();
         let sp_id = sp.into();
         let handler = async {
-            let sp = apictx.mgmt_switch.sp(sp_id)?;
+            let sp = apictx.mgmt_switch.sp(sp_id).map_err(HttpError::from)?;
             let component = component_from_str(&component)?;
 
             // Our config may specifically disallow resetting the SP of our
@@ -485,12 +486,12 @@ impl GatewayApi for GatewayImpl {
             // we always disable this; it's a config option to allow for
             // dev/test environments that don't need this.)
             if component == SpComponent::SP_ITSELF
-                && !apictx.mgmt_switch.allowed_to_reset_sp(sp_id)?
+                && !apictx
+                    .mgmt_switch
+                    .allowed_to_reset_sp(sp_id)
+                    .map_err(HttpError::from)?
             {
-                return Err(HttpError::for_bad_request(
-                    None,
-                    "MGS will not reset its own sled's SP".to_string(),
-                ));
+                return Err(SpComponentResetError::ResetSpOfLocalSled);
             }
 
             sp.reset_component_prepare(component)
@@ -502,7 +503,8 @@ impl GatewayApi for GatewayImpl {
                 .map_err(|err| SpCommsError::SpCommunicationFailed {
                     sp: sp_id,
                     err,
-                })?;
+                })
+                .map_err(HttpError::from)?;
 
             Ok(HttpResponseUpdatedNoContent {})
         };
