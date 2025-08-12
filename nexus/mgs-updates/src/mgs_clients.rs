@@ -6,13 +6,45 @@
 
 use futures::Future;
 use gateway_client::Client;
+use gateway_client::types::SpComponentResetError;
 use slog::Logger;
 use slog::warn;
 use std::collections::VecDeque;
+use std::fmt;
 use std::sync::Arc;
 
 pub(super) type GatewayClientError =
     gateway_client::Error<gateway_client::types::Error>;
+pub(super) type GatewaySpComponentResetError =
+    gateway_client::Error<SpComponentResetError>;
+
+/// Helper trait for error types we can get from various gateway_client API
+/// calls.
+///
+/// For each error type, we need to know whether we should retry the request (by
+/// sending it to the next MGS instance).
+pub(super) trait RetryableMgsError: fmt::Display {
+    fn should_try_next_mgs(&self) -> bool;
+}
+
+impl RetryableMgsError for GatewayClientError {
+    fn should_try_next_mgs(&self) -> bool {
+        matches!(self, GatewayClientError::CommunicationError(_))
+    }
+}
+
+impl RetryableMgsError for GatewaySpComponentResetError {
+    fn should_try_next_mgs(&self) -> bool {
+        match self {
+            gateway_client::Error::CommunicationError(_) => true,
+            gateway_client::Error::ErrorResponse(resp) => match resp.as_ref() {
+                SpComponentResetError::ResetSpOfLocalSled => true,
+                SpComponentResetError::Other { .. } => false,
+            },
+            _ => false,
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct MgsClients {
@@ -46,24 +78,25 @@ impl MgsClients {
 
     /// Run `op` against all clients in sequence until either one succeeds (in
     /// which case the success value is returned), one fails with a
-    /// non-communication error (in which case that error is returned), or all
-    /// of them fail with communication errors (in which case the communication
-    /// error from the last-attempted client is returned).
+    /// non-retryable error (in which case that error is returned), or all of
+    /// them fail with retryable errors (in which case the error from the
+    /// last-attempted client is returned).
     ///
     /// On a successful return, the internal client list will be reordered so
     /// any future accesses will attempt the most-recently-successful client.
-    pub(super) async fn try_all_serially<T, F, Fut>(
+    pub(super) async fn try_all_serially<T, E, F, Fut>(
         &mut self,
         log: &Logger,
         op: F,
-    ) -> Result<T, GatewayClientError>
+    ) -> Result<T, E>
     where
         // Seems like it would be nicer to take `&Client` here instead of
         // needing to clone each `Arc`, but there's currently no decent way of
         // doing that without boxing the returned future:
         // https://users.rust-lang.org/t/how-to-express-that-the-future-returned-by-a-closure-lives-only-as-long-as-its-argument/90039/10
         F: Fn(Arc<Client>) -> Fut,
-        Fut: Future<Output = Result<T, GatewayClientError>>,
+        Fut: Future<Output = Result<T, E>>,
+        E: RetryableMgsError,
     {
         let mut last_err = None;
         for (i, client) in self.clients.iter().enumerate() {
@@ -72,24 +105,27 @@ impl MgsClients {
                     self.clients.rotate_left(i);
                     return Ok(value);
                 }
-                Err(GatewayClientError::CommunicationError(err)) => {
-                    if i < self.clients.len() {
-                        warn!(
-                            log, "communication error with MGS; \
-                                  will try next client";
-                            "mgs_addr" => client.baseurl(),
-                            "err" => %err,
-                        );
+                Err(err) => {
+                    if err.should_try_next_mgs() {
+                        if i < self.clients.len() {
+                            warn!(
+                                log, "retryable error with MGS; \
+                                      will try next client";
+                                "mgs_addr" => client.baseurl(),
+                                "err" => %err,
+                            );
+                        }
+                        last_err = Some(err);
+                        continue;
+                    } else {
+                        return Err(err);
                     }
-                    last_err = Some(err);
-                    continue;
                 }
-                Err(err) => return Err(err),
             }
         }
 
-        // The only way to get here is if all clients failed with communication
+        // The only way to get here is if all clients failed with retryable
         // errors. Return the error from the last MGS we tried.
-        Err(GatewayClientError::CommunicationError(last_err.unwrap()))
+        Err(last_err.unwrap())
     }
 }

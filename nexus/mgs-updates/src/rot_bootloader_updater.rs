@@ -11,6 +11,7 @@ use crate::common_sp_update::PostUpdateError;
 use crate::common_sp_update::PrecheckError;
 use crate::common_sp_update::PrecheckStatus;
 use crate::common_sp_update::error_means_caboose_is_invalid;
+use crate::mgs_clients::GatewayClientError;
 use futures::FutureExt;
 use futures::future::BoxFuture;
 use gateway_client::SpComponent;
@@ -245,7 +246,7 @@ impl SpComponentUpdateHelperImpl for ReconfiguratorRotBootloaderUpdater {
                             &SpComponentFirmwareSlot { slot: 1 },
                         )
                         .await?;
-                    Ok(())
+                    Ok::<_, GatewayClientError>(())
                 })
                 .await?;
 
@@ -258,8 +259,7 @@ impl SpComponentUpdateHelperImpl for ReconfiguratorRotBootloaderUpdater {
                             update.slot_id,
                             &SpComponent::ROT.to_string(),
                         )
-                        .await?;
-                    Ok(())
+                        .await
                 })
                 .await?;
 

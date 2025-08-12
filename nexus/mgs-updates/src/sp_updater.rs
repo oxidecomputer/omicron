@@ -15,6 +15,7 @@ use crate::common_sp_update::PrecheckStatus;
 use crate::common_sp_update::SpComponentUpdater;
 use crate::common_sp_update::deliver_update;
 use crate::common_sp_update::error_means_caboose_is_invalid;
+use crate::mgs_clients::GatewaySpComponentResetError;
 use futures::FutureExt;
 use futures::future::BoxFuture;
 use gateway_client::SpComponent;
@@ -25,8 +26,6 @@ use slog::Logger;
 use slog::{debug, info};
 use tokio::sync::watch;
 use uuid::Uuid;
-
-type GatewayClientError = gateway_client::Error<gateway_client::types::Error>;
 
 pub struct SpUpdater {
     log: Logger,
@@ -99,7 +98,7 @@ impl SpUpdater {
     async fn finalize_update_via_reset(
         &self,
         client: &gateway_client::Client,
-    ) -> Result<(), GatewayClientError> {
+    ) -> Result<(), GatewaySpComponentResetError> {
         client
             .sp_component_reset(self.sp_type, self.sp_slot, self.component())
             .await?;
@@ -284,8 +283,7 @@ impl SpComponentUpdateHelperImpl for ReconfiguratorSpUpdater {
                             update.slot_id,
                             SpComponent::SP_ITSELF.const_as_str(),
                         )
-                        .await?;
-                    Ok(())
+                        .await
                 })
                 .await?;
             Ok(())
