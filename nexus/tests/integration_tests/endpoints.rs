@@ -401,15 +401,6 @@ pub static DEMO_DISK_CREATE: LazyLock<params::DiskCreate> =
             ),
         }
     });
-pub static DEMO_DISK_METRICS_URL: LazyLock<String> = LazyLock::new(|| {
-    format!(
-        "/v1/disks/{}/metrics/activated?start_time={:?}&end_time={:?}&{}",
-        *DEMO_DISK_NAME,
-        Utc::now(),
-        Utc::now(),
-        *DEMO_PROJECT_SELECTOR,
-    )
-});
 
 // Related to importing blocks from an external source
 pub static DEMO_IMPORT_DISK_NAME: LazyLock<Name> =
@@ -1272,6 +1263,10 @@ pub static DEMO_UPDATE_TRUST_ROOT_CREATE: LazyLock<serde_json::Value> =
             .unwrap()
     });
 
+pub static AUDIT_LOG_URL: LazyLock<String> = LazyLock::new(|| {
+    String::from("/v1/system/audit-log?start_time=2025-01-01T00:00:00Z")
+});
+
 /// Describes an API endpoint to be verified by the "unauthorized" test
 ///
 /// These structs are also used to check whether we're covering all endpoints in
@@ -2047,12 +2042,6 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                     AllowedMethod::Get,
                     AllowedMethod::Delete,
                 ],
-            },
-            VerifyEndpoint {
-                url: &DEMO_DISK_METRICS_URL,
-                visibility: Visibility::Protected,
-                unprivileged_access: UnprivilegedAccess::None,
-                allowed_methods: vec![AllowedMethod::Get],
             },
             VerifyEndpoint {
                 url: &DEMO_INSTANCE_DISKS_URL,
@@ -3024,6 +3013,13 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
             },
             VerifyEndpoint {
                 url: &ALERT_CLASSES_URL,
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Get],
+            },
+            // Audit log
+            VerifyEndpoint {
+                url: &AUDIT_LOG_URL,
                 visibility: Visibility::Public,
                 unprivileged_access: UnprivilegedAccess::None,
                 allowed_methods: vec![AllowedMethod::Get],

@@ -1635,6 +1635,46 @@
         }
       }
     },
+    "/quiesce": {
+      "get": {
+        "summary": "Check whether Nexus is running normally, quiescing, or fully quiesced.",
+        "operationId": "quiesce_get",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuiesceStatus"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "summary": "Begin quiescing this Nexus instance",
+        "description": "This causes no new sagas to be started and eventually causes no database connections to become available.  This is a one-way trip.  There's no unquiescing Nexus.",
+        "operationId": "quiesce_start",
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/racks/{rack_id}/initialization-complete": {
       "put": {
         "summary": "Report that the Rack Setup Service initialization is complete",
@@ -4656,6 +4696,29 @@
         "format": "uint8",
         "minimum": 0
       },
+      "HeldDbClaimInfo": {
+        "description": "Describes an outstanding database claim (for debugging why quiesce is stuck)",
+        "type": "object",
+        "properties": {
+          "debug": {
+            "type": "string"
+          },
+          "held_since": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "id": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "debug",
+          "held_since",
+          "id"
+        ]
+      },
       "IdMapBlueprintDatasetConfig": {
         "type": "object",
         "additionalProperties": {
@@ -5263,6 +5326,14 @@
         },
         "required": [
           "status"
+        ]
+      },
+      "M2Slot": {
+        "description": "Describes an M.2 slot, often in the context of writing a system image to it.",
+        "type": "string",
+        "enum": [
+          "A",
+          "B"
         ]
       },
       "MacAddr": {
@@ -6178,6 +6249,68 @@
               "expected_stage0_next_version",
               "expected_stage0_version"
             ]
+          },
+          {
+            "description": "the host OS is being updated\n\nWe write the phase 1 via MGS, and have a precheck condition that sled-agent has already written the matching phase 2.",
+            "type": "object",
+            "properties": {
+              "component": {
+                "type": "string",
+                "enum": [
+                  "host_phase1"
+                ]
+              },
+              "expected_active_phase_1_hash": {
+                "description": "The hash of the phase 1 slot specified by `expected_active_phase_1_hash`.\n\nWe should always be able to fetch this. Even if the phase 1 contents themselves have been corrupted (very scary for the active slot!), the SP can still hash those contents.",
+                "type": "string",
+                "format": "hex string (32 bytes)"
+              },
+              "expected_active_phase_1_slot": {
+                "description": "Which slot is currently active according to the SP.\n\nThis controls which slot will be used the next time the sled boots; it will _usually_ match `boot_disk`, but differs in the window of time between telling the SP to change which slot to use and the host OS rebooting to actually use that slot.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/M2Slot"
+                  }
+                ]
+              },
+              "expected_active_phase_2_hash": {
+                "description": "The hash of the currently-active phase 2 artifact.\n\nIt's possible sled-agent won't be able to report this value, but that would indicate that we don't know the version currently running. The planner wouldn't stage an update without knowing the current version, so if something has gone wrong in the meantime we won't proceede either.",
+                "type": "string",
+                "format": "hex string (32 bytes)"
+              },
+              "expected_boot_disk": {
+                "description": "Which slot the host OS most recently booted from.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/M2Slot"
+                  }
+                ]
+              },
+              "expected_inactive_phase_1_hash": {
+                "description": "The hash of the phase 1 slot specified by toggling `expected_active_phase_1_slot` to the other slot.\n\nWe should always be able to fetch this. Even if the phase 1 contents of the inactive slot are entirely bogus, the SP can still hash those contents.",
+                "type": "string",
+                "format": "hex string (32 bytes)"
+              },
+              "expected_inactive_phase_2_hash": {
+                "description": "The hash of the currently-inactive phase 2 artifact.\n\nIt's entirely possible that a sled needing a host OS update has no valid artifact in its inactive slot. However, a precondition for us performing a phase 1 update is that `sled-agent` on the target sled has already written the paired phase 2 artifact to the inactive slot; therefore, we don't need to be able to represent an invalid inactive slot.",
+                "type": "string",
+                "format": "hex string (32 bytes)"
+              },
+              "sled_agent_address": {
+                "description": "Address for contacting sled-agent to check phase 2 contents.",
+                "type": "string"
+              }
+            },
+            "required": [
+              "component",
+              "expected_active_phase_1_hash",
+              "expected_active_phase_1_slot",
+              "expected_active_phase_2_hash",
+              "expected_boot_disk",
+              "expected_inactive_phase_1_hash",
+              "expected_inactive_phase_2_hash",
+              "sled_agent_address"
+            ]
           }
         ]
       },
@@ -6580,6 +6713,188 @@
           "lease_duration"
         ]
       },
+      "QuiesceState": {
+        "description": "See [`QuiesceStatus`] for more on Nexus quiescing.\n\nAt any given time, Nexus is always in one of these states:\n\n```text Running             (normal operation) | | quiesce starts v WaitingForSagas     (no new sagas are allowed, but some are still running) | | no more sagas running v WaitingForDb        (no sagas running; no new db connections may be acquired by Nexus at-large, but some are still held) | | no more database connections held v Quiesced            (no sagas running, no database connections in use) ```\n\nQuiescing is (currently) a one-way trip: once a Nexus process starts quiescing, it will never go back to normal operation.  It will never go back to an earlier stage, either.",
+        "oneOf": [
+          {
+            "description": "Normal operation",
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "running"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
+            "description": "New sagas disallowed, but some are still running.",
+            "type": "object",
+            "properties": {
+              "quiesce_details": {
+                "type": "object",
+                "properties": {
+                  "time_requested": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                },
+                "required": [
+                  "time_requested"
+                ]
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "waiting_for_sagas"
+                ]
+              }
+            },
+            "required": [
+              "quiesce_details",
+              "state"
+            ]
+          },
+          {
+            "description": "No sagas running, no new database connections may be claimed, but some database connections are still held.",
+            "type": "object",
+            "properties": {
+              "quiesce_details": {
+                "type": "object",
+                "properties": {
+                  "duration_waiting_for_sagas": {
+                    "$ref": "#/components/schemas/Duration"
+                  },
+                  "time_requested": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                },
+                "required": [
+                  "duration_waiting_for_sagas",
+                  "time_requested"
+                ]
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "waiting_for_db"
+                ]
+              }
+            },
+            "required": [
+              "quiesce_details",
+              "state"
+            ]
+          },
+          {
+            "description": "Nexus has no sagas running and is not using the database",
+            "type": "object",
+            "properties": {
+              "quiesce_details": {
+                "type": "object",
+                "properties": {
+                  "duration_total": {
+                    "$ref": "#/components/schemas/Duration"
+                  },
+                  "duration_waiting_for_db": {
+                    "$ref": "#/components/schemas/Duration"
+                  },
+                  "duration_waiting_for_sagas": {
+                    "$ref": "#/components/schemas/Duration"
+                  },
+                  "time_quiesced": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "time_requested": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                },
+                "required": [
+                  "duration_total",
+                  "duration_waiting_for_db",
+                  "duration_waiting_for_sagas",
+                  "time_quiesced",
+                  "time_requested"
+                ]
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "quiesced"
+                ]
+              }
+            },
+            "required": [
+              "quiesce_details",
+              "state"
+            ]
+          }
+        ]
+      },
+      "QuiesceStatus": {
+        "description": "Describes whether Nexus is quiescing or quiesced and what, if anything, is blocking the quiesce process\n\n**Quiescing** is the process of draining Nexus of running sagas and stopping all use of the database in preparation for upgrade.  See [`QuiesceState`] for more on the stages involved.",
+        "type": "object",
+        "properties": {
+          "db_claims": {
+            "title": "IdOrdMap",
+            "description": "what database claims are currently held (by any part of Nexus)\n\nEntries here prevent transitioning from `WaitingForDb` to `Quiesced`.",
+            "x-rust-type": {
+              "crate": "iddqd",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/HeldDbClaimInfo"
+                }
+              ],
+              "path": "iddqd::IdOrdMap",
+              "version": "*"
+            },
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HeldDbClaimInfo"
+            },
+            "uniqueItems": true
+          },
+          "sagas_running": {
+            "title": "IdOrdMap",
+            "description": "what sagas are currently running\n\nThis should only be non-empty when state is `Running` or `WaitingForSagas`.  Entries here prevent transitioning from `WaitingForSagas` to `WaitingForDb`.",
+            "x-rust-type": {
+              "crate": "iddqd",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/RunningSagaInfo"
+                }
+              ],
+              "path": "iddqd::IdOrdMap",
+              "version": "*"
+            },
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RunningSagaInfo"
+            },
+            "uniqueItems": true
+          },
+          "state": {
+            "description": "what stage of quiescing is Nexus at",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/QuiesceState"
+              }
+            ]
+          }
+        },
+        "required": [
+          "db_claims",
+          "sagas_running",
+          "state"
+        ]
+      },
       "RackInitializationRequest": {
         "type": "object",
         "properties": {
@@ -6963,6 +7278,28 @@
         "required": [
           "destination",
           "nexthop"
+        ]
+      },
+      "RunningSagaInfo": {
+        "description": "Describes a running saga (for debugging why quiesce is stuck)",
+        "type": "object",
+        "properties": {
+          "saga_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "saga_name": {
+            "type": "string"
+          },
+          "time_started": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "saga_id",
+          "saga_name",
+          "time_started"
         ]
       },
       "Saga": {

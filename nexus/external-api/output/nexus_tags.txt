@@ -35,7 +35,6 @@ disk_create                              POST     /v1/disks
 disk_delete                              DELETE   /v1/disks/{disk}
 disk_finalize_import                     POST     /v1/disks/{disk}/finalize
 disk_list                                GET      /v1/disks
-disk_metrics_list                        GET      /v1/disks/{disk}/metrics/{metric}
 disk_view                                GET      /v1/disks/{disk}
 
 API operations found with tag "experimental"
@@ -187,6 +186,10 @@ webhook_receiver_update                  PUT      /v1/webhook-receivers/{receive
 webhook_secrets_add                      POST     /v1/webhook-secrets
 webhook_secrets_delete                   DELETE   /v1/webhook-secrets/{secret_id}
 webhook_secrets_list                     GET      /v1/webhook-secrets
+
+API operations found with tag "system/audit-log"
+OPERATION ID                             METHOD   URL PATH
+audit_log_list                           GET      /v1/system/audit-log
 
 API operations found with tag "system/hardware"
 OPERATION ID                             METHOD   URL PATH

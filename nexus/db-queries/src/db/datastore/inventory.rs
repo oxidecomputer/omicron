@@ -39,6 +39,7 @@ use nexus_db_model::InvCollectionError;
 use nexus_db_model::InvConfigReconcilerStatus;
 use nexus_db_model::InvConfigReconcilerStatusKind;
 use nexus_db_model::InvDataset;
+use nexus_db_model::InvHostPhase1ActiveSlot;
 use nexus_db_model::InvHostPhase1FlashHash;
 use nexus_db_model::InvInternalDns;
 use nexus_db_model::InvLastReconciliationDatasetResult;
@@ -73,7 +74,7 @@ use nexus_db_model::{
 };
 use nexus_db_model::{HwPowerState, InvZoneManifestNonBoot};
 use nexus_db_model::{HwRotSlot, InvMupdateOverrideNonBoot};
-use nexus_db_model::{InvCaboose, InvClearMupdateOverride};
+use nexus_db_model::{InvCaboose, InvRemoveMupdateOverride};
 use nexus_db_schema::enums::HwM2SlotEnum;
 use nexus_db_schema::enums::HwRotSlotEnum;
 use nexus_db_schema::enums::RotImageErrorEnum;
@@ -687,6 +688,64 @@ impl DataStore {
                         _stage0_error,
                         _stage0next_error,
                     ) = rot_dsl::inv_root_of_trust::all_columns();
+                }
+            }
+
+            // Insert rows for the host phase 1 active slots that we found.
+            // Like service processors, we do this using INSERT INTO ... SELECT.
+            {
+                use nexus_db_schema::schema::hw_baseboard_id::dsl as baseboard_dsl;
+                use nexus_db_schema::schema::inv_host_phase_1_active_slot::dsl as phase1_dsl;
+
+                for (baseboard_id, phase1) in
+                    &collection.host_phase_1_active_slots
+                {
+                    let selection = nexus_db_schema::schema::hw_baseboard_id::table
+                        .select((
+                            db_collection_id
+                                .into_sql::<diesel::sql_types::Uuid>(),
+                            baseboard_dsl::id,
+                            phase1.time_collected
+                                .into_sql::<diesel::sql_types::Timestamptz>(),
+                            phase1.source
+                                .clone()
+                                .into_sql::<diesel::sql_types::Text>(),
+                            HwM2Slot::from(phase1.slot)
+                                .into_sql::<HwM2SlotEnum>(),
+                        ))
+                        .filter(
+                            baseboard_dsl::part_number
+                                .eq(baseboard_id.part_number.clone()),
+                        )
+                        .filter(
+                            baseboard_dsl::serial_number
+                                .eq(baseboard_id.serial_number.clone()),
+                        );
+
+                    let _ = diesel::insert_into(
+                        nexus_db_schema::schema::inv_host_phase_1_active_slot::table,
+                    )
+                    .values(selection)
+                    .into_columns((
+                        phase1_dsl::inv_collection_id,
+                        phase1_dsl::hw_baseboard_id,
+                        phase1_dsl::time_collected,
+                        phase1_dsl::source,
+                        phase1_dsl::slot,
+                    ))
+                    .execute_async(&conn)
+                    .await?;
+
+                    // See the comment in the above block (where we use
+                    // `inv_service_processor::all_columns()`).  The same
+                    // applies here.
+                    let (
+                        _inv_collection_id,
+                        _hw_baseboard_id,
+                        _time_collected,
+                        _source,
+                        _slot,
+                    ) = phase1_dsl::inv_host_phase_1_active_slot::all_columns();
                 }
             }
 
@@ -1802,6 +1861,7 @@ impl DataStore {
         struct NumRowsDeleted {
             ncollections: usize,
             nsps: usize,
+            nhost_phase1_active_slots: usize,
             nhost_phase1_flash_hashes: usize,
             nrots: usize,
             ncabooses: usize,
@@ -1835,6 +1895,7 @@ impl DataStore {
         let NumRowsDeleted {
             ncollections,
             nsps,
+            nhost_phase1_active_slots,
             nhost_phase1_flash_hashes,
             nrots,
             ncabooses,
@@ -1881,6 +1942,16 @@ impl DataStore {
                     let nsps = {
                         use nexus_db_schema::schema::inv_service_processor::dsl;
                         diesel::delete(dsl::inv_service_processor.filter(
+                            dsl::inv_collection_id.eq(db_collection_id),
+                        ))
+                        .execute_async(&conn)
+                        .await?
+                    };
+
+                    // Remove rows for host phase 1 active slots.
+                    let nhost_phase1_active_slots = {
+                        use nexus_db_schema::schema::inv_host_phase_1_active_slot::dsl;
+                        diesel::delete(dsl::inv_host_phase_1_active_slot.filter(
                             dsl::inv_collection_id.eq(db_collection_id),
                         ))
                         .execute_async(&conn)
@@ -2156,6 +2227,7 @@ impl DataStore {
                     Ok(NumRowsDeleted {
                         ncollections,
                         nsps,
+                        nhost_phase1_active_slots,
                         nhost_phase1_flash_hashes,
                         nrots,
                         ncabooses,
@@ -2195,6 +2267,7 @@ impl DataStore {
             "collection_id" => collection_id.to_string(),
             "ncollections" => ncollections,
             "nsps" => nsps,
+            "nhost_phase1_active_slots" => nhost_phase1_active_slots,
             "nhost_phase1_flash_hashes" => nhost_phase1_flash_hashes,
             "nrots" => nrots,
             "ncabooses" => ncabooses,
@@ -2701,6 +2774,45 @@ impl DataStore {
                     })
             })
             .collect::<Result<BTreeMap<_, _>, _>>()?;
+
+        // Fetch the host phase 1 active slots found.
+        let host_phase_1_active_slots = {
+            use nexus_db_schema::schema::inv_host_phase_1_active_slot::dsl;
+
+            let mut slots = BTreeMap::new();
+
+            let mut paginator = Paginator::new(
+                batch_size,
+                dropshot::PaginationOrder::Ascending,
+            );
+            while let Some(p) = paginator.next() {
+                let batch = paginated(
+                    dsl::inv_host_phase_1_active_slot,
+                    dsl::hw_baseboard_id,
+                    &p.current_pagparams(),
+                )
+                .filter(dsl::inv_collection_id.eq(db_id))
+                .select(InvHostPhase1ActiveSlot::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+                paginator = p.found_batch(&batch, &|row| row.hw_baseboard_id);
+                for row in batch {
+                    let bb = baseboards_by_id
+                        .get(&row.hw_baseboard_id)
+                        .ok_or_else(|| {
+                            Error::internal_error(
+                                "missing baseboard that we should have fetched",
+                            )
+                        })?;
+                    slots.insert(Arc::clone(bb), row.into());
+                }
+            }
+
+            slots
+        };
 
         // Fetch records of host phase 1 flash hashes found.
         let inv_host_phase_1_flash_hash_rows = {
@@ -3793,8 +3905,8 @@ impl DataStore {
                         BootPartitionContents { boot_disk, slot_a, slot_b }
                     };
 
-                    let clear_mupdate_override = reconciler
-                        .clear_mupdate_override
+                    let remove_mupdate_override = reconciler
+                        .remove_mupdate_override
                         .into_inventory()
                         .map_err(|err| {
                             Error::internal_error(&format!("{err:#}"))
@@ -3816,7 +3928,7 @@ impl DataStore {
                             .remove(&sled_id)
                             .unwrap_or_default(),
                         boot_partitions,
-                        clear_mupdate_override,
+                        remove_mupdate_override,
                     })
                 })
                 .transpose()?;
@@ -3946,6 +4058,7 @@ impl DataStore {
             cabooses: cabooses_by_id.values().cloned().collect(),
             rot_pages: rot_pages_by_id.values().cloned().collect(),
             sps,
+            host_phase_1_active_slots,
             host_phase_1_flash_hashes,
             rots,
             cabooses_found,
@@ -4041,8 +4154,8 @@ impl ConfigReconcilerRows {
                     )?
                 };
             last_reconciliation_config_id = Some(last_reconciled_config);
-            let clear_mupdate_override = InvClearMupdateOverride::new(
-                last_reconciliation.clear_mupdate_override.as_ref(),
+            let remove_mupdate_override = InvRemoveMupdateOverride::new(
+                last_reconciliation.remove_mupdate_override.as_ref(),
             );
 
             self.config_reconcilers.push(InvSledConfigReconciler::new(
@@ -4062,7 +4175,7 @@ impl ConfigReconcilerRows {
                     .as_ref()
                     .err()
                     .cloned(),
-                clear_mupdate_override,
+                remove_mupdate_override,
             ));
 
             // Boot partition _errors_ are kept in `InvSledConfigReconciler`
@@ -4315,8 +4428,8 @@ mod test {
     use nexus_sled_agent_shared::inventory::BootPartitionDetails;
     use nexus_sled_agent_shared::inventory::OrphanedDataset;
     use nexus_sled_agent_shared::inventory::{
-        BootImageHeader, ClearMupdateOverrideBootSuccessInventory,
-        ClearMupdateOverrideInventory,
+        BootImageHeader, RemoveMupdateOverrideBootSuccessInventory,
+        RemoveMupdateOverrideInventory,
     };
     use nexus_sled_agent_shared::inventory::{
         ConfigReconcilerInventory, ConfigReconcilerInventoryResult,
@@ -5179,10 +5292,10 @@ mod test {
                             artifact_size: 456789,
                         }),
                     },
-                    clear_mupdate_override: Some(
-                        ClearMupdateOverrideInventory {
+                    remove_mupdate_override: Some(
+                        RemoveMupdateOverrideInventory {
                             boot_disk_result: Ok(
-                                ClearMupdateOverrideBootSuccessInventory::Cleared,
+                                RemoveMupdateOverrideBootSuccessInventory::Removed,
                             ),
                             non_boot_message: "simulated non-boot message"
                                 .to_owned(),

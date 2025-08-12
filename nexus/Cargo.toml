@@ -45,6 +45,7 @@ http.workspace = true
 http-body-util.workspace = true
 hyper.workspace = true
 hyper-staticfile.workspace = true
+iddqd.workspace = true
 id-map.workspace = true
 illumos-utils.workspace = true
 internal-dns-resolver.workspace = true
@@ -107,9 +108,10 @@ tempfile.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["full"] }
 tokio-postgres = { workspace = true, features = ["with-serde_json-1"] }
-tokio-util = { workspace = true, features = ["codec"] }
+tokio-util = { workspace = true, features = ["codec", "rt"] }
 tough.workspace = true
 tufaceous-artifact.workspace = true
+usdt.workspace = true
 uuid.workspace = true
 
 nexus-auth.workspace = true

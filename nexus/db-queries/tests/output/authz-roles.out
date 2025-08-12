@@ -110,6 +110,20 @@ resource: authz::IpPoolList
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
 
+resource: authz::QuiesceState
+
+  USER                             Q  R LC RP  M MP CC  D
+  fleet-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  fleet-collaborator               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  fleet-viewer                     ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-collaborator               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-viewer                     ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-admin                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  unauthenticated                  !  !  !  !  !  !  !  !
+
 resource: authz::UpdateTrustRootList
 
   USER                             Q  R LC RP  M MP CC  D
@@ -150,6 +164,20 @@ resource: authz::AlertClassList
   silo1-proj1-admin                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  unauthenticated                  !  !  !  !  !  !  !  !
+
+resource: authz::AuditLog
+
+  USER                             Q  R LC RP  M MP CC  D
+  fleet-admin                      ✘  ✘  ✔  ✘  ✘  ✘  ✔  ✘
+  fleet-collaborator               ✘  ✘  ✔  ✘  ✘  ✘  ✔  ✘
+  fleet-viewer                     ✘  ✘  ✔  ✘  ✘  ✘  ✔  ✘
+  silo1-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✔  ✘
+  silo1-collaborator               ✘  ✘  ✘  ✘  ✘  ✘  ✔  ✘
+  silo1-viewer                     ✘  ✘  ✘  ✘  ✘  ✘  ✔  ✘
+  silo1-proj1-admin                ✘  ✘  ✘  ✘  ✘  ✘  ✔  ✘
+  silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✔  ✘
+  silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✔  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
 
 resource: Silo "silo1"

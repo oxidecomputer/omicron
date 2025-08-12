@@ -29,6 +29,7 @@ use diesel::prelude::*;
 use diesel::query_builder::{QueryFragment, QueryId};
 use diesel::query_dsl::methods::LoadQuery;
 use diesel::{ExpressionMethods, QueryDsl};
+use iddqd::IdOrdMap;
 use nexus_db_errors::{ErrorHandler, public_error_from_diesel};
 use nexus_db_lookup::{DataStoreConnection, DbConnection};
 use omicron_common::api::external::Error;
@@ -49,6 +50,7 @@ mod affinity;
 mod alert;
 mod alert_rx;
 mod allow_list;
+mod audit_log;
 mod auth;
 mod bfd;
 mod bgp;
@@ -121,11 +123,13 @@ mod zpool;
 pub use address_lot::AddressLotCreateResult;
 pub use dns::DataStoreDnsTest;
 pub use dns::DnsVersionUpdateBuilder;
+pub use ereport::EreportFilters;
 pub use instance::{
     InstanceAndActiveVmm, InstanceGestalt, InstanceStateComputer,
 };
 pub use inventory::DataStoreInventoryTest;
 use nexus_db_model::AllSchemaVersions;
+use nexus_types::internal_api::views::HeldDbClaimInfo;
 pub use oximeter::CollectorReassignment;
 pub use rack::RackInit;
 pub use rack::SledUnderlayAllocationResult;
@@ -295,6 +299,23 @@ impl DataStore {
         Ok(datastore)
     }
 
+    /// Disables creation of all new database claims
+    ///
+    /// This is currently a one-way trip.  The DataStore cannot be un-quiesced.
+    pub fn quiesce(&self) {
+        self.pool.quiesce();
+    }
+
+    /// Wait for all outstanding claims to be released
+    pub async fn wait_for_quiesced(&self) {
+        self.pool.wait_for_quiesced().await;
+    }
+
+    /// Returns information about held db claims
+    pub fn claims_held(&self) -> IdOrdMap<HeldDbClaimInfo> {
+        self.pool.claims_held()
+    }
+
     /// Terminates the underlying pool, stopping it from connecting to backends.
     pub async fn terminate(&self) {
         self.pool.terminate().await
@@ -346,10 +367,7 @@ impl DataStore {
         opctx: &OpContext,
     ) -> Result<DataStoreConnection, Error> {
         opctx.authorize(authz::Action::Query, &authz::DATABASE).await?;
-        let connection = self.pool.claim().await.map_err(|err| {
-            Error::unavail(&format!("Failed to access DB connection: {err}"))
-        })?;
-        Ok(connection)
+        self.pool_connection_unauthorized().await
     }
 
     /// Returns an unauthorized connection to a connection from the database
@@ -360,10 +378,7 @@ impl DataStore {
     pub(super) async fn pool_connection_unauthorized(
         &self,
     ) -> Result<DataStoreConnection, Error> {
-        let connection = self.pool.claim().await.map_err(|err| {
-            Error::unavail(&format!("Failed to access DB connection: {err}"))
-        })?;
-        Ok(connection)
+        self.pool.claim().await
     }
 
     /// For testing only. This isn't cfg(test) because nexus needs access to it.

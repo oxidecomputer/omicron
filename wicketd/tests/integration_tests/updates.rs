@@ -29,6 +29,7 @@ use sled_agent_zone_images::ZoneImageSourceResolver;
 use sled_storage::config::MountConfig;
 use tokio::sync::oneshot;
 use tufaceous_artifact::{ArtifactHashId, ArtifactKind, KnownArtifactKind};
+use update_common::artifacts::UpdatePlan;
 use update_engine::NestedError;
 use wicket::OutputKind;
 use wicket_common::{
@@ -95,7 +96,7 @@ async fn test_updates() {
         .into_inner();
 
     // We should have an artifact for every known artifact kind (except
-    // `Zone`)...
+    // `Zone`), as well as the installinator document...
     let expected_kinds: BTreeSet<_> = KnownArtifactKind::iter()
         .filter(|k| !matches!(k, KnownArtifactKind::Zone))
         .map(ArtifactKind::from)
@@ -298,7 +299,11 @@ async fn test_updates() {
 // multi_thread is required.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_installinator_fetch() {
-    let gateway = gateway_setup::test_setup("test_updates", SpPort::One).await;
+    let gateway = gateway_setup::test_setup(
+        "test_installinator_fetch_no_installinator_document",
+        SpPort::One,
+    )
+    .await;
     let wicketd_testctx = WicketdTestContext::setup(gateway).await;
     let log = wicketd_testctx.log();
 
@@ -335,10 +340,88 @@ async fn test_installinator_fetch() {
         .artifact_store
         .current_plan()
         .expect("we just uploaded a repository, so there should be a plan");
+
+    installinator_fetch_impl(&wicketd_testctx, &temp_dir, &update_plan, true)
+        .await;
+
+    wicketd_testctx.teardown().await;
+}
+
+// See documentation for extract_nested_artifact_pair in update_plan.rs for why
+// multi_thread is required.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_installinator_fetch_no_installinator_document() {
+    // TODO-cleanup: future TUF repos will always have an installinator
+    // document, and this test can be removed.
+    let gateway = gateway_setup::test_setup(
+        "test_installinator_fetch_no_installinator_document",
+        SpPort::One,
+    )
+    .await;
+    let wicketd_testctx = WicketdTestContext::setup(gateway).await;
+    let log = wicketd_testctx.log();
+
+    let temp_dir = Utf8TempDir::new().expect("temp dir created");
+    let archive_path = temp_dir.path().join("archive.zip");
+
+    // Test ingestion of an artifact with non-semver versions. This ensures that
+    // wicketd for v14 and above can handle non-semver versions.
+    //
+    // --allow-non-semver can be removed once customer systems are updated to
+    // v14 and above.
+    let args = tufaceous::Args::try_parse_from([
+        "tufaceous",
+        "assemble",
+        "../update-common/manifests/fake-non-semver.toml",
+        "--allow-non-semver",
+        "--no-installinator-document",
+        archive_path.as_str(),
+    ])
+    .expect("args parsed correctly");
+
+    args.exec(log).await.expect("assemble command completed successfully");
+
+    // Read the archive and upload it to the server.
+    let zip_bytes =
+        fs_err::read(&archive_path).expect("archive read correctly");
+    wicketd_testctx
+        .wicketd_client
+        .put_repository(zip_bytes)
+        .await
+        .expect("bytes read and archived");
+
+    let update_plan = wicketd_testctx
+        .server
+        .artifact_store
+        .current_plan()
+        .expect("we just uploaded a repository, so there should be a plan");
+
+    installinator_fetch_impl(
+        &wicketd_testctx,
+        &temp_dir,
+        &update_plan,
+        /* has_installinator_doc */ false,
+    )
+    .await;
+
+    wicketd_testctx.teardown().await;
+}
+
+async fn installinator_fetch_impl(
+    wicketd_testctx: &WicketdTestContext,
+    temp_dir: &Utf8TempDir,
+    update_plan: &UpdatePlan,
+    // TODO-cleanup: in the future, all TUF repos will have installinator
+    // documents.
+    has_installinator_doc: bool,
+) {
+    let log = wicketd_testctx.log();
+
     let host_phase_2_hash = update_plan.host_phase_2_hash.to_string();
     let control_plane_hash = update_plan.control_plane_hash.to_string();
 
-    // Are the artifacts available when looked up by hash?
+    // Are the host phase 2 and control plane artifacts available when looked up
+    // by hash?
     let host_phase_2_id = ArtifactHashId {
         kind: ArtifactKind::HOST_PHASE_2,
         hash: update_plan.host_phase_2_hash,
@@ -362,6 +445,24 @@ async fn test_installinator_fetch() {
             .contains_by_hash(&control_plane_id),
         "control plane ID found by hash"
     );
+    // Is the installinator document available, if it exists in the update plan?
+    let installinator_doc_hash = has_installinator_doc.then(|| {
+        let installinator_doc_hash = update_plan
+            .installinator_doc_hash
+            .expect("expected installinator document to be present");
+        let installinator_doc_id = ArtifactHashId {
+            kind: KnownArtifactKind::InstallinatorDocument.into(),
+            hash: installinator_doc_hash,
+        };
+        assert!(
+            wicketd_testctx
+                .server
+                .artifact_store
+                .contains_by_hash(&installinator_doc_id),
+            "installinator document ID found by hash"
+        );
+        installinator_doc_hash.to_string()
+    });
 
     // Tell the installinator to download artifacts from that location.
     let peers_list = format!(
@@ -394,25 +495,33 @@ async fn test_installinator_fetch() {
         temp_dir.path().join("pool/int").join(non_boot_zpool.to_string());
 
     let update_id_str = mupdate_id.to_string();
-    let args = installinator::InstallinatorApp::try_parse_from([
+
+    let mut args = vec![
         "installinator",
         "install",
         "--mechanism",
         peers_list.as_str(),
         "--update-id",
         update_id_str.as_str(),
-        "--host-phase-2",
-        host_phase_2_hash.as_str(),
-        "--control-plane",
-        control_plane_hash.as_str(),
         a_path.as_str(),
         b_path.as_str(),
         "--data-link0",
         "cxgbe0",
         "--data-link1",
         "cxgbe1",
-    ])
-    .expect("installinator args parsed successfully");
+    ];
+
+    // Pass in the installinator document hash, or the host phase 2 and control
+    // plane hashes, based on what's available.
+    if let Some(installinator_doc_hash) = &installinator_doc_hash {
+        args.extend(["--installinator-doc", installinator_doc_hash.as_str()]);
+    } else {
+        args.extend(["--host-phase-2", host_phase_2_hash.as_str()]);
+        args.extend(["--control-plane", control_plane_hash.as_str()]);
+    }
+
+    let args = installinator::InstallinatorApp::try_parse_from(args)
+        .expect("installinator args parsed successfully");
 
     args.exec(&log.new(slog::o!("crate" => "installinator")))
         .await
@@ -574,8 +683,6 @@ async fn test_installinator_fetch() {
     );
 
     recv_handle.await.expect("recv_handle succeeded");
-
-    wicketd_testctx.teardown().await;
 }
 
 // See documentation for extract_nested_artifact_pair in update_plan.rs for why

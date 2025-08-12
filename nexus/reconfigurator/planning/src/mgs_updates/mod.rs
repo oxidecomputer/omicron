@@ -4,6 +4,14 @@
 
 //! Facilities for making choices about MGS-managed updates
 
+mod rot;
+
+use crate::mgs_updates::rot::RotUpdateState;
+use crate::mgs_updates::rot::mgs_update_status_rot;
+use crate::mgs_updates::rot::try_make_update_rot;
+
+use gateway_types::rot::RotSlot;
+use nexus_types::deployment::ExpectedActiveRotSlot;
 use nexus_types::deployment::ExpectedVersion;
 use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdateDetails;
@@ -19,7 +27,21 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 use thiserror::Error;
 use tufaceous_artifact::ArtifactVersion;
+use tufaceous_artifact::ArtifactVersionError;
 use tufaceous_artifact::KnownArtifactKind;
+
+/// How to handle an MGS-driven update that has become impossible due to
+/// unsatisfied preconditions.
+#[derive(Debug, Clone, Copy, strum::EnumIter)]
+pub enum ImpossibleUpdatePolicy {
+    /// Keep the update in the subsequent blueprint (e.g., because we believe it
+    /// may become possible again).
+    Keep,
+    /// Remove the impossible update and attempt to replan, which will typically
+    /// replace the impossible update with a new update for the same target with
+    /// different preconditions.
+    Reevaluate,
+}
 
 /// Generates a new set of `PendingMgsUpdates` based on:
 ///
@@ -31,6 +53,8 @@ use tufaceous_artifact::KnownArtifactKind;
 /// * `current_artifacts`: information about artifacts from the current target
 ///   release (if any)
 /// * `nmax_updates`: the maximum number of updates allowed at once
+/// * `impossible_update_policy`: what to do if we detect an update has become
+///   impossible due to unsatisfied preconditions
 ///
 /// By current policy, `nmax_updates` is always 1, but the implementation here
 /// supports more than one update per invocation.
@@ -41,6 +65,7 @@ pub fn plan_mgs_updates(
     current_updates: &PendingMgsUpdates,
     current_artifacts: &TargetReleaseDescription,
     nmax_updates: usize,
+    impossible_update_policy: ImpossibleUpdatePolicy,
 ) -> PendingMgsUpdates {
     let mut rv = PendingMgsUpdates::new();
     let mut boards_preferred = BTreeSet::new();
@@ -63,25 +88,36 @@ pub fn plan_mgs_updates(
             Ok(MgsUpdateStatus::Done) => {
                 info!(
                     log,
-                    "SP update completed \
+                    "MGS-driven update completed \
                      (will remove it and re-evaluate board)";
                     update
                 );
                 boards_preferred.insert(update.baseboard_id.clone());
             }
-            Ok(MgsUpdateStatus::Impossible) => {
-                info!(
-                    log,
-                    "SP update impossible \
-                     (will remove it and re-evaluate board)";
-                    update
-                );
-                boards_preferred.insert(update.baseboard_id.clone());
-            }
+            Ok(MgsUpdateStatus::Impossible) => match impossible_update_policy {
+                ImpossibleUpdatePolicy::Keep => {
+                    info!(
+                        log,
+                        "keeping apparently-impossible MGS-driven update \
+                         (waiting for recent update to be applied)";
+                        update
+                    );
+                    rv.insert(update.clone());
+                }
+                ImpossibleUpdatePolicy::Reevaluate => {
+                    info!(
+                        log,
+                        "MGS-driven update impossible \
+                         (will remove it and re-evaluate board)";
+                        update
+                    );
+                    boards_preferred.insert(update.baseboard_id.clone());
+                }
+            },
             Ok(MgsUpdateStatus::NotDone) => {
                 info!(
                     log,
-                    "SP update not yet completed (will keep it)";
+                    "MGS-driven update not yet completed (will keep it)";
                     update
                 );
                 rv.insert(update.clone());
@@ -89,7 +125,7 @@ pub fn plan_mgs_updates(
             Err(error) => {
                 info!(
                     log,
-                    "cannot determine SP update status (will keep it)";
+                    "cannot determine MGS-driven update status (will keep it)";
                     update,
                     InlineErrorChain::new(&error)
                 );
@@ -102,7 +138,10 @@ pub fn plan_mgs_updates(
     // containing artifacts), then we cannot configure more updates.
     let current_artifacts = match current_artifacts {
         TargetReleaseDescription::Initial => {
-            warn!(log, "cannot issue more SP updates (no current artifacts)");
+            warn!(
+                log,
+                "cannot issue more MGS-driven updates (no current artifacts)",
+            );
             return rv;
         }
         TargetReleaseDescription::TufRepo(description) => description,
@@ -122,7 +161,7 @@ pub fn plan_mgs_updates(
         if rv.len() >= nmax_updates {
             info!(
                 log,
-                "reached maximum number of pending SP updates";
+                "reached maximum number of pending MGS-driven updates";
                 "max" => nmax_updates
             );
             return rv;
@@ -130,16 +169,16 @@ pub fn plan_mgs_updates(
 
         match try_make_update(log, board, inventory, current_artifacts) {
             Some(update) => {
-                info!(log, "configuring SP update"; &update);
+                info!(log, "configuring MGS-driven update"; &update);
                 rv.insert(update);
             }
             None => {
-                info!(log, "skipping board for SP update"; board);
+                info!(log, "skipping board for MGS-driven update"; board);
             }
         }
     }
 
-    info!(log, "ran out of boards for SP update");
+    info!(log, "ran out of boards for MGS-driven update");
     rv
 }
 
@@ -170,12 +209,16 @@ enum MgsUpdateStatusError {
     MissingSpInfo,
     #[error("no caboose found for active slot in inventory")]
     MissingActiveCaboose,
+    #[error("no RoT state found in inventory")]
+    MissingRotState,
     #[error("not yet implemented")]
     NotYetImplemented,
+    #[error("unable to parse input into ArtifactVersion: {0:?}")]
+    FailedArtifactVersionParse(ArtifactVersionError),
 }
 
-/// Determine the status of a single MGS update based on what's in inventory for
-/// that board.
+/// Determine the status of a single MGS-driven update based on what's in
+/// inventory for that board.
 fn mgs_update_status(
     log: &slog::Logger,
     inventory: &Collection,
@@ -184,12 +227,12 @@ fn mgs_update_status(
     let baseboard_id = &update.baseboard_id;
     let desired_version = &update.artifact_version;
 
-    // Check the contents of the cabooses against what we expect either before
-    // or after the update.
+    // Check the contents of the target of `update` against what we expect
+    // either before or after the update.
     //
     // We check this before anything else because if we get back
     // `MgsUpdateStatus::Done`, then we're done no matter what else is true.
-    let caboose_status = match &update.details {
+    let update_status = match &update.details {
         PendingMgsUpdateDetails::Sp {
             expected_active_version,
             expected_inactive_version,
@@ -212,22 +255,86 @@ fn mgs_update_status(
                 found_inactive_version,
             ))
         }
-        PendingMgsUpdateDetails::Rot { .. }
-        | PendingMgsUpdateDetails::RotBootloader { .. } => {
+        PendingMgsUpdateDetails::Rot {
+            expected_active_slot,
+            expected_inactive_version,
+            expected_persistent_boot_preference,
+            expected_pending_persistent_boot_preference,
+            expected_transient_boot_preference,
+        } => {
+            let active_caboose_which = match &expected_active_slot.slot {
+                RotSlot::A => CabooseWhich::RotSlotA,
+                RotSlot::B => CabooseWhich::RotSlotB,
+            };
+
+            let Some(active_caboose) =
+                inventory.caboose_for(active_caboose_which, baseboard_id)
+            else {
+                return Err(MgsUpdateStatusError::MissingActiveCaboose);
+            };
+
+            let found_inactive_version = inventory
+                .caboose_for(active_caboose_which.toggled_slot(), baseboard_id)
+                .map(|c| c.caboose.version.as_ref());
+
+            let rot_state = inventory
+                .rots
+                .get(baseboard_id)
+                .ok_or(MgsUpdateStatusError::MissingRotState)?;
+
+            let found_active_version =
+                ArtifactVersion::new(active_caboose.caboose.version.clone())
+                    .map_err(|e| {
+                        MgsUpdateStatusError::FailedArtifactVersionParse(e)
+                    })?;
+
+            let found_active_slot = ExpectedActiveRotSlot {
+                slot: rot_state.active_slot,
+                version: found_active_version,
+            };
+
+            let expected = RotUpdateState {
+                active_slot: expected_active_slot.clone(),
+                persistent_boot_preference:
+                    *expected_persistent_boot_preference,
+                pending_persistent_boot_preference:
+                    *expected_pending_persistent_boot_preference,
+                transient_boot_preference: *expected_transient_boot_preference,
+            };
+
+            let found = RotUpdateState {
+                active_slot: found_active_slot,
+                persistent_boot_preference: rot_state
+                    .persistent_boot_preference,
+                pending_persistent_boot_preference: rot_state
+                    .pending_persistent_boot_preference,
+                transient_boot_preference: rot_state.transient_boot_preference,
+            };
+
+            Ok(mgs_update_status_rot(
+                desired_version,
+                expected,
+                found,
+                expected_inactive_version,
+                found_inactive_version,
+            ))
+        }
+        PendingMgsUpdateDetails::RotBootloader { .. }
+        | PendingMgsUpdateDetails::HostPhase1(_) => {
             return Err(MgsUpdateStatusError::NotYetImplemented);
         }
     };
 
-    // If we're able to reach a clear determination based on the caboose status
-    // alone, great.  Return that.
+    // If we're able to reach a clear determination based on the status alone,
+    // great.  Return that.
     if matches!(
-        caboose_status,
+        update_status,
         Err(_) | Ok(MgsUpdateStatus::Done) | Ok(MgsUpdateStatus::Impossible)
     ) {
-        return caboose_status;
+        return update_status;
     }
 
-    // If based on the caboose we're only able to determine that the update is
+    // If based on the status we're only able to determine that the update is
     // not yet done, there's another "impossible" case to consider: that the
     // baseboard has moved in the rack.
     let sp_info = inventory
@@ -248,13 +355,13 @@ fn mgs_update_status(
     } else if sp_info.sp_slot != update.slot_id {
         warn!(
             log,
-            "baseboard with in-progress SP update has moved";
+            "baseboard with in-progress MGS-driven update has moved";
             "sp_info" => #?sp_info,
             update,
         );
         Ok(MgsUpdateStatus::Impossible)
     } else {
-        caboose_status
+        update_status
     }
 }
 
@@ -285,7 +392,16 @@ fn mgs_update_status_sp(
     // still matches what we saw when we configured this update.  If not, then
     // this update cannot proceed as currently configured.  It will fail its
     // precondition check.
-    //
+    mgs_update_status_inactive_versions(
+        found_inactive_version,
+        expected_inactive_version,
+    )
+}
+
+fn mgs_update_status_inactive_versions(
+    found_inactive_version: Option<&str>,
+    expected_inactive_version: &ExpectedVersion,
+) -> MgsUpdateStatus {
     // This logic is more complex than for the active slot because unlike the
     // active slot, it's possible for both the found contents and the expected
     // contents to be missing and that's not necessarily an error.
@@ -339,11 +455,14 @@ fn try_make_update(
     inventory: &Collection,
     current_artifacts: &TufRepoDescription,
 ) -> Option<PendingMgsUpdate> {
-    // TODO When we add support for planning RoT, RoT bootloader, and host OS
+    // TODO When we add support for planning RoT bootloader, and host OS
     // updates, we'll try these in a hardcoded priority order until any of them
     // returns `Some`.  The order is described in RFD 565 section "Update
-    // Sequence".  For now, we only plan SP updates.
-    try_make_update_sp(log, baseboard_id, inventory, current_artifacts)
+    // Sequence".  For now, we only plan SP and RoT updates.
+    try_make_update_rot(log, baseboard_id, inventory, current_artifacts)
+        .or_else(|| {
+            try_make_update_sp(log, baseboard_id, inventory, current_artifacts)
+        })
 }
 
 /// Determine if the given baseboard needs an SP update and, if so, returns it.
@@ -412,6 +531,7 @@ fn try_make_update_sp(
                     KnownArtifactKind::GimletRot
                     | KnownArtifactKind::Host
                     | KnownArtifactKind::Trampoline
+                    | KnownArtifactKind::InstallinatorDocument
                     | KnownArtifactKind::ControlPlane
                     | KnownArtifactKind::Zone
                     | KnownArtifactKind::PscRot
@@ -482,7 +602,8 @@ fn try_make_update_sp(
 
 #[cfg(test)]
 mod test {
-    use crate::mgs_updates::plan_mgs_updates;
+    use super::ImpossibleUpdatePolicy;
+    use super::plan_mgs_updates;
     use chrono::Utc;
     use dropshot::ConfigLogging;
     use dropshot::ConfigLoggingLevel;
@@ -506,7 +627,9 @@ mod test {
     use omicron_test_utils::dev::LogContext;
     use std::collections::BTreeMap;
     use std::collections::BTreeSet;
+    use strum::IntoEnumIterator;
     use tufaceous_artifact::ArtifactHash;
+    use tufaceous_artifact::ArtifactKind;
     use tufaceous_artifact::ArtifactVersion;
     use tufaceous_artifact::KnownArtifactKind;
 
@@ -532,12 +655,40 @@ mod test {
     const ARTIFACT_HASH_SP_PSC_B: ArtifactHash = ArtifactHash([9; 32]);
     /// Hash of fake artifact for fake psc-c SP
     const ARTIFACT_HASH_SP_PSC_C: ArtifactHash = ArtifactHash([10; 32]);
+    /// Hash of fake artifact for fake gimlet RoT slot A
+    const ARTIFACT_HASH_ROT_GIMLET_A: ArtifactHash = ArtifactHash([13; 32]);
+    /// Hash of fake artifact for fake gimlet RoT slot B
+    const ARTIFACT_HASH_ROT_GIMLET_B: ArtifactHash = ArtifactHash([14; 32]);
+    /// Hash of fake artifact for fake psc RoT slot A
+    const ARTIFACT_HASH_ROT_PSC_A: ArtifactHash = ArtifactHash([17; 32]);
+    /// Hash of fake artifact for fake psc RoT slot B
+    const ARTIFACT_HASH_ROT_PSC_B: ArtifactHash = ArtifactHash([18; 32]);
+    /// Hash of fake artifact for fake switch RoT slot A
+    const ARTIFACT_HASH_ROT_SWITCH_A: ArtifactHash = ArtifactHash([21; 32]);
+    /// Hash of fake artifact for fake switch RoT slot B
+    const ARTIFACT_HASH_ROT_SWITCH_B: ArtifactHash = ArtifactHash([22; 32]);
 
     // unused artifact hashes
 
     const ARTIFACT_HASH_CONTROL_PLANE: ArtifactHash = ArtifactHash([33; 32]);
     const ARTIFACT_HASH_NEXUS: ArtifactHash = ArtifactHash([34; 32]);
     const ARTIFACT_HASH_HOST_OS: ArtifactHash = ArtifactHash([35; 32]);
+
+    /// Hash of a fake RoT signing keys
+    const ROT_SIGN_GIMLET: &str =
+        "1111111111111111111111111111111111111111111111111111111111111111";
+    const ROT_SIGN_PSC: &str =
+        "2222222222222222222222222222222222222222222222222222222222222222";
+    const ROT_SIGN_SWITCH: &str =
+        "3333333333333333333333333333333333333333333333333333333333333333";
+
+    #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+    enum MgsUpdateComponent {
+        Sp,
+        Rot,
+        RotBootloader,
+        HostOs,
+    }
 
     fn test_artifact_for_board(board: &str) -> ArtifactHash {
         match board {
@@ -551,7 +702,27 @@ mod test {
         }
     }
 
-    /// Describes the SPs in the environment used in these tests
+    fn test_artifact_for_artifact_kind(kind: ArtifactKind) -> ArtifactHash {
+        let artifact_hash = if kind == ArtifactKind::GIMLET_ROT_IMAGE_A {
+            ARTIFACT_HASH_ROT_GIMLET_A
+        } else if kind == ArtifactKind::GIMLET_ROT_IMAGE_B {
+            ARTIFACT_HASH_ROT_GIMLET_B
+        } else if kind == ArtifactKind::PSC_ROT_IMAGE_A {
+            ARTIFACT_HASH_ROT_PSC_A
+        } else if kind == ArtifactKind::PSC_ROT_IMAGE_B {
+            ARTIFACT_HASH_ROT_PSC_B
+        } else if kind == ArtifactKind::SWITCH_ROT_IMAGE_A {
+            ARTIFACT_HASH_ROT_SWITCH_A
+        } else if kind == ArtifactKind::SWITCH_ROT_IMAGE_B {
+            ARTIFACT_HASH_ROT_SWITCH_B
+        } else {
+            panic!("test bug: no artifact for artifact kind {kind:?}")
+        };
+
+        return artifact_hash;
+    }
+
+    /// Describes the SPs and RoTs in the environment used in these tests
     ///
     /// There will be:
     ///
@@ -561,23 +732,77 @@ mod test {
     ///
     /// The specific set of hardware (boards) vary and are hardcoded:
     ///
-    /// - sled 0: gimlet-d
-    /// - other sleds: gimlet-e
-    /// - switch 0: sidecar-b
-    /// - switch 1: sidecar-c
-    /// - psc 0: psc-b
-    /// - psc 1: psc-c
-    fn test_config() -> BTreeMap<(SpType, u16), (&'static str, &'static str)> {
+    /// - sled 0: gimlet-d, oxide-rot-1
+    /// - other sleds: gimlet-e, oxide-rot-1
+    /// - switch 0: sidecar-b, oxide-rot-1
+    /// - switch 1: sidecar-c, oxide-rot-1
+    /// - psc 0: psc-b, oxide-rot-1
+    /// - psc 1: psc-c, oxide-rot-1
+    fn test_collection_config() -> BTreeMap<
+        (SpType, u16),
+        (&'static str, &'static str, &'static str, &'static str),
+    > {
         BTreeMap::from([
-            ((SpType::Sled, 0), ("sled_0", "gimlet-d")),
-            ((SpType::Sled, 1), ("sled_1", "gimlet-e")),
-            ((SpType::Sled, 2), ("sled_2", "gimlet-e")),
-            ((SpType::Sled, 3), ("sled_3", "gimlet-e")),
-            ((SpType::Switch, 0), ("switch_0", "sidecar-b")),
-            ((SpType::Switch, 1), ("switch_1", "sidecar-c")),
-            ((SpType::Power, 0), ("power_0", "psc-b")),
-            ((SpType::Power, 1), ("power_1", "psc-c")),
+            (
+                (SpType::Sled, 0),
+                ("sled_0", "gimlet-d", "oxide-rot-1", ROT_SIGN_GIMLET),
+            ),
+            (
+                (SpType::Sled, 1),
+                ("sled_1", "gimlet-e", "oxide-rot-1", ROT_SIGN_GIMLET),
+            ),
+            (
+                (SpType::Sled, 2),
+                ("sled_2", "gimlet-e", "oxide-rot-1", ROT_SIGN_GIMLET),
+            ),
+            (
+                (SpType::Sled, 3),
+                ("sled_3", "gimlet-e", "oxide-rot-1", ROT_SIGN_GIMLET),
+            ),
+            (
+                (SpType::Switch, 0),
+                ("switch_0", "sidecar-b", "oxide-rot-1", ROT_SIGN_SWITCH),
+            ),
+            (
+                (SpType::Switch, 1),
+                ("switch_1", "sidecar-c", "oxide-rot-1", ROT_SIGN_SWITCH),
+            ),
+            (
+                (SpType::Power, 0),
+                ("power_0", "psc-b", "oxide-rot-1", ROT_SIGN_PSC),
+            ),
+            (
+                (SpType::Power, 1),
+                ("power_1", "psc-c", "oxide-rot-1", ROT_SIGN_PSC),
+            ),
         ])
+    }
+
+    /// Describes the SPs and RoTs in the environment used in these tests, but
+    /// spearated by component for use in sequential testing
+    fn test_config()
+    -> BTreeMap<(SpType, u16, MgsUpdateComponent), (&'static str, &'static str)>
+    {
+        test_collection_config()
+            .into_iter()
+            .flat_map(
+                |(
+                    (sp_type, slot_id),
+                    (serial, sp_board_name, rot_board_name, ..),
+                )| {
+                    [
+                        (
+                            (sp_type, slot_id, MgsUpdateComponent::Sp),
+                            (serial, sp_board_name),
+                        ),
+                        (
+                            (sp_type, slot_id, MgsUpdateComponent::Rot),
+                            (serial, rot_board_name),
+                        ),
+                    ]
+                },
+            )
+            .collect()
     }
 
     /// Returns a TufRepoDescription that we can use to exercise the planning
@@ -591,48 +816,101 @@ mod test {
         let artifacts = vec![
             make_artifact(
                 "control-plane",
-                KnownArtifactKind::ControlPlane,
+                KnownArtifactKind::ControlPlane.into(),
                 ARTIFACT_HASH_CONTROL_PLANE,
+                None,
             ),
             make_artifact(
                 "nexus",
-                KnownArtifactKind::Zone,
+                KnownArtifactKind::Zone.into(),
                 ARTIFACT_HASH_NEXUS,
+                None,
             ),
             make_artifact(
                 "host-os",
-                KnownArtifactKind::Host,
+                KnownArtifactKind::Host.into(),
                 ARTIFACT_HASH_HOST_OS,
+                None,
             ),
             make_artifact(
                 "gimlet-d",
-                KnownArtifactKind::GimletSp,
+                KnownArtifactKind::GimletSp.into(),
                 test_artifact_for_board("gimlet-d"),
+                None,
             ),
             make_artifact(
                 "gimlet-e",
-                KnownArtifactKind::GimletSp,
+                KnownArtifactKind::GimletSp.into(),
                 test_artifact_for_board("gimlet-e"),
+                None,
             ),
             make_artifact(
                 "sidecar-b",
-                KnownArtifactKind::SwitchSp,
+                KnownArtifactKind::SwitchSp.into(),
                 test_artifact_for_board("sidecar-b"),
+                None,
             ),
             make_artifact(
                 "sidecar-c",
-                KnownArtifactKind::SwitchSp,
+                KnownArtifactKind::SwitchSp.into(),
                 test_artifact_for_board("sidecar-c"),
+                None,
             ),
             make_artifact(
                 "psc-b",
-                KnownArtifactKind::PscSp,
+                KnownArtifactKind::PscSp.into(),
                 test_artifact_for_board("psc-b"),
+                None,
             ),
             make_artifact(
                 "psc-c",
-                KnownArtifactKind::PscSp,
+                KnownArtifactKind::PscSp.into(),
                 test_artifact_for_board("psc-c"),
+                None,
+            ),
+            make_artifact(
+                "oxide-rot-1",
+                ArtifactKind::GIMLET_ROT_IMAGE_A,
+                test_artifact_for_artifact_kind(
+                    ArtifactKind::GIMLET_ROT_IMAGE_A,
+                ),
+                Some(ROT_SIGN_GIMLET.into()),
+            ),
+            make_artifact(
+                "oxide-rot-1",
+                ArtifactKind::GIMLET_ROT_IMAGE_B,
+                test_artifact_for_artifact_kind(
+                    ArtifactKind::GIMLET_ROT_IMAGE_B,
+                ),
+                Some(ROT_SIGN_GIMLET.into()),
+            ),
+            make_artifact(
+                "oxide-rot-1",
+                ArtifactKind::PSC_ROT_IMAGE_A,
+                test_artifact_for_artifact_kind(ArtifactKind::PSC_ROT_IMAGE_A),
+                Some(ROT_SIGN_PSC.into()),
+            ),
+            make_artifact(
+                "oxide-rot-1",
+                ArtifactKind::PSC_ROT_IMAGE_B,
+                test_artifact_for_artifact_kind(ArtifactKind::PSC_ROT_IMAGE_B),
+                Some(ROT_SIGN_PSC.into()),
+            ),
+            make_artifact(
+                "oxide-rot-1",
+                ArtifactKind::SWITCH_ROT_IMAGE_A,
+                test_artifact_for_artifact_kind(
+                    ArtifactKind::SWITCH_ROT_IMAGE_A,
+                ),
+                Some(ROT_SIGN_SWITCH.into()),
+            ),
+            make_artifact(
+                "oxide-rot-1",
+                ArtifactKind::SWITCH_ROT_IMAGE_B,
+                test_artifact_for_artifact_kind(
+                    ArtifactKind::SWITCH_ROT_IMAGE_B,
+                ),
+                Some(ROT_SIGN_SWITCH.into()),
             ),
         ];
 
@@ -650,30 +928,38 @@ mod test {
 
     fn make_artifact(
         name: &str,
-        kind: KnownArtifactKind,
+        kind: ArtifactKind,
         hash: ArtifactHash,
+        sign: Option<Vec<u8>>,
     ) -> TufArtifactMeta {
         TufArtifactMeta {
             id: ArtifactId {
                 name: name.to_string(),
                 version: ARTIFACT_VERSION_2,
-                kind: kind.into(),
+                kind,
             },
             hash,
             size: 0, // unused here
+            sign,
         }
     }
 
     // Construct inventory for an environment suitable for our testing.
     //
-    // See test_config() for information about the hardware.  All SPs will
-    // appear to be running version `active_version` except those identified in
-    // `active_version_exceptions`.  All SPs will appear to have
-    // `inactive_version` in the inactive slot.
+    // See test_config() for information about the hardware.  All SPs and RoTs
+    // will appear to be running version `active_version` except those
+    // identified in `active_version_exceptions`.  All SPs and RoTs will appear
+    // to have `inactive_version` in the inactive slot.
     fn make_collection(
         active_version: ArtifactVersion,
         active_version_exceptions: &BTreeMap<(SpType, u16), ArtifactVersion>,
         inactive_version: ExpectedVersion,
+        active_rot_version: ArtifactVersion,
+        active_rot_version_exceptions: &BTreeMap<
+            (SpType, u16),
+            ArtifactVersion,
+        >,
+        inactive_rot_version: ExpectedVersion,
     ) -> Collection {
         let mut builder = nexus_inventory::CollectionBuilder::new(
             "planning_mgs_updates_basic",
@@ -702,8 +988,12 @@ mod test {
             serial_number: String::from("unused"),
         };
 
-        let test_config = test_config();
-        for ((sp_type, sp_slot), (serial, caboose_board)) in test_config {
+        let test_config = test_collection_config();
+        for (
+            (sp_type, sp_slot),
+            (serial, caboose_sp_board, caboose_rot_board, rkth),
+        ) in test_config
+        {
             let sp_state = SpState {
                 model: format!("dummy_{}", sp_type),
                 serial_number: serial.to_string(),
@@ -716,6 +1006,9 @@ mod test {
             let active_version = active_version_exceptions
                 .get(&(sp_type, sp_slot))
                 .unwrap_or(&active_version);
+            let active_rot_version = active_rot_version_exceptions
+                .get(&(sp_type, sp_slot))
+                .unwrap_or(&active_rot_version);
 
             builder
                 .found_caboose(
@@ -723,12 +1016,28 @@ mod test {
                     CabooseWhich::SpSlot0,
                     "test",
                     SpComponentCaboose {
-                        board: caboose_board.to_string(),
+                        board: caboose_sp_board.to_string(),
                         epoch: None,
                         git_commit: String::from("unused"),
-                        name: caboose_board.to_string(),
+                        name: caboose_sp_board.to_string(),
                         sign: None,
                         version: active_version.as_str().to_string(),
+                    },
+                )
+                .unwrap();
+
+            builder
+                .found_caboose(
+                    &baseboard_id,
+                    CabooseWhich::RotSlotA,
+                    "test",
+                    SpComponentCaboose {
+                        board: caboose_rot_board.to_string(),
+                        epoch: None,
+                        git_commit: String::from("unused"),
+                        name: caboose_rot_board.to_string(),
+                        sign: Some(rkth.to_string()),
+                        version: active_rot_version.as_str().to_string(),
                     },
                 )
                 .unwrap();
@@ -742,12 +1051,32 @@ mod test {
                         CabooseWhich::SpSlot1,
                         "test",
                         SpComponentCaboose {
-                            board: caboose_board.to_string(),
+                            board: caboose_sp_board.to_string(),
                             epoch: None,
                             git_commit: String::from("unused"),
-                            name: caboose_board.to_string(),
+                            name: caboose_sp_board.to_string(),
                             sign: None,
                             version: inactive_version.as_str().to_string(),
+                        },
+                    )
+                    .unwrap();
+            }
+
+            if let ExpectedVersion::Version(inactive_rot_version) =
+                &inactive_rot_version
+            {
+                builder
+                    .found_caboose(
+                        &baseboard_id,
+                        CabooseWhich::RotSlotB,
+                        "test",
+                        SpComponentCaboose {
+                            board: caboose_rot_board.to_string(),
+                            epoch: None,
+                            git_commit: String::from("unused"),
+                            name: caboose_rot_board.to_string(),
+                            sign: Some(rkth.to_string()),
+                            version: inactive_rot_version.as_str().to_string(),
                         },
                     )
                     .unwrap();
@@ -757,11 +1086,12 @@ mod test {
         builder.build()
     }
 
-    // Short hand-rolled update sequence that exercises some basic behavior.
+    // Short hand-rolled update sequence that exercises some basic behavior for
+    // SP updates.
     #[test]
-    fn test_basic() {
+    fn test_basic_sp() {
         let logctx = LogContext::new(
-            "planning_mgs_updates_basic",
+            "planning_mgs_updates_basic_sp",
             &ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Debug },
         );
         let log = &logctx.log;
@@ -772,10 +1102,14 @@ mod test {
             ARTIFACT_VERSION_2,
             &BTreeMap::from([((SpType::Sled, 0), ARTIFACT_VERSION_1)]),
             ExpectedVersion::NoValidVersion,
+            ARTIFACT_VERSION_2,
+            &BTreeMap::new(),
+            ExpectedVersion::NoValidVersion,
         );
         let current_boards = &collection.baseboards;
         let initial_updates = PendingMgsUpdates::new();
         let nmax_updates = 1;
+        let impossible_update_policy = ImpossibleUpdatePolicy::Reevaluate;
         let updates = plan_mgs_updates(
             log,
             &collection,
@@ -783,6 +1117,7 @@ mod test {
             &initial_updates,
             &TargetReleaseDescription::Initial,
             nmax_updates,
+            impossible_update_policy,
         );
         assert!(updates.is_empty());
 
@@ -796,6 +1131,7 @@ mod test {
             &initial_updates,
             &TargetReleaseDescription::TufRepo(repo.clone()),
             nmax_updates,
+            impossible_update_policy,
         );
         assert_eq!(updates.len(), 1);
         let first_update = updates.iter().next().expect("at least one update");
@@ -815,6 +1151,7 @@ mod test {
             &updates,
             &TargetReleaseDescription::TufRepo(repo.clone()),
             nmax_updates,
+            impossible_update_policy,
         );
         assert_eq!(updates, later_updates);
 
@@ -828,6 +1165,9 @@ mod test {
                 ((SpType::Switch, 1), ARTIFACT_VERSION_1),
             ]),
             ExpectedVersion::NoValidVersion,
+            ARTIFACT_VERSION_2,
+            &BTreeMap::new(),
+            ExpectedVersion::NoValidVersion,
         );
         let later_updates = plan_mgs_updates(
             log,
@@ -836,6 +1176,7 @@ mod test {
             &updates,
             &TargetReleaseDescription::TufRepo(repo.clone()),
             nmax_updates,
+            impossible_update_policy,
         );
         assert_eq!(updates, later_updates);
 
@@ -847,6 +1188,9 @@ mod test {
             ARTIFACT_VERSION_2,
             &BTreeMap::from([((SpType::Switch, 1), ARTIFACT_VERSION_1)]),
             ExpectedVersion::NoValidVersion,
+            ARTIFACT_VERSION_2,
+            &BTreeMap::new(),
+            ExpectedVersion::NoValidVersion,
         );
         let later_updates = plan_mgs_updates(
             log,
@@ -855,6 +1199,7 @@ mod test {
             &updates,
             &TargetReleaseDescription::TufRepo(repo.clone()),
             nmax_updates,
+            impossible_update_policy,
         );
         assert_eq!(later_updates.len(), 1);
         let next_update =
@@ -872,6 +1217,9 @@ mod test {
             ARTIFACT_VERSION_2,
             &BTreeMap::new(),
             ExpectedVersion::NoValidVersion,
+            ARTIFACT_VERSION_2,
+            &BTreeMap::new(),
+            ExpectedVersion::NoValidVersion,
         );
         let later_updates = plan_mgs_updates(
             log,
@@ -880,6 +1228,7 @@ mod test {
             &later_updates,
             &TargetReleaseDescription::TufRepo(repo.clone()),
             nmax_updates,
+            impossible_update_policy,
         );
         assert!(later_updates.is_empty());
 
@@ -889,6 +1238,9 @@ mod test {
             ARTIFACT_VERSION_2,
             &BTreeMap::from([((SpType::Sled, 0), ARTIFACT_VERSION_1)]),
             ExpectedVersion::NoValidVersion,
+            ARTIFACT_VERSION_2,
+            &BTreeMap::new(),
+            ExpectedVersion::NoValidVersion,
         );
         let updates = plan_mgs_updates(
             log,
@@ -897,6 +1249,7 @@ mod test {
             &PendingMgsUpdates::new(),
             &TargetReleaseDescription::TufRepo(repo.clone()),
             nmax_updates,
+            impossible_update_policy,
         );
         assert!(updates.is_empty());
         let updates = plan_mgs_updates(
@@ -906,6 +1259,7 @@ mod test {
             &PendingMgsUpdates::new(),
             &TargetReleaseDescription::TufRepo(repo.clone()),
             nmax_updates,
+            impossible_update_policy,
         );
         // We verified most of the details above.  Here we're just double
         // checking that the baseboard being missing is the only reason that no
@@ -934,6 +1288,9 @@ mod test {
             ARTIFACT_VERSION_2,
             &BTreeMap::from([((SpType::Sled, 0), ARTIFACT_VERSION_1)]),
             ExpectedVersion::Version(ARTIFACT_VERSION_1),
+            ARTIFACT_VERSION_2,
+            &BTreeMap::new(),
+            ExpectedVersion::NoValidVersion,
         );
         let new_updates = plan_mgs_updates(
             log,
@@ -942,6 +1299,7 @@ mod test {
             &updates,
             &TargetReleaseDescription::TufRepo(repo.clone()),
             nmax_updates,
+            impossible_update_policy,
         );
         assert_ne!(updates, new_updates);
         assert_eq!(new_updates.len(), 1);
@@ -972,6 +1330,9 @@ mod test {
             ARTIFACT_VERSION_2,
             &BTreeMap::from([((SpType::Sled, 0), ARTIFACT_VERSION_1_5)]),
             ExpectedVersion::NoValidVersion,
+            ARTIFACT_VERSION_2,
+            &BTreeMap::new(),
+            ExpectedVersion::NoValidVersion,
         );
         let new_updates = plan_mgs_updates(
             log,
@@ -980,6 +1341,7 @@ mod test {
             &updates,
             &TargetReleaseDescription::TufRepo(repo.clone()),
             nmax_updates,
+            impossible_update_policy,
         );
         assert_ne!(updates, new_updates);
         assert_eq!(new_updates.len(), 1);
@@ -1006,6 +1368,416 @@ mod test {
         logctx.cleanup_successful();
     }
 
+    // Short hand-rolled update sequence that exercises some basic behavior for
+    // RoT updates.
+    #[test]
+    fn test_basic_rot() {
+        let logctx = LogContext::new(
+            "planning_mgs_updates_basic_rot",
+            &ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Debug },
+        );
+        let log = &logctx.log;
+
+        // Test that with no updates pending and no TUF repo specified, there
+        // will remain no updates pending.
+        let collection = make_collection(
+            ARTIFACT_VERSION_2,
+            &BTreeMap::new(),
+            ExpectedVersion::NoValidVersion,
+            ARTIFACT_VERSION_2,
+            &BTreeMap::from([((SpType::Sled, 0), ARTIFACT_VERSION_1)]),
+            ExpectedVersion::NoValidVersion,
+        );
+        let current_boards = &collection.baseboards;
+        let initial_updates = PendingMgsUpdates::new();
+        let nmax_updates = 1;
+        let impossible_update_policy = ImpossibleUpdatePolicy::Reevaluate;
+        let updates = plan_mgs_updates(
+            log,
+            &collection,
+            current_boards,
+            &initial_updates,
+            &TargetReleaseDescription::Initial,
+            nmax_updates,
+            impossible_update_policy,
+        );
+        assert!(updates.is_empty());
+
+        // Test that when a TUF repo is specified and one RoT is outdated, then
+        // it's configured with an update (and the update looks correct).
+        let repo = make_tuf_repo();
+        let updates = plan_mgs_updates(
+            log,
+            &collection,
+            current_boards,
+            &initial_updates,
+            &TargetReleaseDescription::TufRepo(repo.clone()),
+            nmax_updates,
+            impossible_update_policy,
+        );
+        assert_eq!(updates.len(), 1);
+        let first_update = updates.iter().next().expect("at least one update");
+        assert_eq!(first_update.baseboard_id.serial_number, "sled_0");
+        assert_eq!(first_update.sp_type, SpType::Sled);
+        assert_eq!(first_update.slot_id, 0);
+        assert_eq!(first_update.artifact_hash, ARTIFACT_HASH_ROT_GIMLET_B);
+        assert_eq!(first_update.artifact_version, ARTIFACT_VERSION_2);
+
+        // Test that when an update is already pending, and nothing changes
+        // about the state of the world (i.e., the inventory), then the planner
+        // makes no changes.
+        let later_updates = plan_mgs_updates(
+            log,
+            &collection,
+            current_boards,
+            &updates,
+            &TargetReleaseDescription::TufRepo(repo.clone()),
+            nmax_updates,
+            impossible_update_policy,
+        );
+        assert_eq!(updates, later_updates);
+
+        // Test that when two updates are needed, but one is already pending,
+        // then the other one is *not* started (because it exceeds
+        // nmax_updates).
+        let later_collection = make_collection(
+            ARTIFACT_VERSION_2,
+            &BTreeMap::new(),
+            ExpectedVersion::NoValidVersion,
+            ARTIFACT_VERSION_2,
+            &BTreeMap::from([
+                ((SpType::Sled, 0), ARTIFACT_VERSION_1),
+                ((SpType::Switch, 1), ARTIFACT_VERSION_1),
+            ]),
+            ExpectedVersion::NoValidVersion,
+        );
+        let later_updates = plan_mgs_updates(
+            log,
+            &later_collection,
+            current_boards,
+            &updates,
+            &TargetReleaseDescription::TufRepo(repo.clone()),
+            nmax_updates,
+            impossible_update_policy,
+        );
+        assert_eq!(updates, later_updates);
+
+        // At this point, we're ready to test that when the first SpType update
+        // completes, then the second one *is* started.  This tests three
+        // different things: first that we noticed the first one completed,
+        // second that we noticed another thing needed an update, and third that
+        // the planner schedules the updates in the correct order: first RoT,
+        // and second SP.
+        let later_collection = make_collection(
+            ARTIFACT_VERSION_2,
+            &BTreeMap::from([((SpType::Switch, 1), ARTIFACT_VERSION_1)]),
+            ExpectedVersion::NoValidVersion,
+            ARTIFACT_VERSION_2,
+            &BTreeMap::from([((SpType::Switch, 1), ARTIFACT_VERSION_1)]),
+            ExpectedVersion::NoValidVersion,
+        );
+        let later_updates = plan_mgs_updates(
+            log,
+            &later_collection,
+            current_boards,
+            &updates,
+            &TargetReleaseDescription::TufRepo(repo.clone()),
+            nmax_updates,
+            impossible_update_policy,
+        );
+        assert_eq!(later_updates.len(), 1);
+        let next_update =
+            later_updates.iter().next().expect("at least one update");
+        assert_ne!(first_update, next_update);
+        assert_eq!(next_update.baseboard_id.serial_number, "switch_1");
+        assert_eq!(next_update.sp_type, SpType::Switch);
+        assert_eq!(next_update.slot_id, 1);
+        assert_eq!(next_update.artifact_hash, ARTIFACT_HASH_ROT_SWITCH_B);
+        assert_eq!(next_update.artifact_version, ARTIFACT_VERSION_2);
+
+        // Finally, test that when all components are in spec, then no updates
+        // are configured.
+        let updated_collection = make_collection(
+            ARTIFACT_VERSION_2,
+            &BTreeMap::new(),
+            ExpectedVersion::NoValidVersion,
+            ARTIFACT_VERSION_2,
+            &BTreeMap::new(),
+            ExpectedVersion::NoValidVersion,
+        );
+        let later_updates = plan_mgs_updates(
+            log,
+            &updated_collection,
+            current_boards,
+            &later_updates,
+            &TargetReleaseDescription::TufRepo(repo.clone()),
+            nmax_updates,
+            impossible_update_policy,
+        );
+        assert!(later_updates.is_empty());
+
+        // Test that we don't try to update boards that aren't in
+        // `current_boards`, even if they're in inventory and outdated.
+        let collection = make_collection(
+            ARTIFACT_VERSION_2,
+            &BTreeMap::new(),
+            ExpectedVersion::NoValidVersion,
+            ARTIFACT_VERSION_2,
+            &BTreeMap::from([((SpType::Sled, 0), ARTIFACT_VERSION_1)]),
+            ExpectedVersion::NoValidVersion,
+        );
+        let updates = plan_mgs_updates(
+            log,
+            &collection,
+            &BTreeSet::new(),
+            &PendingMgsUpdates::new(),
+            &TargetReleaseDescription::TufRepo(repo.clone()),
+            nmax_updates,
+            impossible_update_policy,
+        );
+        assert!(updates.is_empty());
+        let updates = plan_mgs_updates(
+            log,
+            &collection,
+            &collection.baseboards,
+            &PendingMgsUpdates::new(),
+            &TargetReleaseDescription::TufRepo(repo.clone()),
+            nmax_updates,
+            impossible_update_policy,
+        );
+        // We verified most of the details above.  Here we're just double
+        // checking that the baseboard being missing is the only reason that no
+        // update was generated.
+        assert_eq!(updates.len(), 1);
+
+        // Verify the precondition details of an ordinary RoT update.
+        let old_update =
+            updates.into_iter().next().expect("at least one update");
+        let PendingMgsUpdateDetails::Rot {
+            expected_active_slot: old_expected_active_slot,
+            expected_inactive_version: old_expected_inactive_version,
+            ..
+        } = &old_update.details
+        else {
+            panic!("expected RoT update");
+        };
+        assert_eq!(ARTIFACT_VERSION_1, old_expected_active_slot.version());
+        assert_eq!(
+            ExpectedVersion::NoValidVersion,
+            *old_expected_inactive_version
+        );
+
+        // Test that if the inactive slot contents have changed, then we'll get
+        // a new update reflecting that.
+        let collection = make_collection(
+            ARTIFACT_VERSION_2,
+            &BTreeMap::new(),
+            ExpectedVersion::Version(ARTIFACT_VERSION_1),
+            ARTIFACT_VERSION_2,
+            &BTreeMap::from([((SpType::Sled, 0), ARTIFACT_VERSION_1)]),
+            ExpectedVersion::Version(ARTIFACT_VERSION_1),
+        );
+        let new_updates = plan_mgs_updates(
+            log,
+            &collection,
+            &collection.baseboards,
+            &updates,
+            &TargetReleaseDescription::TufRepo(repo.clone()),
+            nmax_updates,
+            impossible_update_policy,
+        );
+        assert_ne!(updates, new_updates);
+        assert_eq!(new_updates.len(), 1);
+        let new_update =
+            new_updates.into_iter().next().expect("at least one update");
+        assert_eq!(old_update.baseboard_id, new_update.baseboard_id);
+        assert_eq!(old_update.sp_type, new_update.sp_type);
+        assert_eq!(old_update.slot_id, new_update.slot_id);
+        assert_eq!(old_update.artifact_hash, new_update.artifact_hash);
+        assert_eq!(old_update.artifact_version, new_update.artifact_version);
+        let PendingMgsUpdateDetails::Rot {
+            expected_active_slot: new_expected_active_slot,
+            expected_inactive_version: new_expected_inactive_version,
+            ..
+        } = &new_update.details
+        else {
+            panic!("expected RoT update");
+        };
+        assert_eq!(ARTIFACT_VERSION_1, new_expected_active_slot.version());
+        assert_eq!(
+            ExpectedVersion::Version(ARTIFACT_VERSION_1),
+            *new_expected_inactive_version
+        );
+
+        // Test that if instead it's the active slot whose contents have changed
+        // to something other than the new expected version, then we'll also get
+        // a new update reflecting that.
+        let collection = make_collection(
+            ARTIFACT_VERSION_2,
+            &BTreeMap::new(),
+            ExpectedVersion::NoValidVersion,
+            ARTIFACT_VERSION_2,
+            &BTreeMap::from([((SpType::Sled, 0), ARTIFACT_VERSION_1_5)]),
+            ExpectedVersion::NoValidVersion,
+        );
+        let new_updates = plan_mgs_updates(
+            log,
+            &collection,
+            &collection.baseboards,
+            &updates,
+            &TargetReleaseDescription::TufRepo(repo.clone()),
+            nmax_updates,
+            impossible_update_policy,
+        );
+        assert_ne!(updates, new_updates);
+        assert_eq!(new_updates.len(), 1);
+        let new_update =
+            new_updates.into_iter().next().expect("at least one update");
+        assert_eq!(old_update.baseboard_id, new_update.baseboard_id);
+        assert_eq!(old_update.sp_type, new_update.sp_type);
+        assert_eq!(old_update.slot_id, new_update.slot_id);
+        assert_eq!(old_update.artifact_hash, new_update.artifact_hash);
+        assert_eq!(old_update.artifact_version, new_update.artifact_version);
+        let PendingMgsUpdateDetails::Rot {
+            expected_active_slot: new_expected_active_slot,
+            expected_inactive_version: new_expected_inactive_version,
+            ..
+        } = &new_update.details
+        else {
+            panic!("expected RoT update");
+        };
+        assert_eq!(ARTIFACT_VERSION_1_5, new_expected_active_slot.version());
+        assert_eq!(
+            ExpectedVersion::NoValidVersion,
+            *new_expected_inactive_version
+        );
+
+        logctx.cleanup_successful();
+    }
+
+    // Confirm our behavior for impossible updates
+    #[test]
+    fn test_impossible_update_policy() {
+        let logctx = LogContext::new(
+            "planning_mgs_updates_impossible_update_policy",
+            &ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Debug },
+        );
+        let log = &logctx.log;
+
+        // Initial setup: sled 0 has active version 1 and inactive version 1.5.
+        let collection = make_collection(
+            ARTIFACT_VERSION_2,
+            &BTreeMap::from([((SpType::Sled, 0), ARTIFACT_VERSION_1)]),
+            ExpectedVersion::Version(ARTIFACT_VERSION_1_5),
+            ARTIFACT_VERSION_2,
+            &BTreeMap::new(),
+            ExpectedVersion::Version(ARTIFACT_VERSION_1_5),
+        );
+        let current_boards = &collection.baseboards;
+        let initial_updates = PendingMgsUpdates::new();
+        let nmax_updates = 1;
+        let repo = make_tuf_repo();
+
+        // We should attempt to update this SP to version 2 no matter what our
+        // impossible update policy is; we have no updates at all, currently!
+        //
+        // We stash the updates from either iteration into this `updates` value;
+        // they're both the same.
+        let mut updates = None;
+        for impossible_update_policy in ImpossibleUpdatePolicy::iter() {
+            let planned_updates = plan_mgs_updates(
+                log,
+                &collection,
+                current_boards,
+                &initial_updates,
+                &TargetReleaseDescription::TufRepo(repo.clone()),
+                nmax_updates,
+                impossible_update_policy,
+            );
+            assert_eq!(planned_updates.len(), 1);
+            let first_update =
+                planned_updates.iter().next().expect("at least one update");
+            assert_eq!(first_update.baseboard_id.serial_number, "sled_0");
+            assert_eq!(first_update.sp_type, SpType::Sled);
+            assert_eq!(first_update.slot_id, 0);
+            assert_eq!(first_update.artifact_hash, ARTIFACT_HASH_SP_GIMLET_D);
+            assert_eq!(first_update.artifact_version, ARTIFACT_VERSION_2);
+            let PendingMgsUpdateDetails::Sp {
+                expected_active_version,
+                expected_inactive_version,
+            } = &first_update.details
+            else {
+                panic!("expected SP update");
+            };
+            assert_eq!(*expected_active_version, ARTIFACT_VERSION_1);
+            assert_eq!(
+                *expected_inactive_version,
+                ExpectedVersion::Version(ARTIFACT_VERSION_1_5)
+            );
+            updates = Some(planned_updates);
+        }
+        let updates = updates.unwrap();
+
+        // Create a new collection that differs from the original collection in
+        // that sled 0's inactive slot has no valid version. This emulates an
+        // update in progress; we've partially written the contents, so there is
+        // no caboose to read.
+        let collection = make_collection(
+            ARTIFACT_VERSION_2,
+            &BTreeMap::from([((SpType::Sled, 0), ARTIFACT_VERSION_1)]),
+            ExpectedVersion::NoValidVersion,
+            ARTIFACT_VERSION_2,
+            &BTreeMap::new(),
+            ExpectedVersion::Version(ARTIFACT_VERSION_1_5),
+        );
+
+        // If we plan with `ImpossibleUpdatePolicy::Keep`, we should _not_
+        // replace the update, even though its preconditions are no longer
+        // valid.
+        let keep_updates = plan_mgs_updates(
+            log,
+            &collection,
+            current_boards,
+            &updates,
+            &TargetReleaseDescription::TufRepo(repo.clone()),
+            nmax_updates,
+            ImpossibleUpdatePolicy::Keep,
+        );
+        assert_eq!(updates, keep_updates);
+
+        // On the other hand, if we plan with
+        // `ImpossibleUpdatePolicy::Reevaluate`, we should replace the update.
+        let reeval_updates = plan_mgs_updates(
+            log,
+            &collection,
+            current_boards,
+            &initial_updates,
+            &TargetReleaseDescription::TufRepo(repo.clone()),
+            nmax_updates,
+            ImpossibleUpdatePolicy::Keep,
+        );
+        assert_eq!(reeval_updates.len(), 1);
+        let first_update =
+            reeval_updates.iter().next().expect("at least one update");
+        assert_eq!(first_update.baseboard_id.serial_number, "sled_0");
+        assert_eq!(first_update.sp_type, SpType::Sled);
+        assert_eq!(first_update.slot_id, 0);
+        assert_eq!(first_update.artifact_hash, ARTIFACT_HASH_SP_GIMLET_D);
+        assert_eq!(first_update.artifact_version, ARTIFACT_VERSION_2);
+        let PendingMgsUpdateDetails::Sp {
+            expected_active_version,
+            expected_inactive_version,
+        } = &first_update.details
+        else {
+            panic!("expected SP update");
+        };
+        assert_eq!(*expected_active_version, ARTIFACT_VERSION_1);
+        // This is the only field that should have changed:
+        assert_eq!(*expected_inactive_version, ExpectedVersion::NoValidVersion);
+
+        logctx.cleanup_successful();
+    }
+
     // Updates a whole system's SPs one at a time
     #[test]
     fn test_whole_system_sequential() {
@@ -1017,10 +1789,12 @@ mod test {
         let mut latest_updates = PendingMgsUpdates::new();
         let repo = make_tuf_repo();
         let nmax_updates = 1;
+        let impossible_update_policy = ImpossibleUpdatePolicy::Reevaluate;
 
-        // Maintain a map of SPs that we've updated.  We'll use this to
+        // Maintain a map of SPs and RoTs that we've updated.  We'll use this to
         // configure the inventory collection that we create at each step.
-        let mut exceptions = BTreeMap::new();
+        let mut sp_exceptions = BTreeMap::new();
+        let mut rot_exceptions = BTreeMap::new();
 
         // We do not control the order of updates.  But we expect to update each
         // of the SPs in this map.  When we do, we expect to find the given
@@ -1028,7 +1802,16 @@ mod test {
         let mut expected_updates: BTreeMap<_, _> = test_config()
             .into_iter()
             .map(|(k, (serial, board_name))| {
-                (k, (serial, test_artifact_for_board(board_name)))
+                if board_name == "oxide-rot-1" {
+                    let kind = match k.0 {
+                        SpType::Sled => ArtifactKind::GIMLET_ROT_IMAGE_B,
+                        SpType::Power => ArtifactKind::PSC_ROT_IMAGE_B,
+                        SpType::Switch => ArtifactKind::SWITCH_ROT_IMAGE_B,
+                    };
+                    (k, (serial, test_artifact_for_artifact_kind(kind)))
+                } else {
+                    (k, (serial, test_artifact_for_board(board_name)))
+                }
             })
             .collect();
 
@@ -1037,7 +1820,10 @@ mod test {
             // version 1 except for what we've already updated.
             let collection = make_collection(
                 ARTIFACT_VERSION_1,
-                &exceptions,
+                &sp_exceptions,
+                ExpectedVersion::NoValidVersion,
+                ARTIFACT_VERSION_1,
+                &rot_exceptions,
                 ExpectedVersion::NoValidVersion,
             );
 
@@ -1054,27 +1840,47 @@ mod test {
                 &latest_updates,
                 &TargetReleaseDescription::TufRepo(repo.clone()),
                 nmax_updates,
+                impossible_update_policy,
             );
             assert_eq!(new_updates.len(), 1);
             let update =
                 new_updates.iter().next().expect("at least one update");
             verify_one_sp_update(&mut expected_updates, update);
 
-            // Update `exceptions` for the next iteration.
+            // Update `exceptions` or `rot_exceptions` for the next iteration.
             let sp_type = update.sp_type;
             let sp_slot = update.slot_id;
-            assert!(
-                exceptions
-                    .insert((sp_type, sp_slot), ARTIFACT_VERSION_2)
-                    .is_none()
-            );
+            match update.details {
+                PendingMgsUpdateDetails::Rot { .. } => {
+                    assert!(
+                        rot_exceptions
+                            .insert((sp_type, sp_slot), ARTIFACT_VERSION_2)
+                            .is_none()
+                    );
+                }
+                PendingMgsUpdateDetails::Sp { .. } => {
+                    assert!(
+                        sp_exceptions
+                            .insert((sp_type, sp_slot), ARTIFACT_VERSION_2)
+                            .is_none()
+                    );
+                }
+                PendingMgsUpdateDetails::RotBootloader { .. }
+                | PendingMgsUpdateDetails::HostPhase1(_) => {
+                    unimplemented!()
+                }
+            }
+
             latest_updates = new_updates;
         }
 
         // Take one more lap.  It should reflect zero updates.
         let collection = make_collection(
             ARTIFACT_VERSION_1,
-            &exceptions,
+            &sp_exceptions,
+            ExpectedVersion::NoValidVersion,
+            ARTIFACT_VERSION_1,
+            &rot_exceptions,
             ExpectedVersion::NoValidVersion,
         );
         let last_updates = plan_mgs_updates(
@@ -1084,6 +1890,7 @@ mod test {
             &latest_updates,
             &TargetReleaseDescription::TufRepo(repo.clone()),
             nmax_updates,
+            impossible_update_policy,
         );
         assert!(last_updates.is_empty());
 
@@ -1103,12 +1910,25 @@ mod test {
         let mut expected_updates: BTreeMap<_, _> = test_config()
             .into_iter()
             .map(|(k, (serial, board_name))| {
-                (k, (serial, test_artifact_for_board(board_name)))
+                if board_name == "oxide-rot-1" {
+                    let kind = match k.0 {
+                        SpType::Sled => ArtifactKind::GIMLET_ROT_IMAGE_B,
+                        SpType::Power => ArtifactKind::PSC_ROT_IMAGE_B,
+                        SpType::Switch => ArtifactKind::SWITCH_ROT_IMAGE_B,
+                    };
+                    (k, (serial, test_artifact_for_artifact_kind(kind)))
+                } else {
+                    (k, (serial, test_artifact_for_board(board_name)))
+                }
             })
             .collect();
 
         // Update the whole system at once.
+        let impossible_update_policy = ImpossibleUpdatePolicy::Reevaluate;
         let collection = make_collection(
+            ARTIFACT_VERSION_1,
+            &BTreeMap::new(),
+            ExpectedVersion::NoValidVersion,
             ARTIFACT_VERSION_1,
             &BTreeMap::new(),
             ExpectedVersion::NoValidVersion,
@@ -1120,8 +1940,13 @@ mod test {
             &PendingMgsUpdates::new(),
             &TargetReleaseDescription::TufRepo(repo.clone()),
             usize::MAX,
+            impossible_update_policy,
         );
-        assert_eq!(all_updates.len(), expected_updates.len());
+        // `all_updates` counts each update per SpType. This means an update for
+        // SP and RoT for the same SpType count as a single update. For
+        // `expected_updates`, each component update counts as an update, so the
+        // amount of `all_updates` should be half of `expected_updates`.
+        assert_eq!(all_updates.len(), expected_updates.len() / 2);
         for update in &all_updates {
             verify_one_sp_update(&mut expected_updates, update);
         }
@@ -1129,6 +1954,9 @@ mod test {
         // Now, notice when they've all been updated, even if the limit is only
         // one.
         let collection = make_collection(
+            ARTIFACT_VERSION_2,
+            &BTreeMap::new(),
+            ExpectedVersion::NoValidVersion,
             ARTIFACT_VERSION_2,
             &BTreeMap::new(),
             ExpectedVersion::NoValidVersion,
@@ -1140,6 +1968,7 @@ mod test {
             &all_updates,
             &TargetReleaseDescription::TufRepo(repo.clone()),
             1,
+            impossible_update_policy,
         );
         assert!(all_updates_done.is_empty());
 
@@ -1147,25 +1976,45 @@ mod test {
     }
 
     fn verify_one_sp_update(
-        expected_updates: &mut BTreeMap<(SpType, u16), (&str, ArtifactHash)>,
+        expected_updates: &mut BTreeMap<
+            (SpType, u16, MgsUpdateComponent),
+            (&str, ArtifactHash),
+        >,
         update: &PendingMgsUpdate,
     ) {
         let sp_type = update.sp_type;
         let sp_slot = update.slot_id;
+        let component = match &update.details {
+            PendingMgsUpdateDetails::Rot { .. } => MgsUpdateComponent::Rot,
+            PendingMgsUpdateDetails::RotBootloader { .. } => {
+                MgsUpdateComponent::RotBootloader
+            }
+            PendingMgsUpdateDetails::Sp { .. } => MgsUpdateComponent::Sp,
+            PendingMgsUpdateDetails::HostPhase1(_) => {
+                MgsUpdateComponent::HostOs
+            }
+        };
         println!("found update: {} slot {}", sp_type, sp_slot);
         let (expected_serial, expected_artifact) = expected_updates
-            .remove(&(sp_type, sp_slot))
+            .remove(&(sp_type, sp_slot, component))
             .expect("unexpected update");
         assert_eq!(update.artifact_hash, expected_artifact);
         assert_eq!(update.artifact_version, ARTIFACT_VERSION_2);
         assert_eq!(update.baseboard_id.serial_number, *expected_serial);
-        let PendingMgsUpdateDetails::Sp {
-            expected_active_version,
-            expected_inactive_version,
-        } = &update.details
-        else {
-            panic!("expected SP update");
-        };
+        let (expected_active_version, expected_inactive_version) =
+            match &update.details {
+                PendingMgsUpdateDetails::Rot {
+                    expected_active_slot,
+                    expected_inactive_version,
+                    ..
+                } => (&expected_active_slot.version, expected_inactive_version),
+                PendingMgsUpdateDetails::Sp {
+                    expected_active_version,
+                    expected_inactive_version,
+                } => (expected_active_version, expected_inactive_version),
+                PendingMgsUpdateDetails::RotBootloader { .. }
+                | PendingMgsUpdateDetails::HostPhase1(_) => unimplemented!(),
+            };
         assert_eq!(*expected_active_version, ARTIFACT_VERSION_1);
         assert_eq!(*expected_inactive_version, ExpectedVersion::NoValidVersion);
     }
@@ -1185,14 +2034,20 @@ mod test {
             ARTIFACT_VERSION_2,
             &BTreeMap::from([((SpType::Sled, 0), ARTIFACT_VERSION_1)]),
             ExpectedVersion::NoValidVersion,
+            ARTIFACT_VERSION_2,
+            &BTreeMap::from([((SpType::Sled, 0), ARTIFACT_VERSION_1)]),
+            ExpectedVersion::NoValidVersion,
         );
+        let nmax_updates = 1;
+        let impossible_update_policy = ImpossibleUpdatePolicy::Reevaluate;
         let updates = plan_mgs_updates(
             log,
             &collection,
             &collection.baseboards,
             &PendingMgsUpdates::new(),
             &TargetReleaseDescription::TufRepo(repo.clone()),
-            1,
+            nmax_updates,
+            impossible_update_policy,
         );
         assert!(!updates.is_empty());
         let update = updates.into_iter().next().expect("at least one update");
@@ -1214,7 +2069,8 @@ mod test {
             &collection.baseboards,
             &updates,
             &TargetReleaseDescription::TufRepo(repo.clone()),
-            1,
+            nmax_updates,
+            impossible_update_policy,
         );
         assert!(!new_updates.is_empty());
         let new_update =

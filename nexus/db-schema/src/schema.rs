@@ -1416,6 +1416,7 @@ table! {
         sha256 -> Text,
         artifact_size -> Int8,
         generation_added -> Int8,
+        sign -> Nullable<Binary>,
     }
 }
 
@@ -1560,6 +1561,17 @@ table! {
 }
 
 table! {
+    inv_host_phase_1_active_slot (inv_collection_id, hw_baseboard_id) {
+        inv_collection_id -> Uuid,
+        hw_baseboard_id -> Uuid,
+        time_collected -> Timestamptz,
+        source -> Text,
+
+        slot -> crate::enums::HwM2SlotEnum,
+    }
+}
+
+table! {
     inv_host_phase_1_flash_hash (inv_collection_id, hw_baseboard_id, slot) {
         inv_collection_id -> Uuid,
         hw_baseboard_id -> Uuid,
@@ -1642,7 +1654,7 @@ table! {
         boot_partition_a_error -> Nullable<Text>,
         boot_partition_b_error -> Nullable<Text>,
 
-        clear_mupdate_override_boot_success -> Nullable<crate::enums::ClearMupdateOverrideBootSuccessEnum>,
+        clear_mupdate_override_boot_success -> Nullable<crate::enums::RemoveMupdateOverrideBootSuccessEnum>,
         clear_mupdate_override_boot_error -> Nullable<Text>,
         clear_mupdate_override_non_boot_message -> Nullable<Text>,
     }
@@ -2654,6 +2666,8 @@ table! {
         class -> Nullable<Text>,
 
         report -> Jsonb,
+
+        part_number -> Nullable<Text>,
     }
 }
 
@@ -2675,3 +2689,45 @@ table! {
     }
 }
 allow_tables_to_appear_in_same_query!(user_data_export, snapshot, image);
+
+table! {
+    audit_log (id) {
+        id -> Uuid,
+        time_started -> Timestamptz,
+        request_id -> Text,
+        request_uri -> Text,
+        operation_id -> Text,
+        source_ip -> Inet,
+        user_agent -> Nullable<Text>,
+        actor_id -> Nullable<Uuid>,
+        actor_silo_id -> Nullable<Uuid>,
+        actor_kind -> crate::enums::AuditLogActorKindEnum,
+        auth_method -> Nullable<Text>,
+        time_completed -> Nullable<Timestamptz>,
+        http_status_code -> Nullable<Int4>, // SqlU16
+        error_code -> Nullable<Text>,
+        error_message -> Nullable<Text>,
+        result_kind -> Nullable<crate::enums::AuditLogResultKindEnum>,
+    }
+}
+
+table! {
+    audit_log_complete (id) {
+        id -> Uuid,
+        time_started -> Timestamptz,
+        request_id -> Text,
+        request_uri -> Text,
+        operation_id -> Text,
+        source_ip -> Inet,
+        user_agent -> Nullable<Text>,
+        actor_id -> Nullable<Uuid>,
+        actor_silo_id -> Nullable<Uuid>,
+        actor_kind -> crate::enums::AuditLogActorKindEnum,
+        auth_method -> Nullable<Text>,
+        time_completed -> Timestamptz,
+        http_status_code -> Nullable<Int4>, // SqlU16
+        error_code -> Nullable<Text>,
+        error_message -> Nullable<Text>,
+        result_kind -> crate::enums::AuditLogResultKindEnum,
+    }
+}
