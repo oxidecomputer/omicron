@@ -482,7 +482,7 @@ impl ReconfiguratorHostPhase1Updater {
     ) -> Result<ArtifactHash, PrecheckError> {
         match mgs_clients
             .try_all_serially(log, move |mgs_client| async move {
-                match mgs_client
+                mgs_client
                     .host_phase_1_flash_hash_calculate_with_timeout(
                         sp_type,
                         sp_slot,
@@ -490,31 +490,17 @@ impl ReconfiguratorHostPhase1Updater {
                         PHASE_1_HASHING_TIMEOUT,
                     )
                     .await
-                {
-                    // The return types here are a little weird;
-                    // `try_all_serially()` requires us to return a `Result<T,
-                    // GatewayClientError>`, but
-                    // `host_phase_1_flash_hash_calculate_with_timeout()`
-                    // returns a `HostPhase1HashError`; its `RequestError`
-                    // variant _contains_ a `GatewayClientError`. We convert
-                    // that specific variant into its `GatewayClientError`, and
-                    // return a `Result<Result<_, HostPhase1HashError>,
-                    // GatewayClientError>. We unpack the inner result in a
-                    // `match` after `try_all_serially()`.
-                    Ok(hash) => Ok(Ok(hash)),
-                    Err(HostPhase1HashError::RequestError { err, .. }) => {
-                        Err(err)
-                    }
-                    Err(err) => Ok(Err(err)),
-                }
             })
-            .await?
+            .await
         {
             Ok(hash) => Ok(ArtifactHash(hash)),
             Err(HostPhase1HashError::RequestError { err, .. }) => {
                 Err(err.into())
             }
-            Err(err) => Err(PrecheckError::DeterminingActiveArtifact {
+            Err(
+                err @ (HostPhase1HashError::Timeout(_)
+                | HostPhase1HashError::ContentsModifiedWhileHashing),
+            ) => Err(PrecheckError::DeterminingActiveArtifact {
                 kind: ArtifactKind::HOST_PHASE_1,
                 err: InlineErrorChain::new(&err).to_string(),
             }),
