@@ -2639,9 +2639,9 @@ dependencies = [
 
 [[package]]
 name = "diesel"
-version = "2.2.11"
+version = "2.2.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a917a9209950404d5be011c81d081a2692a822f73c3d6af586f0cab5ff50f614"
+checksum = "229850a212cd9b84d4f0290ad9d294afc0ae70fccaa8949dbe8b43ffafa1e20c"
 dependencies = [
  "bitflags 2.9.1",
  "byteorder",
@@ -6681,6 +6681,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "assert_matches",
+ "camino",
  "chrono",
  "dropshot",
  "futures",
@@ -6688,11 +6689,13 @@ dependencies = [
  "gateway-messages",
  "gateway-test-utils",
  "gateway-types",
+ "http",
  "hubtools",
  "id-map",
  "iddqd",
  "internal-dns-resolver",
  "internal-dns-types",
+ "nexus-sled-agent-shared",
  "nexus-types",
  "omicron-common",
  "omicron-test-utils",
@@ -6704,6 +6707,10 @@ dependencies = [
  "repo-depot-client",
  "reqwest",
  "sha2",
+ "sled-agent-api",
+ "sled-agent-client",
+ "sled-agent-types",
+ "sled-diagnostics",
  "slog",
  "slog-error-chain",
  "sp-sim",
@@ -6841,6 +6848,7 @@ dependencies = [
  "dropshot",
  "expectorate",
  "gateway-client",
+ "gateway-types",
  "id-map",
  "iddqd",
  "illumos-utils",
@@ -7876,6 +7884,7 @@ dependencies = [
  "hyper-rustls",
  "hyper-staticfile",
  "id-map",
+ "iddqd",
  "illumos-utils",
  "internal-dns-resolver",
  "internal-dns-types",
@@ -10578,9 +10587,9 @@ dependencies = [
 
 [[package]]
 name = "qorb"
-version = "0.4.0"
+version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0a3a29f6021f8ccb73eef615ad8b17006098376a75e9ba41eb0f6b976bd12e97"
+checksum = "2f223a85f489c9548719fb367c6733e8bc9d4eef76d6ea59a18299acd9497c60"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -10872,6 +10881,7 @@ dependencies = [
  "datatest-stable",
  "dropshot",
  "expectorate",
+ "gateway-types",
  "humantime",
  "iddqd",
  "indent_write",
@@ -10925,6 +10935,7 @@ dependencies = [
  "internal-dns-types",
  "nexus-mgs-updates",
  "nexus-types",
+ "omicron-common",
  "omicron-repl-utils",
  "omicron-workspace-hack",
  "oxide-tokio-rt",

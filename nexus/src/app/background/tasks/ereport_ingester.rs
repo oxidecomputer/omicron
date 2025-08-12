@@ -270,13 +270,44 @@ impl Ingester {
                         &opctx.log,
                         MISSING_VPD,
                     );
-                    let class = get_sp_metadata_string(
-                        "class",
-                        &ereport,
-                        &restart_id,
-                        &opctx.log,
-                        "",
-                    );
+
+                    let class = ereport
+                        .data
+                        // "k" (for "kind") is used as an abbreviation of
+                        // "class" to save 4 bytes of ereport.
+                        .get("k")
+                        .or_else(|| ereport.data.get("class"));
+                    let class = match (class, ereport.data.get("lost")) {
+                        (Some(serde_json::Value::String(class)), _) => {
+                            Some(class.to_string())
+                        }
+                        (Some(v), _) => {
+                            slog::warn!(
+                                &opctx.log,
+                                "malformed ereport: value for 'k'/'class' \
+                                 should be a string, but found: {v:?}";
+                                "ena" => ?ereport.ena,
+                                "restart_id" => ?restart_id,
+                            );
+                            None
+                        }
+                        // This is a loss record! I know this!
+                        (None, Some(serde_json::Value::Null)) => {
+                            Some("ereport.data_loss.possible".to_string())
+                        }
+                        (None, Some(serde_json::Value::Number(_))) => {
+                            Some("ereport.data_loss.certain".to_string())
+                        }
+                        (None, _) => {
+                            slog::warn!(
+                                &opctx.log,
+                                "ereport missing 'k'/'class' key";
+                                "ena" => ?ereport.ena,
+                                "restart_id" => ?restart_id,
+                            );
+                            None
+                        }
+                    };
 
                     db::model::SpEreport {
                         restart_id: restart_id.into(),
@@ -500,8 +531,8 @@ mod tests {
         dbg!(&activation1);
         assert_eq!(
             activation1.sps.len(),
-            3,
-            "ereports from 3 SPs should be observed: {:?}",
+            4,
+            "ereports from 4 SPs should be observed: {:?}",
             activation1.sps,
         );
 
@@ -526,34 +557,47 @@ mod tests {
             "55e30cc7-a109-492f-aca9-735ed725df3c"
         ));
 
+        let sled0 =
+            ExpectedReporter { serial: "SimGimlet00", part: "SimGimletSp" };
         let sled0_ereports = [
-            (
-                Ena::from(1),
+            sled0.ereport(
+                1,
+                "ereport.data_loss.possible",
                 serde_json::json!({
-                    "baseboard_part_number": "SimGimletSp",
-                    "baseboard_serial_number": "SimGimlet00",
+                    "hubris_archive_id": "ffffffff",
+                    "hubris_version": "0.0.2",
+                    "hubris_task_name": "packrat",
+                    "hubris_task_gen": 0,
+                    "hubris_uptime_ms": 666,
+                    "ereport_message_version": 0,
+                    "lost": null,
+                }),
+            ),
+            sled0.ereport(
+                2,
+                "gov.nasa.apollo.o2_tanks.stir.begin",
+                serde_json::json!({
                     "hubris_archive_id": "ffffffff",
                     "hubris_version": "0.0.2",
                     "hubris_task_name": "task_apollo_server",
                     "hubris_task_gen": 13,
                     "hubris_uptime_ms": 1233,
                     "ereport_message_version": 0,
-                    "class": "gov.nasa.apollo.o2_tanks.stir.begin",
+                    "k": "gov.nasa.apollo.o2_tanks.stir.begin",
                     "message": "stirring the tanks",
                 }),
             ),
-            (
-                Ena::from(2),
+            sled0.ereport(
+                3,
+                "io.discovery.ae35.fault",
                 serde_json::json!({
-                    "baseboard_part_number": "SimGimletSp",
-                    "baseboard_serial_number": "SimGimlet00",
                     "hubris_archive_id": "ffffffff",
                     "hubris_version": "0.0.2",
                     "hubris_task_name": "drv_ae35_server",
                     "hubris_task_gen": 1,
                     "hubris_uptime_ms": 1234,
                     "ereport_message_version": 0,
-                    "class": "io.discovery.ae35.fault",
+                    "k": "io.discovery.ae35.fault",
                     "message": "i've just picked up a fault in the AE-35 unit",
                     "de": {
                         "scheme": "fmd",
@@ -566,18 +610,17 @@ mod tests {
                     "hours_to_failure": 72,
                 }),
             ),
-            (
-                Ena::from(3),
+            sled0.ereport(
+                4,
+                "gov.nasa.apollo.fault",
                 serde_json::json!({
-                    "baseboard_part_number": "SimGimletSp",
-                    "baseboard_serial_number": "SimGimlet00",
                     "hubris_archive_id": "ffffffff",
                     "hubris_version": "0.0.2",
                     "hubris_task_name": "task_apollo_server",
                     "hubris_task_gen": 13,
                     "hubris_uptime_ms": 1237,
                     "ereport_message_version": 0,
-                    "class": "gov.nasa.apollo.fault",
+                    "k": "gov.nasa.apollo.fault",
                     "message": "houston, we have a problem",
                     "crew": [
                         "Lovell",
@@ -586,65 +629,79 @@ mod tests {
                     ],
                 }),
             ),
-            (
-                Ena::from(4),
+            sled0.ereport(
+                5,
+                "flagrant_error",
                 serde_json::json!({
-                    "baseboard_part_number": "SimGimletSp",
-                    "baseboard_serial_number": "SimGimlet00",
                     "hubris_archive_id": "ffffffff",
                     "hubris_version": "0.0.2",
                     "hubris_task_name": "drv_thingy_server",
                     "hubris_task_gen": 2,
                     "hubris_uptime_ms": 1240,
                     "ereport_message_version": 0,
-                    "class": "flagrant_error",
+                    "k": "flagrant_error",
                     "computer": false,
                 }),
             ),
-            (
-                Ena::from(5),
+            sled0.ereport(
+                6,
+                "overfull_hbox",
                 serde_json::json!({
-                    "baseboard_part_number": "SimGimletSp",
-                    "baseboard_serial_number": "SimGimlet00",
                     "hubris_archive_id": "ffffffff",
                     "hubris_version": "0.0.2",
                     "hubris_task_name": "task_latex_server",
                     "hubris_task_gen": 1,
                     "hubris_uptime_ms": 1245,
                     "ereport_message_version": 0,
-                    "class": "overfull_hbox",
+                    "k": "overfull_hbox",
                     "badness": 10000,
                 }),
             ),
         ];
 
-        let sled1_ereports = [(
-            Ena::from(1),
-            serde_json::json!({
-                "baseboard_part_number": "SimGimletSp",
-                "baseboard_serial_number": "SimGimlet01",
-                "hubris_archive_id": "ffffffff",
-                "hubris_version": "0.0.2",
-                "hubris_task_name": "task_thermal_server",
-                "hubris_task_gen": 1,
-                "hubris_uptime_ms": 1233,
-                "ereport_message_version": 0,
-                "class": "computer.oxide.gimlet.chassis_integrity.fault",
-                "nosub_class": "chassis_integrity.cat_hair_detected",
-                "message": "cat hair detected inside gimlet",
-                "de": {
-                    "scheme": "fmd",
-                    "mod-name": "hubris-thermal-diagnosis",
-                    "mod-version": "1.0",
-                    "authority": {
-                        "product-id": "oxide",
-                        "server-id": "SimGimlet1",
-                    }
-                },
-                "certainty": 0x64,
-                "cat_hair_amount": 10000,
-            }),
-        )];
+        let sled1 =
+            ExpectedReporter { part: "SimGimletSp", serial: "SimGimlet01" };
+        let sled1_ereports = [
+            sled1.ereport(
+                1,
+                "ereport.data_loss.possible",
+                serde_json::json!({
+                    "hubris_archive_id": "ffffffff",
+                    "hubris_version": "0.0.2",
+                    "hubris_task_name": "packrat",
+                    "hubris_task_gen": 0,
+                    "hubris_uptime_ms": 666,
+                    "ereport_message_version": 0,
+                    "lost": null,
+                }),
+            ),
+            sled1.ereport(
+                2,
+                "computer.oxide.gimlet.chassis_integrity.fault",
+                serde_json::json!({
+                    "hubris_archive_id": "ffffffff",
+                    "hubris_version": "0.0.2",
+                    "hubris_task_name": "task_thermal_server",
+                    "hubris_task_gen": 1,
+                    "hubris_uptime_ms": 1233,
+                    "ereport_message_version": 0,
+                    "class": "computer.oxide.gimlet.chassis_integrity.fault",
+                    "nosub_class": "chassis_integrity.cat_hair_detected",
+                    "message": "cat hair detected inside gimlet",
+                    "de": {
+                        "scheme": "fmd",
+                        "mod-name": "hubris-thermal-diagnosis",
+                        "mod-version": "1.0",
+                        "authority": {
+                            "product-id": "oxide",
+                            "server-id": "SimGimlet1",
+                        }
+                    },
+                    "certainty": 0x64,
+                    "cat_hair_amount": 10000,
+                }),
+            ),
+        ];
 
         check_sp_ereports_exist(
             datastore,
@@ -689,11 +746,56 @@ mod tests {
         .await;
     }
 
+    struct ExpectedReporter {
+        serial: &'static str,
+        part: &'static str,
+    }
+
+    struct ExpectedEreport {
+        ena: Ena,
+        class: Option<&'static str>,
+        serial: Option<&'static str>,
+        part: Option<&'static str>,
+        json: serde_json::Value,
+    }
+
+    impl ExpectedReporter {
+        fn ereport(
+            &self,
+            ena: u64,
+            class: impl Into<Option<&'static str>>,
+            mut json: serde_json::Value,
+        ) -> ExpectedEreport {
+            if let serde_json::Value::Object(ref mut map) = &mut json {
+                map.insert(
+                    "baseboard_part_number".to_string(),
+                    self.part.into(),
+                );
+                map.insert(
+                    "baseboard_serial_number".to_string(),
+                    self.serial.into(),
+                );
+            } else {
+                panic!(
+                    "Expected ereport JSON to be an object, but it was some \
+                     other thing. This is a bug in your test code!",
+                );
+            };
+            ExpectedEreport {
+                ena: Ena(ena),
+                class: class.into(),
+                serial: Some(self.serial),
+                part: Some(self.part),
+                json,
+            }
+        }
+    }
+
     async fn check_sp_ereports_exist(
         datastore: &DataStore,
         opctx: &OpContext,
         restart_id: EreporterRestartUuid,
-        expected_ereports: &[(Ena, serde_json::Value)],
+        expected_ereports: &[ExpectedEreport],
     ) {
         let mut paginator = Paginator::new(
             std::num::NonZeroU32::new(100).unwrap(),
@@ -721,14 +823,35 @@ mod tests {
             expected_ereports.len()
         );
 
-        for (ena, report) in expected_ereports {
+        for ExpectedEreport { ena, json, serial, part, class } in
+            expected_ereports
+        {
             let Some(found_report) = found_ereports.get(ena) else {
                 panic!(
-                    "expected ereport {restart_id:?}:{ena} not found in database"
+                    "expected ereport {restart_id:?}:{ena} not found in \
+                     database"
                 )
             };
             assert_eq!(
-                report, &found_report.report,
+                serial,
+                &found_report.serial_number.as_deref(),
+                "expected ereport {restart_id:?}:{ena} to have serial \
+                 {serial:?}"
+            );
+            assert_eq!(
+                part,
+                &found_report.part_number.as_deref(),
+                "expected ereport {restart_id:?}:{ena} to have part number \
+                 {part:?}"
+            );
+            assert_eq!(
+                class,
+                &found_report.class.as_deref(),
+                "expected ereport {restart_id:?}:{ena} to have class \
+                 {class:?}"
+            );
+            assert_eq!(
+                json, &found_report.report,
                 "ereport data for {restart_id:?}:{ena} doesn't match expected"
             );
         }

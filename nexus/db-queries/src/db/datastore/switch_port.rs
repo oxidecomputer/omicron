@@ -504,7 +504,6 @@ impl DataStore {
                 result.link_lldp = lldp_link_config::dsl::lldp_link_config
                     .filter(lldp_link_config::id.eq_any(lldp_link_ids))
                     .select(LldpLinkConfig::as_select())
-                    .limit(1)
                     .load_async::<LldpLinkConfig>(&conn)
                     .await?;
 
@@ -523,7 +522,6 @@ impl DataStore {
                 let configs = tx_eq_config::dsl::tx_eq_config
                     .filter(tx_eq_config::id.eq_any(tx_eq_ids))
                     .select(TxEqConfig::as_select())
-                    .limit(1)
                     .load_async::<TxEqConfig>(&conn)
                     .await?;
                     result.tx_eq = tx_eq_ids_and_nulls

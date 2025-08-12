@@ -3108,10 +3108,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.lldp_link_config (
     chassis_id STRING(63),
     system_name STRING(63),
     system_description STRING(612),
-    management_ip TEXT,
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
-    time_deleted TIMESTAMPTZ
+    time_deleted TIMESTAMPTZ,
+    management_ip INET
 );
 
 CREATE TABLE IF NOT EXISTS omicron.public.tx_eq_config (
@@ -4800,7 +4800,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_oximeter_read_policy (
 -- Blueprint information related to pending RoT bootloader upgrades.
 CREATE TABLE IF NOT EXISTS omicron.public.bp_pending_mgs_update_rot_bootloader (
     -- Foreign key into the `blueprint` table
-    blueprint_id UUID,
+    blueprint_id UUID NOT NULL,
     -- identify of the device to be updated
     -- (foreign key into the `hw_baseboard_id` table)
     hw_baseboard_id UUID NOT NULL,
@@ -4821,7 +4821,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_pending_mgs_update_rot_bootloader (
 -- Blueprint information related to pending SP upgrades.
 CREATE TABLE IF NOT EXISTS omicron.public.bp_pending_mgs_update_sp (
     -- Foreign key into the `blueprint` table
-    blueprint_id UUID,
+    blueprint_id UUID NOT NULL,
     -- identify of the device to be updated
     -- (foreign key into the `hw_baseboard_id` table)
     hw_baseboard_id UUID NOT NULL,
@@ -4842,7 +4842,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_pending_mgs_update_sp (
 -- Blueprint information related to pending RoT upgrades.
 CREATE TABLE IF NOT EXISTS omicron.public.bp_pending_mgs_update_rot (
     -- Foreign key into the `blueprint` table
-    blueprint_id UUID,
+    blueprint_id UUID NOT NULL,
     -- identify of the device to be updated
     -- (foreign key into the `hw_baseboard_id` table)
     hw_baseboard_id UUID NOT NULL,
@@ -4860,6 +4860,33 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_pending_mgs_update_rot (
     expected_persistent_boot_preference omicron.public.hw_rot_slot NOT NULL,
     expected_pending_persistent_boot_preference omicron.public.hw_rot_slot,
     expected_transient_boot_preference omicron.public.hw_rot_slot,
+
+    PRIMARY KEY(blueprint_id, hw_baseboard_id)
+);
+
+-- Blueprint information related to pending host OS phase 1 updates.
+CREATE TABLE IF NOT EXISTS omicron.public.bp_pending_mgs_update_host_phase_1 (
+    -- Foreign key into the `blueprint` table
+    blueprint_id UUID NOT NULL,
+    -- identify of the device to be updated
+    -- (foreign key into the `hw_baseboard_id` table)
+    hw_baseboard_id UUID NOT NULL,
+    -- location of this device according to MGS
+    sp_type omicron.public.sp_type NOT NULL,
+    sp_slot INT4 NOT NULL,
+    -- artifact to be deployed to this device
+    artifact_sha256 STRING(64) NOT NULL,
+    artifact_version STRING(64) NOT NULL,
+
+    -- host-phase-1-specific details
+    expected_active_phase_1_slot omicron.public.hw_m2_slot NOT NULL,
+    expected_boot_disk omicron.public.hw_m2_slot NOT NULL,
+    expected_active_phase_1_hash STRING(64) NOT NULL,
+    expected_active_phase_2_hash STRING(64) NOT NULL,
+    expected_inactive_phase_1_hash STRING(64) NOT NULL,
+    expected_inactive_phase_2_hash STRING(64) NOT NULL,
+    sled_agent_ip INET NOT NULL,
+    sled_agent_port INT4 NOT NULL CHECK (sled_agent_port BETWEEN 0 AND 65535),
 
     PRIMARY KEY(blueprint_id, hw_baseboard_id)
 );
@@ -6497,7 +6524,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '177.0.0', NULL)
+    (TRUE, NOW(), NOW(), '179.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
