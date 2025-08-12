@@ -1458,7 +1458,9 @@ dependencies = [
  "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
+ "openapi-manager-types",
  "schemars",
+ "semver 1.0.26",
  "serde",
 ]
 
@@ -1607,7 +1609,9 @@ dependencies = [
  "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
+ "openapi-manager-types",
  "schemars",
+ "semver 1.0.26",
  "serde",
 ]
 
@@ -3664,7 +3668,9 @@ dependencies = [
  "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
+ "openapi-manager-types",
  "schemars",
+ "semver 1.0.26",
  "serde",
  "uuid",
 ]
@@ -7236,7 +7242,9 @@ dependencies = [
  "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
+ "openapi-manager-types",
  "schemars",
+ "semver 1.0.26",
  "serde",
 ]
 
@@ -8989,7 +8997,9 @@ dependencies = [
  "dropshot",
  "omicron-common",
  "omicron-workspace-hack",
+ "openapi-manager-types",
  "schemars",
+ "semver 1.0.26",
  "serde",
  "uuid",
 ]
@@ -12271,7 +12281,9 @@ dependencies = [
  "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
+ "openapi-manager-types",
  "schemars",
+ "semver 1.0.26",
  "serde",
  "sled-agent-types",
  "sled-diagnostics",

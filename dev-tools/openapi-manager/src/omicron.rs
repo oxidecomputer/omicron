@@ -36,7 +36,9 @@ pub fn all_apis() -> Vec<ManagedApiConfig> {
         },
         ManagedApiConfig {
             title: "ClickHouse Cluster Admin Keeper API",
-            versions: Versions::new_lockstep(semver::Version::new(0, 0, 1)),
+            versions: Versions::new_versioned(
+                clickhouse_admin_api::supported_versions(),
+            ),
             description: "API for interacting with the Oxide \
                 control plane's ClickHouse cluster keepers",
             boundary: ApiBoundary::Internal,
@@ -47,7 +49,9 @@ pub fn all_apis() -> Vec<ManagedApiConfig> {
         },
         ManagedApiConfig {
             title: "ClickHouse Cluster Admin Server API",
-            versions: Versions::new_lockstep(semver::Version::new(0, 0, 1)),
+            versions: Versions::new_versioned(
+                clickhouse_admin_api::supported_versions(),
+            ),
             description: "API for interacting with the Oxide \
                 control plane's ClickHouse cluster replica servers",
             boundary: ApiBoundary::Internal,
@@ -58,7 +62,9 @@ pub fn all_apis() -> Vec<ManagedApiConfig> {
         },
         ManagedApiConfig {
             title: "ClickHouse Single-Node Admin Server API",
-            versions: Versions::new_lockstep(semver::Version::new(0, 0, 1)),
+            versions: Versions::new_versioned(
+                clickhouse_admin_api::supported_versions(),
+            ),
             description: "API for interacting with the Oxide \
                 control plane's single-node ClickHouse database",
             boundary: ApiBoundary::Internal,
@@ -69,7 +75,9 @@ pub fn all_apis() -> Vec<ManagedApiConfig> {
         },
         ManagedApiConfig {
             title: "CockroachDB Cluster Admin API",
-            versions: Versions::new_lockstep(semver::Version::new(0, 0, 1)),
+            versions: Versions::new_versioned(
+                cockroach_admin_api::supported_versions(),
+            ),
             description: "API for interacting with the Oxide \
                 control plane's CockroachDB cluster",
             boundary: ApiBoundary::Internal,
@@ -90,7 +98,7 @@ pub fn all_apis() -> Vec<ManagedApiConfig> {
         },
         ManagedApiConfig {
             title: "Oxide Management Gateway Service API",
-            versions: Versions::new_lockstep(semver::Version::new(0, 0, 1)),
+            versions: Versions::new_versioned(gateway_api::supported_versions()),
             description: "API for interacting with the Oxide \
                 control plane's gateway service",
             boundary: ApiBoundary::Internal,
@@ -130,7 +138,9 @@ pub fn all_apis() -> Vec<ManagedApiConfig> {
         },
         ManagedApiConfig {
             title: "NTP Admin API",
-            versions: Versions::new_lockstep(semver::Version::new(0, 0, 1)),
+            versions: Versions::new_versioned(
+                ntp_admin_api::supported_versions(),
+            ),
             description: "API for interacting with NTP",
             boundary: ApiBoundary::Internal,
             api_description: ntp_admin_api_mod::stub_api_description,
@@ -139,7 +149,9 @@ pub fn all_apis() -> Vec<ManagedApiConfig> {
         },
         ManagedApiConfig {
             title: "Oxide Oximeter API",
-            versions: Versions::new_lockstep(semver::Version::new(0, 0, 1)),
+            versions: Versions::new_versioned(
+                oximeter_api::supported_versions(),
+            ),
             description: "API for interacting with oximeter",
             boundary: ApiBoundary::Internal,
             api_description: oximeter_api_mod::stub_api_description,
@@ -157,7 +169,9 @@ pub fn all_apis() -> Vec<ManagedApiConfig> {
         },
         ManagedApiConfig {
             title: "Oxide Sled Agent API",
-            versions: Versions::new_lockstep(semver::Version::new(0, 0, 1)),
+            versions: Versions::new_versioned(
+                sled_agent_api::supported_versions(),
+            ),
             description: "API for interacting with individual sleds",
             boundary: ApiBoundary::Internal,
             api_description: sled_agent_api_mod::stub_api_description,

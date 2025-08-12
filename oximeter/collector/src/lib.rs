@@ -339,6 +339,12 @@ impl Oximeter {
             bind_address: SocketAddr::V6(args.address),
             ..Default::default()
         })
+        .version_policy(dropshot::VersionPolicy::Dynamic(Box::new(
+            dropshot::ClientSpecifiesVersionInHeader::new(
+                omicron_common::api::VERSION_HEADER,
+                oximeter_api::VERSION_INITIAL,
+            ),
+        )))
         .start()
         .map_err(|e| Error::Server(e.to_string()))?;
 
@@ -451,6 +457,12 @@ impl Oximeter {
             bind_address: SocketAddr::V6(args.address),
             ..Default::default()
         })
+        .version_policy(dropshot::VersionPolicy::Dynamic(Box::new(
+            dropshot::ClientSpecifiesVersionInHeader::new(
+                omicron_common::api::VERSION_HEADER,
+                oximeter_api::VERSION_INITIAL,
+            ),
+        )))
         .start()
         .map_err(|e| Error::Server(e.to_string()))?;
         info!(log, "started oximeter standalone server");

@@ -6,3 +6,7 @@
 
 pub mod external;
 pub mod internal;
+
+/// API versioning header name used across Omicron APIs.
+pub const VERSION_HEADER: http::HeaderName =
+    http::HeaderName::from_static("api-version");

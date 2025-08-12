@@ -6,7 +6,7 @@
 //! running in an omicron zone.
 
 progenitor::generate_api!(
-    spec = "../../openapi/clickhouse-admin-server.json",
+    spec = "../../openapi/clickhouse-admin-server/clickhouse-admin-server-latest.json",
     interface = Positional,
     inner_type = slog::Logger,
     pre_hook = (|log: &slog::Logger, request: &reqwest::Request| {
