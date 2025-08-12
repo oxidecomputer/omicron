@@ -1130,6 +1130,7 @@ impl<'a> Planner<'a> {
             .all_sleds(SledFilter::SpsUpdatedByReconfigurator)
             .map(|(_sled_id, details)| &details.baseboard_id)
             .collect();
+
         let included_baseboards =
             self.inventory
                 .sps
@@ -5508,6 +5509,7 @@ pub(crate) mod test {
                 },
                 hash: ArtifactHash([0; 32]),
                 size: 0,
+                sign: None,
             }
         };
     }
