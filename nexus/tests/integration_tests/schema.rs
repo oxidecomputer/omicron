@@ -2889,6 +2889,148 @@ fn after_171_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
     })
 }
 
+const NEXUS_ID_181_0: &str = "387433f9-1473-4ca2-b156-9670452985e0";
+const OLD_NEXUS_ID_181_0: &str = "287433f9-1473-4ca2-b156-9670452985e0";
+
+const BP_ID_181_0: &str = "5a5ff941-3b5a-403b-9fda-db2049f4c736";
+const OLD_BP_ID_181_0: &str = "4a5ff941-3b5a-403b-9fda-db2049f4c736";
+
+fn before_181_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+    Box::pin(async move {
+        // Create a blueprint which contains a Nexus - we'll use this for the migration.
+        ctx.client
+            .execute(
+                &format!(
+                    "INSERT INTO omicron.public.bp_target
+                     (version, blueprint_id, enabled, time_made_target)
+                     VALUES
+                     (1, '{BP_ID_181_0}', true, now());",
+                ),
+                &[],
+            )
+            .await
+            .expect("inserted bp_target rows for 181");
+        ctx.client
+            .execute(
+                &format!(
+                    "INSERT INTO omicron.public.bp_omicron_zone (
+                         blueprint_id, sled_id, id, zone_type,
+                         primary_service_ip, primary_service_port,
+                         second_service_ip, second_service_port,
+                         dataset_zpool_name, bp_nic_id,
+                         dns_gz_address, dns_gz_address_index,
+                         ntp_ntp_servers, ntp_dns_servers, ntp_domain,
+                         nexus_external_tls, nexus_external_dns_servers,
+                         snat_ip, snat_first_port, snat_last_port,
+                         external_ip_id, filesystem_pool, disposition,
+                         disposition_expunged_as_of_generation,
+                         disposition_expunged_ready_for_cleanup,
+                         image_source, image_artifact_sha256
+                     )
+                     VALUES (
+                         '{BP_ID_181_0}', gen_random_uuid(), '{NEXUS_ID_181_0}',
+                         'nexus', '192.168.1.10', 8080,
+                         NULL, NULL, NULL, NULL,
+                         NULL, NULL, NULL, NULL, NULL,
+                         false, ARRAY[]::INET[], NULL, NULL, NULL,
+                         NULL, gen_random_uuid(), 'in_service',
+                         NULL, false, 'install_dataset', NULL
+                     );"
+                ),
+                &[],
+            )
+            .await
+            .expect("inserted bp_omicron_zone rows for 181");
+
+        // ALSO create an old blueprint, which isn't the latest target.
+        //
+        // We should ignore this one! No rows should be inserted for old data.
+        ctx.client
+            .execute(
+                &format!(
+                    "INSERT INTO omicron.public.bp_target
+                     (version, blueprint_id, enabled, time_made_target)
+                     VALUES
+                     (0, '{OLD_BP_ID_181_0}', true, now());",
+                ),
+                &[],
+            )
+            .await
+            .expect("inserted bp_target rows for 181");
+        ctx.client
+            .execute(
+                &format!(
+                    "INSERT INTO omicron.public.bp_omicron_zone (
+                         blueprint_id, sled_id, id, zone_type,
+                         primary_service_ip, primary_service_port,
+                         second_service_ip, second_service_port,
+                         dataset_zpool_name, bp_nic_id,
+                         dns_gz_address, dns_gz_address_index,
+                         ntp_ntp_servers, ntp_dns_servers, ntp_domain,
+                         nexus_external_tls, nexus_external_dns_servers,
+                         snat_ip, snat_first_port, snat_last_port,
+                         external_ip_id, filesystem_pool, disposition,
+                         disposition_expunged_as_of_generation,
+                         disposition_expunged_ready_for_cleanup,
+                         image_source, image_artifact_sha256
+                     )
+                     VALUES (
+                         '{OLD_BP_ID_181_0}', gen_random_uuid(),
+                         '{OLD_NEXUS_ID_181_0}', 'nexus', '192.168.1.10', 8080,
+                         NULL, NULL, NULL, NULL,
+                         NULL, NULL, NULL, NULL, NULL,
+                         false, ARRAY[]::INET[], NULL, NULL, NULL,
+                         NULL, gen_random_uuid(), 'in_service',
+                         NULL, false, 'install_dataset', NULL
+                     );"
+                ),
+                &[],
+            )
+            .await
+            .expect("inserted bp_omicron_zone rows for 181");
+    })
+}
+
+fn after_181_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+    Box::pin(async move {
+        // After the migration, the new row should be created - only for Nexuses
+        // in the latest blueprint.
+        //
+        // Note that "OLD_NEXUS_ID_181_0" doesn't get a row - it's in an old
+        // blueprint.
+        let rows = ctx
+            .client
+            .query(
+                "SELECT
+                   nexus_id,
+                   last_drained_blueprint_id,
+                   state
+                 FROM omicron.public.db_metadata_nexus;",
+                &[],
+            )
+            .await
+            .expect("queried post-migration inv_sled_config_reconciler");
+
+        let rows = process_rows(&rows);
+        assert_eq!(rows.len(), 1);
+        let row = &rows[0];
+
+        // Create a new row for the Nexuses in the target blueprint
+        assert_eq!(
+            row.values[0].expect("nexus_id").unwrap(),
+            &AnySqlType::Uuid(NEXUS_ID_181_0.parse().unwrap())
+        );
+        assert_eq!(row.values[1].expect("last_drained_blueprint_id"), None);
+        assert_eq!(
+            row.values[2].expect("state").unwrap(),
+            &AnySqlType::Enum(SqlEnum::from((
+                "db_metadata_nexus_state",
+                "active"
+            )))
+        );
+    })
+}
+
 // Lazily initializes all migration checks. The combination of Rust function
 // pointers and async makes defining a static table fairly painful, so we're
 // using lazy initialization instead.
@@ -2987,7 +3129,10 @@ fn get_migration_checks() -> BTreeMap<Version, DataMigrationFns> {
         Version::new(171, 0, 0),
         DataMigrationFns::new().before(before_171_0_0).after(after_171_0_0),
     );
-
+    map.insert(
+        Version::new(181, 0, 0),
+        DataMigrationFns::new().before(before_181_0_0).after(after_181_0_0),
+    );
     map
 }
 

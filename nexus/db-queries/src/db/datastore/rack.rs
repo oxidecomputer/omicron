@@ -723,6 +723,7 @@ impl DataStore {
                     // - Zpools
                     // - Datasets
                     // - A blueprint
+                    // - Nexus database access records
                     //
                     // Which RSS has already allocated during bootstrapping.
 
@@ -783,6 +784,15 @@ impl DataStore {
                              as target";
                             &e,
                         );
+                        err.set(RackInitError::BlueprintTargetSet(e)).unwrap();
+                        DieselError::RollbackTransaction
+                    })?;
+
+                    // Insert Nexus database access records
+                    self.initialize_nexus_access_from_blueprint_on_connection(
+                        &conn,
+                        *blueprint.id.as_untyped_uuid()
+                    ).await.map_err(|e| {
                         err.set(RackInitError::BlueprintTargetSet(e)).unwrap();
                         DieselError::RollbackTransaction
                     })?;

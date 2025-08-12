@@ -108,11 +108,27 @@ async fn main_impl() -> anyhow::Result<()> {
         }
         Cmd::Upgrade { version } => {
             println!("Upgrading to {version}");
-            datastore
-                .ensure_schema(&log, version.clone(), Some(&all_versions))
-                .await
-                .map_err(|e| anyhow!(e))?;
-            println!("Upgrade to {version} complete");
+            let checked_action = datastore
+                .check_schema_and_access(
+                    None,
+                    version.clone(),
+                    db::datastore::ConsumerPolicy::Update,
+                )
+                .await?;
+
+            match checked_action.action() {
+                db::datastore::SchemaAction::Ready => {
+                    println!("Already at version {version}")
+                }
+                db::datastore::SchemaAction::Update => {
+                    datastore
+                        .update_schema(checked_action, Some(&all_versions))
+                        .await
+                        .map_err(|e| anyhow!(e))?;
+                    println!("Update to {version} complete");
+                }
+                _ => println!("Cannot update to version {version}"),
+            }
         }
     }
     datastore.terminate().await;

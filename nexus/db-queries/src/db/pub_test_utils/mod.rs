@@ -114,7 +114,9 @@ impl TestDatabaseBuilder {
                     Interface::Datastore => {
                         let pool = new_pool(log, &db);
                         let datastore = Arc::new(
-                            DataStore::new(&log, pool, None).await.unwrap(),
+                            DataStore::new(&log, pool, None, None)
+                                .await
+                                .unwrap(),
                         );
                         TestDatabase {
                             db,
@@ -300,7 +302,8 @@ async fn datastore_test(
 
     let cfg = db::Config { url: db.pg_config().clone() };
     let pool = Arc::new(db::Pool::new_single_host(&log, &cfg));
-    let datastore = Arc::new(DataStore::new(&log, pool, None).await.unwrap());
+    let datastore =
+        Arc::new(DataStore::new(&log, pool, None, None).await.unwrap());
 
     // Create an OpContext with the credentials of "db-init" just for the
     // purpose of loading the built-in users, roles, and assignments.

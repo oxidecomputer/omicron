@@ -2370,6 +2370,14 @@ table! {
 }
 
 table! {
+    db_metadata_nexus (nexus_id) {
+        nexus_id -> Uuid,
+        last_drained_blueprint_id -> Nullable<Uuid>,
+        state -> crate::enums::DbMetadataNexusStateEnum,
+    }
+}
+
+table! {
     migration (id) {
         id -> Uuid,
         instance_id -> Uuid,
