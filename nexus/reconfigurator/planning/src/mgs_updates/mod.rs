@@ -435,15 +435,21 @@ fn try_make_update(
 }
 
 #[cfg(test)]
+mod test_helpers;
+
+#[cfg(test)]
 mod test {
     use super::ImpossibleUpdatePolicy;
     use super::plan_mgs_updates;
+    use super::test_helpers::TestBoard;
+    use super::test_helpers::TestBoards;
     use chrono::Utc;
     use dropshot::ConfigLogging;
     use dropshot::ConfigLoggingLevel;
     use gateway_client::types::PowerState;
     use gateway_client::types::RotState;
     use gateway_client::types::SpComponentCaboose;
+    use gateway_client::types::SpIdentifier;
     use gateway_client::types::SpState;
     use gateway_client::types::SpType;
     use nexus_types::deployment::ExpectedVersion;
@@ -556,86 +562,29 @@ mod test {
         return artifact_hash;
     }
 
-    /// Describes the SPs and RoTs in the environment used in these tests
-    ///
-    /// There will be:
-    ///
-    /// - 4 sled SPs
-    /// - 2 switch SPs
-    /// - 2 PSC SPs
-    ///
-    /// The specific set of hardware (boards) vary and are hardcoded:
-    ///
-    /// - sled 0: gimlet-d, oxide-rot-1
-    /// - other sleds: gimlet-e, oxide-rot-1
-    /// - switch 0: sidecar-b, oxide-rot-1
-    /// - switch 1: sidecar-c, oxide-rot-1
-    /// - psc 0: psc-b, oxide-rot-1
-    /// - psc 1: psc-c, oxide-rot-1
-    fn test_collection_config() -> BTreeMap<
-        (SpType, u16),
-        (&'static str, &'static str, &'static str, &'static str),
-    > {
-        BTreeMap::from([
-            (
-                (SpType::Sled, 0),
-                ("sled_0", "gimlet-d", "oxide-rot-1", ROT_SIGN_GIMLET),
-            ),
-            (
-                (SpType::Sled, 1),
-                ("sled_1", "gimlet-e", "oxide-rot-1", ROT_SIGN_GIMLET),
-            ),
-            (
-                (SpType::Sled, 2),
-                ("sled_2", "gimlet-e", "oxide-rot-1", ROT_SIGN_GIMLET),
-            ),
-            (
-                (SpType::Sled, 3),
-                ("sled_3", "gimlet-e", "oxide-rot-1", ROT_SIGN_GIMLET),
-            ),
-            (
-                (SpType::Switch, 0),
-                ("switch_0", "sidecar-b", "oxide-rot-1", ROT_SIGN_SWITCH),
-            ),
-            (
-                (SpType::Switch, 1),
-                ("switch_1", "sidecar-c", "oxide-rot-1", ROT_SIGN_SWITCH),
-            ),
-            (
-                (SpType::Power, 0),
-                ("power_0", "psc-b", "oxide-rot-1", ROT_SIGN_PSC),
-            ),
-            (
-                (SpType::Power, 1),
-                ("power_1", "psc-c", "oxide-rot-1", ROT_SIGN_PSC),
-            ),
-        ])
-    }
-
     /// Describes the SPs and RoTs in the environment used in these tests, but
     /// spearated by component for use in sequential testing
     fn test_config()
     -> BTreeMap<(SpType, u16, MgsUpdateComponent), (&'static str, &'static str)>
     {
-        test_collection_config()
+        TestBoards::new()
             .into_iter()
-            .flat_map(
-                |(
-                    (sp_type, slot_id),
-                    (serial, sp_board_name, rot_board_name, ..),
-                )| {
-                    [
+            .flat_map(|board| {
+                [
+                    (
+                        (board.id.type_, board.id.slot, MgsUpdateComponent::Sp),
+                        (board.serial, board.sp_board),
+                    ),
+                    (
                         (
-                            (sp_type, slot_id, MgsUpdateComponent::Sp),
-                            (serial, sp_board_name),
+                            board.id.type_,
+                            board.id.slot,
+                            MgsUpdateComponent::Rot,
                         ),
-                        (
-                            (sp_type, slot_id, MgsUpdateComponent::Rot),
-                            (serial, rot_board_name),
-                        ),
-                    ]
-                },
-            )
+                        (board.serial, board.rot_board),
+                    ),
+                ]
+            })
             .collect()
     }
 
@@ -822,12 +771,15 @@ mod test {
             serial_number: String::from("unused"),
         };
 
-        let test_config = test_collection_config();
-        for (
-            (sp_type, sp_slot),
-            (serial, caboose_sp_board, caboose_rot_board, rkth),
-        ) in test_config
-        {
+        for board in TestBoards::new().into_iter() {
+            let TestBoard {
+                id: SpIdentifier { type_: sp_type, slot: sp_slot },
+                serial,
+                sp_board: caboose_sp_board,
+                rot_board: caboose_rot_board,
+                rot_sign: rkth,
+            } = board;
+
             let sp_state = SpState {
                 model: format!("dummy_{}", sp_type),
                 serial_number: serial.to_string(),
