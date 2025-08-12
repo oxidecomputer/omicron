@@ -12,6 +12,8 @@ use futures::StreamExt;
 use futures::stream::FuturesUnordered;
 use gateway_messages::SpPort;
 use gateway_sp_comms::SingleSp;
+use iddqd::IdOrdItem;
+use iddqd::IdOrdMap;
 use serde::Deserialize;
 use serde::Serialize;
 use slog::Logger;
@@ -70,14 +72,45 @@ pub struct SwitchPortDescription {
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct LocationConfig {
-    /// List of human-readable location names; the actual strings don't matter,
-    /// but they're used in log messages and to sync with the refined locations
-    /// contained in `determination`. For "rack v1" see RFD 250 § 7.2.
-    pub names: Vec<String>,
+    /// Description of the locations where MGS might be running.
+    ///
+    /// For "rack v1" see RFD 250 § 7.2.
+    pub description: Vec<LocationDescriptionConfig>,
 
     /// A list of switch ports that can be used to determine which location (of
     /// those listed in `names`) we are.
     pub determination: Vec<LocationDeterminationConfig>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct LocationDescriptionConfig {
+    /// Human-readable name; the actual string doesn't matter, but it's used in
+    /// log messages and to sync with the refined locations contained in
+    /// [`LocationDeterminationConfig`].
+    pub name: String,
+
+    /// Index of the sled on which MGS in this location is running.
+    pub local_sled: u16,
+
+    /// Config option controlling whether MGS will accept a request to reset the
+    /// SP of its local sled.
+    ///
+    /// MGS resetting its local sled's SP is dangerous during SP updates,
+    /// because the "reset" operation involves a watchdog that requires MGS to
+    /// send a "disarm the watchdog" message _after_ the reset, which it can't
+    /// do if it just powered itself off.
+    pub allow_local_sled_sp_reset: bool,
+}
+
+impl IdOrdItem for LocationDescriptionConfig {
+    type Key<'a> = &'a str;
+
+    fn key(&self) -> Self::Key<'_> {
+        &self.name
+    }
+
+    iddqd::id_upcast!();
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
@@ -87,13 +120,13 @@ pub struct LocationDeterminationConfig {
     pub interfaces: Vec<String>,
 
     /// If the SP on one of the `interfaces` communicates with us on its port 1,
-    /// we must be one of this set of locations (which should be a subset of our
-    /// parent [`LocationConfig`]'s `names).
+    /// we must be one of this set of locations (which must be a subset of our
+    /// parent [`LocationConfig`]'s names).
     pub sp_port_1: Vec<String>,
 
     /// If the SP on one of the `interfaces` communicates with us on its port 2,
-    /// we must be one of this set of locations (which should be a subset of our
-    /// parent [`LocationConfig`]'s `names).
+    /// we must be one of this set of locations (which must be a subset of our
+    /// parent [`LocationConfig`]'s names).
     pub sp_port_2: Vec<String>,
 }
 
@@ -132,7 +165,7 @@ impl LocationMap {
 
         // Collect responses and solve for a single location
         let location = resolve_location(
-            config.names,
+            config.description.iter().map(|d| d.name.as_str()).collect(),
             ReceiverStream::new(refined_locations),
             log,
         )
@@ -185,7 +218,7 @@ impl LocationMap {
 //    a nonexistent switch port.
 #[derive(Debug, PartialEq, Eq)]
 pub(super) struct ValidatedLocationConfig {
-    names: HashSet<String>,
+    description: IdOrdMap<LocationDescriptionConfig>,
     determination: Vec<ValidatedLocationDeterminationConfig>,
 }
 
@@ -224,9 +257,37 @@ impl ValidatedLocationConfig {
         // collection of reasons the config is invalid (if any)
         let mut reasons = Vec::new();
 
-        let names = vec_to_hashset(config.names, &mut reasons, || {
-            String::from("location names contain at least one duplicate entry")
-        });
+        let description = {
+            let n = config.description.len();
+            let description =
+                config.description.into_iter().collect::<IdOrdMap<_>>();
+
+            // Validate that we have no duplicate location names.
+            if n != description.len() {
+                reasons.push(String::from(
+                    "location descriptions contain at least one duplicate name",
+                ));
+            }
+
+            // Validate that we have no duplicate `local_sled` values.
+            let local_sled = description
+                .iter()
+                .map(|d| d.local_sled)
+                .collect::<HashSet<_>>();
+            if n != local_sled.len() {
+                reasons.push(String::from(
+                    "location descriptions contain at least one \
+                     duplicate local_sled",
+                ));
+            }
+
+            description
+        };
+
+        // Most of our validation below only cares about our description's name
+        // fields; collect those into a set.
+        let names =
+            description.iter().map(|d| d.name.clone()).collect::<HashSet<_>>();
 
         // make sure every port has a defined ID for any element of `names`, and
         // no extras
@@ -312,7 +373,7 @@ impl ValidatedLocationConfig {
             .collect::<Vec<_>>();
 
         if reasons.is_empty() {
-            Ok(Self { names, determination })
+            Ok(Self { description, determination })
         } else {
             Err(StartupError::InvalidConfig { reasons })
         }
@@ -413,7 +474,7 @@ async fn discover_sps(
 /// `determinations` will yield `[(SwitchPort(0), ["a", "b"]), (SwitchPort(1),
 /// ["c"])]`, we would notice the empty intersection and fail accordingly.
 async fn resolve_location<S>(
-    mut locations: HashSet<String>,
+    mut locations: HashSet<&str>,
     determinations: S,
     log: &Logger,
 ) -> Result<String, String>
@@ -430,7 +491,7 @@ where
             "interface" => interface,
             "refined_locations" => ?refined_locations,
         );
-        locations.retain(|name| refined_locations.contains(name));
+        locations.retain(|name| refined_locations.contains(*name));
 
         // If we're down to 1 location (or 0 if something has gone horribly
         // wrong), we don't need to wait for the remaining answers; we've
@@ -441,7 +502,7 @@ where
     }
 
     match locations.len() {
-        1 => Ok(locations.into_iter().next().unwrap()),
+        1 => Ok(locations.into_iter().next().unwrap().to_string()),
         0 => Err(String::from(concat!(
             "could not determine unique location ",
             "(all possible locations eliminated)",
@@ -481,10 +542,22 @@ mod tests {
             ]),
         }];
         let bad_config = LocationConfig {
-            names: vec![
-                String::from("a"),
-                String::from("b"),
-                String::from("a"), // dupe
+            description: vec![
+                LocationDescriptionConfig {
+                    name: String::from("a"),
+                    local_sled: 14,
+                    allow_local_sled_sp_reset: false,
+                },
+                LocationDescriptionConfig {
+                    name: String::from("b"),
+                    local_sled: 14, // dupe
+                    allow_local_sled_sp_reset: false,
+                },
+                LocationDescriptionConfig {
+                    name: String::from("a"), // dupe
+                    local_sled: 16,
+                    allow_local_sled_sp_reset: false,
+                },
             ],
             determination: vec![
                 LocationDeterminationConfig {
@@ -528,7 +601,8 @@ mod tests {
         assert_eq!(
             reasons,
             &[
-                "location names contain at least one duplicate entry",
+                "location descriptions contain at least one duplicate name",
+                "location descriptions contain at least one duplicate local_sled",
                 "port \"fake\" is missing an ID for location \"b\"",
                 "port \"fake\" contains unknown location \"c\"",
                 "determination `0.sp_port_1` contains duplicate names",
@@ -557,7 +631,18 @@ mod tests {
             ]),
         }];
         let good_config = LocationConfig {
-            names: vec![String::from("a"), String::from("b")],
+            description: vec![
+                LocationDescriptionConfig {
+                    name: String::from("a"),
+                    local_sled: 14,
+                    allow_local_sled_sp_reset: false,
+                },
+                LocationDescriptionConfig {
+                    name: String::from("b"),
+                    local_sled: 16,
+                    allow_local_sled_sp_reset: false,
+                },
+            ],
             determination: vec![
                 LocationDeterminationConfig {
                     interfaces: vec!["fake".to_string()],
@@ -571,6 +656,8 @@ mod tests {
                 },
             ],
         };
+        let good_description =
+            good_config.description.iter().cloned().collect();
 
         let config = ValidatedLocationConfig::validate(
             &good_ports,
@@ -582,7 +669,7 @@ mod tests {
         assert_eq!(
             config,
             ValidatedLocationConfig {
-                names: HashSet::from([String::from("a"), String::from("b")]),
+                description: good_description,
                 determination: vec![
                     ValidatedLocationDeterminationConfig {
                         switch_port: SwitchPort(0),
@@ -600,12 +687,12 @@ mod tests {
     }
 
     struct Harness {
-        names: HashSet<String>,
+        names: HashSet<&'static str>,
         determinations: stream::Iter<vec::IntoIter<(String, HashSet<String>)>>,
     }
 
     impl Harness {
-        fn new(names: &[&str], determinations: &[&[&str]]) -> Self {
+        fn new(names: &[&'static str], determinations: &[&[&str]]) -> Self {
             let determinations: Vec<(String, HashSet<String>)> = determinations
                 .iter()
                 .enumerate()
@@ -617,7 +704,7 @@ mod tests {
                 })
                 .collect();
             Self {
-                names: names.iter().copied().map(String::from).collect(),
+                names: names.iter().copied().collect(),
                 determinations: stream::iter(determinations),
             }
         }
