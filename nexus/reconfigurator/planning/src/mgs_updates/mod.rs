@@ -694,6 +694,15 @@ mod test {
     const ARTIFACT_HASH_ROT_SWITCH_A: ArtifactHash = ArtifactHash([21; 32]);
     /// Hash of fake artifact for fake switch RoT slot B
     const ARTIFACT_HASH_ROT_SWITCH_B: ArtifactHash = ArtifactHash([22; 32]);
+    /// Hash of fake artifact for fake gimlet RoT bootloader
+    const ARTIFACT_HASH_ROT_BOOTLOADER_GIMLET: ArtifactHash =
+        ArtifactHash([24; 32]);
+    /// Hash of fake artifact for fake psc RoT bootloader
+    const ARTIFACT_HASH_ROT_BOOTLOADER_PSC: ArtifactHash =
+        ArtifactHash([25; 32]);
+    /// Hash of fake artifact for fake switch RoT bootloader
+    const ARTIFACT_HASH_ROT_BOOTLOADER_SWITCH: ArtifactHash =
+        ArtifactHash([28; 32]);
 
     // unused artifact hashes
 
@@ -709,7 +718,7 @@ mod test {
     const ROT_SIGN_SWITCH: &str =
         "3333333333333333333333333333333333333333333333333333333333333333";
 
-    #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
     enum MgsUpdateComponent {
         Sp,
         Rot,
@@ -743,6 +752,12 @@ mod test {
             ARTIFACT_HASH_ROT_SWITCH_A
         } else if kind == ArtifactKind::SWITCH_ROT_IMAGE_B {
             ARTIFACT_HASH_ROT_SWITCH_B
+        } else if kind == ArtifactKind::GIMLET_ROT_STAGE0 {
+            ARTIFACT_HASH_ROT_BOOTLOADER_GIMLET
+        } else if kind == ArtifactKind::PSC_ROT_STAGE0 {
+            ARTIFACT_HASH_ROT_BOOTLOADER_PSC
+        } else if kind == ArtifactKind::SWITCH_ROT_STAGE0 {
+            ARTIFACT_HASH_ROT_BOOTLOADER_SWITCH
         } else {
             panic!("test bug: no artifact for artifact kind {kind:?}")
         };
@@ -825,6 +840,14 @@ mod test {
                         ),
                         (
                             (sp_type, slot_id, MgsUpdateComponent::Rot),
+                            (serial, rot_board_name),
+                        ),
+                        (
+                            (
+                                sp_type,
+                                slot_id,
+                                MgsUpdateComponent::RotBootloader,
+                            ),
                             (serial, rot_board_name),
                         ),
                     ]
@@ -940,6 +963,29 @@ mod test {
                 ),
                 Some(ROT_SIGN_SWITCH.into()),
             ),
+            //
+            make_artifact(
+                "oxide-rot-1",
+                ArtifactKind::GIMLET_ROT_STAGE0,
+                test_artifact_for_artifact_kind(
+                    ArtifactKind::GIMLET_ROT_STAGE0,
+                ),
+                Some(ROT_SIGN_GIMLET.into()),
+            ),
+            make_artifact(
+                "oxide-rot-1",
+                ArtifactKind::PSC_ROT_STAGE0,
+                test_artifact_for_artifact_kind(ArtifactKind::PSC_ROT_STAGE0),
+                Some(ROT_SIGN_PSC.into()),
+            ),
+            make_artifact(
+                "oxide-rot-1",
+                ArtifactKind::SWITCH_ROT_STAGE0,
+                test_artifact_for_artifact_kind(
+                    ArtifactKind::SWITCH_ROT_STAGE0,
+                ),
+                Some(ROT_SIGN_SWITCH.into()),
+            ),
         ];
 
         TufRepoDescription {
@@ -978,16 +1024,22 @@ mod test {
     // will appear to be running version `active_version` except those
     // identified in `active_version_exceptions`.  All SPs and RoTs will appear
     // to have `inactive_version` in the inactive slot.
+    //
+    // TODO-K: Use a struct so I don't have to tell clippy to shut up
+    #[allow(clippy::too_many_arguments)]
     fn make_collection(
-        active_version: ArtifactVersion,
-        active_version_exceptions: &BTreeMap<(SpType, u16), ArtifactVersion>,
-        inactive_version: ExpectedVersion,
+        active_sp_version: ArtifactVersion,
+        active_sp_version_exceptions: &BTreeMap<(SpType, u16), ArtifactVersion>,
+        inactive_sp_version: ExpectedVersion,
         active_rot_version: ArtifactVersion,
         active_rot_version_exceptions: &BTreeMap<
             (SpType, u16),
             ArtifactVersion,
         >,
         inactive_rot_version: ExpectedVersion,
+        stage0_version: ArtifactVersion,
+        stage0_version_exceptions: &BTreeMap<(SpType, u16), ArtifactVersion>,
+        stage0_next_version: ExpectedVersion,
     ) -> Collection {
         let mut builder = nexus_inventory::CollectionBuilder::new(
             "planning_mgs_updates_basic",
@@ -1031,12 +1083,15 @@ mod test {
             let baseboard_id = builder
                 .found_sp_state("test", sp_type, sp_slot, sp_state)
                 .unwrap();
-            let active_version = active_version_exceptions
+            let active_sp_version = active_sp_version_exceptions
                 .get(&(sp_type, sp_slot))
-                .unwrap_or(&active_version);
+                .unwrap_or(&active_sp_version);
             let active_rot_version = active_rot_version_exceptions
                 .get(&(sp_type, sp_slot))
                 .unwrap_or(&active_rot_version);
+            let stage0_version = stage0_version_exceptions
+                .get(&(sp_type, sp_slot))
+                .unwrap_or(&stage0_version);
 
             builder
                 .found_caboose(
@@ -1049,7 +1104,7 @@ mod test {
                         git_commit: String::from("unused"),
                         name: caboose_sp_board.to_string(),
                         sign: None,
-                        version: active_version.as_str().to_string(),
+                        version: active_sp_version.as_str().to_string(),
                     },
                 )
                 .unwrap();
@@ -1070,8 +1125,24 @@ mod test {
                 )
                 .unwrap();
 
+            builder
+                .found_caboose(
+                    &baseboard_id,
+                    CabooseWhich::Stage0,
+                    "test",
+                    SpComponentCaboose {
+                        board: caboose_rot_board.to_string(),
+                        epoch: None,
+                        git_commit: String::from("unused"),
+                        name: caboose_rot_board.to_string(),
+                        sign: Some(rkth.to_string()),
+                        version: stage0_version.as_str().to_string(),
+                    },
+                )
+                .unwrap();
+
             if let ExpectedVersion::Version(inactive_version) =
-                &inactive_version
+                &inactive_sp_version
             {
                 builder
                     .found_caboose(
@@ -1109,6 +1180,26 @@ mod test {
                     )
                     .unwrap();
             }
+
+            if let ExpectedVersion::Version(stage0_next_version) =
+                &stage0_next_version
+            {
+                builder
+                    .found_caboose(
+                        &baseboard_id,
+                        CabooseWhich::Stage0Next,
+                        "test",
+                        SpComponentCaboose {
+                            board: caboose_rot_board.to_string(),
+                            epoch: None,
+                            git_commit: String::from("unused"),
+                            name: caboose_rot_board.to_string(),
+                            sign: Some(rkth.to_string()),
+                            version: stage0_next_version.as_str().to_string(),
+                        },
+                    )
+                    .unwrap();
+            }
         }
 
         builder.build()
@@ -1129,6 +1220,9 @@ mod test {
         let collection = make_collection(
             ARTIFACT_VERSION_2,
             &BTreeMap::from([((SpType::Sled, 0), ARTIFACT_VERSION_1)]),
+            ExpectedVersion::NoValidVersion,
+            ARTIFACT_VERSION_2,
+            &BTreeMap::new(),
             ExpectedVersion::NoValidVersion,
             ARTIFACT_VERSION_2,
             &BTreeMap::new(),
@@ -1196,6 +1290,9 @@ mod test {
             ARTIFACT_VERSION_2,
             &BTreeMap::new(),
             ExpectedVersion::NoValidVersion,
+            ARTIFACT_VERSION_2,
+            &BTreeMap::new(),
+            ExpectedVersion::NoValidVersion,
         );
         let later_updates = plan_mgs_updates(
             log,
@@ -1215,6 +1312,9 @@ mod test {
         let later_collection = make_collection(
             ARTIFACT_VERSION_2,
             &BTreeMap::from([((SpType::Switch, 1), ARTIFACT_VERSION_1)]),
+            ExpectedVersion::NoValidVersion,
+            ARTIFACT_VERSION_2,
+            &BTreeMap::new(),
             ExpectedVersion::NoValidVersion,
             ARTIFACT_VERSION_2,
             &BTreeMap::new(),
@@ -1248,6 +1348,9 @@ mod test {
             ARTIFACT_VERSION_2,
             &BTreeMap::new(),
             ExpectedVersion::NoValidVersion,
+            ARTIFACT_VERSION_2,
+            &BTreeMap::new(),
+            ExpectedVersion::NoValidVersion,
         );
         let later_updates = plan_mgs_updates(
             log,
@@ -1265,6 +1368,9 @@ mod test {
         let collection = make_collection(
             ARTIFACT_VERSION_2,
             &BTreeMap::from([((SpType::Sled, 0), ARTIFACT_VERSION_1)]),
+            ExpectedVersion::NoValidVersion,
+            ARTIFACT_VERSION_2,
+            &BTreeMap::new(),
             ExpectedVersion::NoValidVersion,
             ARTIFACT_VERSION_2,
             &BTreeMap::new(),
@@ -1319,6 +1425,9 @@ mod test {
             ARTIFACT_VERSION_2,
             &BTreeMap::new(),
             ExpectedVersion::NoValidVersion,
+            ARTIFACT_VERSION_2,
+            &BTreeMap::new(),
+            ExpectedVersion::NoValidVersion,
         );
         let new_updates = plan_mgs_updates(
             log,
@@ -1357,6 +1466,9 @@ mod test {
         let collection = make_collection(
             ARTIFACT_VERSION_2,
             &BTreeMap::from([((SpType::Sled, 0), ARTIFACT_VERSION_1_5)]),
+            ExpectedVersion::NoValidVersion,
+            ARTIFACT_VERSION_2,
+            &BTreeMap::new(),
             ExpectedVersion::NoValidVersion,
             ARTIFACT_VERSION_2,
             &BTreeMap::new(),
@@ -1414,6 +1526,9 @@ mod test {
             ExpectedVersion::NoValidVersion,
             ARTIFACT_VERSION_2,
             &BTreeMap::from([((SpType::Sled, 0), ARTIFACT_VERSION_1)]),
+            ExpectedVersion::NoValidVersion,
+            ARTIFACT_VERSION_2,
+            &BTreeMap::new(),
             ExpectedVersion::NoValidVersion,
         );
         let current_boards = &collection.baseboards;
@@ -1478,6 +1593,9 @@ mod test {
                 ((SpType::Switch, 1), ARTIFACT_VERSION_1),
             ]),
             ExpectedVersion::NoValidVersion,
+            ARTIFACT_VERSION_2,
+            &BTreeMap::new(),
+            ExpectedVersion::NoValidVersion,
         );
         let later_updates = plan_mgs_updates(
             log,
@@ -1502,6 +1620,9 @@ mod test {
             ExpectedVersion::NoValidVersion,
             ARTIFACT_VERSION_2,
             &BTreeMap::from([((SpType::Switch, 1), ARTIFACT_VERSION_1)]),
+            ExpectedVersion::NoValidVersion,
+            ARTIFACT_VERSION_2,
+            &BTreeMap::new(),
             ExpectedVersion::NoValidVersion,
         );
         let later_updates = plan_mgs_updates(
@@ -1532,6 +1653,9 @@ mod test {
             ARTIFACT_VERSION_2,
             &BTreeMap::new(),
             ExpectedVersion::NoValidVersion,
+            ARTIFACT_VERSION_2,
+            &BTreeMap::new(),
+            ExpectedVersion::NoValidVersion,
         );
         let later_updates = plan_mgs_updates(
             log,
@@ -1552,6 +1676,9 @@ mod test {
             ExpectedVersion::NoValidVersion,
             ARTIFACT_VERSION_2,
             &BTreeMap::from([((SpType::Sled, 0), ARTIFACT_VERSION_1)]),
+            ExpectedVersion::NoValidVersion,
+            ARTIFACT_VERSION_2,
+            &BTreeMap::new(),
             ExpectedVersion::NoValidVersion,
         );
         let updates = plan_mgs_updates(
@@ -1604,6 +1731,9 @@ mod test {
             ARTIFACT_VERSION_2,
             &BTreeMap::from([((SpType::Sled, 0), ARTIFACT_VERSION_1)]),
             ExpectedVersion::Version(ARTIFACT_VERSION_1),
+            ARTIFACT_VERSION_2,
+            &BTreeMap::new(),
+            ExpectedVersion::NoValidVersion,
         );
         let new_updates = plan_mgs_updates(
             log,
@@ -1647,6 +1777,9 @@ mod test {
             ARTIFACT_VERSION_2,
             &BTreeMap::from([((SpType::Sled, 0), ARTIFACT_VERSION_1_5)]),
             ExpectedVersion::NoValidVersion,
+            ARTIFACT_VERSION_2,
+            &BTreeMap::new(),
+            ExpectedVersion::NoValidVersion,
         );
         let new_updates = plan_mgs_updates(
             log,
@@ -1683,6 +1816,8 @@ mod test {
         logctx.cleanup_successful();
     }
 
+    // TODO-K: Create test_basic_rot_bootloader()
+
     // Confirm our behavior for impossible updates
     #[test]
     fn test_impossible_update_policy() {
@@ -1700,6 +1835,9 @@ mod test {
             ARTIFACT_VERSION_2,
             &BTreeMap::new(),
             ExpectedVersion::Version(ARTIFACT_VERSION_1_5),
+            ARTIFACT_VERSION_2,
+            &BTreeMap::new(),
+            ExpectedVersion::NoValidVersion,
         );
         let current_boards = &collection.baseboards;
         let initial_updates = PendingMgsUpdates::new();
@@ -1757,6 +1895,9 @@ mod test {
             ARTIFACT_VERSION_2,
             &BTreeMap::new(),
             ExpectedVersion::Version(ARTIFACT_VERSION_1_5),
+            ARTIFACT_VERSION_2,
+            &BTreeMap::new(),
+            ExpectedVersion::NoValidVersion,
         );
 
         // If we plan with `ImpossibleUpdatePolicy::Keep`, we should _not_
@@ -1823,6 +1964,7 @@ mod test {
         // configure the inventory collection that we create at each step.
         let mut sp_exceptions = BTreeMap::new();
         let mut rot_exceptions = BTreeMap::new();
+        let mut rot_bootloader_exceptions = BTreeMap::new();
 
         // We do not control the order of updates.  But we expect to update each
         // of the SPs in this map.  When we do, we expect to find the given
@@ -1831,10 +1973,26 @@ mod test {
             .into_iter()
             .map(|(k, (serial, board_name))| {
                 if board_name == "oxide-rot-1" {
-                    let kind = match k.0 {
-                        SpType::Sled => ArtifactKind::GIMLET_ROT_IMAGE_B,
-                        SpType::Power => ArtifactKind::PSC_ROT_IMAGE_B,
-                        SpType::Switch => ArtifactKind::SWITCH_ROT_IMAGE_B,
+                    let component = k.2;
+                    // TODO-K: Clean up, maybe do a method for MgsUpdateComponent
+                    // kind_by_sp_type() or something like that?
+                    let kind = if component == MgsUpdateComponent::Rot {
+                        match k.0 {
+                            SpType::Sled => ArtifactKind::GIMLET_ROT_IMAGE_B,
+                            SpType::Power => ArtifactKind::PSC_ROT_IMAGE_B,
+                            SpType::Switch => ArtifactKind::SWITCH_ROT_IMAGE_B,
+                        }
+                    } else if component == MgsUpdateComponent::RotBootloader {
+                        match k.0 {
+                            SpType::Sled => ArtifactKind::GIMLET_ROT_STAGE0,
+                            SpType::Power => ArtifactKind::PSC_ROT_STAGE0,
+                            SpType::Switch => ArtifactKind::SWITCH_ROT_STAGE0,
+                        }
+                    } else {
+                        panic!(
+                            " unsupported MGS update component: {:#?}",
+                            component
+                        );
                     };
                     (k, (serial, test_artifact_for_artifact_kind(kind)))
                 } else {
@@ -1852,6 +2010,9 @@ mod test {
                 ExpectedVersion::NoValidVersion,
                 ARTIFACT_VERSION_1,
                 &rot_exceptions,
+                ExpectedVersion::NoValidVersion,
+                ARTIFACT_VERSION_1,
+                &rot_bootloader_exceptions,
                 ExpectedVersion::NoValidVersion,
             );
 
@@ -1894,7 +2055,11 @@ mod test {
                     );
                 }
                 PendingMgsUpdateDetails::RotBootloader { .. } => {
-                    unimplemented!()
+                    assert!(
+                        rot_bootloader_exceptions
+                            .insert((sp_type, sp_slot), ARTIFACT_VERSION_2)
+                            .is_none()
+                    );
                 }
             }
 
@@ -1908,6 +2073,9 @@ mod test {
             ExpectedVersion::NoValidVersion,
             ARTIFACT_VERSION_1,
             &rot_exceptions,
+            ExpectedVersion::NoValidVersion,
+            ARTIFACT_VERSION_1,
+            &rot_bootloader_exceptions,
             ExpectedVersion::NoValidVersion,
         );
         let last_updates = plan_mgs_updates(
@@ -1938,10 +2106,24 @@ mod test {
             .into_iter()
             .map(|(k, (serial, board_name))| {
                 if board_name == "oxide-rot-1" {
-                    let kind = match k.0 {
-                        SpType::Sled => ArtifactKind::GIMLET_ROT_IMAGE_B,
-                        SpType::Power => ArtifactKind::PSC_ROT_IMAGE_B,
-                        SpType::Switch => ArtifactKind::SWITCH_ROT_IMAGE_B,
+                    let component = k.2;
+                    let kind = if component == MgsUpdateComponent::Rot {
+                        match k.0 {
+                            SpType::Sled => ArtifactKind::GIMLET_ROT_IMAGE_B,
+                            SpType::Power => ArtifactKind::PSC_ROT_IMAGE_B,
+                            SpType::Switch => ArtifactKind::SWITCH_ROT_IMAGE_B,
+                        }
+                    } else if component == MgsUpdateComponent::RotBootloader {
+                        match k.0 {
+                            SpType::Sled => ArtifactKind::GIMLET_ROT_STAGE0,
+                            SpType::Power => ArtifactKind::PSC_ROT_STAGE0,
+                            SpType::Switch => ArtifactKind::SWITCH_ROT_STAGE0,
+                        }
+                    } else {
+                        panic!(
+                            " unsupported MGS update component: {:#?}",
+                            component
+                        );
                     };
                     (k, (serial, test_artifact_for_artifact_kind(kind)))
                 } else {
@@ -1953,6 +2135,9 @@ mod test {
         // Update the whole system at once.
         let impossible_update_policy = ImpossibleUpdatePolicy::Reevaluate;
         let collection = make_collection(
+            ARTIFACT_VERSION_1,
+            &BTreeMap::new(),
+            ExpectedVersion::NoValidVersion,
             ARTIFACT_VERSION_1,
             &BTreeMap::new(),
             ExpectedVersion::NoValidVersion,
@@ -1981,6 +2166,9 @@ mod test {
         // Now, notice when they've all been updated, even if the limit is only
         // one.
         let collection = make_collection(
+            ARTIFACT_VERSION_2,
+            &BTreeMap::new(),
+            ExpectedVersion::NoValidVersion,
             ARTIFACT_VERSION_2,
             &BTreeMap::new(),
             ExpectedVersion::NoValidVersion,
@@ -2025,20 +2213,22 @@ mod test {
         assert_eq!(update.artifact_hash, expected_artifact);
         assert_eq!(update.artifact_version, ARTIFACT_VERSION_2);
         assert_eq!(update.baseboard_id.serial_number, *expected_serial);
-        let (expected_active_version, expected_inactive_version) = match &update
-            .details
-        {
-            PendingMgsUpdateDetails::Rot {
-                expected_active_slot,
-                expected_inactive_version,
-                ..
-            } => (&expected_active_slot.version, expected_inactive_version),
-            PendingMgsUpdateDetails::Sp {
-                expected_active_version,
-                expected_inactive_version,
-            } => (expected_active_version, expected_inactive_version),
-            PendingMgsUpdateDetails::RotBootloader { .. } => unimplemented!(),
-        };
+        let (expected_active_version, expected_inactive_version) =
+            match &update.details {
+                PendingMgsUpdateDetails::Rot {
+                    expected_active_slot,
+                    expected_inactive_version,
+                    ..
+                } => (&expected_active_slot.version, expected_inactive_version),
+                PendingMgsUpdateDetails::Sp {
+                    expected_active_version,
+                    expected_inactive_version,
+                } => (expected_active_version, expected_inactive_version),
+                PendingMgsUpdateDetails::RotBootloader {
+                    expected_stage0_version,
+                    expected_stage0_next_version,
+                } => (expected_stage0_version, expected_stage0_next_version),
+            };
         assert_eq!(*expected_active_version, ARTIFACT_VERSION_1);
         assert_eq!(*expected_inactive_version, ExpectedVersion::NoValidVersion);
     }
@@ -2055,6 +2245,9 @@ mod test {
         let log = &logctx.log;
         let repo = make_tuf_repo();
         let mut collection = make_collection(
+            ARTIFACT_VERSION_2,
+            &BTreeMap::from([((SpType::Sled, 0), ARTIFACT_VERSION_1)]),
+            ExpectedVersion::NoValidVersion,
             ARTIFACT_VERSION_2,
             &BTreeMap::from([((SpType::Sled, 0), ARTIFACT_VERSION_1)]),
             ExpectedVersion::NoValidVersion,
