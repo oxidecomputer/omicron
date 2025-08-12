@@ -50,11 +50,12 @@ impl RetryableMgsError for GatewaySpComponentResetError {
 impl RetryableMgsError for HostPhase1HashError {
     fn should_try_next_mgs(&self) -> bool {
         match self {
-            // This is a timeout _from the SP_, not related to any communication
-            // with MGS. We have no reason to believe retrying via the other MGS
-            // will change this result. (The only time we've seen this error in
-            // practice is due to bugs on the SP where the hashing engine gets
-            // stuck.)
+            // `Timeout` here means we were successfully communicating with the
+            // SP via MGS, but the SP failed to compute the hash in a reasonable
+            // amount of time. We have no reason to believe retrying via the
+            // other MGS will change this result. (The only time we've seen this
+            // error in practice was due to a bug on the SP where the hashing
+            // engine got stuck.)
             HostPhase1HashError::Timeout(_) => false,
             HostPhase1HashError::ContentsModifiedWhileHashing => false,
             HostPhase1HashError::RequestError { err, .. } => {

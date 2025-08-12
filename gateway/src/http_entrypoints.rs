@@ -483,8 +483,8 @@ impl GatewayApi for GatewayImpl {
             // "disarm the watchdog" message. But if we've reset our own local
             // sled, we won't be alive to disarm the watchdog, which will result
             // in the SP (erroneously) rolling back the update. (In production
-            // we always disable this; it's a config option to allow for
-            // dev/test environments that don't need this.)
+            // we always disallow this; it's a config option to support dev/test
+            // environments that don't need this.)
             if component == SpComponent::SP_ITSELF
                 && !apictx
                     .mgmt_switch
