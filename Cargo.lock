@@ -6606,7 +6606,6 @@ dependencies = [
  "id-map",
  "iddqd",
  "itertools 0.14.0",
- "nexus-client",
  "nexus-sled-agent-shared",
  "nexus-types",
  "ntp-admin-client",

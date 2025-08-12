@@ -48,7 +48,6 @@ omicron-workspace-hack.workspace = true
 expectorate.workspace = true
 gateway-test-utils.workspace = true
 httpmock.workspace = true
-nexus-client.workspace = true
 omicron-sled-agent.workspace = true
 regex.workspace = true
 tokio.workspace = true
