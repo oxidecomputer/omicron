@@ -132,6 +132,8 @@ pub struct LocationDeterminationConfig {
 
 #[derive(Debug)]
 pub(super) struct LocationMap {
+    local_sled: u16,
+    allow_local_sled_sp_reset: bool,
     port_to_id: HashMap<SwitchPort, SpIdentifier>,
     id_to_port: HashMap<SpIdentifier, SwitchPort>,
 }
@@ -171,6 +173,13 @@ impl LocationMap {
         )
         .await?;
 
+        // `resolve_location` can only return a string we gave it, so we know we
+        // can look the full description back up from just the name.
+        let description = config
+            .description
+            .get(location.as_str())
+            .expect("resolve_location() returned a location we gave it");
+
         // based on the resolved location and the input configuration, build the
         // map of port <-> logical ID
         let mut port_to_id = HashMap::with_capacity(ports.len());
@@ -185,7 +194,12 @@ impl LocationMap {
             id_to_port.insert(id, port);
         }
 
-        Ok(Self { port_to_id, id_to_port })
+        Ok(Self {
+            local_sled: description.local_sled,
+            allow_local_sled_sp_reset: description.allow_local_sled_sp_reset,
+            port_to_id,
+            id_to_port,
+        })
     }
 
     /// Get the ID of a given port.
