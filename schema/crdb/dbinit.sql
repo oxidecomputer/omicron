@@ -187,6 +187,24 @@ CREATE TYPE IF NOT EXISTS omicron.public.sled_state AS ENUM (
     'decommissioned'
 );
 
+-- The model of CPU installed in a particular sled, discovered by sled-agent
+-- and reported to Nexus. This determines what VMs can run on a sled: instances
+-- that require a specific minimum CPU platform can only run on sleds whose
+-- CPUs support all the features of that platform.
+CREATE TYPE IF NOT EXISTS omicron.public.sled_cpu_family AS ENUM (
+    -- Sled-agent didn't recognize the sled's CPU.
+    'unknown',
+
+    -- AMD Milan, or lab CPU close enough that sled-agent reported it as one.
+    'amd_milan',
+
+    -- AMD Turin, or lab CPU close enough that sled-agent reported it as one.
+    'amd_turin',
+
+    -- AMD Turin Dense. There are no "Turin Dense-likes", so this is precise.
+    'amd_turin_dense'
+);
+
 CREATE TABLE IF NOT EXISTS omicron.public.sled (
     /* Identity metadata (asset) */
     id UUID PRIMARY KEY,
@@ -229,7 +247,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.sled (
 
     /* The bound port of the Repo Depot API server, running on the same IP as
        the sled agent server. */
-    repo_depot_port INT4 CHECK (port BETWEEN 0 AND 65535) NOT NULL
+    repo_depot_port INT4 CHECK (port BETWEEN 0 AND 65535) NOT NULL,
+
+    /* The sled's detected CPU family. */
+    cpu_family omicron.public.sled_cpu_family NOT NULL
 );
 
 -- Add an index that ensures a given physical sled (identified by serial and
@@ -3706,6 +3727,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_sled_agent (
     -- present.
     mupdate_override_boot_disk_error TEXT,
 
+    -- The sled's CPU family. This is also duplicated with the `sled` table,
+    -- similar to `usable_hardware_threads` and friends above.
+    cpu_family omicron.public.sled_cpu_family NOT NULL,
+
     CONSTRAINT reconciler_status_sled_config_present_if_running CHECK (
         (reconciler_status_kind = 'running'
             AND reconciler_status_sled_config IS NOT NULL)
@@ -6524,7 +6549,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '179.0.0', NULL)
+    (TRUE, NOW(), NOW(), '180.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
