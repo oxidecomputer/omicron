@@ -14,6 +14,7 @@
 mod location_map;
 
 pub use self::location_map::LocationConfig;
+pub use self::location_map::LocationDescriptionConfig;
 pub use self::location_map::LocationDeterminationConfig;
 use self::location_map::LocationMap;
 pub use self::location_map::SwitchPortConfig;
