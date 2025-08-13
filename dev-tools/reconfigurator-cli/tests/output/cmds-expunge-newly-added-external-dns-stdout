@@ -334,7 +334,7 @@ parent:    06c88262-f435-410e-ba98-101bed41ec27
 
  PENDING MGS-MANAGED UPDATES: 0
 
-Empty planning report for blueprint 3f00b694-1b16-4aaa-8f78-e6b3a527b434.
+empty planning report for blueprint 3f00b694-1b16-4aaa-8f78-e6b3a527b434.
 
 
 
@@ -1025,7 +1025,7 @@ parent:    3f00b694-1b16-4aaa-8f78-e6b3a527b434
 
  PENDING MGS-MANAGED UPDATES: 0
 
-Empty planning report for blueprint 366b0b68-d80e-4bc1-abd3-dc69837847e0.
+empty planning report for blueprint 366b0b68-d80e-4bc1-abd3-dc69837847e0.
 
 
 
@@ -1034,13 +1034,13 @@ Empty planning report for blueprint 366b0b68-d80e-4bc1-abd3-dc69837847e0.
 INFO skipping noop image source check for all sleds, reason: no target release is currently set
 WARN cannot issue more MGS-driven updates (no current artifacts)
 generated blueprint 9c998c1d-1a7b-440a-ae0c-40f781dea6e2 based on parent blueprint 366b0b68-d80e-4bc1-abd3-dc69837847e0
-Planning report for blueprint 9c998c1d-1a7b-440a-ae0c-40f781dea6e2:
-Chicken switches:
+planning report for blueprint 9c998c1d-1a7b-440a-ae0c-40f781dea6e2:
+chicken switches:
     add zones with mupdate override:   false
 
-* Discretionary zones placed:
+* discretionary zones placed:
   * 1 zone on sled 711ac7f8-d19e-4572-bdb9-e9b50f6e362a: external_dns
-* Zone updates waiting on discretionary zones
+* zone updates waiting on discretionary zones
 
 
 > blueprint-diff 366b0b68-d80e-4bc1-abd3-dc69837847e0 9c998c1d-1a7b-440a-ae0c-40f781dea6e2
@@ -1728,13 +1728,13 @@ parent:    366b0b68-d80e-4bc1-abd3-dc69837847e0
 
  PENDING MGS-MANAGED UPDATES: 0
 
-Planning report for blueprint 9c998c1d-1a7b-440a-ae0c-40f781dea6e2:
-Chicken switches:
+planning report for blueprint 9c998c1d-1a7b-440a-ae0c-40f781dea6e2:
+chicken switches:
     add zones with mupdate override:   false
 
-* Discretionary zones placed:
+* discretionary zones placed:
   * 1 zone on sled 711ac7f8-d19e-4572-bdb9-e9b50f6e362a: external_dns
-* Zone updates waiting on discretionary zones
+* zone updates waiting on discretionary zones
 
 
 

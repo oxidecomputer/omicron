@@ -210,13 +210,13 @@ WARN cannot configure RoT update for board (missing sign in caboose from invento
 INFO configuring MGS-driven update, artifact_version: 1.0.0, artifact_hash: 7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670, expected_inactive_version: NoValidVersion, expected_active_version: 0.0.1, component: sp, sp_slot: 0, sp_type: Sled, serial_number: serial0, part_number: model0
 INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1 based on parent blueprint dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21
-Planning report for blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1:
-Chicken switches:
+planning report for blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1:
+chicken switches:
     add zones with mupdate override:   false
 
 * 1 pending MGS update:
   * model0:serial0: Sp { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: NoValidVersion }
-* Zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+* zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
 
 
 > blueprint-diff dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
@@ -392,13 +392,13 @@ INFO performed noop image source checks on sled, sled_id: d81c6a84-79b8-4958-ae4
 INFO MGS-driven update not yet completed (will keep it), artifact_version: 1.0.0, artifact_hash: 7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670, expected_inactive_version: NoValidVersion, expected_active_version: 0.0.1, component: sp, sp_slot: 0, sp_type: Sled, serial_number: serial0, part_number: model0
 INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4 based on parent blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
-Planning report for blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4:
-Chicken switches:
+planning report for blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4:
+chicken switches:
     add zones with mupdate override:   false
 
 * 1 pending MGS update:
   * model0:serial0: Sp { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: NoValidVersion }
-* Zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+* zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
 
 
 > blueprint-diff 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1 58d5e830-0884-47d8-a7cd-b2b3751adeb4
@@ -579,13 +579,13 @@ WARN cannot configure RoT update for board (missing sign in caboose from invento
 INFO configuring MGS-driven update, artifact_version: 1.0.0, artifact_hash: 7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670, expected_inactive_version: NoValidVersion, expected_active_version: 0.0.1, component: sp, sp_slot: 1, sp_type: Sled, serial_number: serial1, part_number: model1
 INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint af934083-59b5-4bf6-8966-6fb5292c29e1 based on parent blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4
-Planning report for blueprint af934083-59b5-4bf6-8966-6fb5292c29e1:
-Chicken switches:
+planning report for blueprint af934083-59b5-4bf6-8966-6fb5292c29e1:
+chicken switches:
     add zones with mupdate override:   false
 
 * 1 pending MGS update:
   * model1:serial1: Sp { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: NoValidVersion }
-* Zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+* zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
 
 
 > blueprint-diff 58d5e830-0884-47d8-a7cd-b2b3751adeb4 af934083-59b5-4bf6-8966-6fb5292c29e1
@@ -776,13 +776,13 @@ WARN cannot configure RoT update for board (missing sign in caboose from invento
 INFO configuring MGS-driven update, artifact_version: 1.0.0, artifact_hash: 7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670, expected_inactive_version: Version(ArtifactVersion("0.5.0")), expected_active_version: 0.0.1, component: sp, sp_slot: 1, sp_type: Sled, serial_number: serial1, part_number: model1
 INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint df06bb57-ad42-4431-9206-abff322896c7 based on parent blueprint af934083-59b5-4bf6-8966-6fb5292c29e1
-Planning report for blueprint df06bb57-ad42-4431-9206-abff322896c7:
-Chicken switches:
+planning report for blueprint df06bb57-ad42-4431-9206-abff322896c7:
+chicken switches:
     add zones with mupdate override:   false
 
 * 1 pending MGS update:
   * model1:serial1: Sp { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: Version(ArtifactVersion("0.5.0")) }
-* Zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+* zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
 
 
 > blueprint-diff af934083-59b5-4bf6-8966-6fb5292c29e1 df06bb57-ad42-4431-9206-abff322896c7
@@ -972,13 +972,13 @@ WARN cannot configure RoT update for board (missing sign in caboose from invento
 INFO configuring MGS-driven update, artifact_version: 1.0.0, artifact_hash: 7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670, expected_inactive_version: NoValidVersion, expected_active_version: 0.0.1, component: sp, sp_slot: 2, sp_type: Sled, serial_number: serial2, part_number: model2
 INFO ran out of boards for MGS-driven update
 generated blueprint 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba based on parent blueprint df06bb57-ad42-4431-9206-abff322896c7
-Planning report for blueprint 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba:
-Chicken switches:
+planning report for blueprint 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba:
+chicken switches:
     add zones with mupdate override:   false
 
 * 1 pending MGS update:
   * model2:serial2: Sp { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: NoValidVersion }
-* Zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+* zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
 
 
 > blueprint-diff df06bb57-ad42-4431-9206-abff322896c7 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba
@@ -1168,8 +1168,8 @@ WARN cannot configure RoT update for board (missing sign in caboose from invento
 INFO skipping board for MGS-driven update, serial_number: serial1, part_number: model1
 INFO ran out of boards for MGS-driven update
 generated blueprint 9034c710-3e57-45f3-99e5-4316145e87ac based on parent blueprint 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba
-Planning report for blueprint 9034c710-3e57-45f3-99e5-4316145e87ac:
-Chicken switches:
+planning report for blueprint 9034c710-3e57-45f3-99e5-4316145e87ac:
+chicken switches:
     add zones with mupdate override:   false
 
 * 1 out-of-date zone updated in-place:

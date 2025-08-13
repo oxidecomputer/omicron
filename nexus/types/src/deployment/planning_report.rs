@@ -97,7 +97,7 @@ impl fmt::Display for PlanningReport {
         if self.is_empty() {
             writeln!(
                 f,
-                "Empty planning report for blueprint {}.",
+                "empty planning report for blueprint {}.",
                 self.blueprint_id,
             )?;
         } else {
@@ -112,11 +112,11 @@ impl fmt::Display for PlanningReport {
                 zone_updates,
                 cockroachdb_settings,
             } = self;
-            writeln!(f, "Planning report for blueprint {blueprint_id}:")?;
+            writeln!(f, "planning report for blueprint {blueprint_id}:")?;
             if *chicken_switches != PlannerChickenSwitches::default() {
                 writeln!(
                     f,
-                    "Chicken switches:\n{}",
+                    "chicken switches:\n{}",
                     chicken_switches.display()
                 )?;
             }
@@ -285,14 +285,14 @@ impl fmt::Display for PlanningNoopImageSourceStepReport {
         if *no_target_release {
             return writeln!(
                 f,
-                "* Skipping noop image source check for all sleds (no current TUF repo)",
+                "* skipping noop image source check for all sleds (no current TUF repo)",
             );
         }
 
         for (sled_id, reason) in skipped_sleds.iter() {
             writeln!(
                 f,
-                "* Skipping noop image source check on sled {sled_id}: {reason}"
+                "* skipping noop image source check on sled {sled_id}: {reason}"
             )?;
         }
 
@@ -304,7 +304,7 @@ impl fmt::Display for PlanningNoopImageSourceStepReport {
             if *num_eligible > 0 && *num_dataset > 0 {
                 writeln!(
                     f,
-                    "* Noop converting {num_eligible}/{num_dataset} install-dataset zones \
+                    "* noop converting {num_eligible}/{num_dataset} install-dataset zones \
                        to artifact store on sled {sled_id}",
                 )?;
             }
@@ -605,13 +605,13 @@ impl fmt::Display for PlanningAddStepReport {
         } = self;
 
         if let Some(waiting_on) = waiting_on {
-            writeln!(f, "* Waiting on {}", waiting_on.as_str())?;
+            writeln!(f, "* waiting on {}", waiting_on.as_str())?;
         }
 
         if !sleds_without_ntp_zones_in_inventory.is_empty() {
             writeln!(
                 f,
-                "* Waiting for NTP zones to appear in inventory on sleds: {}",
+                "* waiting for NTP zones to appear in inventory on sleds: {}",
                 sleds_without_ntp_zones_in_inventory
                     .iter()
                     .map(|sled_id| format!("{sled_id}"))
@@ -623,7 +623,7 @@ impl fmt::Display for PlanningAddStepReport {
         if !sleds_without_zpools_for_ntp_zones.is_empty() {
             writeln!(
                 f,
-                "* No zpools in service for NTP zones on sleds: {}",
+                "* no zpools in service for NTP zones on sleds: {}",
                 sleds_without_zpools_for_ntp_zones
                     .iter()
                     .map(|sled_id| format!("{sled_id}"))
@@ -635,7 +635,7 @@ impl fmt::Display for PlanningAddStepReport {
         if !sleds_waiting_for_ntp_zone.is_empty() {
             writeln!(
                 f,
-                "* Discretionary zone placement waiting for NTP zones on sleds: {}",
+                "* discretionary zone placement waiting for NTP zones on sleds: {}",
                 sleds_waiting_for_ntp_zone
                     .iter()
                     .map(|sled_id| format!("{sled_id}"))
@@ -647,7 +647,7 @@ impl fmt::Display for PlanningAddStepReport {
         if !sleds_getting_ntp_and_discretionary_zones.is_empty() {
             writeln!(
                 f,
-                "* Sleds getting NTP zones and which have other services already, \
+                "* sleds getting NTP zones and which have other services already, \
                    making them eligible for discretionary zones: {}",
                 sleds_getting_ntp_and_discretionary_zones
                     .iter()
@@ -658,14 +658,14 @@ impl fmt::Display for PlanningAddStepReport {
         }
 
         for sled_id in sleds_missing_ntp_zone {
-            writeln!(f, "* Missing NTP zone on sled {sled_id}",)?;
+            writeln!(f, "* missing NTP zone on sled {sled_id}",)?;
         }
 
         for (sled_id, zpools) in sleds_missing_crucible_zone {
             for zpool_id in zpools {
                 writeln!(
                     f,
-                    "* Missing Crucible zone for sled {sled_id}, zpool {zpool_id}",
+                    "* missing Crucible zone for sled {sled_id}, zpool {zpool_id}",
                 )?;
             }
         }
@@ -675,12 +675,12 @@ impl fmt::Display for PlanningAddStepReport {
         {
             writeln!(
                 f,
-                "* Only placed {placed}/{wanted_to_place} desired {kind} zones"
+                "* only placed {placed}/{wanted_to_place} desired {kind} zones"
             )?;
         }
 
         if !discretionary_zones_placed.is_empty() {
-            writeln!(f, "* Discretionary zones placed:")?;
+            writeln!(f, "* discretionary zones placed:")?;
             for (sled_id, kinds) in discretionary_zones_placed.iter() {
                 let (n, s) = plural_vec(kinds);
                 writeln!(
@@ -800,7 +800,7 @@ impl fmt::Display for PlanningZoneUpdatesStepReport {
         } = self;
 
         if let Some(waiting_on) = waiting_on {
-            writeln!(f, "* Zone updates waiting on {}", waiting_on.as_str())?;
+            writeln!(f, "* zone updates waiting on {}", waiting_on.as_str())?;
         }
 
         if !expunged_zones.is_empty() {
@@ -975,7 +975,7 @@ impl fmt::Display for PlanningCockroachdbSettingsStepReport {
                 self;
             writeln!(
                 f,
-                "* Will ensure cockroachdb setting: {preserve_downgrade}"
+                "* will ensure cockroachdb setting: {preserve_downgrade}"
             )?;
         }
         Ok(())
