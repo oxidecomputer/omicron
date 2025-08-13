@@ -441,8 +441,15 @@ mod test_helpers;
 mod test {
     use super::ImpossibleUpdatePolicy;
     use super::plan_mgs_updates;
+    use super::test_helpers::ARTIFACT_HASH_ROT_GIMLET_B;
+    use super::test_helpers::ARTIFACT_HASH_ROT_SWITCH_B;
+    use super::test_helpers::ARTIFACT_HASH_SP_GIMLET_D;
+    use super::test_helpers::ARTIFACT_HASH_SP_SIDECAR_C;
+    use super::test_helpers::ARTIFACT_VERSION_1;
+    use super::test_helpers::ARTIFACT_VERSION_1_5;
+    use super::test_helpers::ARTIFACT_VERSION_2;
+    use super::test_helpers::MgsUpdateComponent;
     use super::test_helpers::TestBoards;
-    use chrono::Utc;
     use dropshot::ConfigLogging;
     use dropshot::ConfigLoggingLevel;
     use gateway_client::types::SpType;
@@ -451,272 +458,11 @@ mod test {
     use nexus_types::deployment::PendingMgsUpdateDetails;
     use nexus_types::deployment::PendingMgsUpdates;
     use nexus_types::deployment::TargetReleaseDescription;
-    use omicron_common::api::external::TufArtifactMeta;
-    use omicron_common::api::external::TufRepoDescription;
-    use omicron_common::api::external::TufRepoMeta;
-    use omicron_common::update::ArtifactId;
     use omicron_test_utils::dev::LogContext;
     use std::collections::BTreeMap;
     use std::collections::BTreeSet;
     use strum::IntoEnumIterator;
     use tufaceous_artifact::ArtifactHash;
-    use tufaceous_artifact::ArtifactKind;
-    use tufaceous_artifact::ArtifactVersion;
-    use tufaceous_artifact::KnownArtifactKind;
-
-    /// Version that will be used for all artifacts in the TUF repo
-    const ARTIFACT_VERSION_2: ArtifactVersion =
-        ArtifactVersion::new_const("2.0.0");
-    /// Version that will be "deployed" in the SP we want to update
-    const ARTIFACT_VERSION_1: ArtifactVersion =
-        ArtifactVersion::new_const("1.0.0");
-    /// Version that's different from the other two
-    const ARTIFACT_VERSION_1_5: ArtifactVersion =
-        ArtifactVersion::new_const("1.5.0");
-
-    /// Hash of fake artifact for fake gimlet-e SP
-    const ARTIFACT_HASH_SP_GIMLET_E: ArtifactHash = ArtifactHash([1; 32]);
-    /// Hash of fake artifact for fake gimlet-d SP
-    const ARTIFACT_HASH_SP_GIMLET_D: ArtifactHash = ArtifactHash([2; 32]);
-    /// Hash of fake artifact for fake sidecar-b SP
-    const ARTIFACT_HASH_SP_SIDECAR_B: ArtifactHash = ArtifactHash([5; 32]);
-    /// Hash of fake artifact for fake sidecar-c SP
-    const ARTIFACT_HASH_SP_SIDECAR_C: ArtifactHash = ArtifactHash([6; 32]);
-    /// Hash of fake artifact for fake psc-b SP
-    const ARTIFACT_HASH_SP_PSC_B: ArtifactHash = ArtifactHash([9; 32]);
-    /// Hash of fake artifact for fake psc-c SP
-    const ARTIFACT_HASH_SP_PSC_C: ArtifactHash = ArtifactHash([10; 32]);
-    /// Hash of fake artifact for fake gimlet RoT slot A
-    const ARTIFACT_HASH_ROT_GIMLET_A: ArtifactHash = ArtifactHash([13; 32]);
-    /// Hash of fake artifact for fake gimlet RoT slot B
-    const ARTIFACT_HASH_ROT_GIMLET_B: ArtifactHash = ArtifactHash([14; 32]);
-    /// Hash of fake artifact for fake psc RoT slot A
-    const ARTIFACT_HASH_ROT_PSC_A: ArtifactHash = ArtifactHash([17; 32]);
-    /// Hash of fake artifact for fake psc RoT slot B
-    const ARTIFACT_HASH_ROT_PSC_B: ArtifactHash = ArtifactHash([18; 32]);
-    /// Hash of fake artifact for fake switch RoT slot A
-    const ARTIFACT_HASH_ROT_SWITCH_A: ArtifactHash = ArtifactHash([21; 32]);
-    /// Hash of fake artifact for fake switch RoT slot B
-    const ARTIFACT_HASH_ROT_SWITCH_B: ArtifactHash = ArtifactHash([22; 32]);
-
-    // unused artifact hashes
-
-    const ARTIFACT_HASH_CONTROL_PLANE: ArtifactHash = ArtifactHash([33; 32]);
-    const ARTIFACT_HASH_NEXUS: ArtifactHash = ArtifactHash([34; 32]);
-    const ARTIFACT_HASH_HOST_OS: ArtifactHash = ArtifactHash([35; 32]);
-
-    /// Hash of a fake RoT signing keys
-    const ROT_SIGN_GIMLET: &str =
-        "1111111111111111111111111111111111111111111111111111111111111111";
-    const ROT_SIGN_PSC: &str =
-        "2222222222222222222222222222222222222222222222222222222222222222";
-    const ROT_SIGN_SWITCH: &str =
-        "3333333333333333333333333333333333333333333333333333333333333333";
-
-    #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
-    enum MgsUpdateComponent {
-        Sp,
-        Rot,
-        RotBootloader,
-        HostOs,
-    }
-
-    fn test_artifact_for_board(board: &str) -> ArtifactHash {
-        match board {
-            "gimlet-d" => ARTIFACT_HASH_SP_GIMLET_D,
-            "gimlet-e" => ARTIFACT_HASH_SP_GIMLET_E,
-            "sidecar-b" => ARTIFACT_HASH_SP_SIDECAR_B,
-            "sidecar-c" => ARTIFACT_HASH_SP_SIDECAR_C,
-            "psc-b" => ARTIFACT_HASH_SP_PSC_B,
-            "psc-c" => ARTIFACT_HASH_SP_PSC_C,
-            _ => panic!("test bug: no artifact for board {board:?}"),
-        }
-    }
-
-    fn test_artifact_for_artifact_kind(kind: ArtifactKind) -> ArtifactHash {
-        let artifact_hash = if kind == ArtifactKind::GIMLET_ROT_IMAGE_A {
-            ARTIFACT_HASH_ROT_GIMLET_A
-        } else if kind == ArtifactKind::GIMLET_ROT_IMAGE_B {
-            ARTIFACT_HASH_ROT_GIMLET_B
-        } else if kind == ArtifactKind::PSC_ROT_IMAGE_A {
-            ARTIFACT_HASH_ROT_PSC_A
-        } else if kind == ArtifactKind::PSC_ROT_IMAGE_B {
-            ARTIFACT_HASH_ROT_PSC_B
-        } else if kind == ArtifactKind::SWITCH_ROT_IMAGE_A {
-            ARTIFACT_HASH_ROT_SWITCH_A
-        } else if kind == ArtifactKind::SWITCH_ROT_IMAGE_B {
-            ARTIFACT_HASH_ROT_SWITCH_B
-        } else {
-            panic!("test bug: no artifact for artifact kind {kind:?}")
-        };
-
-        return artifact_hash;
-    }
-
-    /// Describes the SPs and RoTs in the environment used in these tests, but
-    /// spearated by component for use in sequential testing
-    fn test_config()
-    -> BTreeMap<(SpType, u16, MgsUpdateComponent), (&'static str, &'static str)>
-    {
-        TestBoards::new("fixme")
-            .into_iter()
-            .flat_map(|board| {
-                [
-                    (
-                        (board.id.type_, board.id.slot, MgsUpdateComponent::Sp),
-                        (board.serial, board.sp_board),
-                    ),
-                    (
-                        (
-                            board.id.type_,
-                            board.id.slot,
-                            MgsUpdateComponent::Rot,
-                        ),
-                        (board.serial, board.rot_board),
-                    ),
-                ]
-            })
-            .collect()
-    }
-
-    /// Returns a TufRepoDescription that we can use to exercise the planning
-    /// code.
-    fn make_tuf_repo() -> TufRepoDescription {
-        const SYSTEM_VERSION: semver::Version = semver::Version::new(0, 0, 1);
-        const SYSTEM_HASH: ArtifactHash = ArtifactHash([3; 32]);
-
-        // Include a bunch of SP-related artifacts, as well as a few others just
-        // to make sure those are properly ignored.
-        let artifacts = vec![
-            make_artifact(
-                "control-plane",
-                KnownArtifactKind::ControlPlane.into(),
-                ARTIFACT_HASH_CONTROL_PLANE,
-                None,
-            ),
-            make_artifact(
-                "nexus",
-                KnownArtifactKind::Zone.into(),
-                ARTIFACT_HASH_NEXUS,
-                None,
-            ),
-            make_artifact(
-                "host-os",
-                KnownArtifactKind::Host.into(),
-                ARTIFACT_HASH_HOST_OS,
-                None,
-            ),
-            make_artifact(
-                "gimlet-d",
-                KnownArtifactKind::GimletSp.into(),
-                test_artifact_for_board("gimlet-d"),
-                None,
-            ),
-            make_artifact(
-                "gimlet-e",
-                KnownArtifactKind::GimletSp.into(),
-                test_artifact_for_board("gimlet-e"),
-                None,
-            ),
-            make_artifact(
-                "sidecar-b",
-                KnownArtifactKind::SwitchSp.into(),
-                test_artifact_for_board("sidecar-b"),
-                None,
-            ),
-            make_artifact(
-                "sidecar-c",
-                KnownArtifactKind::SwitchSp.into(),
-                test_artifact_for_board("sidecar-c"),
-                None,
-            ),
-            make_artifact(
-                "psc-b",
-                KnownArtifactKind::PscSp.into(),
-                test_artifact_for_board("psc-b"),
-                None,
-            ),
-            make_artifact(
-                "psc-c",
-                KnownArtifactKind::PscSp.into(),
-                test_artifact_for_board("psc-c"),
-                None,
-            ),
-            make_artifact(
-                "oxide-rot-1",
-                ArtifactKind::GIMLET_ROT_IMAGE_A,
-                test_artifact_for_artifact_kind(
-                    ArtifactKind::GIMLET_ROT_IMAGE_A,
-                ),
-                Some(ROT_SIGN_GIMLET.into()),
-            ),
-            make_artifact(
-                "oxide-rot-1",
-                ArtifactKind::GIMLET_ROT_IMAGE_B,
-                test_artifact_for_artifact_kind(
-                    ArtifactKind::GIMLET_ROT_IMAGE_B,
-                ),
-                Some(ROT_SIGN_GIMLET.into()),
-            ),
-            make_artifact(
-                "oxide-rot-1",
-                ArtifactKind::PSC_ROT_IMAGE_A,
-                test_artifact_for_artifact_kind(ArtifactKind::PSC_ROT_IMAGE_A),
-                Some(ROT_SIGN_PSC.into()),
-            ),
-            make_artifact(
-                "oxide-rot-1",
-                ArtifactKind::PSC_ROT_IMAGE_B,
-                test_artifact_for_artifact_kind(ArtifactKind::PSC_ROT_IMAGE_B),
-                Some(ROT_SIGN_PSC.into()),
-            ),
-            make_artifact(
-                "oxide-rot-1",
-                ArtifactKind::SWITCH_ROT_IMAGE_A,
-                test_artifact_for_artifact_kind(
-                    ArtifactKind::SWITCH_ROT_IMAGE_A,
-                ),
-                Some(ROT_SIGN_SWITCH.into()),
-            ),
-            make_artifact(
-                "oxide-rot-1",
-                ArtifactKind::SWITCH_ROT_IMAGE_B,
-                test_artifact_for_artifact_kind(
-                    ArtifactKind::SWITCH_ROT_IMAGE_B,
-                ),
-                Some(ROT_SIGN_SWITCH.into()),
-            ),
-        ];
-
-        TufRepoDescription {
-            repo: TufRepoMeta {
-                hash: SYSTEM_HASH,
-                targets_role_version: 0,
-                valid_until: Utc::now(),
-                system_version: SYSTEM_VERSION,
-                file_name: String::new(),
-            },
-            artifacts,
-        }
-    }
-
-    fn make_artifact(
-        name: &str,
-        kind: ArtifactKind,
-        hash: ArtifactHash,
-        sign: Option<Vec<u8>>,
-    ) -> TufArtifactMeta {
-        TufArtifactMeta {
-            id: ArtifactId {
-                name: name.to_string(),
-                version: ARTIFACT_VERSION_2,
-                kind,
-            },
-            hash,
-            size: 0, // unused here
-            sign,
-        }
-    }
 
     // Short hand-rolled update sequence that exercises some basic behavior for
     // SP updates.
@@ -757,7 +503,7 @@ mod test {
 
         // Test that when a TUF repo is specified and one SP is outdated, then
         // it's configured with an update (and the update looks correct).
-        let repo = make_tuf_repo();
+        let repo = test_boards.tuf_repo();
         let updates = plan_mgs_updates(
             log,
             &collection,
@@ -1038,7 +784,7 @@ mod test {
 
         // Test that when a TUF repo is specified and one RoT is outdated, then
         // it's configured with an update (and the update looks correct).
-        let repo = make_tuf_repo();
+        let repo = test_boards.tuf_repo();
         let updates = plan_mgs_updates(
             log,
             &collection,
@@ -1311,7 +1057,7 @@ mod test {
         let current_boards = &collection.baseboards;
         let initial_updates = PendingMgsUpdates::new();
         let nmax_updates = 1;
-        let repo = make_tuf_repo();
+        let repo = test_boards.tuf_repo();
 
         // We should attempt to update this SP to version 2 no matter what our
         // impossible update policy is; we have no updates at all, currently!
@@ -1426,28 +1172,14 @@ mod test {
         let log = &logctx.log;
         let test_boards = TestBoards::new(test_name);
         let mut latest_updates = PendingMgsUpdates::new();
-        let repo = make_tuf_repo();
+        let repo = test_boards.tuf_repo();
         let nmax_updates = 1;
         let impossible_update_policy = ImpossibleUpdatePolicy::Reevaluate;
 
         // We do not control the order of updates.  But we expect to update each
         // of the SPs in this map.  When we do, we expect to find the given
         // artifact.
-        let mut expected_updates: BTreeMap<_, _> = test_config()
-            .into_iter()
-            .map(|(k, (serial, board_name))| {
-                if board_name == "oxide-rot-1" {
-                    let kind = match k.0 {
-                        SpType::Sled => ArtifactKind::GIMLET_ROT_IMAGE_B,
-                        SpType::Power => ArtifactKind::PSC_ROT_IMAGE_B,
-                        SpType::Switch => ArtifactKind::SWITCH_ROT_IMAGE_B,
-                    };
-                    (k, (serial, test_artifact_for_artifact_kind(kind)))
-                } else {
-                    (k, (serial, test_artifact_for_board(board_name)))
-                }
-            })
-            .collect();
+        let mut expected_updates = test_boards.expected_updates();
 
         // Start with collections that record everything at version 1. We'll add
         // exceptions as we step through updates below.
@@ -1541,23 +1273,9 @@ mod test {
         );
         let log = &logctx.log;
         let test_boards = TestBoards::new(test_name);
-        let repo = make_tuf_repo();
+        let repo = test_boards.tuf_repo();
 
-        let mut expected_updates: BTreeMap<_, _> = test_config()
-            .into_iter()
-            .map(|(k, (serial, board_name))| {
-                if board_name == "oxide-rot-1" {
-                    let kind = match k.0 {
-                        SpType::Sled => ArtifactKind::GIMLET_ROT_IMAGE_B,
-                        SpType::Power => ArtifactKind::PSC_ROT_IMAGE_B,
-                        SpType::Switch => ArtifactKind::SWITCH_ROT_IMAGE_B,
-                    };
-                    (k, (serial, test_artifact_for_artifact_kind(kind)))
-                } else {
-                    (k, (serial, test_artifact_for_board(board_name)))
-                }
-            })
-            .collect();
+        let mut expected_updates = test_boards.expected_updates();
 
         // Update the whole system at once.
         let impossible_update_policy = ImpossibleUpdatePolicy::Reevaluate;
@@ -1665,7 +1383,7 @@ mod test {
 
         // Configure an update for one SP.
         let log = &logctx.log;
-        let repo = make_tuf_repo();
+        let repo = test_boards.tuf_repo();
         let mut collection = test_boards
             .collection_builder()
             .sp_active_version(ARTIFACT_VERSION_2)
