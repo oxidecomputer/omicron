@@ -84,6 +84,18 @@ pub async fn ensure_partition_layout(
     unimplemented!("Accessing hardware unsupported on non-illumos");
 }
 
+#[derive(thiserror::Error, Debug)]
+pub enum DiskPathsError {
+    #[error("findinding disk paths is unsupported on this platform")]
+    UnsupportedPlatform,
+}
+
+pub(crate) fn find_disk_paths(
+    _unparsed_disk: &UnparsedDisk,
+) -> Result<DiskPaths, DiskPathsError> {
+    unimplemented!("Accessing hardware unsupported on non-illumos");
+}
+
 /// Return true if the host system is an Oxide Gimlet.
 pub fn is_gimlet() -> anyhow::Result<bool> {
     Ok(false)
