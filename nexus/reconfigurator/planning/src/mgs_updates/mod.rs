@@ -448,21 +448,17 @@ mod test {
     use super::test_helpers::ARTIFACT_VERSION_1;
     use super::test_helpers::ARTIFACT_VERSION_1_5;
     use super::test_helpers::ARTIFACT_VERSION_2;
-    use super::test_helpers::MgsUpdateComponent;
     use super::test_helpers::TestBoards;
     use dropshot::ConfigLogging;
     use dropshot::ConfigLoggingLevel;
     use gateway_client::types::SpType;
     use nexus_types::deployment::ExpectedVersion;
-    use nexus_types::deployment::PendingMgsUpdate;
     use nexus_types::deployment::PendingMgsUpdateDetails;
     use nexus_types::deployment::PendingMgsUpdates;
     use nexus_types::deployment::TargetReleaseDescription;
     use omicron_test_utils::dev::LogContext;
-    use std::collections::BTreeMap;
     use std::collections::BTreeSet;
     use strum::IntoEnumIterator;
-    use tufaceous_artifact::ArtifactHash;
 
     // Short hand-rolled update sequence that exercises some basic behavior for
     // SP updates.
@@ -1210,7 +1206,7 @@ mod test {
             assert_eq!(new_updates.len(), 1);
             let update =
                 new_updates.iter().next().expect("at least one update");
-            verify_one_sp_update(&mut expected_updates, update);
+            expected_updates.verify_one(update);
 
             // Update `exceptions` or `rot_exceptions` for the next iteration.
             let sp_type = update.sp_type;
@@ -1301,7 +1297,7 @@ mod test {
         // amount of `all_updates` should be half of `expected_updates`.
         assert_eq!(all_updates.len(), expected_updates.len() / 2);
         for update in &all_updates {
-            verify_one_sp_update(&mut expected_updates, update);
+            expected_updates.verify_one(update);
         }
 
         // Now, notice when they've all been updated, even if the limit is only
@@ -1325,50 +1321,6 @@ mod test {
         assert!(all_updates_done.is_empty());
 
         logctx.cleanup_successful();
-    }
-
-    fn verify_one_sp_update(
-        expected_updates: &mut BTreeMap<
-            (SpType, u16, MgsUpdateComponent),
-            (&str, ArtifactHash),
-        >,
-        update: &PendingMgsUpdate,
-    ) {
-        let sp_type = update.sp_type;
-        let sp_slot = update.slot_id;
-        let component = match &update.details {
-            PendingMgsUpdateDetails::Rot { .. } => MgsUpdateComponent::Rot,
-            PendingMgsUpdateDetails::RotBootloader { .. } => {
-                MgsUpdateComponent::RotBootloader
-            }
-            PendingMgsUpdateDetails::Sp { .. } => MgsUpdateComponent::Sp,
-            PendingMgsUpdateDetails::HostPhase1(_) => {
-                MgsUpdateComponent::HostOs
-            }
-        };
-        println!("found update: {} slot {}", sp_type, sp_slot);
-        let (expected_serial, expected_artifact) = expected_updates
-            .remove(&(sp_type, sp_slot, component))
-            .expect("unexpected update");
-        assert_eq!(update.artifact_hash, expected_artifact);
-        assert_eq!(update.artifact_version, ARTIFACT_VERSION_2);
-        assert_eq!(update.baseboard_id.serial_number, *expected_serial);
-        let (expected_active_version, expected_inactive_version) =
-            match &update.details {
-                PendingMgsUpdateDetails::Rot {
-                    expected_active_slot,
-                    expected_inactive_version,
-                    ..
-                } => (&expected_active_slot.version, expected_inactive_version),
-                PendingMgsUpdateDetails::Sp {
-                    expected_active_version,
-                    expected_inactive_version,
-                } => (expected_active_version, expected_inactive_version),
-                PendingMgsUpdateDetails::RotBootloader { .. }
-                | PendingMgsUpdateDetails::HostPhase1(_) => unimplemented!(),
-            };
-        assert_eq!(*expected_active_version, ARTIFACT_VERSION_1);
-        assert_eq!(*expected_inactive_version, ExpectedVersion::NoValidVersion);
     }
 
     // Tests the case where an SP appears to move while an update is pending

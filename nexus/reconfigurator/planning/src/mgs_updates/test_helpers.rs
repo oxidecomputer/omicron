@@ -17,6 +17,8 @@ use gateway_types::rot::RotSlot;
 use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
 use nexus_types::deployment::ExpectedVersion;
+use nexus_types::deployment::PendingMgsUpdate;
+use nexus_types::deployment::PendingMgsUpdateDetails;
 use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::Collection;
 use omicron_common::api::external::TufArtifactMeta;
@@ -326,38 +328,108 @@ impl TestBoards {
         }
     }
 
-    // TODO-john clean up return type?
-    pub fn expected_updates(
-        &self,
-    ) -> BTreeMap<(SpType, u16, MgsUpdateComponent), (&'static str, ArtifactHash)>
-    {
-        self.boards
-            .iter()
-            .flat_map(|board| {
-                let sp_artifact = test_artifact_for_board(board.sp_board);
-                let rot_artifact =
-                    test_artifact_for_artifact_kind(match board.id.type_ {
-                        SpType::Sled => ArtifactKind::GIMLET_ROT_IMAGE_B,
-                        SpType::Power => ArtifactKind::PSC_ROT_IMAGE_B,
-                        SpType::Switch => ArtifactKind::SWITCH_ROT_IMAGE_B,
-                    });
+    /// Collect the set of all expected updates for all supported components of
+    /// these test boards.
+    pub fn expected_updates(&self) -> ExpectedUpdates {
+        let mut updates = IdOrdMap::new();
 
-                [
-                    (
-                        (board.id.type_, board.id.slot, MgsUpdateComponent::Sp),
-                        (board.serial, sp_artifact),
+        for board in &self.boards {
+            updates
+                .insert_unique(ExpectedUpdate {
+                    sp_type: board.id.type_,
+                    sp_slot: board.id.slot,
+                    component: MgsUpdateComponent::Sp,
+                    expected_serial: board.serial,
+                    expected_artifact: test_artifact_for_board(board.sp_board),
+                })
+                .expect("boards are unique");
+            updates
+                .insert_unique(ExpectedUpdate {
+                    sp_type: board.id.type_,
+                    sp_slot: board.id.slot,
+                    component: MgsUpdateComponent::Rot,
+                    expected_serial: board.serial,
+                    expected_artifact: test_artifact_for_artifact_kind(
+                        match board.id.type_ {
+                            SpType::Sled => ArtifactKind::GIMLET_ROT_IMAGE_B,
+                            SpType::Power => ArtifactKind::PSC_ROT_IMAGE_B,
+                            SpType::Switch => ArtifactKind::SWITCH_ROT_IMAGE_B,
+                        },
                     ),
-                    (
-                        (
-                            board.id.type_,
-                            board.id.slot,
-                            MgsUpdateComponent::Rot,
-                        ),
-                        (board.serial, rot_artifact),
-                    ),
-                ]
-            })
-            .collect()
+                })
+                .expect("boards are unique");
+        }
+
+        ExpectedUpdates { updates }
+    }
+}
+
+#[derive(Debug)]
+struct ExpectedUpdate {
+    sp_type: SpType,
+    sp_slot: u16,
+    component: MgsUpdateComponent,
+    expected_serial: &'static str,
+    expected_artifact: ArtifactHash,
+}
+
+impl IdOrdItem for ExpectedUpdate {
+    type Key<'a> = (SpType, u16, MgsUpdateComponent);
+
+    fn key(&self) -> Self::Key<'_> {
+        (self.sp_type, self.sp_slot, self.component)
+    }
+
+    iddqd::id_upcast!();
+}
+
+/// Test helper containing all the expected updates from a `TestBoards`.
+pub(super) struct ExpectedUpdates {
+    updates: IdOrdMap<ExpectedUpdate>,
+}
+
+impl ExpectedUpdates {
+    pub fn len(&self) -> usize {
+        self.updates.len()
+    }
+
+    pub fn verify_one(&mut self, update: &PendingMgsUpdate) {
+        let sp_type = update.sp_type;
+        let sp_slot = update.slot_id;
+        let component = match &update.details {
+            PendingMgsUpdateDetails::Rot { .. } => MgsUpdateComponent::Rot,
+            PendingMgsUpdateDetails::RotBootloader { .. } => {
+                MgsUpdateComponent::RotBootloader
+            }
+            PendingMgsUpdateDetails::Sp { .. } => MgsUpdateComponent::Sp,
+            PendingMgsUpdateDetails::HostPhase1(_) => {
+                MgsUpdateComponent::HostOs
+            }
+        };
+        println!("found update: {} slot {}", sp_type, sp_slot);
+        let ExpectedUpdate { expected_serial, expected_artifact, .. } = self
+            .updates
+            .remove(&(sp_type, sp_slot, component))
+            .expect("unexpected update");
+        assert_eq!(update.artifact_hash, expected_artifact);
+        assert_eq!(update.artifact_version, ARTIFACT_VERSION_2);
+        assert_eq!(update.baseboard_id.serial_number, *expected_serial);
+        let (expected_active_version, expected_inactive_version) =
+            match &update.details {
+                PendingMgsUpdateDetails::Rot {
+                    expected_active_slot,
+                    expected_inactive_version,
+                    ..
+                } => (&expected_active_slot.version, expected_inactive_version),
+                PendingMgsUpdateDetails::Sp {
+                    expected_active_version,
+                    expected_inactive_version,
+                } => (expected_active_version, expected_inactive_version),
+                PendingMgsUpdateDetails::RotBootloader { .. }
+                | PendingMgsUpdateDetails::HostPhase1(_) => unimplemented!(),
+            };
+        assert_eq!(*expected_active_version, ARTIFACT_VERSION_1);
+        assert_eq!(*expected_inactive_version, ExpectedVersion::NoValidVersion);
     }
 }
 
@@ -617,7 +689,7 @@ fn test_artifact_for_board(board: &str) -> ArtifactHash {
 }
 
 fn test_artifact_for_artifact_kind(kind: ArtifactKind) -> ArtifactHash {
-    let artifact_hash = if kind == ArtifactKind::GIMLET_ROT_IMAGE_A {
+    if kind == ArtifactKind::GIMLET_ROT_IMAGE_A {
         ARTIFACT_HASH_ROT_GIMLET_A
     } else if kind == ArtifactKind::GIMLET_ROT_IMAGE_B {
         ARTIFACT_HASH_ROT_GIMLET_B
@@ -631,7 +703,5 @@ fn test_artifact_for_artifact_kind(kind: ArtifactKind) -> ArtifactHash {
         ARTIFACT_HASH_ROT_SWITCH_B
     } else {
         panic!("test bug: no artifact for artifact kind {kind:?}")
-    };
-
-    return artifact_hash;
+    }
 }
