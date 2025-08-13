@@ -79,10 +79,10 @@ impl Nexus {
         .await
     }
 
-    // The logic of this function should follow very closely what
-    // `instance_ensure_dpd_config` does. However, there are enough differences
-    // in the mechanics of how the logic is being carried out to justify having
-    // this separate function, it seems.
+    /// The logic of this function should follow very closely what
+    /// `instance_ensure_dpd_config` does. However, there are enough differences
+    /// in the mechanics of how the logic is being carried out to justify having
+    /// this separate function, it seems.
     pub(crate) async fn probe_ensure_dpd_config(
         &self,
         opctx: &OpContext,
@@ -421,10 +421,6 @@ pub(crate) async fn instance_ensure_dpd_config(
     Ok(nat_entries)
 }
 
-// The logic of this function should follow very closely what
-// `instance_ensure_dpd_config` does. However, there are enough differences
-// in the mechanics of how the logic is being carried out to justify having
-// this separate function, it seems.
 pub(crate) async fn probe_ensure_dpd_config(
     datastore: &DataStore,
     log: &slog::Logger,

@@ -542,6 +542,43 @@ impl TryFrom<ExternalIp> for FloatingIp {
     }
 }
 
+// MULTICAST GROUPS
+
+/// View of a Multicast Group
+#[derive(
+    ObjectIdentity, Debug, PartialEq, Clone, Deserialize, Serialize, JsonSchema,
+)]
+pub struct MulticastGroup {
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+    /// The multicast IP address held by this resource.
+    pub multicast_ip: IpAddr,
+    /// Source IP addresses for Source-Specific Multicast (SSM).
+    /// Empty array means any source is allowed.
+    pub source_ips: Vec<IpAddr>,
+    /// The ID of the IP pool this resource belongs to.
+    pub ip_pool_id: Uuid,
+    /// The project this resource exists within.
+    pub project_id: Uuid,
+    /// Current state of the multicast group.
+    pub state: String,
+}
+
+/// View of a Multicast Group Member (instance belonging to a multicast group)
+#[derive(
+    ObjectIdentity, Debug, PartialEq, Clone, Deserialize, Serialize, JsonSchema,
+)]
+pub struct MulticastGroupMember {
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+    /// The ID of the multicast group this member belongs to.
+    pub multicast_group_id: Uuid,
+    /// The ID of the instance that is a member of this group.
+    pub instance_id: Uuid,
+    /// Current state of the multicast group membership.
+    pub state: String,
+}
+
 // RACKS
 
 /// View of an Rack

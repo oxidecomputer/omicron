@@ -2180,6 +2180,32 @@ impl DataStore {
             ))
         }
     }
+
+    /// Get the runtime state of an instance by ID.
+    ///
+    /// Returns the instance's current runtime state, or None if the instance
+    /// doesn't exist or has been deleted.
+    pub async fn instance_get_state(
+        &self,
+        opctx: &OpContext,
+        instance_id: &InstanceUuid,
+    ) -> Result<Option<InstanceRuntimeState>, external::Error> {
+        use nexus_db_schema::schema::instance::dsl;
+        let id = instance_id.into_untyped_uuid();
+
+        let instance = dsl::instance
+            .filter(dsl::id.eq(id))
+            .filter(dsl::time_deleted.is_null())
+            .select(Instance::as_select())
+            .first_async::<Instance>(
+                &*self.pool_connection_authorized(opctx).await?,
+            )
+            .await
+            .optional()
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        Ok(instance.map(|i| i.runtime_state))
+    }
 }
 
 #[cfg(test)]
@@ -2260,6 +2286,7 @@ mod tests {
                         start: false,
                         auto_restart_policy: Default::default(),
                         anti_affinity_groups: Vec::new(),
+                        multicast_groups: Vec::new(),
                     },
                 ),
             )

@@ -62,12 +62,39 @@ use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 use uuid::Uuid;
 
+/// IPv4 multicast address range (224.0.0.0/4).
+/// See RFC 5771 (IPv4 Multicast Address Assignments):
+/// <https://www.rfc-editor.org/rfc/rfc5771>
+#[allow(dead_code)]
+const IPV4_MULTICAST_RANGE: &str = "224.0.0.0/4";
+
+/// IPv6 multicast address range (ff00::/8).
+/// See RFC 4291 (IPv6 Addressing Architecture):
+/// <https://www.rfc-editor.org/rfc/rfc4291>
+#[allow(dead_code)]
+const IPV6_MULTICAST_RANGE: &str = "ff00::/8";
+
 /// Stored routes (and usage count) for a given VPC/subnet.
 #[derive(Debug, Default, Clone)]
 struct RouteSet {
     version: Option<RouterVersion>,
     routes: HashSet<ResolvedVpcRoute>,
     active_ports: usize,
+}
+
+/// Configuration for multicast groups on an OPTE port.
+///
+/// TODO: This type should be moved to [oxide_vpc::api] when OPTE dependencies
+/// are updated, following the same pattern as other VPC configuration types
+/// like [ExternalIpCfg], [IpCfg], etc.
+///
+/// TODO: Eventually remove.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MulticastGroupCfg {
+    /// The multicast group IP address (IPv4 or IPv6).
+    pub group_ip: IpAddr,
+    /// For Source-Specific Multicast (SSM), list of source addresses.
+    pub sources: Vec<IpAddr>,
 }
 
 #[derive(Debug)]
@@ -595,7 +622,7 @@ impl PortManager {
     }
 
     /// Set Internet Gateway mappings for all external IPs in use
-    /// by attached `NetworkInterface`s.
+    /// by attached [NetworkInterface]s.
     ///
     /// Returns whether the internal mappings were changed.
     pub fn set_eip_gateways(&self, mappings: ExternalIpGatewayMap) -> bool {
@@ -747,6 +774,68 @@ impl PortManager {
         };
         let hdl = Handle::new()?;
         hdl.set_external_ips(&req)?;
+
+        Ok(())
+    }
+
+    /// Validate multicast group memberships for an OPTE port.
+    ///
+    /// This method validates multicast group configurations but does not yet
+    /// configure OPTE port-level multicast group membership. The actual
+    /// multicast forwarding is currently handled by the reconciler + DPD
+    /// at the dataplane switch level.
+    ///
+    /// TODO: Once OPTE kernel module supports multicast group APIs, this method
+    /// should be updated accordingly to configure the port for specific
+    /// multicast group memberships.
+    pub fn multicast_groups_ensure(
+        &self,
+        nic_id: Uuid,
+        nic_kind: NetworkInterfaceKind,
+        multicast_groups: &[MulticastGroupCfg],
+    ) -> Result<(), Error> {
+        let ports = self.inner.ports.lock().unwrap();
+        let port = ports.get(&(nic_id, nic_kind)).ok_or_else(|| {
+            Error::MulticastUpdateMissingPort(nic_id, nic_kind)
+        })?;
+
+        debug!(
+            self.inner.log,
+            "Validating multicast group configuration for OPTE port";
+            "port_name" => port.name(),
+            "nic_id" => ?nic_id,
+            "groups" => ?multicast_groups,
+        );
+
+        // Validate multicast group configurations
+        for group in multicast_groups {
+            if !group.group_ip.is_multicast() {
+                error!(
+                    self.inner.log,
+                    "Invalid multicast IP address";
+                    "group_ip" => %group.group_ip,
+                    "port_name" => port.name(),
+                );
+                return Err(Error::InvalidPortIpConfig);
+            }
+        }
+
+        // TODO: Configure firewall rules to allow multicast traffic.
+        // Add exceptions in source/dest MAC/L3 addr checking for multicast
+        // addreses matching known groups, only doing cidr-checking on the
+        // multicasst destination side.
+
+        info!(
+            self.inner.log,
+            "OPTE port configured for multicast traffic";
+            "port_name" => port.name(),
+            "ipv4_range" => IPV4_MULTICAST_RANGE,
+            "ipv6_range" => IPV6_MULTICAST_RANGE,
+            "multicast_groups" => multicast_groups.len(),
+        );
+
+        // TODO: Configure OPTE port for specific multicast group membership
+        // once APIs are available.
 
         Ok(())
     }

@@ -79,6 +79,7 @@ mod ip_pool;
 mod lldp;
 mod login;
 mod metrics;
+pub(crate) mod multicast;
 mod network_interface;
 pub(crate) mod oximeter;
 mod probe;
@@ -129,6 +130,7 @@ pub(crate) const MAX_EXTERNAL_IPS_PER_INSTANCE: usize =
     nexus_db_queries::db::queries::external_ip::MAX_EXTERNAL_IPS_PER_INSTANCE
         as usize;
 pub(crate) const MAX_EPHEMERAL_IPS_PER_INSTANCE: usize = 1;
+pub(crate) const MAX_MULTICAST_GROUPS_PER_INSTANCE: usize = 32;
 
 pub const MAX_VCPU_PER_INSTANCE: u16 = 64;
 
@@ -1172,11 +1174,58 @@ pub(crate) async fn dpd_clients(
     resolver: &internal_dns_resolver::Resolver,
     log: &slog::Logger,
 ) -> Result<HashMap<SwitchLocation, dpd_client::Client>, String> {
-    let mappings = switch_zone_address_mappings(resolver, log).await?;
-    let clients: HashMap<SwitchLocation, dpd_client::Client> = mappings
+    // Try DNS + socket + custom ports support first (works in test environments)
+    match resolver.lookup_all_socket_v6(ServiceName::Dendrite).await {
+        Ok(socket_addrs) => {
+            // DNS has port information - use it to get mappings and custom ports
+            let mut mappings = HashMap::new();
+            let mut custom_ports = HashMap::new();
+
+            for socket_addr in socket_addrs {
+                let mappings_result =
+                    map_switch_zone_addrs(log, vec![*socket_addr.ip()]).await;
+                let switch_mappings = match mappings_result {
+                    Ok(m) => m,
+                    Err(e) => {
+                        return Err(format!(
+                            "failed to map switch addresses: {}",
+                            e
+                        ));
+                    }
+                };
+
+                for (location, addr) in switch_mappings {
+                    mappings.insert(location, addr);
+                    custom_ports.insert(location, socket_addr.port());
+                }
+            }
+
+            Ok(build_dpd_clients_with_ports(
+                &mappings,
+                Some(&custom_ports),
+                log,
+            ))
+        }
+        Err(_) => {
+            // Fall back to config-based approach (IP only with hardcoded port)
+            let mappings = switch_zone_address_mappings(resolver, log).await?;
+            Ok(build_dpd_clients_with_ports(&mappings, None, log))
+        }
+    }
+}
+
+/// Build DPD clients with optional custom ports, defaulting to DENDRITE_PORT
+fn build_dpd_clients_with_ports(
+    mappings: &HashMap<SwitchLocation, std::net::Ipv6Addr>,
+    custom_ports: Option<&HashMap<SwitchLocation, u16>>,
+    log: &slog::Logger,
+) -> HashMap<SwitchLocation, dpd_client::Client> {
+    mappings
         .iter()
         .map(|(location, addr)| {
-            let port = DENDRITE_PORT;
+            let port = custom_ports
+                .and_then(|ports| ports.get(location).copied())
+                .unwrap_or(DENDRITE_PORT);
 
             let client_state = dpd_client::ClientState {
                 tag: String::from("nexus"),
@@ -1191,8 +1240,7 @@ pub(crate) async fn dpd_clients(
             );
             (*location, dpd_client)
         })
-        .collect();
-    Ok(clients)
+        .collect()
 }
 
 // We currently ignore the rack_id argument here, as the shared
@@ -1259,13 +1307,28 @@ async fn switch_zone_address_mappings(
 // via an API call. We probably will need to rethink how we're looking
 // up switch addresses as a whole, since how DNS is currently setup for
 // Dendrite is insufficient for what we need.
-async fn map_switch_zone_addrs(
+pub(crate) async fn map_switch_zone_addrs(
     log: &Logger,
     switch_zone_addresses: Vec<Ipv6Addr>,
 ) -> Result<HashMap<SwitchLocation, Ipv6Addr>, String> {
+    // In test environments, MGS may not be running, so provide fallback logic
+    // Check for typical test patterns: single localhost address
+    if switch_zone_addresses.len() == 1
+        && switch_zone_addresses[0] == Ipv6Addr::LOCALHOST
+    {
+        info!(
+            log,
+            "Single localhost dendrite detected - attempting MGS connection, will fallback if unavailable";
+            "zone_address" => #?switch_zone_addresses[0]
+        );
+    }
+
     use gateway_client::Client as MgsClient;
     info!(log, "Determining switch slots managed by switch zones");
     let mut switch_zone_addrs = HashMap::new();
+    let is_single_localhost = switch_zone_addresses.len() == 1
+        && switch_zone_addresses[0] == Ipv6Addr::LOCALHOST;
+
     for addr in switch_zone_addresses {
         let mgs_client = MgsClient::new(
             &format!("http://[{}]:{}", addr, MGS_PORT),
@@ -1290,7 +1353,19 @@ async fn map_switch_zone_addrs(
                     "zone_address" => #?addr,
                     "reason" => #?e
                 );
-                return Err(e.to_string());
+
+                // If we can't reach MGS and this looks like a test environment, make assumptions
+                if is_single_localhost {
+                    warn!(
+                        log,
+                        "MGS unavailable for localhost dendrite - assuming Switch0 for test/development environment";
+                        "zone_address" => #?addr
+                    );
+                    0 // Assume localhost is Switch0 in test/development environments
+                } else {
+                    // In production or multi-address scenarios, fail hard
+                    return Err(format!("Cannot determine switch slot: {}", e));
+                }
             }
         };
 

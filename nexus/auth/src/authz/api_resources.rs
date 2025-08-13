@@ -1149,6 +1149,20 @@ authz_resource! {
     polar_snippet = InProject,
 }
 
+// Note: MulticastGroup member attachments/detachments (instances
+// joining/leaving groups) use the existing `MulticastGroup` and
+// `Instance` authz resources rather than creating a separate
+// `MulticastGroupMember` authz resource. This follows
+// the same pattern as external IP attachments, where the relationship
+// permissions are controlled by the parent resources being connected.
+authz_resource! {
+    name = "MulticastGroup",
+    parent = "Project",
+    primary_key = Uuid,
+    roles_allowed = false,
+    polar_snippet = InProject,
+}
+
 // Customer network integration resources nested below "Fleet"
 
 authz_resource! {
