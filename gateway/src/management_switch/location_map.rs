@@ -19,6 +19,7 @@ use serde::Serialize;
 use slog::Logger;
 use slog::debug;
 use slog::info;
+use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::net::SocketAddrV6;
@@ -282,26 +283,43 @@ impl ValidatedLocationConfig {
         let mut reasons = Vec::new();
 
         let description = {
-            let n = config.description.len();
-            let description =
-                config.description.into_iter().collect::<IdOrdMap<_>>();
+            // Build up a list of name duplicates. (There should be 0!)
+            let mut duplicate_names = Vec::new();
+
+            // Build up a list of local sled duplicates. (There should be 0!) We
+            // need to keep a set of local sleds we've seen to do this.
+            let mut local_sleds_seen = BTreeSet::new();
+            let mut duplicate_local_sleds = Vec::new();
+
+            let mut description = IdOrdMap::new();
+            for d in config.description {
+                if !local_sleds_seen.insert(d.local_sled) {
+                    duplicate_local_sleds.push(d.local_sled.to_string());
+                }
+
+                if let Err(err) = description.insert_unique(d) {
+                    let (item, _) = err.into_parts();
+                    duplicate_names.push(item.name);
+                }
+            }
 
             // Validate that we have no duplicate location names.
-            if n != description.len() {
-                reasons.push(String::from(
-                    "location descriptions contain at least one duplicate name",
+            if !duplicate_names.is_empty() {
+                let plural = if duplicate_names.len() == 1 { "" } else { "s" };
+                reasons.push(format!(
+                    "location descriptions contain duplicate name{plural}: {}",
+                    duplicate_names.join(", ")
                 ));
             }
 
             // Validate that we have no duplicate `local_sled` values.
-            let local_sled = description
-                .iter()
-                .map(|d| d.local_sled)
-                .collect::<HashSet<_>>();
-            if n != local_sled.len() {
-                reasons.push(String::from(
-                    "location descriptions contain at least one \
-                     duplicate local_sled",
+            if !duplicate_local_sleds.is_empty() {
+                let plural =
+                    if duplicate_local_sleds.len() == 1 { "" } else { "s" };
+                reasons.push(format!(
+                    "location descriptions contain duplicate \
+                     local_sled{plural}: {}",
+                    duplicate_local_sleds.join(", "),
                 ));
             }
 
@@ -625,8 +643,8 @@ mod tests {
         assert_eq!(
             reasons,
             &[
-                "location descriptions contain at least one duplicate name",
-                "location descriptions contain at least one duplicate local_sled",
+                "location descriptions contain duplicate name: a",
+                "location descriptions contain duplicate local_sled: 14",
                 "port \"fake\" is missing an ID for location \"b\"",
                 "port \"fake\" contains unknown location \"c\"",
                 "determination `0.sp_port_1` contains duplicate names",
