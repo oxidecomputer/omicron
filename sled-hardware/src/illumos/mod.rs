@@ -9,7 +9,7 @@ use gethostname::gethostname;
 use illumos_devinfo::{DevInfo, DevLinkType, DevLinks, Node, Property};
 use libnvme::{Nvme, controller::Controller};
 use omicron_common::disk::{DiskIdentity, DiskVariant};
-use sled_hardware_types::Baseboard;
+use sled_hardware_types::{Baseboard, SledCpuFamily};
 use slog::Logger;
 use slog::debug;
 use slog::error;
@@ -795,6 +795,11 @@ impl HardwareManager {
             .as_ref()
             .cloned()
             .unwrap_or_else(|| Baseboard::unknown())
+    }
+
+    pub fn cpu_family(&self) -> SledCpuFamily {
+        let log = self.log.new(slog::o!("component" => "detect_cpu_family"));
+        crate::detect_cpu_family(&log)
     }
 
     pub fn online_processor_count(&self) -> u32 {
