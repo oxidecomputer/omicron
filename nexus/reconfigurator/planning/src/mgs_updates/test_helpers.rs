@@ -40,14 +40,6 @@ pub(super) const ARTIFACT_VERSION_1: ArtifactVersion =
 pub(super) const ARTIFACT_VERSION_1_5: ArtifactVersion =
     ArtifactVersion::new_const("1.5.0");
 
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
-pub(super) enum MgsUpdateComponent {
-    Sp,
-    Rot,
-    RotBootloader,
-    HostOs,
-}
-
 /// Hash of fake artifact for fake gimlet-e SP
 pub(super) const ARTIFACT_HASH_SP_GIMLET_E: ArtifactHash =
     ArtifactHash([1; 32]);
@@ -93,6 +85,27 @@ const ROT_SIGN_PSC: &str =
     "2222222222222222222222222222222222222222222222222222222222222222";
 const ROT_SIGN_SWITCH: &str =
     "3333333333333333333333333333333333333333333333333333333333333333";
+
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
+pub(super) enum MgsUpdateComponent {
+    Sp,
+    Rot,
+    RotBootloader,
+    HostOs,
+}
+
+impl From<&'_ PendingMgsUpdateDetails> for MgsUpdateComponent {
+    fn from(value: &'_ PendingMgsUpdateDetails) -> Self {
+        match value {
+            PendingMgsUpdateDetails::Rot { .. } => Self::Rot,
+            PendingMgsUpdateDetails::RotBootloader { .. } => {
+                Self::RotBootloader
+            }
+            PendingMgsUpdateDetails::Sp { .. } => Self::Sp,
+            PendingMgsUpdateDetails::HostPhase1(_) => Self::HostOs,
+        }
+    }
+}
 
 /// Description of a single fake board (sled, switch, or PSC).
 #[derive(Debug)]
@@ -396,16 +409,7 @@ impl ExpectedUpdates {
     pub fn verify_one(&mut self, update: &PendingMgsUpdate) {
         let sp_type = update.sp_type;
         let sp_slot = update.slot_id;
-        let component = match &update.details {
-            PendingMgsUpdateDetails::Rot { .. } => MgsUpdateComponent::Rot,
-            PendingMgsUpdateDetails::RotBootloader { .. } => {
-                MgsUpdateComponent::RotBootloader
-            }
-            PendingMgsUpdateDetails::Sp { .. } => MgsUpdateComponent::Sp,
-            PendingMgsUpdateDetails::HostPhase1(_) => {
-                MgsUpdateComponent::HostOs
-            }
-        };
+        let component = MgsUpdateComponent::from(&update.details);
         println!("found update: {} slot {}", sp_type, sp_slot);
         let ExpectedUpdate { expected_serial, expected_artifact, .. } = self
             .updates
