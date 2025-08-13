@@ -515,13 +515,13 @@ impl<'a> TestBoardCollectionBuilder<'a> {
             .contains_key(&SpIdentifier { type_, slot })
     }
 
-    pub fn rot_active_version(mut self, v: ArtifactVersion) -> Self {
-        self.rot_active_version = Some(v);
-        self
-    }
-
-    pub fn rot_inactive_version(mut self, v: ExpectedVersion) -> Self {
-        self.rot_inactive_version = Some(v);
+    pub fn rot_versions(
+        mut self,
+        active: ArtifactVersion,
+        inactive: ExpectedVersion,
+    ) -> Self {
+        self.rot_active_version = Some(active);
+        self.rot_inactive_version = Some(inactive);
         self
     }
 
