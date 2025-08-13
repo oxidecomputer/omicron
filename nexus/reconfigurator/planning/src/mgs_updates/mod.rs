@@ -216,6 +216,8 @@ enum MgsUpdateStatusError {
     MissingActiveCaboose,
     #[error("no RoT state found in inventory")]
     MissingRotState,
+    #[error("not yet implemented")]
+    NotYetImplemented,
     #[error("unable to parse input into ArtifactVersion: {0:?}")]
     FailedArtifactVersionParse(ArtifactVersionError),
 }
