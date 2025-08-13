@@ -1734,9 +1734,9 @@ impl Sled {
         Caboose {
             board: board.clone(),
             git_commit: String::from("unknown"),
-            name: board,
+            name: board.clone(),
             version: version.to_string(),
-            sign: None,
+            sign: Some(board),
         }
     }
 
@@ -1757,9 +1757,9 @@ impl Sled {
         Caboose {
             board: board.clone(),
             git_commit: String::from("unknown"),
-            name: board,
+            name: board.clone(),
             version: version.to_string(),
-            sign: None,
+            sign: Some(board),
         }
     }
 

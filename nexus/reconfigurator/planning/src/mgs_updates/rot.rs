@@ -183,6 +183,10 @@ pub fn try_make_update_rot(
                 return false;
             };
             if artifact_sign != *rkth {
+                warn!(
+                    log,
+                    "DEBUG: RKTH -> {rkth} SIGN -> {artifact_sign}";
+                );
                 return false;
             }
 

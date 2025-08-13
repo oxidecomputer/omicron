@@ -1050,10 +1050,10 @@ Sled serial0
         A    0101010101010101010101010101010101010101010101010101010101010101 
         B    0202020202020202020202020202020202020202020202020202020202020202 
     cabooses:
-        SLOT     BOARD        NAME         VERSION GIT_COMMIT SIGN 
-        SpSlot0  SimGimletSp  SimGimletSp  0.0.1   unknown    n/a  
-        RotSlotA SimRot       SimRot       0.0.2   unknown    n/a  
-        Stage0   SimRotStage0 SimRotStage0 0.0.1   unknown    n/a  
+        SLOT     BOARD        NAME         VERSION GIT_COMMIT SIGN         
+        SpSlot0  SimGimletSp  SimGimletSp  0.0.1   unknown    n/a          
+        RotSlotA SimRot       SimRot       0.0.2   unknown    SimRot       
+        Stage0   SimRotStage0 SimRotStage0 0.0.1   unknown    SimRotStage0 
     RoT pages:
         SLOT DATA_BASE64 
     RoT: active slot: slot A
@@ -1075,10 +1075,10 @@ Sled serial1
         A    0101010101010101010101010101010101010101010101010101010101010101 
         B    0202020202020202020202020202020202020202020202020202020202020202 
     cabooses:
-        SLOT     BOARD        NAME         VERSION GIT_COMMIT SIGN 
-        SpSlot0  SimGimletSp  SimGimletSp  0.0.1   unknown    n/a  
-        RotSlotA SimRot       SimRot       0.0.2   unknown    n/a  
-        Stage0   SimRotStage0 SimRotStage0 0.0.1   unknown    n/a  
+        SLOT     BOARD        NAME         VERSION GIT_COMMIT SIGN         
+        SpSlot0  SimGimletSp  SimGimletSp  0.0.1   unknown    n/a          
+        RotSlotA SimRot       SimRot       0.0.2   unknown    SimRot       
+        Stage0   SimRotStage0 SimRotStage0 0.0.1   unknown    SimRotStage0 
     RoT pages:
         SLOT DATA_BASE64 
     RoT: active slot: slot A
@@ -1100,10 +1100,10 @@ Sled serial2
         A    0101010101010101010101010101010101010101010101010101010101010101 
         B    0202020202020202020202020202020202020202020202020202020202020202 
     cabooses:
-        SLOT     BOARD        NAME         VERSION GIT_COMMIT SIGN 
-        SpSlot0  SimGimletSp  SimGimletSp  0.0.1   unknown    n/a  
-        RotSlotA SimRot       SimRot       0.0.2   unknown    n/a  
-        Stage0   SimRotStage0 SimRotStage0 0.0.1   unknown    n/a  
+        SLOT     BOARD        NAME         VERSION GIT_COMMIT SIGN         
+        SpSlot0  SimGimletSp  SimGimletSp  0.0.1   unknown    n/a          
+        RotSlotA SimRot       SimRot       0.0.2   unknown    SimRot       
+        Stage0   SimRotStage0 SimRotStage0 0.0.1   unknown    SimRotStage0 
     RoT pages:
         SLOT DATA_BASE64 
     RoT: active slot: slot A
