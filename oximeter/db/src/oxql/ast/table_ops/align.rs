@@ -358,7 +358,7 @@ fn mean_delta_value_in_window(
         .copied()
         .zip(times.into_iter().copied())
         .zip(vals.into_iter().copied());
-    let diff = timestamps[last_timestamp] - timestamps[first_timestamp];
+    let diff = window_end - window_start;
     let count = diff.num_seconds().max(1) as f64;
     let mut maybe_sum = None;
     for it in iter.filter_map(|((start, time), maybe_val)| {
