@@ -216,6 +216,7 @@ INFO sufficient InternalDns zones exist in plan, desired_count: 3, current_count
 INFO sufficient ExternalDns zones exist in plan, desired_count: 3, current_count: 3
 INFO sufficient Nexus zones exist in plan, desired_count: 3, current_count: 3
 INFO sufficient Oximeter zones exist in plan, desired_count: 0, current_count: 0
+WARN cannot configure RoT bootloader update for board (missing sign in stage0 caboose from inventory), serial_number: serial0, part_number: model0
 WARN cannot configure RoT update for board (missing sign in caboose from inventory), serial_number: serial0, part_number: model0
 INFO configuring MGS-driven update, artifact_version: 1.0.0, artifact_hash: 7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670, expected_inactive_version: NoValidVersion, expected_active_version: 0.0.1, component: sp, sp_slot: 0, sp_type: Sled, serial_number: serial0, part_number: model0
 INFO reached maximum number of pending MGS-driven updates, max: 1
@@ -589,8 +590,10 @@ INFO sufficient ExternalDns zones exist in plan, desired_count: 3, current_count
 INFO sufficient Nexus zones exist in plan, desired_count: 3, current_count: 3
 INFO sufficient Oximeter zones exist in plan, desired_count: 0, current_count: 0
 INFO MGS-driven update completed (will remove it and re-evaluate board), artifact_version: 1.0.0, artifact_hash: 7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670, expected_inactive_version: NoValidVersion, expected_active_version: 0.0.1, component: sp, sp_slot: 0, sp_type: Sled, serial_number: serial0, part_number: model0
+WARN cannot configure RoT bootloader update for board (missing sign in stage0 caboose from inventory), serial_number: serial0, part_number: model0
 WARN cannot configure RoT update for board (missing sign in caboose from inventory), serial_number: serial0, part_number: model0
 INFO skipping board for MGS-driven update, serial_number: serial0, part_number: model0
+WARN cannot configure RoT bootloader update for board (missing sign in stage0 caboose from inventory), serial_number: serial1, part_number: model1
 WARN cannot configure RoT update for board (missing sign in caboose from inventory), serial_number: serial1, part_number: model1
 INFO configuring MGS-driven update, artifact_version: 1.0.0, artifact_hash: 7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670, expected_inactive_version: NoValidVersion, expected_active_version: 0.0.1, component: sp, sp_slot: 1, sp_type: Sled, serial_number: serial1, part_number: model1
 INFO reached maximum number of pending MGS-driven updates, max: 1
@@ -791,6 +794,7 @@ INFO sufficient ExternalDns zones exist in plan, desired_count: 3, current_count
 INFO sufficient Nexus zones exist in plan, desired_count: 3, current_count: 3
 INFO sufficient Oximeter zones exist in plan, desired_count: 0, current_count: 0
 INFO MGS-driven update impossible (will remove it and re-evaluate board), artifact_version: 1.0.0, artifact_hash: 7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670, expected_inactive_version: NoValidVersion, expected_active_version: 0.0.1, component: sp, sp_slot: 1, sp_type: Sled, serial_number: serial1, part_number: model1
+WARN cannot configure RoT bootloader update for board (missing sign in stage0 caboose from inventory), serial_number: serial1, part_number: model1
 WARN cannot configure RoT update for board (missing sign in caboose from inventory), serial_number: serial1, part_number: model1
 INFO configuring MGS-driven update, artifact_version: 1.0.0, artifact_hash: 7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670, expected_inactive_version: Version(ArtifactVersion("0.5.0")), expected_active_version: 0.0.1, component: sp, sp_slot: 1, sp_type: Sled, serial_number: serial1, part_number: model1
 INFO reached maximum number of pending MGS-driven updates, max: 1
@@ -986,10 +990,13 @@ INFO sufficient ExternalDns zones exist in plan, desired_count: 3, current_count
 INFO sufficient Nexus zones exist in plan, desired_count: 3, current_count: 3
 INFO sufficient Oximeter zones exist in plan, desired_count: 0, current_count: 0
 INFO MGS-driven update completed (will remove it and re-evaluate board), artifact_version: 1.0.0, artifact_hash: 7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670, expected_inactive_version: Version(ArtifactVersion("0.5.0")), expected_active_version: 0.0.1, component: sp, sp_slot: 1, sp_type: Sled, serial_number: serial1, part_number: model1
+WARN cannot configure RoT bootloader update for board (missing sign in stage0 caboose from inventory), serial_number: serial1, part_number: model1
 WARN cannot configure RoT update for board (missing sign in caboose from inventory), serial_number: serial1, part_number: model1
 INFO skipping board for MGS-driven update, serial_number: serial1, part_number: model1
+WARN cannot configure RoT bootloader update for board (missing sign in stage0 caboose from inventory), serial_number: serial0, part_number: model0
 WARN cannot configure RoT update for board (missing sign in caboose from inventory), serial_number: serial0, part_number: model0
 INFO skipping board for MGS-driven update, serial_number: serial0, part_number: model0
+WARN cannot configure RoT bootloader update for board (missing sign in stage0 caboose from inventory), serial_number: serial2, part_number: model2
 WARN cannot configure RoT update for board (missing sign in caboose from inventory), serial_number: serial2, part_number: model2
 INFO configuring MGS-driven update, artifact_version: 1.0.0, artifact_hash: 7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670, expected_inactive_version: NoValidVersion, expected_active_version: 0.0.1, component: sp, sp_slot: 2, sp_type: Sled, serial_number: serial2, part_number: model2
 INFO ran out of boards for MGS-driven update
@@ -1185,10 +1192,13 @@ INFO sufficient ExternalDns zones exist in plan, desired_count: 3, current_count
 INFO sufficient Nexus zones exist in plan, desired_count: 3, current_count: 3
 INFO sufficient Oximeter zones exist in plan, desired_count: 0, current_count: 0
 INFO MGS-driven update completed (will remove it and re-evaluate board), artifact_version: 1.0.0, artifact_hash: 7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670, expected_inactive_version: NoValidVersion, expected_active_version: 0.0.1, component: sp, sp_slot: 2, sp_type: Sled, serial_number: serial2, part_number: model2
+WARN cannot configure RoT bootloader update for board (missing sign in stage0 caboose from inventory), serial_number: serial2, part_number: model2
 WARN cannot configure RoT update for board (missing sign in caboose from inventory), serial_number: serial2, part_number: model2
 INFO skipping board for MGS-driven update, serial_number: serial2, part_number: model2
+WARN cannot configure RoT bootloader update for board (missing sign in stage0 caboose from inventory), serial_number: serial0, part_number: model0
 WARN cannot configure RoT update for board (missing sign in caboose from inventory), serial_number: serial0, part_number: model0
 INFO skipping board for MGS-driven update, serial_number: serial0, part_number: model0
+WARN cannot configure RoT bootloader update for board (missing sign in stage0 caboose from inventory), serial_number: serial1, part_number: model1
 WARN cannot configure RoT update for board (missing sign in caboose from inventory), serial_number: serial1, part_number: model1
 INFO skipping board for MGS-driven update, serial_number: serial1, part_number: model1
 INFO ran out of boards for MGS-driven update
