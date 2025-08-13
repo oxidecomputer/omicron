@@ -2,7 +2,6 @@
 
 use crate::helpers::{ctx::Context, generate_name};
 use anyhow::{Context as _, Result, ensure};
-use async_trait::async_trait;
 use omicron_test_utils::dev::poll::{CondCheckError, wait_for_condition};
 use oxide_client::types::{
     ByteCount, DiskCreate, DiskSource, ExternalIp, ExternalIpCreate,
@@ -10,9 +9,13 @@ use oxide_client::types::{
     InstanceNetworkInterfaceAttachment, InstanceState, SshKeyCreate,
 };
 use oxide_client::{ClientCurrentUserExt, ClientDisksExt, ClientInstancesExt};
+use rand::RngCore;
+use russh::client::AuthResult;
+use russh::keys::{
+    PrivateKey, PrivateKeyWithHashAlg, PublicKey, PublicKeyBase64,
+    ssh_key::private::{Ed25519PrivateKey, KeypairData},
+};
 use russh::{ChannelMsg, Disconnect};
-use russh_keys::PublicKeyBase64;
-use russh_keys::key::{KeyPair, PublicKey};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -21,8 +24,7 @@ async fn instance_launch() -> Result<()> {
     let ctx = Context::new().await?;
 
     eprintln!("generate SSH key");
-    let key =
-        Arc::new(KeyPair::generate_ed25519().context("key generation failed")?);
+    let key = generate_private_key()?;
     let public_key_str = format!("ssh-ed25519 {}", key.public_key_base64());
     eprintln!("create SSH key: {}", public_key_str);
     let ssh_key_name = generate_name("key")?;
@@ -151,16 +153,10 @@ async fn instance_launch() -> Result<()> {
         .and_then(|(lines, _)| {
             lines.trim().lines().find(|line| line.starts_with("ssh-ed25519"))
         })
-        .and_then(|line| line.split_whitespace().nth(1))
         .context("failed to get SSH host key from serial console")?;
-    eprintln!("host key: ssh-ed25519 {}", host_key);
-    let host_key = PublicKey::parse(
-        b"ssh-ed25519",
-        &base64::Engine::decode(
-            &base64::engine::general_purpose::STANDARD,
-            host_key,
-        )?,
-    )?;
+    eprintln!("host key: {host_key}");
+    let host_key = PublicKey::from_openssh(host_key)
+        .context("failed to parse host key")?;
 
     eprintln!("connecting ssh");
     let mut session = russh::client::connect(
@@ -171,7 +167,8 @@ async fn instance_launch() -> Result<()> {
     .await?;
     eprintln!("authenticating ssh");
     ensure!(
-        session.authenticate_publickey("debian", key).await?,
+        session.authenticate_publickey("debian", key).await?
+            == AuthResult::Success,
         "authentication failed"
     );
 
@@ -302,7 +299,6 @@ struct SshClient {
     host_key: PublicKey,
 }
 
-#[async_trait]
 impl russh::client::Handler for SshClient {
     type Error = anyhow::Error;
 
@@ -312,4 +308,19 @@ impl russh::client::Handler for SshClient {
     ) -> Result<bool, Self::Error> {
         Ok(&self.host_key == server_public_key)
     }
+}
+
+fn generate_private_key() -> anyhow::Result<PrivateKeyWithHashAlg> {
+    // Generate random bytes ourselves since upstream is still on rand 0.8.
+    let mut seed = [0u8; Ed25519PrivateKey::BYTE_SIZE];
+    rand::thread_rng().fill_bytes(&mut seed);
+    let private_key = PrivateKey::new(
+        KeypairData::Ed25519(Ed25519PrivateKey::from_bytes(&seed).into()),
+        "random private key",
+    )
+    .context("key generation failed")?;
+    Ok(PrivateKeyWithHashAlg::new(
+        Arc::new(private_key),
+        /* hash_alg is ignored for non-RSA keys */ None,
+    ))
 }
