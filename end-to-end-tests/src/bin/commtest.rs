@@ -7,8 +7,8 @@ use oxide_client::{
     ClientSystemHardwareExt, ClientSystemIpPoolsExt, ClientSystemStatusExt,
     ClientVpcsExt,
     types::{
-        IpPoolCreate, IpPoolLinkSilo, IpRange, IpVersion, Name, NameOrId,
-        PingStatus, ProbeCreate, ProbeInfo, ProjectCreate,
+        IpPoolCreate, IpPoolLinkSilo, IpPoolType, IpRange, IpVersion, Name,
+        NameOrId, PingStatus, ProbeCreate, ProbeInfo, ProjectCreate,
         UsernamePasswordCredentials,
     },
 };
@@ -295,6 +295,9 @@ async fn rack_prepare(
                         name: pool_name.parse().unwrap(),
                         description: "Default IP pool".to_string(),
                         ip_version,
+                        mvlan: None,
+                        pool_type: IpPoolType::Unicast,
+                        switch_port_uplinks: None,
                     })
                     .send()
                     .await?;

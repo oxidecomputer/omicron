@@ -282,6 +282,7 @@ impl_dyn_authorized_resource_for_resource!(authz::Alert);
 impl_dyn_authorized_resource_for_resource!(authz::AlertReceiver);
 impl_dyn_authorized_resource_for_resource!(authz::WebhookSecret);
 impl_dyn_authorized_resource_for_resource!(authz::Zpool);
+impl_dyn_authorized_resource_for_resource!(authz::MulticastGroup);
 
 impl_dyn_authorized_resource_for_global!(authz::AlertClassList);
 impl_dyn_authorized_resource_for_global!(authz::BlueprintConfig);

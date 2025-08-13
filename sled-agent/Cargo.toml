@@ -129,8 +129,10 @@ http.workspace = true
 hyper.workspace = true
 nexus-reconfigurator-blippy.workspace = true
 omicron-test-utils.workspace = true
+progenitor.workspace = true
 pretty_assertions.workspace = true
 rcgen.workspace = true
+regress.workspace = true
 reqwest = { workspace = true, features = ["blocking"] }
 subprocess.workspace = true
 slog-async.workspace = true

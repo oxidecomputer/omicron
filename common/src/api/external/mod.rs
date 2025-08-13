@@ -952,6 +952,8 @@ pub enum ResourceType {
     LldpLinkConfig,
     LoopbackAddress,
     MetricProducer,
+    MulticastGroup,
+    MulticastGroupMember,
     NatEntry,
     Oximeter,
     PhysicalDisk,
@@ -2509,6 +2511,12 @@ impl Vni {
 
     /// The VNI for the builtin services VPC.
     pub const SERVICES_VNI: Self = Self(100);
+
+    /// VNI default if no VPC is provided for a multicast group.
+    ///
+    /// This is a low-numbered VNI, to avoid colliding with user VNIs.
+    /// However, it is not in the Oxide-reserved yet.
+    pub const DEFAULT_MULTICAST_VNI: Self = Self(77);
 
     /// Oxide reserves a slice of initial VNIs for its own use.
     pub const MIN_GUEST_VNI: u32 = 1024;

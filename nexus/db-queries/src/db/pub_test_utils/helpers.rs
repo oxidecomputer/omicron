@@ -31,11 +31,13 @@ use nexus_db_model::SledUpdate;
 use nexus_db_model::Snapshot;
 use nexus_db_model::SnapshotIdentity;
 use nexus_db_model::SnapshotState;
+use nexus_db_model::Vmm;
 use nexus_types::external_api::params;
 use nexus_types::identity::Resource;
 use omicron_common::api::external;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
+use omicron_uuid_kinds::PropolisUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::VolumeUuid;
 use std::net::Ipv6Addr;
@@ -241,6 +243,7 @@ pub async fn create_stopped_instance_record(
             start: false,
             auto_restart_policy: Default::default(),
             anti_affinity_groups: Vec::new(),
+            multicast_groups: Vec::new(),
         },
     );
 
@@ -494,4 +497,91 @@ pub async fn create_project_image(
         )
         .await
         .unwrap()
+}
+
+/// Create a VMM record for testing.
+pub async fn create_vmm_for_instance(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    instance_id: InstanceUuid,
+    sled_id: SledUuid,
+) -> PropolisUuid {
+    let vmm_id = PropolisUuid::new_v4();
+    let vmm = Vmm::new(
+        vmm_id,
+        instance_id,
+        sled_id,
+        "127.0.0.1".parse().unwrap(), // Test IP
+        12400,                        // Test port
+        nexus_db_model::VmmCpuPlatform::SledDefault, // Test CPU platform
+    );
+    datastore.vmm_insert(opctx, vmm).await.expect("Should create VMM");
+    vmm_id
+}
+
+/// Update instance runtime to point to a VMM.
+pub async fn attach_instance_to_vmm(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    authz_project: &authz::Project,
+    instance_id: InstanceUuid,
+    vmm_id: PropolisUuid,
+) {
+    // Fetch current instance to get generation
+    let authz_instance = authz::Instance::new(
+        authz_project.clone(),
+        instance_id.into_untyped_uuid(),
+        external::LookupType::ById(instance_id.into_untyped_uuid()),
+    );
+    let instance = datastore
+        .instance_refetch(opctx, &authz_instance)
+        .await
+        .expect("Should fetch instance");
+
+    datastore
+        .instance_update_runtime(
+            &instance_id,
+            &InstanceRuntimeState {
+                nexus_state: InstanceState::Vmm,
+                propolis_id: Some(vmm_id.into_untyped_uuid()),
+                dst_propolis_id: None,
+                migration_id: None,
+                gen: Generation::from(instance.runtime().gen.next()),
+                time_updated: Utc::now(),
+                time_last_auto_restarted: None,
+            },
+        )
+        .await
+        .expect("Should update instance runtime state");
+}
+
+/// Create an instance with an associated VMM (convenience function).
+pub async fn create_instance_with_vmm(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    authz_project: &authz::Project,
+    instance_name: &str,
+    sled_id: SledUuid,
+) -> (InstanceUuid, PropolisUuid) {
+    let instance_id = create_stopped_instance_record(
+        opctx,
+        datastore,
+        authz_project,
+        instance_name,
+    )
+    .await;
+
+    let vmm_id =
+        create_vmm_for_instance(opctx, datastore, instance_id, sled_id).await;
+
+    attach_instance_to_vmm(
+        opctx,
+        datastore,
+        authz_project,
+        instance_id,
+        vmm_id,
+    )
+    .await;
+
+    (instance_id, vmm_id)
 }

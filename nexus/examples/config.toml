@@ -142,6 +142,7 @@ alert_dispatcher.period_secs = 60
 webhook_deliverator.period_secs = 60
 read_only_region_replacement_start.period_secs = 30
 sp_ereport_ingester.period_secs = 30
+multicast_group_reconciler.period_secs = 60
 
 [default_region_allocation_strategy]
 # allocate region on 3 random distinct zpools, on 3 random distinct sleds.

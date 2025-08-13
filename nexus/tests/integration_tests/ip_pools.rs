@@ -43,6 +43,7 @@ use nexus_types::external_api::params::IpPoolCreate;
 use nexus_types::external_api::params::IpPoolLinkSilo;
 use nexus_types::external_api::params::IpPoolSiloUpdate;
 use nexus_types::external_api::params::IpPoolUpdate;
+use nexus_types::external_api::shared::IpPoolType;
 use nexus_types::external_api::shared::IpRange;
 use nexus_types::external_api::shared::Ipv4Range;
 use nexus_types::external_api::shared::SiloIdentityMode;
@@ -61,6 +62,7 @@ use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::SimpleIdentityOrName;
 use omicron_common::api::external::{IdentityMetadataCreateParams, Name};
+use omicron_common::vlan::VlanID;
 use omicron_nexus::TestInterfaces;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
@@ -101,13 +103,13 @@ async fn test_ip_pool_basic_crud(cptestctx: &ControlPlaneTestContext) {
 
     // Create the pool, verify we can get it back by either listing or fetching
     // directly
-    let params = IpPoolCreate {
-        identity: IdentityMetadataCreateParams {
-            name: pool_name.parse().unwrap(),
+    let params = IpPoolCreate::new(
+        IdentityMetadataCreateParams {
+            name: String::from(pool_name).parse().unwrap(),
             description: String::from(description),
         },
-        ip_version: IpVersion::V4,
-    };
+        IpVersion::V4,
+    );
     let created_pool: IpPool =
         object_create(client, ip_pools_url, &params).await;
     assert_eq!(created_pool.identity.name, pool_name);
@@ -125,13 +127,13 @@ async fn test_ip_pool_basic_crud(cptestctx: &ControlPlaneTestContext) {
     let error = object_create_error(
         client,
         ip_pools_url,
-        &params::IpPoolCreate {
-            identity: IdentityMetadataCreateParams {
+        &params::IpPoolCreate::new(
+            IdentityMetadataCreateParams {
                 name: pool_name.parse().unwrap(),
                 description: String::new(),
             },
-            ip_version: IpVersion::V4,
-        },
+            IpVersion::V4,
+        ),
         StatusCode::BAD_REQUEST,
     )
     .await;
@@ -175,6 +177,8 @@ async fn test_ip_pool_basic_crud(cptestctx: &ControlPlaneTestContext) {
             name: Some(String::from(new_pool_name).parse().unwrap()),
             description: None,
         },
+        mvlan: None,
+        switch_port_uplinks: None,
     };
     let modified_pool: IpPool =
         object_put(client, &ip_pool_url, &updates).await;
@@ -382,6 +386,8 @@ async fn test_ip_pool_service_no_cud(cptestctx: &ControlPlaneTestContext) {
             name: Some("test".parse().unwrap()),
             description: Some("test".to_string()),
         },
+        mvlan: None,
+        switch_port_uplinks: None,
     };
     let error = object_put_error(
         client,
@@ -821,13 +827,13 @@ async fn create_pool(
     name: &str,
     ip_version: IpVersion,
 ) -> IpPool {
-    let params = IpPoolCreate {
-        identity: IdentityMetadataCreateParams {
+    let params = IpPoolCreate::new(
+        IdentityMetadataCreateParams {
             name: Name::try_from(name.to_string()).unwrap(),
             description: "".to_string(),
         },
         ip_version,
-    };
+    );
     NexusRequest::objects_post(client, "/v1/system/ip-pools", &params)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
@@ -948,13 +954,14 @@ async fn test_ip_pool_range_overlapping_ranges_fails(
     let ip_pool_add_range_url = format!("{}/add", ip_pool_ranges_url);
 
     // Create the pool, verify basic properties
-    let params = IpPoolCreate {
-        identity: IdentityMetadataCreateParams {
-            name: pool_name.parse().unwrap(),
+    let params = IpPoolCreate::new(
+        IdentityMetadataCreateParams {
+            name: String::from(pool_name).parse().unwrap(),
             description: String::from(description),
         },
-        ip_version: IpVersion::V4,
-    };
+        IpVersion::V4,
+    );
+
     let created_pool: IpPool =
         object_create(client, ip_pools_url, &params).await;
     assert_eq!(created_pool.identity.name, pool_name);
@@ -1107,13 +1114,13 @@ async fn test_ip_pool_range_pagination(cptestctx: &ControlPlaneTestContext) {
     let ip_pool_add_range_url = format!("{}/add", ip_pool_ranges_url);
 
     // Create the pool, verify basic properties
-    let params = IpPoolCreate {
-        identity: IdentityMetadataCreateParams {
-            name: pool_name.parse().unwrap(),
+    let params = IpPoolCreate::new(
+        IdentityMetadataCreateParams {
+            name: String::from(pool_name).parse().unwrap(),
             description: String::from(description),
         },
-        ip_version: IpVersion::V4,
-    };
+        IpVersion::V4,
+    );
     let created_pool: IpPool =
         object_create(client, ip_pools_url, &params).await;
     assert_eq!(created_pool.identity.name, pool_name);
@@ -1522,4 +1529,490 @@ fn assert_ranges_eq(first: &IpPoolRange, second: &IpPoolRange) {
     assert_eq!(first.time_created, second.time_created);
     assert_eq!(first.range.first_address(), second.range.first_address());
     assert_eq!(first.range.last_address(), second.range.last_address());
+}
+
+fn assert_unicast_defaults(pool: &IpPool) {
+    assert_eq!(pool.pool_type, IpPoolType::Unicast);
+    assert!(pool.mvlan.is_none());
+    assert!(pool.switch_port_uplinks.is_none());
+}
+
+#[nexus_test]
+async fn test_ip_pool_unicast_defaults(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+
+    // Test that regular IP pool creation uses unicast defaults
+    let pool = create_pool(client, "unicast-test", IpVersion::V4).await;
+    assert_unicast_defaults(&pool);
+
+    // Test that explicitly creating with default type still works
+    let params = IpPoolCreate::new(
+        IdentityMetadataCreateParams {
+            name: "explicit-unicast".parse().unwrap(),
+            description: "Explicit unicast pool".to_string(),
+        },
+        IpVersion::V4,
+    );
+    let pool: IpPool =
+        object_create(client, "/v1/system/ip-pools", &params).await;
+    assert_unicast_defaults(&pool);
+}
+
+#[nexus_test]
+async fn test_ip_pool_multicast_crud(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+
+    // Create multicast IP pool
+    let params = IpPoolCreate::new_multicast(
+        IdentityMetadataCreateParams {
+            name: "multicast-test".parse().unwrap(),
+            description: "Test multicast pool".to_string(),
+        },
+        IpVersion::V4,
+        Some(vec!["switch0.qsfp0".parse().unwrap()]),
+        VlanID::new(100).ok(),
+    );
+
+    let pool: IpPool =
+        object_create(client, "/v1/system/ip-pools", &params).await;
+    assert_eq!(pool.pool_type, IpPoolType::Multicast);
+    assert_eq!(pool.mvlan, Some(100u16));
+    assert!(pool.switch_port_uplinks.is_some());
+    let uplinks = pool.switch_port_uplinks.as_ref().unwrap();
+    assert_eq!(uplinks.len(), 1);
+    // Verify view shows "switch.port" format
+    assert_eq!(uplinks[0], "switch0.qsfp0");
+
+    // Test update - change VLAN and remove uplinks
+    let updates = IpPoolUpdate {
+        identity: IdentityMetadataUpdateParams {
+            name: None,
+            description: Some("Updated multicast pool".to_string()),
+        },
+        mvlan: VlanID::new(200).ok(),
+        switch_port_uplinks: Some(vec![]), // Remove all uplinks
+    };
+
+    let pool_url = "/v1/system/ip-pools/multicast-test";
+    let updated_pool: IpPool = object_put(client, pool_url, &updates).await;
+    assert_eq!(updated_pool.mvlan, Some(200u16));
+    let uplinks = updated_pool.switch_port_uplinks.as_ref().unwrap();
+    assert_eq!(uplinks.len(), 0); // All uplinks removed
+
+    // Note: Field clearing semantics would need to be tested separately
+    // as the update API uses None to mean "no change", not "clear field"
+}
+
+#[nexus_test]
+async fn test_ip_pool_multicast_ranges(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+
+    // Create IPv4 multicast pool
+    let params = IpPoolCreate::new_multicast(
+        IdentityMetadataCreateParams {
+            name: "multicast-ipv4".parse().unwrap(),
+            description: "IPv4 multicast pool".to_string(),
+        },
+        IpVersion::V4,
+        None,
+        None,
+    );
+
+    let _pool: IpPool =
+        object_create(client, "/v1/system/ip-pools", &params).await;
+    let pool_url = "/v1/system/ip-pools/multicast-ipv4";
+    let ranges_url = format!("{}/ranges/add", pool_url);
+
+    // Add IPv4 multicast range (224.0.0.0/4)
+    let ipv4_range = IpRange::V4(
+        Ipv4Range::new(
+            std::net::Ipv4Addr::new(224, 1, 1, 1),
+            std::net::Ipv4Addr::new(224, 1, 1, 10),
+        )
+        .unwrap(),
+    );
+
+    let created_range: IpPoolRange =
+        object_create(client, &ranges_url, &ipv4_range).await;
+    assert_eq!(ipv4_range.first_address(), created_range.range.first_address());
+    assert_eq!(ipv4_range.last_address(), created_range.range.last_address());
+
+    // Verify utilization
+    assert_ip_pool_utilization(client, "multicast-ipv4", 0, 10.0).await;
+}
+
+#[nexus_test]
+async fn test_ip_pool_multicast_silo_linking(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    // Create multicast pool
+    let params = IpPoolCreate::new_multicast(
+        IdentityMetadataCreateParams {
+            name: "multicast-silo-test".parse().unwrap(),
+            description: "Multicast pool for silo linking".to_string(),
+        },
+        IpVersion::V4,
+        None,
+        VlanID::new(300).ok(),
+    );
+
+    let _pool: IpPool =
+        object_create(client, "/v1/system/ip-pools", &params).await;
+
+    // Create silo to link with
+    let silo =
+        create_silo(&client, "multicast-silo", true, SiloIdentityMode::SamlJit)
+            .await;
+
+    // Link multicast pool to silo
+    link_ip_pool(client, "multicast-silo-test", &silo.id(), true).await;
+
+    // Verify the link shows up correctly
+    let silo_pools = pools_for_silo(client, "multicast-silo").await;
+    assert_eq!(silo_pools.len(), 1);
+    assert_eq!(silo_pools[0].identity.name, "multicast-silo-test");
+    // Note: SiloIpPool doesn't expose pool_type, would need separate lookup
+    assert!(silo_pools[0].is_default);
+
+    // Verify pool shows linked silo
+    let linked_silos = silos_for_pool(client, "multicast-silo-test").await;
+    assert_eq!(linked_silos.items.len(), 1);
+    assert_eq!(linked_silos.items[0].silo_id, silo.id());
+    assert!(linked_silos.items[0].is_default);
+}
+
+#[nexus_test]
+async fn test_ip_pool_mixed_unicast_multicast(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    // Create one of each type
+    let unicast_pool = create_pool(client, "unicast", IpVersion::V4).await;
+    assert_unicast_defaults(&unicast_pool);
+
+    let multicast_params = IpPoolCreate::new_multicast(
+        IdentityMetadataCreateParams {
+            name: "multicast".parse().unwrap(),
+            description: "Multicast pool".to_string(),
+        },
+        IpVersion::V4,
+        Some(vec!["switch0.qsfp0".parse().unwrap()]),
+        VlanID::new(400).ok(),
+    );
+
+    let multicast_pool: IpPool =
+        object_create(client, "/v1/system/ip-pools", &multicast_params).await;
+    assert_eq!(multicast_pool.pool_type, IpPoolType::Multicast);
+
+    // List all pools - should see both types
+    let all_pools = get_ip_pools(client).await;
+    assert_eq!(all_pools.len(), 2);
+
+    // Verify each has correct type
+    for pool in all_pools {
+        match pool.identity.name.as_str() {
+            "unicast" => assert_unicast_defaults(&pool),
+            "multicast" => assert_eq!(pool.pool_type, IpPoolType::Multicast),
+            _ => panic!("Unexpected pool name: {}", pool.identity.name),
+        }
+    }
+}
+
+#[nexus_test]
+async fn test_ip_pool_unicast_rejects_multicast_fields(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    // Try to create unicast pool with multicast-only fields - should be rejected
+    let mut params = IpPoolCreate::new(
+        IdentityMetadataCreateParams {
+            name: "invalid-unicast".parse().unwrap(),
+            description: "Unicast pool with invalid multicast fields"
+                .to_string(),
+        },
+        IpVersion::V4,
+    );
+    params.mvlan = VlanID::new(100).ok(); // This should be rejected for unicast
+
+    let error = object_create_error(
+        client,
+        "/v1/system/ip-pools",
+        &params,
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+    assert!(
+        error.message.contains("mvlan")
+            || error.message.contains("VLAN")
+            || error.message.contains("unicast")
+    );
+
+    // Try to create unicast pool with uplinks - should be rejected
+    let mut params = IpPoolCreate::new(
+        IdentityMetadataCreateParams {
+            name: "invalid-unicast2".parse().unwrap(),
+            description: "Unicast pool with uplinks".to_string(),
+        },
+        IpVersion::V4,
+    );
+    params.switch_port_uplinks = Some(vec!["switch0.qsfp0".parse().unwrap()]);
+
+    let error = object_create_error(
+        client,
+        "/v1/system/ip-pools",
+        &params,
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+    assert!(
+        error.message.contains("uplink")
+            || error.message.contains("switch")
+            || error.message.contains("unicast")
+    );
+
+    // Both fields together should also fail
+    let mut params = IpPoolCreate::new(
+        IdentityMetadataCreateParams {
+            name: "invalid-unicast3".parse().unwrap(),
+            description: "Unicast pool with both invalid fields".to_string(),
+        },
+        IpVersion::V4,
+    );
+    params.mvlan = VlanID::new(200).ok();
+    params.switch_port_uplinks = Some(vec!["switch0.qsfp0".parse().unwrap()]);
+
+    let error = object_create_error(
+        client,
+        "/v1/system/ip-pools",
+        &params,
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+    assert!(
+        error.message.contains("unicast")
+            || error.message.contains("mvlan")
+            || error.message.contains("uplink")
+    );
+}
+
+#[nexus_test]
+async fn test_ip_pool_multicast_invalid_vlan(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    // Test valid VLAN range first (to ensure we understand the API)
+    let valid_params = IpPoolCreate::new_multicast(
+        IdentityMetadataCreateParams {
+            name: "valid-vlan".parse().unwrap(),
+            description: "Multicast pool with valid VLAN".to_string(),
+        },
+        IpVersion::V4,
+        None,
+        VlanID::new(100).ok(),
+    );
+
+    // This should succeed
+    let _pool: IpPool =
+        object_create(client, "/v1/system/ip-pools", &valid_params).await;
+
+    // Now test edge cases - VLAN 4094 should be valid (at the boundary)
+    let boundary_params = IpPoolCreate::new_multicast(
+        IdentityMetadataCreateParams {
+            name: "boundary-vlan".parse().unwrap(),
+            description: "Multicast pool with boundary VLAN".to_string(),
+        },
+        IpVersion::V4,
+        None,
+        VlanID::new(4094).ok(),
+    );
+
+    let _pool: IpPool =
+        object_create(client, "/v1/system/ip-pools", &boundary_params).await;
+}
+
+#[nexus_test]
+async fn test_ip_pool_multicast_invalid_uplinks(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    // Test with empty uplinks list
+    let params = IpPoolCreate::new_multicast(
+        IdentityMetadataCreateParams {
+            name: "empty-uplinks".parse().unwrap(),
+            description: "Multicast pool with empty uplinks".to_string(),
+        },
+        IpVersion::V4,
+        Some(vec![]),
+        VlanID::new(100).ok(),
+    );
+
+    // Empty list should be fine - just means no specific uplinks configured
+    let _pool: IpPool =
+        object_create(client, "/v1/system/ip-pools", &params).await;
+
+    // Test with duplicate uplinks
+    let params = IpPoolCreate::new_multicast(
+        IdentityMetadataCreateParams {
+            name: "duplicate-uplinks".parse().unwrap(),
+            description: "Multicast pool with duplicate uplinks".to_string(),
+        },
+        IpVersion::V4,
+        Some(vec![
+            "switch0.qsfp0".parse().unwrap(),
+            "switch0.qsfp0".parse().unwrap(), // Duplicate - should be automatically removed
+        ]),
+        VlanID::new(200).ok(),
+    );
+
+    // Duplicates should be automatically removed by the deserializer
+    let _pool: IpPool =
+        object_create(client, "/v1/system/ip-pools", &params).await;
+    let uplinks = _pool.switch_port_uplinks.as_ref().unwrap();
+    assert_eq!(uplinks.len(), 1); // Duplicate should be removed, only one entry
+
+    // Test with non-existent switch port
+    let params = IpPoolCreate::new_multicast(
+        IdentityMetadataCreateParams {
+            name: "invalid-switch-port".parse().unwrap(),
+            description: "Multicast pool with invalid switch port".to_string(),
+        },
+        IpVersion::V4,
+        Some(vec!["switch1.qsfp0".parse().unwrap()]), // switch1 doesn't exist
+        VlanID::new(300).ok(),
+    );
+
+    // Should fail with 400 error about switch port not found
+    let error = object_create_error(
+        client,
+        "/v1/system/ip-pools",
+        &params,
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+    assert!(
+        error.message.contains("switch1.qsfp0")
+            && error.message.contains("not found")
+    );
+}
+
+/// Test ASM/SSM multicast pool validation - ensure pools cannot mix ASM and SSM ranges
+#[nexus_test]
+async fn test_multicast_pool_asm_ssm_validation(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    // Create pure ASM multicast pool
+    let asm_pool_params = IpPoolCreate::new_multicast(
+        IdentityMetadataCreateParams {
+            name: "asm-pool".parse().unwrap(),
+            description: "Pure ASM multicast pool".to_string(),
+        },
+        IpVersion::V4,
+        Some(vec!["switch0.qsfp0".parse().unwrap()]),
+        VlanID::new(100).ok(),
+    );
+    let asm_pool: IpPool =
+        object_create(client, "/v1/system/ip-pools", &asm_pool_params).await;
+
+    // Add ASM range (224.x.x.x) - should succeed
+    let asm_range = IpRange::V4(
+        Ipv4Range::new(
+            std::net::Ipv4Addr::new(224, 1, 0, 1),
+            std::net::Ipv4Addr::new(224, 1, 0, 50),
+        )
+        .unwrap(),
+    );
+    let add_asm_url =
+        format!("/v1/system/ip-pools/{}/ranges/add", asm_pool.identity.name);
+    object_create::<IpRange, IpPoolRange>(client, &add_asm_url, &asm_range)
+        .await;
+
+    // Try to add SSM range (232.x.x.x) to ASM pool - should fail
+    let ssm_range = IpRange::V4(
+        Ipv4Range::new(
+            std::net::Ipv4Addr::new(232, 1, 0, 1),
+            std::net::Ipv4Addr::new(232, 1, 0, 50),
+        )
+        .unwrap(),
+    );
+    let error = object_create_error(
+        client,
+        &add_asm_url,
+        &ssm_range,
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+    assert!(
+        error.message.contains("Cannot mix")
+            && error.message.contains("ASM")
+            && error.message.contains("SSM"),
+        "Expected ASM/SSM mixing error, got: {}",
+        error.message
+    );
+
+    // Create pure SSM multicast pool
+    let ssm_pool_params = IpPoolCreate::new_multicast(
+        IdentityMetadataCreateParams {
+            name: "ssm-pool".parse().unwrap(),
+            description: "Pure SSM multicast pool".to_string(),
+        },
+        IpVersion::V4,
+        Some(vec!["switch0.qsfp0".parse().unwrap()]),
+        VlanID::new(200).ok(),
+    );
+    let ssm_pool: IpPool =
+        object_create(client, "/v1/system/ip-pools", &ssm_pool_params).await;
+
+    // Add SSM range (232.x.x.x) - should succeed
+    let add_ssm_url =
+        format!("/v1/system/ip-pools/{}/ranges/add", ssm_pool.identity.name);
+    object_create::<IpRange, IpPoolRange>(client, &add_ssm_url, &ssm_range)
+        .await;
+
+    // Try to add ASM range (224.x.x.x) to SSM pool - should fail
+    let error = object_create_error(
+        client,
+        &add_ssm_url,
+        &asm_range,
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+    assert!(
+        error.message.contains("Cannot mix")
+            && error.message.contains("ASM")
+            && error.message.contains("SSM"),
+        "Expected ASM/SSM mixing error, got: {}",
+        error.message
+    );
+
+    // Note: IPv6 multicast ranges are not yet supported in the system,
+    // so we focus on IPv4 validation for now
+
+    // Verify that multiple ranges of the same type can be added
+    let asm_range2 = IpRange::V4(
+        Ipv4Range::new(
+            std::net::Ipv4Addr::new(224, 2, 0, 1),
+            std::net::Ipv4Addr::new(224, 2, 0, 50),
+        )
+        .unwrap(),
+    );
+    object_create::<IpRange, IpPoolRange>(client, &add_asm_url, &asm_range2)
+        .await;
+
+    let ssm_range2 = IpRange::V4(
+        Ipv4Range::new(
+            std::net::Ipv4Addr::new(232, 2, 0, 1),
+            std::net::Ipv4Addr::new(232, 2, 0, 50),
+        )
+        .unwrap(),
+    );
+    object_create::<IpRange, IpPoolRange>(client, &add_ssm_url, &ssm_range2)
+        .await;
 }

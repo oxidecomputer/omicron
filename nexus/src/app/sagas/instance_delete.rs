@@ -13,6 +13,7 @@ use nexus_db_queries::{authn, authz, db};
 use omicron_common::api::internal::shared::SwitchLocation;
 use serde::Deserialize;
 use serde::Serialize;
+use slog::info;
 use steno::ActionError;
 
 // instance delete saga: input parameters
@@ -39,7 +40,10 @@ declare_saga_actions! {
     DEALLOCATE_EXTERNAL_IP -> "no_result3" {
         + sid_deallocate_external_ip
     }
-    INSTANCE_DELETE_NAT -> "no_result4" {
+    LEAVE_MULTICAST_GROUPS -> "no_result4" {
+        + sid_leave_multicast_groups
+    }
+    INSTANCE_DELETE_NAT -> "no_result5" {
         + sid_delete_nat
     }
 }
@@ -64,6 +68,7 @@ impl NexusSaga for SagaInstanceDelete {
         builder.append(instance_delete_record_action());
         builder.append(delete_network_interfaces_action());
         builder.append(deallocate_external_ip_action());
+        builder.append(leave_multicast_groups_action());
         Ok(builder.build()?)
     }
 }
@@ -128,6 +133,34 @@ async fn sid_delete_nat(
         .instance_delete_dpd_config(&opctx, &authz_instance)
         .await
         .map_err(ActionError::action_failed)?;
+
+    Ok(())
+}
+
+async fn sid_leave_multicast_groups(
+    sagactx: NexusActionContext,
+) -> Result<(), ActionError> {
+    let osagactx = sagactx.user_data();
+    let datastore = osagactx.datastore();
+    let params = sagactx.saga_params::<Params>()?;
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
+
+    let instance_id = params.authz_instance.id();
+
+    // Mark all multicast group memberships for this instance as deleted
+    datastore
+        .multicast_group_members_mark_for_removal(&opctx, instance_id)
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    info!(
+        osagactx.log(),
+        "Marked multicast members for removal";
+        "instance_id" => %instance_id
+    );
 
     Ok(())
 }
@@ -240,6 +273,7 @@ mod test {
             start: false,
             auto_restart_policy: Default::default(),
             anti_affinity_groups: Vec::new(),
+            multicast_groups: Vec::new(),
         }
     }
 
