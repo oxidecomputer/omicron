@@ -347,6 +347,20 @@ has_relation(fleet: Fleet, "parent_fleet", collection: SamlIdentityProvider)
 # Fleet.  None of these resources defines their own roles.
 #
 
+# Describes the quiesce state of a particular Nexus instance.
+#
+# These authz checks must not require the database.  We grant this directly to
+# callers of the internal API.
+resource QuiesceState {
+	permissions = [ "read", "modify" ];
+}
+has_permission(USER_INTERNAL_API: AuthenticatedActor, "read", _q: QuiesceState);
+has_permission(
+    USER_INTERNAL_API: AuthenticatedActor,
+    "modify",
+    _q: QuiesceState
+);
+
 # Describes the policy for reading and modifying DNS configuration
 # (both internal and external)
 resource DnsConfig {

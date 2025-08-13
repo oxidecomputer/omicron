@@ -909,6 +909,49 @@ impl Handler {
             rot: Ok(rot_state_v2(self.update_state.rot_state())),
         }
     }
+
+    fn set_power_state_impl(
+        &mut self,
+        power_state: PowerState,
+    ) -> PowerStateTransition {
+        let modified =
+            self.power_state.send_if_modified(|stored_power_state| {
+                if power_state == (*stored_power_state).into() {
+                    return false;
+                }
+                *stored_power_state = match power_state {
+                    PowerState::A0 => {
+                        let slot = self
+                            .update_state
+                            .component_get_active_slot(
+                                SpComponent::HOST_CPU_BOOT_FLASH,
+                            )
+                            .expect(
+                                "can always get active slot for \
+                                 valid component",
+                            );
+                        let slot = M2Slot::from_mgs_firmware_slot(slot)
+                            .expect("sp-sim ensures host slot is always valid");
+                        GimletPowerState::A0(slot)
+                    }
+                    // `A1` is a transitory state that we can't even observe on
+                    // real devices as of
+                    // https://github.com/oxidecomputer/hubris/pull/2107. Our
+                    // tests really care about "host powered on" (A0) or "host
+                    // powered off" (A2), so just squish the transitory state
+                    // down to "host powered off".
+                    PowerState::A1 | PowerState::A2 => GimletPowerState::A2,
+                };
+                true
+            });
+
+        if modified {
+            self.power_state_changes.fetch_add(1, Ordering::Relaxed);
+            PowerStateTransition::Changed
+        } else {
+            PowerStateTransition::Unchanged
+        }
+    }
 }
 
 impl SpHandler for Handler {
@@ -1254,47 +1297,14 @@ impl SpHandler for Handler {
         sender: Sender<Self::VLanId>,
         power_state: PowerState,
     ) -> Result<PowerStateTransition, SpError> {
-        let prev_power_state = *self.power_state.borrow();
-        let transition = if power_state != prev_power_state.into() {
-            PowerStateTransition::Changed
-        } else {
-            PowerStateTransition::Unchanged
-        };
+        let transition = self.set_power_state_impl(power_state);
 
         debug!(
             &self.log, "received set power state";
             "sender" => ?sender,
-            "prev_power_state" => ?power_state,
             "power_state" => ?power_state,
             "transition" => ?transition,
         );
-
-        let new_power_state = match power_state {
-            PowerState::A0 => {
-                let slot = self
-                    .update_state
-                    .component_get_active_slot(SpComponent::HOST_CPU_BOOT_FLASH)
-                    .expect("can always get active slot for valid component");
-                let slot = M2Slot::from_mgs_firmware_slot(slot)
-                    .expect("sp-sim ensures host slot is always valid");
-                GimletPowerState::A0(slot)
-            }
-            // `A1` is a transitory state that we can't even observe on real
-            // devices as of https://github.com/oxidecomputer/hubris/pull/2107.
-            // Our tests really care about "host powered on" (A0) or "host
-            // powered off" (A2), so just squish the transitory state down to
-            // "host powered off".
-            PowerState::A1 | PowerState::A2 => GimletPowerState::A2,
-        };
-        self.power_state.send_modify(|s| {
-            *s = new_power_state;
-        });
-        match transition {
-            PowerStateTransition::Changed => {
-                self.power_state_changes.fetch_add(1, Ordering::Relaxed);
-            }
-            PowerStateTransition::Unchanged => (),
-        }
 
         Ok(transition)
     }
@@ -1327,6 +1337,10 @@ impl SpHandler for Handler {
         if component == SpComponent::SP_ITSELF {
             if self.reset_pending == Some(SpComponent::SP_ITSELF) {
                 self.update_state.sp_reset();
+                // When the SP resets, the host also resets; emulate this
+                // behavior by tracking a power state transition to A2 and back.
+                self.set_power_state_impl(PowerState::A2);
+                self.set_power_state_impl(PowerState::A0);
                 self.reset_pending = None;
                 if let Some(signal) = self.should_fail_to_respond_signal.take()
                 {
@@ -1573,6 +1587,10 @@ impl SpHandler for Handler {
         if component == SpComponent::SP_ITSELF {
             if self.reset_pending == Some(SpComponent::SP_ITSELF) {
                 self.update_state.sp_reset();
+                // When the SP resets, the host also resets; emulate this
+                // behavior by tracking a power state transition to A2 and back.
+                self.set_power_state_impl(PowerState::A2);
+                self.set_power_state_impl(PowerState::A0);
                 self.reset_pending = None;
                 if let Some(signal) = self.should_fail_to_respond_signal.take()
                 {

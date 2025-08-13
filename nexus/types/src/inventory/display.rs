@@ -611,6 +611,7 @@ fn display_sleds(
             sled_role,
             usable_hardware_threads,
             usable_physical_ram,
+            cpu_family,
             reservoir_size,
             disks,
             zpools,
@@ -643,6 +644,7 @@ fn display_sleds(
         )?;
         writeln!(indented, "address:     {}", sled_agent_address)?;
         writeln!(indented, "usable hw threads:   {}", usable_hardware_threads)?;
+        writeln!(indented, "CPU family:          {}", cpu_family)?;
         writeln!(
             indented,
             "usable memory (GiB): {}",

@@ -8,9 +8,12 @@ use std::net::Ipv6Addr;
 
 use internal_dns_resolver::Resolver;
 use nexus_db_queries::{context::OpContext, db::DataStore};
-use nexus_types::deployment::{
-    Blueprint, PendingMgsUpdates,
-    execution::{EventBuffer, Overridables},
+use nexus_types::{
+    deployment::{
+        Blueprint, PendingMgsUpdates,
+        execution::{EventBuffer, Overridables},
+    },
+    quiesce::SagaQuiesceHandle,
 };
 use omicron_uuid_kinds::OmicronZoneUuid;
 use update_engine::TerminalKind;
@@ -37,6 +40,8 @@ pub(crate) async fn realize_blueprint_and_expect(
 
     // This helper function does not support MGS-managed updates.
     let (mgs_updates, _rx) = watch::channel(PendingMgsUpdates::new());
+    // This helper function does not mess with quiescing.
+    let saga_quiesce = SagaQuiesceHandle::new(opctx.log.clone());
     let nexus_id = OmicronZoneUuid::new_v4();
     let output = crate::realize_blueprint(
         RequiredRealizeArgs {
@@ -47,6 +52,7 @@ pub(crate) async fn realize_blueprint_and_expect(
             blueprint,
             sender,
             mgs_updates,
+            saga_quiesce,
         }
         .with_overrides(overrides)
         .as_nexus(OmicronZoneUuid::new_v4()),
