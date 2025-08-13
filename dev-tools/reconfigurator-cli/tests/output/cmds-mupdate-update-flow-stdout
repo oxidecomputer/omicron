@@ -503,6 +503,7 @@ chicken switches:
     add zones with mupdate override:   false
 
 * waiting on MUPdate overrides
+* MUPdate overrides exist
 * zone updates waiting on MUPdate overrides
 
 
@@ -877,6 +878,7 @@ chicken switches:
     add zones with mupdate override:   false
 
 * waiting on MUPdate overrides
+* MUPdate overrides exist
 * zone updates waiting on MUPdate overrides
 
 
@@ -1098,6 +1100,7 @@ chicken switches:
 
 * noop converting 6/6 install-dataset zones to artifact store on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
 * waiting on MUPdate overrides
+* MUPdate overrides exist
 * zone updates waiting on MUPdate overrides
 
 
@@ -1382,6 +1385,7 @@ chicken switches:
 
 * skipping noop image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 6 zones are already from artifacts
 * waiting on MUPdate overrides
+* MUPdate overrides exist
 * zone updates waiting on MUPdate overrides
 
 
@@ -1556,6 +1560,7 @@ chicken switches:
 
 * skipping noop image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 6 zones are already from artifacts
 * waiting on MUPdate overrides
+* MUPdate overrides exist
 * zone updates waiting on MUPdate overrides
 
 
@@ -1794,6 +1799,7 @@ chicken switches:
 * skipping noop image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 6 zones are already from artifacts
 * noop converting 6/6 install-dataset zones to artifact store on sled d81c6a84-79b8-4958-ae41-ea46c9b19763
 * waiting on MUPdate overrides
+* MUPdate overrides exist
 * zone updates waiting on MUPdate overrides
 
 
@@ -1969,6 +1975,7 @@ chicken switches:
 * skipping noop image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 6 zones are already from artifacts
 * noop converting 6/6 install-dataset zones to artifact store on sled d81c6a84-79b8-4958-ae41-ea46c9b19763
 * waiting on MUPdate overrides
+* MUPdate overrides exist
 * zone updates waiting on MUPdate overrides
 
 
@@ -2545,6 +2552,7 @@ chicken switches:
 * skipping noop image source check on sled c3bc4c6d-fdde-4fc4-8493-89d2a1e5ee6b: all 0 zones are already from artifacts
 * skipping noop image source check on sled d81c6a84-79b8-4958-ae41-ea46c9b19763: all 6 zones are already from artifacts
 * waiting on MUPdate overrides
+* MUPdate overrides exist
 * zone updates waiting on MUPdate overrides
 
 
@@ -2767,6 +2775,8 @@ generated blueprint 61a93ea3-c872-48e0-aace-e86b0c52b839 based on parent bluepri
 planning report for blueprint 61a93ea3-c872-48e0-aace-e86b0c52b839:
 * skipping noop image source check on sled c3bc4c6d-fdde-4fc4-8493-89d2a1e5ee6b: all 0 zones are already from artifacts
 * skipping noop image source check on sled d81c6a84-79b8-4958-ae41-ea46c9b19763: all 6 zones are already from artifacts
+* MUPdate overrides exist
+* adding zones despite MUPdate override, as specified by the `add_zones_with_mupdate_override` chicken switch
 * discretionary zone placement waiting for NTP zones on sleds: c3bc4c6d-fdde-4fc4-8493-89d2a1e5ee6b
 * missing NTP zone on sled c3bc4c6d-fdde-4fc4-8493-89d2a1e5ee6b
 * zone updates waiting on MUPdate overrides

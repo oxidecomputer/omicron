@@ -6412,6 +6412,10 @@
       "PlanningAddStepReport": {
         "type": "object",
         "properties": {
+          "add_zones_with_mupdate_override": {
+            "description": "The value of the homonymous chicken switch.",
+            "type": "boolean"
+          },
           "discretionary_zones_placed": {
             "description": "Sled ID → kinds of discretionary zones placed there",
             "type": "object",
@@ -6421,6 +6425,10 @@
                 "type": "string"
               }
             }
+          },
+          "has_mupdate_override": {
+            "description": "Are there any outstanding MUPdate overrides?",
+            "type": "boolean"
           },
           "out_of_eligible_sleds": {
             "description": "Discretionary zone kind → (placed, wanted to place)",
@@ -6491,7 +6499,9 @@
           }
         },
         "required": [
+          "add_zones_with_mupdate_override",
           "discretionary_zones_placed",
+          "has_mupdate_override",
           "out_of_eligible_sleds",
           "sleds_getting_ntp_and_discretionary_zones",
           "sleds_missing_crucible_zone",

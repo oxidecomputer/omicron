@@ -484,6 +484,12 @@ pub struct PlanningAddStepReport {
     /// What are we waiting on to start zone additions?
     pub waiting_on: Option<ZoneAddWaitingOn>,
 
+    /// Are there any outstanding MUPdate overrides?
+    pub has_mupdate_override: bool,
+
+    /// The value of the homonymous chicken switch.
+    pub add_zones_with_mupdate_override: bool,
+
     pub sleds_without_ntp_zones_in_inventory: BTreeSet<SledUuid>,
     pub sleds_without_zpools_for_ntp_zones: BTreeSet<SledUuid>,
     pub sleds_waiting_for_ntp_zone: BTreeSet<SledUuid>,
@@ -508,6 +514,8 @@ impl PlanningAddStepReport {
     pub fn new() -> Self {
         Self {
             waiting_on: None,
+            has_mupdate_override: true,
+            add_zones_with_mupdate_override: false,
             sleds_without_ntp_zones_in_inventory: BTreeSet::new(),
             sleds_without_zpools_for_ntp_zones: BTreeSet::new(),
             sleds_waiting_for_ntp_zone: BTreeSet::new(),
@@ -593,6 +601,8 @@ impl fmt::Display for PlanningAddStepReport {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let Self {
             waiting_on,
+            has_mupdate_override,
+            add_zones_with_mupdate_override,
             sleds_without_ntp_zones_in_inventory,
             sleds_without_zpools_for_ntp_zones,
             sleds_waiting_for_ntp_zone,
@@ -606,6 +616,19 @@ impl fmt::Display for PlanningAddStepReport {
 
         if let Some(waiting_on) = waiting_on {
             writeln!(f, "* waiting on {}", waiting_on.as_str())?;
+        }
+
+        if *has_mupdate_override {
+            writeln!(f, "* MUPdate overrides exist")?;
+        }
+
+        if *add_zones_with_mupdate_override {
+            writeln!(
+                f,
+                "* adding zones despite MUPdate override, \
+                   as specified by the `add_zones_with_mupdate_override` \
+                   chicken switch"
+            )?;
         }
 
         if !sleds_without_ntp_zones_in_inventory.is_empty() {

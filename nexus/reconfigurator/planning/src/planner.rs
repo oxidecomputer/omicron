@@ -193,15 +193,19 @@ impl<'a> Planner<'a> {
         };
 
         // Likewise for zone additions, unless overridden with the chicken switch.
-        let add = if plan_mupdate_override_res.is_empty()
-            || self.input.chicken_switches().add_zones_with_mupdate_override
-        {
-            self.do_plan_add(&mgs_updates)?
-        } else {
-            PlanningAddStepReport::waiting_on(
-                ZoneAddWaitingOn::MupdateOverrides,
-            )
-        };
+        let has_mupdate_override = !plan_mupdate_override_res.is_empty();
+        let add_zones_with_mupdate_override =
+            self.input.chicken_switches().add_zones_with_mupdate_override;
+        let mut add =
+            if !has_mupdate_override || add_zones_with_mupdate_override {
+                self.do_plan_add(&mgs_updates)?
+            } else {
+                PlanningAddStepReport::waiting_on(
+                    ZoneAddWaitingOn::MupdateOverrides,
+                )
+            };
+        add.has_mupdate_override = has_mupdate_override;
+        add.add_zones_with_mupdate_override = add_zones_with_mupdate_override;
 
         let zone_updates = if add.any_discretionary_zones_placed() {
             // Do not update any zones if we've added any discretionary zones
