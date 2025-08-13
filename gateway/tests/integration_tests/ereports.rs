@@ -73,6 +73,20 @@ mod sled0 {
     });
 
     def_ereport! {
+        LOSS: {
+            "baseboard_part_number": "SimGimletSp",
+            "baseboard_serial_number": "SimGimlet00",
+            "hubris_archive_id": "ffffffff",
+            "hubris_version": "0.0.2",
+            "hubris_task_name": "packrat",
+            "hubris_task_gen": 0,
+            "hubris_uptime_ms": 666,
+            "ereport_message_version": 0,
+            "lost": null,
+        }
+    }
+
+    def_ereport! {
         EREPORT_1: {
             "baseboard_part_number": "SimGimletSp",
             "baseboard_serial_number": "SimGimlet00",
@@ -82,7 +96,7 @@ mod sled0 {
             "hubris_task_gen": 13,
             "hubris_uptime_ms": 1233,
             "ereport_message_version": 0,
-            "class": "gov.nasa.apollo.o2_tanks.stir.begin",
+            "k": "gov.nasa.apollo.o2_tanks.stir.begin",
             "message": "stirring the tanks",
         }
     }
@@ -96,7 +110,7 @@ mod sled0 {
             "hubris_task_gen": 1,
             "hubris_uptime_ms": 1234,
             "ereport_message_version": 0,
-            "class": "io.discovery.ae35.fault",
+            "k": "io.discovery.ae35.fault",
             "message": "i've just picked up a fault in the AE-35 unit",
             "de": {
                 "scheme": "fmd",
@@ -119,7 +133,7 @@ mod sled0 {
             "hubris_task_gen": 13,
             "hubris_uptime_ms": 1237,
             "ereport_message_version": 0,
-            "class": "gov.nasa.apollo.fault",
+            "k": "gov.nasa.apollo.fault",
             "message": "houston, we have a problem",
             "crew": [
                 "Lovell",
@@ -139,7 +153,7 @@ mod sled0 {
             "hubris_task_gen": 2,
             "hubris_uptime_ms": 1240,
             "ereport_message_version": 0,
-            "class": "flagrant_error",
+            "k": "flagrant_error",
             "computer": false,
         }
     }
@@ -154,7 +168,7 @@ mod sled0 {
             "hubris_task_gen": 1,
             "hubris_uptime_ms": 1245,
             "ereport_message_version": 0,
-            "class": "overfull_hbox",
+            "k": "overfull_hbox",
             "badness": 10000,
         }
     }
@@ -165,6 +179,20 @@ mod sled1 {
     pub(super) static RESTART_0: LazyLock<Uuid> = LazyLock::new(|| {
         "55e30cc7-a109-492f-aca9-735ed725df3c".parse().expect("is a valid UUID")
     });
+
+    def_ereport! {
+        LOSS: {
+            "baseboard_part_number": "SimGimletSp",
+            "baseboard_serial_number": "SimGimlet01",
+            "hubris_archive_id": "ffffffff",
+            "hubris_version": "0.0.2",
+            "hubris_task_name": "packrat",
+            "hubris_task_gen": 0,
+            "hubris_uptime_ms": 666,
+            "ereport_message_version": 0,
+            "lost": null,
+        }
+    }
 
     def_ereport! {
         EREPORT_1: {
@@ -233,9 +261,14 @@ async fn ereports_basic() {
 
     assert_eq!(restart_id.as_untyped_uuid(), &*sled1::RESTART_0);
     let reports = reports.items;
-    assert_eq!(reports.len(), 1, "expected 1 ereport, found: {:#?}", reports);
+    assert_eq!(reports.len(), 2, "expected 2 ereports, found: {:#?}", reports);
+
     let report = &reports[0];
     assert_eq!(report.ena, ereport_types::Ena(1));
+    assert_eq!(report.data, *sled1::LOSS);
+
+    let report = &reports[1];
+    assert_eq!(report.ena, ereport_types::Ena(2));
     assert_eq!(report.data, *sled1::EREPORT_1);
 
     testctx.teardown().await;
@@ -254,7 +287,7 @@ async fn ereports_limit() {
             restart_id: Uuid::new_v4(),
             start_ena: 0,
             committed_ena: None,
-            limit: 2
+            limit: 3
         }
         .response(client)
         .await
@@ -262,13 +295,18 @@ async fn ereports_limit() {
 
     assert_eq!(restart_id.as_untyped_uuid(), &*sled0::RESTART_0);
     let reports = reports.items;
-    assert_eq!(reports.len(), 2, "expected 2 ereports, found: {:#?}", reports);
+    assert_eq!(reports.len(), 3, "expected 3 ereports, found: {:#?}", reports);
+
     let report = &reports[0];
     assert_eq!(report.ena, ereport_types::Ena(1));
-    assert_eq!(report.data, *sled0::EREPORT_1);
+    assert_eq!(report.data, *sled0::LOSS);
 
     let report = &reports[1];
     assert_eq!(report.ena, ereport_types::Ena(2));
+    assert_eq!(report.data, *sled0::EREPORT_1);
+
+    let report = &reports[2];
+    assert_eq!(report.ena, ereport_types::Ena(3));
     assert_eq!(report.data, *sled0::EREPORT_2);
 
     let ereport_types::Ereports { restart_id, reports } = dbg!(
@@ -288,11 +326,11 @@ async fn ereports_limit() {
     assert_eq!(reports.len(), 2, "expected 2 ereports, found: {:#?}", reports);
     let report = &reports[0];
     assert_eq!(report.ena, ereport_types::Ena(3));
-    assert_eq!(report.data, *sled0::EREPORT_3);
+    assert_eq!(report.data, *sled0::EREPORT_2);
 
     let report = &reports[1];
     assert_eq!(report.ena, ereport_types::Ena(4));
-    assert_eq!(report.data, *sled0::EREPORT_4);
+    assert_eq!(report.data, *sled0::EREPORT_3);
 
     testctx.teardown().await;
 }
@@ -323,11 +361,11 @@ async fn ereports_commit() {
     assert_eq!(reports.len(), 2, "expected 2 ereports, found: {:#?}", reports);
     let report = &reports[0];
     assert_eq!(report.ena, ereport_types::Ena(1));
-    assert_eq!(report.data, *sled0::EREPORT_1);
+    assert_eq!(report.data, *sled0::LOSS);
 
     let report = &reports[1];
     assert_eq!(report.ena, ereport_types::Ena(2));
-    assert_eq!(report.data, *sled0::EREPORT_2);
+    assert_eq!(report.data, *sled0::EREPORT_1);
 
     // Now, send a request with a committed ENA *and* a matching restart ID.
     let ereport_types::Ereports { restart_id, reports } = dbg!(
@@ -347,11 +385,11 @@ async fn ereports_commit() {
     assert_eq!(reports.len(), 2, "expected 2 ereports, found: {:#?}", reports);
     let report = &reports[0];
     assert_eq!(report.ena, ereport_types::Ena(3));
-    assert_eq!(report.data, *sled0::EREPORT_3);
+    assert_eq!(report.data, *sled0::EREPORT_2);
 
     let report = &reports[1];
     assert_eq!(report.ena, ereport_types::Ena(4));
-    assert_eq!(report.data, *sled0::EREPORT_4);
+    assert_eq!(report.data, *sled0::EREPORT_3);
 
     // Even if the start ENA of a subsequent request is 0, we shouldn't see any
     // ereports with ENAs lower than the committed ENA.
@@ -369,17 +407,21 @@ async fn ereports_commit() {
 
     assert_eq!(restart_id.as_untyped_uuid(), &*sled0::RESTART_0);
     let reports = reports.items;
-    assert_eq!(reports.len(), 3, "expected 3 ereports, found: {:#?}", reports);
+    assert_eq!(reports.len(), 4, "expected 3 ereports, found: {:#?}", reports);
     let report = &reports[0];
     assert_eq!(report.ena, ereport_types::Ena(3));
-    assert_eq!(report.data, *sled0::EREPORT_3);
+    assert_eq!(report.data, *sled0::EREPORT_2);
 
     let report = &reports[1];
     assert_eq!(report.ena, ereport_types::Ena(4));
-    assert_eq!(report.data, *sled0::EREPORT_4);
+    assert_eq!(report.data, *sled0::EREPORT_3);
 
     let report = &reports[2];
     assert_eq!(report.ena, ereport_types::Ena(5));
+    assert_eq!(report.data, *sled0::EREPORT_4);
+
+    let report = &reports[3];
+    assert_eq!(report.ena, ereport_types::Ena(6));
     assert_eq!(report.data, *sled0::EREPORT_5);
 
     testctx.teardown().await;

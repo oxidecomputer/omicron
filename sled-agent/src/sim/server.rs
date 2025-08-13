@@ -8,7 +8,7 @@ use super::config::Config;
 use super::http_entrypoints::api as http_api;
 use super::sled_agent::SledAgent;
 use super::storage::PantryServer;
-use crate::nexus::NexusClient;
+use crate::nexus::{ConvertInto, NexusClient};
 use crate::rack_setup::SledConfig;
 use crate::rack_setup::service::build_initial_blueprint_from_sled_configs;
 use crate::rack_setup::{
@@ -166,6 +166,7 @@ impl Server {
                                 config.hardware.reservoir_ram,
                             )
                             .unwrap(),
+                            cpu_family: config.hardware.cpu_family.convert(),
                             generation: Generation::new(),
                             decommissioned: false,
                         },

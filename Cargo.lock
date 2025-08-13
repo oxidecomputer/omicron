@@ -7118,6 +7118,7 @@ dependencies = [
  "omicron-cockroach-metrics",
  "omicron-common",
  "omicron-passwords",
+ "omicron-test-utils",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "openssl",
@@ -7139,6 +7140,7 @@ dependencies = [
  "test-strategy",
  "textwrap",
  "thiserror 2.0.12",
+ "tokio",
  "tough",
  "tufaceous-artifact",
  "unicode-width 0.1.14",
@@ -7879,6 +7881,7 @@ dependencies = [
  "hyper-rustls",
  "hyper-staticfile",
  "id-map",
+ "iddqd",
  "illumos-utils",
  "internal-dns-resolver",
  "internal-dns-types",
@@ -10579,9 +10582,9 @@ dependencies = [
 
 [[package]]
 name = "qorb"
-version = "0.4.0"
+version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0a3a29f6021f8ccb73eef615ad8b17006098376a75e9ba41eb0f6b976bd12e97"
+checksum = "2f223a85f489c9548719fb367c6733e8bc9d4eef76d6ea59a18299acd9497c60"
 dependencies = [
  "anyhow",
  "async-trait",

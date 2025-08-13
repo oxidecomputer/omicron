@@ -1749,7 +1749,7 @@ mod test {
     use nexus_reconfigurator_blippy::{Blippy, BlippyReportSortKey};
     use nexus_sled_agent_shared::inventory::{
         Baseboard, ConfigReconcilerInventoryStatus, Inventory, InventoryDisk,
-        OmicronZoneType, SledRole, ZoneImageResolverInventory,
+        OmicronZoneType, SledCpuFamily, SledRole, ZoneImageResolverInventory,
     };
     use omicron_common::{
         address::{Ipv6Subnet, SLED_PREFIX, get_sled_address},
@@ -1775,6 +1775,7 @@ mod test {
                 baseboard: Baseboard::Unknown,
                 usable_hardware_threads: 32,
                 usable_physical_ram: ByteCount::from_gibibytes_u32(16),
+                cpu_family: SledCpuFamily::AmdMilan,
                 reservoir_size: ByteCount::from_gibibytes_u32(0),
                 disks: (0..u2_count)
                     .map(|i| InventoryDisk {

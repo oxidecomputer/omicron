@@ -5000,6 +5000,9 @@
           "baseboard": {
             "$ref": "#/components/schemas/Baseboard"
           },
+          "cpu_family": {
+            "$ref": "#/components/schemas/SledCpuFamily"
+          },
           "datasets": {
             "type": "array",
             "items": {
@@ -5063,6 +5066,7 @@
         },
         "required": [
           "baseboard",
+          "cpu_family",
           "datasets",
           "disks",
           "reconciler_status",
@@ -7005,6 +7009,39 @@
           "com2",
           "com3",
           "com4"
+        ]
+      },
+      "SledCpuFamily": {
+        "description": "Identifies the kind of CPU present on a sled, determined by reading CPUID.\n\nThis is intended to broadly support the control plane answering the question \"can I run this instance on that sled?\" given an instance with either no or some CPU platform requirement. It is not enough information for more precise placement questions - for example, is a CPU a high-frequency part or many-core part? We don't include Genoa here, but in that CPU family there are high frequency parts, many-core parts, and large-cache parts. To support those questions (or satisfactorily answer #8730) we would need to collect additional information and send it along.",
+        "oneOf": [
+          {
+            "description": "The CPU vendor or its family number don't correspond to any of the known family variants.",
+            "type": "string",
+            "enum": [
+              "unknown"
+            ]
+          },
+          {
+            "description": "AMD Milan processors (or very close). Could be an actual Milan in a Gimlet, a close-to-Milan client Zen 3 part, or Zen 4 (for which Milan is the greatest common denominator).",
+            "type": "string",
+            "enum": [
+              "amd_milan"
+            ]
+          },
+          {
+            "description": "AMD Turin processors (or very close). Could be an actual Turin in a Cosmo, or a close-to-Turin client Zen 5 part.",
+            "type": "string",
+            "enum": [
+              "amd_turin"
+            ]
+          },
+          {
+            "description": "AMD Turin Dense processors. There are no \"Turin Dense-like\" CPUs unlike other cases, so this means a bona fide Zen 5c Turin Dense part.",
+            "type": "string",
+            "enum": [
+              "amd_turin_dense"
+            ]
+          }
         ]
       },
       "SledDiagnosticsQueryOutput": {

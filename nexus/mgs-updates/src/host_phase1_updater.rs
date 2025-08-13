@@ -552,7 +552,7 @@ impl ReconfiguratorHostPhase1Updater {
         log: &Logger,
     ) -> Result<(), PrecheckError> {
         let PendingMgsUpdateHostPhase1Details {
-            expected_boot_disk: expected_active_boot_disk,
+            expected_boot_disk,
             expected_active_phase_2_hash,
             expected_inactive_phase_2_hash,
             ..
@@ -563,7 +563,7 @@ impl ReconfiguratorHostPhase1Updater {
             self.get_boot_partition_inventory_from_sled_agent(log).await?;
 
         // Confirm the expected boot disk.
-        match (sled_inventory.boot_disk, *expected_active_boot_disk) {
+        match (sled_inventory.boot_disk, *expected_boot_disk) {
             (Ok(found), expected) if found == expected => (),
             (Ok(found), expected) => {
                 return Err(PrecheckError::WrongHostOsBootDisk {
@@ -580,7 +580,7 @@ impl ReconfiguratorHostPhase1Updater {
         // can't proceed: either our update has become impossible due to other
         // changes (requires replanning), or we're waiting for sled-agent to
         // write the phase 2 we expect.
-        let (active, inactive) = match expected_active_boot_disk {
+        let (active, inactive) = match expected_boot_disk {
             M2Slot::A => (sled_inventory.slot_a, sled_inventory.slot_b),
             M2Slot::B => (sled_inventory.slot_b, sled_inventory.slot_a),
         };

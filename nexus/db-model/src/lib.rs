@@ -104,6 +104,7 @@ mod silo_group;
 mod silo_user;
 mod silo_user_password_hash;
 mod sled;
+mod sled_cpu_family;
 mod sled_instance;
 mod sled_policy;
 mod sled_resource_vmm;
@@ -225,6 +226,7 @@ pub use silo_group::*;
 pub use silo_user::*;
 pub use silo_user_password_hash::*;
 pub use sled::*;
+pub use sled_cpu_family::*;
 pub use sled_instance::*;
 pub use sled_policy::to_db_sled_policy; // Do not expose DbSledPolicy
 pub use sled_resource_vmm::*;

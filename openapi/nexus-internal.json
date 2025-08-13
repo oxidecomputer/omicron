@@ -1635,6 +1635,46 @@
         }
       }
     },
+    "/quiesce": {
+      "get": {
+        "summary": "Check whether Nexus is running normally, quiescing, or fully quiesced.",
+        "operationId": "quiesce_get",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuiesceStatus"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "summary": "Begin quiescing this Nexus instance",
+        "description": "This causes no new sagas to be started and eventually causes no database connections to become available.  This is a one-way trip.  There's no unquiescing Nexus.",
+        "operationId": "quiesce_start",
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/racks/{rack_id}/initialization-complete": {
       "put": {
         "summary": "Report that the Rack Setup Service initialization is complete",
@@ -4656,6 +4696,29 @@
         "format": "uint8",
         "minimum": 0
       },
+      "HeldDbClaimInfo": {
+        "description": "Describes an outstanding database claim (for debugging why quiesce is stuck)",
+        "type": "object",
+        "properties": {
+          "debug": {
+            "type": "string"
+          },
+          "held_since": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "id": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "debug",
+          "held_since",
+          "id"
+        ]
+      },
       "IdMapBlueprintDatasetConfig": {
         "type": "object",
         "additionalProperties": {
@@ -6277,6 +6340,33 @@
           "by_baseboard"
         ]
       },
+      "PendingSagaInfo": {
+        "description": "Describes a pending saga (for debugging why quiesce is stuck)",
+        "type": "object",
+        "properties": {
+          "recovered": {
+            "description": "If true, we know the saga needs to be recovered.  It may or may not be running already.\n\nIf false, this saga was created in this Nexus process's lifetime.  It's still running.",
+            "type": "boolean"
+          },
+          "saga_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "saga_name": {
+            "type": "string"
+          },
+          "time_pending": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "recovered",
+          "saga_id",
+          "saga_name",
+          "time_pending"
+        ]
+      },
       "PhysicalDiskKind": {
         "description": "Describes the form factor of physical disks.",
         "type": "string",
@@ -6648,6 +6738,188 @@
         },
         "required": [
           "lease_duration"
+        ]
+      },
+      "QuiesceState": {
+        "description": "See [`QuiesceStatus`] for more on Nexus quiescing.\n\nAt any given time, Nexus is always in one of these states:\n\n```text Running             (normal operation) | | quiesce starts v WaitingForSagas     (no new sagas are allowed, but some are still running) | | no more sagas running v WaitingForDb        (no sagas running; no new db connections may be acquired by Nexus at-large, but some are still held) | | no more database connections held v Quiesced            (no sagas running, no database connections in use) ```\n\nQuiescing is (currently) a one-way trip: once a Nexus process starts quiescing, it will never go back to normal operation.  It will never go back to an earlier stage, either.",
+        "oneOf": [
+          {
+            "description": "Normal operation",
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "running"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
+            "description": "New sagas disallowed, but some are still running.",
+            "type": "object",
+            "properties": {
+              "quiesce_details": {
+                "type": "object",
+                "properties": {
+                  "time_requested": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                },
+                "required": [
+                  "time_requested"
+                ]
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "waiting_for_sagas"
+                ]
+              }
+            },
+            "required": [
+              "quiesce_details",
+              "state"
+            ]
+          },
+          {
+            "description": "No sagas running, no new database connections may be claimed, but some database connections are still held.",
+            "type": "object",
+            "properties": {
+              "quiesce_details": {
+                "type": "object",
+                "properties": {
+                  "duration_waiting_for_sagas": {
+                    "$ref": "#/components/schemas/Duration"
+                  },
+                  "time_requested": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                },
+                "required": [
+                  "duration_waiting_for_sagas",
+                  "time_requested"
+                ]
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "waiting_for_db"
+                ]
+              }
+            },
+            "required": [
+              "quiesce_details",
+              "state"
+            ]
+          },
+          {
+            "description": "Nexus has no sagas running and is not using the database",
+            "type": "object",
+            "properties": {
+              "quiesce_details": {
+                "type": "object",
+                "properties": {
+                  "duration_total": {
+                    "$ref": "#/components/schemas/Duration"
+                  },
+                  "duration_waiting_for_db": {
+                    "$ref": "#/components/schemas/Duration"
+                  },
+                  "duration_waiting_for_sagas": {
+                    "$ref": "#/components/schemas/Duration"
+                  },
+                  "time_quiesced": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "time_requested": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                },
+                "required": [
+                  "duration_total",
+                  "duration_waiting_for_db",
+                  "duration_waiting_for_sagas",
+                  "time_quiesced",
+                  "time_requested"
+                ]
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "quiesced"
+                ]
+              }
+            },
+            "required": [
+              "quiesce_details",
+              "state"
+            ]
+          }
+        ]
+      },
+      "QuiesceStatus": {
+        "description": "Describes whether Nexus is quiescing or quiesced and what, if anything, is blocking the quiesce process\n\n**Quiescing** is the process of draining Nexus of running sagas and stopping all use of the database in preparation for upgrade.  See [`QuiesceState`] for more on the stages involved.",
+        "type": "object",
+        "properties": {
+          "db_claims": {
+            "title": "IdOrdMap",
+            "description": "what database claims are currently held (by any part of Nexus)\n\nEntries here prevent transitioning from `WaitingForDb` to `Quiesced`.",
+            "x-rust-type": {
+              "crate": "iddqd",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/HeldDbClaimInfo"
+                }
+              ],
+              "path": "iddqd::IdOrdMap",
+              "version": "*"
+            },
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HeldDbClaimInfo"
+            },
+            "uniqueItems": true
+          },
+          "sagas_pending": {
+            "title": "IdOrdMap",
+            "description": "what sagas are currently running or known needing to be recovered\n\nThis should only be non-empty when state is `Running` or `WaitingForSagas`.  Entries here prevent transitioning from `WaitingForSagas` to `WaitingForDb`.",
+            "x-rust-type": {
+              "crate": "iddqd",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/PendingSagaInfo"
+                }
+              ],
+              "path": "iddqd::IdOrdMap",
+              "version": "*"
+            },
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PendingSagaInfo"
+            },
+            "uniqueItems": true
+          },
+          "state": {
+            "description": "what stage of quiescing is Nexus at",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/QuiesceState"
+              }
+            ]
+          }
+        },
+        "required": [
+          "db_claims",
+          "sagas_pending",
+          "state"
         ]
       },
       "RackInitializationRequest": {
@@ -7265,6 +7537,14 @@
               }
             ]
           },
+          "cpu_family": {
+            "description": "The family of the sled's CPU.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SledCpuFamily"
+              }
+            ]
+          },
           "decommissioned": {
             "description": "Whether the sled-agent has been decommissioned by nexus\n\nThis flag is only set to true by nexus. Setting it on an upsert from sled-agent has no effect.",
             "type": "boolean"
@@ -7320,6 +7600,7 @@
         },
         "required": [
           "baseboard",
+          "cpu_family",
           "decommissioned",
           "generation",
           "repo_depot_port",
@@ -7328,6 +7609,39 @@
           "sa_address",
           "usable_hardware_threads",
           "usable_physical_ram"
+        ]
+      },
+      "SledCpuFamily": {
+        "description": "Identifies the kind of CPU present on a sled, determined by reading CPUID.\n\nThis is intended to broadly support the control plane answering the question \"can I run this instance on that sled?\" given an instance with either no or some CPU platform requirement. It is not enough information for more precise placement questions - for example, is a CPU a high-frequency part or many-core part? We don't include Genoa here, but in that CPU family there are high frequency parts, many-core parts, and large-cache parts. To support those questions (or satisfactorily answer #8730) we would need to collect additional information and send it along.",
+        "oneOf": [
+          {
+            "description": "The CPU vendor or its family number don't correspond to any of the known family variants.",
+            "type": "string",
+            "enum": [
+              "unknown"
+            ]
+          },
+          {
+            "description": "AMD Milan processors (or very close). Could be an actual Milan in a Gimlet, a close-to-Milan client Zen 3 part, or Zen 4 (for which Milan is the greatest common denominator).",
+            "type": "string",
+            "enum": [
+              "amd_milan"
+            ]
+          },
+          {
+            "description": "AMD Turin processors (or very close). Could be an actual Turin in a Cosmo, or a close-to-Turin client Zen 5 part.",
+            "type": "string",
+            "enum": [
+              "amd_turin"
+            ]
+          },
+          {
+            "description": "AMD Turin Dense processors. There are no \"Turin Dense-like\" CPUs unlike other cases, so this means a bona fide Zen 5c Turin Dense part.",
+            "type": "string",
+            "enum": [
+              "amd_turin_dense"
+            ]
+          }
         ]
       },
       "SledId": {
