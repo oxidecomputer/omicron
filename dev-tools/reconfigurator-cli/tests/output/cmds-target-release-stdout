@@ -202,7 +202,7 @@ f45ba181-4b56-42cc-a762-874d90184a43 0       <REDACTED_TIMESTAMP>
 
 
 > # First step: upgrade one RoT.
-> blueprint-plan dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21 f45ba181-4b56-42cc-a762-874d90184a43
+> blueprint-plan latest latest
 INFO performed noop image source checks on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, num_total: 9, num_already_artifact: 0, num_eligible: 0, num_ineligible: 9
 INFO performed noop image source checks on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, num_total: 8, num_already_artifact: 0, num_eligible: 0, num_ineligible: 8
 INFO performed noop image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 8, num_already_artifact: 0, num_eligible: 0, num_ineligible: 8
@@ -221,7 +221,7 @@ INFO reached maximum number of pending MGS-driven updates, max: 1
 INFO will ensure cockroachdb setting, setting: cluster.preserve_downgrade_option, value: DoNotModify
 generated blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1 based on parent blueprint dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21
 
-> blueprint-diff dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
+> blueprint-diff latest
 from: blueprint dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21
 to:   blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
 
@@ -387,7 +387,7 @@ external DNS:
 
 
 > # If we generate another plan, there should be no change.
-> blueprint-plan 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1 f45ba181-4b56-42cc-a762-874d90184a43
+> blueprint-plan latest latest
 INFO performed noop image source checks on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, num_total: 9, num_already_artifact: 0, num_eligible: 0, num_ineligible: 9
 INFO performed noop image source checks on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, num_total: 8, num_already_artifact: 0, num_eligible: 0, num_ineligible: 8
 INFO performed noop image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 8, num_already_artifact: 0, num_eligible: 0, num_ineligible: 8
@@ -406,7 +406,7 @@ INFO reached maximum number of pending MGS-driven updates, max: 1
 INFO will ensure cockroachdb setting, setting: cluster.preserve_downgrade_option, value: DoNotModify
 generated blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4 based on parent blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
 
-> blueprint-diff 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1 58d5e830-0884-47d8-a7cd-b2b3751adeb4
+> blueprint-diff latest
 from: blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
 to:   blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4
 
@@ -573,7 +573,7 @@ set sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 RoT settings: slot a -> 1.0.0
 > inventory-generate
 generated inventory collection eb0796d5-ab8a-4f7b-a884-b4aeacb8ab51 from configured sleds
 
-> blueprint-plan 58d5e830-0884-47d8-a7cd-b2b3751adeb4 eb0796d5-ab8a-4f7b-a884-b4aeacb8ab51
+> blueprint-plan latest latest
 INFO performed noop image source checks on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, num_total: 9, num_already_artifact: 0, num_eligible: 0, num_ineligible: 9
 INFO performed noop image source checks on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, num_total: 8, num_already_artifact: 0, num_eligible: 0, num_ineligible: 8
 INFO performed noop image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 8, num_already_artifact: 0, num_eligible: 0, num_ineligible: 8
@@ -593,7 +593,7 @@ INFO reached maximum number of pending MGS-driven updates, max: 1
 INFO will ensure cockroachdb setting, setting: cluster.preserve_downgrade_option, value: DoNotModify
 generated blueprint af934083-59b5-4bf6-8966-6fb5292c29e1 based on parent blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4
 
-> blueprint-diff 58d5e830-0884-47d8-a7cd-b2b3751adeb4 af934083-59b5-4bf6-8966-6fb5292c29e1
+> blueprint-diff latest
 from: blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4
 to:   blueprint af934083-59b5-4bf6-8966-6fb5292c29e1
 
@@ -770,7 +770,7 @@ set sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 SP versions: active -> 1.0.0
 > inventory-generate
 generated inventory collection 61f451b3-2121-4ed6-91c7-a550054f6c21 from configured sleds
 
-> blueprint-plan af934083-59b5-4bf6-8966-6fb5292c29e1 61f451b3-2121-4ed6-91c7-a550054f6c21
+> blueprint-plan latest latest
 INFO performed noop image source checks on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, num_total: 9, num_already_artifact: 0, num_eligible: 0, num_ineligible: 9
 INFO performed noop image source checks on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, num_total: 8, num_already_artifact: 0, num_eligible: 0, num_ineligible: 8
 INFO performed noop image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 8, num_already_artifact: 0, num_eligible: 0, num_ineligible: 8
@@ -791,7 +791,7 @@ INFO reached maximum number of pending MGS-driven updates, max: 1
 INFO will ensure cockroachdb setting, setting: cluster.preserve_downgrade_option, value: DoNotModify
 generated blueprint df06bb57-ad42-4431-9206-abff322896c7 based on parent blueprint af934083-59b5-4bf6-8966-6fb5292c29e1
 
-> blueprint-diff af934083-59b5-4bf6-8966-6fb5292c29e1 df06bb57-ad42-4431-9206-abff322896c7
+> blueprint-diff latest
 from: blueprint af934083-59b5-4bf6-8966-6fb5292c29e1
 to:   blueprint df06bb57-ad42-4431-9206-abff322896c7
 
@@ -970,7 +970,7 @@ set sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c RoT settings: slot b -> 0.5.0
 > inventory-generate
 generated inventory collection b1bda47d-2c19-4fba-96e3-d9df28db7436 from configured sleds
 
-> blueprint-plan df06bb57-ad42-4431-9206-abff322896c7 b1bda47d-2c19-4fba-96e3-d9df28db7436
+> blueprint-plan latest latest
 INFO performed noop image source checks on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, num_total: 9, num_already_artifact: 0, num_eligible: 0, num_ineligible: 9
 INFO performed noop image source checks on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, num_total: 8, num_already_artifact: 0, num_eligible: 0, num_ineligible: 8
 INFO performed noop image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 8, num_already_artifact: 0, num_eligible: 0, num_ineligible: 8
@@ -990,7 +990,7 @@ INFO reached maximum number of pending MGS-driven updates, max: 1
 INFO will ensure cockroachdb setting, setting: cluster.preserve_downgrade_option, value: DoNotModify
 generated blueprint 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba based on parent blueprint df06bb57-ad42-4431-9206-abff322896c7
 
-> blueprint-diff df06bb57-ad42-4431-9206-abff322896c7 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba
+> blueprint-diff latest
 from: blueprint df06bb57-ad42-4431-9206-abff322896c7
 to:   blueprint 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba
 
@@ -1164,7 +1164,7 @@ set sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c RoT settings: slot a -> 1.0.0
 > inventory-generate
 generated inventory collection a71f7a73-35a6-45e8-acbe-f1c5925eed69 from configured sleds
 
-> blueprint-plan 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba a71f7a73-35a6-45e8-acbe-f1c5925eed69
+> blueprint-plan latest latest
 INFO performed noop image source checks on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, num_total: 9, num_already_artifact: 0, num_eligible: 0, num_ineligible: 9
 INFO performed noop image source checks on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, num_total: 8, num_already_artifact: 0, num_eligible: 0, num_ineligible: 8
 INFO performed noop image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 8, num_already_artifact: 0, num_eligible: 0, num_ineligible: 8
@@ -1184,7 +1184,7 @@ INFO reached maximum number of pending MGS-driven updates, max: 1
 INFO will ensure cockroachdb setting, setting: cluster.preserve_downgrade_option, value: DoNotModify
 generated blueprint 9034c710-3e57-45f3-99e5-4316145e87ac based on parent blueprint 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba
 
-> blueprint-diff 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba 9034c710-3e57-45f3-99e5-4316145e87ac
+> blueprint-diff latest
 from: blueprint 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba
 to:   blueprint 9034c710-3e57-45f3-99e5-4316145e87ac
 
@@ -1361,7 +1361,7 @@ set sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c SP versions: inactive -> 0.5.0
 > inventory-generate
 generated inventory collection 0b5efbb3-0b1b-4bbf-b7d8-a2d6fca074c6 from configured sleds
 
-> blueprint-plan 9034c710-3e57-45f3-99e5-4316145e87ac 0b5efbb3-0b1b-4bbf-b7d8-a2d6fca074c6
+> blueprint-plan latest latest
 INFO performed noop image source checks on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, num_total: 9, num_already_artifact: 0, num_eligible: 0, num_ineligible: 9
 INFO performed noop image source checks on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, num_total: 8, num_already_artifact: 0, num_eligible: 0, num_ineligible: 8
 INFO performed noop image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 8, num_already_artifact: 0, num_eligible: 0, num_ineligible: 8
@@ -1381,7 +1381,7 @@ INFO reached maximum number of pending MGS-driven updates, max: 1
 INFO will ensure cockroachdb setting, setting: cluster.preserve_downgrade_option, value: DoNotModify
 generated blueprint d60afc57-f15d-476c-bd0f-b1071e2bb976 based on parent blueprint 9034c710-3e57-45f3-99e5-4316145e87ac
 
-> blueprint-diff 9034c710-3e57-45f3-99e5-4316145e87ac d60afc57-f15d-476c-bd0f-b1071e2bb976
+> blueprint-diff latest
 from: blueprint 9034c710-3e57-45f3-99e5-4316145e87ac
 to:   blueprint d60afc57-f15d-476c-bd0f-b1071e2bb976
 
@@ -1555,7 +1555,7 @@ set sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c SP versions: active -> 1.0.0
 > inventory-generate
 generated inventory collection 78f72e8d-46a9-40a9-8618-602f54454d80 from configured sleds
 
-> blueprint-plan d60afc57-f15d-476c-bd0f-b1071e2bb976 78f72e8d-46a9-40a9-8618-602f54454d80
+> blueprint-plan latest latest
 INFO performed noop image source checks on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, num_total: 9, num_already_artifact: 0, num_eligible: 0, num_ineligible: 9
 INFO performed noop image source checks on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, num_total: 8, num_already_artifact: 0, num_eligible: 0, num_ineligible: 8
 INFO performed noop image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 8, num_already_artifact: 0, num_eligible: 0, num_ineligible: 8
@@ -1577,7 +1577,7 @@ INFO ran out of boards for MGS-driven update
 INFO will ensure cockroachdb setting, setting: cluster.preserve_downgrade_option, value: DoNotModify
 generated blueprint a5a8f242-ffa5-473c-8efd-2acf2dc0b736 based on parent blueprint d60afc57-f15d-476c-bd0f-b1071e2bb976
 
-> blueprint-diff d60afc57-f15d-476c-bd0f-b1071e2bb976 a5a8f242-ffa5-473c-8efd-2acf2dc0b736
+> blueprint-diff latest
 from: blueprint d60afc57-f15d-476c-bd0f-b1071e2bb976
 to:   blueprint a5a8f242-ffa5-473c-8efd-2acf2dc0b736
 
@@ -1751,7 +1751,7 @@ set sled d81c6a84-79b8-4958-ae41-ea46c9b19763 RoT settings: slot a -> 1.0.0
 > inventory-generate
 generated inventory collection 39363465-89ae-4ac2-9be1-099068da9d45 from configured sleds
 
-> blueprint-plan a5a8f242-ffa5-473c-8efd-2acf2dc0b736 39363465-89ae-4ac2-9be1-099068da9d45
+> blueprint-plan latest latest
 INFO performed noop image source checks on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, num_total: 9, num_already_artifact: 0, num_eligible: 0, num_ineligible: 9
 INFO performed noop image source checks on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, num_total: 8, num_already_artifact: 0, num_eligible: 0, num_ineligible: 8
 INFO performed noop image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 8, num_already_artifact: 0, num_eligible: 0, num_ineligible: 8
@@ -1771,7 +1771,7 @@ INFO reached maximum number of pending MGS-driven updates, max: 1
 INFO will ensure cockroachdb setting, setting: cluster.preserve_downgrade_option, value: DoNotModify
 generated blueprint 626487fa-7139-45ec-8416-902271fc730b based on parent blueprint a5a8f242-ffa5-473c-8efd-2acf2dc0b736
 
-> blueprint-diff a5a8f242-ffa5-473c-8efd-2acf2dc0b736 626487fa-7139-45ec-8416-902271fc730b
+> blueprint-diff latest
 from: blueprint a5a8f242-ffa5-473c-8efd-2acf2dc0b736
 to:   blueprint 626487fa-7139-45ec-8416-902271fc730b
 
@@ -1945,7 +1945,7 @@ set sled d81c6a84-79b8-4958-ae41-ea46c9b19763 SP versions: active -> 1.0.0
 > inventory-generate
 generated inventory collection 04bc9001-0836-4fec-b9cb-9d4760caf8b4 from configured sleds
 
-> blueprint-plan 626487fa-7139-45ec-8416-902271fc730b 04bc9001-0836-4fec-b9cb-9d4760caf8b4
+> blueprint-plan latest latest
 INFO performed noop image source checks on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, num_total: 9, num_already_artifact: 0, num_eligible: 0, num_ineligible: 9
 INFO performed noop image source checks on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, num_total: 8, num_already_artifact: 0, num_eligible: 0, num_ineligible: 8
 INFO performed noop image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 8, num_already_artifact: 0, num_eligible: 0, num_ineligible: 8
@@ -1968,7 +1968,7 @@ INFO updating zone image source in-place, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88
 INFO will ensure cockroachdb setting, setting: cluster.preserve_downgrade_option, value: DoNotModify
 generated blueprint c1a0d242-9160-40f4-96ae-61f8f40a0b1b based on parent blueprint 626487fa-7139-45ec-8416-902271fc730b
 
-> blueprint-diff 626487fa-7139-45ec-8416-902271fc730b c1a0d242-9160-40f4-96ae-61f8f40a0b1b
+> blueprint-diff latest
 from: blueprint 626487fa-7139-45ec-8416-902271fc730b
 to:   blueprint c1a0d242-9160-40f4-96ae-61f8f40a0b1b
 
