@@ -85,12 +85,15 @@ impl From<gateway_messages::UpdatePreparationProgress>
     }
 }
 
-// This type is a duplicate of the type in `ipcc`, and we provide a
-// `From<_>` impl to convert to it. We keep these types distinct to allow us to
-// choose different representations for MGS's HTTP API (this type) and the wire
-// format passed through the SP to installinator
-// (`ipcc::InstallinatorImageId`), although _currently_ they happen to
-// be defined identically.
+// This type is a duplicate of the type in `ipcc`. We keep these types distinct
+// to allow us to choose different representations for MGS's HTTP API (this
+// type) and the wire format passed through the SP to installinator
+// (`ipcc::InstallinatorImageId`), although _currently_ they happen to be
+// defined identically.
+//
+// We don't define a conversion from `Self` to `ipcc::InstallinatorImageId` here
+// to avoid a dependency on `libipcc`. Instead, callers can easily perform
+// conversions themselves.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema,
 )]
@@ -99,16 +102,6 @@ pub struct InstallinatorImageId {
     pub update_id: MupdateUuid,
     pub host_phase_2: ArtifactHash,
     pub control_plane: ArtifactHash,
-}
-
-impl From<InstallinatorImageId> for ipcc::InstallinatorImageId {
-    fn from(id: InstallinatorImageId) -> Self {
-        Self {
-            update_id: id.update_id,
-            host_phase_2: id.host_phase_2,
-            control_plane: id.control_plane,
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

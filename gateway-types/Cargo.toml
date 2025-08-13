@@ -14,7 +14,6 @@ gateway-messages.workspace = true
 # would only be used for From impls anyway. We put those impls in
 # omicron-gateway instead, and don't use `From`.
 hex.workspace = true
-ipcc.workspace = true
 omicron-common.workspace = true
 omicron-uuid-kinds.workspace = true
 omicron-workspace-hack.workspace = true
