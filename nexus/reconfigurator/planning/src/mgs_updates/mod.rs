@@ -821,8 +821,8 @@ mod test {
         ])
     }
 
-    /// Describes the SPs and RoTs in the environment used in these tests, but
-    /// spearated by component for use in sequential testing
+    /// Describes the SPs, RoTs and RoT bootloaders in the environment used in
+    /// these tests, but spearated by component for use in sequential testing
     fn test_config()
     -> BTreeMap<(SpType, u16, MgsUpdateComponent), (&'static str, &'static str)>
     {
@@ -853,6 +853,42 @@ mod test {
                     ]
                 },
             )
+            .collect()
+    }
+
+    /// Describes every possible updateable device along with its corresponding
+    /// artifact. This is based off of the configuration in test_config.
+    fn test_updateable_components()
+    -> BTreeMap<(SpType, u16, MgsUpdateComponent), (&'static str, ArtifactHash)>
+    {
+        test_config()
+            .into_iter()
+            .map(|(k, (serial, board_name))| {
+                if board_name == "oxide-rot-1" {
+                    let component = k.2;
+                    let kind = if component == MgsUpdateComponent::Rot {
+                        match k.0 {
+                            SpType::Sled => ArtifactKind::GIMLET_ROT_IMAGE_B,
+                            SpType::Power => ArtifactKind::PSC_ROT_IMAGE_B,
+                            SpType::Switch => ArtifactKind::SWITCH_ROT_IMAGE_B,
+                        }
+                    } else if component == MgsUpdateComponent::RotBootloader {
+                        match k.0 {
+                            SpType::Sled => ArtifactKind::GIMLET_ROT_STAGE0,
+                            SpType::Power => ArtifactKind::PSC_ROT_STAGE0,
+                            SpType::Switch => ArtifactKind::SWITCH_ROT_STAGE0,
+                        }
+                    } else {
+                        panic!(
+                            " unsupported MGS update component: {:#?}",
+                            component
+                        );
+                    };
+                    (k, (serial, test_artifact_for_artifact_kind(kind)))
+                } else {
+                    (k, (serial, test_artifact_for_board(board_name)))
+                }
+            })
             .collect()
     }
 
@@ -1020,9 +1056,9 @@ mod test {
 
     // Construct inventory for an environment suitable for our testing.
     //
-    // See test_config() for information about the hardware.  All SPs and RoTs
+    // See test_config() for information about the hardware.  All components
     // will appear to be running version `active_version` except those
-    // identified in `active_version_exceptions`.  All SPs and RoTs will appear
+    // identified in `active_version_exceptions`.  All components will appear
     // to have `inactive_version` in the inactive slot.
     //
     // TODO-K: Use a struct so I don't have to tell clippy to shut up
@@ -1967,39 +2003,9 @@ mod test {
         let mut rot_bootloader_exceptions = BTreeMap::new();
 
         // We do not control the order of updates.  But we expect to update each
-        // of the SPs in this map.  When we do, we expect to find the given
-        // artifact.
-        let mut expected_updates: BTreeMap<_, _> = test_config()
-            .into_iter()
-            .map(|(k, (serial, board_name))| {
-                if board_name == "oxide-rot-1" {
-                    let component = k.2;
-                    // TODO-K: Clean up, maybe do a method for MgsUpdateComponent
-                    // kind_by_sp_type() or something like that?
-                    let kind = if component == MgsUpdateComponent::Rot {
-                        match k.0 {
-                            SpType::Sled => ArtifactKind::GIMLET_ROT_IMAGE_B,
-                            SpType::Power => ArtifactKind::PSC_ROT_IMAGE_B,
-                            SpType::Switch => ArtifactKind::SWITCH_ROT_IMAGE_B,
-                        }
-                    } else if component == MgsUpdateComponent::RotBootloader {
-                        match k.0 {
-                            SpType::Sled => ArtifactKind::GIMLET_ROT_STAGE0,
-                            SpType::Power => ArtifactKind::PSC_ROT_STAGE0,
-                            SpType::Switch => ArtifactKind::SWITCH_ROT_STAGE0,
-                        }
-                    } else {
-                        panic!(
-                            " unsupported MGS update component: {:#?}",
-                            component
-                        );
-                    };
-                    (k, (serial, test_artifact_for_artifact_kind(kind)))
-                } else {
-                    (k, (serial, test_artifact_for_board(board_name)))
-                }
-            })
-            .collect();
+        // of the components in this map.  When we do, we expect to find the
+        // given artifact.
+        let mut expected_updates = test_updateable_components();
 
         for _ in 0..expected_updates.len() {
             // Generate an inventory collection reflecting that everything is at
@@ -2101,36 +2107,7 @@ mod test {
         );
         let log = &logctx.log;
         let repo = make_tuf_repo();
-
-        let mut expected_updates: BTreeMap<_, _> = test_config()
-            .into_iter()
-            .map(|(k, (serial, board_name))| {
-                if board_name == "oxide-rot-1" {
-                    let component = k.2;
-                    let kind = if component == MgsUpdateComponent::Rot {
-                        match k.0 {
-                            SpType::Sled => ArtifactKind::GIMLET_ROT_IMAGE_B,
-                            SpType::Power => ArtifactKind::PSC_ROT_IMAGE_B,
-                            SpType::Switch => ArtifactKind::SWITCH_ROT_IMAGE_B,
-                        }
-                    } else if component == MgsUpdateComponent::RotBootloader {
-                        match k.0 {
-                            SpType::Sled => ArtifactKind::GIMLET_ROT_STAGE0,
-                            SpType::Power => ArtifactKind::PSC_ROT_STAGE0,
-                            SpType::Switch => ArtifactKind::SWITCH_ROT_STAGE0,
-                        }
-                    } else {
-                        panic!(
-                            " unsupported MGS update component: {:#?}",
-                            component
-                        );
-                    };
-                    (k, (serial, test_artifact_for_artifact_kind(kind)))
-                } else {
-                    (k, (serial, test_artifact_for_board(board_name)))
-                }
-            })
-            .collect();
+        let mut expected_updates = test_updateable_components();
 
         // Update the whole system at once.
         let impossible_update_policy = ImpossibleUpdatePolicy::Reevaluate;
@@ -2155,10 +2132,11 @@ mod test {
             impossible_update_policy,
         );
         // `all_updates` counts each update per SpType. This means an update for
-        // SP and RoT for the same SpType count as a single update. For
-        // `expected_updates`, each component update counts as an update, so the
-        // amount of `all_updates` should be half of `expected_updates`.
-        assert_eq!(all_updates.len(), expected_updates.len() / 2);
+        // SP, RoT, and RoT bootloader for the same SpType count as a single
+        // update. For `expected_updates`, each component update counts as an
+        // update, so the amount of `all_updates` should be a third of
+        // `expected_updates`.
+        assert_eq!(all_updates.len(), expected_updates.len() / 3);
         for update in &all_updates {
             verify_one_sp_update(&mut expected_updates, update);
         }
