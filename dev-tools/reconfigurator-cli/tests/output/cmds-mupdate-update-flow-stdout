@@ -2139,13 +2139,16 @@ INFO sufficient InternalDns zones exist in plan, desired_count: 3, current_count
 INFO sufficient ExternalDns zones exist in plan, desired_count: 3, current_count: 3
 INFO sufficient Nexus zones exist in plan, desired_count: 3, current_count: 3
 INFO sufficient Oximeter zones exist in plan, desired_count: 0, current_count: 0
-WARN cannot configure RoT update for board (no matching artifact), serial_number: serial0, part_number: model0
+WARN cannot configure RoT bootloader update for board (missing sign in stage0 caboose from inventory), serial_number: serial0, part_number: model0
+WARN cannot configure RoT update for board (missing sign in caboose from inventory), serial_number: serial0, part_number: model0
 WARN cannot configure SP update for board (no matching artifact), serial_number: serial0, part_number: model0
 INFO skipping board for MGS-driven update, serial_number: serial0, part_number: model0
-WARN cannot configure RoT update for board (no matching artifact), serial_number: serial1, part_number: model1
+WARN cannot configure RoT bootloader update for board (missing sign in stage0 caboose from inventory), serial_number: serial1, part_number: model1
+WARN cannot configure RoT update for board (missing sign in caboose from inventory), serial_number: serial1, part_number: model1
 WARN cannot configure SP update for board (no matching artifact), serial_number: serial1, part_number: model1
 INFO skipping board for MGS-driven update, serial_number: serial1, part_number: model1
-WARN cannot configure RoT update for board (no matching artifact), serial_number: serial2, part_number: model2
+WARN cannot configure RoT bootloader update for board (missing sign in stage0 caboose from inventory), serial_number: serial2, part_number: model2
+WARN cannot configure RoT update for board (missing sign in caboose from inventory), serial_number: serial2, part_number: model2
 WARN cannot configure SP update for board (no matching artifact), serial_number: serial2, part_number: model2
 INFO skipping board for MGS-driven update, serial_number: serial2, part_number: model2
 INFO ran out of boards for MGS-driven update
