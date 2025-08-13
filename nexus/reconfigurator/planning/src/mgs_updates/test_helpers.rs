@@ -450,10 +450,8 @@ impl ExpectedUpdates {
 ///
 /// After construction, the caller _must_ call:
 ///
-/// * `sp_active_version()`
-/// * `rot_active_version()`
-/// * `sp_inactive_version()`
-/// * `rot_inactive_version()`
+/// * `sp_versions()`
+/// * `rot_versions()`
 ///
 /// to set the default active and inactive versions reported for all SPs and
 /// RoTs. The caller may also call the various `*_exception` methods to override
@@ -487,13 +485,13 @@ impl<'a> TestBoardCollectionBuilder<'a> {
         }
     }
 
-    pub fn sp_active_version(mut self, v: ArtifactVersion) -> Self {
-        self.sp_active_version = Some(v);
-        self
-    }
-
-    pub fn sp_inactive_version(mut self, v: ExpectedVersion) -> Self {
-        self.sp_inactive_version = Some(v);
+    pub fn sp_versions(
+        mut self,
+        active: ArtifactVersion,
+        inactive: ExpectedVersion,
+    ) -> Self {
+        self.sp_active_version = Some(active);
+        self.sp_inactive_version = Some(inactive);
         self
     }
 

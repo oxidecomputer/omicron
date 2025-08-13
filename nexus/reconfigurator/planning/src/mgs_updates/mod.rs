@@ -476,9 +476,8 @@ mod test {
         // will remain no updates pending.
         let collection = test_boards
             .collection_builder()
-            .sp_active_version(ARTIFACT_VERSION_2)
+            .sp_versions(ARTIFACT_VERSION_2, ExpectedVersion::NoValidVersion)
             .rot_active_version(ARTIFACT_VERSION_2)
-            .sp_inactive_version(ExpectedVersion::NoValidVersion)
             .rot_inactive_version(ExpectedVersion::NoValidVersion)
             .sp_active_version_exception(SpType::Sled, 0, ARTIFACT_VERSION_1)
             .build();
@@ -536,9 +535,8 @@ mod test {
         // nmax_updates).
         let later_collection = test_boards
             .collection_builder()
-            .sp_active_version(ARTIFACT_VERSION_2)
+            .sp_versions(ARTIFACT_VERSION_2, ExpectedVersion::NoValidVersion)
             .rot_active_version(ARTIFACT_VERSION_2)
-            .sp_inactive_version(ExpectedVersion::NoValidVersion)
             .rot_inactive_version(ExpectedVersion::NoValidVersion)
             .sp_active_version_exception(SpType::Sled, 0, ARTIFACT_VERSION_1)
             .sp_active_version_exception(SpType::Switch, 1, ARTIFACT_VERSION_1)
@@ -560,9 +558,8 @@ mod test {
         // second that we noticed another thing needed an update
         let later_collection = test_boards
             .collection_builder()
-            .sp_active_version(ARTIFACT_VERSION_2)
+            .sp_versions(ARTIFACT_VERSION_2, ExpectedVersion::NoValidVersion)
             .rot_active_version(ARTIFACT_VERSION_2)
-            .sp_inactive_version(ExpectedVersion::NoValidVersion)
             .rot_inactive_version(ExpectedVersion::NoValidVersion)
             .sp_active_version_exception(SpType::Switch, 1, ARTIFACT_VERSION_1)
             .build();
@@ -589,9 +586,8 @@ mod test {
         // configured.
         let updated_collection = test_boards
             .collection_builder()
-            .sp_active_version(ARTIFACT_VERSION_2)
+            .sp_versions(ARTIFACT_VERSION_2, ExpectedVersion::NoValidVersion)
             .rot_active_version(ARTIFACT_VERSION_2)
-            .sp_inactive_version(ExpectedVersion::NoValidVersion)
             .rot_inactive_version(ExpectedVersion::NoValidVersion)
             .build();
         let later_updates = plan_mgs_updates(
@@ -609,9 +605,8 @@ mod test {
         // `current_boards`, even if they're in inventory and outdated.
         let collection = test_boards
             .collection_builder()
-            .sp_active_version(ARTIFACT_VERSION_2)
+            .sp_versions(ARTIFACT_VERSION_2, ExpectedVersion::NoValidVersion)
             .rot_active_version(ARTIFACT_VERSION_2)
-            .sp_inactive_version(ExpectedVersion::NoValidVersion)
             .rot_inactive_version(ExpectedVersion::NoValidVersion)
             .sp_active_version_exception(SpType::Sled, 0, ARTIFACT_VERSION_1)
             .build();
@@ -659,9 +654,11 @@ mod test {
         // a new update reflecting that.
         let collection = test_boards
             .collection_builder()
-            .sp_active_version(ARTIFACT_VERSION_2)
+            .sp_versions(
+                ARTIFACT_VERSION_2,
+                ExpectedVersion::Version(ARTIFACT_VERSION_1),
+            )
             .rot_active_version(ARTIFACT_VERSION_2)
-            .sp_inactive_version(ExpectedVersion::Version(ARTIFACT_VERSION_1))
             .rot_inactive_version(ExpectedVersion::NoValidVersion)
             .sp_active_version_exception(SpType::Sled, 0, ARTIFACT_VERSION_1)
             .build();
@@ -701,9 +698,8 @@ mod test {
         // a new update reflecting that.
         let collection = test_boards
             .collection_builder()
-            .sp_active_version(ARTIFACT_VERSION_2)
+            .sp_versions(ARTIFACT_VERSION_2, ExpectedVersion::NoValidVersion)
             .rot_active_version(ARTIFACT_VERSION_2)
-            .sp_inactive_version(ExpectedVersion::NoValidVersion)
             .rot_inactive_version(ExpectedVersion::NoValidVersion)
             .sp_active_version_exception(SpType::Sled, 0, ARTIFACT_VERSION_1_5)
             .build();
@@ -757,9 +753,8 @@ mod test {
         // will remain no updates pending.
         let collection = test_boards
             .collection_builder()
-            .sp_active_version(ARTIFACT_VERSION_2)
+            .sp_versions(ARTIFACT_VERSION_2, ExpectedVersion::NoValidVersion)
             .rot_active_version(ARTIFACT_VERSION_2)
-            .sp_inactive_version(ExpectedVersion::NoValidVersion)
             .rot_inactive_version(ExpectedVersion::NoValidVersion)
             .rot_active_version_exception(SpType::Sled, 0, ARTIFACT_VERSION_1)
             .build();
@@ -817,9 +812,8 @@ mod test {
         // nmax_updates).
         let later_collection = test_boards
             .collection_builder()
-            .sp_active_version(ARTIFACT_VERSION_2)
+            .sp_versions(ARTIFACT_VERSION_2, ExpectedVersion::NoValidVersion)
             .rot_active_version(ARTIFACT_VERSION_2)
-            .sp_inactive_version(ExpectedVersion::NoValidVersion)
             .rot_inactive_version(ExpectedVersion::NoValidVersion)
             .rot_active_version_exception(SpType::Sled, 0, ARTIFACT_VERSION_1)
             .rot_active_version_exception(SpType::Switch, 1, ARTIFACT_VERSION_1)
@@ -843,9 +837,8 @@ mod test {
         // and second SP.
         let later_collection = test_boards
             .collection_builder()
-            .sp_active_version(ARTIFACT_VERSION_2)
+            .sp_versions(ARTIFACT_VERSION_2, ExpectedVersion::NoValidVersion)
             .rot_active_version(ARTIFACT_VERSION_2)
-            .sp_inactive_version(ExpectedVersion::NoValidVersion)
             .rot_inactive_version(ExpectedVersion::NoValidVersion)
             .sp_active_version_exception(SpType::Switch, 1, ARTIFACT_VERSION_1)
             .rot_active_version_exception(SpType::Switch, 1, ARTIFACT_VERSION_1)
@@ -873,9 +866,8 @@ mod test {
         // are configured.
         let updated_collection = test_boards
             .collection_builder()
-            .sp_active_version(ARTIFACT_VERSION_2)
+            .sp_versions(ARTIFACT_VERSION_2, ExpectedVersion::NoValidVersion)
             .rot_active_version(ARTIFACT_VERSION_2)
-            .sp_inactive_version(ExpectedVersion::NoValidVersion)
             .rot_inactive_version(ExpectedVersion::NoValidVersion)
             .build();
         let later_updates = plan_mgs_updates(
@@ -893,9 +885,8 @@ mod test {
         // `current_boards`, even if they're in inventory and outdated.
         let collection = test_boards
             .collection_builder()
-            .sp_active_version(ARTIFACT_VERSION_2)
+            .sp_versions(ARTIFACT_VERSION_2, ExpectedVersion::NoValidVersion)
             .rot_active_version(ARTIFACT_VERSION_2)
-            .sp_inactive_version(ExpectedVersion::NoValidVersion)
             .rot_inactive_version(ExpectedVersion::NoValidVersion)
             .rot_active_version_exception(SpType::Sled, 0, ARTIFACT_VERSION_1)
             .build();
@@ -944,9 +935,11 @@ mod test {
         // a new update reflecting that.
         let collection = test_boards
             .collection_builder()
-            .sp_active_version(ARTIFACT_VERSION_2)
+            .sp_versions(
+                ARTIFACT_VERSION_2,
+                ExpectedVersion::Version(ARTIFACT_VERSION_1),
+            )
             .rot_active_version(ARTIFACT_VERSION_2)
-            .sp_inactive_version(ExpectedVersion::Version(ARTIFACT_VERSION_1))
             .rot_inactive_version(ExpectedVersion::Version(ARTIFACT_VERSION_1))
             .rot_active_version_exception(SpType::Sled, 0, ARTIFACT_VERSION_1)
             .build();
@@ -987,9 +980,8 @@ mod test {
         // a new update reflecting that.
         let collection = test_boards
             .collection_builder()
-            .sp_active_version(ARTIFACT_VERSION_2)
+            .sp_versions(ARTIFACT_VERSION_2, ExpectedVersion::NoValidVersion)
             .rot_active_version(ARTIFACT_VERSION_2)
-            .sp_inactive_version(ExpectedVersion::NoValidVersion)
             .rot_inactive_version(ExpectedVersion::NoValidVersion)
             .rot_active_version_exception(SpType::Sled, 0, ARTIFACT_VERSION_1_5)
             .build();
@@ -1042,9 +1034,11 @@ mod test {
         // Initial setup: sled 0 has active version 1 and inactive version 1.5.
         let collection = test_boards
             .collection_builder()
-            .sp_active_version(ARTIFACT_VERSION_2)
+            .sp_versions(
+                ARTIFACT_VERSION_2,
+                ExpectedVersion::Version(ARTIFACT_VERSION_1_5),
+            )
             .rot_active_version(ARTIFACT_VERSION_2)
-            .sp_inactive_version(ExpectedVersion::Version(ARTIFACT_VERSION_1_5))
             .rot_inactive_version(ExpectedVersion::Version(
                 ARTIFACT_VERSION_1_5,
             ))
@@ -1101,9 +1095,8 @@ mod test {
         // no caboose to read.
         let collection = test_boards
             .collection_builder()
-            .sp_active_version(ARTIFACT_VERSION_2)
+            .sp_versions(ARTIFACT_VERSION_2, ExpectedVersion::NoValidVersion)
             .rot_active_version(ARTIFACT_VERSION_2)
-            .sp_inactive_version(ExpectedVersion::NoValidVersion)
             .rot_inactive_version(ExpectedVersion::Version(
                 ARTIFACT_VERSION_1_5,
             ))
@@ -1181,9 +1174,8 @@ mod test {
         // exceptions as we step through updates below.
         let mut builder = test_boards
             .collection_builder()
-            .sp_active_version(ARTIFACT_VERSION_1)
+            .sp_versions(ARTIFACT_VERSION_1, ExpectedVersion::NoValidVersion)
             .rot_active_version(ARTIFACT_VERSION_1)
-            .sp_inactive_version(ExpectedVersion::NoValidVersion)
             .rot_inactive_version(ExpectedVersion::NoValidVersion);
         for _ in 0..expected_updates.len() {
             let collection = builder.clone().build();
@@ -1279,9 +1271,8 @@ mod test {
         // the RoTs, but stages at most one pending update per board.
         let collection = test_boards
             .collection_builder()
-            .sp_active_version(ARTIFACT_VERSION_1)
+            .sp_versions(ARTIFACT_VERSION_1, ExpectedVersion::NoValidVersion)
             .rot_active_version(ARTIFACT_VERSION_1)
-            .sp_inactive_version(ExpectedVersion::NoValidVersion)
             .rot_inactive_version(ExpectedVersion::NoValidVersion)
             .build();
         let all_updates = plan_mgs_updates(
@@ -1310,9 +1301,8 @@ mod test {
         // been updated already; this should attempt to update all of the SPs.
         let collection = test_boards
             .collection_builder()
-            .sp_active_version(ARTIFACT_VERSION_1)
+            .sp_versions(ARTIFACT_VERSION_1, ExpectedVersion::NoValidVersion)
             .rot_active_version(ARTIFACT_VERSION_2)
-            .sp_inactive_version(ExpectedVersion::NoValidVersion)
             .rot_inactive_version(ExpectedVersion::NoValidVersion)
             .build();
         let all_updates = plan_mgs_updates(
@@ -1344,9 +1334,8 @@ mod test {
         // one.
         let collection = test_boards
             .collection_builder()
-            .sp_active_version(ARTIFACT_VERSION_2)
+            .sp_versions(ARTIFACT_VERSION_2, ExpectedVersion::NoValidVersion)
             .rot_active_version(ARTIFACT_VERSION_2)
-            .sp_inactive_version(ExpectedVersion::NoValidVersion)
             .rot_inactive_version(ExpectedVersion::NoValidVersion)
             .build();
         let all_updates_done = plan_mgs_updates(
@@ -1378,9 +1367,8 @@ mod test {
         let repo = test_boards.tuf_repo();
         let mut collection = test_boards
             .collection_builder()
-            .sp_active_version(ARTIFACT_VERSION_2)
+            .sp_versions(ARTIFACT_VERSION_2, ExpectedVersion::NoValidVersion)
             .rot_active_version(ARTIFACT_VERSION_2)
-            .sp_inactive_version(ExpectedVersion::NoValidVersion)
             .rot_inactive_version(ExpectedVersion::NoValidVersion)
             .sp_active_version_exception(SpType::Sled, 0, ARTIFACT_VERSION_1)
             .rot_active_version_exception(SpType::Sled, 0, ARTIFACT_VERSION_1)
