@@ -100,7 +100,9 @@ pub struct LocationDescriptionConfig {
     /// MGS resetting its local sled's SP is dangerous during SP updates,
     /// because the "reset" operation involves a watchdog that requires MGS to
     /// send a "disarm the watchdog" message _after_ the reset, which it can't
-    /// do if it just powered itself off.
+    /// do if it just powered itself off. In production, we always expect this
+    /// value to be false. In dev/test environments, we allow it to be true to
+    /// not interfere with reset testing that isn't connected to an actual sled.
     pub allow_local_sled_sp_reset: bool,
 }
 
