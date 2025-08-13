@@ -1242,6 +1242,7 @@ mod test {
 
             latest_updates = new_updates;
         }
+        assert!(expected_updates.is_empty());
 
         // Take one more lap.  It should reflect zero updates.
         let collection = builder.build();
@@ -1259,7 +1260,7 @@ mod test {
         logctx.cleanup_successful();
     }
 
-    // Updates a whole system's SPs at once
+    // Updates as much of a whole system at once as we can
     #[test]
     fn test_whole_system_simultaneous() {
         let test_name = "planning_mgs_updates_whole_system_simultaneous";
@@ -1270,11 +1271,12 @@ mod test {
         let log = &logctx.log;
         let test_boards = TestBoards::new(test_name);
         let repo = test_boards.tuf_repo();
+        let impossible_update_policy = ImpossibleUpdatePolicy::Reevaluate;
 
         let mut expected_updates = test_boards.expected_updates();
 
-        // Update the whole system at once.
-        let impossible_update_policy = ImpossibleUpdatePolicy::Reevaluate;
+        // Update the whole system at once; this should attempt to update all of
+        // the RoTs, but stages at most one pending update per board.
         let collection = test_boards
             .collection_builder()
             .sp_active_version(ARTIFACT_VERSION_1)
@@ -1291,14 +1293,52 @@ mod test {
             usize::MAX,
             impossible_update_policy,
         );
-        // `all_updates` counts each update per SpType. This means an update for
-        // SP and RoT for the same SpType count as a single update. For
-        // `expected_updates`, each component update counts as an update, so the
-        // amount of `all_updates` should be half of `expected_updates`.
-        assert_eq!(all_updates.len(), expected_updates.len() / 2);
         for update in &all_updates {
+            // Confirm all our updates are to RoTs.
+            match &update.details {
+                PendingMgsUpdateDetails::Rot { .. } => (),
+                PendingMgsUpdateDetails::Sp { .. }
+                | PendingMgsUpdateDetails::RotBootloader { .. }
+                | PendingMgsUpdateDetails::HostPhase1(..) => {
+                    panic!("unexpected update type: {update:?}")
+                }
+            }
             expected_updates.verify_one(update);
         }
+
+        // Update the whole system at once again, but note the RoTs have all
+        // been updated already; this should attempt to update all of the SPs.
+        let collection = test_boards
+            .collection_builder()
+            .sp_active_version(ARTIFACT_VERSION_1)
+            .rot_active_version(ARTIFACT_VERSION_2)
+            .sp_inactive_version(ExpectedVersion::NoValidVersion)
+            .rot_inactive_version(ExpectedVersion::NoValidVersion)
+            .build();
+        let all_updates = plan_mgs_updates(
+            log,
+            &collection,
+            &collection.baseboards,
+            &PendingMgsUpdates::new(),
+            &TargetReleaseDescription::TufRepo(repo.clone()),
+            usize::MAX,
+            impossible_update_policy,
+        );
+        for update in &all_updates {
+            // Confirm all our updates are to SPs.
+            match &update.details {
+                PendingMgsUpdateDetails::Sp { .. } => (),
+                PendingMgsUpdateDetails::Rot { .. }
+                | PendingMgsUpdateDetails::RotBootloader { .. }
+                | PendingMgsUpdateDetails::HostPhase1(..) => {
+                    panic!("unexpected update type: {update:?}")
+                }
+            }
+            expected_updates.verify_one(update);
+        }
+
+        // We should have performed all expected updates.
+        assert!(expected_updates.is_empty());
 
         // Now, notice when they've all been updated, even if the limit is only
         // one.

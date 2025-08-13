@@ -402,10 +402,19 @@ pub(super) struct ExpectedUpdates {
 }
 
 impl ExpectedUpdates {
+    pub fn is_empty(&self) -> bool {
+        self.updates.is_empty()
+    }
+
     pub fn len(&self) -> usize {
         self.updates.len()
     }
 
+    /// Confirm that `update` matches one of our expected updates, and _remove_
+    /// that update.
+    ///
+    /// Callers can confirm that all updates have been verified by calling this
+    /// method for each expected update and then checking `self.is_empty()`.
     pub fn verify_one(&mut self, update: &PendingMgsUpdate) {
         let sp_type = update.sp_type;
         let sp_slot = update.slot_id;
