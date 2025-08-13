@@ -1327,6 +1327,7 @@ impl Sled {
             policy,
             state: SledState::Active,
             resources: SledResources { subnet: sled_subnet, zpools },
+            // TODO-K: Add sign here?
             stage0_caboose: Some(Arc::new(
                 Self::default_rot_bootloader_caboose(String::from("0.0.1")),
             )),
@@ -1342,6 +1343,7 @@ impl Sled {
                 String::from("0.0.1"),
             ))),
             sp_inactive_caboose: None,
+            // TODO-K: Add sign here?
             rot_slot_a_caboose: Some(Arc::new(Self::default_rot_caboose(
                 String::from("0.0.2"),
             ))),
@@ -1726,6 +1728,7 @@ impl Sled {
         }
     }
 
+    // TODO-K: Add sign here?
     fn default_rot_bootloader_caboose(version: String) -> Caboose {
         let board = sp_sim::SIM_ROT_STAGE0_BOARD.to_string();
         Caboose {
@@ -1748,6 +1751,7 @@ impl Sled {
         }
     }
 
+    // TODO-K: Add sign here?
     fn default_rot_caboose(version: String) -> Caboose {
         let board = sp_sim::SIM_ROT_BOARD.to_string();
         Caboose {
