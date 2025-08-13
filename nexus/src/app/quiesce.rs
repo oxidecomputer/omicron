@@ -4,7 +4,6 @@
 
 //! Manage Nexus quiesce state
 
-use super::saga::SagaExecutor;
 use assert_matches::assert_matches;
 use chrono::Utc;
 use nexus_db_queries::authz;
@@ -12,6 +11,7 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_types::internal_api::views::QuiesceState;
 use nexus_types::internal_api::views::QuiesceStatus;
+use nexus_types::quiesce::SagaQuiesceHandle;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::UpdateResult;
 use std::sync::Arc;
@@ -37,7 +37,7 @@ impl super::Nexus {
         if started {
             tokio::spawn(do_quiesce(
                 self.quiesce.clone(),
-                self.sagas.clone(),
+                self.saga_quiesce.clone(),
                 self.datastore().clone(),
             ));
         }
@@ -50,20 +50,20 @@ impl super::Nexus {
     ) -> LookupResult<QuiesceStatus> {
         opctx.authorize(authz::Action::Read, &authz::QUIESCE_STATE).await?;
         let state = self.quiesce.borrow().clone();
-        let sagas_running = self.sagas.sagas_running();
+        let sagas_pending = self.saga_quiesce.sagas_pending();
         let db_claims = self.datastore().claims_held();
-        Ok(QuiesceStatus { state, sagas_running, db_claims })
+        Ok(QuiesceStatus { state, sagas_pending, db_claims })
     }
 }
 
 async fn do_quiesce(
     quiesce: watch::Sender<QuiesceState>,
-    saga_exec: Arc<SagaExecutor>,
+    saga_quiesce: SagaQuiesceHandle,
     datastore: Arc<DataStore>,
 ) {
     assert_matches!(*quiesce.borrow(), QuiesceState::WaitingForSagas { .. });
-    saga_exec.quiesce();
-    saga_exec.wait_for_quiesced().await;
+    saga_quiesce.quiesce();
+    saga_quiesce.wait_for_quiesced().await;
     quiesce.send_modify(|q| {
         let QuiesceState::WaitingForSagas {
             time_requested,
@@ -180,7 +180,7 @@ mod test {
         assert!(duration_total >= duration_waiting_for_sagas);
         assert!(duration_total >= duration_waiting_for_db);
         assert!(duration_total <= (after - before).to_std().unwrap());
-        assert!(status.sagas_running.is_empty());
+        assert!(status.sagas_pending.is_empty());
         assert!(status.db_claims.is_empty());
     }
 
@@ -254,7 +254,7 @@ mod test {
             quiesce_status.state,
             QuiesceState::WaitingForSagas { .. }
         );
-        assert!(quiesce_status.sagas_running.contains_key(&demo_saga.saga_id));
+        assert!(quiesce_status.sagas_pending.contains_key(&demo_saga.saga_id));
         // We should see at least one held database claim from the one we took
         // above.
         assert!(!quiesce_status.db_claims.is_empty());
@@ -318,7 +318,7 @@ mod test {
                 if !matches!(rv.state, QuiesceState::WaitingForDb { .. }) {
                     return Err(CondCheckError::<NexusClientError>::NotYet);
                 }
-                assert!(rv.sagas_running.is_empty());
+                assert!(rv.sagas_pending.is_empty());
                 // The database claim we took is still held.
                 assert!(!rv.db_claims.is_empty());
                 Ok(())
