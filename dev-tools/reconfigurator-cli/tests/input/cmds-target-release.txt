@@ -31,7 +31,7 @@ sled-list
 blueprint-list
 inventory-list
 
-# First step: upgrade one RoT.
+# First step: upgrade one RoT bootloader.
 blueprint-plan latest latest
 blueprint-diff latest
 
@@ -39,29 +39,52 @@ blueprint-diff latest
 blueprint-plan latest latest
 blueprint-diff latest
 
-# Now, update the simulated RoT to reflect that the update completed.
+# Now, update the simulated RoT bootloader to reflect that the update completed.
 # Collect inventory from it and use that collection for another planning step.
 # This should report that the update completed, remove that update, and add one
 # for an SP on the same sled.
+sled-update-rot-bootloader 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 --stage0 1.0.0
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+# After the RoT bootloader update has completed, we update the simulated RoT to
+# reflect that update has completed as well.
+# Like before, collect inventory from it and use that collection for the next
+# step.
+# This should report that the update completed, remove that update, and add one
+# for another sled.
 sled-update-rot 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 --slot-a 1.0.0
 inventory-generate
 blueprint-plan latest latest
 blueprint-diff latest
 
-# After the RoT update has completed, we update the simulated SP to reflect that
-# update has completed as well.
-# Like before, collect inventory from it and use that collection for the next step.
-# This should report that the update completed, remove that update, and add one
-# for another sled.
+# We repeat the same procedure with the SP
 sled-update-sp 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 --active 1.0.0
 inventory-generate
 blueprint-plan latest latest
 blueprint-diff latest
 
 # This time, make it more interesting.  Change the inactive slot contents of
-# the simulated RoT.  This should make the configured update impossible and cause
-# the planner to fix it. To test this, we also need to tell the planner not to
-# ignore this update even though it's quite new.
+# the simulated RoT bootloader.  This should make the configured update
+# impossible and cause the planner to fix it. To test this, we also need to tell
+# the planner not to ignore this update even though it's quite new.
+set ignore-impossible-mgs-updates-since now
+sled-update-rot-bootloader 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c --stage0-next 0.5.0
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+# Now simulate the update completing successfully.
+# Like before, we should see a pending RoT update for this sled.
+sled-update-rot-bootloader 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c --stage0 1.0.0
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+# Now we'll change the inactive slot contents of the simulated RoT. Like with
+# the RoT bootloader, this should make the update impossible and cause the
+# planner to fix it.
 set ignore-impossible-mgs-updates-since now
 sled-update-rot 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c --slot-b 0.5.0
 inventory-generate
@@ -75,8 +98,8 @@ inventory-generate
 blueprint-plan latest latest
 blueprint-diff latest
 
-# Now we'll change the inactive slot contents of the simulated SP. Like with the
-# RoT, this should make the update impossible and cause the planner to fix it.
+# We repeat the same procedure with the SP. Like with the RoT, this should make
+# the update impossible and cause the planner to fix it.
 set ignore-impossible-mgs-updates-since now
 sled-update-sp 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c --inactive 0.5.0
 inventory-generate
@@ -84,8 +107,15 @@ blueprint-plan latest latest
 blueprint-diff latest
 
 # Let's simulate the successful SP update as well.
-# Another couple of planning steps should try to update the last sled.
+# A few more planning steps should try to update the last sled.
 sled-update-sp 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c --active 1.0.0
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+# Update the RoT bootloader on the last sled.
+# There should be a pending RoT update.
+sled-update-rot-bootloader d81c6a84-79b8-4958-ae41-ea46c9b19763 --stage0 1.0.0
 inventory-generate
 blueprint-plan latest latest
 blueprint-diff latest
