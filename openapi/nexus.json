@@ -22275,7 +22275,7 @@
             "description": "Tables resulting from the query, each containing timeseries.",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/Table"
+              "$ref": "#/components/schemas/TableOutput"
             }
           }
         },
@@ -25523,7 +25523,7 @@
           "vlan_id"
         ]
       },
-      "Table": {
+      "TableOutput": {
         "description": "A table represents one or more timeseries with the same schema.\n\nA table is the result of an OxQL query. It contains a name, usually the name of the timeseries schema from which the data is derived, and any number of timeseries, which contain the actual data.",
         "type": "object",
         "properties": {
@@ -25531,8 +25531,8 @@
             "type": "string"
           },
           "timeseries": {
-            "type": "object",
-            "additionalProperties": {
+            "type": "array",
+            "items": {
               "$ref": "#/components/schemas/Timeseries"
             }
           }

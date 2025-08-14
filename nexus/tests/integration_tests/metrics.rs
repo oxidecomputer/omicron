@@ -270,7 +270,7 @@ async fn test_instance_watcher_metrics(
 
     #[track_caller]
     fn count_state(
-        table: &oxql_types::Table,
+        table: &oxql_types::TableOutput,
         instance_id: InstanceUuid,
         state: &'static str,
     ) -> Result<i64, MetricsNotYet> {

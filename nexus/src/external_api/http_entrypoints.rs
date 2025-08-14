@@ -6571,7 +6571,11 @@ impl NexusExternalApi for NexusExternalApiImpl {
             nexus
                 .timeseries_query(&opctx, &query)
                 .await
-                .map(|tables| HttpResponseOk(views::OxqlQueryResult { tables }))
+                .map(|tables| {
+                    HttpResponseOk(views::OxqlQueryResult {
+                        tables: tables.into_iter().map(Into::into).collect(),
+                    })
+                })
                 .map_err(HttpError::from)
         };
         apictx
@@ -6598,7 +6602,11 @@ impl NexusExternalApi for NexusExternalApiImpl {
             nexus
                 .timeseries_query_project(&opctx, &project_lookup, &query)
                 .await
-                .map(|tables| HttpResponseOk(views::OxqlQueryResult { tables }))
+                .map(|tables| {
+                    HttpResponseOk(views::OxqlQueryResult {
+                        tables: tables.into_iter().map(Into::into).collect(),
+                    })
+                })
                 .map_err(HttpError::from)
         };
         apictx
