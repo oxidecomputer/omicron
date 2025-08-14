@@ -942,7 +942,7 @@ impl GatewayApi for GatewayImpl {
         let handler = async {
             let sp = apictx.mgmt_switch.sp(sp_id)?;
 
-            let image_id = ipcc::InstallinatorImageId::from(body.into_inner());
+            let image_id = to_ipcc_installinator_image_id(body.into_inner());
 
             sp.set_ipcc_key_lookup_value(
                 Key::InstallinatorImageId as u8,
@@ -1171,6 +1171,16 @@ fn component_from_str(s: &str) -> Result<SpComponent, HttpError> {
             "invalid SP component name".to_string(),
         )
     })
+}
+
+fn to_ipcc_installinator_image_id(
+    image_id: InstallinatorImageId,
+) -> ipcc::InstallinatorImageId {
+    ipcc::InstallinatorImageId {
+        update_id: image_id.update_id,
+        host_phase_2: image_id.host_phase_2,
+        control_plane: image_id.control_plane,
+    }
 }
 
 // The _from_comms functions are here rather than `From` impls in gateway-types

@@ -72,6 +72,15 @@ pub(super) const ARTIFACT_HASH_ROT_SWITCH_A: ArtifactHash =
 /// Hash of fake artifact for fake switch RoT slot B
 pub(super) const ARTIFACT_HASH_ROT_SWITCH_B: ArtifactHash =
     ArtifactHash([22; 32]);
+/// Hash of fake artifact for fake gimlet RoT bootloader
+pub(super) const ARTIFACT_HASH_ROT_BOOTLOADER_GIMLET: ArtifactHash =
+    ArtifactHash([24; 32]);
+/// Hash of fake artifact for fake psc RoT bootloader
+pub(super) const ARTIFACT_HASH_ROT_BOOTLOADER_PSC: ArtifactHash =
+    ArtifactHash([25; 32]);
+/// Hash of fake artifact for fake switch RoT bootloader
+pub(super) const ARTIFACT_HASH_ROT_BOOTLOADER_SWITCH: ArtifactHash =
+    ArtifactHash([28; 32]);
 
 // unused artifact hashes contained in our fake TUF repo
 const ARTIFACT_HASH_CONTROL_PLANE: ArtifactHash = ArtifactHash([33; 32]);
@@ -135,7 +144,8 @@ pub(super) struct TestBoards {
 }
 
 impl TestBoards {
-    /// Describes the SPs and RoTs in the environment used in these tests
+    /// Describes the SPs, RoTs, and RoT bootloaders in the environment used in
+    /// these tests
     ///
     /// There will be:
     ///
@@ -327,6 +337,28 @@ impl TestBoards {
                 ),
                 Some(ROT_SIGN_SWITCH.into()),
             ),
+            make_artifact(
+                "oxide-rot-1",
+                ArtifactKind::GIMLET_ROT_STAGE0,
+                test_artifact_for_artifact_kind(
+                    ArtifactKind::GIMLET_ROT_STAGE0,
+                ),
+                Some(ROT_SIGN_GIMLET.into()),
+            ),
+            make_artifact(
+                "oxide-rot-1",
+                ArtifactKind::PSC_ROT_STAGE0,
+                test_artifact_for_artifact_kind(ArtifactKind::PSC_ROT_STAGE0),
+                Some(ROT_SIGN_PSC.into()),
+            ),
+            make_artifact(
+                "oxide-rot-1",
+                ArtifactKind::SWITCH_ROT_STAGE0,
+                test_artifact_for_artifact_kind(
+                    ArtifactKind::SWITCH_ROT_STAGE0,
+                ),
+                Some(ROT_SIGN_SWITCH.into()),
+            ),
         ];
 
         TufRepoDescription {
@@ -367,6 +399,21 @@ impl TestBoards {
                             SpType::Sled => ArtifactKind::GIMLET_ROT_IMAGE_B,
                             SpType::Power => ArtifactKind::PSC_ROT_IMAGE_B,
                             SpType::Switch => ArtifactKind::SWITCH_ROT_IMAGE_B,
+                        },
+                    ),
+                })
+                .expect("boards are unique");
+            updates
+                .insert_unique(ExpectedUpdate {
+                    sp_type: board.id.type_,
+                    sp_slot: board.id.slot,
+                    component: MgsUpdateComponent::RotBootloader,
+                    expected_serial: board.serial,
+                    expected_artifact: test_artifact_for_artifact_kind(
+                        match board.id.type_ {
+                            SpType::Sled => ArtifactKind::GIMLET_ROT_STAGE0,
+                            SpType::Power => ArtifactKind::PSC_ROT_STAGE0,
+                            SpType::Switch => ArtifactKind::SWITCH_ROT_STAGE0,
                         },
                     ),
                 })
@@ -438,8 +485,11 @@ impl ExpectedUpdates {
                     expected_active_version,
                     expected_inactive_version,
                 } => (expected_active_version, expected_inactive_version),
-                PendingMgsUpdateDetails::RotBootloader { .. }
-                | PendingMgsUpdateDetails::HostPhase1(_) => unimplemented!(),
+                PendingMgsUpdateDetails::RotBootloader {
+                    expected_stage0_version,
+                    expected_stage0_next_version,
+                } => (expected_stage0_version, expected_stage0_next_version),
+                PendingMgsUpdateDetails::HostPhase1(_) => unimplemented!(),
             };
         assert_eq!(*expected_active_version, ARTIFACT_VERSION_1);
         assert_eq!(*expected_inactive_version, ExpectedVersion::NoValidVersion);
@@ -466,10 +516,13 @@ pub(super) struct TestBoardCollectionBuilder<'a> {
     sp_inactive_version: Option<ExpectedVersion>,
     rot_active_version: Option<ArtifactVersion>,
     rot_inactive_version: Option<ExpectedVersion>,
+    stage0_version: Option<ArtifactVersion>,
+    stage0_next_version: Option<ExpectedVersion>,
 
     // fields that callers _may_ influence before calling `build()`
     sp_active_version_exceptions: BTreeMap<SpIdentifier, ArtifactVersion>,
     rot_active_version_exceptions: BTreeMap<SpIdentifier, ArtifactVersion>,
+    stage0_version_exceptions: BTreeMap<SpIdentifier, ArtifactVersion>,
 }
 
 impl<'a> TestBoardCollectionBuilder<'a> {
@@ -480,8 +533,11 @@ impl<'a> TestBoardCollectionBuilder<'a> {
             sp_inactive_version: None,
             rot_active_version: None,
             rot_inactive_version: None,
+            stage0_version: None,
+            stage0_next_version: None,
             sp_active_version_exceptions: BTreeMap::new(),
             rot_active_version_exceptions: BTreeMap::new(),
+            stage0_version_exceptions: BTreeMap::new(),
         }
     }
 
@@ -545,17 +601,49 @@ impl<'a> TestBoardCollectionBuilder<'a> {
             .contains_key(&SpIdentifier { type_, slot })
     }
 
+    pub fn stage0_versions(
+        mut self,
+        stage0: ArtifactVersion,
+        stage0_next: ExpectedVersion,
+    ) -> Self {
+        self.stage0_version = Some(stage0);
+        self.stage0_next_version = Some(stage0_next);
+        self
+    }
+
+    pub fn stage0_version_exception(
+        mut self,
+        type_: SpType,
+        slot: u16,
+        v: ArtifactVersion,
+    ) -> Self {
+        self.stage0_version_exceptions.insert(SpIdentifier { type_, slot }, v);
+        self
+    }
+
+    pub fn has_stage0_version_exception(
+        &self,
+        type_: SpType,
+        slot: u16,
+    ) -> bool {
+        self.stage0_version_exceptions
+            .contains_key(&SpIdentifier { type_, slot })
+    }
+
     pub fn build(self) -> Collection {
         let sp_active_version =
-            self.sp_active_version.expect("sp_active_version() was provided");
-        let sp_inactive_version = self
-            .sp_inactive_version
-            .expect("sp_inactive_version() was provided");
+            self.sp_active_version.expect("sp_versions() was called");
+        let sp_inactive_version =
+            self.sp_inactive_version.expect("sp_versions() was called");
         let rot_active_version =
-            self.rot_active_version.expect("rot_active_version() was provided");
-        let rot_inactive_version = self
-            .rot_inactive_version
-            .expect("rot_inactive_version() was provided");
+            self.rot_active_version.expect("rot_versions() was called");
+        let rot_inactive_version =
+            self.rot_inactive_version.expect("rot_versions() was called");
+        let stage0_version =
+            self.stage0_version.expect("rot_bootloader_versions() was called");
+        let stage0_next_version = self
+            .stage0_next_version
+            .expect("rot_bootloader_versions() was called");
 
         let mut builder =
             nexus_inventory::CollectionBuilder::new(self.boards.test_name);
@@ -609,6 +697,10 @@ impl<'a> TestBoardCollectionBuilder<'a> {
                 .rot_active_version_exceptions
                 .get(&sp_id)
                 .unwrap_or(&rot_active_version);
+            let stage0_version = self
+                .stage0_version_exceptions
+                .get(&sp_id)
+                .unwrap_or(&stage0_version);
 
             builder
                 .found_caboose(
@@ -638,6 +730,22 @@ impl<'a> TestBoardCollectionBuilder<'a> {
                         name: caboose_rot_board.to_string(),
                         sign: Some(rkth.to_string()),
                         version: rot_active_version.as_str().to_string(),
+                    },
+                )
+                .unwrap();
+
+            builder
+                .found_caboose(
+                    &baseboard_id,
+                    CabooseWhich::Stage0,
+                    "test",
+                    SpComponentCaboose {
+                        board: caboose_rot_board.to_string(),
+                        epoch: None,
+                        git_commit: String::from("unused"),
+                        name: caboose_rot_board.to_string(),
+                        sign: Some(rkth.to_string()),
+                        version: stage0_version.as_str().to_string(),
                     },
                 )
                 .unwrap();
@@ -681,6 +789,26 @@ impl<'a> TestBoardCollectionBuilder<'a> {
                     )
                     .unwrap();
             }
+
+            if let ExpectedVersion::Version(stage0_next_version) =
+                &stage0_next_version
+            {
+                builder
+                    .found_caboose(
+                        &baseboard_id,
+                        CabooseWhich::Stage0Next,
+                        "test",
+                        SpComponentCaboose {
+                            board: caboose_rot_board.to_string(),
+                            epoch: None,
+                            git_commit: String::from("unused"),
+                            name: caboose_rot_board.to_string(),
+                            sign: Some(rkth.to_string()),
+                            version: stage0_next_version.as_str().to_string(),
+                        },
+                    )
+                    .unwrap();
+            }
         }
 
         builder.build()
@@ -712,6 +840,12 @@ fn test_artifact_for_artifact_kind(kind: ArtifactKind) -> ArtifactHash {
         ARTIFACT_HASH_ROT_SWITCH_A
     } else if kind == ArtifactKind::SWITCH_ROT_IMAGE_B {
         ARTIFACT_HASH_ROT_SWITCH_B
+    } else if kind == ArtifactKind::GIMLET_ROT_STAGE0 {
+        ARTIFACT_HASH_ROT_BOOTLOADER_GIMLET
+    } else if kind == ArtifactKind::PSC_ROT_STAGE0 {
+        ARTIFACT_HASH_ROT_BOOTLOADER_PSC
+    } else if kind == ArtifactKind::SWITCH_ROT_STAGE0 {
+        ARTIFACT_HASH_ROT_BOOTLOADER_SWITCH
     } else {
         panic!("test bug: no artifact for artifact kind {kind:?}")
     }

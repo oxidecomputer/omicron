@@ -72,6 +72,7 @@ mod clickhouse;
 pub mod execution;
 mod network_resources;
 mod planning_input;
+mod planning_report;
 mod zone_type;
 
 use crate::inventory::BaseboardId;
@@ -122,6 +123,21 @@ pub use planning_input::TargetReleaseDescription;
 pub use planning_input::TufRepoContentsError;
 pub use planning_input::TufRepoPolicy;
 pub use planning_input::ZpoolFilter;
+pub use planning_report::CockroachdbUnsafeToShutdown;
+pub use planning_report::PlanningAddStepReport;
+pub use planning_report::PlanningCockroachdbSettingsStepReport;
+pub use planning_report::PlanningDecommissionStepReport;
+pub use planning_report::PlanningExpungeStepReport;
+pub use planning_report::PlanningMgsUpdatesStepReport;
+pub use planning_report::PlanningMupdateOverrideStepReport;
+pub use planning_report::PlanningNoopImageSourceSkipSledReason;
+pub use planning_report::PlanningNoopImageSourceSkipZoneReason;
+pub use planning_report::PlanningNoopImageSourceStepReport;
+pub use planning_report::PlanningReport;
+pub use planning_report::PlanningZoneUpdatesStepReport;
+pub use planning_report::ZoneAddWaitingOn;
+pub use planning_report::ZoneUnsafeToShutdown;
+pub use planning_report::ZoneUpdatesWaitingOn;
 pub use zone_type::BlueprintZoneType;
 pub use zone_type::DurableDataset;
 pub use zone_type::blueprint_zone_type;
@@ -235,12 +251,17 @@ pub struct Blueprint {
     /// when this blueprint was generated (for debugging)
     #[daft(ignore)]
     pub time_created: chrono::DateTime<chrono::Utc>,
+
     /// identity of the component that generated the blueprint (for debugging)
     /// This would generally be the Uuid of a Nexus instance.
     pub creator: String,
+
     /// human-readable string describing why this blueprint was created
     /// (for debugging)
     pub comment: String,
+
+    /// Report on the planning session that resulted in this blueprint
+    pub report: PlanningReport,
 }
 
 impl Blueprint {
@@ -634,6 +655,7 @@ impl fmt::Display for BlueprintDisplay<'_> {
             time_created: _,
             creator: _,
             comment: _,
+            report,
         } = self.blueprint;
 
         writeln!(f, "blueprint  {}", id)?;
@@ -745,6 +767,8 @@ impl fmt::Display for BlueprintDisplay<'_> {
                 )
             )?;
         }
+
+        writeln!(f, "\n{report}")?;
 
         Ok(())
     }

@@ -5,11 +5,14 @@
 //! Facilities for making choices about MGS-managed updates
 
 mod rot;
+mod rot_bootloader;
 mod sp;
 
 use crate::mgs_updates::rot::RotUpdateState;
 use crate::mgs_updates::rot::mgs_update_status_rot;
 use crate::mgs_updates::rot::try_make_update_rot;
+use crate::mgs_updates::rot_bootloader::mgs_update_status_rot_bootloader;
+use crate::mgs_updates::rot_bootloader::try_make_update_rot_bootloader;
 use crate::mgs_updates::sp::mgs_update_status_sp;
 use crate::mgs_updates::sp::try_make_update_sp;
 
@@ -235,6 +238,28 @@ fn mgs_update_status(
     // We check this before anything else because if we get back
     // `MgsUpdateStatus::Done`, then we're done no matter what else is true.
     let update_status = match &update.details {
+        PendingMgsUpdateDetails::RotBootloader {
+            expected_stage0_version,
+            expected_stage0_next_version,
+        } => {
+            let Some(stage0_caboose) =
+                inventory.caboose_for(CabooseWhich::Stage0, baseboard_id)
+            else {
+                return Err(MgsUpdateStatusError::MissingActiveCaboose);
+            };
+
+            let found_stage0_next_version = inventory
+                .caboose_for(CabooseWhich::Stage0Next, baseboard_id)
+                .map(|c| c.caboose.version.as_ref());
+
+            Ok(mgs_update_status_rot_bootloader(
+                desired_version,
+                expected_stage0_version,
+                expected_stage0_next_version,
+                &stage0_caboose.caboose.version,
+                found_stage0_next_version,
+            ))
+        }
         PendingMgsUpdateDetails::Sp {
             expected_active_version,
             expected_inactive_version,
@@ -321,8 +346,7 @@ fn mgs_update_status(
                 found_inactive_version,
             ))
         }
-        PendingMgsUpdateDetails::RotBootloader { .. }
-        | PendingMgsUpdateDetails::HostPhase1(_) => {
+        PendingMgsUpdateDetails::HostPhase1(_) => {
             return Err(MgsUpdateStatusError::NotYetImplemented);
         }
     };
@@ -424,14 +448,22 @@ fn try_make_update(
     inventory: &Collection,
     current_artifacts: &TufRepoDescription,
 ) -> Option<PendingMgsUpdate> {
-    // TODO When we add support for planning RoT bootloader, and host OS
-    // updates, we'll try these in a hardcoded priority order until any of them
-    // returns `Some`.  The order is described in RFD 565 section "Update
-    // Sequence".  For now, we only plan SP and RoT updates.
-    try_make_update_rot(log, baseboard_id, inventory, current_artifacts)
-        .or_else(|| {
-            try_make_update_sp(log, baseboard_id, inventory, current_artifacts)
-        })
+    // We try MGS-driven update components in a hardcoded priority order until
+    // any of them returns `Some`. The order is described in RFD 565 section
+    // "Update Sequence". For now, we only plan SP, RoT and RoT bootloader
+    // updates. When implemented, host OS updates will be the first to try.
+    try_make_update_rot_bootloader(
+        log,
+        baseboard_id,
+        inventory,
+        current_artifacts,
+    )
+    .or_else(|| {
+        try_make_update_rot(log, baseboard_id, inventory, current_artifacts)
+    })
+    .or_else(|| {
+        try_make_update_sp(log, baseboard_id, inventory, current_artifacts)
+    })
 }
 
 #[cfg(test)]
@@ -441,6 +473,8 @@ mod test_helpers;
 mod test {
     use super::ImpossibleUpdatePolicy;
     use super::plan_mgs_updates;
+    use super::test_helpers::ARTIFACT_HASH_ROT_BOOTLOADER_GIMLET;
+    use super::test_helpers::ARTIFACT_HASH_ROT_BOOTLOADER_SWITCH;
     use super::test_helpers::ARTIFACT_HASH_ROT_GIMLET_B;
     use super::test_helpers::ARTIFACT_HASH_ROT_SWITCH_B;
     use super::test_helpers::ARTIFACT_HASH_SP_GIMLET_D;
@@ -478,6 +512,10 @@ mod test {
             .collection_builder()
             .sp_versions(ARTIFACT_VERSION_2, ExpectedVersion::NoValidVersion)
             .rot_versions(ARTIFACT_VERSION_2, ExpectedVersion::NoValidVersion)
+            .stage0_versions(
+                ARTIFACT_VERSION_2,
+                ExpectedVersion::NoValidVersion,
+            )
             .sp_active_version_exception(SpType::Sled, 0, ARTIFACT_VERSION_1)
             .build();
         let current_boards = &collection.baseboards;
@@ -536,6 +574,10 @@ mod test {
             .collection_builder()
             .sp_versions(ARTIFACT_VERSION_2, ExpectedVersion::NoValidVersion)
             .rot_versions(ARTIFACT_VERSION_2, ExpectedVersion::NoValidVersion)
+            .stage0_versions(
+                ARTIFACT_VERSION_2,
+                ExpectedVersion::NoValidVersion,
+            )
             .sp_active_version_exception(SpType::Sled, 0, ARTIFACT_VERSION_1)
             .sp_active_version_exception(SpType::Switch, 1, ARTIFACT_VERSION_1)
             .build();
@@ -558,6 +600,10 @@ mod test {
             .collection_builder()
             .sp_versions(ARTIFACT_VERSION_2, ExpectedVersion::NoValidVersion)
             .rot_versions(ARTIFACT_VERSION_2, ExpectedVersion::NoValidVersion)
+            .stage0_versions(
+                ARTIFACT_VERSION_2,
+                ExpectedVersion::NoValidVersion,
+            )
             .sp_active_version_exception(SpType::Switch, 1, ARTIFACT_VERSION_1)
             .build();
         let later_updates = plan_mgs_updates(
@@ -585,6 +631,10 @@ mod test {
             .collection_builder()
             .sp_versions(ARTIFACT_VERSION_2, ExpectedVersion::NoValidVersion)
             .rot_versions(ARTIFACT_VERSION_2, ExpectedVersion::NoValidVersion)
+            .stage0_versions(
+                ARTIFACT_VERSION_2,
+                ExpectedVersion::NoValidVersion,
+            )
             .build();
         let later_updates = plan_mgs_updates(
             log,
@@ -603,6 +653,10 @@ mod test {
             .collection_builder()
             .sp_versions(ARTIFACT_VERSION_2, ExpectedVersion::NoValidVersion)
             .rot_versions(ARTIFACT_VERSION_2, ExpectedVersion::NoValidVersion)
+            .stage0_versions(
+                ARTIFACT_VERSION_2,
+                ExpectedVersion::NoValidVersion,
+            )
             .sp_active_version_exception(SpType::Sled, 0, ARTIFACT_VERSION_1)
             .build();
         let updates = plan_mgs_updates(
@@ -654,6 +708,10 @@ mod test {
                 ExpectedVersion::Version(ARTIFACT_VERSION_1),
             )
             .rot_versions(ARTIFACT_VERSION_2, ExpectedVersion::NoValidVersion)
+            .stage0_versions(
+                ARTIFACT_VERSION_2,
+                ExpectedVersion::NoValidVersion,
+            )
             .sp_active_version_exception(SpType::Sled, 0, ARTIFACT_VERSION_1)
             .build();
         let new_updates = plan_mgs_updates(
@@ -694,6 +752,10 @@ mod test {
             .collection_builder()
             .sp_versions(ARTIFACT_VERSION_2, ExpectedVersion::NoValidVersion)
             .rot_versions(ARTIFACT_VERSION_2, ExpectedVersion::NoValidVersion)
+            .stage0_versions(
+                ARTIFACT_VERSION_2,
+                ExpectedVersion::NoValidVersion,
+            )
             .sp_active_version_exception(SpType::Sled, 0, ARTIFACT_VERSION_1_5)
             .build();
         let new_updates = plan_mgs_updates(
@@ -748,6 +810,10 @@ mod test {
             .collection_builder()
             .sp_versions(ARTIFACT_VERSION_2, ExpectedVersion::NoValidVersion)
             .rot_versions(ARTIFACT_VERSION_2, ExpectedVersion::NoValidVersion)
+            .stage0_versions(
+                ARTIFACT_VERSION_2,
+                ExpectedVersion::NoValidVersion,
+            )
             .rot_active_version_exception(SpType::Sled, 0, ARTIFACT_VERSION_1)
             .build();
         let current_boards = &collection.baseboards;
@@ -806,6 +872,10 @@ mod test {
             .collection_builder()
             .sp_versions(ARTIFACT_VERSION_2, ExpectedVersion::NoValidVersion)
             .rot_versions(ARTIFACT_VERSION_2, ExpectedVersion::NoValidVersion)
+            .stage0_versions(
+                ARTIFACT_VERSION_2,
+                ExpectedVersion::NoValidVersion,
+            )
             .rot_active_version_exception(SpType::Sled, 0, ARTIFACT_VERSION_1)
             .rot_active_version_exception(SpType::Switch, 1, ARTIFACT_VERSION_1)
             .build();
@@ -830,6 +900,10 @@ mod test {
             .collection_builder()
             .sp_versions(ARTIFACT_VERSION_2, ExpectedVersion::NoValidVersion)
             .rot_versions(ARTIFACT_VERSION_2, ExpectedVersion::NoValidVersion)
+            .stage0_versions(
+                ARTIFACT_VERSION_2,
+                ExpectedVersion::NoValidVersion,
+            )
             .sp_active_version_exception(SpType::Switch, 1, ARTIFACT_VERSION_1)
             .rot_active_version_exception(SpType::Switch, 1, ARTIFACT_VERSION_1)
             .build();
@@ -858,6 +932,10 @@ mod test {
             .collection_builder()
             .sp_versions(ARTIFACT_VERSION_2, ExpectedVersion::NoValidVersion)
             .rot_versions(ARTIFACT_VERSION_2, ExpectedVersion::NoValidVersion)
+            .stage0_versions(
+                ARTIFACT_VERSION_2,
+                ExpectedVersion::NoValidVersion,
+            )
             .build();
         let later_updates = plan_mgs_updates(
             log,
@@ -876,6 +954,10 @@ mod test {
             .collection_builder()
             .sp_versions(ARTIFACT_VERSION_2, ExpectedVersion::NoValidVersion)
             .rot_versions(ARTIFACT_VERSION_2, ExpectedVersion::NoValidVersion)
+            .stage0_versions(
+                ARTIFACT_VERSION_2,
+                ExpectedVersion::NoValidVersion,
+            )
             .rot_active_version_exception(SpType::Sled, 0, ARTIFACT_VERSION_1)
             .build();
         let updates = plan_mgs_updates(
@@ -931,6 +1013,10 @@ mod test {
                 ARTIFACT_VERSION_2,
                 ExpectedVersion::Version(ARTIFACT_VERSION_1),
             )
+            .stage0_versions(
+                ARTIFACT_VERSION_2,
+                ExpectedVersion::NoValidVersion,
+            )
             .rot_active_version_exception(SpType::Sled, 0, ARTIFACT_VERSION_1)
             .build();
         let new_updates = plan_mgs_updates(
@@ -972,6 +1058,10 @@ mod test {
             .collection_builder()
             .sp_versions(ARTIFACT_VERSION_2, ExpectedVersion::NoValidVersion)
             .rot_versions(ARTIFACT_VERSION_2, ExpectedVersion::NoValidVersion)
+            .stage0_versions(
+                ARTIFACT_VERSION_2,
+                ExpectedVersion::NoValidVersion,
+            )
             .rot_active_version_exception(SpType::Sled, 0, ARTIFACT_VERSION_1_5)
             .build();
         let new_updates = plan_mgs_updates(
@@ -1009,6 +1099,311 @@ mod test {
         logctx.cleanup_successful();
     }
 
+    // Short hand-rolled update sequence that exercises some basic behavior for
+    // RoT bootloader updates.
+    #[test]
+    fn test_basic_rot_bootloader() {
+        let test_name = "planning_mgs_updates_basic_rot_bootloader";
+        let logctx = LogContext::new(
+            test_name,
+            &ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Debug },
+        );
+        let log = &logctx.log;
+        let test_boards = TestBoards::new(test_name);
+
+        // Test that with no updates pending and no TUF repo specified, there
+        // will remain no updates pending.
+        let collection = test_boards
+            .collection_builder()
+            .sp_versions(ARTIFACT_VERSION_2, ExpectedVersion::NoValidVersion)
+            .rot_versions(ARTIFACT_VERSION_2, ExpectedVersion::NoValidVersion)
+            .stage0_versions(
+                ARTIFACT_VERSION_2,
+                ExpectedVersion::NoValidVersion,
+            )
+            .stage0_version_exception(SpType::Sled, 0, ARTIFACT_VERSION_1)
+            .build();
+        let current_boards = &collection.baseboards;
+        let initial_updates = PendingMgsUpdates::new();
+        let nmax_updates = 1;
+        let impossible_update_policy = ImpossibleUpdatePolicy::Reevaluate;
+        let updates = plan_mgs_updates(
+            log,
+            &collection,
+            current_boards,
+            &initial_updates,
+            &TargetReleaseDescription::Initial,
+            nmax_updates,
+            impossible_update_policy,
+        );
+        assert!(updates.is_empty());
+
+        // Test that when a TUF repo is specified and one RoT is outdated, then
+        // it's configured with an update (and the update looks correct).
+        let repo = test_boards.tuf_repo();
+        let updates = plan_mgs_updates(
+            log,
+            &collection,
+            current_boards,
+            &initial_updates,
+            &TargetReleaseDescription::TufRepo(repo.clone()),
+            nmax_updates,
+            impossible_update_policy,
+        );
+        assert_eq!(updates.len(), 1);
+        let first_update = updates.iter().next().expect("at least one update");
+        assert_eq!(first_update.baseboard_id.serial_number, "sled_0");
+        assert_eq!(first_update.sp_type, SpType::Sled);
+        assert_eq!(first_update.slot_id, 0);
+        assert_eq!(
+            first_update.artifact_hash,
+            ARTIFACT_HASH_ROT_BOOTLOADER_GIMLET
+        );
+        assert_eq!(first_update.artifact_version, ARTIFACT_VERSION_2);
+
+        // Test that when an update is already pending, and nothing changes
+        // about the state of the world (i.e., the inventory), then the planner
+        // makes no changes.
+        let later_updates = plan_mgs_updates(
+            log,
+            &collection,
+            current_boards,
+            &updates,
+            &TargetReleaseDescription::TufRepo(repo.clone()),
+            nmax_updates,
+            impossible_update_policy,
+        );
+        assert_eq!(updates, later_updates);
+
+        // Test that when two updates are needed, but one is already pending,
+        // then the other one is *not* started (because it exceeds
+        // nmax_updates).
+        let later_collection = test_boards
+            .collection_builder()
+            .sp_versions(ARTIFACT_VERSION_2, ExpectedVersion::NoValidVersion)
+            .rot_versions(ARTIFACT_VERSION_2, ExpectedVersion::NoValidVersion)
+            .stage0_versions(
+                ARTIFACT_VERSION_2,
+                ExpectedVersion::NoValidVersion,
+            )
+            .stage0_version_exception(SpType::Sled, 0, ARTIFACT_VERSION_1)
+            .stage0_version_exception(SpType::Switch, 1, ARTIFACT_VERSION_1)
+            .build();
+        let later_updates = plan_mgs_updates(
+            log,
+            &later_collection,
+            current_boards,
+            &updates,
+            &TargetReleaseDescription::TufRepo(repo.clone()),
+            nmax_updates,
+            impossible_update_policy,
+        );
+        assert_eq!(updates, later_updates);
+
+        // At this point, we're ready to test that when the first SpType update
+        // completes, then the second one *is* started.  This tests three
+        // different things: first that we noticed the first one completed,
+        // second that we noticed another thing needed an update, and third that
+        // the planner schedules the updates in the correct order: first RoT
+        // bootloader, second RoT and third SP.
+        let later_collection = test_boards
+            .collection_builder()
+            .sp_versions(ARTIFACT_VERSION_2, ExpectedVersion::NoValidVersion)
+            .rot_versions(ARTIFACT_VERSION_2, ExpectedVersion::NoValidVersion)
+            .stage0_versions(
+                ARTIFACT_VERSION_2,
+                ExpectedVersion::NoValidVersion,
+            )
+            .sp_active_version_exception(SpType::Switch, 1, ARTIFACT_VERSION_1)
+            .rot_active_version_exception(SpType::Switch, 1, ARTIFACT_VERSION_1)
+            .stage0_version_exception(SpType::Switch, 1, ARTIFACT_VERSION_1)
+            .build();
+        let later_updates = plan_mgs_updates(
+            log,
+            &later_collection,
+            current_boards,
+            &updates,
+            &TargetReleaseDescription::TufRepo(repo.clone()),
+            nmax_updates,
+            impossible_update_policy,
+        );
+        assert_eq!(later_updates.len(), 1);
+        let next_update =
+            later_updates.iter().next().expect("at least one update");
+        assert_ne!(first_update, next_update);
+        assert_eq!(next_update.baseboard_id.serial_number, "switch_1");
+        assert_eq!(next_update.sp_type, SpType::Switch);
+        assert_eq!(next_update.slot_id, 1);
+        assert_eq!(
+            next_update.artifact_hash,
+            ARTIFACT_HASH_ROT_BOOTLOADER_SWITCH
+        );
+        assert_eq!(next_update.artifact_version, ARTIFACT_VERSION_2);
+
+        // Finally, test that when all components are in spec, then no updates
+        // are configured.
+        let updated_collection = test_boards
+            .collection_builder()
+            .sp_versions(ARTIFACT_VERSION_2, ExpectedVersion::NoValidVersion)
+            .rot_versions(ARTIFACT_VERSION_2, ExpectedVersion::NoValidVersion)
+            .stage0_versions(
+                ARTIFACT_VERSION_2,
+                ExpectedVersion::NoValidVersion,
+            )
+            .build();
+        let later_updates = plan_mgs_updates(
+            log,
+            &updated_collection,
+            current_boards,
+            &later_updates,
+            &TargetReleaseDescription::TufRepo(repo.clone()),
+            nmax_updates,
+            impossible_update_policy,
+        );
+        assert!(later_updates.is_empty());
+
+        // Test that we don't try to update boards that aren't in
+        // `current_boards`, even if they're in inventory and outdated.
+        let collection = test_boards
+            .collection_builder()
+            .sp_versions(ARTIFACT_VERSION_2, ExpectedVersion::NoValidVersion)
+            .rot_versions(ARTIFACT_VERSION_2, ExpectedVersion::NoValidVersion)
+            .stage0_versions(
+                ARTIFACT_VERSION_2,
+                ExpectedVersion::NoValidVersion,
+            )
+            .stage0_version_exception(SpType::Sled, 0, ARTIFACT_VERSION_1)
+            .build();
+        let updates = plan_mgs_updates(
+            log,
+            &collection,
+            &BTreeSet::new(),
+            &PendingMgsUpdates::new(),
+            &TargetReleaseDescription::TufRepo(repo.clone()),
+            nmax_updates,
+            impossible_update_policy,
+        );
+        assert!(updates.is_empty());
+        let updates = plan_mgs_updates(
+            log,
+            &collection,
+            &collection.baseboards,
+            &PendingMgsUpdates::new(),
+            &TargetReleaseDescription::TufRepo(repo.clone()),
+            nmax_updates,
+            impossible_update_policy,
+        );
+        // We verified most of the details above.  Here we're just double
+        // checking that the baseboard being missing is the only reason that no
+        // update was generated.
+        assert_eq!(updates.len(), 1);
+
+        // Verify the precondition details of an ordinary RoT update.
+        let old_update =
+            updates.into_iter().next().expect("at least one update");
+        let PendingMgsUpdateDetails::RotBootloader {
+            expected_stage0_version: old_expected_stage0_version,
+            expected_stage0_next_version: old_expected_stage0_next_version,
+        } = &old_update.details
+        else {
+            panic!("expected RoT bootloader update");
+        };
+        assert_eq!(ARTIFACT_VERSION_1, *old_expected_stage0_version);
+        assert_eq!(
+            ExpectedVersion::NoValidVersion,
+            *old_expected_stage0_next_version
+        );
+
+        // Test that if the inactive slot contents have changed, then we'll get
+        // a new update reflecting that.
+        let collection = test_boards
+            .collection_builder()
+            .sp_versions(ARTIFACT_VERSION_2, ExpectedVersion::NoValidVersion)
+            .rot_versions(ARTIFACT_VERSION_2, ExpectedVersion::NoValidVersion)
+            .stage0_versions(
+                ARTIFACT_VERSION_2,
+                ExpectedVersion::Version(ARTIFACT_VERSION_1),
+            )
+            .stage0_version_exception(SpType::Sled, 0, ARTIFACT_VERSION_1)
+            .build();
+        let new_updates = plan_mgs_updates(
+            log,
+            &collection,
+            &collection.baseboards,
+            &updates,
+            &TargetReleaseDescription::TufRepo(repo.clone()),
+            nmax_updates,
+            impossible_update_policy,
+        );
+        assert_ne!(updates, new_updates);
+        assert_eq!(new_updates.len(), 1);
+        let new_update =
+            new_updates.into_iter().next().expect("at least one update");
+        assert_eq!(old_update.baseboard_id, new_update.baseboard_id);
+        assert_eq!(old_update.sp_type, new_update.sp_type);
+        assert_eq!(old_update.slot_id, new_update.slot_id);
+        assert_eq!(old_update.artifact_hash, new_update.artifact_hash);
+        assert_eq!(old_update.artifact_version, new_update.artifact_version);
+        let PendingMgsUpdateDetails::RotBootloader {
+            expected_stage0_version: new_expected_stage0_version,
+            expected_stage0_next_version: new_expected_stage0_next_version,
+        } = &new_update.details
+        else {
+            panic!("expected RoT bootloader update");
+        };
+        assert_eq!(ARTIFACT_VERSION_1, *new_expected_stage0_version);
+        assert_eq!(
+            ExpectedVersion::Version(ARTIFACT_VERSION_1),
+            *new_expected_stage0_next_version
+        );
+
+        // Test that if instead it's the active slot whose contents have changed
+        // to something other than the new expected version, then we'll also get
+        // a new update reflecting that.
+        let collection = test_boards
+            .collection_builder()
+            .sp_versions(ARTIFACT_VERSION_2, ExpectedVersion::NoValidVersion)
+            .rot_versions(ARTIFACT_VERSION_2, ExpectedVersion::NoValidVersion)
+            .stage0_versions(
+                ARTIFACT_VERSION_2,
+                ExpectedVersion::NoValidVersion,
+            )
+            .stage0_version_exception(SpType::Sled, 0, ARTIFACT_VERSION_1_5)
+            .build();
+        let new_updates = plan_mgs_updates(
+            log,
+            &collection,
+            &collection.baseboards,
+            &updates,
+            &TargetReleaseDescription::TufRepo(repo.clone()),
+            nmax_updates,
+            impossible_update_policy,
+        );
+        assert_ne!(updates, new_updates);
+        assert_eq!(new_updates.len(), 1);
+        let new_update =
+            new_updates.into_iter().next().expect("at least one update");
+        assert_eq!(old_update.baseboard_id, new_update.baseboard_id);
+        assert_eq!(old_update.sp_type, new_update.sp_type);
+        assert_eq!(old_update.slot_id, new_update.slot_id);
+        assert_eq!(old_update.artifact_hash, new_update.artifact_hash);
+        assert_eq!(old_update.artifact_version, new_update.artifact_version);
+        let PendingMgsUpdateDetails::RotBootloader {
+            expected_stage0_version: new_expected_stage0_version,
+            expected_stage0_next_version: new_expected_stage0_next_version,
+        } = &new_update.details
+        else {
+            panic!("expected RoT bootloader update");
+        };
+        assert_eq!(ARTIFACT_VERSION_1_5, *new_expected_stage0_version);
+        assert_eq!(
+            ExpectedVersion::NoValidVersion,
+            *new_expected_stage0_next_version
+        );
+
+        logctx.cleanup_successful();
+    }
+
     // Confirm our behavior for impossible updates
     #[test]
     fn test_impossible_update_policy() {
@@ -1030,6 +1425,10 @@ mod test {
             .rot_versions(
                 ARTIFACT_VERSION_2,
                 ExpectedVersion::Version(ARTIFACT_VERSION_1_5),
+            )
+            .stage0_versions(
+                ARTIFACT_VERSION_2,
+                ExpectedVersion::NoValidVersion,
             )
             .sp_active_version_exception(SpType::Sled, 0, ARTIFACT_VERSION_1)
             .build();
@@ -1088,6 +1487,10 @@ mod test {
             .rot_versions(
                 ARTIFACT_VERSION_2,
                 ExpectedVersion::Version(ARTIFACT_VERSION_1_5),
+            )
+            .stage0_versions(
+                ARTIFACT_VERSION_2,
+                ExpectedVersion::NoValidVersion,
             )
             .sp_active_version_exception(SpType::Sled, 0, ARTIFACT_VERSION_1)
             .build();
@@ -1164,7 +1567,11 @@ mod test {
         let mut builder = test_boards
             .collection_builder()
             .sp_versions(ARTIFACT_VERSION_1, ExpectedVersion::NoValidVersion)
-            .rot_versions(ARTIFACT_VERSION_1, ExpectedVersion::NoValidVersion);
+            .rot_versions(ARTIFACT_VERSION_1, ExpectedVersion::NoValidVersion)
+            .stage0_versions(
+                ARTIFACT_VERSION_1,
+                ExpectedVersion::NoValidVersion,
+            );
         for _ in 0..expected_updates.len() {
             let collection = builder.clone().build();
 
@@ -1214,8 +1621,17 @@ mod test {
                         ARTIFACT_VERSION_2,
                     );
                 }
-                PendingMgsUpdateDetails::RotBootloader { .. }
-                | PendingMgsUpdateDetails::HostPhase1(_) => {
+                PendingMgsUpdateDetails::RotBootloader { .. } => {
+                    assert!(
+                        !builder.has_stage0_version_exception(sp_type, sp_slot)
+                    );
+                    builder = builder.stage0_version_exception(
+                        sp_type,
+                        sp_slot,
+                        ARTIFACT_VERSION_2,
+                    );
+                }
+                PendingMgsUpdateDetails::HostPhase1(_) => {
                     unimplemented!()
                 }
             }
@@ -1256,11 +1672,55 @@ mod test {
         let mut expected_updates = test_boards.expected_updates();
 
         // Update the whole system at once; this should attempt to update all of
-        // the RoTs, but stages at most one pending update per board.
+        // the RoT bootloaders, but stages at most one pending update per board.
+        //
+        // TODO THIS IS WRONG! We should only be willing to stage at most one
+        // bootloader update at a time, across the whole system. This is
+        // currently enforced by the fact that the real planner passes 1 instead
+        // of usize::MAX, but we should probably fix this.
         let collection = test_boards
             .collection_builder()
             .sp_versions(ARTIFACT_VERSION_1, ExpectedVersion::NoValidVersion)
             .rot_versions(ARTIFACT_VERSION_1, ExpectedVersion::NoValidVersion)
+            .stage0_versions(
+                ARTIFACT_VERSION_1,
+                ExpectedVersion::NoValidVersion,
+            )
+            .build();
+        let all_updates = plan_mgs_updates(
+            log,
+            &collection,
+            &collection.baseboards,
+            &PendingMgsUpdates::new(),
+            &TargetReleaseDescription::TufRepo(repo.clone()),
+            usize::MAX,
+            impossible_update_policy,
+        );
+
+        for update in &all_updates {
+            // Confirm all our updates are to RoT bootloaders.
+            match &update.details {
+                PendingMgsUpdateDetails::RotBootloader { .. } => (),
+                PendingMgsUpdateDetails::Rot { .. }
+                | PendingMgsUpdateDetails::Sp { .. }
+                | PendingMgsUpdateDetails::HostPhase1(..) => {
+                    panic!("unexpected update type: {update:?}")
+                }
+            }
+            expected_updates.verify_one(update);
+        }
+
+        // Update the whole system at once again, but note the RoT bootloaders
+        // have all been updated already; this should attempt to update all of
+        // the RoTs.
+        let collection = test_boards
+            .collection_builder()
+            .sp_versions(ARTIFACT_VERSION_1, ExpectedVersion::NoValidVersion)
+            .rot_versions(ARTIFACT_VERSION_1, ExpectedVersion::NoValidVersion)
+            .stage0_versions(
+                ARTIFACT_VERSION_2,
+                ExpectedVersion::NoValidVersion,
+            )
             .build();
         let all_updates = plan_mgs_updates(
             log,
@@ -1284,12 +1744,17 @@ mod test {
             expected_updates.verify_one(update);
         }
 
-        // Update the whole system at once again, but note the RoTs have all
-        // been updated already; this should attempt to update all of the SPs.
+        // Update the whole system at once again, but note the RoT bootloaders
+        // and RoTs have all been updated already; this should attempt to update
+        // all of the SPs.
         let collection = test_boards
             .collection_builder()
             .sp_versions(ARTIFACT_VERSION_1, ExpectedVersion::NoValidVersion)
             .rot_versions(ARTIFACT_VERSION_2, ExpectedVersion::NoValidVersion)
+            .stage0_versions(
+                ARTIFACT_VERSION_2,
+                ExpectedVersion::NoValidVersion,
+            )
             .build();
         let all_updates = plan_mgs_updates(
             log,
@@ -1303,7 +1768,7 @@ mod test {
         for update in &all_updates {
             // Confirm all our updates are to SPs.
             match &update.details {
-                PendingMgsUpdateDetails::Sp { .. } => (),
+                PendingMgsUpdateDetails::Sp { .. } =>(),
                 PendingMgsUpdateDetails::Rot { .. }
                 | PendingMgsUpdateDetails::RotBootloader { .. }
                 | PendingMgsUpdateDetails::HostPhase1(..) => {
@@ -1322,6 +1787,10 @@ mod test {
             .collection_builder()
             .sp_versions(ARTIFACT_VERSION_2, ExpectedVersion::NoValidVersion)
             .rot_versions(ARTIFACT_VERSION_2, ExpectedVersion::NoValidVersion)
+            .stage0_versions(
+                ARTIFACT_VERSION_2,
+                ExpectedVersion::NoValidVersion,
+            )
             .build();
         let all_updates_done = plan_mgs_updates(
             log,
@@ -1354,8 +1823,13 @@ mod test {
             .collection_builder()
             .sp_versions(ARTIFACT_VERSION_2, ExpectedVersion::NoValidVersion)
             .rot_versions(ARTIFACT_VERSION_2, ExpectedVersion::NoValidVersion)
+            .stage0_versions(
+                ARTIFACT_VERSION_2,
+                ExpectedVersion::NoValidVersion,
+            )
             .sp_active_version_exception(SpType::Sled, 0, ARTIFACT_VERSION_1)
             .rot_active_version_exception(SpType::Sled, 0, ARTIFACT_VERSION_1)
+            .stage0_version_exception(SpType::Sled, 0, ARTIFACT_VERSION_1)
             .build();
         let nmax_updates = 1;
         let impossible_update_policy = ImpossibleUpdatePolicy::Reevaluate;

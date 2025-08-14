@@ -7,6 +7,7 @@
 use anyhow::{Context, ensure};
 use nexus_client::types::BlueprintTargetSet;
 use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
+use nexus_reconfigurator_planning::planner::PlannerRng;
 use nexus_types::deployment::{Blueprint, PlanningInput};
 use nexus_types::inventory::Collection;
 use omicron_uuid_kinds::GenericUuid;
@@ -73,6 +74,7 @@ pub async fn blueprint_edit_current_target(
         &planning_input,
         &collection,
         "test-suite",
+        PlannerRng::from_entropy(),
     )
     .context("creating BlueprintBuilder")?;
 
