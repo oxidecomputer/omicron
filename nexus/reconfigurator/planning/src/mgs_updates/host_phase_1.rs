@@ -6,6 +6,7 @@
 
 use super::MgsUpdateStatus;
 use super::MgsUpdateStatusError;
+use gateway_client::types::SpType;
 use nexus_types::deployment::BlueprintArtifactVersion;
 use nexus_types::deployment::BlueprintHostPhase2DesiredContents;
 use nexus_types::deployment::PendingMgsUpdate;
@@ -230,6 +231,16 @@ pub(super) fn try_make_update(
         );
         return None;
     };
+
+    // Only configure host OS updates for sleds.
+    //
+    // We don't bother logging a return value of `None` for non-sleds, because
+    // we will never attempt to configure an update for them (nor should we).
+    match sp_info.sp_type {
+        SpType::Sled => (),
+        SpType::Power | SpType::Switch => return None,
+    }
+
     let Some(sled_agent) = inventory.sled_agents.iter().find(|sled_agent| {
         sled_agent.baseboard_id.as_ref() == Some(baseboard_id)
     }) else {
