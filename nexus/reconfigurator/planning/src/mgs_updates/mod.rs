@@ -1516,7 +1516,8 @@ mod test {
                 new_updates.iter().next().expect("at least one update");
             expected_updates.verify_one(update);
 
-            // Update `exceptions` or `rot_exceptions` for the next iteration.
+            // Update our builder with an addition exception for the update we
+            // just planned for the next iteration.
             let sp_type = update.sp_type;
             let sp_slot = update.slot_id;
             match update.details {
