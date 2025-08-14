@@ -11,6 +11,7 @@ use nexus_auth::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_reconfigurator_planning::planner::Planner;
+use nexus_reconfigurator_planning::planner::PlannerRng;
 use nexus_reconfigurator_preparation::PlanningInputFromDb;
 use nexus_types::deployment::ReconfiguratorChickenSwitchesView;
 use nexus_types::deployment::{Blueprint, BlueprintTarget};
@@ -140,6 +141,7 @@ impl BlueprintPlanner {
             &input,
             "blueprint_planner",
             &collection,
+            PlannerRng::from_entropy(),
         ) {
             Ok(planner) => planner,
             Err(error) => {
@@ -249,8 +251,13 @@ impl BlueprintPlanner {
         }
 
         // We have a new target!
+        let report = blueprint.report.clone();
         self.tx_blueprint.send_replace(Some(Arc::new((target, blueprint))));
-        BlueprintPlannerStatus::Targeted { parent_blueprint_id, blueprint_id }
+        BlueprintPlannerStatus::Targeted {
+            parent_blueprint_id,
+            blueprint_id,
+            report,
+        }
     }
 }
 
@@ -350,8 +357,10 @@ mod test {
             BlueprintPlannerStatus::Targeted {
                 parent_blueprint_id,
                 blueprint_id,
+                report,
             } if parent_blueprint_id == initial_blueprint.id
-                && blueprint_id != initial_blueprint.id =>
+                && blueprint_id != initial_blueprint.id
+                && blueprint_id == report.blueprint_id =>
             {
                 blueprint_id
             }

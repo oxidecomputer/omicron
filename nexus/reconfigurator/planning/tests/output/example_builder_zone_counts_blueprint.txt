@@ -533,3 +533,6 @@ parent:    e35b2fdd-354d-48d9-acb5-703b2c269a54
     target release min gen:   1
 
  PENDING MGS-MANAGED UPDATES: 0
+
+empty planning report for blueprint 4a0b8410-b14f-41e7-85e7-3c0fe7050ccc.
+
