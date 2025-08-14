@@ -20,7 +20,7 @@ fn normal_distribution_quantile(size: i32, p: f64) -> f64 {
     let mut q = Quantile::new(p).unwrap();
     let normal = Normal::new(mu, sigma).unwrap();
     for _ in 0..size {
-        q.append(normal.sample(&mut rand::thread_rng())).unwrap();
+        q.append(normal.sample(&mut rand::rng())).unwrap();
     }
     q.estimate().unwrap()
 }

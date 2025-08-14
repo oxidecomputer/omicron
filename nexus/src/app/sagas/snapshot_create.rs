@@ -519,7 +519,7 @@ async fn ssc_regions_ensure(
     let extent_count = datasets_and_regions[0].1.extent_count;
 
     // Create volume construction request
-    let mut rng = StdRng::from_entropy();
+    let mut rng = StdRng::from_os_rng();
     let volume_construction_request = VolumeConstructionRequest::Volume {
         id: *destination_volume_id.as_untyped_uuid(),
         block_size,

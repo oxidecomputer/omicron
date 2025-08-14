@@ -857,9 +857,7 @@ mod test {
         }
 
         // delete a subset of the entries
-        for entry in
-            db_records.iter().choose_multiple(&mut rand::thread_rng(), 50)
-        {
+        for entry in db_records.iter().choose_multiple(&mut rand::rng(), 50) {
             datastore.ipv4_nat_delete(&opctx, entry).await.unwrap();
         }
 

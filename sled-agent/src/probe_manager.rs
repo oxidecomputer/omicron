@@ -314,7 +314,7 @@ impl ProbeManagerInner {
     /// such as storage and networking. Then it configures, installs and
     /// boots the probe zone.
     async fn add_probe(self: &Arc<Self>, probe: &ProbeState) -> Result<()> {
-        let mut rng = rand::rngs::StdRng::from_entropy();
+        let mut rng = rand::rngs::StdRng::from_os_rng();
         let zone_root_path = self
             .available_datasets_rx
             .all_mounted_zone_root_datasets()

@@ -1373,7 +1373,7 @@ mod tests {
     use flate2::{Compression, write::GzEncoder};
     use futures::StreamExt;
     use omicron_test_utils::dev::test_setup_log;
-    use rand::{Rng, distributions::Standard, thread_rng};
+    use rand::{Rng, distr::StandardUniform};
     use sha2::{Digest, Sha256};
     use tufaceous_brand_metadata::{ArchiveType, LayerInfo, Metadata};
     use tufaceous_lib::{
@@ -1381,7 +1381,7 @@ mod tests {
     };
 
     fn make_random_bytes() -> Vec<u8> {
-        thread_rng().sample_iter(Standard).take(128).collect()
+        rand::rng().sample_iter(StandardUniform).take(128).collect()
     }
 
     struct RandomHostOsImage {
