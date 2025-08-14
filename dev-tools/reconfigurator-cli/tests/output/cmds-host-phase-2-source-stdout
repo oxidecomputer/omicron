@@ -712,6 +712,9 @@ parent:    8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
 
  PENDING MGS-MANAGED UPDATES: 0
 
+empty planning report for blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4.
+
+
 
 
 > # Restore A to "current contents"
@@ -1418,5 +1421,8 @@ parent:    af934083-59b5-4bf6-8966-6fb5292c29e1
     target release min gen:   1
 
  PENDING MGS-MANAGED UPDATES: 0
+
+empty planning report for blueprint df06bb57-ad42-4431-9206-abff322896c7.
+
 
 

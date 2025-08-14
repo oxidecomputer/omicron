@@ -1861,14 +1861,14 @@ fn cmd_blueprint_plan(
         &planning_input,
         creator,
         collection,
+        rng,
     )
-    .context("creating planner")?
-    .with_rng(rng);
+    .context("creating planner")?;
 
     let blueprint = planner.plan().context("generating blueprint")?;
     let rv = format!(
-        "generated blueprint {} based on parent blueprint {}",
-        blueprint.id, parent_blueprint.id,
+        "generated blueprint {} based on parent blueprint {}\n{}",
+        blueprint.id, parent_blueprint.id, blueprint.report,
     );
     system.add_blueprint(blueprint)?;
 
@@ -1906,9 +1906,9 @@ fn cmd_blueprint_edit(
         &planning_input,
         &latest_collection,
         creator,
+        rng,
     )
     .context("creating blueprint builder")?;
-    builder.set_rng(rng);
 
     if let Some(comment) = args.comment {
         builder.comment(comment);
