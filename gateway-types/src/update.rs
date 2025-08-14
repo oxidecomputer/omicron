@@ -2,14 +2,62 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::time::Duration;
-
+use dropshot::{ErrorStatusCode, HttpError, HttpResponseError};
 use gateway_messages::UpdateStatus;
 use omicron_uuid_kinds::MupdateUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use std::time::Duration;
 use tufaceous_artifact::ArtifactHash;
 use uuid::Uuid;
+
+/// The error type returned by the `sp_component_reset()` MGS endpoint.
+#[derive(
+    Debug, Clone, PartialEq, Eq, Serialize, JsonSchema, thiserror::Error,
+)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum SpComponentResetError {
+    /// MGS refuses to reset its own sled's SP.
+    #[error("cannot reset SP of the sled hosting MGS")]
+    ResetSpOfLocalSled,
+
+    /// Other dropshot errors.
+    #[error("{internal_message}")]
+    Other {
+        message: String,
+        error_code: Option<String>,
+
+        // Skip serializing these fields, as they are used for the
+        // `fmt::Display` implementation and for determining the status code,
+        // respectively, rather than included in the response body:
+        #[serde(skip)]
+        internal_message: String,
+        #[serde(skip)]
+        status: ErrorStatusCode,
+    },
+}
+
+impl HttpResponseError for SpComponentResetError {
+    fn status_code(&self) -> ErrorStatusCode {
+        match self {
+            SpComponentResetError::ResetSpOfLocalSled => {
+                ErrorStatusCode::BAD_REQUEST
+            }
+            SpComponentResetError::Other { status, .. } => *status,
+        }
+    }
+}
+
+impl From<HttpError> for SpComponentResetError {
+    fn from(err: HttpError) -> Self {
+        Self::Other {
+            message: err.external_message,
+            error_code: err.error_code,
+            internal_message: err.internal_message,
+            status: err.status_code,
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(tag = "state", rename_all = "snake_case")]
