@@ -558,7 +558,7 @@ impl ZoneManifestBootInventory {
     }
 
     /// Returns a displayer for this inventory.
-    pub fn display(&self) -> ZoneManifestBootInventoryDisplay {
+    pub fn display(&self) -> ZoneManifestBootInventoryDisplay<'_> {
         ZoneManifestBootInventoryDisplay { inner: self }
     }
 }

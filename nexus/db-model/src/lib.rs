@@ -432,7 +432,7 @@ pub(crate) use impl_from_sql_text;
 pub trait DatabaseString: Sized {
     type Error: std::fmt::Display;
 
-    fn to_database_string(&self) -> Cow<str>;
+    fn to_database_string(&self) -> Cow<'_, str>;
     fn from_database_string(s: &str) -> Result<Self, Self::Error>;
 }
 
@@ -445,7 +445,7 @@ use std::borrow::Cow;
 impl DatabaseString for FleetRole {
     type Error = anyhow::Error;
 
-    fn to_database_string(&self) -> Cow<str> {
+    fn to_database_string(&self) -> Cow<'_, str> {
         match self {
             FleetRole::Admin => "admin",
             FleetRole::Collaborator => "collaborator",
@@ -470,7 +470,7 @@ impl DatabaseString for FleetRole {
 impl DatabaseString for SiloRole {
     type Error = anyhow::Error;
 
-    fn to_database_string(&self) -> Cow<str> {
+    fn to_database_string(&self) -> Cow<'_, str> {
         match self {
             SiloRole::Admin => "admin",
             SiloRole::Collaborator => "collaborator",
@@ -495,7 +495,7 @@ impl DatabaseString for SiloRole {
 impl DatabaseString for ProjectRole {
     type Error = anyhow::Error;
 
-    fn to_database_string(&self) -> Cow<str> {
+    fn to_database_string(&self) -> Cow<'_, str> {
         match self {
             ProjectRole::Admin => "admin",
             ProjectRole::Collaborator => "collaborator",

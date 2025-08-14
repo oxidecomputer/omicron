@@ -1052,7 +1052,7 @@ impl Nexus {
 
     pub(crate) fn demo_sagas(
         &self,
-    ) -> Result<std::sync::MutexGuard<CompletingDemoSagas>, Error> {
+    ) -> Result<std::sync::MutexGuard<'_, CompletingDemoSagas>, Error> {
         self.demo_sagas.lock().map_err(|error| {
             Error::internal_error(&format!(
                 "failed to acquire demo_sagas lock: {:#}",

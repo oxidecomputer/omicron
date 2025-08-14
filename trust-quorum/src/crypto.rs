@@ -473,8 +473,7 @@ mod tests {
         let res = RackSecret::reconstruct(
             &shares.shares.expose_secret()[0..(input.threshold - 2) as usize],
         );
-        if res.is_ok() {
-            let rs = res.unwrap();
+        if let Ok(rs) = res {
             prop_assert_ne!(rs.expose_secret(), original.expose_secret());
         }
 

@@ -1040,7 +1040,7 @@ impl DatasetTask {
         let root_path = dataset.full_name();
         let get_properties_result = zfs
             .get_dataset_properties(
-                &[root_path.clone()],
+                std::slice::from_ref(&root_path),
                 WhichDatasets::SelfAndChildren,
             )
             .await;

@@ -35,7 +35,7 @@ pub struct RouteTarget(pub external::RouteTarget);
 impl DatabaseString for RouteTarget {
     type Error = <external::RouteTarget as FromStr>::Err;
 
-    fn to_database_string(&self) -> Cow<str> {
+    fn to_database_string(&self) -> Cow<'_, str> {
         self.0.to_string().into()
     }
 
@@ -63,7 +63,7 @@ impl RouteDestination {
 impl DatabaseString for RouteDestination {
     type Error = <external::RouteDestination as FromStr>::Err;
 
-    fn to_database_string(&self) -> Cow<str> {
+    fn to_database_string(&self) -> Cow<'_, str> {
         self.0.to_string().into()
     }
 

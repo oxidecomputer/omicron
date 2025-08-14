@@ -560,11 +560,11 @@ impl<'a> Resolved<'a> {
         &self,
         ident: &ApiIdent,
         version: &semver::Version,
-    ) -> Option<&Resolution> {
+    ) -> Option<&Resolution<'_>> {
         self.api_results.get(ident).and_then(|v| v.by_version.get(version))
     }
 
-    pub fn symlink_problem(&self, ident: &ApiIdent) -> Option<&Problem> {
+    pub fn symlink_problem(&self, ident: &ApiIdent) -> Option<&Problem<'_>> {
         self.api_results.get(ident).and_then(|v| v.symlink.as_ref())
     }
 

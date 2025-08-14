@@ -116,7 +116,7 @@ schemars = { version = "0.8.22", features = ["bytes", "chrono", "semver", "url",
 scopeguard = { version = "1.2.0" }
 semver = { version = "1.0.26", features = ["serde"] }
 serde = { version = "1.0.219", features = ["alloc", "derive", "rc"] }
-serde_json = { version = "1.0.141", features = ["raw_value", "unbounded_depth"] }
+serde_json = { version = "1.0.142", features = ["raw_value", "unbounded_depth"] }
 sha1 = { version = "0.10.6", features = ["oid"] }
 sha2 = { version = "0.10.9", features = ["oid"] }
 similar = { version = "2.7.0", features = ["bytes", "inline", "unicode"] }
@@ -145,6 +145,7 @@ url = { version = "2.5.4", features = ["serde"] }
 usdt = { version = "0.5.0" }
 usdt-impl = { version = "0.5.0", default-features = false, features = ["asm", "des"] }
 uuid = { version = "1.17.0", features = ["serde", "v4"] }
+winnow-ca01ad9e24f5d932 = { package = "winnow", version = "0.7.10" }
 x509-cert = { version = "0.2.5" }
 zerocopy-c38e5c1d305a1b54 = { package = "zerocopy", version = "0.8.26", default-features = false, features = ["derive", "simd"] }
 zerocopy-ca01ad9e24f5d932 = { package = "zerocopy", version = "0.7.35", features = ["derive", "simd"] }
@@ -252,7 +253,7 @@ schemars = { version = "0.8.22", features = ["bytes", "chrono", "semver", "url",
 scopeguard = { version = "1.2.0" }
 semver = { version = "1.0.26", features = ["serde"] }
 serde = { version = "1.0.219", features = ["alloc", "derive", "rc"] }
-serde_json = { version = "1.0.141", features = ["raw_value", "unbounded_depth"] }
+serde_json = { version = "1.0.142", features = ["raw_value", "unbounded_depth"] }
 sha1 = { version = "0.10.6", features = ["oid"] }
 sha2 = { version = "0.10.9", features = ["oid"] }
 similar = { version = "2.7.0", features = ["bytes", "inline", "unicode"] }
@@ -283,6 +284,7 @@ url = { version = "2.5.4", features = ["serde"] }
 usdt = { version = "0.5.0" }
 usdt-impl = { version = "0.5.0", default-features = false, features = ["asm", "des"] }
 uuid = { version = "1.17.0", features = ["serde", "v4"] }
+winnow-ca01ad9e24f5d932 = { package = "winnow", version = "0.7.10" }
 x509-cert = { version = "0.2.5" }
 zerocopy-c38e5c1d305a1b54 = { package = "zerocopy", version = "0.8.26", default-features = false, features = ["derive", "simd"] }
 zerocopy-ca01ad9e24f5d932 = { package = "zerocopy", version = "0.7.35", features = ["derive", "simd"] }
@@ -367,7 +369,7 @@ mio = { version = "1.0.2", features = ["net", "os-ext"] }
 rustix-d585fab2519d2d1 = { package = "rustix", version = "0.38.37", features = ["event", "fs", "net", "pipe", "process", "stdio", "system", "termios", "time"] }
 rustix-dff4ba8e3ae991db = { package = "rustix", version = "1.0.7", features = ["fs", "stdio", "termios"] }
 toml_edit-cdcf2f9584511fe6 = { package = "toml_edit", version = "0.19.15", features = ["serde"] }
-winnow = { version = "0.6.26", features = ["simd"] }
+winnow-3b31131e45eafb45 = { package = "winnow", version = "0.6.26", features = ["simd"] }
 
 [target.x86_64-unknown-illumos.build-dependencies]
 bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.9.1", default-features = false, features = ["std"] }
@@ -383,6 +385,6 @@ mio = { version = "1.0.2", features = ["net", "os-ext"] }
 rustix-d585fab2519d2d1 = { package = "rustix", version = "0.38.37", features = ["event", "fs", "net", "pipe", "process", "stdio", "system", "termios", "time"] }
 rustix-dff4ba8e3ae991db = { package = "rustix", version = "1.0.7", features = ["fs", "stdio", "termios"] }
 toml_edit-cdcf2f9584511fe6 = { package = "toml_edit", version = "0.19.15", features = ["serde"] }
-winnow = { version = "0.6.26", features = ["simd"] }
+winnow-3b31131e45eafb45 = { package = "winnow", version = "0.6.26", features = ["simd"] }
 
 ### END HAKARI SECTION
