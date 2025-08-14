@@ -208,8 +208,20 @@ impl TestBoards {
 
     /// Get a helper to build an inventory collection reflecting specific
     /// versions of our test boards.
-    pub fn collection_builder<'a>(&'a self) -> TestBoardCollectionBuilder<'a> {
-        TestBoardCollectionBuilder::new(self)
+    ///
+    /// The provided versions will be the default for the active and inactive
+    /// SP, RoT, and RoT bootloader slots. They can be overridden by methods on
+    /// the returned builder.
+    pub fn collection_builder<'a>(
+        &'a self,
+        default_active_version: ArtifactVersion,
+        default_inactive_version: ExpectedVersion,
+    ) -> TestBoardCollectionBuilder<'a> {
+        TestBoardCollectionBuilder::new(
+            self,
+            default_active_version,
+            default_inactive_version,
+        )
     }
 
     /// Returns a TufRepoDescription that we can use to exercise the planning
@@ -511,13 +523,13 @@ impl ExpectedUpdates {
 pub(super) struct TestBoardCollectionBuilder<'a> {
     boards: &'a TestBoards,
 
-    // fields that callers _must_ provide before calling `build()`
-    sp_active_version: Option<ArtifactVersion>,
-    sp_inactive_version: Option<ExpectedVersion>,
-    rot_active_version: Option<ArtifactVersion>,
-    rot_inactive_version: Option<ExpectedVersion>,
-    stage0_version: Option<ArtifactVersion>,
-    stage0_next_version: Option<ExpectedVersion>,
+    // default versions
+    sp_active_version: ArtifactVersion,
+    sp_inactive_version: ExpectedVersion,
+    rot_active_version: ArtifactVersion,
+    rot_inactive_version: ExpectedVersion,
+    stage0_version: ArtifactVersion,
+    stage0_next_version: ExpectedVersion,
 
     // fields that callers _may_ influence before calling `build()`
     sp_active_version_exceptions: BTreeMap<SpIdentifier, ArtifactVersion>,
@@ -526,15 +538,19 @@ pub(super) struct TestBoardCollectionBuilder<'a> {
 }
 
 impl<'a> TestBoardCollectionBuilder<'a> {
-    fn new(boards: &'a TestBoards) -> Self {
+    fn new(
+        boards: &'a TestBoards,
+        default_active_version: ArtifactVersion,
+        default_inactive_version: ExpectedVersion,
+    ) -> Self {
         Self {
             boards,
-            sp_active_version: None,
-            sp_inactive_version: None,
-            rot_active_version: None,
-            rot_inactive_version: None,
-            stage0_version: None,
-            stage0_next_version: None,
+            sp_active_version: default_active_version.clone(),
+            sp_inactive_version: default_inactive_version.clone(),
+            rot_active_version: default_active_version.clone(),
+            rot_inactive_version: default_inactive_version.clone(),
+            stage0_version: default_active_version,
+            stage0_next_version: default_inactive_version,
             sp_active_version_exceptions: BTreeMap::new(),
             rot_active_version_exceptions: BTreeMap::new(),
             stage0_version_exceptions: BTreeMap::new(),
@@ -546,8 +562,8 @@ impl<'a> TestBoardCollectionBuilder<'a> {
         active: ArtifactVersion,
         inactive: ExpectedVersion,
     ) -> Self {
-        self.sp_active_version = Some(active);
-        self.sp_inactive_version = Some(inactive);
+        self.sp_active_version = active;
+        self.sp_inactive_version = inactive;
         self
     }
 
@@ -576,8 +592,8 @@ impl<'a> TestBoardCollectionBuilder<'a> {
         active: ArtifactVersion,
         inactive: ExpectedVersion,
     ) -> Self {
-        self.rot_active_version = Some(active);
-        self.rot_inactive_version = Some(inactive);
+        self.rot_active_version = active;
+        self.rot_inactive_version = inactive;
         self
     }
 
@@ -606,8 +622,8 @@ impl<'a> TestBoardCollectionBuilder<'a> {
         stage0: ArtifactVersion,
         stage0_next: ExpectedVersion,
     ) -> Self {
-        self.stage0_version = Some(stage0);
-        self.stage0_next_version = Some(stage0_next);
+        self.stage0_version = stage0;
+        self.stage0_next_version = stage0_next;
         self
     }
 
@@ -631,20 +647,6 @@ impl<'a> TestBoardCollectionBuilder<'a> {
     }
 
     pub fn build(self) -> Collection {
-        let sp_active_version =
-            self.sp_active_version.expect("sp_versions() was called");
-        let sp_inactive_version =
-            self.sp_inactive_version.expect("sp_versions() was called");
-        let rot_active_version =
-            self.rot_active_version.expect("rot_versions() was called");
-        let rot_inactive_version =
-            self.rot_inactive_version.expect("rot_versions() was called");
-        let stage0_version =
-            self.stage0_version.expect("rot_bootloader_versions() was called");
-        let stage0_next_version = self
-            .stage0_next_version
-            .expect("rot_bootloader_versions() was called");
-
         let mut builder =
             nexus_inventory::CollectionBuilder::new(self.boards.test_name);
 
@@ -692,15 +694,15 @@ impl<'a> TestBoardCollectionBuilder<'a> {
             let sp_active_version = self
                 .sp_active_version_exceptions
                 .get(&sp_id)
-                .unwrap_or(&sp_active_version);
+                .unwrap_or(&self.sp_active_version);
             let rot_active_version = self
                 .rot_active_version_exceptions
                 .get(&sp_id)
-                .unwrap_or(&rot_active_version);
+                .unwrap_or(&self.rot_active_version);
             let stage0_version = self
                 .stage0_version_exceptions
                 .get(&sp_id)
-                .unwrap_or(&stage0_version);
+                .unwrap_or(&self.stage0_version);
 
             builder
                 .found_caboose(
@@ -751,7 +753,7 @@ impl<'a> TestBoardCollectionBuilder<'a> {
                 .unwrap();
 
             if let ExpectedVersion::Version(sp_inactive_version) =
-                &sp_inactive_version
+                &self.sp_inactive_version
             {
                 builder
                     .found_caboose(
@@ -771,7 +773,7 @@ impl<'a> TestBoardCollectionBuilder<'a> {
             }
 
             if let ExpectedVersion::Version(rot_inactive_version) =
-                &rot_inactive_version
+                &self.rot_inactive_version
             {
                 builder
                     .found_caboose(
@@ -791,7 +793,7 @@ impl<'a> TestBoardCollectionBuilder<'a> {
             }
 
             if let ExpectedVersion::Version(stage0_next_version) =
-                &stage0_next_version
+                &self.stage0_next_version
             {
                 builder
                     .found_caboose(

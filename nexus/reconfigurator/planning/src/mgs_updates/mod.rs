@@ -509,10 +509,7 @@ mod test {
         // Test that with no updates pending and no TUF repo specified, there
         // will remain no updates pending.
         let collection = test_boards
-            .collection_builder()
-            .sp_versions(ARTIFACT_VERSION_2, ExpectedVersion::NoValidVersion)
-            .rot_versions(ARTIFACT_VERSION_2, ExpectedVersion::NoValidVersion)
-            .stage0_versions(
+            .collection_builder(
                 ARTIFACT_VERSION_2,
                 ExpectedVersion::NoValidVersion,
             )
@@ -571,10 +568,7 @@ mod test {
         // then the other one is *not* started (because it exceeds
         // nmax_updates).
         let later_collection = test_boards
-            .collection_builder()
-            .sp_versions(ARTIFACT_VERSION_2, ExpectedVersion::NoValidVersion)
-            .rot_versions(ARTIFACT_VERSION_2, ExpectedVersion::NoValidVersion)
-            .stage0_versions(
+            .collection_builder(
                 ARTIFACT_VERSION_2,
                 ExpectedVersion::NoValidVersion,
             )
@@ -597,10 +591,7 @@ mod test {
         // different things: first that we noticed the first one completed, and
         // second that we noticed another thing needed an update
         let later_collection = test_boards
-            .collection_builder()
-            .sp_versions(ARTIFACT_VERSION_2, ExpectedVersion::NoValidVersion)
-            .rot_versions(ARTIFACT_VERSION_2, ExpectedVersion::NoValidVersion)
-            .stage0_versions(
+            .collection_builder(
                 ARTIFACT_VERSION_2,
                 ExpectedVersion::NoValidVersion,
             )
@@ -628,10 +619,7 @@ mod test {
         // Finally, test that when all SPs are in spec, then no updates are
         // configured.
         let updated_collection = test_boards
-            .collection_builder()
-            .sp_versions(ARTIFACT_VERSION_2, ExpectedVersion::NoValidVersion)
-            .rot_versions(ARTIFACT_VERSION_2, ExpectedVersion::NoValidVersion)
-            .stage0_versions(
+            .collection_builder(
                 ARTIFACT_VERSION_2,
                 ExpectedVersion::NoValidVersion,
             )
@@ -650,10 +638,7 @@ mod test {
         // Test that we don't try to update boards that aren't in
         // `current_boards`, even if they're in inventory and outdated.
         let collection = test_boards
-            .collection_builder()
-            .sp_versions(ARTIFACT_VERSION_2, ExpectedVersion::NoValidVersion)
-            .rot_versions(ARTIFACT_VERSION_2, ExpectedVersion::NoValidVersion)
-            .stage0_versions(
+            .collection_builder(
                 ARTIFACT_VERSION_2,
                 ExpectedVersion::NoValidVersion,
             )
@@ -702,15 +687,13 @@ mod test {
         // Test that if the inactive slot contents have changed, then we'll get
         // a new update reflecting that.
         let collection = test_boards
-            .collection_builder()
+            .collection_builder(
+                ARTIFACT_VERSION_2,
+                ExpectedVersion::NoValidVersion,
+            )
             .sp_versions(
                 ARTIFACT_VERSION_2,
                 ExpectedVersion::Version(ARTIFACT_VERSION_1),
-            )
-            .rot_versions(ARTIFACT_VERSION_2, ExpectedVersion::NoValidVersion)
-            .stage0_versions(
-                ARTIFACT_VERSION_2,
-                ExpectedVersion::NoValidVersion,
             )
             .sp_active_version_exception(SpType::Sled, 0, ARTIFACT_VERSION_1)
             .build();
@@ -749,10 +732,7 @@ mod test {
         // to something other than the new expected version, then we'll also get
         // a new update reflecting that.
         let collection = test_boards
-            .collection_builder()
-            .sp_versions(ARTIFACT_VERSION_2, ExpectedVersion::NoValidVersion)
-            .rot_versions(ARTIFACT_VERSION_2, ExpectedVersion::NoValidVersion)
-            .stage0_versions(
+            .collection_builder(
                 ARTIFACT_VERSION_2,
                 ExpectedVersion::NoValidVersion,
             )
@@ -807,10 +787,7 @@ mod test {
         // Test that with no updates pending and no TUF repo specified, there
         // will remain no updates pending.
         let collection = test_boards
-            .collection_builder()
-            .sp_versions(ARTIFACT_VERSION_2, ExpectedVersion::NoValidVersion)
-            .rot_versions(ARTIFACT_VERSION_2, ExpectedVersion::NoValidVersion)
-            .stage0_versions(
+            .collection_builder(
                 ARTIFACT_VERSION_2,
                 ExpectedVersion::NoValidVersion,
             )
@@ -869,10 +846,7 @@ mod test {
         // then the other one is *not* started (because it exceeds
         // nmax_updates).
         let later_collection = test_boards
-            .collection_builder()
-            .sp_versions(ARTIFACT_VERSION_2, ExpectedVersion::NoValidVersion)
-            .rot_versions(ARTIFACT_VERSION_2, ExpectedVersion::NoValidVersion)
-            .stage0_versions(
+            .collection_builder(
                 ARTIFACT_VERSION_2,
                 ExpectedVersion::NoValidVersion,
             )
@@ -897,10 +871,7 @@ mod test {
         // the planner schedules the updates in the correct order: first RoT,
         // and second SP.
         let later_collection = test_boards
-            .collection_builder()
-            .sp_versions(ARTIFACT_VERSION_2, ExpectedVersion::NoValidVersion)
-            .rot_versions(ARTIFACT_VERSION_2, ExpectedVersion::NoValidVersion)
-            .stage0_versions(
+            .collection_builder(
                 ARTIFACT_VERSION_2,
                 ExpectedVersion::NoValidVersion,
             )
@@ -929,10 +900,7 @@ mod test {
         // Finally, test that when all components are in spec, then no updates
         // are configured.
         let updated_collection = test_boards
-            .collection_builder()
-            .sp_versions(ARTIFACT_VERSION_2, ExpectedVersion::NoValidVersion)
-            .rot_versions(ARTIFACT_VERSION_2, ExpectedVersion::NoValidVersion)
-            .stage0_versions(
+            .collection_builder(
                 ARTIFACT_VERSION_2,
                 ExpectedVersion::NoValidVersion,
             )
@@ -951,10 +919,7 @@ mod test {
         // Test that we don't try to update boards that aren't in
         // `current_boards`, even if they're in inventory and outdated.
         let collection = test_boards
-            .collection_builder()
-            .sp_versions(ARTIFACT_VERSION_2, ExpectedVersion::NoValidVersion)
-            .rot_versions(ARTIFACT_VERSION_2, ExpectedVersion::NoValidVersion)
-            .stage0_versions(
+            .collection_builder(
                 ARTIFACT_VERSION_2,
                 ExpectedVersion::NoValidVersion,
             )
@@ -1004,18 +969,9 @@ mod test {
         // Test that if the inactive slot contents have changed, then we'll get
         // a new update reflecting that.
         let collection = test_boards
-            .collection_builder()
-            .sp_versions(
+            .collection_builder(
                 ARTIFACT_VERSION_2,
                 ExpectedVersion::Version(ARTIFACT_VERSION_1),
-            )
-            .rot_versions(
-                ARTIFACT_VERSION_2,
-                ExpectedVersion::Version(ARTIFACT_VERSION_1),
-            )
-            .stage0_versions(
-                ARTIFACT_VERSION_2,
-                ExpectedVersion::NoValidVersion,
             )
             .rot_active_version_exception(SpType::Sled, 0, ARTIFACT_VERSION_1)
             .build();
@@ -1055,10 +1011,7 @@ mod test {
         // to something other than the new expected version, then we'll also get
         // a new update reflecting that.
         let collection = test_boards
-            .collection_builder()
-            .sp_versions(ARTIFACT_VERSION_2, ExpectedVersion::NoValidVersion)
-            .rot_versions(ARTIFACT_VERSION_2, ExpectedVersion::NoValidVersion)
-            .stage0_versions(
+            .collection_builder(
                 ARTIFACT_VERSION_2,
                 ExpectedVersion::NoValidVersion,
             )
@@ -1114,10 +1067,7 @@ mod test {
         // Test that with no updates pending and no TUF repo specified, there
         // will remain no updates pending.
         let collection = test_boards
-            .collection_builder()
-            .sp_versions(ARTIFACT_VERSION_2, ExpectedVersion::NoValidVersion)
-            .rot_versions(ARTIFACT_VERSION_2, ExpectedVersion::NoValidVersion)
-            .stage0_versions(
+            .collection_builder(
                 ARTIFACT_VERSION_2,
                 ExpectedVersion::NoValidVersion,
             )
@@ -1179,10 +1129,7 @@ mod test {
         // then the other one is *not* started (because it exceeds
         // nmax_updates).
         let later_collection = test_boards
-            .collection_builder()
-            .sp_versions(ARTIFACT_VERSION_2, ExpectedVersion::NoValidVersion)
-            .rot_versions(ARTIFACT_VERSION_2, ExpectedVersion::NoValidVersion)
-            .stage0_versions(
+            .collection_builder(
                 ARTIFACT_VERSION_2,
                 ExpectedVersion::NoValidVersion,
             )
@@ -1207,10 +1154,7 @@ mod test {
         // the planner schedules the updates in the correct order: first RoT
         // bootloader, second RoT and third SP.
         let later_collection = test_boards
-            .collection_builder()
-            .sp_versions(ARTIFACT_VERSION_2, ExpectedVersion::NoValidVersion)
-            .rot_versions(ARTIFACT_VERSION_2, ExpectedVersion::NoValidVersion)
-            .stage0_versions(
+            .collection_builder(
                 ARTIFACT_VERSION_2,
                 ExpectedVersion::NoValidVersion,
             )
@@ -1243,10 +1187,7 @@ mod test {
         // Finally, test that when all components are in spec, then no updates
         // are configured.
         let updated_collection = test_boards
-            .collection_builder()
-            .sp_versions(ARTIFACT_VERSION_2, ExpectedVersion::NoValidVersion)
-            .rot_versions(ARTIFACT_VERSION_2, ExpectedVersion::NoValidVersion)
-            .stage0_versions(
+            .collection_builder(
                 ARTIFACT_VERSION_2,
                 ExpectedVersion::NoValidVersion,
             )
@@ -1265,10 +1206,7 @@ mod test {
         // Test that we don't try to update boards that aren't in
         // `current_boards`, even if they're in inventory and outdated.
         let collection = test_boards
-            .collection_builder()
-            .sp_versions(ARTIFACT_VERSION_2, ExpectedVersion::NoValidVersion)
-            .rot_versions(ARTIFACT_VERSION_2, ExpectedVersion::NoValidVersion)
-            .stage0_versions(
+            .collection_builder(
                 ARTIFACT_VERSION_2,
                 ExpectedVersion::NoValidVersion,
             )
@@ -1317,9 +1255,10 @@ mod test {
         // Test that if the inactive slot contents have changed, then we'll get
         // a new update reflecting that.
         let collection = test_boards
-            .collection_builder()
-            .sp_versions(ARTIFACT_VERSION_2, ExpectedVersion::NoValidVersion)
-            .rot_versions(ARTIFACT_VERSION_2, ExpectedVersion::NoValidVersion)
+            .collection_builder(
+                ARTIFACT_VERSION_2,
+                ExpectedVersion::NoValidVersion,
+            )
             .stage0_versions(
                 ARTIFACT_VERSION_2,
                 ExpectedVersion::Version(ARTIFACT_VERSION_1),
@@ -1361,10 +1300,7 @@ mod test {
         // to something other than the new expected version, then we'll also get
         // a new update reflecting that.
         let collection = test_boards
-            .collection_builder()
-            .sp_versions(ARTIFACT_VERSION_2, ExpectedVersion::NoValidVersion)
-            .rot_versions(ARTIFACT_VERSION_2, ExpectedVersion::NoValidVersion)
-            .stage0_versions(
+            .collection_builder(
                 ARTIFACT_VERSION_2,
                 ExpectedVersion::NoValidVersion,
             )
@@ -1417,18 +1353,9 @@ mod test {
 
         // Initial setup: sled 0 has active version 1 and inactive version 1.5.
         let collection = test_boards
-            .collection_builder()
-            .sp_versions(
+            .collection_builder(
                 ARTIFACT_VERSION_2,
                 ExpectedVersion::Version(ARTIFACT_VERSION_1_5),
-            )
-            .rot_versions(
-                ARTIFACT_VERSION_2,
-                ExpectedVersion::Version(ARTIFACT_VERSION_1_5),
-            )
-            .stage0_versions(
-                ARTIFACT_VERSION_2,
-                ExpectedVersion::NoValidVersion,
             )
             .sp_active_version_exception(SpType::Sled, 0, ARTIFACT_VERSION_1)
             .build();
@@ -1482,15 +1409,13 @@ mod test {
         // update in progress; we've partially written the contents, so there is
         // no caboose to read.
         let collection = test_boards
-            .collection_builder()
-            .sp_versions(ARTIFACT_VERSION_2, ExpectedVersion::NoValidVersion)
+            .collection_builder(
+                ARTIFACT_VERSION_2,
+                ExpectedVersion::NoValidVersion,
+            )
             .rot_versions(
                 ARTIFACT_VERSION_2,
                 ExpectedVersion::Version(ARTIFACT_VERSION_1_5),
-            )
-            .stage0_versions(
-                ARTIFACT_VERSION_2,
-                ExpectedVersion::NoValidVersion,
             )
             .sp_active_version_exception(SpType::Sled, 0, ARTIFACT_VERSION_1)
             .build();
@@ -1564,14 +1489,10 @@ mod test {
 
         // Start with collections that record everything at version 1. We'll add
         // exceptions as we step through updates below.
-        let mut builder = test_boards
-            .collection_builder()
-            .sp_versions(ARTIFACT_VERSION_1, ExpectedVersion::NoValidVersion)
-            .rot_versions(ARTIFACT_VERSION_1, ExpectedVersion::NoValidVersion)
-            .stage0_versions(
-                ARTIFACT_VERSION_1,
-                ExpectedVersion::NoValidVersion,
-            );
+        let mut builder = test_boards.collection_builder(
+            ARTIFACT_VERSION_1,
+            ExpectedVersion::NoValidVersion,
+        );
         for _ in 0..expected_updates.len() {
             let collection = builder.clone().build();
 
@@ -1679,10 +1600,7 @@ mod test {
         // currently enforced by the fact that the real planner passes 1 instead
         // of usize::MAX, but we should probably fix this.
         let collection = test_boards
-            .collection_builder()
-            .sp_versions(ARTIFACT_VERSION_1, ExpectedVersion::NoValidVersion)
-            .rot_versions(ARTIFACT_VERSION_1, ExpectedVersion::NoValidVersion)
-            .stage0_versions(
+            .collection_builder(
                 ARTIFACT_VERSION_1,
                 ExpectedVersion::NoValidVersion,
             )
@@ -1714,9 +1632,10 @@ mod test {
         // have all been updated already; this should attempt to update all of
         // the RoTs.
         let collection = test_boards
-            .collection_builder()
-            .sp_versions(ARTIFACT_VERSION_1, ExpectedVersion::NoValidVersion)
-            .rot_versions(ARTIFACT_VERSION_1, ExpectedVersion::NoValidVersion)
+            .collection_builder(
+                ARTIFACT_VERSION_1,
+                ExpectedVersion::NoValidVersion,
+            )
             .stage0_versions(
                 ARTIFACT_VERSION_2,
                 ExpectedVersion::NoValidVersion,
@@ -1748,8 +1667,10 @@ mod test {
         // and RoTs have all been updated already; this should attempt to update
         // all of the SPs.
         let collection = test_boards
-            .collection_builder()
-            .sp_versions(ARTIFACT_VERSION_1, ExpectedVersion::NoValidVersion)
+            .collection_builder(
+                ARTIFACT_VERSION_1,
+                ExpectedVersion::NoValidVersion,
+            )
             .rot_versions(ARTIFACT_VERSION_2, ExpectedVersion::NoValidVersion)
             .stage0_versions(
                 ARTIFACT_VERSION_2,
@@ -1768,7 +1689,7 @@ mod test {
         for update in &all_updates {
             // Confirm all our updates are to SPs.
             match &update.details {
-                PendingMgsUpdateDetails::Sp { .. } =>(),
+                PendingMgsUpdateDetails::Sp { .. } => (),
                 PendingMgsUpdateDetails::Rot { .. }
                 | PendingMgsUpdateDetails::RotBootloader { .. }
                 | PendingMgsUpdateDetails::HostPhase1(..) => {
@@ -1784,10 +1705,7 @@ mod test {
         // Now, notice when they've all been updated, even if the limit is only
         // one.
         let collection = test_boards
-            .collection_builder()
-            .sp_versions(ARTIFACT_VERSION_2, ExpectedVersion::NoValidVersion)
-            .rot_versions(ARTIFACT_VERSION_2, ExpectedVersion::NoValidVersion)
-            .stage0_versions(
+            .collection_builder(
                 ARTIFACT_VERSION_2,
                 ExpectedVersion::NoValidVersion,
             )
@@ -1820,10 +1738,7 @@ mod test {
         let log = &logctx.log;
         let repo = test_boards.tuf_repo();
         let mut collection = test_boards
-            .collection_builder()
-            .sp_versions(ARTIFACT_VERSION_2, ExpectedVersion::NoValidVersion)
-            .rot_versions(ARTIFACT_VERSION_2, ExpectedVersion::NoValidVersion)
-            .stage0_versions(
+            .collection_builder(
                 ARTIFACT_VERSION_2,
                 ExpectedVersion::NoValidVersion,
             )
