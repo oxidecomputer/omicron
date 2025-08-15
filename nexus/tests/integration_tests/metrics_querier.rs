@@ -93,7 +93,7 @@ impl<'a, N> MetricsQuerier<'a, N> {
         cond: F,
     ) -> T
     where
-        F: Fn(Vec<oxql_types::Table>) -> Result<T, MetricsNotYet>,
+        F: Fn(Vec<oxql_types::TableOutput>) -> Result<T, MetricsNotYet>,
     {
         self.timeseries_query_until("/v1/system/timeseries/query", query, cond)
             .await
@@ -108,7 +108,7 @@ impl<'a, N> MetricsQuerier<'a, N> {
         cond: F,
     ) -> T
     where
-        F: Fn(Vec<oxql_types::Table>) -> Result<T, MetricsNotYet>,
+        F: Fn(Vec<oxql_types::TableOutput>) -> Result<T, MetricsNotYet>,
     {
         self.timeseries_query_until(
             &format!("/v1/timeseries/query?project={project}"),
@@ -128,7 +128,7 @@ impl<'a, N> MetricsQuerier<'a, N> {
         &self,
         project: &str,
         query: &str,
-    ) -> Vec<oxql_types::Table> {
+    ) -> Vec<oxql_types::TableOutput> {
         self.project_timeseries_query_until(project, query, |tables| Ok(tables))
             .await
     }
@@ -270,7 +270,7 @@ impl<'a, N> MetricsQuerier<'a, N> {
         cond: F,
     ) -> T
     where
-        F: Fn(Vec<oxql_types::Table>) -> Result<T, MetricsNotYet>,
+        F: Fn(Vec<oxql_types::TableOutput>) -> Result<T, MetricsNotYet>,
     {
         let result = wait_for_condition(
             || async {
@@ -389,5 +389,5 @@ impl<'a, N> MetricsQuerier<'a, N> {
 
 enum TimeseriesQueryResult {
     TimeseriesNotFound,
-    Ok(Vec<oxql_types::Table>),
+    Ok(Vec<oxql_types::TableOutput>),
 }

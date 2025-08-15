@@ -360,3 +360,61 @@ impl Table {
         }
     }
 }
+
+/// A table represents one or more timeseries with the same schema.
+///
+/// A table is the result of an OxQL query. It contains a name, usually the name
+/// of the timeseries schema from which the data is derived, and any number of
+/// timeseries, which contain the actual data.
+//
+// # Motivation
+//
+// This struct is derived from [`Table`] but presents timeseries data as a `Vec`
+// rather than a map keyed by [`TimeseriesKey`]. This provides a cleaner JSON
+// representation for external consumers, as these numeric keys are ephemeral
+// identifiers that have no meaning to API consumers. Key ordering is retained
+// as this is contructed from the already sorted values present in [`Table`].
+//
+// When serializing a [`Table`] to JSON, the `BTreeMap<TimeseriesKey, Timeseries>`
+// structure produces output with numeric keys like:
+// ```json
+// {
+//   "timeseries": {
+//     "2352746367989923131": { ... },
+//     "3940108470521992408": { ... }
+//   }
+// }
+// ```
+//
+// `TableOutput` instead serializes timeseries as an array:
+// ```json
+// {
+//   "timeseries": [ { ... }, { ... } ]
+// }
+// ```
+#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
+pub struct TableOutput {
+    // The name of the table.
+    pub name: String,
+    // The set of timeseries in the table, ordered by key.
+    timeseries: Vec<Timeseries>,
+}
+
+impl From<Table> for TableOutput {
+    fn from(table: Table) -> Self {
+        let timeseries: Vec<_> = table.timeseries.into_values().collect();
+        TableOutput { name: table.name, timeseries }
+    }
+}
+
+impl TableOutput {
+    /// Return the name of the table.
+    pub fn name(&self) -> &str {
+        self.name.as_str()
+    }
+
+    /// Return the list of timeseries in this table, ordered by key.
+    pub fn timeseries(&self) -> impl ExactSizeIterator<Item = &Timeseries> {
+        self.timeseries.iter()
+    }
+}

@@ -1117,7 +1117,7 @@ pub struct AllowList {
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
 pub struct OxqlQueryResult {
     /// Tables resulting from the query, each containing timeseries.
-    pub tables: Vec<oxql_types::Table>,
+    pub tables: Vec<oxql_types::TableOutput>,
 }
 
 // ALERTS

@@ -11,6 +11,7 @@ pub mod point;
 pub mod table;
 
 pub use self::table::Table;
+pub use self::table::TableOutput;
 pub use self::table::Timeseries;
 
 /// Describes the time alignment for an OxQL query.
