@@ -88,7 +88,7 @@ pub(crate) fn plan_mgs_updates(
     impossible_update_policy: ImpossibleUpdatePolicy,
 ) -> PlannedMgsUpdates {
     let mut pending_updates = PendingMgsUpdates::new();
-    let mut pending_host_phase_2_changes = PendingHostPhase2Changes::default();
+    let mut pending_host_phase_2_changes = PendingHostPhase2Changes::empty();
     let mut boards_preferred = BTreeSet::new();
 
     // Determine the status of all currently pending updates by comparing what
@@ -508,7 +508,7 @@ fn try_make_update(
     }) {
         // We have a non-host update; there are no pending host phase 2 changes
         // necessary.
-        return Some((update, PendingHostPhase2Changes::default()));
+        return Some((update, PendingHostPhase2Changes::empty()));
     }
 
     host_phase_1::try_make_update(
@@ -1554,20 +1554,24 @@ mod test {
 
             // Run the planner and verify that we got one of our expected
             // updates.
-            let PlannedMgsUpdates { pending_updates: new_updates, .. } =
-                plan_mgs_updates(
-                    log,
-                    &collection,
-                    current_boards,
-                    &latest_updates,
-                    &TargetReleaseDescription::TufRepo(repo.clone()),
-                    nmax_updates,
-                    impossible_update_policy,
-                );
+            let PlannedMgsUpdates {
+                pending_updates: new_updates,
+                mut pending_host_phase_2_changes,
+            } = plan_mgs_updates(
+                log,
+                &collection,
+                current_boards,
+                &latest_updates,
+                &TargetReleaseDescription::TufRepo(repo.clone()),
+                nmax_updates,
+                impossible_update_policy,
+            );
             assert_eq!(new_updates.len(), 1);
             let update =
                 new_updates.iter().next().expect("at least one update");
-            expected_updates.verify_one(update);
+            expected_updates
+                .verify_one(update, &mut pending_host_phase_2_changes);
+            assert!(pending_host_phase_2_changes.is_empty());
 
             // Update our builder with an addition exception for the update we
             // just planned for the next iteration.
@@ -1678,16 +1682,18 @@ mod test {
                 ARTIFACT_HASH_HOST_PHASE_2_V1,
             )
             .build();
-        let PlannedMgsUpdates { pending_updates: all_updates, .. } =
-            plan_mgs_updates(
-                log,
-                &collection,
-                &collection.baseboards,
-                &PendingMgsUpdates::new(),
-                &TargetReleaseDescription::TufRepo(repo.clone()),
-                usize::MAX,
-                impossible_update_policy,
-            );
+        let PlannedMgsUpdates {
+            pending_updates: all_updates,
+            mut pending_host_phase_2_changes,
+        } = plan_mgs_updates(
+            log,
+            &collection,
+            &collection.baseboards,
+            &PendingMgsUpdates::new(),
+            &TargetReleaseDescription::TufRepo(repo.clone()),
+            usize::MAX,
+            impossible_update_policy,
+        );
 
         for update in &all_updates {
             // Confirm all our updates are to RoT bootloaders.
@@ -1699,8 +1705,10 @@ mod test {
                     panic!("unexpected update type: {update:?}")
                 }
             }
-            expected_updates.verify_one(update);
+            expected_updates
+                .verify_one(update, &mut pending_host_phase_2_changes);
         }
+        assert!(pending_host_phase_2_changes.is_empty());
 
         // Update the whole system at once again, but note the RoT bootloaders
         // have all been updated already; this should attempt to update all of
@@ -1718,16 +1726,18 @@ mod test {
                 ARTIFACT_HASH_HOST_PHASE_2_V1,
             )
             .build();
-        let PlannedMgsUpdates { pending_updates: all_updates, .. } =
-            plan_mgs_updates(
-                log,
-                &collection,
-                &collection.baseboards,
-                &PendingMgsUpdates::new(),
-                &TargetReleaseDescription::TufRepo(repo.clone()),
-                usize::MAX,
-                impossible_update_policy,
-            );
+        let PlannedMgsUpdates {
+            pending_updates: all_updates,
+            mut pending_host_phase_2_changes,
+        } = plan_mgs_updates(
+            log,
+            &collection,
+            &collection.baseboards,
+            &PendingMgsUpdates::new(),
+            &TargetReleaseDescription::TufRepo(repo.clone()),
+            usize::MAX,
+            impossible_update_policy,
+        );
         for update in &all_updates {
             // Confirm all our updates are to RoTs.
             match &update.details {
@@ -1738,8 +1748,10 @@ mod test {
                     panic!("unexpected update type: {update:?}")
                 }
             }
-            expected_updates.verify_one(update);
+            expected_updates
+                .verify_one(update, &mut pending_host_phase_2_changes);
         }
+        assert!(pending_host_phase_2_changes.is_empty());
 
         // Update the whole system at once again, but note the RoT bootloaders
         // and RoTs have all been updated already; this should attempt to update
@@ -1756,16 +1768,18 @@ mod test {
                 ARTIFACT_HASH_HOST_PHASE_2_V1,
             )
             .build();
-        let PlannedMgsUpdates { pending_updates: all_updates, .. } =
-            plan_mgs_updates(
-                log,
-                &collection,
-                &collection.baseboards,
-                &PendingMgsUpdates::new(),
-                &TargetReleaseDescription::TufRepo(repo.clone()),
-                usize::MAX,
-                impossible_update_policy,
-            );
+        let PlannedMgsUpdates {
+            pending_updates: all_updates,
+            mut pending_host_phase_2_changes,
+        } = plan_mgs_updates(
+            log,
+            &collection,
+            &collection.baseboards,
+            &PendingMgsUpdates::new(),
+            &TargetReleaseDescription::TufRepo(repo.clone()),
+            usize::MAX,
+            impossible_update_policy,
+        );
         for update in &all_updates {
             // Confirm all our updates are to SPs.
             match &update.details {
@@ -1776,8 +1790,10 @@ mod test {
                     panic!("unexpected update type: {update:?}")
                 }
             }
-            expected_updates.verify_one(update);
+            expected_updates
+                .verify_one(update, &mut pending_host_phase_2_changes);
         }
+        assert!(pending_host_phase_2_changes.is_empty());
 
         // Update the whole system at once again, but note the RoT bootloaders,
         // RoTs, and SPs have all been updated already; this should attempt to
@@ -1793,16 +1809,18 @@ mod test {
                 ARTIFACT_HASH_HOST_PHASE_2_V1,
             )
             .build();
-        let PlannedMgsUpdates { pending_updates: all_updates, .. } =
-            plan_mgs_updates(
-                log,
-                &collection,
-                &collection.baseboards,
-                &PendingMgsUpdates::new(),
-                &TargetReleaseDescription::TufRepo(repo.clone()),
-                usize::MAX,
-                impossible_update_policy,
-            );
+        let PlannedMgsUpdates {
+            pending_updates: all_updates,
+            mut pending_host_phase_2_changes,
+        } = plan_mgs_updates(
+            log,
+            &collection,
+            &collection.baseboards,
+            &PendingMgsUpdates::new(),
+            &TargetReleaseDescription::TufRepo(repo.clone()),
+            usize::MAX,
+            impossible_update_policy,
+        );
         for update in &all_updates {
             // Confirm all our updates are to SPs.
             match &update.details {
@@ -1813,8 +1831,10 @@ mod test {
                     panic!("unexpected update type: {update:?}")
                 }
             }
-            expected_updates.verify_one(update);
+            expected_updates
+                .verify_one(update, &mut pending_host_phase_2_changes);
         }
+        assert!(pending_host_phase_2_changes.is_empty());
 
         // We should have performed all expected updates.
         assert!(expected_updates.is_empty());
@@ -1822,17 +1842,20 @@ mod test {
         // Now, notice when they've all been updated, even if the limit is only
         // one.
         let collection = test_boards.collection_builder().build();
-        let PlannedMgsUpdates { pending_updates: all_updates_done, .. } =
-            plan_mgs_updates(
-                log,
-                &collection,
-                &collection.baseboards,
-                &all_updates,
-                &TargetReleaseDescription::TufRepo(repo.clone()),
-                1,
-                impossible_update_policy,
-            );
+        let PlannedMgsUpdates {
+            pending_updates: all_updates_done,
+            pending_host_phase_2_changes,
+        } = plan_mgs_updates(
+            log,
+            &collection,
+            &collection.baseboards,
+            &all_updates,
+            &TargetReleaseDescription::TufRepo(repo.clone()),
+            1,
+            impossible_update_policy,
+        );
         assert!(all_updates_done.is_empty());
+        assert!(pending_host_phase_2_changes.is_empty());
 
         logctx.cleanup_successful();
     }

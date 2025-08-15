@@ -27,12 +27,16 @@ use std::sync::Arc;
 use tufaceous_artifact::ArtifactHash;
 use tufaceous_artifact::ArtifactKind;
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub(crate) struct PendingHostPhase2Changes {
     by_sled: BTreeMap<SledUuid, (M2Slot, BlueprintHostPhase2DesiredContents)>,
 }
 
 impl PendingHostPhase2Changes {
+    pub(super) fn empty() -> Self {
+        Self { by_sled: BTreeMap::new() }
+    }
+
     fn insert(
         &mut self,
         sled_id: SledUuid,
@@ -69,6 +73,19 @@ impl PendingHostPhase2Changes {
         self.by_sled
             .into_iter()
             .map(|(sled_id, (slot, contents))| (sled_id, slot, contents))
+    }
+
+    #[cfg(test)]
+    pub(super) fn remove(
+        &mut self,
+        sled_id: &SledUuid,
+    ) -> Option<(M2Slot, BlueprintHostPhase2DesiredContents)> {
+        self.by_sled.remove(sled_id)
+    }
+
+    #[cfg(test)]
+    pub(super) fn is_empty(&self) -> bool {
+        self.by_sled.is_empty()
     }
 }
 
@@ -429,7 +446,7 @@ pub(super) fn try_make_update(
     // blueprint editor all the way down to this point, so instead we'll return
     // the set of host phase 2 changes we want the planner to make on our
     // behalf.
-    let mut pending_host_phase_2_changes = PendingHostPhase2Changes::default();
+    let mut pending_host_phase_2_changes = PendingHostPhase2Changes::empty();
     pending_host_phase_2_changes.insert(
         sled_agent.sled_id,
         boot_disk.toggled(),

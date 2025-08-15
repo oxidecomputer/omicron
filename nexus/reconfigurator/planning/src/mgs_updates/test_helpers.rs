@@ -29,6 +29,8 @@ use nexus_sled_agent_shared::inventory::OmicronSledConfig;
 use nexus_sled_agent_shared::inventory::SledCpuFamily;
 use nexus_sled_agent_shared::inventory::SledRole;
 use nexus_sled_agent_shared::inventory::ZoneImageResolverInventory;
+use nexus_types::deployment::BlueprintArtifactVersion;
+use nexus_types::deployment::BlueprintHostPhase2DesiredContents;
 use nexus_types::deployment::ExpectedVersion;
 use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdateDetails;
@@ -46,6 +48,8 @@ use tufaceous_artifact::ArtifactHash;
 use tufaceous_artifact::ArtifactKind;
 use tufaceous_artifact::ArtifactVersion;
 use tufaceous_artifact::KnownArtifactKind;
+
+use crate::mgs_updates::PendingHostPhase2Changes;
 
 /// Version that will be used for all artifacts in the TUF repo
 pub(super) const ARTIFACT_VERSION_2: ArtifactVersion =
@@ -444,6 +448,7 @@ impl TestBoards {
     /// these test boards.
     pub fn expected_updates(&self) -> ExpectedUpdates {
         let mut updates = IdOrdMap::new();
+        let mut phase2 = IdOrdMap::new();
 
         for board in &self.boards {
             updates
@@ -496,10 +501,24 @@ impl TestBoards {
                         expected_artifact: ARTIFACT_HASH_HOST_PHASE_1,
                     })
                     .expect("boards are unique");
+                phase2
+                    .insert_unique(ExpectedHostPhase2Change {
+                        sp_slot: board.id.slot,
+                        sled_id: board.sled_id,
+                        slot: M2Slot::B,
+                        contents:
+                            BlueprintHostPhase2DesiredContents::Artifact {
+                                version: BlueprintArtifactVersion::Available {
+                                    version: ARTIFACT_VERSION_2,
+                                },
+                                hash: ARTIFACT_HASH_HOST_PHASE_2,
+                            },
+                    })
+                    .expect("boards are unique");
             }
         }
 
-        ExpectedUpdates { updates }
+        ExpectedUpdates { updates, phase2 }
     }
 }
 
@@ -522,9 +541,28 @@ impl IdOrdItem for ExpectedUpdate {
     iddqd::id_upcast!();
 }
 
+#[derive(Debug)]
+struct ExpectedHostPhase2Change {
+    sp_slot: u16,
+    sled_id: SledUuid,
+    slot: M2Slot,
+    contents: BlueprintHostPhase2DesiredContents,
+}
+
+impl IdOrdItem for ExpectedHostPhase2Change {
+    type Key<'a> = u16;
+
+    fn key(&self) -> Self::Key<'_> {
+        self.sp_slot
+    }
+
+    iddqd::id_upcast!();
+}
+
 /// Test helper containing all the expected updates from a `TestBoards`.
 pub(super) struct ExpectedUpdates {
     updates: IdOrdMap<ExpectedUpdate>,
+    phase2: IdOrdMap<ExpectedHostPhase2Change>,
 }
 
 impl ExpectedUpdates {
@@ -541,7 +579,18 @@ impl ExpectedUpdates {
     ///
     /// Callers can confirm that all updates have been verified by calling this
     /// method for each expected update and then checking `self.is_empty()`.
-    pub fn verify_one(&mut self, update: &PendingMgsUpdate) {
+    ///
+    /// If `update` describes a host phase 1 update, we'll also confirm that
+    /// `pending_host_phase_2_changes` contains the expected corresponding
+    /// change, and _remove_ that change from `pending_host_phase_2_changes`.
+    /// This allows the calling tests to assert that
+    /// `pending_host_phase_2_changes` is empty once all updates have been
+    /// verified.
+    pub fn verify_one(
+        &mut self,
+        update: &PendingMgsUpdate,
+        pending_host_phase_2_changes: &mut PendingHostPhase2Changes,
+    ) {
         let sp_type = update.sp_type;
         let sp_slot = update.slot_id;
         let component = MgsUpdateComponent::from(&update.details);
@@ -553,59 +602,73 @@ impl ExpectedUpdates {
         assert_eq!(update.artifact_hash, expected_artifact);
         assert_eq!(update.artifact_version, ARTIFACT_VERSION_2);
         assert_eq!(update.baseboard_id.serial_number, *expected_serial);
-        let (expected_active_version, expected_inactive_version) =
-            match &update.details {
-                PendingMgsUpdateDetails::Rot {
-                    expected_active_slot,
-                    expected_inactive_version,
-                    ..
-                } => (&expected_active_slot.version, expected_inactive_version),
-                PendingMgsUpdateDetails::Sp {
-                    expected_active_version,
-                    expected_inactive_version,
-                } => (expected_active_version, expected_inactive_version),
-                PendingMgsUpdateDetails::RotBootloader {
-                    expected_stage0_version,
-                    expected_stage0_next_version,
-                } => (expected_stage0_version, expected_stage0_next_version),
-                PendingMgsUpdateDetails::HostPhase1(
-                    PendingMgsUpdateHostPhase1Details {
-                        expected_active_phase_1_slot,
-                        expected_boot_disk,
-                        expected_active_phase_1_hash,
-                        expected_active_phase_2_hash,
-                        expected_inactive_phase_1_hash,
-                        expected_inactive_phase_2_hash,
-                        sled_agent_address: _,
-                    },
-                ) => {
-                    // Host OS updates aren't in terms of versions, so we can't
-                    // return the expected versions in this match arm. Just do
-                    // our own checks then return directly.
-                    assert_eq!(*expected_active_phase_1_slot, M2Slot::A);
-                    assert_eq!(*expected_boot_disk, M2Slot::A);
-                    assert_eq!(
-                        *expected_active_phase_1_hash,
-                        ARTIFACT_HASH_HOST_PHASE_1_V1
-                    );
-                    assert_eq!(
-                        *expected_inactive_phase_1_hash,
-                        ARTIFACT_HASH_HOST_PHASE_1_V1
-                    );
-                    assert_eq!(
-                        *expected_active_phase_2_hash,
-                        ARTIFACT_HASH_HOST_PHASE_2_V1
-                    );
-                    // The inactive phase 2 hash should match the _new_ artifact
-                    // in the TUF repo; our planner sets this precondition and
-                    // execution waits for sled-agent to fulfill it.
-                    assert_eq!(
-                        *expected_inactive_phase_2_hash,
-                        ARTIFACT_HASH_HOST_PHASE_2
-                    );
-                    return;
-                }
-            };
+        let (expected_active_version, expected_inactive_version) = match &update
+            .details
+        {
+            PendingMgsUpdateDetails::Rot {
+                expected_active_slot,
+                expected_inactive_version,
+                ..
+            } => (&expected_active_slot.version, expected_inactive_version),
+            PendingMgsUpdateDetails::Sp {
+                expected_active_version,
+                expected_inactive_version,
+            } => (expected_active_version, expected_inactive_version),
+            PendingMgsUpdateDetails::RotBootloader {
+                expected_stage0_version,
+                expected_stage0_next_version,
+            } => (expected_stage0_version, expected_stage0_next_version),
+            PendingMgsUpdateDetails::HostPhase1(
+                PendingMgsUpdateHostPhase1Details {
+                    expected_active_phase_1_slot,
+                    expected_boot_disk,
+                    expected_active_phase_1_hash,
+                    expected_active_phase_2_hash,
+                    expected_inactive_phase_1_hash,
+                    expected_inactive_phase_2_hash,
+                    sled_agent_address: _,
+                },
+            ) => {
+                // Host OS updates aren't in terms of versions, so we can't
+                // return the expected versions in this match arm. Just do
+                // our own checks then return directly.
+                assert_eq!(*expected_active_phase_1_slot, M2Slot::A);
+                assert_eq!(*expected_boot_disk, M2Slot::A);
+                assert_eq!(
+                    *expected_active_phase_1_hash,
+                    ARTIFACT_HASH_HOST_PHASE_1_V1
+                );
+                assert_eq!(
+                    *expected_inactive_phase_1_hash,
+                    ARTIFACT_HASH_HOST_PHASE_1_V1
+                );
+                assert_eq!(
+                    *expected_active_phase_2_hash,
+                    ARTIFACT_HASH_HOST_PHASE_2_V1
+                );
+                // The inactive phase 2 hash should match the _new_ artifact
+                // in the TUF repo; our planner sets this precondition and
+                // execution waits for sled-agent to fulfill it.
+                assert_eq!(
+                    *expected_inactive_phase_2_hash,
+                    ARTIFACT_HASH_HOST_PHASE_2
+                );
+
+                // We should also have a corresponding phase 2 change for this
+                // phase 1 update.
+                let expected_phase2 = self
+                    .phase2
+                    .remove(&sp_slot)
+                    .expect("missing phase2 update");
+                let (actual_phase2_slot, actual_phase2_contents) =
+                    pending_host_phase_2_changes
+                        .remove(&expected_phase2.sled_id)
+                        .expect("missing expected pending phase 2 change");
+                assert_eq!(expected_phase2.slot, actual_phase2_slot);
+                assert_eq!(expected_phase2.contents, actual_phase2_contents);
+                return;
+            }
+        };
         assert_eq!(*expected_active_version, ARTIFACT_VERSION_1);
         assert_eq!(*expected_inactive_version, ExpectedVersion::NoValidVersion);
     }
