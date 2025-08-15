@@ -105,22 +105,25 @@ pub(super) const ARTIFACT_HASH_ROT_BOOTLOADER_SWITCH: ArtifactHash =
 /// Hash of fake artifact for host OS phase 1
 pub(super) const ARTIFACT_HASH_HOST_PHASE_1: ArtifactHash =
     ArtifactHash([29; 32]);
+/// Hash of fake artifact for host OS phase 1 (for a fake version 1.5)
+pub(super) const ARTIFACT_HASH_HOST_PHASE_1_V1_5: ArtifactHash =
+    ArtifactHash([30; 32]);
 /// Hash of fake artifact for host OS phase 2
 pub(super) const ARTIFACT_HASH_HOST_PHASE_2: ArtifactHash =
-    ArtifactHash([30; 32]);
+    ArtifactHash([31; 32]);
 
 /// Hash of a fake "version 1" artifact for host OS phase 1
 ///
 /// This can be used to produce an inventory collection for a host slot that
 /// needs an update.
 pub(super) const ARTIFACT_HASH_HOST_PHASE_1_V1: ArtifactHash =
-    ArtifactHash([31; 32]);
+    ArtifactHash([32; 32]);
 /// Hash of a fake "version 1" artifact for host OS phase 1
 ///
 /// This can be used to produce an inventory collection for a host slot that
 /// needs an update.
 pub(super) const ARTIFACT_HASH_HOST_PHASE_2_V1: ArtifactHash =
-    ArtifactHash([32; 32]);
+    ArtifactHash([33; 32]);
 
 // unused artifact hashes contained in our fake TUF repo
 const ARTIFACT_HASH_CONTROL_PLANE: ArtifactHash = ArtifactHash([33; 32]);
@@ -248,6 +251,14 @@ impl TestBoards {
             }
         }
         Self { boards, test_name }
+    }
+
+    /// Get the sled ID of a particular sled by SP slot number.
+    pub fn sled_id(&self, sp_slot: u16) -> Option<SledUuid> {
+        self.boards.iter().find_map(|b| {
+            (b.id.type_ == SpType::Sled && b.id.slot == sp_slot)
+                .then_some(b.sled_id)
+        })
     }
 
     /// Get a helper to build an inventory collection reflecting specific

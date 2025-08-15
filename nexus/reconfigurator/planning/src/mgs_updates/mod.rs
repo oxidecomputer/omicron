@@ -53,7 +53,7 @@ pub enum ImpossibleUpdatePolicy {
 }
 
 /// Output of planning MGS updates.
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub(crate) struct PlannedMgsUpdates {
     /// The actual pending updates; these should be added to the blueprint.
     pub(crate) pending_updates: PendingMgsUpdates,

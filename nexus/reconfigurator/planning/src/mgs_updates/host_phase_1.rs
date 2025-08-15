@@ -27,7 +27,7 @@ use std::sync::Arc;
 use tufaceous_artifact::ArtifactHash;
 use tufaceous_artifact::ArtifactKind;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub(crate) struct PendingHostPhase2Changes {
     by_sled: BTreeMap<SledUuid, (M2Slot, BlueprintHostPhase2DesiredContents)>,
 }
@@ -76,6 +76,17 @@ impl PendingHostPhase2Changes {
     }
 
     #[cfg(test)]
+    pub(crate) fn iter(
+        &self,
+    ) -> impl Iterator<
+        Item = (SledUuid, M2Slot, &BlueprintHostPhase2DesiredContents),
+    > + '_ {
+        self.by_sled
+            .iter()
+            .map(|(sled_id, (slot, contents))| (*sled_id, *slot, contents))
+    }
+
+    #[cfg(test)]
     pub(super) fn remove(
         &mut self,
         sled_id: &SledUuid,
@@ -86,6 +97,11 @@ impl PendingHostPhase2Changes {
     #[cfg(test)]
     pub(super) fn is_empty(&self) -> bool {
         self.by_sled.is_empty()
+    }
+
+    #[cfg(test)]
+    fn len(&self) -> usize {
+        self.by_sled.len()
     }
 }
 
@@ -474,4 +490,414 @@ pub(super) fn try_make_update(
         },
         pending_host_phase_2_changes,
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::mgs_updates::ImpossibleUpdatePolicy;
+    use crate::mgs_updates::plan_mgs_updates;
+    use crate::mgs_updates::test_helpers::ARTIFACT_HASH_HOST_PHASE_1;
+    use crate::mgs_updates::test_helpers::ARTIFACT_HASH_HOST_PHASE_1_V1;
+    use crate::mgs_updates::test_helpers::ARTIFACT_HASH_HOST_PHASE_1_V1_5;
+    use crate::mgs_updates::test_helpers::ARTIFACT_HASH_HOST_PHASE_2;
+    use crate::mgs_updates::test_helpers::ARTIFACT_HASH_HOST_PHASE_2_V1;
+    use crate::mgs_updates::test_helpers::ARTIFACT_VERSION_2;
+    use crate::mgs_updates::test_helpers::TestBoards;
+    use dropshot::ConfigLogging;
+    use dropshot::ConfigLoggingLevel;
+    use dropshot::test_util::LogContext;
+    use gateway_client::types::SpType;
+    use nexus_types::deployment::BlueprintArtifactVersion;
+    use nexus_types::deployment::BlueprintHostPhase2DesiredContents;
+    use nexus_types::deployment::PendingMgsUpdateDetails;
+    use nexus_types::deployment::PendingMgsUpdateHostPhase1Details;
+    use nexus_types::deployment::PendingMgsUpdates;
+    use nexus_types::deployment::TargetReleaseDescription;
+    use omicron_common::disk::M2Slot;
+    use std::collections::BTreeSet;
+
+    // Short hand-rolled update sequence that exercises some basic behavior for
+    // host OS updates.
+    #[test]
+    fn test_basic_host_os() {
+        let test_name = "planning_mgs_updates_basic_host_os";
+        let logctx = LogContext::new(
+            test_name,
+            &ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Debug },
+        );
+        let log = &logctx.log;
+        let test_boards = TestBoards::new(test_name);
+
+        // Test that with no updates pending and no TUF repo specified, there
+        // will remain no updates pending.
+        let collection = test_boards
+            .collection_builder()
+            .host_active_exception(
+                0,
+                ARTIFACT_HASH_HOST_PHASE_1_V1,
+                ARTIFACT_HASH_HOST_PHASE_2_V1,
+            )
+            .build();
+        let current_boards = &collection.baseboards;
+        let sled_0_id = test_boards.sled_id(0).expect("have sled 0");
+        let sled_1_id = test_boards.sled_id(1).expect("have sled 1");
+        let initial_updates = PendingMgsUpdates::new();
+        let nmax_updates = 1;
+        let impossible_update_policy = ImpossibleUpdatePolicy::Reevaluate;
+        let planned = plan_mgs_updates(
+            log,
+            &collection,
+            current_boards,
+            &initial_updates,
+            &TargetReleaseDescription::Initial,
+            nmax_updates,
+            impossible_update_policy,
+        );
+        assert!(planned.pending_updates.is_empty());
+        assert!(planned.pending_host_phase_2_changes.is_empty());
+
+        // Test that when a TUF repo is specified and one host OS is outdated,
+        // then it's configured with an update (and the update looks correct).
+        let repo = test_boards.tuf_repo();
+        let planned = plan_mgs_updates(
+            log,
+            &collection,
+            current_boards,
+            &initial_updates,
+            &TargetReleaseDescription::TufRepo(repo.clone()),
+            nmax_updates,
+            impossible_update_policy,
+        );
+        assert_eq!(planned.pending_updates.len(), 1);
+        let first_update =
+            planned.pending_updates.iter().next().expect("at least one update");
+        assert_eq!(first_update.baseboard_id.serial_number, "sled_0");
+        assert_eq!(first_update.sp_type, SpType::Sled);
+        assert_eq!(first_update.slot_id, 0);
+        assert_eq!(first_update.artifact_hash, ARTIFACT_HASH_HOST_PHASE_1);
+        assert_eq!(first_update.artifact_version, ARTIFACT_VERSION_2);
+        assert_eq!(planned.pending_host_phase_2_changes.len(), 1);
+        let (phase2_id, phase2_slot, phase2_contents) =
+            planned.pending_host_phase_2_changes.iter().next().unwrap();
+        assert_eq!(phase2_id, sled_0_id);
+        assert_eq!(phase2_slot, M2Slot::B);
+        assert_eq!(
+            *phase2_contents,
+            BlueprintHostPhase2DesiredContents::Artifact {
+                version: BlueprintArtifactVersion::Available {
+                    version: ARTIFACT_VERSION_2
+                },
+                hash: ARTIFACT_HASH_HOST_PHASE_2
+            }
+        );
+
+        // Test that when an update is already pending, and nothing changes
+        // about the state of the world (i.e., the inventory), then the planner
+        // makes no changes.
+        let later_planned = plan_mgs_updates(
+            log,
+            &collection,
+            current_boards,
+            &planned.pending_updates,
+            &TargetReleaseDescription::TufRepo(repo.clone()),
+            nmax_updates,
+            impossible_update_policy,
+        );
+        // We should keep the pending MGS update, but not return any new phase 2
+        // changes. (Those had already been applied to the sled configs.)
+        assert_eq!(planned.pending_updates, later_planned.pending_updates);
+        assert!(later_planned.pending_host_phase_2_changes.is_empty());
+
+        // Test that when two updates are needed, but one is already pending,
+        // then the other one is *not* started (because it exceeds
+        // nmax_updates).
+        let later_collection = test_boards
+            .collection_builder()
+            .host_active_exception(
+                0,
+                ARTIFACT_HASH_HOST_PHASE_1_V1,
+                ARTIFACT_HASH_HOST_PHASE_2_V1,
+            )
+            .host_active_exception(
+                1,
+                ARTIFACT_HASH_HOST_PHASE_1_V1,
+                ARTIFACT_HASH_HOST_PHASE_2_V1,
+            )
+            .build();
+        let later_planned = plan_mgs_updates(
+            log,
+            &later_collection,
+            current_boards,
+            &planned.pending_updates,
+            &TargetReleaseDescription::TufRepo(repo.clone()),
+            nmax_updates,
+            impossible_update_policy,
+        );
+        assert_eq!(planned.pending_updates, later_planned.pending_updates);
+        assert!(later_planned.pending_host_phase_2_changes.is_empty());
+
+        // At this point, we're ready to test that when the first update
+        // completes, then the second one *is* started.  This tests two
+        // different things: first that we noticed the first one completed, and
+        // second that we noticed another thing needed an update
+        let later_collection = test_boards
+            .collection_builder()
+            .host_active_exception(
+                1,
+                ARTIFACT_HASH_HOST_PHASE_1_V1,
+                ARTIFACT_HASH_HOST_PHASE_2_V1,
+            )
+            .build();
+        let later_planned = plan_mgs_updates(
+            log,
+            &later_collection,
+            current_boards,
+            &planned.pending_updates,
+            &TargetReleaseDescription::TufRepo(repo.clone()),
+            nmax_updates,
+            impossible_update_policy,
+        );
+        assert_eq!(later_planned.pending_updates.len(), 1);
+        let first_update = later_planned
+            .pending_updates
+            .iter()
+            .next()
+            .expect("at least one update");
+        assert_eq!(first_update.baseboard_id.serial_number, "sled_1");
+        assert_eq!(first_update.sp_type, SpType::Sled);
+        assert_eq!(first_update.slot_id, 1);
+        assert_eq!(first_update.artifact_hash, ARTIFACT_HASH_HOST_PHASE_1);
+        assert_eq!(first_update.artifact_version, ARTIFACT_VERSION_2);
+        assert_eq!(later_planned.pending_host_phase_2_changes.len(), 1);
+        let (phase2_id, phase2_slot, phase2_contents) =
+            later_planned.pending_host_phase_2_changes.iter().next().unwrap();
+        assert_eq!(phase2_id, sled_1_id);
+        assert_eq!(phase2_slot, M2Slot::B);
+        assert_eq!(
+            *phase2_contents,
+            BlueprintHostPhase2DesiredContents::Artifact {
+                version: BlueprintArtifactVersion::Available {
+                    version: ARTIFACT_VERSION_2
+                },
+                hash: ARTIFACT_HASH_HOST_PHASE_2
+            }
+        );
+
+        // Finally, test that when all OSs are in spec, then no updates are
+        // configured.
+        let updated_collection = test_boards.collection_builder().build();
+        let later_planned = plan_mgs_updates(
+            log,
+            &updated_collection,
+            current_boards,
+            &later_planned.pending_updates,
+            &TargetReleaseDescription::TufRepo(repo.clone()),
+            nmax_updates,
+            impossible_update_policy,
+        );
+        assert!(later_planned.pending_updates.is_empty());
+        assert!(later_planned.pending_host_phase_2_changes.is_empty());
+
+        // Test that we don't try to update boards that aren't in
+        // `current_boards`, even if they're in inventory and outdated.
+        let collection = test_boards
+            .collection_builder()
+            .host_active_exception(
+                0,
+                ARTIFACT_HASH_HOST_PHASE_1_V1,
+                ARTIFACT_HASH_HOST_PHASE_2_V1,
+            )
+            .build();
+        let planned = plan_mgs_updates(
+            log,
+            &collection,
+            &BTreeSet::new(),
+            &PendingMgsUpdates::new(),
+            &TargetReleaseDescription::TufRepo(repo.clone()),
+            nmax_updates,
+            impossible_update_policy,
+        );
+        assert!(planned.pending_updates.is_empty());
+        assert!(planned.pending_host_phase_2_changes.is_empty());
+        let planned = plan_mgs_updates(
+            log,
+            &collection,
+            &collection.baseboards,
+            &PendingMgsUpdates::new(),
+            &TargetReleaseDescription::TufRepo(repo.clone()),
+            nmax_updates,
+            impossible_update_policy,
+        );
+        // We verified most of the details above.  Here we're just double
+        // checking that the baseboard being missing is the only reason that no
+        // update was generated.
+        assert_eq!(planned.pending_updates.len(), 1);
+        assert_eq!(planned.pending_host_phase_2_changes.len(), 1);
+
+        // Verify the precondition details of an ordinary update.
+        let old_update = planned
+            .pending_updates
+            .into_iter()
+            .next()
+            .expect("at least one update");
+        let PendingMgsUpdateDetails::HostPhase1(
+            PendingMgsUpdateHostPhase1Details {
+                expected_active_phase_1_slot,
+                expected_boot_disk,
+                expected_active_phase_1_hash,
+                expected_active_phase_2_hash,
+                expected_inactive_phase_1_hash,
+                expected_inactive_phase_2_hash,
+                sled_agent_address: _,
+            },
+        ) = &old_update.details
+        else {
+            panic!("expected host phase 1 update");
+        };
+        assert_eq!(M2Slot::A, *expected_active_phase_1_slot);
+        assert_eq!(M2Slot::A, *expected_boot_disk);
+        assert_eq!(
+            ARTIFACT_HASH_HOST_PHASE_1_V1,
+            *expected_active_phase_1_hash
+        );
+        assert_eq!(
+            ARTIFACT_HASH_HOST_PHASE_2_V1,
+            *expected_active_phase_2_hash
+        );
+        assert_eq!(
+            ARTIFACT_HASH_HOST_PHASE_1_V1,
+            *expected_inactive_phase_1_hash
+        );
+        // Note: Not V1! This should be the _new_ artifact hash.
+        assert_eq!(ARTIFACT_HASH_HOST_PHASE_2, *expected_inactive_phase_2_hash);
+
+        // Test that if the inactive slot contents have changed, then we'll get
+        // a new update reflecting that.
+        let collection = test_boards
+            .collection_builder()
+            .host_phase_1_artifacts(
+                ARTIFACT_HASH_HOST_PHASE_1,
+                ARTIFACT_HASH_HOST_PHASE_1_V1_5,
+            )
+            .host_active_exception(
+                0,
+                ARTIFACT_HASH_HOST_PHASE_1_V1,
+                ARTIFACT_HASH_HOST_PHASE_2_V1,
+            )
+            .build();
+        let new_planned = plan_mgs_updates(
+            log,
+            &collection,
+            &collection.baseboards,
+            &planned.pending_updates,
+            &TargetReleaseDescription::TufRepo(repo.clone()),
+            nmax_updates,
+            impossible_update_policy,
+        );
+        assert_ne!(planned.pending_updates, new_planned.pending_updates);
+        assert_eq!(new_planned.pending_updates.len(), 1);
+        let new_update = new_planned
+            .pending_updates
+            .into_iter()
+            .next()
+            .expect("at least one update");
+        assert_eq!(old_update.baseboard_id, new_update.baseboard_id);
+        assert_eq!(old_update.sp_type, new_update.sp_type);
+        assert_eq!(old_update.slot_id, new_update.slot_id);
+        assert_eq!(old_update.artifact_hash, new_update.artifact_hash);
+        assert_eq!(old_update.artifact_version, new_update.artifact_version);
+        let PendingMgsUpdateDetails::HostPhase1(
+            PendingMgsUpdateHostPhase1Details {
+                expected_active_phase_1_slot,
+                expected_boot_disk,
+                expected_active_phase_1_hash,
+                expected_active_phase_2_hash,
+                expected_inactive_phase_1_hash,
+                expected_inactive_phase_2_hash,
+                sled_agent_address: _,
+            },
+        ) = &new_update.details
+        else {
+            panic!("expected host phase 1 update");
+        };
+        assert_eq!(M2Slot::A, *expected_active_phase_1_slot);
+        assert_eq!(M2Slot::A, *expected_boot_disk);
+        assert_eq!(
+            ARTIFACT_HASH_HOST_PHASE_1_V1,
+            *expected_active_phase_1_hash
+        );
+        assert_eq!(
+            ARTIFACT_HASH_HOST_PHASE_2_V1,
+            *expected_active_phase_2_hash
+        );
+        assert_eq!(
+            ARTIFACT_HASH_HOST_PHASE_1_V1_5,
+            *expected_inactive_phase_1_hash
+        );
+        assert_eq!(ARTIFACT_HASH_HOST_PHASE_2, *expected_inactive_phase_2_hash);
+
+        // Test that if instead it's the active slot whose contents have changed
+        // to something other than the new expected version, then we'll also get
+        // a new update reflecting that.
+        let collection = test_boards
+            .collection_builder()
+            .host_active_exception(
+                0,
+                ARTIFACT_HASH_HOST_PHASE_1_V1_5,
+                ARTIFACT_HASH_HOST_PHASE_2_V1,
+            )
+            .build();
+        let new_planned = plan_mgs_updates(
+            log,
+            &collection,
+            &collection.baseboards,
+            &planned.pending_updates,
+            &TargetReleaseDescription::TufRepo(repo.clone()),
+            nmax_updates,
+            impossible_update_policy,
+        );
+        assert_ne!(planned.pending_updates, new_planned.pending_updates);
+        assert_eq!(new_planned.pending_updates.len(), 1);
+        let new_update = new_planned
+            .pending_updates
+            .into_iter()
+            .next()
+            .expect("at least one update");
+        assert_eq!(old_update.baseboard_id, new_update.baseboard_id);
+        assert_eq!(old_update.sp_type, new_update.sp_type);
+        assert_eq!(old_update.slot_id, new_update.slot_id);
+        assert_eq!(old_update.artifact_hash, new_update.artifact_hash);
+        assert_eq!(old_update.artifact_version, new_update.artifact_version);
+        let PendingMgsUpdateDetails::HostPhase1(
+            PendingMgsUpdateHostPhase1Details {
+                expected_active_phase_1_slot,
+                expected_boot_disk,
+                expected_active_phase_1_hash,
+                expected_active_phase_2_hash,
+                expected_inactive_phase_1_hash,
+                expected_inactive_phase_2_hash,
+                sled_agent_address: _,
+            },
+        ) = &new_update.details
+        else {
+            panic!("expected host phase 1 update");
+        };
+        assert_eq!(M2Slot::A, *expected_active_phase_1_slot);
+        assert_eq!(M2Slot::A, *expected_boot_disk);
+        assert_eq!(
+            ARTIFACT_HASH_HOST_PHASE_1_V1_5,
+            *expected_active_phase_1_hash
+        );
+        assert_eq!(
+            ARTIFACT_HASH_HOST_PHASE_2_V1,
+            *expected_active_phase_2_hash
+        );
+        assert_eq!(
+            ARTIFACT_HASH_HOST_PHASE_1_V1,
+            *expected_inactive_phase_1_hash
+        );
+        assert_eq!(ARTIFACT_HASH_HOST_PHASE_2, *expected_inactive_phase_2_hash);
+
+        logctx.cleanup_successful();
+    }
 }
