@@ -1161,21 +1161,6 @@ impl From<oxql_types::Table> for OxqlTable {
     }
 }
 
-// these methods are only used in tests
-impl OxqlTable {
-    /// Return the name of the table.
-    pub fn name(&self) -> &str {
-        self.name.as_str()
-    }
-
-    /// Return the list of timeseries in this table, ordered by key.
-    pub fn timeseries(
-        &self,
-    ) -> impl ExactSizeIterator<Item = &oxql_types::Timeseries> {
-        self.timeseries.iter()
-    }
-}
-
 /// The result of a successful OxQL query.
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
 pub struct OxqlQueryResult {
