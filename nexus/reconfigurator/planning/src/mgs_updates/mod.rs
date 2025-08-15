@@ -4,6 +4,7 @@
 
 //! Facilities for making choices about MGS-managed updates
 
+mod host_phase_1;
 mod rot;
 mod rot_bootloader;
 mod sp;
@@ -27,6 +28,7 @@ use nexus_types::inventory::BaseboardId;
 use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::Collection;
 use omicron_common::api::external::TufRepoDescription;
+use omicron_common::disk::M2Slot;
 use slog::{error, info, warn};
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeSet;
@@ -34,6 +36,8 @@ use std::sync::Arc;
 use thiserror::Error;
 use tufaceous_artifact::ArtifactVersion;
 use tufaceous_artifact::ArtifactVersionError;
+
+pub(crate) use host_phase_1::PendingHostPhase2Changes;
 
 /// How to handle an MGS-driven update that has become impossible due to
 /// unsatisfied preconditions.
@@ -46,6 +50,17 @@ pub enum ImpossibleUpdatePolicy {
     /// replace the impossible update with a new update for the same target with
     /// different preconditions.
     Reevaluate,
+}
+
+/// Output of planning MGS updates.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct PlannedMgsUpdates {
+    /// The actual pending updates; these should be added to the blueprint.
+    pub(crate) pending_updates: PendingMgsUpdates,
+
+    /// Pending changes to sleds' host phase 2 contents; each of these should
+    /// result in a change to the respective sled's `BlueprintSledConfig`.
+    pub(crate) pending_host_phase_2_changes: PendingHostPhase2Changes,
 }
 
 /// Generates a new set of `PendingMgsUpdates` based on:
@@ -63,7 +78,7 @@ pub enum ImpossibleUpdatePolicy {
 ///
 /// By current policy, `nmax_updates` is always 1, but the implementation here
 /// supports more than one update per invocation.
-pub fn plan_mgs_updates(
+pub(crate) fn plan_mgs_updates(
     log: &slog::Logger,
     inventory: &Collection,
     current_boards: &BTreeSet<Arc<BaseboardId>>,
@@ -71,8 +86,9 @@ pub fn plan_mgs_updates(
     current_artifacts: &TargetReleaseDescription,
     nmax_updates: usize,
     impossible_update_policy: ImpossibleUpdatePolicy,
-) -> PendingMgsUpdates {
-    let mut rv = PendingMgsUpdates::new();
+) -> PlannedMgsUpdates {
+    let mut pending_updates = PendingMgsUpdates::new();
+    let mut pending_host_phase_2_changes = PendingHostPhase2Changes::empty();
     let mut boards_preferred = BTreeSet::new();
 
     // Determine the status of all currently pending updates by comparing what
@@ -107,7 +123,7 @@ pub fn plan_mgs_updates(
                          (waiting for recent update to be applied)";
                         update
                     );
-                    rv.insert(update.clone());
+                    pending_updates.insert(update.clone());
                 }
                 ImpossibleUpdatePolicy::Reevaluate => {
                     info!(
@@ -125,7 +141,7 @@ pub fn plan_mgs_updates(
                     "MGS-driven update not yet completed (will keep it)";
                     update
                 );
-                rv.insert(update.clone());
+                pending_updates.insert(update.clone());
             }
             Err(error) => {
                 info!(
@@ -134,7 +150,7 @@ pub fn plan_mgs_updates(
                     update,
                     InlineErrorChain::new(&error)
                 );
-                rv.insert(update.clone());
+                pending_updates.insert(update.clone());
             }
         }
     }
@@ -147,7 +163,10 @@ pub fn plan_mgs_updates(
                 log,
                 "cannot issue more MGS-driven updates (no current artifacts)",
             );
-            return rv;
+            return PlannedMgsUpdates {
+                pending_updates,
+                pending_host_phase_2_changes,
+            };
         }
         TargetReleaseDescription::TufRepo(description) => description,
     };
@@ -163,19 +182,23 @@ pub fn plan_mgs_updates(
         current_boards.iter().filter(|b| !boards_preferred.contains(*b));
     let candidates = boards_preferred.iter().chain(non_preferred);
     for board in candidates {
-        if rv.len() >= nmax_updates {
+        if pending_updates.len() >= nmax_updates {
             info!(
                 log,
                 "reached maximum number of pending MGS-driven updates";
                 "max" => nmax_updates
             );
-            return rv;
+            return PlannedMgsUpdates {
+                pending_updates,
+                pending_host_phase_2_changes,
+            };
         }
 
         match try_make_update(log, board, inventory, current_artifacts) {
-            Some(update) => {
+            Some((update, mut host_phase_2)) => {
                 info!(log, "configuring MGS-driven update"; &update);
-                rv.insert(update);
+                pending_updates.insert(update);
+                pending_host_phase_2_changes.append(&mut host_phase_2);
             }
             None => {
                 info!(log, "skipping board for MGS-driven update"; board);
@@ -184,7 +207,7 @@ pub fn plan_mgs_updates(
     }
 
     info!(log, "ran out of boards for MGS-driven update");
-    rv
+    PlannedMgsUpdates { pending_updates, pending_host_phase_2_changes }
 }
 
 #[derive(Debug)]
@@ -216,8 +239,19 @@ enum MgsUpdateStatusError {
     MissingActiveCaboose,
     #[error("no RoT state found in inventory")]
     MissingRotState,
-    #[error("not yet implemented")]
-    NotYetImplemented,
+    #[error("no active host phase 1 slot found in inventory")]
+    MissingHostPhase1ActiveSlot,
+    #[error("no host phase 1 hash found in inventory for slot {0:?}")]
+    MissingHostPhase1FlashHash(M2Slot),
+    #[error("no sled-agent config reconciler result found in inventory")]
+    MissingSledAgentLastReconciliation,
+    #[error("sled-agent reported an error determining boot disk: {0}")]
+    SledAgentErrorDeterminingBootDisk(String),
+    #[error(
+        "sled-agent reported an error determining boot partition contents \
+         for slot {slot}: {err}"
+    )]
+    SledAgentErrorDeterminingBootPartitionDetails { slot: M2Slot, err: String },
     #[error("unable to parse input into ArtifactVersion: {0:?}")]
     FailedArtifactVersionParse(ArtifactVersionError),
 }
@@ -230,6 +264,7 @@ fn mgs_update_status(
     update: &PendingMgsUpdate,
 ) -> Result<MgsUpdateStatus, MgsUpdateStatusError> {
     let baseboard_id = &update.baseboard_id;
+    let desired_artifact_hash = update.artifact_hash;
     let desired_version = &update.artifact_version;
 
     // Check the contents of the target of `update` against what we expect
@@ -252,13 +287,13 @@ fn mgs_update_status(
                 .caboose_for(CabooseWhich::Stage0Next, baseboard_id)
                 .map(|c| c.caboose.version.as_ref());
 
-            Ok(mgs_update_status_rot_bootloader(
+            mgs_update_status_rot_bootloader(
                 desired_version,
                 expected_stage0_version,
                 expected_stage0_next_version,
                 &stage0_caboose.caboose.version,
                 found_stage0_next_version,
-            ))
+            )
         }
         PendingMgsUpdateDetails::Sp {
             expected_active_version,
@@ -274,13 +309,22 @@ fn mgs_update_status(
                 .caboose_for(CabooseWhich::SpSlot1, baseboard_id)
                 .map(|c| c.caboose.version.as_ref());
 
-            Ok(mgs_update_status_sp(
+            mgs_update_status_sp(
                 desired_version,
                 expected_active_version,
                 expected_inactive_version,
                 &active_caboose.caboose.version,
                 found_inactive_version,
-            ))
+            )
+        }
+        PendingMgsUpdateDetails::HostPhase1(details) => {
+            host_phase_1::update_status(
+                baseboard_id,
+                desired_artifact_hash,
+                inventory,
+                details,
+                log,
+            )?
         }
         PendingMgsUpdateDetails::Rot {
             expected_active_slot,
@@ -338,16 +382,13 @@ fn mgs_update_status(
                 transient_boot_preference: rot_state.transient_boot_preference,
             };
 
-            Ok(mgs_update_status_rot(
+            mgs_update_status_rot(
                 desired_version,
                 expected,
                 found,
                 expected_inactive_version,
                 found_inactive_version,
-            ))
-        }
-        PendingMgsUpdateDetails::HostPhase1(_) => {
-            return Err(MgsUpdateStatusError::NotYetImplemented);
+            )
         }
     };
 
@@ -355,9 +396,9 @@ fn mgs_update_status(
     // great.  Return that.
     if matches!(
         update_status,
-        Err(_) | Ok(MgsUpdateStatus::Done) | Ok(MgsUpdateStatus::Impossible)
+        MgsUpdateStatus::Done | MgsUpdateStatus::Impossible
     ) {
-        return update_status;
+        return Ok(update_status);
     }
 
     // If based on the status we're only able to determine that the update is
@@ -387,7 +428,7 @@ fn mgs_update_status(
         );
         Ok(MgsUpdateStatus::Impossible)
     } else {
-        update_status
+        Ok(update_status)
     }
 }
 
@@ -441,18 +482,19 @@ fn mgs_update_status_inactive_versions(
 }
 
 /// Determine if the given baseboard needs any MGS-driven update (e.g., update
-/// to its SP, RoT, etc.).  If so, returns the update.  If not, returns `None`.
+/// to its SP, RoT, etc.).  If so, returns the update and a set of changes that
+/// need to be made to sled configs related to host phase 2 images (this set
+/// will be empty if we made a non-host update).  If not, returns `None`.
 fn try_make_update(
     log: &slog::Logger,
     baseboard_id: &Arc<BaseboardId>,
     inventory: &Collection,
     current_artifacts: &TufRepoDescription,
-) -> Option<PendingMgsUpdate> {
+) -> Option<(PendingMgsUpdate, PendingHostPhase2Changes)> {
     // We try MGS-driven update components in a hardcoded priority order until
-    // any of them returns `Some`. The order is described in RFD 565 section
-    // "Update Sequence". For now, we only plan SP, RoT and RoT bootloader
-    // updates. When implemented, host OS updates will be the last to try.
-    try_make_update_rot_bootloader(
+    // any of them returns `Some`.  The order is described in RFD 565 section
+    // "Update Sequence".
+    if let Some(update) = try_make_update_rot_bootloader(
         log,
         baseboard_id,
         inventory,
@@ -463,7 +505,18 @@ fn try_make_update(
     })
     .or_else(|| {
         try_make_update_sp(log, baseboard_id, inventory, current_artifacts)
-    })
+    }) {
+        // We have a non-host update; there are no pending host phase 2 changes
+        // necessary.
+        return Some((update, PendingHostPhase2Changes::empty()));
+    }
+
+    host_phase_1::try_make_update(
+        log,
+        baseboard_id,
+        inventory,
+        current_artifacts,
+    )
 }
 
 #[cfg(test)]
@@ -472,7 +525,12 @@ mod test_helpers;
 #[cfg(test)]
 mod test {
     use super::ImpossibleUpdatePolicy;
+    use super::PlannedMgsUpdates;
     use super::plan_mgs_updates;
+    use super::test_helpers::ARTIFACT_HASH_HOST_PHASE_1;
+    use super::test_helpers::ARTIFACT_HASH_HOST_PHASE_1_V1;
+    use super::test_helpers::ARTIFACT_HASH_HOST_PHASE_2;
+    use super::test_helpers::ARTIFACT_HASH_HOST_PHASE_2_V1;
     use super::test_helpers::ARTIFACT_HASH_ROT_BOOTLOADER_GIMLET;
     use super::test_helpers::ARTIFACT_HASH_ROT_BOOTLOADER_SWITCH;
     use super::test_helpers::ARTIFACT_HASH_ROT_GIMLET_B;
@@ -509,39 +567,38 @@ mod test {
         // Test that with no updates pending and no TUF repo specified, there
         // will remain no updates pending.
         let collection = test_boards
-            .collection_builder(
-                ARTIFACT_VERSION_2,
-                ExpectedVersion::NoValidVersion,
-            )
+            .collection_builder()
             .sp_active_version_exception(SpType::Sled, 0, ARTIFACT_VERSION_1)
             .build();
         let current_boards = &collection.baseboards;
         let initial_updates = PendingMgsUpdates::new();
         let nmax_updates = 1;
         let impossible_update_policy = ImpossibleUpdatePolicy::Reevaluate;
-        let updates = plan_mgs_updates(
-            log,
-            &collection,
-            current_boards,
-            &initial_updates,
-            &TargetReleaseDescription::Initial,
-            nmax_updates,
-            impossible_update_policy,
-        );
+        let PlannedMgsUpdates { pending_updates: updates, .. } =
+            plan_mgs_updates(
+                log,
+                &collection,
+                current_boards,
+                &initial_updates,
+                &TargetReleaseDescription::Initial,
+                nmax_updates,
+                impossible_update_policy,
+            );
         assert!(updates.is_empty());
 
         // Test that when a TUF repo is specified and one SP is outdated, then
         // it's configured with an update (and the update looks correct).
         let repo = test_boards.tuf_repo();
-        let updates = plan_mgs_updates(
-            log,
-            &collection,
-            current_boards,
-            &initial_updates,
-            &TargetReleaseDescription::TufRepo(repo.clone()),
-            nmax_updates,
-            impossible_update_policy,
-        );
+        let PlannedMgsUpdates { pending_updates: updates, .. } =
+            plan_mgs_updates(
+                log,
+                &collection,
+                current_boards,
+                &initial_updates,
+                &TargetReleaseDescription::TufRepo(repo.clone()),
+                nmax_updates,
+                impossible_update_policy,
+            );
         assert_eq!(updates.len(), 1);
         let first_update = updates.iter().next().expect("at least one update");
         assert_eq!(first_update.baseboard_id.serial_number, "sled_0");
@@ -553,37 +610,36 @@ mod test {
         // Test that when an update is already pending, and nothing changes
         // about the state of the world (i.e., the inventory), then the planner
         // makes no changes.
-        let later_updates = plan_mgs_updates(
-            log,
-            &collection,
-            current_boards,
-            &updates,
-            &TargetReleaseDescription::TufRepo(repo.clone()),
-            nmax_updates,
-            impossible_update_policy,
-        );
+        let PlannedMgsUpdates { pending_updates: later_updates, .. } =
+            plan_mgs_updates(
+                log,
+                &collection,
+                current_boards,
+                &updates,
+                &TargetReleaseDescription::TufRepo(repo.clone()),
+                nmax_updates,
+                impossible_update_policy,
+            );
         assert_eq!(updates, later_updates);
 
         // Test that when two updates are needed, but one is already pending,
         // then the other one is *not* started (because it exceeds
         // nmax_updates).
         let later_collection = test_boards
-            .collection_builder(
-                ARTIFACT_VERSION_2,
-                ExpectedVersion::NoValidVersion,
-            )
+            .collection_builder()
             .sp_active_version_exception(SpType::Sled, 0, ARTIFACT_VERSION_1)
             .sp_active_version_exception(SpType::Switch, 1, ARTIFACT_VERSION_1)
             .build();
-        let later_updates = plan_mgs_updates(
-            log,
-            &later_collection,
-            current_boards,
-            &updates,
-            &TargetReleaseDescription::TufRepo(repo.clone()),
-            nmax_updates,
-            impossible_update_policy,
-        );
+        let PlannedMgsUpdates { pending_updates: later_updates, .. } =
+            plan_mgs_updates(
+                log,
+                &later_collection,
+                current_boards,
+                &updates,
+                &TargetReleaseDescription::TufRepo(repo.clone()),
+                nmax_updates,
+                impossible_update_policy,
+            );
         assert_eq!(updates, later_updates);
 
         // At this point, we're ready to test that when the first update
@@ -591,21 +647,19 @@ mod test {
         // different things: first that we noticed the first one completed, and
         // second that we noticed another thing needed an update
         let later_collection = test_boards
-            .collection_builder(
-                ARTIFACT_VERSION_2,
-                ExpectedVersion::NoValidVersion,
-            )
+            .collection_builder()
             .sp_active_version_exception(SpType::Switch, 1, ARTIFACT_VERSION_1)
             .build();
-        let later_updates = plan_mgs_updates(
-            log,
-            &later_collection,
-            current_boards,
-            &updates,
-            &TargetReleaseDescription::TufRepo(repo.clone()),
-            nmax_updates,
-            impossible_update_policy,
-        );
+        let PlannedMgsUpdates { pending_updates: later_updates, .. } =
+            plan_mgs_updates(
+                log,
+                &later_collection,
+                current_boards,
+                &updates,
+                &TargetReleaseDescription::TufRepo(repo.clone()),
+                nmax_updates,
+                impossible_update_policy,
+            );
         assert_eq!(later_updates.len(), 1);
         let next_update =
             later_updates.iter().next().expect("at least one update");
@@ -618,51 +672,46 @@ mod test {
 
         // Finally, test that when all SPs are in spec, then no updates are
         // configured.
-        let updated_collection = test_boards
-            .collection_builder(
-                ARTIFACT_VERSION_2,
-                ExpectedVersion::NoValidVersion,
-            )
-            .build();
-        let later_updates = plan_mgs_updates(
-            log,
-            &updated_collection,
-            current_boards,
-            &later_updates,
-            &TargetReleaseDescription::TufRepo(repo.clone()),
-            nmax_updates,
-            impossible_update_policy,
-        );
+        let updated_collection = test_boards.collection_builder().build();
+        let PlannedMgsUpdates { pending_updates: later_updates, .. } =
+            plan_mgs_updates(
+                log,
+                &updated_collection,
+                current_boards,
+                &later_updates,
+                &TargetReleaseDescription::TufRepo(repo.clone()),
+                nmax_updates,
+                impossible_update_policy,
+            );
         assert!(later_updates.is_empty());
 
         // Test that we don't try to update boards that aren't in
         // `current_boards`, even if they're in inventory and outdated.
         let collection = test_boards
-            .collection_builder(
-                ARTIFACT_VERSION_2,
-                ExpectedVersion::NoValidVersion,
-            )
+            .collection_builder()
             .sp_active_version_exception(SpType::Sled, 0, ARTIFACT_VERSION_1)
             .build();
-        let updates = plan_mgs_updates(
-            log,
-            &collection,
-            &BTreeSet::new(),
-            &PendingMgsUpdates::new(),
-            &TargetReleaseDescription::TufRepo(repo.clone()),
-            nmax_updates,
-            impossible_update_policy,
-        );
+        let PlannedMgsUpdates { pending_updates: updates, .. } =
+            plan_mgs_updates(
+                log,
+                &collection,
+                &BTreeSet::new(),
+                &PendingMgsUpdates::new(),
+                &TargetReleaseDescription::TufRepo(repo.clone()),
+                nmax_updates,
+                impossible_update_policy,
+            );
         assert!(updates.is_empty());
-        let updates = plan_mgs_updates(
-            log,
-            &collection,
-            &collection.baseboards,
-            &PendingMgsUpdates::new(),
-            &TargetReleaseDescription::TufRepo(repo.clone()),
-            nmax_updates,
-            impossible_update_policy,
-        );
+        let PlannedMgsUpdates { pending_updates: updates, .. } =
+            plan_mgs_updates(
+                log,
+                &collection,
+                &collection.baseboards,
+                &PendingMgsUpdates::new(),
+                &TargetReleaseDescription::TufRepo(repo.clone()),
+                nmax_updates,
+                impossible_update_policy,
+            );
         // We verified most of the details above.  Here we're just double
         // checking that the baseboard being missing is the only reason that no
         // update was generated.
@@ -687,25 +736,23 @@ mod test {
         // Test that if the inactive slot contents have changed, then we'll get
         // a new update reflecting that.
         let collection = test_boards
-            .collection_builder(
-                ARTIFACT_VERSION_2,
-                ExpectedVersion::NoValidVersion,
-            )
+            .collection_builder()
             .sp_versions(
                 ARTIFACT_VERSION_2,
                 ExpectedVersion::Version(ARTIFACT_VERSION_1),
             )
             .sp_active_version_exception(SpType::Sled, 0, ARTIFACT_VERSION_1)
             .build();
-        let new_updates = plan_mgs_updates(
-            log,
-            &collection,
-            &collection.baseboards,
-            &updates,
-            &TargetReleaseDescription::TufRepo(repo.clone()),
-            nmax_updates,
-            impossible_update_policy,
-        );
+        let PlannedMgsUpdates { pending_updates: new_updates, .. } =
+            plan_mgs_updates(
+                log,
+                &collection,
+                &collection.baseboards,
+                &updates,
+                &TargetReleaseDescription::TufRepo(repo.clone()),
+                nmax_updates,
+                impossible_update_policy,
+            );
         assert_ne!(updates, new_updates);
         assert_eq!(new_updates.len(), 1);
         let new_update =
@@ -732,21 +779,19 @@ mod test {
         // to something other than the new expected version, then we'll also get
         // a new update reflecting that.
         let collection = test_boards
-            .collection_builder(
-                ARTIFACT_VERSION_2,
-                ExpectedVersion::NoValidVersion,
-            )
+            .collection_builder()
             .sp_active_version_exception(SpType::Sled, 0, ARTIFACT_VERSION_1_5)
             .build();
-        let new_updates = plan_mgs_updates(
-            log,
-            &collection,
-            &collection.baseboards,
-            &updates,
-            &TargetReleaseDescription::TufRepo(repo.clone()),
-            nmax_updates,
-            impossible_update_policy,
-        );
+        let PlannedMgsUpdates { pending_updates: new_updates, .. } =
+            plan_mgs_updates(
+                log,
+                &collection,
+                &collection.baseboards,
+                &updates,
+                &TargetReleaseDescription::TufRepo(repo.clone()),
+                nmax_updates,
+                impossible_update_policy,
+            );
         assert_ne!(updates, new_updates);
         assert_eq!(new_updates.len(), 1);
         let new_update =
@@ -787,39 +832,38 @@ mod test {
         // Test that with no updates pending and no TUF repo specified, there
         // will remain no updates pending.
         let collection = test_boards
-            .collection_builder(
-                ARTIFACT_VERSION_2,
-                ExpectedVersion::NoValidVersion,
-            )
+            .collection_builder()
             .rot_active_version_exception(SpType::Sled, 0, ARTIFACT_VERSION_1)
             .build();
         let current_boards = &collection.baseboards;
         let initial_updates = PendingMgsUpdates::new();
         let nmax_updates = 1;
         let impossible_update_policy = ImpossibleUpdatePolicy::Reevaluate;
-        let updates = plan_mgs_updates(
-            log,
-            &collection,
-            current_boards,
-            &initial_updates,
-            &TargetReleaseDescription::Initial,
-            nmax_updates,
-            impossible_update_policy,
-        );
+        let PlannedMgsUpdates { pending_updates: updates, .. } =
+            plan_mgs_updates(
+                log,
+                &collection,
+                current_boards,
+                &initial_updates,
+                &TargetReleaseDescription::Initial,
+                nmax_updates,
+                impossible_update_policy,
+            );
         assert!(updates.is_empty());
 
         // Test that when a TUF repo is specified and one RoT is outdated, then
         // it's configured with an update (and the update looks correct).
         let repo = test_boards.tuf_repo();
-        let updates = plan_mgs_updates(
-            log,
-            &collection,
-            current_boards,
-            &initial_updates,
-            &TargetReleaseDescription::TufRepo(repo.clone()),
-            nmax_updates,
-            impossible_update_policy,
-        );
+        let PlannedMgsUpdates { pending_updates: updates, .. } =
+            plan_mgs_updates(
+                log,
+                &collection,
+                current_boards,
+                &initial_updates,
+                &TargetReleaseDescription::TufRepo(repo.clone()),
+                nmax_updates,
+                impossible_update_policy,
+            );
         assert_eq!(updates.len(), 1);
         let first_update = updates.iter().next().expect("at least one update");
         assert_eq!(first_update.baseboard_id.serial_number, "sled_0");
@@ -831,37 +875,36 @@ mod test {
         // Test that when an update is already pending, and nothing changes
         // about the state of the world (i.e., the inventory), then the planner
         // makes no changes.
-        let later_updates = plan_mgs_updates(
-            log,
-            &collection,
-            current_boards,
-            &updates,
-            &TargetReleaseDescription::TufRepo(repo.clone()),
-            nmax_updates,
-            impossible_update_policy,
-        );
+        let PlannedMgsUpdates { pending_updates: later_updates, .. } =
+            plan_mgs_updates(
+                log,
+                &collection,
+                current_boards,
+                &updates,
+                &TargetReleaseDescription::TufRepo(repo.clone()),
+                nmax_updates,
+                impossible_update_policy,
+            );
         assert_eq!(updates, later_updates);
 
         // Test that when two updates are needed, but one is already pending,
         // then the other one is *not* started (because it exceeds
         // nmax_updates).
         let later_collection = test_boards
-            .collection_builder(
-                ARTIFACT_VERSION_2,
-                ExpectedVersion::NoValidVersion,
-            )
+            .collection_builder()
             .rot_active_version_exception(SpType::Sled, 0, ARTIFACT_VERSION_1)
             .rot_active_version_exception(SpType::Switch, 1, ARTIFACT_VERSION_1)
             .build();
-        let later_updates = plan_mgs_updates(
-            log,
-            &later_collection,
-            current_boards,
-            &updates,
-            &TargetReleaseDescription::TufRepo(repo.clone()),
-            nmax_updates,
-            impossible_update_policy,
-        );
+        let PlannedMgsUpdates { pending_updates: later_updates, .. } =
+            plan_mgs_updates(
+                log,
+                &later_collection,
+                current_boards,
+                &updates,
+                &TargetReleaseDescription::TufRepo(repo.clone()),
+                nmax_updates,
+                impossible_update_policy,
+            );
         assert_eq!(updates, later_updates);
 
         // At this point, we're ready to test that when the first SpType update
@@ -871,22 +914,20 @@ mod test {
         // the planner schedules the updates in the correct order: first RoT,
         // and second SP.
         let later_collection = test_boards
-            .collection_builder(
-                ARTIFACT_VERSION_2,
-                ExpectedVersion::NoValidVersion,
-            )
+            .collection_builder()
             .sp_active_version_exception(SpType::Switch, 1, ARTIFACT_VERSION_1)
             .rot_active_version_exception(SpType::Switch, 1, ARTIFACT_VERSION_1)
             .build();
-        let later_updates = plan_mgs_updates(
-            log,
-            &later_collection,
-            current_boards,
-            &updates,
-            &TargetReleaseDescription::TufRepo(repo.clone()),
-            nmax_updates,
-            impossible_update_policy,
-        );
+        let PlannedMgsUpdates { pending_updates: later_updates, .. } =
+            plan_mgs_updates(
+                log,
+                &later_collection,
+                current_boards,
+                &updates,
+                &TargetReleaseDescription::TufRepo(repo.clone()),
+                nmax_updates,
+                impossible_update_policy,
+            );
         assert_eq!(later_updates.len(), 1);
         let next_update =
             later_updates.iter().next().expect("at least one update");
@@ -899,51 +940,46 @@ mod test {
 
         // Finally, test that when all components are in spec, then no updates
         // are configured.
-        let updated_collection = test_boards
-            .collection_builder(
-                ARTIFACT_VERSION_2,
-                ExpectedVersion::NoValidVersion,
-            )
-            .build();
-        let later_updates = plan_mgs_updates(
-            log,
-            &updated_collection,
-            current_boards,
-            &later_updates,
-            &TargetReleaseDescription::TufRepo(repo.clone()),
-            nmax_updates,
-            impossible_update_policy,
-        );
+        let updated_collection = test_boards.collection_builder().build();
+        let PlannedMgsUpdates { pending_updates: later_updates, .. } =
+            plan_mgs_updates(
+                log,
+                &updated_collection,
+                current_boards,
+                &later_updates,
+                &TargetReleaseDescription::TufRepo(repo.clone()),
+                nmax_updates,
+                impossible_update_policy,
+            );
         assert!(later_updates.is_empty());
 
         // Test that we don't try to update boards that aren't in
         // `current_boards`, even if they're in inventory and outdated.
         let collection = test_boards
-            .collection_builder(
-                ARTIFACT_VERSION_2,
-                ExpectedVersion::NoValidVersion,
-            )
+            .collection_builder()
             .rot_active_version_exception(SpType::Sled, 0, ARTIFACT_VERSION_1)
             .build();
-        let updates = plan_mgs_updates(
-            log,
-            &collection,
-            &BTreeSet::new(),
-            &PendingMgsUpdates::new(),
-            &TargetReleaseDescription::TufRepo(repo.clone()),
-            nmax_updates,
-            impossible_update_policy,
-        );
+        let PlannedMgsUpdates { pending_updates: updates, .. } =
+            plan_mgs_updates(
+                log,
+                &collection,
+                &BTreeSet::new(),
+                &PendingMgsUpdates::new(),
+                &TargetReleaseDescription::TufRepo(repo.clone()),
+                nmax_updates,
+                impossible_update_policy,
+            );
         assert!(updates.is_empty());
-        let updates = plan_mgs_updates(
-            log,
-            &collection,
-            &collection.baseboards,
-            &PendingMgsUpdates::new(),
-            &TargetReleaseDescription::TufRepo(repo.clone()),
-            nmax_updates,
-            impossible_update_policy,
-        );
+        let PlannedMgsUpdates { pending_updates: updates, .. } =
+            plan_mgs_updates(
+                log,
+                &collection,
+                &collection.baseboards,
+                &PendingMgsUpdates::new(),
+                &TargetReleaseDescription::TufRepo(repo.clone()),
+                nmax_updates,
+                impossible_update_policy,
+            );
         // We verified most of the details above.  Here we're just double
         // checking that the baseboard being missing is the only reason that no
         // update was generated.
@@ -969,21 +1005,31 @@ mod test {
         // Test that if the inactive slot contents have changed, then we'll get
         // a new update reflecting that.
         let collection = test_boards
-            .collection_builder(
+            .collection_builder()
+            .sp_versions(
+                ARTIFACT_VERSION_2,
+                ExpectedVersion::Version(ARTIFACT_VERSION_1),
+            )
+            .rot_versions(
+                ARTIFACT_VERSION_2,
+                ExpectedVersion::Version(ARTIFACT_VERSION_1),
+            )
+            .stage0_versions(
                 ARTIFACT_VERSION_2,
                 ExpectedVersion::Version(ARTIFACT_VERSION_1),
             )
             .rot_active_version_exception(SpType::Sled, 0, ARTIFACT_VERSION_1)
             .build();
-        let new_updates = plan_mgs_updates(
-            log,
-            &collection,
-            &collection.baseboards,
-            &updates,
-            &TargetReleaseDescription::TufRepo(repo.clone()),
-            nmax_updates,
-            impossible_update_policy,
-        );
+        let PlannedMgsUpdates { pending_updates: new_updates, .. } =
+            plan_mgs_updates(
+                log,
+                &collection,
+                &collection.baseboards,
+                &updates,
+                &TargetReleaseDescription::TufRepo(repo.clone()),
+                nmax_updates,
+                impossible_update_policy,
+            );
         assert_ne!(updates, new_updates);
         assert_eq!(new_updates.len(), 1);
         let new_update =
@@ -1011,21 +1057,19 @@ mod test {
         // to something other than the new expected version, then we'll also get
         // a new update reflecting that.
         let collection = test_boards
-            .collection_builder(
-                ARTIFACT_VERSION_2,
-                ExpectedVersion::NoValidVersion,
-            )
+            .collection_builder()
             .rot_active_version_exception(SpType::Sled, 0, ARTIFACT_VERSION_1_5)
             .build();
-        let new_updates = plan_mgs_updates(
-            log,
-            &collection,
-            &collection.baseboards,
-            &updates,
-            &TargetReleaseDescription::TufRepo(repo.clone()),
-            nmax_updates,
-            impossible_update_policy,
-        );
+        let PlannedMgsUpdates { pending_updates: new_updates, .. } =
+            plan_mgs_updates(
+                log,
+                &collection,
+                &collection.baseboards,
+                &updates,
+                &TargetReleaseDescription::TufRepo(repo.clone()),
+                nmax_updates,
+                impossible_update_policy,
+            );
         assert_ne!(updates, new_updates);
         assert_eq!(new_updates.len(), 1);
         let new_update =
@@ -1067,39 +1111,38 @@ mod test {
         // Test that with no updates pending and no TUF repo specified, there
         // will remain no updates pending.
         let collection = test_boards
-            .collection_builder(
-                ARTIFACT_VERSION_2,
-                ExpectedVersion::NoValidVersion,
-            )
+            .collection_builder()
             .stage0_version_exception(SpType::Sled, 0, ARTIFACT_VERSION_1)
             .build();
         let current_boards = &collection.baseboards;
         let initial_updates = PendingMgsUpdates::new();
         let nmax_updates = 1;
         let impossible_update_policy = ImpossibleUpdatePolicy::Reevaluate;
-        let updates = plan_mgs_updates(
-            log,
-            &collection,
-            current_boards,
-            &initial_updates,
-            &TargetReleaseDescription::Initial,
-            nmax_updates,
-            impossible_update_policy,
-        );
+        let PlannedMgsUpdates { pending_updates: updates, .. } =
+            plan_mgs_updates(
+                log,
+                &collection,
+                current_boards,
+                &initial_updates,
+                &TargetReleaseDescription::Initial,
+                nmax_updates,
+                impossible_update_policy,
+            );
         assert!(updates.is_empty());
 
         // Test that when a TUF repo is specified and one RoT is outdated, then
         // it's configured with an update (and the update looks correct).
         let repo = test_boards.tuf_repo();
-        let updates = plan_mgs_updates(
-            log,
-            &collection,
-            current_boards,
-            &initial_updates,
-            &TargetReleaseDescription::TufRepo(repo.clone()),
-            nmax_updates,
-            impossible_update_policy,
-        );
+        let PlannedMgsUpdates { pending_updates: updates, .. } =
+            plan_mgs_updates(
+                log,
+                &collection,
+                current_boards,
+                &initial_updates,
+                &TargetReleaseDescription::TufRepo(repo.clone()),
+                nmax_updates,
+                impossible_update_policy,
+            );
         assert_eq!(updates.len(), 1);
         let first_update = updates.iter().next().expect("at least one update");
         assert_eq!(first_update.baseboard_id.serial_number, "sled_0");
@@ -1114,37 +1157,36 @@ mod test {
         // Test that when an update is already pending, and nothing changes
         // about the state of the world (i.e., the inventory), then the planner
         // makes no changes.
-        let later_updates = plan_mgs_updates(
-            log,
-            &collection,
-            current_boards,
-            &updates,
-            &TargetReleaseDescription::TufRepo(repo.clone()),
-            nmax_updates,
-            impossible_update_policy,
-        );
+        let PlannedMgsUpdates { pending_updates: later_updates, .. } =
+            plan_mgs_updates(
+                log,
+                &collection,
+                current_boards,
+                &updates,
+                &TargetReleaseDescription::TufRepo(repo.clone()),
+                nmax_updates,
+                impossible_update_policy,
+            );
         assert_eq!(updates, later_updates);
 
         // Test that when two updates are needed, but one is already pending,
         // then the other one is *not* started (because it exceeds
         // nmax_updates).
         let later_collection = test_boards
-            .collection_builder(
-                ARTIFACT_VERSION_2,
-                ExpectedVersion::NoValidVersion,
-            )
+            .collection_builder()
             .stage0_version_exception(SpType::Sled, 0, ARTIFACT_VERSION_1)
             .stage0_version_exception(SpType::Switch, 1, ARTIFACT_VERSION_1)
             .build();
-        let later_updates = plan_mgs_updates(
-            log,
-            &later_collection,
-            current_boards,
-            &updates,
-            &TargetReleaseDescription::TufRepo(repo.clone()),
-            nmax_updates,
-            impossible_update_policy,
-        );
+        let PlannedMgsUpdates { pending_updates: later_updates, .. } =
+            plan_mgs_updates(
+                log,
+                &later_collection,
+                current_boards,
+                &updates,
+                &TargetReleaseDescription::TufRepo(repo.clone()),
+                nmax_updates,
+                impossible_update_policy,
+            );
         assert_eq!(updates, later_updates);
 
         // At this point, we're ready to test that when the first SpType update
@@ -1154,23 +1196,21 @@ mod test {
         // the planner schedules the updates in the correct order: first RoT
         // bootloader, second RoT and third SP.
         let later_collection = test_boards
-            .collection_builder(
-                ARTIFACT_VERSION_2,
-                ExpectedVersion::NoValidVersion,
-            )
+            .collection_builder()
             .sp_active_version_exception(SpType::Switch, 1, ARTIFACT_VERSION_1)
             .rot_active_version_exception(SpType::Switch, 1, ARTIFACT_VERSION_1)
             .stage0_version_exception(SpType::Switch, 1, ARTIFACT_VERSION_1)
             .build();
-        let later_updates = plan_mgs_updates(
-            log,
-            &later_collection,
-            current_boards,
-            &updates,
-            &TargetReleaseDescription::TufRepo(repo.clone()),
-            nmax_updates,
-            impossible_update_policy,
-        );
+        let PlannedMgsUpdates { pending_updates: later_updates, .. } =
+            plan_mgs_updates(
+                log,
+                &later_collection,
+                current_boards,
+                &updates,
+                &TargetReleaseDescription::TufRepo(repo.clone()),
+                nmax_updates,
+                impossible_update_policy,
+            );
         assert_eq!(later_updates.len(), 1);
         let next_update =
             later_updates.iter().next().expect("at least one update");
@@ -1186,51 +1226,46 @@ mod test {
 
         // Finally, test that when all components are in spec, then no updates
         // are configured.
-        let updated_collection = test_boards
-            .collection_builder(
-                ARTIFACT_VERSION_2,
-                ExpectedVersion::NoValidVersion,
-            )
-            .build();
-        let later_updates = plan_mgs_updates(
-            log,
-            &updated_collection,
-            current_boards,
-            &later_updates,
-            &TargetReleaseDescription::TufRepo(repo.clone()),
-            nmax_updates,
-            impossible_update_policy,
-        );
+        let updated_collection = test_boards.collection_builder().build();
+        let PlannedMgsUpdates { pending_updates: later_updates, .. } =
+            plan_mgs_updates(
+                log,
+                &updated_collection,
+                current_boards,
+                &later_updates,
+                &TargetReleaseDescription::TufRepo(repo.clone()),
+                nmax_updates,
+                impossible_update_policy,
+            );
         assert!(later_updates.is_empty());
 
         // Test that we don't try to update boards that aren't in
         // `current_boards`, even if they're in inventory and outdated.
         let collection = test_boards
-            .collection_builder(
-                ARTIFACT_VERSION_2,
-                ExpectedVersion::NoValidVersion,
-            )
+            .collection_builder()
             .stage0_version_exception(SpType::Sled, 0, ARTIFACT_VERSION_1)
             .build();
-        let updates = plan_mgs_updates(
-            log,
-            &collection,
-            &BTreeSet::new(),
-            &PendingMgsUpdates::new(),
-            &TargetReleaseDescription::TufRepo(repo.clone()),
-            nmax_updates,
-            impossible_update_policy,
-        );
+        let PlannedMgsUpdates { pending_updates: updates, .. } =
+            plan_mgs_updates(
+                log,
+                &collection,
+                &BTreeSet::new(),
+                &PendingMgsUpdates::new(),
+                &TargetReleaseDescription::TufRepo(repo.clone()),
+                nmax_updates,
+                impossible_update_policy,
+            );
         assert!(updates.is_empty());
-        let updates = plan_mgs_updates(
-            log,
-            &collection,
-            &collection.baseboards,
-            &PendingMgsUpdates::new(),
-            &TargetReleaseDescription::TufRepo(repo.clone()),
-            nmax_updates,
-            impossible_update_policy,
-        );
+        let PlannedMgsUpdates { pending_updates: updates, .. } =
+            plan_mgs_updates(
+                log,
+                &collection,
+                &collection.baseboards,
+                &PendingMgsUpdates::new(),
+                &TargetReleaseDescription::TufRepo(repo.clone()),
+                nmax_updates,
+                impossible_update_policy,
+            );
         // We verified most of the details above.  Here we're just double
         // checking that the baseboard being missing is the only reason that no
         // update was generated.
@@ -1255,25 +1290,23 @@ mod test {
         // Test that if the inactive slot contents have changed, then we'll get
         // a new update reflecting that.
         let collection = test_boards
-            .collection_builder(
-                ARTIFACT_VERSION_2,
-                ExpectedVersion::NoValidVersion,
-            )
+            .collection_builder()
             .stage0_versions(
                 ARTIFACT_VERSION_2,
                 ExpectedVersion::Version(ARTIFACT_VERSION_1),
             )
             .stage0_version_exception(SpType::Sled, 0, ARTIFACT_VERSION_1)
             .build();
-        let new_updates = plan_mgs_updates(
-            log,
-            &collection,
-            &collection.baseboards,
-            &updates,
-            &TargetReleaseDescription::TufRepo(repo.clone()),
-            nmax_updates,
-            impossible_update_policy,
-        );
+        let PlannedMgsUpdates { pending_updates: new_updates, .. } =
+            plan_mgs_updates(
+                log,
+                &collection,
+                &collection.baseboards,
+                &updates,
+                &TargetReleaseDescription::TufRepo(repo.clone()),
+                nmax_updates,
+                impossible_update_policy,
+            );
         assert_ne!(updates, new_updates);
         assert_eq!(new_updates.len(), 1);
         let new_update =
@@ -1300,21 +1333,19 @@ mod test {
         // to something other than the new expected version, then we'll also get
         // a new update reflecting that.
         let collection = test_boards
-            .collection_builder(
-                ARTIFACT_VERSION_2,
-                ExpectedVersion::NoValidVersion,
-            )
+            .collection_builder()
             .stage0_version_exception(SpType::Sled, 0, ARTIFACT_VERSION_1_5)
             .build();
-        let new_updates = plan_mgs_updates(
-            log,
-            &collection,
-            &collection.baseboards,
-            &updates,
-            &TargetReleaseDescription::TufRepo(repo.clone()),
-            nmax_updates,
-            impossible_update_policy,
-        );
+        let PlannedMgsUpdates { pending_updates: new_updates, .. } =
+            plan_mgs_updates(
+                log,
+                &collection,
+                &collection.baseboards,
+                &updates,
+                &TargetReleaseDescription::TufRepo(repo.clone()),
+                nmax_updates,
+                impossible_update_policy,
+            );
         assert_ne!(updates, new_updates);
         assert_eq!(new_updates.len(), 1);
         let new_update =
@@ -1353,7 +1384,16 @@ mod test {
 
         // Initial setup: sled 0 has active version 1 and inactive version 1.5.
         let collection = test_boards
-            .collection_builder(
+            .collection_builder()
+            .sp_versions(
+                ARTIFACT_VERSION_2,
+                ExpectedVersion::Version(ARTIFACT_VERSION_1_5),
+            )
+            .rot_versions(
+                ARTIFACT_VERSION_2,
+                ExpectedVersion::Version(ARTIFACT_VERSION_1_5),
+            )
+            .stage0_versions(
                 ARTIFACT_VERSION_2,
                 ExpectedVersion::Version(ARTIFACT_VERSION_1_5),
             )
@@ -1371,15 +1411,16 @@ mod test {
         // they're both the same.
         let mut updates = None;
         for impossible_update_policy in ImpossibleUpdatePolicy::iter() {
-            let planned_updates = plan_mgs_updates(
-                log,
-                &collection,
-                current_boards,
-                &initial_updates,
-                &TargetReleaseDescription::TufRepo(repo.clone()),
-                nmax_updates,
-                impossible_update_policy,
-            );
+            let PlannedMgsUpdates { pending_updates: planned_updates, .. } =
+                plan_mgs_updates(
+                    log,
+                    &collection,
+                    current_boards,
+                    &initial_updates,
+                    &TargetReleaseDescription::TufRepo(repo.clone()),
+                    nmax_updates,
+                    impossible_update_policy,
+                );
             assert_eq!(planned_updates.len(), 1);
             let first_update =
                 planned_updates.iter().next().expect("at least one update");
@@ -1409,10 +1450,7 @@ mod test {
         // update in progress; we've partially written the contents, so there is
         // no caboose to read.
         let collection = test_boards
-            .collection_builder(
-                ARTIFACT_VERSION_2,
-                ExpectedVersion::NoValidVersion,
-            )
+            .collection_builder()
             .rot_versions(
                 ARTIFACT_VERSION_2,
                 ExpectedVersion::Version(ARTIFACT_VERSION_1_5),
@@ -1423,28 +1461,30 @@ mod test {
         // If we plan with `ImpossibleUpdatePolicy::Keep`, we should _not_
         // replace the update, even though its preconditions are no longer
         // valid.
-        let keep_updates = plan_mgs_updates(
-            log,
-            &collection,
-            current_boards,
-            &updates,
-            &TargetReleaseDescription::TufRepo(repo.clone()),
-            nmax_updates,
-            ImpossibleUpdatePolicy::Keep,
-        );
+        let PlannedMgsUpdates { pending_updates: keep_updates, .. } =
+            plan_mgs_updates(
+                log,
+                &collection,
+                current_boards,
+                &updates,
+                &TargetReleaseDescription::TufRepo(repo.clone()),
+                nmax_updates,
+                ImpossibleUpdatePolicy::Keep,
+            );
         assert_eq!(updates, keep_updates);
 
         // On the other hand, if we plan with
         // `ImpossibleUpdatePolicy::Reevaluate`, we should replace the update.
-        let reeval_updates = plan_mgs_updates(
-            log,
-            &collection,
-            current_boards,
-            &initial_updates,
-            &TargetReleaseDescription::TufRepo(repo.clone()),
-            nmax_updates,
-            ImpossibleUpdatePolicy::Keep,
-        );
+        let PlannedMgsUpdates { pending_updates: reeval_updates, .. } =
+            plan_mgs_updates(
+                log,
+                &collection,
+                current_boards,
+                &initial_updates,
+                &TargetReleaseDescription::TufRepo(repo.clone()),
+                nmax_updates,
+                ImpossibleUpdatePolicy::Keep,
+            );
         assert_eq!(reeval_updates.len(), 1);
         let first_update =
             reeval_updates.iter().next().expect("at least one update");
@@ -1489,10 +1529,22 @@ mod test {
 
         // Start with collections that record everything at version 1. We'll add
         // exceptions as we step through updates below.
-        let mut builder = test_boards.collection_builder(
-            ARTIFACT_VERSION_1,
-            ExpectedVersion::NoValidVersion,
-        );
+        let mut builder = test_boards
+            .collection_builder()
+            .sp_versions(ARTIFACT_VERSION_1, ExpectedVersion::NoValidVersion)
+            .rot_versions(ARTIFACT_VERSION_1, ExpectedVersion::NoValidVersion)
+            .host_phase_1_artifacts(
+                ARTIFACT_HASH_HOST_PHASE_1_V1,
+                ARTIFACT_HASH_HOST_PHASE_1_V1,
+            )
+            .host_phase_2_artifacts(
+                ARTIFACT_HASH_HOST_PHASE_2_V1,
+                ARTIFACT_HASH_HOST_PHASE_2_V1,
+            )
+            .stage0_versions(
+                ARTIFACT_VERSION_1,
+                ExpectedVersion::NoValidVersion,
+            );
         for _ in 0..expected_updates.len() {
             let collection = builder.clone().build();
 
@@ -1502,7 +1554,10 @@ mod test {
 
             // Run the planner and verify that we got one of our expected
             // updates.
-            let new_updates = plan_mgs_updates(
+            let PlannedMgsUpdates {
+                pending_updates: new_updates,
+                mut pending_host_phase_2_changes,
+            } = plan_mgs_updates(
                 log,
                 &collection,
                 current_boards,
@@ -1514,7 +1569,9 @@ mod test {
             assert_eq!(new_updates.len(), 1);
             let update =
                 new_updates.iter().next().expect("at least one update");
-            expected_updates.verify_one(update);
+            expected_updates
+                .verify_one(update, &mut pending_host_phase_2_changes);
+            assert!(pending_host_phase_2_changes.is_empty());
 
             // Update our builder with an addition exception for the update we
             // just planned for the next iteration.
@@ -1554,7 +1611,13 @@ mod test {
                     );
                 }
                 PendingMgsUpdateDetails::HostPhase1(_) => {
-                    unimplemented!()
+                    assert_eq!(sp_type, SpType::Sled);
+                    assert!(!builder.has_host_active_exception(sp_slot));
+                    builder = builder.host_active_exception(
+                        sp_slot,
+                        ARTIFACT_HASH_HOST_PHASE_1,
+                        ARTIFACT_HASH_HOST_PHASE_2,
+                    );
                 }
             }
 
@@ -1564,15 +1627,16 @@ mod test {
 
         // Take one more lap.  It should reflect zero updates.
         let collection = builder.build();
-        let last_updates = plan_mgs_updates(
-            log,
-            &collection,
-            &collection.baseboards,
-            &latest_updates,
-            &TargetReleaseDescription::TufRepo(repo.clone()),
-            nmax_updates,
-            impossible_update_policy,
-        );
+        let PlannedMgsUpdates { pending_updates: last_updates, .. } =
+            plan_mgs_updates(
+                log,
+                &collection,
+                &collection.baseboards,
+                &latest_updates,
+                &TargetReleaseDescription::TufRepo(repo.clone()),
+                nmax_updates,
+                impossible_update_policy,
+            );
         assert!(last_updates.is_empty());
 
         logctx.cleanup_successful();
@@ -1602,12 +1666,26 @@ mod test {
         // currently enforced by the fact that the real planner passes 1 instead
         // of usize::MAX, but we should probably fix this.
         let collection = test_boards
-            .collection_builder(
+            .collection_builder()
+            .sp_versions(ARTIFACT_VERSION_1, ExpectedVersion::NoValidVersion)
+            .rot_versions(ARTIFACT_VERSION_1, ExpectedVersion::NoValidVersion)
+            .stage0_versions(
                 ARTIFACT_VERSION_1,
                 ExpectedVersion::NoValidVersion,
             )
+            .host_phase_1_artifacts(
+                ARTIFACT_HASH_HOST_PHASE_1_V1,
+                ARTIFACT_HASH_HOST_PHASE_1_V1,
+            )
+            .host_phase_2_artifacts(
+                ARTIFACT_HASH_HOST_PHASE_2_V1,
+                ARTIFACT_HASH_HOST_PHASE_2_V1,
+            )
             .build();
-        let all_updates = plan_mgs_updates(
+        let PlannedMgsUpdates {
+            pending_updates: all_updates,
+            mut pending_host_phase_2_changes,
+        } = plan_mgs_updates(
             log,
             &collection,
             &collection.baseboards,
@@ -1627,23 +1705,31 @@ mod test {
                     panic!("unexpected update type: {update:?}")
                 }
             }
-            expected_updates.verify_one(update);
+            expected_updates
+                .verify_one(update, &mut pending_host_phase_2_changes);
         }
+        assert!(pending_host_phase_2_changes.is_empty());
 
         // Update the whole system at once again, but note the RoT bootloaders
         // have all been updated already; this should attempt to update all of
         // the RoTs.
         let collection = test_boards
-            .collection_builder(
-                ARTIFACT_VERSION_1,
-                ExpectedVersion::NoValidVersion,
+            .collection_builder()
+            .sp_versions(ARTIFACT_VERSION_1, ExpectedVersion::NoValidVersion)
+            .rot_versions(ARTIFACT_VERSION_1, ExpectedVersion::NoValidVersion)
+            .host_phase_1_artifacts(
+                ARTIFACT_HASH_HOST_PHASE_1_V1,
+                ARTIFACT_HASH_HOST_PHASE_1_V1,
             )
-            .stage0_versions(
-                ARTIFACT_VERSION_2,
-                ExpectedVersion::NoValidVersion,
+            .host_phase_2_artifacts(
+                ARTIFACT_HASH_HOST_PHASE_2_V1,
+                ARTIFACT_HASH_HOST_PHASE_2_V1,
             )
             .build();
-        let all_updates = plan_mgs_updates(
+        let PlannedMgsUpdates {
+            pending_updates: all_updates,
+            mut pending_host_phase_2_changes,
+        } = plan_mgs_updates(
             log,
             &collection,
             &collection.baseboards,
@@ -1662,24 +1748,30 @@ mod test {
                     panic!("unexpected update type: {update:?}")
                 }
             }
-            expected_updates.verify_one(update);
+            expected_updates
+                .verify_one(update, &mut pending_host_phase_2_changes);
         }
+        assert!(pending_host_phase_2_changes.is_empty());
 
         // Update the whole system at once again, but note the RoT bootloaders
         // and RoTs have all been updated already; this should attempt to update
         // all of the SPs.
         let collection = test_boards
-            .collection_builder(
-                ARTIFACT_VERSION_1,
-                ExpectedVersion::NoValidVersion,
+            .collection_builder()
+            .sp_versions(ARTIFACT_VERSION_1, ExpectedVersion::NoValidVersion)
+            .host_phase_1_artifacts(
+                ARTIFACT_HASH_HOST_PHASE_1_V1,
+                ARTIFACT_HASH_HOST_PHASE_1_V1,
             )
-            .rot_versions(ARTIFACT_VERSION_2, ExpectedVersion::NoValidVersion)
-            .stage0_versions(
-                ARTIFACT_VERSION_2,
-                ExpectedVersion::NoValidVersion,
+            .host_phase_2_artifacts(
+                ARTIFACT_HASH_HOST_PHASE_2_V1,
+                ARTIFACT_HASH_HOST_PHASE_2_V1,
             )
             .build();
-        let all_updates = plan_mgs_updates(
+        let PlannedMgsUpdates {
+            pending_updates: all_updates,
+            mut pending_host_phase_2_changes,
+        } = plan_mgs_updates(
             log,
             &collection,
             &collection.baseboards,
@@ -1698,21 +1790,62 @@ mod test {
                     panic!("unexpected update type: {update:?}")
                 }
             }
-            expected_updates.verify_one(update);
+            expected_updates
+                .verify_one(update, &mut pending_host_phase_2_changes);
         }
+        assert!(pending_host_phase_2_changes.is_empty());
+
+        // Update the whole system at once again, but note the RoT bootloaders,
+        // RoTs, and SPs have all been updated already; this should attempt to
+        // update all the host OSs.
+        let collection = test_boards
+            .collection_builder()
+            .host_phase_1_artifacts(
+                ARTIFACT_HASH_HOST_PHASE_1_V1,
+                ARTIFACT_HASH_HOST_PHASE_1_V1,
+            )
+            .host_phase_2_artifacts(
+                ARTIFACT_HASH_HOST_PHASE_2_V1,
+                ARTIFACT_HASH_HOST_PHASE_2_V1,
+            )
+            .build();
+        let PlannedMgsUpdates {
+            pending_updates: all_updates,
+            mut pending_host_phase_2_changes,
+        } = plan_mgs_updates(
+            log,
+            &collection,
+            &collection.baseboards,
+            &PendingMgsUpdates::new(),
+            &TargetReleaseDescription::TufRepo(repo.clone()),
+            usize::MAX,
+            impossible_update_policy,
+        );
+        for update in &all_updates {
+            // Confirm all our updates are to SPs.
+            match &update.details {
+                PendingMgsUpdateDetails::HostPhase1(..) => (),
+                PendingMgsUpdateDetails::Sp { .. }
+                | PendingMgsUpdateDetails::Rot { .. }
+                | PendingMgsUpdateDetails::RotBootloader { .. } => {
+                    panic!("unexpected update type: {update:?}")
+                }
+            }
+            expected_updates
+                .verify_one(update, &mut pending_host_phase_2_changes);
+        }
+        assert!(pending_host_phase_2_changes.is_empty());
 
         // We should have performed all expected updates.
         assert!(expected_updates.is_empty());
 
         // Now, notice when they've all been updated, even if the limit is only
         // one.
-        let collection = test_boards
-            .collection_builder(
-                ARTIFACT_VERSION_2,
-                ExpectedVersion::NoValidVersion,
-            )
-            .build();
-        let all_updates_done = plan_mgs_updates(
+        let collection = test_boards.collection_builder().build();
+        let PlannedMgsUpdates {
+            pending_updates: all_updates_done,
+            pending_host_phase_2_changes,
+        } = plan_mgs_updates(
             log,
             &collection,
             &collection.baseboards,
@@ -1722,6 +1855,7 @@ mod test {
             impossible_update_policy,
         );
         assert!(all_updates_done.is_empty());
+        assert!(pending_host_phase_2_changes.is_empty());
 
         logctx.cleanup_successful();
     }
@@ -1740,25 +1874,23 @@ mod test {
         let log = &logctx.log;
         let repo = test_boards.tuf_repo();
         let mut collection = test_boards
-            .collection_builder(
-                ARTIFACT_VERSION_2,
-                ExpectedVersion::NoValidVersion,
-            )
+            .collection_builder()
             .sp_active_version_exception(SpType::Sled, 0, ARTIFACT_VERSION_1)
             .rot_active_version_exception(SpType::Sled, 0, ARTIFACT_VERSION_1)
             .stage0_version_exception(SpType::Sled, 0, ARTIFACT_VERSION_1)
             .build();
         let nmax_updates = 1;
         let impossible_update_policy = ImpossibleUpdatePolicy::Reevaluate;
-        let updates = plan_mgs_updates(
-            log,
-            &collection,
-            &collection.baseboards,
-            &PendingMgsUpdates::new(),
-            &TargetReleaseDescription::TufRepo(repo.clone()),
-            nmax_updates,
-            impossible_update_policy,
-        );
+        let PlannedMgsUpdates { pending_updates: updates, .. } =
+            plan_mgs_updates(
+                log,
+                &collection,
+                &collection.baseboards,
+                &PendingMgsUpdates::new(),
+                &TargetReleaseDescription::TufRepo(repo.clone()),
+                nmax_updates,
+                impossible_update_policy,
+            );
         assert!(!updates.is_empty());
         let update = updates.into_iter().next().expect("at least one update");
 
@@ -1773,19 +1905,20 @@ mod test {
 
         // Plan again.  The configured update should be updated to reflect the
         // new location.
-        let new_updates = plan_mgs_updates(
-            log,
-            &collection,
-            &collection.baseboards,
-            &updates,
-            &TargetReleaseDescription::TufRepo(repo.clone()),
-            nmax_updates,
-            impossible_update_policy,
-        );
+        let PlannedMgsUpdates { pending_updates: new_updates, .. } =
+            plan_mgs_updates(
+                log,
+                &collection,
+                &collection.baseboards,
+                &updates,
+                &TargetReleaseDescription::TufRepo(repo.clone()),
+                nmax_updates,
+                impossible_update_policy,
+            );
         assert!(!new_updates.is_empty());
         let new_update =
             new_updates.into_iter().next().expect("at least one update");
-        assert_ne!(new_update.slot_id, update.slot_id);
+        assert_eq!(new_update.slot_id, 9);
         assert_eq!(new_update.baseboard_id, update.baseboard_id);
         assert_eq!(new_update.sp_type, update.sp_type);
         assert_eq!(new_update.artifact_hash, update.artifact_hash);
