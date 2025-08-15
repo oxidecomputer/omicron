@@ -22,7 +22,7 @@ use nexus_test_utils::resource_helpers::{
 use nexus_test_utils::wait_for_producer;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::shared::ProjectRole;
-use nexus_types::external_api::views::OxqlQueryResult;
+use nexus_types::external_api::views;
 use nexus_types::silo::DEFAULT_SILO_ID;
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid};
 use oximeter::TimeseriesSchema;
@@ -270,7 +270,7 @@ async fn test_instance_watcher_metrics(
 
     #[track_caller]
     fn count_state(
-        table: &oxql_types::TableOutput,
+        table: &views::OxqlTable,
         instance_id: InstanceUuid,
         state: &'static str,
     ) -> Result<i64, MetricsNotYet> {
@@ -639,7 +639,7 @@ async fn test_project_timeseries_query(
         .expect_status(Some(StatusCode::OK));
     let result = NexusRequest::new(request)
         .authn_as(AuthnMode::UnprivilegedUser)
-        .execute_and_parse_unwrap::<OxqlQueryResult>()
+        .execute_and_parse_unwrap::<views::OxqlQueryResult>()
         .await;
     assert_eq!(result.tables.len(), 1);
     assert_eq!(result.tables[0].timeseries().len(), 2); // two instances
