@@ -7,6 +7,7 @@ use std::num::NonZeroU32;
 use chrono::Utc;
 use dropshot::test_util::ClientTestContext;
 use dropshot::{HttpErrorResponseBody, ResultsPage};
+use gateway_test_utils::setup::DEFAULT_SP_SIM_CONFIG;
 use nexus_auth::authn::USER_TEST_UNPRIVILEGED;
 use nexus_config::NexusConfig;
 use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
@@ -803,6 +804,7 @@ async fn test_session_list_with_config(
         sim::SimMode::Explicit,
         None,
         0,
+        DEFAULT_SP_SIM_CONFIG.into(),
     )
     .await;
     let testctx = &cptestctx.external_client;

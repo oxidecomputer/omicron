@@ -5,6 +5,7 @@
 // Copyright 2022 Oxide Computer Company
 
 use camino::Utf8Path;
+use camino::Utf8PathBuf;
 use dropshot::test_util::ClientTestContext;
 use dropshot::test_util::LogContext;
 use gateway_messages::SpPort;
@@ -32,6 +33,7 @@ use uuid::Uuid;
 // TODO this exact value is copy/pasted from `nexus/test-utils` - should we
 // import it or have our own?
 const RACK_UUID: &str = "c19a698f-c6f9-4a17-ae30-20d711b8f7dc";
+pub const DEFAULT_SP_SIM_CONFIG: &str = "configs/sp_sim_config.test.toml";
 
 pub struct GatewayTestContext {
     pub client: ClientTestContext,
@@ -62,7 +64,9 @@ impl GatewayTestContext {
     }
 }
 
-pub fn load_test_config() -> (omicron_gateway::Config, sp_sim::Config) {
+pub fn load_test_config(
+    sp_sim_config_file: Utf8PathBuf,
+) -> (omicron_gateway::Config, sp_sim::Config) {
     // The test configs are located relative to the directory this file is in.
     // TODO: embed these with include_str! instead?
     let manifest_dir = Utf8Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -73,8 +77,7 @@ pub fn load_test_config() -> (omicron_gateway::Config, sp_sim::Config) {
             Err(e) => panic!("failed to load MGS config: {e}"),
         };
 
-    let sp_sim_config_file_path =
-        manifest_dir.join("configs/sp_sim_config.test.toml");
+    let sp_sim_config_file_path = manifest_dir.join(sp_sim_config_file);
     let sp_sim_config =
         match sp_sim::Config::from_file(&sp_sim_config_file_path) {
             Ok(config) => config,
@@ -87,7 +90,8 @@ pub async fn test_setup(
     test_name: &str,
     sp_port: SpPort,
 ) -> GatewayTestContext {
-    let (server_config, sp_sim_config) = load_test_config();
+    let (server_config, sp_sim_config) =
+        load_test_config(DEFAULT_SP_SIM_CONFIG.into());
     test_setup_with_config(
         test_name,
         sp_port,
