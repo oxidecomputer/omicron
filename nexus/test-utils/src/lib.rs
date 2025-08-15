@@ -321,7 +321,6 @@ pub fn load_test_config() -> NexusConfig {
 pub async fn test_setup<N: NexusServer>(
     test_name: &str,
     extra_sled_agents: u16,
-    // gateway_config_file: &Utf8Path,
 ) -> ControlPlaneTestContext<N> {
     let mut config = load_test_config();
     test_setup_with_config::<N>(
@@ -330,7 +329,7 @@ pub async fn test_setup<N: NexusServer>(
         sim::SimMode::Explicit,
         None,
         extra_sled_agents,
-        // gateway_config_file,
+        DEFAULT_SP_SIM_CONFIG.into(),
     )
     .await
 }
@@ -673,7 +672,6 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         });
     }
 
-    // TODO-K: Here?
     pub async fn start_gateway(
         &mut self,
         switch_location: SwitchLocation,
@@ -1628,8 +1626,7 @@ pub async fn test_setup_with_config<N: NexusServer>(
     sim_mode: sim::SimMode,
     initial_cert: Option<Certificate>,
     extra_sled_agents: u16,
-    // TODO-K: This is so tricy to implement because of the test macros
-    // gateway_config_file: &Utf8Path,
+    gateway_config_file: Utf8PathBuf,
 ) -> ControlPlaneTestContext<N> {
     let builder = ControlPlaneTestContextBuilder::<N>::new(test_name, config);
     setup_with_config_impl(
@@ -1638,8 +1635,7 @@ pub async fn test_setup_with_config<N: NexusServer>(
         sim_mode,
         initial_cert,
         extra_sled_agents,
-        // gateway_config_file,
-        DEFAULT_SP_SIM_CONFIG.into(),
+        gateway_config_file,
     )
     .await
 }
