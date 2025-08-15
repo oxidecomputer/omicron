@@ -1580,8 +1580,9 @@ mod test {
 
     // Updates as much of a whole system at once as we can
     #[test]
-    fn test_whole_system_simultaneous() {
-        let test_name = "planning_mgs_updates_whole_system_simultaneous";
+    fn test_whole_system_simultaneous_updates() {
+        let test_name =
+            "planning_mgs_updates_whole_system_simultaneous_updates";
         let logctx = LogContext::new(
             test_name,
             &ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Debug },
@@ -1728,7 +1729,7 @@ mod test {
     // Tests the case where an SP appears to move while an update is pending
     #[test]
     fn test_sp_move() {
-        let test_name = "planning_mgs_updates_whole_system_simultaneous";
+        let test_name = "planning_mgs_updates_sp_move";
         let logctx = LogContext::new(
             test_name,
             &ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Debug },
