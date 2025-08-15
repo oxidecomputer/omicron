@@ -2182,16 +2182,16 @@ generated inventory collection 0b5efbb3-0b1b-4bbf-b7d8-a2d6fca074c6 from configu
 INFO performed noop image source checks on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, num_total: 7, num_already_artifact: 0, num_eligible: 0, num_ineligible: 7
 INFO performed noop image source checks on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, num_total: 6, num_already_artifact: 6, num_eligible: 0, num_ineligible: 0
 INFO performed noop image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 6, num_already_artifact: 6, num_eligible: 0, num_ineligible: 0
-WARN cannot configure RoT bootloader update for board (missing sign in stage0 caboose from inventory), serial_number: serial0, part_number: model0
-WARN cannot configure RoT update for board (missing sign in caboose from inventory), serial_number: serial0, part_number: model0
+WARN cannot configure RoT bootloader update for board (no matching artifact), serial_number: serial0, part_number: model0
+WARN cannot configure RoT update for board (no matching artifact), serial_number: serial0, part_number: model0
 WARN cannot configure SP update for board (no matching artifact), serial_number: serial0, part_number: model0
 INFO skipping board for MGS-driven update, serial_number: serial0, part_number: model0
-WARN cannot configure RoT bootloader update for board (missing sign in stage0 caboose from inventory), serial_number: serial1, part_number: model1
-WARN cannot configure RoT update for board (missing sign in caboose from inventory), serial_number: serial1, part_number: model1
+WARN cannot configure RoT bootloader update for board (no matching artifact), serial_number: serial1, part_number: model1
+WARN cannot configure RoT update for board (no matching artifact), serial_number: serial1, part_number: model1
 WARN cannot configure SP update for board (no matching artifact), serial_number: serial1, part_number: model1
 INFO skipping board for MGS-driven update, serial_number: serial1, part_number: model1
-WARN cannot configure RoT bootloader update for board (missing sign in stage0 caboose from inventory), serial_number: serial2, part_number: model2
-WARN cannot configure RoT update for board (missing sign in caboose from inventory), serial_number: serial2, part_number: model2
+WARN cannot configure RoT bootloader update for board (no matching artifact), serial_number: serial2, part_number: model2
+WARN cannot configure RoT update for board (no matching artifact), serial_number: serial2, part_number: model2
 WARN cannot configure SP update for board (no matching artifact), serial_number: serial2, part_number: model2
 INFO skipping board for MGS-driven update, serial_number: serial2, part_number: model2
 INFO ran out of boards for MGS-driven update

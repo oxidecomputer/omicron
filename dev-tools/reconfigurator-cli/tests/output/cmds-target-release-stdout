@@ -201,14 +201,12 @@ ID                                   NERRORS TIME_DONE
 f45ba181-4b56-42cc-a762-874d90184a43 0       <REDACTED_TIMESTAMP> 
 
 
-> # First step: upgrade one SP.
-> blueprint-plan dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21 f45ba181-4b56-42cc-a762-874d90184a43
+> # First step: upgrade one RoT bootloader.
+> blueprint-plan latest latest
 INFO performed noop image source checks on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, num_total: 9, num_already_artifact: 0, num_eligible: 0, num_ineligible: 9
 INFO performed noop image source checks on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, num_total: 8, num_already_artifact: 0, num_eligible: 0, num_ineligible: 8
 INFO performed noop image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 8, num_already_artifact: 0, num_eligible: 0, num_ineligible: 8
-WARN cannot configure RoT bootloader update for board (missing sign in stage0 caboose from inventory), serial_number: serial0, part_number: model0
-WARN cannot configure RoT update for board (missing sign in caboose from inventory), serial_number: serial0, part_number: model0
-INFO configuring MGS-driven update, artifact_version: 1.0.0, artifact_hash: 7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670, expected_inactive_version: NoValidVersion, expected_active_version: 0.0.1, component: sp, sp_slot: 0, sp_type: Sled, serial_number: serial0, part_number: model0
+INFO configuring MGS-driven update, artifact_version: 1.0.0, artifact_hash: 005ea358f1cd316df42465b1e3a0334ea22cc0c0442cf9ddf9b42fbf49780236, expected_stage0_next_version: NoValidVersion, expected_stage0_version: 0.0.1, component: rot_bootloader, sp_slot: 0, sp_type: Sled, serial_number: serial0, part_number: model0
 INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1 based on parent blueprint dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21
 planning report for blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1:
@@ -216,11 +214,11 @@ chicken switches:
     add zones with mupdate override:   false
 
 * 1 pending MGS update:
-  * model0:serial0: Sp { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: NoValidVersion }
+  * model0:serial0: RotBootloader { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: NoValidVersion }
 * zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
 
 
-> blueprint-diff dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
+> blueprint-diff latest
 from: blueprint dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21
 to:   blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
 
@@ -240,10 +238,10 @@ to:   blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
  PENDING MGS UPDATES:
 
     Pending MGS-managed updates (all baseboards):
-    ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-    sp_type   slot   part_number   serial_number   artifact_hash                                                      artifact_version   details                                                                                            
-    ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-+   sled      0      model0        serial0         7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670   1.0.0              Sp { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: NoValidVersion }
+    ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+    sp_type   slot   part_number   serial_number   artifact_hash                                                      artifact_version   details                                                                                                          
+    ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
++   sled      0      model0        serial0         005ea358f1cd316df42465b1e3a0334ea22cc0c0442cf9ddf9b42fbf49780236   1.0.0              RotBootloader { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: NoValidVersion }
 
 
 internal DNS:
@@ -386,11 +384,11 @@ external DNS:
 
 
 > # If we generate another plan, there should be no change.
-> blueprint-plan 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1 f45ba181-4b56-42cc-a762-874d90184a43
+> blueprint-plan latest latest
 INFO performed noop image source checks on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, num_total: 9, num_already_artifact: 0, num_eligible: 0, num_ineligible: 9
 INFO performed noop image source checks on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, num_total: 8, num_already_artifact: 0, num_eligible: 0, num_ineligible: 8
 INFO performed noop image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 8, num_already_artifact: 0, num_eligible: 0, num_ineligible: 8
-INFO MGS-driven update not yet completed (will keep it), artifact_version: 1.0.0, artifact_hash: 7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670, expected_inactive_version: NoValidVersion, expected_active_version: 0.0.1, component: sp, sp_slot: 0, sp_type: Sled, serial_number: serial0, part_number: model0
+INFO MGS-driven update not yet completed (will keep it), artifact_version: 1.0.0, artifact_hash: 005ea358f1cd316df42465b1e3a0334ea22cc0c0442cf9ddf9b42fbf49780236, expected_stage0_next_version: NoValidVersion, expected_stage0_version: 0.0.1, component: rot_bootloader, sp_slot: 0, sp_type: Sled, serial_number: serial0, part_number: model0
 INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4 based on parent blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
 planning report for blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4:
@@ -398,11 +396,11 @@ chicken switches:
     add zones with mupdate override:   false
 
 * 1 pending MGS update:
-  * model0:serial0: Sp { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: NoValidVersion }
+  * model0:serial0: RotBootloader { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: NoValidVersion }
 * zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
 
 
-> blueprint-diff 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1 58d5e830-0884-47d8-a7cd-b2b3751adeb4
+> blueprint-diff latest
 from: blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
 to:   blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4
 
@@ -559,27 +557,22 @@ external DNS:
 
 
 
-> # Now, update the simulated SP to reflect that the update completed.
+> # Now, update the simulated RoT bootloader to reflect that the update completed.
 > # Collect inventory from it and use that collection for another planning step.
 > # This should report that the update completed, remove that update, and add one
-> # for another sled.
-> sled-update-sp 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 --active 1.0.0
-set sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 SP versions: active -> 1.0.0
+> # for an SP on the same sled.
+> sled-update-rot-bootloader 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 --stage0 1.0.0
+set sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 RoT bootloader versions: stage0 -> 1.0.0
 
 > inventory-generate
 generated inventory collection eb0796d5-ab8a-4f7b-a884-b4aeacb8ab51 from configured sleds
 
-> blueprint-plan 58d5e830-0884-47d8-a7cd-b2b3751adeb4 eb0796d5-ab8a-4f7b-a884-b4aeacb8ab51
+> blueprint-plan latest latest
 INFO performed noop image source checks on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, num_total: 9, num_already_artifact: 0, num_eligible: 0, num_ineligible: 9
 INFO performed noop image source checks on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, num_total: 8, num_already_artifact: 0, num_eligible: 0, num_ineligible: 8
 INFO performed noop image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 8, num_already_artifact: 0, num_eligible: 0, num_ineligible: 8
-INFO MGS-driven update completed (will remove it and re-evaluate board), artifact_version: 1.0.0, artifact_hash: 7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670, expected_inactive_version: NoValidVersion, expected_active_version: 0.0.1, component: sp, sp_slot: 0, sp_type: Sled, serial_number: serial0, part_number: model0
-WARN cannot configure RoT bootloader update for board (missing sign in stage0 caboose from inventory), serial_number: serial0, part_number: model0
-WARN cannot configure RoT update for board (missing sign in caboose from inventory), serial_number: serial0, part_number: model0
-INFO skipping board for MGS-driven update, serial_number: serial0, part_number: model0
-WARN cannot configure RoT bootloader update for board (missing sign in stage0 caboose from inventory), serial_number: serial1, part_number: model1
-WARN cannot configure RoT update for board (missing sign in caboose from inventory), serial_number: serial1, part_number: model1
-INFO configuring MGS-driven update, artifact_version: 1.0.0, artifact_hash: 7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670, expected_inactive_version: NoValidVersion, expected_active_version: 0.0.1, component: sp, sp_slot: 1, sp_type: Sled, serial_number: serial1, part_number: model1
+INFO MGS-driven update completed (will remove it and re-evaluate board), artifact_version: 1.0.0, artifact_hash: 005ea358f1cd316df42465b1e3a0334ea22cc0c0442cf9ddf9b42fbf49780236, expected_stage0_next_version: NoValidVersion, expected_stage0_version: 0.0.1, component: rot_bootloader, sp_slot: 0, sp_type: Sled, serial_number: serial0, part_number: model0
+INFO configuring MGS-driven update, artifact_version: 1.0.0, artifact_hash: 04e4a7fdb84acca92c8fd3235e26d64ea61bef8a5f98202589fd346989c5720a, expected_transient_boot_preference: None, expected_pending_persistent_boot_preference: None, expected_persistent_boot_preference: A, expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: NoValidVersion, component: rot, sp_slot: 0, sp_type: Sled, serial_number: serial0, part_number: model0
 INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint af934083-59b5-4bf6-8966-6fb5292c29e1 based on parent blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4
 planning report for blueprint af934083-59b5-4bf6-8966-6fb5292c29e1:
@@ -587,11 +580,11 @@ chicken switches:
     add zones with mupdate override:   false
 
 * 1 pending MGS update:
-  * model1:serial1: Sp { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: NoValidVersion }
+  * model0:serial0: Rot { expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: NoValidVersion, expected_persistent_boot_preference: A, expected_pending_persistent_boot_preference: None, expected_transient_boot_preference: None }
 * zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
 
 
-> blueprint-diff 58d5e830-0884-47d8-a7cd-b2b3751adeb4 af934083-59b5-4bf6-8966-6fb5292c29e1
+> blueprint-diff latest
 from: blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4
 to:   blueprint af934083-59b5-4bf6-8966-6fb5292c29e1
 
@@ -611,11 +604,397 @@ to:   blueprint af934083-59b5-4bf6-8966-6fb5292c29e1
  PENDING MGS UPDATES:
 
     Pending MGS-managed updates (all baseboards):
-    ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-    sp_type   slot   part_number   serial_number   artifact_hash                                                      artifact_version   details                                                                                            
-    ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
--   sled      0      model0        serial0         7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670   1.0.0              Sp { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: NoValidVersion }
-+   sled      1      model1        serial1         7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670   1.0.0              Sp { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: NoValidVersion }
+    ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+    sp_type   slot   part_number   serial_number   artifact_hash                                                        artifact_version   details                                                                                                                                                                                                                                                                             
+    ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+*   sled      0      model0        serial0         - 005ea358f1cd316df42465b1e3a0334ea22cc0c0442cf9ddf9b42fbf49780236   1.0.0              - RotBootloader { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: NoValidVersion }                                                                                                                                                                 
+     └─                                            + 04e4a7fdb84acca92c8fd3235e26d64ea61bef8a5f98202589fd346989c5720a                      + Rot { expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: NoValidVersion, expected_persistent_boot_preference: A, expected_pending_persistent_boot_preference: None, expected_transient_boot_preference: None }
+
+
+internal DNS:
+  DNS zone: "control-plane.oxide.internal" (unchanged)
+    name: 058fd5f9-60a8-4e11-9302-15172782e17d.host          (records: 1)
+        AAAA fd00:1122:3344:101::27
+    name: 0c71b3b2-6ceb-4e8f-b020-b08675e83038.host          (records: 1)
+        AAAA fd00:1122:3344:101::22
+    name: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c.sled          (records: 1)
+        AAAA fd00:1122:3344:102::1
+    name: 353b3b65-20f7-48c3-88f7-495bd5d31545.host          (records: 1)
+        AAAA fd00:1122:3344:102::23
+    name: 3eeb8d49-eb1a-43f8-bb64-c2338421c2c6.host          (records: 1)
+        AAAA fd00:1122:3344:103::22
+    name: 427ec88f-f467-42fa-9bbb-66a91a36103c.host          (records: 1)
+        AAAA fd00:1122:3344:2::1
+    name: 466a9f29-62bf-4e63-924a-b9efdb86afec.host          (records: 1)
+        AAAA fd00:1122:3344:102::22
+    name: 5199c033-4cf9-4ab6-8ae7-566bd7606363.host          (records: 1)
+        AAAA fd00:1122:3344:101::25
+    name: 62620961-fc4a-481e-968b-f5acbac0dc63.host          (records: 1)
+        AAAA fd00:1122:3344:102::21
+    name: 6444f8a5-6465-4f0b-a549-1993c113569c.host          (records: 1)
+        AAAA fd00:1122:3344:101::21
+    name: 694bd14f-cb24-4be4-bb19-876e79cda2c8.host          (records: 1)
+        AAAA fd00:1122:3344:103::26
+    name: 6c3ae381-04f7-41ea-b0ac-74db387dbc3a.host          (records: 1)
+        AAAA fd00:1122:3344:102::24
+    name: 75b220ba-a0f4-4872-8202-dc7c87f062d0.host          (records: 1)
+        AAAA fd00:1122:3344:103::24
+    name: 7c252b64-c5af-4ec1-989e-9a03f3b0f111.host          (records: 1)
+        AAAA fd00:1122:3344:103::27
+    name: 803bfb63-c246-41db-b0da-d3b87ddfc63d.host          (records: 1)
+        AAAA fd00:1122:3344:101::23
+    name: 86a22a56-0168-453d-9df1-cb2a7c64b5d3.host          (records: 1)
+        AAAA fd00:1122:3344:102::28
+    name: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6.sled          (records: 1)
+        AAAA fd00:1122:3344:101::1
+    name: 99e2f30b-3174-40bf-a78a-90da8abba8ca.host          (records: 1)
+        AAAA fd00:1122:3344:1::1
+    name: @                                                  (records: 3)
+        NS   ns1.control-plane.oxide.internal
+        NS   ns2.control-plane.oxide.internal
+        NS   ns3.control-plane.oxide.internal
+    name: _clickhouse-admin-single-server._tcp               (records: 1)
+        SRV  port  8888 353b3b65-20f7-48c3-88f7-495bd5d31545.host.control-plane.oxide.internal
+    name: _clickhouse-native._tcp                            (records: 1)
+        SRV  port  9000 353b3b65-20f7-48c3-88f7-495bd5d31545.host.control-plane.oxide.internal
+    name: _clickhouse._tcp                                   (records: 1)
+        SRV  port  8123 353b3b65-20f7-48c3-88f7-495bd5d31545.host.control-plane.oxide.internal
+    name: _crucible-pantry._tcp                              (records: 3)
+        SRV  port 17000 75b220ba-a0f4-4872-8202-dc7c87f062d0.host.control-plane.oxide.internal
+        SRV  port 17000 ad6a3a03-8d0f-4504-99a4-cbf73d69b973.host.control-plane.oxide.internal
+        SRV  port 17000 ba4994a8-23f9-4b1a-a84f-a08d74591389.host.control-plane.oxide.internal
+    name: _crucible._tcp.058fd5f9-60a8-4e11-9302-15172782e17d (records: 1)
+        SRV  port 32345 058fd5f9-60a8-4e11-9302-15172782e17d.host.control-plane.oxide.internal
+    name: _crucible._tcp.5199c033-4cf9-4ab6-8ae7-566bd7606363 (records: 1)
+        SRV  port 32345 5199c033-4cf9-4ab6-8ae7-566bd7606363.host.control-plane.oxide.internal
+    name: _crucible._tcp.694bd14f-cb24-4be4-bb19-876e79cda2c8 (records: 1)
+        SRV  port 32345 694bd14f-cb24-4be4-bb19-876e79cda2c8.host.control-plane.oxide.internal
+    name: _crucible._tcp.7c252b64-c5af-4ec1-989e-9a03f3b0f111 (records: 1)
+        SRV  port 32345 7c252b64-c5af-4ec1-989e-9a03f3b0f111.host.control-plane.oxide.internal
+    name: _crucible._tcp.86a22a56-0168-453d-9df1-cb2a7c64b5d3 (records: 1)
+        SRV  port 32345 86a22a56-0168-453d-9df1-cb2a7c64b5d3.host.control-plane.oxide.internal
+    name: _crucible._tcp.bd354eef-d8a6-4165-9124-283fb5e46d77 (records: 1)
+        SRV  port 32345 bd354eef-d8a6-4165-9124-283fb5e46d77.host.control-plane.oxide.internal
+    name: _crucible._tcp.dfac80b4-a887-430a-ae87-a4e065dba787 (records: 1)
+        SRV  port 32345 dfac80b4-a887-430a-ae87-a4e065dba787.host.control-plane.oxide.internal
+    name: _crucible._tcp.e2fdefe7-95b2-4fd2-ae37-56929a06d58c (records: 1)
+        SRV  port 32345 e2fdefe7-95b2-4fd2-ae37-56929a06d58c.host.control-plane.oxide.internal
+    name: _crucible._tcp.f55647d4-5500-4ad3-893a-df45bd50d622 (records: 1)
+        SRV  port 32345 f55647d4-5500-4ad3-893a-df45bd50d622.host.control-plane.oxide.internal
+    name: _external-dns._tcp                                 (records: 3)
+        SRV  port  5353 6c3ae381-04f7-41ea-b0ac-74db387dbc3a.host.control-plane.oxide.internal
+        SRV  port  5353 803bfb63-c246-41db-b0da-d3b87ddfc63d.host.control-plane.oxide.internal
+        SRV  port  5353 f6ec9c67-946a-4da3-98d5-581f72ce8bf0.host.control-plane.oxide.internal
+    name: _internal-ntp._tcp                                 (records: 3)
+        SRV  port   123 62620961-fc4a-481e-968b-f5acbac0dc63.host.control-plane.oxide.internal
+        SRV  port   123 6444f8a5-6465-4f0b-a549-1993c113569c.host.control-plane.oxide.internal
+        SRV  port   123 f10a4fb9-759f-4a65-b25e-5794ad2d07d8.host.control-plane.oxide.internal
+    name: _nameservice._tcp                                  (records: 3)
+        SRV  port  5353 427ec88f-f467-42fa-9bbb-66a91a36103c.host.control-plane.oxide.internal
+        SRV  port  5353 99e2f30b-3174-40bf-a78a-90da8abba8ca.host.control-plane.oxide.internal
+        SRV  port  5353 ea5b4030-b52f-44b2-8d70-45f15f987d01.host.control-plane.oxide.internal
+    name: _nexus._tcp                                        (records: 3)
+        SRV  port 12221 0c71b3b2-6ceb-4e8f-b020-b08675e83038.host.control-plane.oxide.internal
+        SRV  port 12221 3eeb8d49-eb1a-43f8-bb64-c2338421c2c6.host.control-plane.oxide.internal
+        SRV  port 12221 466a9f29-62bf-4e63-924a-b9efdb86afec.host.control-plane.oxide.internal
+    name: _oximeter-reader._tcp                              (records: 1)
+        SRV  port  9000 353b3b65-20f7-48c3-88f7-495bd5d31545.host.control-plane.oxide.internal
+    name: _repo-depot._tcp                                   (records: 3)
+        SRV  port 12348 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c.sled.control-plane.oxide.internal
+        SRV  port 12348 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6.sled.control-plane.oxide.internal
+        SRV  port 12348 d81c6a84-79b8-4958-ae41-ea46c9b19763.sled.control-plane.oxide.internal
+    name: ad6a3a03-8d0f-4504-99a4-cbf73d69b973.host          (records: 1)
+        AAAA fd00:1122:3344:102::25
+    name: ba4994a8-23f9-4b1a-a84f-a08d74591389.host          (records: 1)
+        AAAA fd00:1122:3344:101::24
+    name: bd354eef-d8a6-4165-9124-283fb5e46d77.host          (records: 1)
+        AAAA fd00:1122:3344:102::26
+    name: d81c6a84-79b8-4958-ae41-ea46c9b19763.sled          (records: 1)
+        AAAA fd00:1122:3344:103::1
+    name: dfac80b4-a887-430a-ae87-a4e065dba787.host          (records: 1)
+        AAAA fd00:1122:3344:101::26
+    name: e2fdefe7-95b2-4fd2-ae37-56929a06d58c.host          (records: 1)
+        AAAA fd00:1122:3344:102::27
+    name: ea5b4030-b52f-44b2-8d70-45f15f987d01.host          (records: 1)
+        AAAA fd00:1122:3344:3::1
+    name: f10a4fb9-759f-4a65-b25e-5794ad2d07d8.host          (records: 1)
+        AAAA fd00:1122:3344:103::21
+    name: f55647d4-5500-4ad3-893a-df45bd50d622.host          (records: 1)
+        AAAA fd00:1122:3344:103::25
+    name: f6ec9c67-946a-4da3-98d5-581f72ce8bf0.host          (records: 1)
+        AAAA fd00:1122:3344:103::23
+    name: ns1                                                (records: 1)
+        AAAA fd00:1122:3344:1::1
+    name: ns2                                                (records: 1)
+        AAAA fd00:1122:3344:2::1
+    name: ns3                                                (records: 1)
+        AAAA fd00:1122:3344:3::1
+
+external DNS:
+  DNS zone: "oxide.example" (unchanged)
+    name: @                                                  (records: 3)
+        NS   ns1.oxide.example
+        NS   ns2.oxide.example
+        NS   ns3.oxide.example
+    name: example-silo.sys                                   (records: 3)
+        A    192.0.2.2
+        A    192.0.2.3
+        A    192.0.2.4
+    name: ns1                                                (records: 1)
+        A    198.51.100.1
+    name: ns2                                                (records: 1)
+        A    198.51.100.2
+    name: ns3                                                (records: 1)
+        A    198.51.100.3
+
+
+
+
+> # After the RoT bootloader update has completed, we update the simulated RoT to
+> # reflect that update has completed as well.
+> # Like before, collect inventory from it and use that collection for the next
+> # step.
+> # This should report that the update completed, remove that update, and add one
+> # for another sled.
+> sled-update-rot 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 --slot-a 1.0.0
+set sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 RoT settings: slot a -> 1.0.0
+
+> inventory-generate
+generated inventory collection 61f451b3-2121-4ed6-91c7-a550054f6c21 from configured sleds
+
+> blueprint-plan latest latest
+INFO performed noop image source checks on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, num_total: 9, num_already_artifact: 0, num_eligible: 0, num_ineligible: 9
+INFO performed noop image source checks on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, num_total: 8, num_already_artifact: 0, num_eligible: 0, num_ineligible: 8
+INFO performed noop image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 8, num_already_artifact: 0, num_eligible: 0, num_ineligible: 8
+INFO MGS-driven update completed (will remove it and re-evaluate board), artifact_version: 1.0.0, artifact_hash: 04e4a7fdb84acca92c8fd3235e26d64ea61bef8a5f98202589fd346989c5720a, expected_transient_boot_preference: None, expected_pending_persistent_boot_preference: None, expected_persistent_boot_preference: A, expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: NoValidVersion, component: rot, sp_slot: 0, sp_type: Sled, serial_number: serial0, part_number: model0
+INFO configuring MGS-driven update, artifact_version: 1.0.0, artifact_hash: 7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670, expected_inactive_version: NoValidVersion, expected_active_version: 0.0.1, component: sp, sp_slot: 0, sp_type: Sled, serial_number: serial0, part_number: model0
+INFO reached maximum number of pending MGS-driven updates, max: 1
+generated blueprint df06bb57-ad42-4431-9206-abff322896c7 based on parent blueprint af934083-59b5-4bf6-8966-6fb5292c29e1
+planning report for blueprint df06bb57-ad42-4431-9206-abff322896c7:
+chicken switches:
+    add zones with mupdate override:   false
+
+* 1 pending MGS update:
+  * model0:serial0: Sp { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: NoValidVersion }
+* zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+
+
+> blueprint-diff latest
+from: blueprint af934083-59b5-4bf6-8966-6fb5292c29e1
+to:   blueprint df06bb57-ad42-4431-9206-abff322896c7
+
+ COCKROACHDB SETTINGS:
+    state fingerprint:::::::::::::::::   (none) (unchanged)
+    cluster.preserve_downgrade_option:   (do not modify) (unchanged)
+
+ METADATA:
+    internal DNS version:::   1 (unchanged)
+    external DNS version:::   1 (unchanged)
+    target release min gen:   1 (unchanged)
+
+ OXIMETER SETTINGS:
+    generation:   1 (unchanged)
+    read from::   SingleNode (unchanged)
+
+ PENDING MGS UPDATES:
+
+    Pending MGS-managed updates (all baseboards):
+    ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+    sp_type   slot   part_number   serial_number   artifact_hash                                                        artifact_version   details                                                                                                                                                                                                                                                                             
+    ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+*   sled      0      model0        serial0         - 04e4a7fdb84acca92c8fd3235e26d64ea61bef8a5f98202589fd346989c5720a   1.0.0              - Rot { expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: NoValidVersion, expected_persistent_boot_preference: A, expected_pending_persistent_boot_preference: None, expected_transient_boot_preference: None }
+     └─                                            + 7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670                      + Sp { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: NoValidVersion }                                                                                                                                                                               
+
+
+internal DNS:
+  DNS zone: "control-plane.oxide.internal" (unchanged)
+    name: 058fd5f9-60a8-4e11-9302-15172782e17d.host          (records: 1)
+        AAAA fd00:1122:3344:101::27
+    name: 0c71b3b2-6ceb-4e8f-b020-b08675e83038.host          (records: 1)
+        AAAA fd00:1122:3344:101::22
+    name: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c.sled          (records: 1)
+        AAAA fd00:1122:3344:102::1
+    name: 353b3b65-20f7-48c3-88f7-495bd5d31545.host          (records: 1)
+        AAAA fd00:1122:3344:102::23
+    name: 3eeb8d49-eb1a-43f8-bb64-c2338421c2c6.host          (records: 1)
+        AAAA fd00:1122:3344:103::22
+    name: 427ec88f-f467-42fa-9bbb-66a91a36103c.host          (records: 1)
+        AAAA fd00:1122:3344:2::1
+    name: 466a9f29-62bf-4e63-924a-b9efdb86afec.host          (records: 1)
+        AAAA fd00:1122:3344:102::22
+    name: 5199c033-4cf9-4ab6-8ae7-566bd7606363.host          (records: 1)
+        AAAA fd00:1122:3344:101::25
+    name: 62620961-fc4a-481e-968b-f5acbac0dc63.host          (records: 1)
+        AAAA fd00:1122:3344:102::21
+    name: 6444f8a5-6465-4f0b-a549-1993c113569c.host          (records: 1)
+        AAAA fd00:1122:3344:101::21
+    name: 694bd14f-cb24-4be4-bb19-876e79cda2c8.host          (records: 1)
+        AAAA fd00:1122:3344:103::26
+    name: 6c3ae381-04f7-41ea-b0ac-74db387dbc3a.host          (records: 1)
+        AAAA fd00:1122:3344:102::24
+    name: 75b220ba-a0f4-4872-8202-dc7c87f062d0.host          (records: 1)
+        AAAA fd00:1122:3344:103::24
+    name: 7c252b64-c5af-4ec1-989e-9a03f3b0f111.host          (records: 1)
+        AAAA fd00:1122:3344:103::27
+    name: 803bfb63-c246-41db-b0da-d3b87ddfc63d.host          (records: 1)
+        AAAA fd00:1122:3344:101::23
+    name: 86a22a56-0168-453d-9df1-cb2a7c64b5d3.host          (records: 1)
+        AAAA fd00:1122:3344:102::28
+    name: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6.sled          (records: 1)
+        AAAA fd00:1122:3344:101::1
+    name: 99e2f30b-3174-40bf-a78a-90da8abba8ca.host          (records: 1)
+        AAAA fd00:1122:3344:1::1
+    name: @                                                  (records: 3)
+        NS   ns1.control-plane.oxide.internal
+        NS   ns2.control-plane.oxide.internal
+        NS   ns3.control-plane.oxide.internal
+    name: _clickhouse-admin-single-server._tcp               (records: 1)
+        SRV  port  8888 353b3b65-20f7-48c3-88f7-495bd5d31545.host.control-plane.oxide.internal
+    name: _clickhouse-native._tcp                            (records: 1)
+        SRV  port  9000 353b3b65-20f7-48c3-88f7-495bd5d31545.host.control-plane.oxide.internal
+    name: _clickhouse._tcp                                   (records: 1)
+        SRV  port  8123 353b3b65-20f7-48c3-88f7-495bd5d31545.host.control-plane.oxide.internal
+    name: _crucible-pantry._tcp                              (records: 3)
+        SRV  port 17000 75b220ba-a0f4-4872-8202-dc7c87f062d0.host.control-plane.oxide.internal
+        SRV  port 17000 ad6a3a03-8d0f-4504-99a4-cbf73d69b973.host.control-plane.oxide.internal
+        SRV  port 17000 ba4994a8-23f9-4b1a-a84f-a08d74591389.host.control-plane.oxide.internal
+    name: _crucible._tcp.058fd5f9-60a8-4e11-9302-15172782e17d (records: 1)
+        SRV  port 32345 058fd5f9-60a8-4e11-9302-15172782e17d.host.control-plane.oxide.internal
+    name: _crucible._tcp.5199c033-4cf9-4ab6-8ae7-566bd7606363 (records: 1)
+        SRV  port 32345 5199c033-4cf9-4ab6-8ae7-566bd7606363.host.control-plane.oxide.internal
+    name: _crucible._tcp.694bd14f-cb24-4be4-bb19-876e79cda2c8 (records: 1)
+        SRV  port 32345 694bd14f-cb24-4be4-bb19-876e79cda2c8.host.control-plane.oxide.internal
+    name: _crucible._tcp.7c252b64-c5af-4ec1-989e-9a03f3b0f111 (records: 1)
+        SRV  port 32345 7c252b64-c5af-4ec1-989e-9a03f3b0f111.host.control-plane.oxide.internal
+    name: _crucible._tcp.86a22a56-0168-453d-9df1-cb2a7c64b5d3 (records: 1)
+        SRV  port 32345 86a22a56-0168-453d-9df1-cb2a7c64b5d3.host.control-plane.oxide.internal
+    name: _crucible._tcp.bd354eef-d8a6-4165-9124-283fb5e46d77 (records: 1)
+        SRV  port 32345 bd354eef-d8a6-4165-9124-283fb5e46d77.host.control-plane.oxide.internal
+    name: _crucible._tcp.dfac80b4-a887-430a-ae87-a4e065dba787 (records: 1)
+        SRV  port 32345 dfac80b4-a887-430a-ae87-a4e065dba787.host.control-plane.oxide.internal
+    name: _crucible._tcp.e2fdefe7-95b2-4fd2-ae37-56929a06d58c (records: 1)
+        SRV  port 32345 e2fdefe7-95b2-4fd2-ae37-56929a06d58c.host.control-plane.oxide.internal
+    name: _crucible._tcp.f55647d4-5500-4ad3-893a-df45bd50d622 (records: 1)
+        SRV  port 32345 f55647d4-5500-4ad3-893a-df45bd50d622.host.control-plane.oxide.internal
+    name: _external-dns._tcp                                 (records: 3)
+        SRV  port  5353 6c3ae381-04f7-41ea-b0ac-74db387dbc3a.host.control-plane.oxide.internal
+        SRV  port  5353 803bfb63-c246-41db-b0da-d3b87ddfc63d.host.control-plane.oxide.internal
+        SRV  port  5353 f6ec9c67-946a-4da3-98d5-581f72ce8bf0.host.control-plane.oxide.internal
+    name: _internal-ntp._tcp                                 (records: 3)
+        SRV  port   123 62620961-fc4a-481e-968b-f5acbac0dc63.host.control-plane.oxide.internal
+        SRV  port   123 6444f8a5-6465-4f0b-a549-1993c113569c.host.control-plane.oxide.internal
+        SRV  port   123 f10a4fb9-759f-4a65-b25e-5794ad2d07d8.host.control-plane.oxide.internal
+    name: _nameservice._tcp                                  (records: 3)
+        SRV  port  5353 427ec88f-f467-42fa-9bbb-66a91a36103c.host.control-plane.oxide.internal
+        SRV  port  5353 99e2f30b-3174-40bf-a78a-90da8abba8ca.host.control-plane.oxide.internal
+        SRV  port  5353 ea5b4030-b52f-44b2-8d70-45f15f987d01.host.control-plane.oxide.internal
+    name: _nexus._tcp                                        (records: 3)
+        SRV  port 12221 0c71b3b2-6ceb-4e8f-b020-b08675e83038.host.control-plane.oxide.internal
+        SRV  port 12221 3eeb8d49-eb1a-43f8-bb64-c2338421c2c6.host.control-plane.oxide.internal
+        SRV  port 12221 466a9f29-62bf-4e63-924a-b9efdb86afec.host.control-plane.oxide.internal
+    name: _oximeter-reader._tcp                              (records: 1)
+        SRV  port  9000 353b3b65-20f7-48c3-88f7-495bd5d31545.host.control-plane.oxide.internal
+    name: _repo-depot._tcp                                   (records: 3)
+        SRV  port 12348 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c.sled.control-plane.oxide.internal
+        SRV  port 12348 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6.sled.control-plane.oxide.internal
+        SRV  port 12348 d81c6a84-79b8-4958-ae41-ea46c9b19763.sled.control-plane.oxide.internal
+    name: ad6a3a03-8d0f-4504-99a4-cbf73d69b973.host          (records: 1)
+        AAAA fd00:1122:3344:102::25
+    name: ba4994a8-23f9-4b1a-a84f-a08d74591389.host          (records: 1)
+        AAAA fd00:1122:3344:101::24
+    name: bd354eef-d8a6-4165-9124-283fb5e46d77.host          (records: 1)
+        AAAA fd00:1122:3344:102::26
+    name: d81c6a84-79b8-4958-ae41-ea46c9b19763.sled          (records: 1)
+        AAAA fd00:1122:3344:103::1
+    name: dfac80b4-a887-430a-ae87-a4e065dba787.host          (records: 1)
+        AAAA fd00:1122:3344:101::26
+    name: e2fdefe7-95b2-4fd2-ae37-56929a06d58c.host          (records: 1)
+        AAAA fd00:1122:3344:102::27
+    name: ea5b4030-b52f-44b2-8d70-45f15f987d01.host          (records: 1)
+        AAAA fd00:1122:3344:3::1
+    name: f10a4fb9-759f-4a65-b25e-5794ad2d07d8.host          (records: 1)
+        AAAA fd00:1122:3344:103::21
+    name: f55647d4-5500-4ad3-893a-df45bd50d622.host          (records: 1)
+        AAAA fd00:1122:3344:103::25
+    name: f6ec9c67-946a-4da3-98d5-581f72ce8bf0.host          (records: 1)
+        AAAA fd00:1122:3344:103::23
+    name: ns1                                                (records: 1)
+        AAAA fd00:1122:3344:1::1
+    name: ns2                                                (records: 1)
+        AAAA fd00:1122:3344:2::1
+    name: ns3                                                (records: 1)
+        AAAA fd00:1122:3344:3::1
+
+external DNS:
+  DNS zone: "oxide.example" (unchanged)
+    name: @                                                  (records: 3)
+        NS   ns1.oxide.example
+        NS   ns2.oxide.example
+        NS   ns3.oxide.example
+    name: example-silo.sys                                   (records: 3)
+        A    192.0.2.2
+        A    192.0.2.3
+        A    192.0.2.4
+    name: ns1                                                (records: 1)
+        A    198.51.100.1
+    name: ns2                                                (records: 1)
+        A    198.51.100.2
+    name: ns3                                                (records: 1)
+        A    198.51.100.3
+
+
+
+
+> # We repeat the same procedure with the SP
+> sled-update-sp 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 --active 1.0.0
+set sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 SP versions: active -> 1.0.0
+
+> inventory-generate
+generated inventory collection b1bda47d-2c19-4fba-96e3-d9df28db7436 from configured sleds
+
+> blueprint-plan latest latest
+INFO performed noop image source checks on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, num_total: 9, num_already_artifact: 0, num_eligible: 0, num_ineligible: 9
+INFO performed noop image source checks on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, num_total: 8, num_already_artifact: 0, num_eligible: 0, num_ineligible: 8
+INFO performed noop image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 8, num_already_artifact: 0, num_eligible: 0, num_ineligible: 8
+INFO MGS-driven update completed (will remove it and re-evaluate board), artifact_version: 1.0.0, artifact_hash: 7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670, expected_inactive_version: NoValidVersion, expected_active_version: 0.0.1, component: sp, sp_slot: 0, sp_type: Sled, serial_number: serial0, part_number: model0
+INFO skipping board for MGS-driven update, serial_number: serial0, part_number: model0
+INFO configuring MGS-driven update, artifact_version: 1.0.0, artifact_hash: 005ea358f1cd316df42465b1e3a0334ea22cc0c0442cf9ddf9b42fbf49780236, expected_stage0_next_version: NoValidVersion, expected_stage0_version: 0.0.1, component: rot_bootloader, sp_slot: 1, sp_type: Sled, serial_number: serial1, part_number: model1
+INFO reached maximum number of pending MGS-driven updates, max: 1
+generated blueprint 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba based on parent blueprint df06bb57-ad42-4431-9206-abff322896c7
+planning report for blueprint 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba:
+chicken switches:
+    add zones with mupdate override:   false
+
+* 1 pending MGS update:
+  * model1:serial1: RotBootloader { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: NoValidVersion }
+* zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+
+
+> blueprint-diff latest
+from: blueprint df06bb57-ad42-4431-9206-abff322896c7
+to:   blueprint 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba
+
+ COCKROACHDB SETTINGS:
+    state fingerprint:::::::::::::::::   (none) (unchanged)
+    cluster.preserve_downgrade_option:   (do not modify) (unchanged)
+
+ METADATA:
+    internal DNS version:::   1 (unchanged)
+    external DNS version:::   1 (unchanged)
+    target release min gen:   1 (unchanged)
+
+ OXIMETER SETTINGS:
+    generation:   1 (unchanged)
+    read from::   SingleNode (unchanged)
+
+ PENDING MGS UPDATES:
+
+    Pending MGS-managed updates (all baseboards):
+    ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+    sp_type   slot   part_number   serial_number   artifact_hash                                                      artifact_version   details                                                                                                          
+    ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-   sled      0      model0        serial0         7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670   1.0.0              Sp { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: NoValidVersion }              
++   sled      1      model1        serial1         005ea358f1cd316df42465b1e3a0334ea22cc0c0442cf9ddf9b42fbf49780236   1.0.0              RotBootloader { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: NoValidVersion }
 
 
 internal DNS:
@@ -758,9 +1137,780 @@ external DNS:
 
 
 > # This time, make it more interesting.  Change the inactive slot contents of
-> # the simulated SP.  This should make the configured update impossible and cause
-> # the planner to fix it. To test this, we also need to tell the planner not to
-> # ignore this update even though it's quite new.
+> # the simulated RoT bootloader.  This should make the configured update
+> # impossible and cause the planner to fix it. To test this, we also need to tell
+> # the planner not to ignore this update even though it's quite new.
+> set ignore-impossible-mgs-updates-since now
+ignoring impossible MGS updates since <REDACTED_TIMESTAMP>
+
+> sled-update-rot-bootloader 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c --stage0-next 0.5.0
+set sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c RoT bootloader versions: stage0_next -> 0.5.0
+
+> inventory-generate
+generated inventory collection a71f7a73-35a6-45e8-acbe-f1c5925eed69 from configured sleds
+
+> blueprint-plan latest latest
+INFO performed noop image source checks on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, num_total: 9, num_already_artifact: 0, num_eligible: 0, num_ineligible: 9
+INFO performed noop image source checks on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, num_total: 8, num_already_artifact: 0, num_eligible: 0, num_ineligible: 8
+INFO performed noop image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 8, num_already_artifact: 0, num_eligible: 0, num_ineligible: 8
+INFO MGS-driven update impossible (will remove it and re-evaluate board), artifact_version: 1.0.0, artifact_hash: 005ea358f1cd316df42465b1e3a0334ea22cc0c0442cf9ddf9b42fbf49780236, expected_stage0_next_version: NoValidVersion, expected_stage0_version: 0.0.1, component: rot_bootloader, sp_slot: 1, sp_type: Sled, serial_number: serial1, part_number: model1
+INFO configuring MGS-driven update, artifact_version: 1.0.0, artifact_hash: 005ea358f1cd316df42465b1e3a0334ea22cc0c0442cf9ddf9b42fbf49780236, expected_stage0_next_version: Version(ArtifactVersion("0.5.0")), expected_stage0_version: 0.0.1, component: rot_bootloader, sp_slot: 1, sp_type: Sled, serial_number: serial1, part_number: model1
+INFO reached maximum number of pending MGS-driven updates, max: 1
+generated blueprint 9034c710-3e57-45f3-99e5-4316145e87ac based on parent blueprint 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba
+planning report for blueprint 9034c710-3e57-45f3-99e5-4316145e87ac:
+chicken switches:
+    add zones with mupdate override:   false
+
+* 1 pending MGS update:
+  * model1:serial1: RotBootloader { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: Version(ArtifactVersion("0.5.0")) }
+* zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+
+
+> blueprint-diff latest
+from: blueprint 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba
+to:   blueprint 9034c710-3e57-45f3-99e5-4316145e87ac
+
+ COCKROACHDB SETTINGS:
+    state fingerprint:::::::::::::::::   (none) (unchanged)
+    cluster.preserve_downgrade_option:   (do not modify) (unchanged)
+
+ METADATA:
+    internal DNS version:::   1 (unchanged)
+    external DNS version:::   1 (unchanged)
+    target release min gen:   1 (unchanged)
+
+ OXIMETER SETTINGS:
+    generation:   1 (unchanged)
+    read from::   SingleNode (unchanged)
+
+ PENDING MGS UPDATES:
+
+    Pending MGS-managed updates (all baseboards):
+    ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+    sp_type   slot   part_number   serial_number   artifact_hash                                                      artifact_version   details                                                                                                                               
+    ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+*   sled      1      model1        serial1         005ea358f1cd316df42465b1e3a0334ea22cc0c0442cf9ddf9b42fbf49780236   1.0.0              - RotBootloader { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: NoValidVersion }                   
+     └─                                                                                                                                  + RotBootloader { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: Version(ArtifactVersion("0.5.0")) }
+
+
+internal DNS:
+  DNS zone: "control-plane.oxide.internal" (unchanged)
+    name: 058fd5f9-60a8-4e11-9302-15172782e17d.host          (records: 1)
+        AAAA fd00:1122:3344:101::27
+    name: 0c71b3b2-6ceb-4e8f-b020-b08675e83038.host          (records: 1)
+        AAAA fd00:1122:3344:101::22
+    name: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c.sled          (records: 1)
+        AAAA fd00:1122:3344:102::1
+    name: 353b3b65-20f7-48c3-88f7-495bd5d31545.host          (records: 1)
+        AAAA fd00:1122:3344:102::23
+    name: 3eeb8d49-eb1a-43f8-bb64-c2338421c2c6.host          (records: 1)
+        AAAA fd00:1122:3344:103::22
+    name: 427ec88f-f467-42fa-9bbb-66a91a36103c.host          (records: 1)
+        AAAA fd00:1122:3344:2::1
+    name: 466a9f29-62bf-4e63-924a-b9efdb86afec.host          (records: 1)
+        AAAA fd00:1122:3344:102::22
+    name: 5199c033-4cf9-4ab6-8ae7-566bd7606363.host          (records: 1)
+        AAAA fd00:1122:3344:101::25
+    name: 62620961-fc4a-481e-968b-f5acbac0dc63.host          (records: 1)
+        AAAA fd00:1122:3344:102::21
+    name: 6444f8a5-6465-4f0b-a549-1993c113569c.host          (records: 1)
+        AAAA fd00:1122:3344:101::21
+    name: 694bd14f-cb24-4be4-bb19-876e79cda2c8.host          (records: 1)
+        AAAA fd00:1122:3344:103::26
+    name: 6c3ae381-04f7-41ea-b0ac-74db387dbc3a.host          (records: 1)
+        AAAA fd00:1122:3344:102::24
+    name: 75b220ba-a0f4-4872-8202-dc7c87f062d0.host          (records: 1)
+        AAAA fd00:1122:3344:103::24
+    name: 7c252b64-c5af-4ec1-989e-9a03f3b0f111.host          (records: 1)
+        AAAA fd00:1122:3344:103::27
+    name: 803bfb63-c246-41db-b0da-d3b87ddfc63d.host          (records: 1)
+        AAAA fd00:1122:3344:101::23
+    name: 86a22a56-0168-453d-9df1-cb2a7c64b5d3.host          (records: 1)
+        AAAA fd00:1122:3344:102::28
+    name: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6.sled          (records: 1)
+        AAAA fd00:1122:3344:101::1
+    name: 99e2f30b-3174-40bf-a78a-90da8abba8ca.host          (records: 1)
+        AAAA fd00:1122:3344:1::1
+    name: @                                                  (records: 3)
+        NS   ns1.control-plane.oxide.internal
+        NS   ns2.control-plane.oxide.internal
+        NS   ns3.control-plane.oxide.internal
+    name: _clickhouse-admin-single-server._tcp               (records: 1)
+        SRV  port  8888 353b3b65-20f7-48c3-88f7-495bd5d31545.host.control-plane.oxide.internal
+    name: _clickhouse-native._tcp                            (records: 1)
+        SRV  port  9000 353b3b65-20f7-48c3-88f7-495bd5d31545.host.control-plane.oxide.internal
+    name: _clickhouse._tcp                                   (records: 1)
+        SRV  port  8123 353b3b65-20f7-48c3-88f7-495bd5d31545.host.control-plane.oxide.internal
+    name: _crucible-pantry._tcp                              (records: 3)
+        SRV  port 17000 75b220ba-a0f4-4872-8202-dc7c87f062d0.host.control-plane.oxide.internal
+        SRV  port 17000 ad6a3a03-8d0f-4504-99a4-cbf73d69b973.host.control-plane.oxide.internal
+        SRV  port 17000 ba4994a8-23f9-4b1a-a84f-a08d74591389.host.control-plane.oxide.internal
+    name: _crucible._tcp.058fd5f9-60a8-4e11-9302-15172782e17d (records: 1)
+        SRV  port 32345 058fd5f9-60a8-4e11-9302-15172782e17d.host.control-plane.oxide.internal
+    name: _crucible._tcp.5199c033-4cf9-4ab6-8ae7-566bd7606363 (records: 1)
+        SRV  port 32345 5199c033-4cf9-4ab6-8ae7-566bd7606363.host.control-plane.oxide.internal
+    name: _crucible._tcp.694bd14f-cb24-4be4-bb19-876e79cda2c8 (records: 1)
+        SRV  port 32345 694bd14f-cb24-4be4-bb19-876e79cda2c8.host.control-plane.oxide.internal
+    name: _crucible._tcp.7c252b64-c5af-4ec1-989e-9a03f3b0f111 (records: 1)
+        SRV  port 32345 7c252b64-c5af-4ec1-989e-9a03f3b0f111.host.control-plane.oxide.internal
+    name: _crucible._tcp.86a22a56-0168-453d-9df1-cb2a7c64b5d3 (records: 1)
+        SRV  port 32345 86a22a56-0168-453d-9df1-cb2a7c64b5d3.host.control-plane.oxide.internal
+    name: _crucible._tcp.bd354eef-d8a6-4165-9124-283fb5e46d77 (records: 1)
+        SRV  port 32345 bd354eef-d8a6-4165-9124-283fb5e46d77.host.control-plane.oxide.internal
+    name: _crucible._tcp.dfac80b4-a887-430a-ae87-a4e065dba787 (records: 1)
+        SRV  port 32345 dfac80b4-a887-430a-ae87-a4e065dba787.host.control-plane.oxide.internal
+    name: _crucible._tcp.e2fdefe7-95b2-4fd2-ae37-56929a06d58c (records: 1)
+        SRV  port 32345 e2fdefe7-95b2-4fd2-ae37-56929a06d58c.host.control-plane.oxide.internal
+    name: _crucible._tcp.f55647d4-5500-4ad3-893a-df45bd50d622 (records: 1)
+        SRV  port 32345 f55647d4-5500-4ad3-893a-df45bd50d622.host.control-plane.oxide.internal
+    name: _external-dns._tcp                                 (records: 3)
+        SRV  port  5353 6c3ae381-04f7-41ea-b0ac-74db387dbc3a.host.control-plane.oxide.internal
+        SRV  port  5353 803bfb63-c246-41db-b0da-d3b87ddfc63d.host.control-plane.oxide.internal
+        SRV  port  5353 f6ec9c67-946a-4da3-98d5-581f72ce8bf0.host.control-plane.oxide.internal
+    name: _internal-ntp._tcp                                 (records: 3)
+        SRV  port   123 62620961-fc4a-481e-968b-f5acbac0dc63.host.control-plane.oxide.internal
+        SRV  port   123 6444f8a5-6465-4f0b-a549-1993c113569c.host.control-plane.oxide.internal
+        SRV  port   123 f10a4fb9-759f-4a65-b25e-5794ad2d07d8.host.control-plane.oxide.internal
+    name: _nameservice._tcp                                  (records: 3)
+        SRV  port  5353 427ec88f-f467-42fa-9bbb-66a91a36103c.host.control-plane.oxide.internal
+        SRV  port  5353 99e2f30b-3174-40bf-a78a-90da8abba8ca.host.control-plane.oxide.internal
+        SRV  port  5353 ea5b4030-b52f-44b2-8d70-45f15f987d01.host.control-plane.oxide.internal
+    name: _nexus._tcp                                        (records: 3)
+        SRV  port 12221 0c71b3b2-6ceb-4e8f-b020-b08675e83038.host.control-plane.oxide.internal
+        SRV  port 12221 3eeb8d49-eb1a-43f8-bb64-c2338421c2c6.host.control-plane.oxide.internal
+        SRV  port 12221 466a9f29-62bf-4e63-924a-b9efdb86afec.host.control-plane.oxide.internal
+    name: _oximeter-reader._tcp                              (records: 1)
+        SRV  port  9000 353b3b65-20f7-48c3-88f7-495bd5d31545.host.control-plane.oxide.internal
+    name: _repo-depot._tcp                                   (records: 3)
+        SRV  port 12348 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c.sled.control-plane.oxide.internal
+        SRV  port 12348 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6.sled.control-plane.oxide.internal
+        SRV  port 12348 d81c6a84-79b8-4958-ae41-ea46c9b19763.sled.control-plane.oxide.internal
+    name: ad6a3a03-8d0f-4504-99a4-cbf73d69b973.host          (records: 1)
+        AAAA fd00:1122:3344:102::25
+    name: ba4994a8-23f9-4b1a-a84f-a08d74591389.host          (records: 1)
+        AAAA fd00:1122:3344:101::24
+    name: bd354eef-d8a6-4165-9124-283fb5e46d77.host          (records: 1)
+        AAAA fd00:1122:3344:102::26
+    name: d81c6a84-79b8-4958-ae41-ea46c9b19763.sled          (records: 1)
+        AAAA fd00:1122:3344:103::1
+    name: dfac80b4-a887-430a-ae87-a4e065dba787.host          (records: 1)
+        AAAA fd00:1122:3344:101::26
+    name: e2fdefe7-95b2-4fd2-ae37-56929a06d58c.host          (records: 1)
+        AAAA fd00:1122:3344:102::27
+    name: ea5b4030-b52f-44b2-8d70-45f15f987d01.host          (records: 1)
+        AAAA fd00:1122:3344:3::1
+    name: f10a4fb9-759f-4a65-b25e-5794ad2d07d8.host          (records: 1)
+        AAAA fd00:1122:3344:103::21
+    name: f55647d4-5500-4ad3-893a-df45bd50d622.host          (records: 1)
+        AAAA fd00:1122:3344:103::25
+    name: f6ec9c67-946a-4da3-98d5-581f72ce8bf0.host          (records: 1)
+        AAAA fd00:1122:3344:103::23
+    name: ns1                                                (records: 1)
+        AAAA fd00:1122:3344:1::1
+    name: ns2                                                (records: 1)
+        AAAA fd00:1122:3344:2::1
+    name: ns3                                                (records: 1)
+        AAAA fd00:1122:3344:3::1
+
+external DNS:
+  DNS zone: "oxide.example" (unchanged)
+    name: @                                                  (records: 3)
+        NS   ns1.oxide.example
+        NS   ns2.oxide.example
+        NS   ns3.oxide.example
+    name: example-silo.sys                                   (records: 3)
+        A    192.0.2.2
+        A    192.0.2.3
+        A    192.0.2.4
+    name: ns1                                                (records: 1)
+        A    198.51.100.1
+    name: ns2                                                (records: 1)
+        A    198.51.100.2
+    name: ns3                                                (records: 1)
+        A    198.51.100.3
+
+
+
+
+> # Now simulate the update completing successfully.
+> # Like before, we should see a pending RoT update for this sled.
+> sled-update-rot-bootloader 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c --stage0 1.0.0
+set sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c RoT bootloader versions: stage0 -> 1.0.0
+
+> inventory-generate
+generated inventory collection 0b5efbb3-0b1b-4bbf-b7d8-a2d6fca074c6 from configured sleds
+
+> blueprint-plan latest latest
+INFO performed noop image source checks on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, num_total: 9, num_already_artifact: 0, num_eligible: 0, num_ineligible: 9
+INFO performed noop image source checks on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, num_total: 8, num_already_artifact: 0, num_eligible: 0, num_ineligible: 8
+INFO performed noop image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 8, num_already_artifact: 0, num_eligible: 0, num_ineligible: 8
+INFO MGS-driven update completed (will remove it and re-evaluate board), artifact_version: 1.0.0, artifact_hash: 005ea358f1cd316df42465b1e3a0334ea22cc0c0442cf9ddf9b42fbf49780236, expected_stage0_next_version: Version(ArtifactVersion("0.5.0")), expected_stage0_version: 0.0.1, component: rot_bootloader, sp_slot: 1, sp_type: Sled, serial_number: serial1, part_number: model1
+INFO configuring MGS-driven update, artifact_version: 1.0.0, artifact_hash: 04e4a7fdb84acca92c8fd3235e26d64ea61bef8a5f98202589fd346989c5720a, expected_transient_boot_preference: None, expected_pending_persistent_boot_preference: None, expected_persistent_boot_preference: A, expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: NoValidVersion, component: rot, sp_slot: 1, sp_type: Sled, serial_number: serial1, part_number: model1
+INFO reached maximum number of pending MGS-driven updates, max: 1
+generated blueprint d60afc57-f15d-476c-bd0f-b1071e2bb976 based on parent blueprint 9034c710-3e57-45f3-99e5-4316145e87ac
+planning report for blueprint d60afc57-f15d-476c-bd0f-b1071e2bb976:
+chicken switches:
+    add zones with mupdate override:   false
+
+* 1 pending MGS update:
+  * model1:serial1: Rot { expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: NoValidVersion, expected_persistent_boot_preference: A, expected_pending_persistent_boot_preference: None, expected_transient_boot_preference: None }
+* zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+
+
+> blueprint-diff latest
+from: blueprint 9034c710-3e57-45f3-99e5-4316145e87ac
+to:   blueprint d60afc57-f15d-476c-bd0f-b1071e2bb976
+
+ COCKROACHDB SETTINGS:
+    state fingerprint:::::::::::::::::   (none) (unchanged)
+    cluster.preserve_downgrade_option:   (do not modify) (unchanged)
+
+ METADATA:
+    internal DNS version:::   1 (unchanged)
+    external DNS version:::   1 (unchanged)
+    target release min gen:   1 (unchanged)
+
+ OXIMETER SETTINGS:
+    generation:   1 (unchanged)
+    read from::   SingleNode (unchanged)
+
+ PENDING MGS UPDATES:
+
+    Pending MGS-managed updates (all baseboards):
+    ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+    sp_type   slot   part_number   serial_number   artifact_hash                                                        artifact_version   details                                                                                                                                                                                                                                                                             
+    ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+*   sled      1      model1        serial1         - 005ea358f1cd316df42465b1e3a0334ea22cc0c0442cf9ddf9b42fbf49780236   1.0.0              - RotBootloader { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: Version(ArtifactVersion("0.5.0")) }                                                                                                                                              
+     └─                                            + 04e4a7fdb84acca92c8fd3235e26d64ea61bef8a5f98202589fd346989c5720a                      + Rot { expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: NoValidVersion, expected_persistent_boot_preference: A, expected_pending_persistent_boot_preference: None, expected_transient_boot_preference: None }
+
+
+internal DNS:
+  DNS zone: "control-plane.oxide.internal" (unchanged)
+    name: 058fd5f9-60a8-4e11-9302-15172782e17d.host          (records: 1)
+        AAAA fd00:1122:3344:101::27
+    name: 0c71b3b2-6ceb-4e8f-b020-b08675e83038.host          (records: 1)
+        AAAA fd00:1122:3344:101::22
+    name: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c.sled          (records: 1)
+        AAAA fd00:1122:3344:102::1
+    name: 353b3b65-20f7-48c3-88f7-495bd5d31545.host          (records: 1)
+        AAAA fd00:1122:3344:102::23
+    name: 3eeb8d49-eb1a-43f8-bb64-c2338421c2c6.host          (records: 1)
+        AAAA fd00:1122:3344:103::22
+    name: 427ec88f-f467-42fa-9bbb-66a91a36103c.host          (records: 1)
+        AAAA fd00:1122:3344:2::1
+    name: 466a9f29-62bf-4e63-924a-b9efdb86afec.host          (records: 1)
+        AAAA fd00:1122:3344:102::22
+    name: 5199c033-4cf9-4ab6-8ae7-566bd7606363.host          (records: 1)
+        AAAA fd00:1122:3344:101::25
+    name: 62620961-fc4a-481e-968b-f5acbac0dc63.host          (records: 1)
+        AAAA fd00:1122:3344:102::21
+    name: 6444f8a5-6465-4f0b-a549-1993c113569c.host          (records: 1)
+        AAAA fd00:1122:3344:101::21
+    name: 694bd14f-cb24-4be4-bb19-876e79cda2c8.host          (records: 1)
+        AAAA fd00:1122:3344:103::26
+    name: 6c3ae381-04f7-41ea-b0ac-74db387dbc3a.host          (records: 1)
+        AAAA fd00:1122:3344:102::24
+    name: 75b220ba-a0f4-4872-8202-dc7c87f062d0.host          (records: 1)
+        AAAA fd00:1122:3344:103::24
+    name: 7c252b64-c5af-4ec1-989e-9a03f3b0f111.host          (records: 1)
+        AAAA fd00:1122:3344:103::27
+    name: 803bfb63-c246-41db-b0da-d3b87ddfc63d.host          (records: 1)
+        AAAA fd00:1122:3344:101::23
+    name: 86a22a56-0168-453d-9df1-cb2a7c64b5d3.host          (records: 1)
+        AAAA fd00:1122:3344:102::28
+    name: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6.sled          (records: 1)
+        AAAA fd00:1122:3344:101::1
+    name: 99e2f30b-3174-40bf-a78a-90da8abba8ca.host          (records: 1)
+        AAAA fd00:1122:3344:1::1
+    name: @                                                  (records: 3)
+        NS   ns1.control-plane.oxide.internal
+        NS   ns2.control-plane.oxide.internal
+        NS   ns3.control-plane.oxide.internal
+    name: _clickhouse-admin-single-server._tcp               (records: 1)
+        SRV  port  8888 353b3b65-20f7-48c3-88f7-495bd5d31545.host.control-plane.oxide.internal
+    name: _clickhouse-native._tcp                            (records: 1)
+        SRV  port  9000 353b3b65-20f7-48c3-88f7-495bd5d31545.host.control-plane.oxide.internal
+    name: _clickhouse._tcp                                   (records: 1)
+        SRV  port  8123 353b3b65-20f7-48c3-88f7-495bd5d31545.host.control-plane.oxide.internal
+    name: _crucible-pantry._tcp                              (records: 3)
+        SRV  port 17000 75b220ba-a0f4-4872-8202-dc7c87f062d0.host.control-plane.oxide.internal
+        SRV  port 17000 ad6a3a03-8d0f-4504-99a4-cbf73d69b973.host.control-plane.oxide.internal
+        SRV  port 17000 ba4994a8-23f9-4b1a-a84f-a08d74591389.host.control-plane.oxide.internal
+    name: _crucible._tcp.058fd5f9-60a8-4e11-9302-15172782e17d (records: 1)
+        SRV  port 32345 058fd5f9-60a8-4e11-9302-15172782e17d.host.control-plane.oxide.internal
+    name: _crucible._tcp.5199c033-4cf9-4ab6-8ae7-566bd7606363 (records: 1)
+        SRV  port 32345 5199c033-4cf9-4ab6-8ae7-566bd7606363.host.control-plane.oxide.internal
+    name: _crucible._tcp.694bd14f-cb24-4be4-bb19-876e79cda2c8 (records: 1)
+        SRV  port 32345 694bd14f-cb24-4be4-bb19-876e79cda2c8.host.control-plane.oxide.internal
+    name: _crucible._tcp.7c252b64-c5af-4ec1-989e-9a03f3b0f111 (records: 1)
+        SRV  port 32345 7c252b64-c5af-4ec1-989e-9a03f3b0f111.host.control-plane.oxide.internal
+    name: _crucible._tcp.86a22a56-0168-453d-9df1-cb2a7c64b5d3 (records: 1)
+        SRV  port 32345 86a22a56-0168-453d-9df1-cb2a7c64b5d3.host.control-plane.oxide.internal
+    name: _crucible._tcp.bd354eef-d8a6-4165-9124-283fb5e46d77 (records: 1)
+        SRV  port 32345 bd354eef-d8a6-4165-9124-283fb5e46d77.host.control-plane.oxide.internal
+    name: _crucible._tcp.dfac80b4-a887-430a-ae87-a4e065dba787 (records: 1)
+        SRV  port 32345 dfac80b4-a887-430a-ae87-a4e065dba787.host.control-plane.oxide.internal
+    name: _crucible._tcp.e2fdefe7-95b2-4fd2-ae37-56929a06d58c (records: 1)
+        SRV  port 32345 e2fdefe7-95b2-4fd2-ae37-56929a06d58c.host.control-plane.oxide.internal
+    name: _crucible._tcp.f55647d4-5500-4ad3-893a-df45bd50d622 (records: 1)
+        SRV  port 32345 f55647d4-5500-4ad3-893a-df45bd50d622.host.control-plane.oxide.internal
+    name: _external-dns._tcp                                 (records: 3)
+        SRV  port  5353 6c3ae381-04f7-41ea-b0ac-74db387dbc3a.host.control-plane.oxide.internal
+        SRV  port  5353 803bfb63-c246-41db-b0da-d3b87ddfc63d.host.control-plane.oxide.internal
+        SRV  port  5353 f6ec9c67-946a-4da3-98d5-581f72ce8bf0.host.control-plane.oxide.internal
+    name: _internal-ntp._tcp                                 (records: 3)
+        SRV  port   123 62620961-fc4a-481e-968b-f5acbac0dc63.host.control-plane.oxide.internal
+        SRV  port   123 6444f8a5-6465-4f0b-a549-1993c113569c.host.control-plane.oxide.internal
+        SRV  port   123 f10a4fb9-759f-4a65-b25e-5794ad2d07d8.host.control-plane.oxide.internal
+    name: _nameservice._tcp                                  (records: 3)
+        SRV  port  5353 427ec88f-f467-42fa-9bbb-66a91a36103c.host.control-plane.oxide.internal
+        SRV  port  5353 99e2f30b-3174-40bf-a78a-90da8abba8ca.host.control-plane.oxide.internal
+        SRV  port  5353 ea5b4030-b52f-44b2-8d70-45f15f987d01.host.control-plane.oxide.internal
+    name: _nexus._tcp                                        (records: 3)
+        SRV  port 12221 0c71b3b2-6ceb-4e8f-b020-b08675e83038.host.control-plane.oxide.internal
+        SRV  port 12221 3eeb8d49-eb1a-43f8-bb64-c2338421c2c6.host.control-plane.oxide.internal
+        SRV  port 12221 466a9f29-62bf-4e63-924a-b9efdb86afec.host.control-plane.oxide.internal
+    name: _oximeter-reader._tcp                              (records: 1)
+        SRV  port  9000 353b3b65-20f7-48c3-88f7-495bd5d31545.host.control-plane.oxide.internal
+    name: _repo-depot._tcp                                   (records: 3)
+        SRV  port 12348 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c.sled.control-plane.oxide.internal
+        SRV  port 12348 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6.sled.control-plane.oxide.internal
+        SRV  port 12348 d81c6a84-79b8-4958-ae41-ea46c9b19763.sled.control-plane.oxide.internal
+    name: ad6a3a03-8d0f-4504-99a4-cbf73d69b973.host          (records: 1)
+        AAAA fd00:1122:3344:102::25
+    name: ba4994a8-23f9-4b1a-a84f-a08d74591389.host          (records: 1)
+        AAAA fd00:1122:3344:101::24
+    name: bd354eef-d8a6-4165-9124-283fb5e46d77.host          (records: 1)
+        AAAA fd00:1122:3344:102::26
+    name: d81c6a84-79b8-4958-ae41-ea46c9b19763.sled          (records: 1)
+        AAAA fd00:1122:3344:103::1
+    name: dfac80b4-a887-430a-ae87-a4e065dba787.host          (records: 1)
+        AAAA fd00:1122:3344:101::26
+    name: e2fdefe7-95b2-4fd2-ae37-56929a06d58c.host          (records: 1)
+        AAAA fd00:1122:3344:102::27
+    name: ea5b4030-b52f-44b2-8d70-45f15f987d01.host          (records: 1)
+        AAAA fd00:1122:3344:3::1
+    name: f10a4fb9-759f-4a65-b25e-5794ad2d07d8.host          (records: 1)
+        AAAA fd00:1122:3344:103::21
+    name: f55647d4-5500-4ad3-893a-df45bd50d622.host          (records: 1)
+        AAAA fd00:1122:3344:103::25
+    name: f6ec9c67-946a-4da3-98d5-581f72ce8bf0.host          (records: 1)
+        AAAA fd00:1122:3344:103::23
+    name: ns1                                                (records: 1)
+        AAAA fd00:1122:3344:1::1
+    name: ns2                                                (records: 1)
+        AAAA fd00:1122:3344:2::1
+    name: ns3                                                (records: 1)
+        AAAA fd00:1122:3344:3::1
+
+external DNS:
+  DNS zone: "oxide.example" (unchanged)
+    name: @                                                  (records: 3)
+        NS   ns1.oxide.example
+        NS   ns2.oxide.example
+        NS   ns3.oxide.example
+    name: example-silo.sys                                   (records: 3)
+        A    192.0.2.2
+        A    192.0.2.3
+        A    192.0.2.4
+    name: ns1                                                (records: 1)
+        A    198.51.100.1
+    name: ns2                                                (records: 1)
+        A    198.51.100.2
+    name: ns3                                                (records: 1)
+        A    198.51.100.3
+
+
+
+
+> # Now we'll change the inactive slot contents of the simulated RoT. Like with
+> # the RoT bootloader, this should make the update impossible and cause the
+> # planner to fix it.
+> set ignore-impossible-mgs-updates-since now
+ignoring impossible MGS updates since <REDACTED_TIMESTAMP>
+
+> sled-update-rot 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c --slot-b 0.5.0
+set sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c RoT settings: slot b -> 0.5.0
+
+> inventory-generate
+generated inventory collection 78f72e8d-46a9-40a9-8618-602f54454d80 from configured sleds
+
+> blueprint-plan latest latest
+INFO performed noop image source checks on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, num_total: 9, num_already_artifact: 0, num_eligible: 0, num_ineligible: 9
+INFO performed noop image source checks on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, num_total: 8, num_already_artifact: 0, num_eligible: 0, num_ineligible: 8
+INFO performed noop image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 8, num_already_artifact: 0, num_eligible: 0, num_ineligible: 8
+INFO MGS-driven update impossible (will remove it and re-evaluate board), artifact_version: 1.0.0, artifact_hash: 04e4a7fdb84acca92c8fd3235e26d64ea61bef8a5f98202589fd346989c5720a, expected_transient_boot_preference: None, expected_pending_persistent_boot_preference: None, expected_persistent_boot_preference: A, expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: NoValidVersion, component: rot, sp_slot: 1, sp_type: Sled, serial_number: serial1, part_number: model1
+INFO configuring MGS-driven update, artifact_version: 1.0.0, artifact_hash: 04e4a7fdb84acca92c8fd3235e26d64ea61bef8a5f98202589fd346989c5720a, expected_transient_boot_preference: None, expected_pending_persistent_boot_preference: None, expected_persistent_boot_preference: A, expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: Version(ArtifactVersion("0.5.0")), component: rot, sp_slot: 1, sp_type: Sled, serial_number: serial1, part_number: model1
+INFO reached maximum number of pending MGS-driven updates, max: 1
+generated blueprint a5a8f242-ffa5-473c-8efd-2acf2dc0b736 based on parent blueprint d60afc57-f15d-476c-bd0f-b1071e2bb976
+planning report for blueprint a5a8f242-ffa5-473c-8efd-2acf2dc0b736:
+chicken switches:
+    add zones with mupdate override:   false
+
+* 1 pending MGS update:
+  * model1:serial1: Rot { expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: Version(ArtifactVersion("0.5.0")), expected_persistent_boot_preference: A, expected_pending_persistent_boot_preference: None, expected_transient_boot_preference: None }
+* zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+
+
+> blueprint-diff latest
+from: blueprint d60afc57-f15d-476c-bd0f-b1071e2bb976
+to:   blueprint a5a8f242-ffa5-473c-8efd-2acf2dc0b736
+
+ COCKROACHDB SETTINGS:
+    state fingerprint:::::::::::::::::   (none) (unchanged)
+    cluster.preserve_downgrade_option:   (do not modify) (unchanged)
+
+ METADATA:
+    internal DNS version:::   1 (unchanged)
+    external DNS version:::   1 (unchanged)
+    target release min gen:   1 (unchanged)
+
+ OXIMETER SETTINGS:
+    generation:   1 (unchanged)
+    read from::   SingleNode (unchanged)
+
+ PENDING MGS UPDATES:
+
+    Pending MGS-managed updates (all baseboards):
+    --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+    sp_type   slot   part_number   serial_number   artifact_hash                                                      artifact_version   details                                                                                                                                                                                                                                                                                                
+    --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+*   sled      1      model1        serial1         04e4a7fdb84acca92c8fd3235e26d64ea61bef8a5f98202589fd346989c5720a   1.0.0              - Rot { expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: NoValidVersion, expected_persistent_boot_preference: A, expected_pending_persistent_boot_preference: None, expected_transient_boot_preference: None }                   
+     └─                                                                                                                                  + Rot { expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: Version(ArtifactVersion("0.5.0")), expected_persistent_boot_preference: A, expected_pending_persistent_boot_preference: None, expected_transient_boot_preference: None }
+
+
+internal DNS:
+  DNS zone: "control-plane.oxide.internal" (unchanged)
+    name: 058fd5f9-60a8-4e11-9302-15172782e17d.host          (records: 1)
+        AAAA fd00:1122:3344:101::27
+    name: 0c71b3b2-6ceb-4e8f-b020-b08675e83038.host          (records: 1)
+        AAAA fd00:1122:3344:101::22
+    name: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c.sled          (records: 1)
+        AAAA fd00:1122:3344:102::1
+    name: 353b3b65-20f7-48c3-88f7-495bd5d31545.host          (records: 1)
+        AAAA fd00:1122:3344:102::23
+    name: 3eeb8d49-eb1a-43f8-bb64-c2338421c2c6.host          (records: 1)
+        AAAA fd00:1122:3344:103::22
+    name: 427ec88f-f467-42fa-9bbb-66a91a36103c.host          (records: 1)
+        AAAA fd00:1122:3344:2::1
+    name: 466a9f29-62bf-4e63-924a-b9efdb86afec.host          (records: 1)
+        AAAA fd00:1122:3344:102::22
+    name: 5199c033-4cf9-4ab6-8ae7-566bd7606363.host          (records: 1)
+        AAAA fd00:1122:3344:101::25
+    name: 62620961-fc4a-481e-968b-f5acbac0dc63.host          (records: 1)
+        AAAA fd00:1122:3344:102::21
+    name: 6444f8a5-6465-4f0b-a549-1993c113569c.host          (records: 1)
+        AAAA fd00:1122:3344:101::21
+    name: 694bd14f-cb24-4be4-bb19-876e79cda2c8.host          (records: 1)
+        AAAA fd00:1122:3344:103::26
+    name: 6c3ae381-04f7-41ea-b0ac-74db387dbc3a.host          (records: 1)
+        AAAA fd00:1122:3344:102::24
+    name: 75b220ba-a0f4-4872-8202-dc7c87f062d0.host          (records: 1)
+        AAAA fd00:1122:3344:103::24
+    name: 7c252b64-c5af-4ec1-989e-9a03f3b0f111.host          (records: 1)
+        AAAA fd00:1122:3344:103::27
+    name: 803bfb63-c246-41db-b0da-d3b87ddfc63d.host          (records: 1)
+        AAAA fd00:1122:3344:101::23
+    name: 86a22a56-0168-453d-9df1-cb2a7c64b5d3.host          (records: 1)
+        AAAA fd00:1122:3344:102::28
+    name: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6.sled          (records: 1)
+        AAAA fd00:1122:3344:101::1
+    name: 99e2f30b-3174-40bf-a78a-90da8abba8ca.host          (records: 1)
+        AAAA fd00:1122:3344:1::1
+    name: @                                                  (records: 3)
+        NS   ns1.control-plane.oxide.internal
+        NS   ns2.control-plane.oxide.internal
+        NS   ns3.control-plane.oxide.internal
+    name: _clickhouse-admin-single-server._tcp               (records: 1)
+        SRV  port  8888 353b3b65-20f7-48c3-88f7-495bd5d31545.host.control-plane.oxide.internal
+    name: _clickhouse-native._tcp                            (records: 1)
+        SRV  port  9000 353b3b65-20f7-48c3-88f7-495bd5d31545.host.control-plane.oxide.internal
+    name: _clickhouse._tcp                                   (records: 1)
+        SRV  port  8123 353b3b65-20f7-48c3-88f7-495bd5d31545.host.control-plane.oxide.internal
+    name: _crucible-pantry._tcp                              (records: 3)
+        SRV  port 17000 75b220ba-a0f4-4872-8202-dc7c87f062d0.host.control-plane.oxide.internal
+        SRV  port 17000 ad6a3a03-8d0f-4504-99a4-cbf73d69b973.host.control-plane.oxide.internal
+        SRV  port 17000 ba4994a8-23f9-4b1a-a84f-a08d74591389.host.control-plane.oxide.internal
+    name: _crucible._tcp.058fd5f9-60a8-4e11-9302-15172782e17d (records: 1)
+        SRV  port 32345 058fd5f9-60a8-4e11-9302-15172782e17d.host.control-plane.oxide.internal
+    name: _crucible._tcp.5199c033-4cf9-4ab6-8ae7-566bd7606363 (records: 1)
+        SRV  port 32345 5199c033-4cf9-4ab6-8ae7-566bd7606363.host.control-plane.oxide.internal
+    name: _crucible._tcp.694bd14f-cb24-4be4-bb19-876e79cda2c8 (records: 1)
+        SRV  port 32345 694bd14f-cb24-4be4-bb19-876e79cda2c8.host.control-plane.oxide.internal
+    name: _crucible._tcp.7c252b64-c5af-4ec1-989e-9a03f3b0f111 (records: 1)
+        SRV  port 32345 7c252b64-c5af-4ec1-989e-9a03f3b0f111.host.control-plane.oxide.internal
+    name: _crucible._tcp.86a22a56-0168-453d-9df1-cb2a7c64b5d3 (records: 1)
+        SRV  port 32345 86a22a56-0168-453d-9df1-cb2a7c64b5d3.host.control-plane.oxide.internal
+    name: _crucible._tcp.bd354eef-d8a6-4165-9124-283fb5e46d77 (records: 1)
+        SRV  port 32345 bd354eef-d8a6-4165-9124-283fb5e46d77.host.control-plane.oxide.internal
+    name: _crucible._tcp.dfac80b4-a887-430a-ae87-a4e065dba787 (records: 1)
+        SRV  port 32345 dfac80b4-a887-430a-ae87-a4e065dba787.host.control-plane.oxide.internal
+    name: _crucible._tcp.e2fdefe7-95b2-4fd2-ae37-56929a06d58c (records: 1)
+        SRV  port 32345 e2fdefe7-95b2-4fd2-ae37-56929a06d58c.host.control-plane.oxide.internal
+    name: _crucible._tcp.f55647d4-5500-4ad3-893a-df45bd50d622 (records: 1)
+        SRV  port 32345 f55647d4-5500-4ad3-893a-df45bd50d622.host.control-plane.oxide.internal
+    name: _external-dns._tcp                                 (records: 3)
+        SRV  port  5353 6c3ae381-04f7-41ea-b0ac-74db387dbc3a.host.control-plane.oxide.internal
+        SRV  port  5353 803bfb63-c246-41db-b0da-d3b87ddfc63d.host.control-plane.oxide.internal
+        SRV  port  5353 f6ec9c67-946a-4da3-98d5-581f72ce8bf0.host.control-plane.oxide.internal
+    name: _internal-ntp._tcp                                 (records: 3)
+        SRV  port   123 62620961-fc4a-481e-968b-f5acbac0dc63.host.control-plane.oxide.internal
+        SRV  port   123 6444f8a5-6465-4f0b-a549-1993c113569c.host.control-plane.oxide.internal
+        SRV  port   123 f10a4fb9-759f-4a65-b25e-5794ad2d07d8.host.control-plane.oxide.internal
+    name: _nameservice._tcp                                  (records: 3)
+        SRV  port  5353 427ec88f-f467-42fa-9bbb-66a91a36103c.host.control-plane.oxide.internal
+        SRV  port  5353 99e2f30b-3174-40bf-a78a-90da8abba8ca.host.control-plane.oxide.internal
+        SRV  port  5353 ea5b4030-b52f-44b2-8d70-45f15f987d01.host.control-plane.oxide.internal
+    name: _nexus._tcp                                        (records: 3)
+        SRV  port 12221 0c71b3b2-6ceb-4e8f-b020-b08675e83038.host.control-plane.oxide.internal
+        SRV  port 12221 3eeb8d49-eb1a-43f8-bb64-c2338421c2c6.host.control-plane.oxide.internal
+        SRV  port 12221 466a9f29-62bf-4e63-924a-b9efdb86afec.host.control-plane.oxide.internal
+    name: _oximeter-reader._tcp                              (records: 1)
+        SRV  port  9000 353b3b65-20f7-48c3-88f7-495bd5d31545.host.control-plane.oxide.internal
+    name: _repo-depot._tcp                                   (records: 3)
+        SRV  port 12348 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c.sled.control-plane.oxide.internal
+        SRV  port 12348 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6.sled.control-plane.oxide.internal
+        SRV  port 12348 d81c6a84-79b8-4958-ae41-ea46c9b19763.sled.control-plane.oxide.internal
+    name: ad6a3a03-8d0f-4504-99a4-cbf73d69b973.host          (records: 1)
+        AAAA fd00:1122:3344:102::25
+    name: ba4994a8-23f9-4b1a-a84f-a08d74591389.host          (records: 1)
+        AAAA fd00:1122:3344:101::24
+    name: bd354eef-d8a6-4165-9124-283fb5e46d77.host          (records: 1)
+        AAAA fd00:1122:3344:102::26
+    name: d81c6a84-79b8-4958-ae41-ea46c9b19763.sled          (records: 1)
+        AAAA fd00:1122:3344:103::1
+    name: dfac80b4-a887-430a-ae87-a4e065dba787.host          (records: 1)
+        AAAA fd00:1122:3344:101::26
+    name: e2fdefe7-95b2-4fd2-ae37-56929a06d58c.host          (records: 1)
+        AAAA fd00:1122:3344:102::27
+    name: ea5b4030-b52f-44b2-8d70-45f15f987d01.host          (records: 1)
+        AAAA fd00:1122:3344:3::1
+    name: f10a4fb9-759f-4a65-b25e-5794ad2d07d8.host          (records: 1)
+        AAAA fd00:1122:3344:103::21
+    name: f55647d4-5500-4ad3-893a-df45bd50d622.host          (records: 1)
+        AAAA fd00:1122:3344:103::25
+    name: f6ec9c67-946a-4da3-98d5-581f72ce8bf0.host          (records: 1)
+        AAAA fd00:1122:3344:103::23
+    name: ns1                                                (records: 1)
+        AAAA fd00:1122:3344:1::1
+    name: ns2                                                (records: 1)
+        AAAA fd00:1122:3344:2::1
+    name: ns3                                                (records: 1)
+        AAAA fd00:1122:3344:3::1
+
+external DNS:
+  DNS zone: "oxide.example" (unchanged)
+    name: @                                                  (records: 3)
+        NS   ns1.oxide.example
+        NS   ns2.oxide.example
+        NS   ns3.oxide.example
+    name: example-silo.sys                                   (records: 3)
+        A    192.0.2.2
+        A    192.0.2.3
+        A    192.0.2.4
+    name: ns1                                                (records: 1)
+        A    198.51.100.1
+    name: ns2                                                (records: 1)
+        A    198.51.100.2
+    name: ns3                                                (records: 1)
+        A    198.51.100.3
+
+
+
+
+> # Now simulate the update completing successfully.
+> # Like before, we should see a pending SP update for this sled.
+> sled-update-rot 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c --slot-a 1.0.0
+set sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c RoT settings: slot a -> 1.0.0
+
+> inventory-generate
+generated inventory collection 39363465-89ae-4ac2-9be1-099068da9d45 from configured sleds
+
+> blueprint-plan latest latest
+INFO performed noop image source checks on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, num_total: 9, num_already_artifact: 0, num_eligible: 0, num_ineligible: 9
+INFO performed noop image source checks on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, num_total: 8, num_already_artifact: 0, num_eligible: 0, num_ineligible: 8
+INFO performed noop image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 8, num_already_artifact: 0, num_eligible: 0, num_ineligible: 8
+INFO MGS-driven update completed (will remove it and re-evaluate board), artifact_version: 1.0.0, artifact_hash: 04e4a7fdb84acca92c8fd3235e26d64ea61bef8a5f98202589fd346989c5720a, expected_transient_boot_preference: None, expected_pending_persistent_boot_preference: None, expected_persistent_boot_preference: A, expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: Version(ArtifactVersion("0.5.0")), component: rot, sp_slot: 1, sp_type: Sled, serial_number: serial1, part_number: model1
+INFO configuring MGS-driven update, artifact_version: 1.0.0, artifact_hash: 7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670, expected_inactive_version: NoValidVersion, expected_active_version: 0.0.1, component: sp, sp_slot: 1, sp_type: Sled, serial_number: serial1, part_number: model1
+INFO reached maximum number of pending MGS-driven updates, max: 1
+generated blueprint 626487fa-7139-45ec-8416-902271fc730b based on parent blueprint a5a8f242-ffa5-473c-8efd-2acf2dc0b736
+planning report for blueprint 626487fa-7139-45ec-8416-902271fc730b:
+chicken switches:
+    add zones with mupdate override:   false
+
+* 1 pending MGS update:
+  * model1:serial1: Sp { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: NoValidVersion }
+* zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+
+
+> blueprint-diff latest
+from: blueprint a5a8f242-ffa5-473c-8efd-2acf2dc0b736
+to:   blueprint 626487fa-7139-45ec-8416-902271fc730b
+
+ COCKROACHDB SETTINGS:
+    state fingerprint:::::::::::::::::   (none) (unchanged)
+    cluster.preserve_downgrade_option:   (do not modify) (unchanged)
+
+ METADATA:
+    internal DNS version:::   1 (unchanged)
+    external DNS version:::   1 (unchanged)
+    target release min gen:   1 (unchanged)
+
+ OXIMETER SETTINGS:
+    generation:   1 (unchanged)
+    read from::   SingleNode (unchanged)
+
+ PENDING MGS UPDATES:
+
+    Pending MGS-managed updates (all baseboards):
+    ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+    sp_type   slot   part_number   serial_number   artifact_hash                                                        artifact_version   details                                                                                                                                                                                                                                                                                                
+    ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+*   sled      1      model1        serial1         - 04e4a7fdb84acca92c8fd3235e26d64ea61bef8a5f98202589fd346989c5720a   1.0.0              - Rot { expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: Version(ArtifactVersion("0.5.0")), expected_persistent_boot_preference: A, expected_pending_persistent_boot_preference: None, expected_transient_boot_preference: None }
+     └─                                            + 7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670                      + Sp { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: NoValidVersion }                                                                                                                                                                                                  
+
+
+internal DNS:
+  DNS zone: "control-plane.oxide.internal" (unchanged)
+    name: 058fd5f9-60a8-4e11-9302-15172782e17d.host          (records: 1)
+        AAAA fd00:1122:3344:101::27
+    name: 0c71b3b2-6ceb-4e8f-b020-b08675e83038.host          (records: 1)
+        AAAA fd00:1122:3344:101::22
+    name: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c.sled          (records: 1)
+        AAAA fd00:1122:3344:102::1
+    name: 353b3b65-20f7-48c3-88f7-495bd5d31545.host          (records: 1)
+        AAAA fd00:1122:3344:102::23
+    name: 3eeb8d49-eb1a-43f8-bb64-c2338421c2c6.host          (records: 1)
+        AAAA fd00:1122:3344:103::22
+    name: 427ec88f-f467-42fa-9bbb-66a91a36103c.host          (records: 1)
+        AAAA fd00:1122:3344:2::1
+    name: 466a9f29-62bf-4e63-924a-b9efdb86afec.host          (records: 1)
+        AAAA fd00:1122:3344:102::22
+    name: 5199c033-4cf9-4ab6-8ae7-566bd7606363.host          (records: 1)
+        AAAA fd00:1122:3344:101::25
+    name: 62620961-fc4a-481e-968b-f5acbac0dc63.host          (records: 1)
+        AAAA fd00:1122:3344:102::21
+    name: 6444f8a5-6465-4f0b-a549-1993c113569c.host          (records: 1)
+        AAAA fd00:1122:3344:101::21
+    name: 694bd14f-cb24-4be4-bb19-876e79cda2c8.host          (records: 1)
+        AAAA fd00:1122:3344:103::26
+    name: 6c3ae381-04f7-41ea-b0ac-74db387dbc3a.host          (records: 1)
+        AAAA fd00:1122:3344:102::24
+    name: 75b220ba-a0f4-4872-8202-dc7c87f062d0.host          (records: 1)
+        AAAA fd00:1122:3344:103::24
+    name: 7c252b64-c5af-4ec1-989e-9a03f3b0f111.host          (records: 1)
+        AAAA fd00:1122:3344:103::27
+    name: 803bfb63-c246-41db-b0da-d3b87ddfc63d.host          (records: 1)
+        AAAA fd00:1122:3344:101::23
+    name: 86a22a56-0168-453d-9df1-cb2a7c64b5d3.host          (records: 1)
+        AAAA fd00:1122:3344:102::28
+    name: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6.sled          (records: 1)
+        AAAA fd00:1122:3344:101::1
+    name: 99e2f30b-3174-40bf-a78a-90da8abba8ca.host          (records: 1)
+        AAAA fd00:1122:3344:1::1
+    name: @                                                  (records: 3)
+        NS   ns1.control-plane.oxide.internal
+        NS   ns2.control-plane.oxide.internal
+        NS   ns3.control-plane.oxide.internal
+    name: _clickhouse-admin-single-server._tcp               (records: 1)
+        SRV  port  8888 353b3b65-20f7-48c3-88f7-495bd5d31545.host.control-plane.oxide.internal
+    name: _clickhouse-native._tcp                            (records: 1)
+        SRV  port  9000 353b3b65-20f7-48c3-88f7-495bd5d31545.host.control-plane.oxide.internal
+    name: _clickhouse._tcp                                   (records: 1)
+        SRV  port  8123 353b3b65-20f7-48c3-88f7-495bd5d31545.host.control-plane.oxide.internal
+    name: _crucible-pantry._tcp                              (records: 3)
+        SRV  port 17000 75b220ba-a0f4-4872-8202-dc7c87f062d0.host.control-plane.oxide.internal
+        SRV  port 17000 ad6a3a03-8d0f-4504-99a4-cbf73d69b973.host.control-plane.oxide.internal
+        SRV  port 17000 ba4994a8-23f9-4b1a-a84f-a08d74591389.host.control-plane.oxide.internal
+    name: _crucible._tcp.058fd5f9-60a8-4e11-9302-15172782e17d (records: 1)
+        SRV  port 32345 058fd5f9-60a8-4e11-9302-15172782e17d.host.control-plane.oxide.internal
+    name: _crucible._tcp.5199c033-4cf9-4ab6-8ae7-566bd7606363 (records: 1)
+        SRV  port 32345 5199c033-4cf9-4ab6-8ae7-566bd7606363.host.control-plane.oxide.internal
+    name: _crucible._tcp.694bd14f-cb24-4be4-bb19-876e79cda2c8 (records: 1)
+        SRV  port 32345 694bd14f-cb24-4be4-bb19-876e79cda2c8.host.control-plane.oxide.internal
+    name: _crucible._tcp.7c252b64-c5af-4ec1-989e-9a03f3b0f111 (records: 1)
+        SRV  port 32345 7c252b64-c5af-4ec1-989e-9a03f3b0f111.host.control-plane.oxide.internal
+    name: _crucible._tcp.86a22a56-0168-453d-9df1-cb2a7c64b5d3 (records: 1)
+        SRV  port 32345 86a22a56-0168-453d-9df1-cb2a7c64b5d3.host.control-plane.oxide.internal
+    name: _crucible._tcp.bd354eef-d8a6-4165-9124-283fb5e46d77 (records: 1)
+        SRV  port 32345 bd354eef-d8a6-4165-9124-283fb5e46d77.host.control-plane.oxide.internal
+    name: _crucible._tcp.dfac80b4-a887-430a-ae87-a4e065dba787 (records: 1)
+        SRV  port 32345 dfac80b4-a887-430a-ae87-a4e065dba787.host.control-plane.oxide.internal
+    name: _crucible._tcp.e2fdefe7-95b2-4fd2-ae37-56929a06d58c (records: 1)
+        SRV  port 32345 e2fdefe7-95b2-4fd2-ae37-56929a06d58c.host.control-plane.oxide.internal
+    name: _crucible._tcp.f55647d4-5500-4ad3-893a-df45bd50d622 (records: 1)
+        SRV  port 32345 f55647d4-5500-4ad3-893a-df45bd50d622.host.control-plane.oxide.internal
+    name: _external-dns._tcp                                 (records: 3)
+        SRV  port  5353 6c3ae381-04f7-41ea-b0ac-74db387dbc3a.host.control-plane.oxide.internal
+        SRV  port  5353 803bfb63-c246-41db-b0da-d3b87ddfc63d.host.control-plane.oxide.internal
+        SRV  port  5353 f6ec9c67-946a-4da3-98d5-581f72ce8bf0.host.control-plane.oxide.internal
+    name: _internal-ntp._tcp                                 (records: 3)
+        SRV  port   123 62620961-fc4a-481e-968b-f5acbac0dc63.host.control-plane.oxide.internal
+        SRV  port   123 6444f8a5-6465-4f0b-a549-1993c113569c.host.control-plane.oxide.internal
+        SRV  port   123 f10a4fb9-759f-4a65-b25e-5794ad2d07d8.host.control-plane.oxide.internal
+    name: _nameservice._tcp                                  (records: 3)
+        SRV  port  5353 427ec88f-f467-42fa-9bbb-66a91a36103c.host.control-plane.oxide.internal
+        SRV  port  5353 99e2f30b-3174-40bf-a78a-90da8abba8ca.host.control-plane.oxide.internal
+        SRV  port  5353 ea5b4030-b52f-44b2-8d70-45f15f987d01.host.control-plane.oxide.internal
+    name: _nexus._tcp                                        (records: 3)
+        SRV  port 12221 0c71b3b2-6ceb-4e8f-b020-b08675e83038.host.control-plane.oxide.internal
+        SRV  port 12221 3eeb8d49-eb1a-43f8-bb64-c2338421c2c6.host.control-plane.oxide.internal
+        SRV  port 12221 466a9f29-62bf-4e63-924a-b9efdb86afec.host.control-plane.oxide.internal
+    name: _oximeter-reader._tcp                              (records: 1)
+        SRV  port  9000 353b3b65-20f7-48c3-88f7-495bd5d31545.host.control-plane.oxide.internal
+    name: _repo-depot._tcp                                   (records: 3)
+        SRV  port 12348 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c.sled.control-plane.oxide.internal
+        SRV  port 12348 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6.sled.control-plane.oxide.internal
+        SRV  port 12348 d81c6a84-79b8-4958-ae41-ea46c9b19763.sled.control-plane.oxide.internal
+    name: ad6a3a03-8d0f-4504-99a4-cbf73d69b973.host          (records: 1)
+        AAAA fd00:1122:3344:102::25
+    name: ba4994a8-23f9-4b1a-a84f-a08d74591389.host          (records: 1)
+        AAAA fd00:1122:3344:101::24
+    name: bd354eef-d8a6-4165-9124-283fb5e46d77.host          (records: 1)
+        AAAA fd00:1122:3344:102::26
+    name: d81c6a84-79b8-4958-ae41-ea46c9b19763.sled          (records: 1)
+        AAAA fd00:1122:3344:103::1
+    name: dfac80b4-a887-430a-ae87-a4e065dba787.host          (records: 1)
+        AAAA fd00:1122:3344:101::26
+    name: e2fdefe7-95b2-4fd2-ae37-56929a06d58c.host          (records: 1)
+        AAAA fd00:1122:3344:102::27
+    name: ea5b4030-b52f-44b2-8d70-45f15f987d01.host          (records: 1)
+        AAAA fd00:1122:3344:3::1
+    name: f10a4fb9-759f-4a65-b25e-5794ad2d07d8.host          (records: 1)
+        AAAA fd00:1122:3344:103::21
+    name: f55647d4-5500-4ad3-893a-df45bd50d622.host          (records: 1)
+        AAAA fd00:1122:3344:103::25
+    name: f6ec9c67-946a-4da3-98d5-581f72ce8bf0.host          (records: 1)
+        AAAA fd00:1122:3344:103::23
+    name: ns1                                                (records: 1)
+        AAAA fd00:1122:3344:1::1
+    name: ns2                                                (records: 1)
+        AAAA fd00:1122:3344:2::1
+    name: ns3                                                (records: 1)
+        AAAA fd00:1122:3344:3::1
+
+external DNS:
+  DNS zone: "oxide.example" (unchanged)
+    name: @                                                  (records: 3)
+        NS   ns1.oxide.example
+        NS   ns2.oxide.example
+        NS   ns3.oxide.example
+    name: example-silo.sys                                   (records: 3)
+        A    192.0.2.2
+        A    192.0.2.3
+        A    192.0.2.4
+    name: ns1                                                (records: 1)
+        A    198.51.100.1
+    name: ns2                                                (records: 1)
+        A    198.51.100.2
+    name: ns3                                                (records: 1)
+        A    198.51.100.3
+
+
+
+
+> # We repeat the same procedure with the SP. Like with the RoT, this should make
+> # the update impossible and cause the planner to fix it.
 > set ignore-impossible-mgs-updates-since now
 ignoring impossible MGS updates since <REDACTED_TIMESTAMP>
 
@@ -768,19 +1918,17 @@ ignoring impossible MGS updates since <REDACTED_TIMESTAMP>
 set sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c SP versions: inactive -> 0.5.0
 
 > inventory-generate
-generated inventory collection 61f451b3-2121-4ed6-91c7-a550054f6c21 from configured sleds
+generated inventory collection 04bc9001-0836-4fec-b9cb-9d4760caf8b4 from configured sleds
 
-> blueprint-plan af934083-59b5-4bf6-8966-6fb5292c29e1 61f451b3-2121-4ed6-91c7-a550054f6c21
+> blueprint-plan latest latest
 INFO performed noop image source checks on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, num_total: 9, num_already_artifact: 0, num_eligible: 0, num_ineligible: 9
 INFO performed noop image source checks on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, num_total: 8, num_already_artifact: 0, num_eligible: 0, num_ineligible: 8
 INFO performed noop image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 8, num_already_artifact: 0, num_eligible: 0, num_ineligible: 8
 INFO MGS-driven update impossible (will remove it and re-evaluate board), artifact_version: 1.0.0, artifact_hash: 7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670, expected_inactive_version: NoValidVersion, expected_active_version: 0.0.1, component: sp, sp_slot: 1, sp_type: Sled, serial_number: serial1, part_number: model1
-WARN cannot configure RoT bootloader update for board (missing sign in stage0 caboose from inventory), serial_number: serial1, part_number: model1
-WARN cannot configure RoT update for board (missing sign in caboose from inventory), serial_number: serial1, part_number: model1
 INFO configuring MGS-driven update, artifact_version: 1.0.0, artifact_hash: 7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670, expected_inactive_version: Version(ArtifactVersion("0.5.0")), expected_active_version: 0.0.1, component: sp, sp_slot: 1, sp_type: Sled, serial_number: serial1, part_number: model1
 INFO reached maximum number of pending MGS-driven updates, max: 1
-generated blueprint df06bb57-ad42-4431-9206-abff322896c7 based on parent blueprint af934083-59b5-4bf6-8966-6fb5292c29e1
-planning report for blueprint df06bb57-ad42-4431-9206-abff322896c7:
+generated blueprint c1a0d242-9160-40f4-96ae-61f8f40a0b1b based on parent blueprint 626487fa-7139-45ec-8416-902271fc730b
+planning report for blueprint c1a0d242-9160-40f4-96ae-61f8f40a0b1b:
 chicken switches:
     add zones with mupdate override:   false
 
@@ -789,9 +1937,9 @@ chicken switches:
 * zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
 
 
-> blueprint-diff af934083-59b5-4bf6-8966-6fb5292c29e1 df06bb57-ad42-4431-9206-abff322896c7
-from: blueprint af934083-59b5-4bf6-8966-6fb5292c29e1
-to:   blueprint df06bb57-ad42-4431-9206-abff322896c7
+> blueprint-diff latest
+from: blueprint 626487fa-7139-45ec-8416-902271fc730b
+to:   blueprint c1a0d242-9160-40f4-96ae-61f8f40a0b1b
 
  COCKROACHDB SETTINGS:
     state fingerprint:::::::::::::::::   (none) (unchanged)
@@ -955,42 +2103,36 @@ external DNS:
 
 
 
-> # Now simulate the update completing successfully.
-> # Another planning step should try to update the last sled.
+> # Let's simulate the successful SP update as well.
+> # A few more planning steps should try to update the last sled.
 > sled-update-sp 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c --active 1.0.0
 set sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c SP versions: active -> 1.0.0
 
 > inventory-generate
-generated inventory collection b1bda47d-2c19-4fba-96e3-d9df28db7436 from configured sleds
+generated inventory collection 08abe624-4b5f-491c-90cb-d74a84e4ba3e from configured sleds
 
-> blueprint-plan df06bb57-ad42-4431-9206-abff322896c7 b1bda47d-2c19-4fba-96e3-d9df28db7436
+> blueprint-plan latest latest
 INFO performed noop image source checks on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, num_total: 9, num_already_artifact: 0, num_eligible: 0, num_ineligible: 9
 INFO performed noop image source checks on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, num_total: 8, num_already_artifact: 0, num_eligible: 0, num_ineligible: 8
 INFO performed noop image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 8, num_already_artifact: 0, num_eligible: 0, num_ineligible: 8
 INFO MGS-driven update completed (will remove it and re-evaluate board), artifact_version: 1.0.0, artifact_hash: 7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670, expected_inactive_version: Version(ArtifactVersion("0.5.0")), expected_active_version: 0.0.1, component: sp, sp_slot: 1, sp_type: Sled, serial_number: serial1, part_number: model1
-WARN cannot configure RoT bootloader update for board (missing sign in stage0 caboose from inventory), serial_number: serial1, part_number: model1
-WARN cannot configure RoT update for board (missing sign in caboose from inventory), serial_number: serial1, part_number: model1
 INFO skipping board for MGS-driven update, serial_number: serial1, part_number: model1
-WARN cannot configure RoT bootloader update for board (missing sign in stage0 caboose from inventory), serial_number: serial0, part_number: model0
-WARN cannot configure RoT update for board (missing sign in caboose from inventory), serial_number: serial0, part_number: model0
 INFO skipping board for MGS-driven update, serial_number: serial0, part_number: model0
-WARN cannot configure RoT bootloader update for board (missing sign in stage0 caboose from inventory), serial_number: serial2, part_number: model2
-WARN cannot configure RoT update for board (missing sign in caboose from inventory), serial_number: serial2, part_number: model2
-INFO configuring MGS-driven update, artifact_version: 1.0.0, artifact_hash: 7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670, expected_inactive_version: NoValidVersion, expected_active_version: 0.0.1, component: sp, sp_slot: 2, sp_type: Sled, serial_number: serial2, part_number: model2
+INFO configuring MGS-driven update, artifact_version: 1.0.0, artifact_hash: 005ea358f1cd316df42465b1e3a0334ea22cc0c0442cf9ddf9b42fbf49780236, expected_stage0_next_version: NoValidVersion, expected_stage0_version: 0.0.1, component: rot_bootloader, sp_slot: 2, sp_type: Sled, serial_number: serial2, part_number: model2
 INFO ran out of boards for MGS-driven update
-generated blueprint 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba based on parent blueprint df06bb57-ad42-4431-9206-abff322896c7
-planning report for blueprint 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba:
+generated blueprint afb09faf-a586-4483-9289-04d4f1d8ba23 based on parent blueprint c1a0d242-9160-40f4-96ae-61f8f40a0b1b
+planning report for blueprint afb09faf-a586-4483-9289-04d4f1d8ba23:
 chicken switches:
     add zones with mupdate override:   false
 
 * 1 pending MGS update:
-  * model2:serial2: Sp { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: NoValidVersion }
+  * model2:serial2: RotBootloader { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: NoValidVersion }
 * zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
 
 
-> blueprint-diff df06bb57-ad42-4431-9206-abff322896c7 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba
-from: blueprint df06bb57-ad42-4431-9206-abff322896c7
-to:   blueprint 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba
+> blueprint-diff latest
+from: blueprint c1a0d242-9160-40f4-96ae-61f8f40a0b1b
+to:   blueprint afb09faf-a586-4483-9289-04d4f1d8ba23
 
  COCKROACHDB SETTINGS:
     state fingerprint:::::::::::::::::   (none) (unchanged)
@@ -1012,7 +2154,389 @@ to:   blueprint 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba
     sp_type   slot   part_number   serial_number   artifact_hash                                                      artifact_version   details                                                                                                               
     -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 -   sled      1      model1        serial1         7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670   1.0.0              Sp { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: Version(ArtifactVersion("0.5.0")) }
-+   sled      2      model2        serial2         7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670   1.0.0              Sp { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: NoValidVersion }                   
++   sled      2      model2        serial2         005ea358f1cd316df42465b1e3a0334ea22cc0c0442cf9ddf9b42fbf49780236   1.0.0              RotBootloader { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: NoValidVersion }     
+
+
+internal DNS:
+  DNS zone: "control-plane.oxide.internal" (unchanged)
+    name: 058fd5f9-60a8-4e11-9302-15172782e17d.host          (records: 1)
+        AAAA fd00:1122:3344:101::27
+    name: 0c71b3b2-6ceb-4e8f-b020-b08675e83038.host          (records: 1)
+        AAAA fd00:1122:3344:101::22
+    name: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c.sled          (records: 1)
+        AAAA fd00:1122:3344:102::1
+    name: 353b3b65-20f7-48c3-88f7-495bd5d31545.host          (records: 1)
+        AAAA fd00:1122:3344:102::23
+    name: 3eeb8d49-eb1a-43f8-bb64-c2338421c2c6.host          (records: 1)
+        AAAA fd00:1122:3344:103::22
+    name: 427ec88f-f467-42fa-9bbb-66a91a36103c.host          (records: 1)
+        AAAA fd00:1122:3344:2::1
+    name: 466a9f29-62bf-4e63-924a-b9efdb86afec.host          (records: 1)
+        AAAA fd00:1122:3344:102::22
+    name: 5199c033-4cf9-4ab6-8ae7-566bd7606363.host          (records: 1)
+        AAAA fd00:1122:3344:101::25
+    name: 62620961-fc4a-481e-968b-f5acbac0dc63.host          (records: 1)
+        AAAA fd00:1122:3344:102::21
+    name: 6444f8a5-6465-4f0b-a549-1993c113569c.host          (records: 1)
+        AAAA fd00:1122:3344:101::21
+    name: 694bd14f-cb24-4be4-bb19-876e79cda2c8.host          (records: 1)
+        AAAA fd00:1122:3344:103::26
+    name: 6c3ae381-04f7-41ea-b0ac-74db387dbc3a.host          (records: 1)
+        AAAA fd00:1122:3344:102::24
+    name: 75b220ba-a0f4-4872-8202-dc7c87f062d0.host          (records: 1)
+        AAAA fd00:1122:3344:103::24
+    name: 7c252b64-c5af-4ec1-989e-9a03f3b0f111.host          (records: 1)
+        AAAA fd00:1122:3344:103::27
+    name: 803bfb63-c246-41db-b0da-d3b87ddfc63d.host          (records: 1)
+        AAAA fd00:1122:3344:101::23
+    name: 86a22a56-0168-453d-9df1-cb2a7c64b5d3.host          (records: 1)
+        AAAA fd00:1122:3344:102::28
+    name: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6.sled          (records: 1)
+        AAAA fd00:1122:3344:101::1
+    name: 99e2f30b-3174-40bf-a78a-90da8abba8ca.host          (records: 1)
+        AAAA fd00:1122:3344:1::1
+    name: @                                                  (records: 3)
+        NS   ns1.control-plane.oxide.internal
+        NS   ns2.control-plane.oxide.internal
+        NS   ns3.control-plane.oxide.internal
+    name: _clickhouse-admin-single-server._tcp               (records: 1)
+        SRV  port  8888 353b3b65-20f7-48c3-88f7-495bd5d31545.host.control-plane.oxide.internal
+    name: _clickhouse-native._tcp                            (records: 1)
+        SRV  port  9000 353b3b65-20f7-48c3-88f7-495bd5d31545.host.control-plane.oxide.internal
+    name: _clickhouse._tcp                                   (records: 1)
+        SRV  port  8123 353b3b65-20f7-48c3-88f7-495bd5d31545.host.control-plane.oxide.internal
+    name: _crucible-pantry._tcp                              (records: 3)
+        SRV  port 17000 75b220ba-a0f4-4872-8202-dc7c87f062d0.host.control-plane.oxide.internal
+        SRV  port 17000 ad6a3a03-8d0f-4504-99a4-cbf73d69b973.host.control-plane.oxide.internal
+        SRV  port 17000 ba4994a8-23f9-4b1a-a84f-a08d74591389.host.control-plane.oxide.internal
+    name: _crucible._tcp.058fd5f9-60a8-4e11-9302-15172782e17d (records: 1)
+        SRV  port 32345 058fd5f9-60a8-4e11-9302-15172782e17d.host.control-plane.oxide.internal
+    name: _crucible._tcp.5199c033-4cf9-4ab6-8ae7-566bd7606363 (records: 1)
+        SRV  port 32345 5199c033-4cf9-4ab6-8ae7-566bd7606363.host.control-plane.oxide.internal
+    name: _crucible._tcp.694bd14f-cb24-4be4-bb19-876e79cda2c8 (records: 1)
+        SRV  port 32345 694bd14f-cb24-4be4-bb19-876e79cda2c8.host.control-plane.oxide.internal
+    name: _crucible._tcp.7c252b64-c5af-4ec1-989e-9a03f3b0f111 (records: 1)
+        SRV  port 32345 7c252b64-c5af-4ec1-989e-9a03f3b0f111.host.control-plane.oxide.internal
+    name: _crucible._tcp.86a22a56-0168-453d-9df1-cb2a7c64b5d3 (records: 1)
+        SRV  port 32345 86a22a56-0168-453d-9df1-cb2a7c64b5d3.host.control-plane.oxide.internal
+    name: _crucible._tcp.bd354eef-d8a6-4165-9124-283fb5e46d77 (records: 1)
+        SRV  port 32345 bd354eef-d8a6-4165-9124-283fb5e46d77.host.control-plane.oxide.internal
+    name: _crucible._tcp.dfac80b4-a887-430a-ae87-a4e065dba787 (records: 1)
+        SRV  port 32345 dfac80b4-a887-430a-ae87-a4e065dba787.host.control-plane.oxide.internal
+    name: _crucible._tcp.e2fdefe7-95b2-4fd2-ae37-56929a06d58c (records: 1)
+        SRV  port 32345 e2fdefe7-95b2-4fd2-ae37-56929a06d58c.host.control-plane.oxide.internal
+    name: _crucible._tcp.f55647d4-5500-4ad3-893a-df45bd50d622 (records: 1)
+        SRV  port 32345 f55647d4-5500-4ad3-893a-df45bd50d622.host.control-plane.oxide.internal
+    name: _external-dns._tcp                                 (records: 3)
+        SRV  port  5353 6c3ae381-04f7-41ea-b0ac-74db387dbc3a.host.control-plane.oxide.internal
+        SRV  port  5353 803bfb63-c246-41db-b0da-d3b87ddfc63d.host.control-plane.oxide.internal
+        SRV  port  5353 f6ec9c67-946a-4da3-98d5-581f72ce8bf0.host.control-plane.oxide.internal
+    name: _internal-ntp._tcp                                 (records: 3)
+        SRV  port   123 62620961-fc4a-481e-968b-f5acbac0dc63.host.control-plane.oxide.internal
+        SRV  port   123 6444f8a5-6465-4f0b-a549-1993c113569c.host.control-plane.oxide.internal
+        SRV  port   123 f10a4fb9-759f-4a65-b25e-5794ad2d07d8.host.control-plane.oxide.internal
+    name: _nameservice._tcp                                  (records: 3)
+        SRV  port  5353 427ec88f-f467-42fa-9bbb-66a91a36103c.host.control-plane.oxide.internal
+        SRV  port  5353 99e2f30b-3174-40bf-a78a-90da8abba8ca.host.control-plane.oxide.internal
+        SRV  port  5353 ea5b4030-b52f-44b2-8d70-45f15f987d01.host.control-plane.oxide.internal
+    name: _nexus._tcp                                        (records: 3)
+        SRV  port 12221 0c71b3b2-6ceb-4e8f-b020-b08675e83038.host.control-plane.oxide.internal
+        SRV  port 12221 3eeb8d49-eb1a-43f8-bb64-c2338421c2c6.host.control-plane.oxide.internal
+        SRV  port 12221 466a9f29-62bf-4e63-924a-b9efdb86afec.host.control-plane.oxide.internal
+    name: _oximeter-reader._tcp                              (records: 1)
+        SRV  port  9000 353b3b65-20f7-48c3-88f7-495bd5d31545.host.control-plane.oxide.internal
+    name: _repo-depot._tcp                                   (records: 3)
+        SRV  port 12348 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c.sled.control-plane.oxide.internal
+        SRV  port 12348 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6.sled.control-plane.oxide.internal
+        SRV  port 12348 d81c6a84-79b8-4958-ae41-ea46c9b19763.sled.control-plane.oxide.internal
+    name: ad6a3a03-8d0f-4504-99a4-cbf73d69b973.host          (records: 1)
+        AAAA fd00:1122:3344:102::25
+    name: ba4994a8-23f9-4b1a-a84f-a08d74591389.host          (records: 1)
+        AAAA fd00:1122:3344:101::24
+    name: bd354eef-d8a6-4165-9124-283fb5e46d77.host          (records: 1)
+        AAAA fd00:1122:3344:102::26
+    name: d81c6a84-79b8-4958-ae41-ea46c9b19763.sled          (records: 1)
+        AAAA fd00:1122:3344:103::1
+    name: dfac80b4-a887-430a-ae87-a4e065dba787.host          (records: 1)
+        AAAA fd00:1122:3344:101::26
+    name: e2fdefe7-95b2-4fd2-ae37-56929a06d58c.host          (records: 1)
+        AAAA fd00:1122:3344:102::27
+    name: ea5b4030-b52f-44b2-8d70-45f15f987d01.host          (records: 1)
+        AAAA fd00:1122:3344:3::1
+    name: f10a4fb9-759f-4a65-b25e-5794ad2d07d8.host          (records: 1)
+        AAAA fd00:1122:3344:103::21
+    name: f55647d4-5500-4ad3-893a-df45bd50d622.host          (records: 1)
+        AAAA fd00:1122:3344:103::25
+    name: f6ec9c67-946a-4da3-98d5-581f72ce8bf0.host          (records: 1)
+        AAAA fd00:1122:3344:103::23
+    name: ns1                                                (records: 1)
+        AAAA fd00:1122:3344:1::1
+    name: ns2                                                (records: 1)
+        AAAA fd00:1122:3344:2::1
+    name: ns3                                                (records: 1)
+        AAAA fd00:1122:3344:3::1
+
+external DNS:
+  DNS zone: "oxide.example" (unchanged)
+    name: @                                                  (records: 3)
+        NS   ns1.oxide.example
+        NS   ns2.oxide.example
+        NS   ns3.oxide.example
+    name: example-silo.sys                                   (records: 3)
+        A    192.0.2.2
+        A    192.0.2.3
+        A    192.0.2.4
+    name: ns1                                                (records: 1)
+        A    198.51.100.1
+    name: ns2                                                (records: 1)
+        A    198.51.100.2
+    name: ns3                                                (records: 1)
+        A    198.51.100.3
+
+
+
+
+> # Update the RoT bootloader on the last sled.
+> # There should be a pending RoT update.
+> sled-update-rot-bootloader d81c6a84-79b8-4958-ae41-ea46c9b19763 --stage0 1.0.0
+set sled d81c6a84-79b8-4958-ae41-ea46c9b19763 RoT bootloader versions: stage0 -> 1.0.0
+
+> inventory-generate
+generated inventory collection 005f6a30-7f65-4593-9f78-ee68f766f42b from configured sleds
+
+> blueprint-plan latest latest
+INFO performed noop image source checks on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, num_total: 9, num_already_artifact: 0, num_eligible: 0, num_ineligible: 9
+INFO performed noop image source checks on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, num_total: 8, num_already_artifact: 0, num_eligible: 0, num_ineligible: 8
+INFO performed noop image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 8, num_already_artifact: 0, num_eligible: 0, num_ineligible: 8
+INFO MGS-driven update completed (will remove it and re-evaluate board), artifact_version: 1.0.0, artifact_hash: 005ea358f1cd316df42465b1e3a0334ea22cc0c0442cf9ddf9b42fbf49780236, expected_stage0_next_version: NoValidVersion, expected_stage0_version: 0.0.1, component: rot_bootloader, sp_slot: 2, sp_type: Sled, serial_number: serial2, part_number: model2
+INFO configuring MGS-driven update, artifact_version: 1.0.0, artifact_hash: 04e4a7fdb84acca92c8fd3235e26d64ea61bef8a5f98202589fd346989c5720a, expected_transient_boot_preference: None, expected_pending_persistent_boot_preference: None, expected_persistent_boot_preference: A, expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: NoValidVersion, component: rot, sp_slot: 2, sp_type: Sled, serial_number: serial2, part_number: model2
+INFO reached maximum number of pending MGS-driven updates, max: 1
+generated blueprint ce365dff-2cdb-4f35-a186-b15e20e1e700 based on parent blueprint afb09faf-a586-4483-9289-04d4f1d8ba23
+planning report for blueprint ce365dff-2cdb-4f35-a186-b15e20e1e700:
+chicken switches:
+    add zones with mupdate override:   false
+
+* 1 pending MGS update:
+  * model2:serial2: Rot { expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: NoValidVersion, expected_persistent_boot_preference: A, expected_pending_persistent_boot_preference: None, expected_transient_boot_preference: None }
+* zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+
+
+> blueprint-diff latest
+from: blueprint afb09faf-a586-4483-9289-04d4f1d8ba23
+to:   blueprint ce365dff-2cdb-4f35-a186-b15e20e1e700
+
+ COCKROACHDB SETTINGS:
+    state fingerprint:::::::::::::::::   (none) (unchanged)
+    cluster.preserve_downgrade_option:   (do not modify) (unchanged)
+
+ METADATA:
+    internal DNS version:::   1 (unchanged)
+    external DNS version:::   1 (unchanged)
+    target release min gen:   1 (unchanged)
+
+ OXIMETER SETTINGS:
+    generation:   1 (unchanged)
+    read from::   SingleNode (unchanged)
+
+ PENDING MGS UPDATES:
+
+    Pending MGS-managed updates (all baseboards):
+    ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+    sp_type   slot   part_number   serial_number   artifact_hash                                                        artifact_version   details                                                                                                                                                                                                                                                                             
+    ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+*   sled      2      model2        serial2         - 005ea358f1cd316df42465b1e3a0334ea22cc0c0442cf9ddf9b42fbf49780236   1.0.0              - RotBootloader { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: NoValidVersion }                                                                                                                                                                 
+     └─                                            + 04e4a7fdb84acca92c8fd3235e26d64ea61bef8a5f98202589fd346989c5720a                      + Rot { expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: NoValidVersion, expected_persistent_boot_preference: A, expected_pending_persistent_boot_preference: None, expected_transient_boot_preference: None }
+
+
+internal DNS:
+  DNS zone: "control-plane.oxide.internal" (unchanged)
+    name: 058fd5f9-60a8-4e11-9302-15172782e17d.host          (records: 1)
+        AAAA fd00:1122:3344:101::27
+    name: 0c71b3b2-6ceb-4e8f-b020-b08675e83038.host          (records: 1)
+        AAAA fd00:1122:3344:101::22
+    name: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c.sled          (records: 1)
+        AAAA fd00:1122:3344:102::1
+    name: 353b3b65-20f7-48c3-88f7-495bd5d31545.host          (records: 1)
+        AAAA fd00:1122:3344:102::23
+    name: 3eeb8d49-eb1a-43f8-bb64-c2338421c2c6.host          (records: 1)
+        AAAA fd00:1122:3344:103::22
+    name: 427ec88f-f467-42fa-9bbb-66a91a36103c.host          (records: 1)
+        AAAA fd00:1122:3344:2::1
+    name: 466a9f29-62bf-4e63-924a-b9efdb86afec.host          (records: 1)
+        AAAA fd00:1122:3344:102::22
+    name: 5199c033-4cf9-4ab6-8ae7-566bd7606363.host          (records: 1)
+        AAAA fd00:1122:3344:101::25
+    name: 62620961-fc4a-481e-968b-f5acbac0dc63.host          (records: 1)
+        AAAA fd00:1122:3344:102::21
+    name: 6444f8a5-6465-4f0b-a549-1993c113569c.host          (records: 1)
+        AAAA fd00:1122:3344:101::21
+    name: 694bd14f-cb24-4be4-bb19-876e79cda2c8.host          (records: 1)
+        AAAA fd00:1122:3344:103::26
+    name: 6c3ae381-04f7-41ea-b0ac-74db387dbc3a.host          (records: 1)
+        AAAA fd00:1122:3344:102::24
+    name: 75b220ba-a0f4-4872-8202-dc7c87f062d0.host          (records: 1)
+        AAAA fd00:1122:3344:103::24
+    name: 7c252b64-c5af-4ec1-989e-9a03f3b0f111.host          (records: 1)
+        AAAA fd00:1122:3344:103::27
+    name: 803bfb63-c246-41db-b0da-d3b87ddfc63d.host          (records: 1)
+        AAAA fd00:1122:3344:101::23
+    name: 86a22a56-0168-453d-9df1-cb2a7c64b5d3.host          (records: 1)
+        AAAA fd00:1122:3344:102::28
+    name: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6.sled          (records: 1)
+        AAAA fd00:1122:3344:101::1
+    name: 99e2f30b-3174-40bf-a78a-90da8abba8ca.host          (records: 1)
+        AAAA fd00:1122:3344:1::1
+    name: @                                                  (records: 3)
+        NS   ns1.control-plane.oxide.internal
+        NS   ns2.control-plane.oxide.internal
+        NS   ns3.control-plane.oxide.internal
+    name: _clickhouse-admin-single-server._tcp               (records: 1)
+        SRV  port  8888 353b3b65-20f7-48c3-88f7-495bd5d31545.host.control-plane.oxide.internal
+    name: _clickhouse-native._tcp                            (records: 1)
+        SRV  port  9000 353b3b65-20f7-48c3-88f7-495bd5d31545.host.control-plane.oxide.internal
+    name: _clickhouse._tcp                                   (records: 1)
+        SRV  port  8123 353b3b65-20f7-48c3-88f7-495bd5d31545.host.control-plane.oxide.internal
+    name: _crucible-pantry._tcp                              (records: 3)
+        SRV  port 17000 75b220ba-a0f4-4872-8202-dc7c87f062d0.host.control-plane.oxide.internal
+        SRV  port 17000 ad6a3a03-8d0f-4504-99a4-cbf73d69b973.host.control-plane.oxide.internal
+        SRV  port 17000 ba4994a8-23f9-4b1a-a84f-a08d74591389.host.control-plane.oxide.internal
+    name: _crucible._tcp.058fd5f9-60a8-4e11-9302-15172782e17d (records: 1)
+        SRV  port 32345 058fd5f9-60a8-4e11-9302-15172782e17d.host.control-plane.oxide.internal
+    name: _crucible._tcp.5199c033-4cf9-4ab6-8ae7-566bd7606363 (records: 1)
+        SRV  port 32345 5199c033-4cf9-4ab6-8ae7-566bd7606363.host.control-plane.oxide.internal
+    name: _crucible._tcp.694bd14f-cb24-4be4-bb19-876e79cda2c8 (records: 1)
+        SRV  port 32345 694bd14f-cb24-4be4-bb19-876e79cda2c8.host.control-plane.oxide.internal
+    name: _crucible._tcp.7c252b64-c5af-4ec1-989e-9a03f3b0f111 (records: 1)
+        SRV  port 32345 7c252b64-c5af-4ec1-989e-9a03f3b0f111.host.control-plane.oxide.internal
+    name: _crucible._tcp.86a22a56-0168-453d-9df1-cb2a7c64b5d3 (records: 1)
+        SRV  port 32345 86a22a56-0168-453d-9df1-cb2a7c64b5d3.host.control-plane.oxide.internal
+    name: _crucible._tcp.bd354eef-d8a6-4165-9124-283fb5e46d77 (records: 1)
+        SRV  port 32345 bd354eef-d8a6-4165-9124-283fb5e46d77.host.control-plane.oxide.internal
+    name: _crucible._tcp.dfac80b4-a887-430a-ae87-a4e065dba787 (records: 1)
+        SRV  port 32345 dfac80b4-a887-430a-ae87-a4e065dba787.host.control-plane.oxide.internal
+    name: _crucible._tcp.e2fdefe7-95b2-4fd2-ae37-56929a06d58c (records: 1)
+        SRV  port 32345 e2fdefe7-95b2-4fd2-ae37-56929a06d58c.host.control-plane.oxide.internal
+    name: _crucible._tcp.f55647d4-5500-4ad3-893a-df45bd50d622 (records: 1)
+        SRV  port 32345 f55647d4-5500-4ad3-893a-df45bd50d622.host.control-plane.oxide.internal
+    name: _external-dns._tcp                                 (records: 3)
+        SRV  port  5353 6c3ae381-04f7-41ea-b0ac-74db387dbc3a.host.control-plane.oxide.internal
+        SRV  port  5353 803bfb63-c246-41db-b0da-d3b87ddfc63d.host.control-plane.oxide.internal
+        SRV  port  5353 f6ec9c67-946a-4da3-98d5-581f72ce8bf0.host.control-plane.oxide.internal
+    name: _internal-ntp._tcp                                 (records: 3)
+        SRV  port   123 62620961-fc4a-481e-968b-f5acbac0dc63.host.control-plane.oxide.internal
+        SRV  port   123 6444f8a5-6465-4f0b-a549-1993c113569c.host.control-plane.oxide.internal
+        SRV  port   123 f10a4fb9-759f-4a65-b25e-5794ad2d07d8.host.control-plane.oxide.internal
+    name: _nameservice._tcp                                  (records: 3)
+        SRV  port  5353 427ec88f-f467-42fa-9bbb-66a91a36103c.host.control-plane.oxide.internal
+        SRV  port  5353 99e2f30b-3174-40bf-a78a-90da8abba8ca.host.control-plane.oxide.internal
+        SRV  port  5353 ea5b4030-b52f-44b2-8d70-45f15f987d01.host.control-plane.oxide.internal
+    name: _nexus._tcp                                        (records: 3)
+        SRV  port 12221 0c71b3b2-6ceb-4e8f-b020-b08675e83038.host.control-plane.oxide.internal
+        SRV  port 12221 3eeb8d49-eb1a-43f8-bb64-c2338421c2c6.host.control-plane.oxide.internal
+        SRV  port 12221 466a9f29-62bf-4e63-924a-b9efdb86afec.host.control-plane.oxide.internal
+    name: _oximeter-reader._tcp                              (records: 1)
+        SRV  port  9000 353b3b65-20f7-48c3-88f7-495bd5d31545.host.control-plane.oxide.internal
+    name: _repo-depot._tcp                                   (records: 3)
+        SRV  port 12348 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c.sled.control-plane.oxide.internal
+        SRV  port 12348 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6.sled.control-plane.oxide.internal
+        SRV  port 12348 d81c6a84-79b8-4958-ae41-ea46c9b19763.sled.control-plane.oxide.internal
+    name: ad6a3a03-8d0f-4504-99a4-cbf73d69b973.host          (records: 1)
+        AAAA fd00:1122:3344:102::25
+    name: ba4994a8-23f9-4b1a-a84f-a08d74591389.host          (records: 1)
+        AAAA fd00:1122:3344:101::24
+    name: bd354eef-d8a6-4165-9124-283fb5e46d77.host          (records: 1)
+        AAAA fd00:1122:3344:102::26
+    name: d81c6a84-79b8-4958-ae41-ea46c9b19763.sled          (records: 1)
+        AAAA fd00:1122:3344:103::1
+    name: dfac80b4-a887-430a-ae87-a4e065dba787.host          (records: 1)
+        AAAA fd00:1122:3344:101::26
+    name: e2fdefe7-95b2-4fd2-ae37-56929a06d58c.host          (records: 1)
+        AAAA fd00:1122:3344:102::27
+    name: ea5b4030-b52f-44b2-8d70-45f15f987d01.host          (records: 1)
+        AAAA fd00:1122:3344:3::1
+    name: f10a4fb9-759f-4a65-b25e-5794ad2d07d8.host          (records: 1)
+        AAAA fd00:1122:3344:103::21
+    name: f55647d4-5500-4ad3-893a-df45bd50d622.host          (records: 1)
+        AAAA fd00:1122:3344:103::25
+    name: f6ec9c67-946a-4da3-98d5-581f72ce8bf0.host          (records: 1)
+        AAAA fd00:1122:3344:103::23
+    name: ns1                                                (records: 1)
+        AAAA fd00:1122:3344:1::1
+    name: ns2                                                (records: 1)
+        AAAA fd00:1122:3344:2::1
+    name: ns3                                                (records: 1)
+        AAAA fd00:1122:3344:3::1
+
+external DNS:
+  DNS zone: "oxide.example" (unchanged)
+    name: @                                                  (records: 3)
+        NS   ns1.oxide.example
+        NS   ns2.oxide.example
+        NS   ns3.oxide.example
+    name: example-silo.sys                                   (records: 3)
+        A    192.0.2.2
+        A    192.0.2.3
+        A    192.0.2.4
+    name: ns1                                                (records: 1)
+        A    198.51.100.1
+    name: ns2                                                (records: 1)
+        A    198.51.100.2
+    name: ns3                                                (records: 1)
+        A    198.51.100.3
+
+
+
+
+> # Update the RoT on the last sled.
+> # There should be one last pending SP update.
+> sled-update-rot d81c6a84-79b8-4958-ae41-ea46c9b19763 --slot-a 1.0.0
+set sled d81c6a84-79b8-4958-ae41-ea46c9b19763 RoT settings: slot a -> 1.0.0
+
+> inventory-generate
+generated inventory collection b5263998-e486-4cea-8842-b32bd326fa3a from configured sleds
+
+> blueprint-plan latest latest
+INFO performed noop image source checks on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, num_total: 9, num_already_artifact: 0, num_eligible: 0, num_ineligible: 9
+INFO performed noop image source checks on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, num_total: 8, num_already_artifact: 0, num_eligible: 0, num_ineligible: 8
+INFO performed noop image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 8, num_already_artifact: 0, num_eligible: 0, num_ineligible: 8
+INFO MGS-driven update completed (will remove it and re-evaluate board), artifact_version: 1.0.0, artifact_hash: 04e4a7fdb84acca92c8fd3235e26d64ea61bef8a5f98202589fd346989c5720a, expected_transient_boot_preference: None, expected_pending_persistent_boot_preference: None, expected_persistent_boot_preference: A, expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: NoValidVersion, component: rot, sp_slot: 2, sp_type: Sled, serial_number: serial2, part_number: model2
+INFO configuring MGS-driven update, artifact_version: 1.0.0, artifact_hash: 7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670, expected_inactive_version: NoValidVersion, expected_active_version: 0.0.1, component: sp, sp_slot: 2, sp_type: Sled, serial_number: serial2, part_number: model2
+INFO reached maximum number of pending MGS-driven updates, max: 1
+generated blueprint 8f2d1f39-7c88-4701-aa43-56bf281b28c1 based on parent blueprint ce365dff-2cdb-4f35-a186-b15e20e1e700
+planning report for blueprint 8f2d1f39-7c88-4701-aa43-56bf281b28c1:
+chicken switches:
+    add zones with mupdate override:   false
+
+* 1 pending MGS update:
+  * model2:serial2: Sp { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: NoValidVersion }
+* zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+
+
+> blueprint-diff latest
+from: blueprint ce365dff-2cdb-4f35-a186-b15e20e1e700
+to:   blueprint 8f2d1f39-7c88-4701-aa43-56bf281b28c1
+
+ COCKROACHDB SETTINGS:
+    state fingerprint:::::::::::::::::   (none) (unchanged)
+    cluster.preserve_downgrade_option:   (do not modify) (unchanged)
+
+ METADATA:
+    internal DNS version:::   1 (unchanged)
+    external DNS version:::   1 (unchanged)
+    target release min gen:   1 (unchanged)
+
+ OXIMETER SETTINGS:
+    generation:   1 (unchanged)
+    read from::   SingleNode (unchanged)
+
+ PENDING MGS UPDATES:
+
+    Pending MGS-managed updates (all baseboards):
+    ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+    sp_type   slot   part_number   serial_number   artifact_hash                                                        artifact_version   details                                                                                                                                                                                                                                                                             
+    ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+*   sled      2      model2        serial2         - 04e4a7fdb84acca92c8fd3235e26d64ea61bef8a5f98202589fd346989c5720a   1.0.0              - Rot { expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: NoValidVersion, expected_persistent_boot_preference: A, expected_pending_persistent_boot_preference: None, expected_transient_boot_preference: None }
+     └─                                            + 7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670                      + Sp { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: NoValidVersion }                                                                                                                                                                               
 
 
 internal DNS:
@@ -1160,25 +2684,19 @@ external DNS:
 set sled d81c6a84-79b8-4958-ae41-ea46c9b19763 SP versions: active -> 1.0.0
 
 > inventory-generate
-generated inventory collection a71f7a73-35a6-45e8-acbe-f1c5925eed69 from configured sleds
+generated inventory collection 68767302-7fed-4eb1-9611-3dfd807ff0cd from configured sleds
 
-> blueprint-plan 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba a71f7a73-35a6-45e8-acbe-f1c5925eed69
+> blueprint-plan latest latest
 INFO performed noop image source checks on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, num_total: 9, num_already_artifact: 0, num_eligible: 0, num_ineligible: 9
 INFO performed noop image source checks on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, num_total: 8, num_already_artifact: 0, num_eligible: 0, num_ineligible: 8
 INFO performed noop image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 8, num_already_artifact: 0, num_eligible: 0, num_ineligible: 8
 INFO MGS-driven update completed (will remove it and re-evaluate board), artifact_version: 1.0.0, artifact_hash: 7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670, expected_inactive_version: NoValidVersion, expected_active_version: 0.0.1, component: sp, sp_slot: 2, sp_type: Sled, serial_number: serial2, part_number: model2
-WARN cannot configure RoT bootloader update for board (missing sign in stage0 caboose from inventory), serial_number: serial2, part_number: model2
-WARN cannot configure RoT update for board (missing sign in caboose from inventory), serial_number: serial2, part_number: model2
 INFO skipping board for MGS-driven update, serial_number: serial2, part_number: model2
-WARN cannot configure RoT bootloader update for board (missing sign in stage0 caboose from inventory), serial_number: serial0, part_number: model0
-WARN cannot configure RoT update for board (missing sign in caboose from inventory), serial_number: serial0, part_number: model0
 INFO skipping board for MGS-driven update, serial_number: serial0, part_number: model0
-WARN cannot configure RoT bootloader update for board (missing sign in stage0 caboose from inventory), serial_number: serial1, part_number: model1
-WARN cannot configure RoT update for board (missing sign in caboose from inventory), serial_number: serial1, part_number: model1
 INFO skipping board for MGS-driven update, serial_number: serial1, part_number: model1
 INFO ran out of boards for MGS-driven update
-generated blueprint 9034c710-3e57-45f3-99e5-4316145e87ac based on parent blueprint 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba
-planning report for blueprint 9034c710-3e57-45f3-99e5-4316145e87ac:
+generated blueprint 12d602a6-5ab4-487a-b94e-eb30cdf30300 based on parent blueprint 8f2d1f39-7c88-4701-aa43-56bf281b28c1
+planning report for blueprint 12d602a6-5ab4-487a-b94e-eb30cdf30300:
 chicken switches:
     add zones with mupdate override:   false
 
@@ -1187,9 +2705,9 @@ chicken switches:
 * 25 remaining out-of-date zones
 
 
-> blueprint-diff 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba 9034c710-3e57-45f3-99e5-4316145e87ac
-from: blueprint 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba
-to:   blueprint 9034c710-3e57-45f3-99e5-4316145e87ac
+> blueprint-diff latest
+from: blueprint 8f2d1f39-7c88-4701-aa43-56bf281b28c1
+to:   blueprint 12d602a6-5ab4-487a-b94e-eb30cdf30300
 
  MODIFIED SLEDS:
 
