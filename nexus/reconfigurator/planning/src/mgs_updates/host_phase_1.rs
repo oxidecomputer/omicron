@@ -900,4 +900,82 @@ mod tests {
 
         logctx.cleanup_successful();
     }
+
+    // Tests the case where a sled appears to move while a host OS update is
+    // pending
+    #[test]
+    fn test_sled_move() {
+        let test_name = "planning_mgs_updates_sled_move";
+        let logctx = LogContext::new(
+            test_name,
+            &ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Debug },
+        );
+        let test_boards = TestBoards::new(test_name);
+
+        // Configure an update for one SP.
+        let log = &logctx.log;
+        let repo = test_boards.tuf_repo();
+        let mut collection = test_boards
+            .collection_builder()
+            .host_active_exception(
+                0,
+                ARTIFACT_HASH_HOST_PHASE_1_V1,
+                ARTIFACT_HASH_HOST_PHASE_2_V1,
+            )
+            .build();
+        let nmax_updates = 1;
+        let impossible_update_policy = ImpossibleUpdatePolicy::Reevaluate;
+        let planned = plan_mgs_updates(
+            log,
+            &collection,
+            &collection.baseboards,
+            &PendingMgsUpdates::new(),
+            &TargetReleaseDescription::TufRepo(repo.clone()),
+            nmax_updates,
+            impossible_update_policy,
+        );
+        assert!(!planned.pending_updates.is_empty());
+        assert!(!planned.pending_host_phase_2_changes.is_empty());
+        let update = planned
+            .pending_updates
+            .into_iter()
+            .next()
+            .expect("at least one update");
+
+        // Move an SP (as if someone had moved the sled to a different cubby).
+        // This is awful, but at least it's easy.
+        let sp_info = collection
+            .sps
+            .values_mut()
+            .find(|sp| sp.sp_type == SpType::Sled && sp.sp_slot == 0)
+            .expect("missing sled 0 SP");
+        sp_info.sp_slot = 9;
+
+        // Plan again.  The configured update should be updated to reflect the
+        // new location.
+        let new_planned = plan_mgs_updates(
+            log,
+            &collection,
+            &collection.baseboards,
+            &planned.pending_updates,
+            &TargetReleaseDescription::TufRepo(repo.clone()),
+            nmax_updates,
+            impossible_update_policy,
+        );
+        assert!(!new_planned.pending_updates.is_empty());
+        assert!(!new_planned.pending_host_phase_2_changes.is_empty());
+        let new_update = new_planned
+            .pending_updates
+            .into_iter()
+            .next()
+            .expect("at least one update");
+        assert_eq!(new_update.slot_id, 9);
+        assert_eq!(new_update.baseboard_id, update.baseboard_id);
+        assert_eq!(new_update.sp_type, update.sp_type);
+        assert_eq!(new_update.artifact_hash, update.artifact_hash);
+        assert_eq!(new_update.artifact_version, update.artifact_version);
+        assert_eq!(new_update.details, update.details);
+
+        logctx.cleanup_successful();
+    }
 }

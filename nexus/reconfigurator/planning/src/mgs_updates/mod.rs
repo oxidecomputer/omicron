@@ -1918,7 +1918,7 @@ mod test {
         assert!(!new_updates.is_empty());
         let new_update =
             new_updates.into_iter().next().expect("at least one update");
-        assert_ne!(new_update.slot_id, update.slot_id);
+        assert_eq!(new_update.slot_id, 9);
         assert_eq!(new_update.baseboard_id, update.baseboard_id);
         assert_eq!(new_update.sp_type, update.sp_type);
         assert_eq!(new_update.artifact_hash, update.artifact_hash);
