@@ -23,7 +23,7 @@ use gateway_types::{
     task_dump::TaskDump,
     update::{
         HostPhase2Progress, HostPhase2RecoveryImageId, InstallinatorImageId,
-        SpUpdateStatus,
+        SpComponentResetError, SpUpdateStatus,
     },
 };
 use schemars::JsonSchema;
@@ -219,7 +219,7 @@ pub trait GatewayApi {
     async fn sp_component_reset(
         rqctx: RequestContext<Self::Context>,
         path: Path<PathSpComponent>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+    ) -> Result<HttpResponseUpdatedNoContent, SpComponentResetError>;
 
     /// Update an SP component
     ///

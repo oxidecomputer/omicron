@@ -534,7 +534,7 @@ async fn wait_for_delivery(
                     "status" => ?update_status,
                 );
 
-                Ok(update_status)
+                Ok::<_, GatewayClientError>(update_status)
             })
             .await?
             .into_inner();

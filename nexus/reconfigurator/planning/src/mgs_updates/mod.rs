@@ -451,7 +451,7 @@ fn try_make_update(
     // We try MGS-driven update components in a hardcoded priority order until
     // any of them returns `Some`. The order is described in RFD 565 section
     // "Update Sequence". For now, we only plan SP, RoT and RoT bootloader
-    // updates. When implemented, host OS updates will be the first to try.
+    // updates. When implemented, host OS updates will be the last to try.
     try_make_update_rot_bootloader(
         log,
         baseboard_id,

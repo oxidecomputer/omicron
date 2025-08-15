@@ -922,6 +922,11 @@ Options:
           [env: LOG_LEVEL=]
           [default: warn]
 
+      --no-executing-info
+          Do not display information about whether a task is currently executing.
+          
+          Useful for test output stability.
+
       --color <COLOR>
           Color output
           

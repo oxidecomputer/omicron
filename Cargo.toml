@@ -374,7 +374,7 @@ bootstrap-agent-client = { path = "clients/bootstrap-agent-client" }
 buf-list = { version = "1.0.3", features = ["tokio1"] }
 byteorder = "1.5.0"
 bytes = "1.10.1"
-camino = { version = "1.1", features = ["serde1"] }
+camino = { version = "1.1.11", features = ["serde1"] }
 camino-tempfile = "1.4.1"
 camino-tempfile-ext = { version = "0.3.2", features = ["assert-color"] }
 cancel-safe-futures = "0.1.5"
@@ -429,7 +429,7 @@ dns-server = { path = "dns-server" }
 dns-server-api = { path = "dns-server-api" }
 dns-service-client = { path = "clients/dns-service-client" }
 dpd-client = { git = "https://github.com/oxidecomputer/dendrite", rev = "6e666520620e26432333d9060bc7d249ba9fa92e" }
-dropshot = { version = "0.16.2", features = [ "usdt-probes" ] }
+dropshot = { version = "0.16.3", features = [ "usdt-probes" ] }
 dyn-clone = "1.0.19"
 either = "1.15.0"
 ereport-types = { path = "ereport/types" }
@@ -672,7 +672,7 @@ semver = { version = "1.0.26", features = ["std", "serde"] }
 serde = { version = "1.0", default-features = false, features = [ "derive", "rc" ] }
 serde_cbor = "0.11.2"
 serde_human_bytes = { git = "https://github.com/oxidecomputer/serde_human_bytes", branch = "main" }
-serde_json = "1.0.141"
+serde_json = "1.0.142"
 serde_tokenstream = "0.2"
 serde_urlencoded = "0.7.1"
 serde_with = { version = "3.14.0", default-features = false, features = ["alloc", "macros"] }

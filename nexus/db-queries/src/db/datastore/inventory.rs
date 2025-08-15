@@ -4371,13 +4371,13 @@ pub trait DataStoreInventoryTest: Send + Sync {
     /// This does not paginate.
     fn inventory_collections(
         &self,
-    ) -> BoxFuture<anyhow::Result<Vec<InvCollection>>>;
+    ) -> BoxFuture<'_, anyhow::Result<Vec<InvCollection>>>;
 }
 
 impl DataStoreInventoryTest for DataStore {
     fn inventory_collections(
         &self,
-    ) -> BoxFuture<anyhow::Result<Vec<InvCollection>>> {
+    ) -> BoxFuture<'_, anyhow::Result<Vec<InvCollection>>> {
         async {
             let conn = self
                 .pool_connection_for_tests()

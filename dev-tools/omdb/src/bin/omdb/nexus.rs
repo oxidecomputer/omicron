@@ -182,6 +182,12 @@ struct BackgroundTasksShowArgs {
     /// "all", "dns_external", or "dns_internal".
     #[clap(value_name = "TASK_NAME")]
     tasks: Vec<String>,
+
+    /// Do not display information about whether a task is currently executing.
+    ///
+    /// Useful for test output stability.
+    #[clap(long)]
+    no_executing_info: bool,
 }
 
 #[derive(Debug, Args)]
@@ -906,6 +912,10 @@ async fn cmd_nexus_background_tasks_show(
         });
     }
 
+    let opts = BackgroundTasksPrintOpts {
+        show_executing_info: !args.no_executing_info,
+    };
+
     // Some tasks should be grouped and printed together in a certain order,
     // even though their names aren't alphabetical.  Notably, the DNS tasks
     // logically go from config -> servers -> propagation, so we want to print
@@ -923,14 +933,14 @@ async fn cmd_nexus_background_tasks_show(
         "blueprint_executor",
     ] {
         if let Some(bgtask) = tasks.remove(name) {
-            print_task(&bgtask);
+            print_task(&bgtask, &opts);
         } else if selected_all {
             eprintln!("warning: expected to find background task {:?}", name);
         }
     }
 
     for (_, bgtask) in &tasks {
-        print_task(bgtask);
+        print_task(bgtask, &opts);
     }
 
     Ok(())
@@ -999,32 +1009,39 @@ async fn cmd_nexus_background_tasks_activate(
     Ok(())
 }
 
-fn print_task(bgtask: &BackgroundTask) {
+#[derive(Clone, Debug)]
+struct BackgroundTasksPrintOpts {
+    show_executing_info: bool,
+}
+
+fn print_task(bgtask: &BackgroundTask, opts: &BackgroundTasksPrintOpts) {
     println!("task: {:?}", bgtask.name);
     println!(
         "  configured period: every {}",
         humantime::format_duration(bgtask.period.clone().into())
     );
-    print!("  currently executing: ");
-    match &bgtask.current {
-        CurrentStatus::Idle => println!("no"),
-        CurrentStatus::Running(current) => {
-            let elapsed = std::time::SystemTime::from(current.start_time)
-                .elapsed()
-                .map(|s| format!("{:.3}ms", s.as_millis()))
-                .unwrap_or_else(|error| format!("(unknown: {:#})", error));
-            print!(
-                "iter {}, triggered by {}\n",
-                current.iteration,
-                reason_str(&current.reason)
-            );
-            print!(
-                "    started at {}, running for {}\n",
-                humantime::format_rfc3339_millis(current.start_time.into()),
-                elapsed,
-            );
+    if opts.show_executing_info {
+        print!("  currently executing: ");
+        match &bgtask.current {
+            CurrentStatus::Idle => println!("no"),
+            CurrentStatus::Running(current) => {
+                let elapsed = std::time::SystemTime::from(current.start_time)
+                    .elapsed()
+                    .map(|s| format!("{:.3}ms", s.as_millis()))
+                    .unwrap_or_else(|error| format!("(unknown: {:#})", error));
+                print!(
+                    "iter {}, triggered by {}\n",
+                    current.iteration,
+                    reason_str(&current.reason)
+                );
+                print!(
+                    "    started at {}, running for {}\n",
+                    humantime::format_rfc3339_millis(current.start_time.into()),
+                    elapsed,
+                );
+            }
         }
-    };
+    }
 
     print!("  last completed activation: ");
     match &bgtask.last {
