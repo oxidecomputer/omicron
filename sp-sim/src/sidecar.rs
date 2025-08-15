@@ -346,7 +346,6 @@ impl Inner {
         commands: mpsc::UnboundedReceiver<Command>,
         log: Logger,
         old_rot_state: bool,
-        //no_stage0_caboose: bool,
         update_state: SimSpUpdate,
         power_state_changes: Arc<AtomicUsize>,
     ) -> (Self, Arc<TokioMutex<Handler>>, watch::Receiver<usize>) {
@@ -522,7 +521,6 @@ impl Handler {
         ignition: FakeIgnition,
         log: Logger,
         old_rot_state: bool,
-        //no_stage0_caboose: bool,
         update_state: SimSpUpdate,
         power_state_changes: Arc<AtomicUsize>,
     ) -> Self {
