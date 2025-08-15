@@ -20,12 +20,8 @@ use wicketd_client::types::{GetInventoryParams, GetInventoryResponse};
 
 #[tokio::test]
 async fn test_inventory() {
-    let gateway = gateway_setup::test_setup(
-        "test_inventory",
-        SpPort::One,
-        gateway_setup::DEFAULT_SP_SIM_CONFIG.into(),
-    )
-    .await;
+    let gateway =
+        gateway_setup::test_setup("test_inventory", SpPort::One).await;
     let wicketd_testctx = WicketdTestContext::setup(gateway).await;
     let params = GetInventoryParams { force_refresh: Vec::new() };
 

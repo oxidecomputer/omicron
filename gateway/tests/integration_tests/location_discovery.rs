@@ -13,18 +13,10 @@ use omicron_gateway::SpIdentifier;
 
 #[tokio::test]
 async fn discovery_both_locations() {
-    let testctx0 = setup::test_setup(
-        "discovery_both_locations_0",
-        SpPort::One,
-        setup::DEFAULT_SP_SIM_CONFIG.into(),
-    )
-    .await;
-    let testctx1 = setup::test_setup(
-        "discovery_both_locations_1",
-        SpPort::Two,
-        setup::DEFAULT_SP_SIM_CONFIG.into(),
-    )
-    .await;
+    let testctx0 =
+        setup::test_setup("discovery_both_locations_0", SpPort::One).await;
+    let testctx1 =
+        setup::test_setup("discovery_both_locations_1", SpPort::Two).await;
 
     let client0 = &testctx0.client;
     let client1 = &testctx1.client;

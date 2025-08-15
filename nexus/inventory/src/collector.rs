@@ -1075,12 +1075,9 @@ mod test {
     async fn test_basic() {
         // Set up the stock MGS test setup (which includes a couple of fake SPs)
         // and a simulated sled agent.  Then run a collection against these.
-        let gwtestctx = gateway_test_utils::setup::test_setup(
-            "test_basic",
-            SpPort::One,
-            gateway_test_utils::setup::DEFAULT_SP_SIM_CONFIG.into(),
-        )
-        .await;
+        let gwtestctx =
+            gateway_test_utils::setup::test_setup("test_basic", SpPort::One)
+                .await;
         let log = &gwtestctx.logctx.log;
 
         let simulated_upstairs =
@@ -1152,13 +1149,11 @@ mod test {
         let gwtestctx1 = gateway_test_utils::setup::test_setup(
             "test_multi_mgs_1",
             SpPort::One,
-            gateway_test_utils::setup::DEFAULT_SP_SIM_CONFIG.into(),
         )
         .await;
         let gwtestctx2 = gateway_test_utils::setup::test_setup(
             "test_multi_mgs_2",
             SpPort::Two,
-            gateway_test_utils::setup::DEFAULT_SP_SIM_CONFIG.into(),
         )
         .await;
         let log = &gwtestctx1.logctx.log;
@@ -1233,7 +1228,6 @@ mod test {
         let gwtestctx = gateway_test_utils::setup::test_setup(
             "test_multi_mgs_2",
             SpPort::Two,
-            gateway_test_utils::setup::DEFAULT_SP_SIM_CONFIG.into(),
         )
         .await;
         let log = &gwtestctx.logctx.log;
@@ -1283,7 +1277,6 @@ mod test {
         let gwtestctx = gateway_test_utils::setup::test_setup(
             "test_sled_agent_failure",
             SpPort::One,
-            gateway_test_utils::setup::DEFAULT_SP_SIM_CONFIG.into(),
         )
         .await;
         let log = &gwtestctx.logctx.log;

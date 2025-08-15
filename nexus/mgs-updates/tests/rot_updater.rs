@@ -48,12 +48,9 @@ fn make_fake_rot_archive_with_caboose(caboose: &hubtools::Caboose) -> Vec<u8> {
 #[tokio::test]
 async fn test_rot_updater_updates_sled() {
     // Start MGS + Sim SP.
-    let mgstestctx = mgs_setup::test_setup(
-        "test_rot_updater_updates_sled",
-        SpPort::One,
-        mgs_setup::DEFAULT_SP_SIM_CONFIG.into(),
-    )
-    .await;
+    let mgstestctx =
+        mgs_setup::test_setup("test_rot_updater_updates_sled", SpPort::One)
+            .await;
 
     // Configure an MGS client.
     let mgs_client = mgstestctx.client();
@@ -222,12 +219,9 @@ async fn test_rot_updater_updates_sled() {
 #[tokio::test]
 async fn test_rot_updater_updates_switch() {
     // Start MGS + Sim SP.
-    let mgstestctx = mgs_setup::test_setup(
-        "test_rot_updater_updates_switch",
-        SpPort::One,
-        mgs_setup::DEFAULT_SP_SIM_CONFIG.into(),
-    )
-    .await;
+    let mgstestctx =
+        mgs_setup::test_setup("test_rot_updater_updates_switch", SpPort::One)
+            .await;
 
     // Configure an MGS client.
     let mgs_client = mgstestctx.client();
@@ -399,7 +393,6 @@ async fn test_rot_updater_remembers_successful_mgs_instance() {
     let mgstestctx = mgs_setup::test_setup(
         "test_rot_updater_remembers_successful_mgs_instance",
         SpPort::One,
-        mgs_setup::DEFAULT_SP_SIM_CONFIG.into(),
     )
     .await;
 
@@ -501,7 +494,6 @@ async fn test_rot_updater_switches_mgs_instances_on_failure() {
     let mgstestctx = mgs_setup::test_setup(
         "test_rot_updater_switches_mgs_instances_on_failure",
         SpPort::One,
-        mgs_setup::DEFAULT_SP_SIM_CONFIG.into(),
     )
     .await;
     let mgs_bind_addr = mgstestctx.client.bind_address;
@@ -701,7 +693,6 @@ async fn test_rot_updater_delivers_progress() {
     let mgstestctx = mgs_setup::test_setup(
         "test_rot_updater_delivers_progress",
         SpPort::One,
-        mgs_setup::DEFAULT_SP_SIM_CONFIG.into(),
     )
     .await;
 

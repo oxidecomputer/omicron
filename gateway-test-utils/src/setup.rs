@@ -89,10 +89,9 @@ pub fn load_test_config(
 pub async fn test_setup(
     test_name: &str,
     sp_port: SpPort,
-    sp_sim_config_file_path: Utf8PathBuf,
 ) -> GatewayTestContext {
     let (server_config, sp_sim_config) =
-        load_test_config(sp_sim_config_file_path);
+        load_test_config(DEFAULT_SP_SIM_CONFIG.into());
     test_setup_with_config(
         test_name,
         sp_port,

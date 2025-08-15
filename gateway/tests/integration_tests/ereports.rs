@@ -214,12 +214,7 @@ async fn check_sim_state(
 
 #[tokio::test]
 async fn ereports_basic() {
-    let testctx = setup::test_setup(
-        "ereports_basic",
-        SpPort::One,
-        setup::DEFAULT_SP_SIM_CONFIG.into(),
-    )
-    .await;
+    let testctx = setup::test_setup("ereports_basic", SpPort::One).await;
     let client = &testctx.client;
     let simrack = &testctx.simrack;
     check_sim_state(simrack).await;
@@ -248,12 +243,7 @@ async fn ereports_basic() {
 
 #[tokio::test]
 async fn ereports_limit() {
-    let testctx = setup::test_setup(
-        "ereports_limit",
-        SpPort::One,
-        setup::DEFAULT_SP_SIM_CONFIG.into(),
-    )
-    .await;
+    let testctx = setup::test_setup("ereports_limit", SpPort::One).await;
     let client = &testctx.client;
     let simrack = &testctx.simrack;
     check_sim_state(simrack).await;
@@ -309,12 +299,7 @@ async fn ereports_limit() {
 
 #[tokio::test]
 async fn ereports_commit() {
-    let testctx = setup::test_setup(
-        "ereports_limit",
-        SpPort::One,
-        setup::DEFAULT_SP_SIM_CONFIG.into(),
-    )
-    .await;
+    let testctx = setup::test_setup("ereports_limit", SpPort::One).await;
     let client = &testctx.client;
     let simrack = &testctx.simrack;
     check_sim_state(simrack).await;

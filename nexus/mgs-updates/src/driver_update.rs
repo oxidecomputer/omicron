@@ -750,7 +750,6 @@ mod test {
         let gwtestctx = gateway_test_utils::setup::test_setup(
             "test_sp_update_basic",
             SpPort::One,
-            gateway_test_utils::setup::DEFAULT_SP_SIM_CONFIG.into(),
         )
         .await;
         let log = &gwtestctx.logctx.log;
@@ -835,7 +834,6 @@ mod test {
         let gwtestctx = gateway_test_utils::setup::test_setup(
             "test_rot_bootloader_update_basic",
             SpPort::One,
-            gateway_test_utils::setup::DEFAULT_SP_SIM_CONFIG.into(),
         )
         .await;
         let log = &gwtestctx.logctx.log;
@@ -921,7 +919,6 @@ mod test {
         let gwtestctx = gateway_test_utils::setup::test_setup(
             "test_rot_update_basic",
             SpPort::One,
-            gateway_test_utils::setup::DEFAULT_SP_SIM_CONFIG.into(),
         )
         .await;
         let log = &gwtestctx.logctx.log;
@@ -1010,7 +1007,6 @@ mod test {
         let gwtestctx = gateway_test_utils::setup::test_setup(
             "test_sp_update_watched",
             SpPort::One,
-            gateway_test_utils::setup::DEFAULT_SP_SIM_CONFIG.into(),
         )
         .await;
         let log = &gwtestctx.logctx.log;
@@ -1098,7 +1094,6 @@ mod test {
         let gwtestctx = gateway_test_utils::setup::test_setup(
             "test_sp_update_takeover",
             SpPort::One,
-            gateway_test_utils::setup::DEFAULT_SP_SIM_CONFIG.into(),
         )
         .await;
         let log = &gwtestctx.logctx.log;
@@ -1188,7 +1183,6 @@ mod test {
         let gwtestctx = gateway_test_utils::setup::test_setup(
             "test_sp_basic_failures",
             SpPort::One,
-            gateway_test_utils::setup::DEFAULT_SP_SIM_CONFIG.into(),
         )
         .await;
         let log = &gwtestctx.logctx.log;
@@ -1350,7 +1344,6 @@ mod test {
         let gwtestctx = gateway_test_utils::setup::test_setup(
             "test_rot_basic_failures",
             SpPort::One,
-            gateway_test_utils::setup::DEFAULT_SP_SIM_CONFIG.into(),
         )
         .await;
         let log = &gwtestctx.logctx.log;
@@ -1565,7 +1558,6 @@ mod test {
         let gwtestctx = gateway_test_utils::setup::test_setup(
             "test_rot_bootloader_basic_failures",
             SpPort::One,
-            gateway_test_utils::setup::DEFAULT_SP_SIM_CONFIG.into(),
         )
         .await;
         let log = &gwtestctx.logctx.log;
