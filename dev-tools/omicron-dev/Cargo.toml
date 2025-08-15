@@ -16,6 +16,7 @@ camino.workspace = true
 clap.workspace = true
 dropshot.workspace = true
 futures.workspace = true
+gateway-test-utils.workspace = true
 libc.workspace = true
 nexus-config.workspace = true
 nexus-test-interface.workspace = true

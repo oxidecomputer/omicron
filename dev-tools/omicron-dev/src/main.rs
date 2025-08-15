@@ -6,6 +6,7 @@ use anyhow::Context;
 use camino::Utf8PathBuf;
 use clap::{Args, Parser, Subcommand};
 use futures::StreamExt;
+use gateway_test_utils::setup::DEFAULT_SP_SIM_CONFIG;
 use libc::SIGINT;
 use nexus_config::NexusConfig;
 use nexus_test_interface::NexusServer;
@@ -47,8 +48,8 @@ struct RunAllArgs {
     #[clap(long, action)]
     nexus_listen_port: Option<u16>,
     /// Override the gateway server configuration file.
-    #[clap(long)]
-    gateway_config: Option<Utf8PathBuf>,
+    #[clap(long, default_value = DEFAULT_SP_SIM_CONFIG)]
+    gateway_config: Utf8PathBuf,
 }
 
 impl RunAllArgs {

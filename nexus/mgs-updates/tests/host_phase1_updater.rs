@@ -34,7 +34,7 @@ async fn test_host_phase1_updater_updates_sled() {
     let mgstestctx = mgs_setup::test_setup(
         "test_host_phase1_updater_updates_sled",
         SpPort::One,
-        None,
+        mgs_setup::DEFAULT_SP_SIM_CONFIG.into(),
     )
     .await;
 
@@ -88,7 +88,7 @@ async fn test_host_phase1_updater_remembers_successful_mgs_instance() {
     let mgstestctx = mgs_setup::test_setup(
         "test_host_phase1_updater_remembers_successful_mgs_instance",
         SpPort::One,
-        None,
+        mgs_setup::DEFAULT_SP_SIM_CONFIG.into(),
     )
     .await;
 
@@ -189,7 +189,7 @@ async fn test_host_phase1_updater_switches_mgs_instances_on_failure() {
     let mgstestctx = mgs_setup::test_setup(
         "test_host_phase1_updater_switches_mgs_instances_on_failure",
         SpPort::One,
-        None,
+        mgs_setup::DEFAULT_SP_SIM_CONFIG.into(),
     )
     .await;
     let mgs_bind_addr = mgstestctx.client.bind_address;
@@ -386,7 +386,7 @@ async fn test_host_phase1_updater_delivers_progress() {
     let mgstestctx = mgs_setup::test_setup(
         "test_host_phase1_updater_delivers_progress",
         SpPort::One,
-        None,
+        mgs_setup::DEFAULT_SP_SIM_CONFIG.into(),
     )
     .await;
 

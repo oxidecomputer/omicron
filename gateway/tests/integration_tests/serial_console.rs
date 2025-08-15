@@ -19,9 +19,12 @@ use tokio_tungstenite::tungstenite::protocol::Message;
 
 #[tokio::test]
 async fn serial_console_communication() {
-    let testctx =
-        setup::test_setup("serial_console_communication", SpPort::One, None)
-            .await;
+    let testctx = setup::test_setup(
+        "serial_console_communication",
+        SpPort::One,
+        setup::DEFAULT_SP_SIM_CONFIG.into(),
+    )
+    .await;
     let client = &testctx.client;
     let simrack = &testctx.simrack;
 
@@ -67,8 +70,12 @@ async fn serial_console_communication() {
 
 #[tokio::test]
 async fn serial_console_detach() {
-    let testctx =
-        setup::test_setup("serial_console_detach", SpPort::One, None).await;
+    let testctx = setup::test_setup(
+        "serial_console_detach",
+        SpPort::One,
+        setup::DEFAULT_SP_SIM_CONFIG.into(),
+    )
+    .await;
     let client = &testctx.client;
     let simrack = &testctx.simrack;
 

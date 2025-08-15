@@ -17,7 +17,12 @@ use std::io::Read;
 
 #[tokio::test]
 async fn task_dump() {
-    let testctx = setup::test_setup("task_dump", SpPort::One, None).await;
+    let testctx = setup::test_setup(
+        "task_dump",
+        SpPort::One,
+        setup::DEFAULT_SP_SIM_CONFIG.into(),
+    )
+    .await;
     let client = &testctx.client;
     let simrack = &testctx.simrack;
 

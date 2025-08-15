@@ -7686,6 +7686,7 @@ dependencies = [
  "dropshot",
  "expectorate",
  "futures",
+ "gateway-test-utils",
  "libc",
  "nexus-config",
  "nexus-test-interface",

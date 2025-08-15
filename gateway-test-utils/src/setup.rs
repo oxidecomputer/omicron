@@ -33,6 +33,7 @@ use uuid::Uuid;
 // TODO this exact value is copy/pasted from `nexus/test-utils` - should we
 // import it or have our own?
 const RACK_UUID: &str = "c19a698f-c6f9-4a17-ae30-20d711b8f7dc";
+pub const DEFAULT_SP_SIM_CONFIG: &str = "configs/sp_sim_config.test.toml";
 
 pub struct GatewayTestContext {
     pub client: ClientTestContext,
@@ -64,8 +65,7 @@ impl GatewayTestContext {
 }
 
 pub fn load_test_config(
-    // TODO-K: This could just be a string if it makes nexus tests macro easier
-    sp_sim_config_file_path: Option<Utf8PathBuf>,
+    sp_sim_config_file: Utf8PathBuf,
 ) -> (omicron_gateway::Config, sp_sim::Config) {
     // The test configs are located relative to the directory this file is in.
     // TODO: embed these with include_str! instead?
@@ -77,11 +77,7 @@ pub fn load_test_config(
             Err(e) => panic!("failed to load MGS config: {e}"),
         };
 
-    let sp_sim_config_file_path = if let Some(dir) = sp_sim_config_file_path {
-        manifest_dir.join(dir)
-    } else {
-        manifest_dir.join("configs/sp_sim_config.test.toml")
-    };
+    let sp_sim_config_file_path = manifest_dir.join(sp_sim_config_file);
     let sp_sim_config =
         match sp_sim::Config::from_file(&sp_sim_config_file_path) {
             Ok(config) => config,
@@ -93,8 +89,7 @@ pub fn load_test_config(
 pub async fn test_setup(
     test_name: &str,
     sp_port: SpPort,
-    // TODO-K: Instead of option have the default config file be a constant?
-    sp_sim_config_file_path: Option<Utf8PathBuf>,
+    sp_sim_config_file_path: Utf8PathBuf,
 ) -> GatewayTestContext {
     let (server_config, sp_sim_config) =
         load_test_config(sp_sim_config_file_path);

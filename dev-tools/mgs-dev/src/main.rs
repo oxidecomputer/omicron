@@ -7,6 +7,7 @@
 use camino::Utf8PathBuf;
 use clap::{Args, Parser, Subcommand};
 use futures::StreamExt;
+use gateway_test_utils::setup::DEFAULT_SP_SIM_CONFIG;
 use libc::SIGINT;
 use signal_hook_tokio::Signals;
 use std::net::SocketAddr;
@@ -45,8 +46,8 @@ struct MgsRunArgs {
     #[clap(long)]
     nexus_address: Option<SocketAddr>,
     /// Override the sp-sim configuration file.
-    #[clap(long)]
-    sp_sim_config_file: Option<Utf8PathBuf>,
+    #[clap(long, default_value = DEFAULT_SP_SIM_CONFIG)]
+    sp_sim_config_file: Utf8PathBuf,
 }
 
 impl MgsRunArgs {
