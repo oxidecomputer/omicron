@@ -43,6 +43,7 @@ use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::http_pagination::PaginatedBy;
+use omicron_uuid_kinds::SiloGroupUuid;
 use ref_cast::RefCast;
 use uuid::Uuid;
 
@@ -177,7 +178,7 @@ impl DataStore {
         dns_update: DnsVersionUpdateBuilder,
     ) -> Result<Silo, TransactionError<Error>> {
         let silo_id = Uuid::new_v4();
-        let silo_group_id = Uuid::new_v4();
+        let silo_group_id = SiloGroupUuid::new_v4();
 
         let silo_create_query = Self::silo_create_query(
             opctx,
@@ -208,29 +209,30 @@ impl DataStore {
             None
         };
 
-        let silo_admin_group_role_assignment_queries =
-            if new_silo_params.admin_group_name.is_some() {
-                // Grant silo admin role for members of the admin group.
-                let policy = shared::Policy {
-                    role_assignments: vec![shared::RoleAssignment {
-                        identity_type: shared::IdentityType::SiloGroup,
-                        identity_id: silo_group_id,
-                        role_name: SiloRole::Admin,
-                    }],
-                };
-
-                let silo_admin_group_role_assignment_queries =
-                    DataStore::role_assignment_replace_visible_queries(
-                        opctx,
-                        &authz_silo,
-                        &policy.role_assignments,
-                    )
-                    .await?;
-
-                Some(silo_admin_group_role_assignment_queries)
-            } else {
-                None
+        let silo_admin_group_role_assignment_queries = if new_silo_params
+            .admin_group_name
+            .is_some()
+        {
+            // Grant silo admin role for members of the admin group.
+            let policy = shared::Policy {
+                role_assignments: vec![shared::RoleAssignment::for_silo_group(
+                    silo_group_id,
+                    SiloRole::Admin,
+                )],
             };
+
+            let silo_admin_group_role_assignment_queries =
+                DataStore::role_assignment_replace_visible_queries(
+                    opctx,
+                    &authz_silo,
+                    &policy.role_assignments,
+                )
+                .await?;
+
+            Some(silo_admin_group_role_assignment_queries)
+        } else {
+            None
+        };
 
         // This method uses nested transactions, which are not supported
         // with retryable transactions.

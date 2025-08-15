@@ -25,6 +25,8 @@ use omicron_common::api::internal::nexus::Certificate as InternalCertificate;
 use omicron_test_utils::certificates::CertificateChain;
 use omicron_test_utils::dev::poll::CondCheckError;
 use omicron_test_utils::dev::poll::wait_for_condition;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::SiloUserUuid;
 use oxide_client::ClientCurrentUserExt;
 use oxide_client::ClientSilosExt;
 use oxide_client::ClientSystemSilosExt;
@@ -409,7 +411,7 @@ async fn test_silo_certificates() {
         .expect("failed to create Silo");
 
     // Create a local user in that Silo.
-    let silo2_user = silo1_client
+    let silo2_user: SiloUserUuid = silo1_client
         .local_idp_user_create()
         .silo(silo2.silo_name.clone())
         .body(
@@ -433,7 +435,7 @@ async fn test_silo_certificates() {
         .into_inner();
     silo2_policy.role_assignments.push(
         oxide_client::types::SiloRoleRoleAssignment::builder()
-            .identity_id(silo2_user)
+            .identity_id(silo2_user.into_untyped_uuid())
             .identity_type(oxide_client::types::IdentityType::SiloUser)
             .role_name(oxide_client::types::SiloRole::Admin)
             .try_into()
@@ -472,7 +474,7 @@ async fn test_silo_certificates() {
         .send()
         .await
         .expect("failed to create Silo");
-    let silo3_user = silo1_client
+    let silo3_user: SiloUserUuid = silo1_client
         .local_idp_user_create()
         .silo(silo3.silo_name.clone())
         .body(
@@ -496,7 +498,7 @@ async fn test_silo_certificates() {
         .into_inner();
     silo3_policy.role_assignments.push(
         oxide_client::types::SiloRoleRoleAssignment::builder()
-            .identity_id(silo3_user)
+            .identity_id(silo3_user.into_untyped_uuid())
             .identity_type(oxide_client::types::IdentityType::SiloUser)
             .role_name(oxide_client::types::SiloRole::Admin)
             .try_into()

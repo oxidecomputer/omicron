@@ -13,6 +13,7 @@ use crate::storage::Storage;
 use chrono::{DateTime, Utc};
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::ConsoleSessionUuid;
+use omicron_uuid_kinds::SiloUserUuid;
 use slog::debug;
 use slog::o;
 use slog::trace;
@@ -127,14 +128,24 @@ impl OpContext {
         let mut metadata = BTreeMap::new();
 
         let log = if let Some(actor) = authn.actor() {
-            let actor_id = actor.actor_id();
             metadata
                 .insert(String::from("authenticated"), String::from("true"));
             metadata.insert(String::from("actor"), format!("{:?}", actor));
 
-            log.new(
-                o!("authenticated" => true, "actor_id" => actor_id.to_string()),
-            )
+            match &actor {
+                authn::Actor::SiloUser { silo_user_id, silo_id } => {
+                    log.new(o!(
+                        "authenticated" => true,
+                        "silo_user_id" => silo_user_id.to_string(),
+                        "silo_id" => silo_id.to_string(),
+                    ))
+                }
+
+                authn::Actor::UserBuiltin { user_builtin_id } => log.new(o!(
+                    "authenticated" => true,
+                    "user_builtin_id" => user_builtin_id.to_string(),
+                )),
+            }
         } else {
             metadata
                 .insert(String::from("authenticated"), String::from("false"));
@@ -373,9 +384,8 @@ impl Session for ConsoleSessionWithSiloId {
     fn id(&self) -> ConsoleSessionUuid {
         self.console_session.id()
     }
-
-    fn silo_user_id(&self) -> Uuid {
-        self.console_session.silo_user_id
+    fn silo_user_id(&self) -> SiloUserUuid {
+        self.console_session.silo_user_id()
     }
     fn silo_id(&self) -> Uuid {
         self.silo_id

@@ -5,9 +5,11 @@
 use chrono::{DateTime, Utc};
 use nexus_db_schema::schema::console_session;
 use nexus_types::external_api::views;
+use omicron_uuid_kinds::SiloUserKind;
+use omicron_uuid_kinds::SiloUserUuid;
 use omicron_uuid_kinds::{ConsoleSessionKind, ConsoleSessionUuid, GenericUuid};
-use uuid::Uuid;
 
+use crate::to_db_typed_uuid;
 use crate::typed_uuid::DbTypedUuid;
 
 // TODO: `struct SessionToken(String)` for session token
@@ -19,23 +21,36 @@ pub struct ConsoleSession {
     pub token: String,
     pub time_created: DateTime<Utc>,
     pub time_last_used: DateTime<Utc>,
-    pub silo_user_id: Uuid,
+    silo_user_id: DbTypedUuid<SiloUserKind>,
 }
 
 impl ConsoleSession {
-    pub fn new(token: String, silo_user_id: Uuid) -> Self {
+    pub fn new(token: String, silo_user_id: SiloUserUuid) -> Self {
         let now = Utc::now();
+        Self::new_with_times(token, silo_user_id, now, now)
+    }
+
+    pub fn new_with_times(
+        token: String,
+        silo_user_id: SiloUserUuid,
+        time_created: DateTime<Utc>,
+        time_last_used: DateTime<Utc>,
+    ) -> Self {
         Self {
             id: ConsoleSessionUuid::new_v4().into(),
             token,
-            silo_user_id,
-            time_last_used: now,
-            time_created: now,
+            silo_user_id: to_db_typed_uuid(silo_user_id),
+            time_created,
+            time_last_used,
         }
     }
 
     pub fn id(&self) -> ConsoleSessionUuid {
         self.id.0
+    }
+
+    pub fn silo_user_id(&self) -> SiloUserUuid {
+        self.silo_user_id.into()
     }
 }
 

@@ -17,6 +17,7 @@ use async_bb8_diesel::AsyncRunQueryDsl;
 use db_macros::lookup_resource;
 use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
 use ipnetwork::IpNetwork;
+use nexus_auth::authn;
 use nexus_auth::authz;
 use nexus_auth::context::OpContext;
 use nexus_db_errors::{ErrorHandler, public_error_from_diesel};
@@ -26,17 +27,7 @@ use nexus_types::identity::Resource;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::{LookupResult, LookupType, ResourceType};
-use omicron_uuid_kinds::AccessTokenKind;
-use omicron_uuid_kinds::AlertReceiverUuid;
-use omicron_uuid_kinds::AlertUuid;
-use omicron_uuid_kinds::ConsoleSessionUuid;
-use omicron_uuid_kinds::PhysicalDiskUuid;
-use omicron_uuid_kinds::SupportBundleUuid;
-use omicron_uuid_kinds::TufArtifactKind;
-use omicron_uuid_kinds::TufRepoKind;
-use omicron_uuid_kinds::TufTrustRootUuid;
-use omicron_uuid_kinds::TypedUuid;
-use omicron_uuid_kinds::WebhookSecretUuid;
+use omicron_uuid_kinds::*;
 use slog::{error, trace};
 use uuid::Uuid;
 
@@ -257,12 +248,29 @@ impl<'a> LookupPath<'a> {
     }
 
     /// Select a resource of type SiloUser, identified by its id
-    pub fn silo_user_id(self, id: Uuid) -> SiloUser<'a> {
+    pub fn silo_user_id(self, id: SiloUserUuid) -> SiloUser<'a> {
         SiloUser::PrimaryKey(Root { lookup_root: self }, id)
     }
 
+    /// Select a resource of type SiloUser that matches an authenticated Actor
+    pub fn silo_user_actor(
+        self,
+        actor: &'a authn::Actor,
+    ) -> Result<SiloUser<'a>, Error> {
+        match actor.silo_user_id() {
+            Some(silo_user_id) => Ok(SiloUser::PrimaryKey(
+                Root { lookup_root: self },
+                silo_user_id,
+            )),
+
+            None => Err(Error::non_resourcetype_not_found(
+                "could not find silo user",
+            )),
+        }
+    }
+
     /// Select a resource of type SiloGroup, identified by its id
-    pub fn silo_group_id(self, id: Uuid) -> SiloGroup<'a> {
+    pub fn silo_group_id(self, id: SiloGroupUuid) -> SiloGroup<'a> {
         SiloGroup::PrimaryKey(Root { lookup_root: self }, id)
     }
 
@@ -368,8 +376,8 @@ impl<'a> LookupPath<'a> {
         TufArtifact::PrimaryKey(Root { lookup_root: self }, id)
     }
 
-    /// Select a resource of type UserBuiltin, identified by its `name`
-    pub fn user_builtin_id<'b>(self, id: Uuid) -> UserBuiltin<'b>
+    /// Select a resource of type UserBuiltin, identified by its `id`
+    pub fn user_builtin_id<'b>(self, id: BuiltInUserUuid) -> UserBuiltin<'b>
     where
         'a: 'b,
     {
@@ -532,7 +540,7 @@ lookup_resource! {
     ancestors = [ "Silo" ],
     lookup_by_name = false,
     soft_deletes = true,
-    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ],
+    primary_key_columns = [ { column_name = "id", uuid_kind = SiloUserKind } ],
     visible_outside_silo = true
 }
 
@@ -541,7 +549,7 @@ lookup_resource! {
     ancestors = [ "Silo" ],
     lookup_by_name = false,
     soft_deletes = true,
-    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+    primary_key_columns = [ { column_name = "id", uuid_kind = SiloGroupKind } ]
 }
 
 lookup_resource! {
@@ -584,7 +592,7 @@ lookup_resource! {
 
 lookup_resource! {
     name = "SshKey",
-    ancestors = [ "Silo", "SiloUser" ],
+    ancestors = [ "Silo", "SiloUser*" ],
     lookup_by_name = true,
     soft_deletes = true,
     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
@@ -841,7 +849,7 @@ lookup_resource! {
     ancestors = [],
     lookup_by_name = true,
     soft_deletes = false,
-    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+    primary_key_columns = [ { column_name = "id", uuid_kind = BuiltInUserKind } ]
 }
 
 lookup_resource! {
