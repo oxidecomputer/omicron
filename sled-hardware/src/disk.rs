@@ -51,6 +51,10 @@ pub enum PooledDiskError {
     CannotFormatM2NotImplemented,
     #[error(transparent)]
     NvmeFormatAndResize(#[from] NvmeFormattingError),
+    #[error("Invalid Utf8 path: {0}")]
+    FromPathBuf(#[from] camino::FromPathBufError),
+    #[error("Cannot find disk paths for {identity:?}: {error}")]
+    DiskPath { identity: DiskIdentity, error: DiskPathsError },
 }
 
 /// A partition (or 'slice') of a disk.
@@ -199,7 +203,7 @@ impl DiskFirmware {
     Debug, Clone, PartialEq, Eq, Hash, Ord, PartialOrd, Deserialize, Serialize,
 )]
 pub struct UnparsedDisk {
-    paths: DiskPaths,
+    nvme_instance: i32,
     slot: i64,
     variant: DiskVariant,
     identity: DiskIdentity,
@@ -209,30 +213,14 @@ pub struct UnparsedDisk {
 
 impl UnparsedDisk {
     pub fn new(
-        devfs_path: Utf8PathBuf,
-        dev_path: Option<Utf8PathBuf>,
+        nvme_instance: i32,
         slot: i64,
         variant: DiskVariant,
         identity: DiskIdentity,
         is_boot_disk: bool,
         firmware: DiskFirmware,
     ) -> Self {
-        Self {
-            paths: DiskPaths { devfs_path, dev_path },
-            slot,
-            variant,
-            identity,
-            is_boot_disk,
-            firmware,
-        }
-    }
-
-    pub fn paths(&self) -> &DiskPaths {
-        &self.paths
-    }
-
-    pub fn devfs_path(&self) -> &Utf8PathBuf {
-        &self.paths.devfs_path
+        Self { nvme_instance, slot, variant, identity, is_boot_disk, firmware }
     }
 
     pub fn variant(&self) -> DiskVariant {
@@ -249,6 +237,10 @@ impl UnparsedDisk {
 
     pub fn slot(&self) -> i64 {
         self.slot
+    }
+
+    pub fn nvme_instance(&self) -> i32 {
+        self.nvme_instance
     }
 
     pub fn firmware(&self) -> &DiskFirmware {
@@ -274,6 +266,7 @@ impl UnparsedDisk {
 pub struct PooledDisk {
     pub paths: DiskPaths,
     pub slot: i64,
+    pub nvme_instance: i32,
     pub variant: DiskVariant,
     pub identity: DiskIdentity,
     pub is_boot_disk: bool,
@@ -291,7 +284,12 @@ impl PooledDisk {
         unparsed_disk: UnparsedDisk,
         zpool_id: Option<ZpoolUuid>,
     ) -> Result<Self, PooledDiskError> {
-        let paths = &unparsed_disk.paths;
+        let paths = find_disk_paths(&unparsed_disk).map_err(|error| {
+            PooledDiskError::DiskPath {
+                identity: unparsed_disk.identity().clone(),
+                error,
+            }
+        })?;
         let variant = unparsed_disk.variant;
         let identity = &unparsed_disk.identity;
         // Ensure the GPT has the right format. This does not necessarily
@@ -316,8 +314,9 @@ impl PooledDisk {
         ensure_zpool_failmode_is_continue(log, &zpool_name).await?;
 
         Ok(Self {
-            paths: unparsed_disk.paths,
+            paths,
             slot: unparsed_disk.slot,
+            nvme_instance: unparsed_disk.nvme_instance,
             variant: unparsed_disk.variant,
             identity: unparsed_disk.identity,
             is_boot_disk: unparsed_disk.is_boot_disk,
