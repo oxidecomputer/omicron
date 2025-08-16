@@ -415,12 +415,7 @@ impl Plan {
 
             let id = OmicronZoneUuid::new_v4();
             dns_builder
-                .host_zone_internal_dns(
-                    id,
-                    ServiceName::InternalDns,
-                    http_address,
-                    dns_address,
-                )
+                .host_zone_internal_dns(id, http_address, dns_address)
                 .unwrap();
             let dataset_name =
                 sled.alloc_dataset_from_u2s(DatasetKind::InternalDns)?;
@@ -624,7 +619,6 @@ impl Plan {
             dns_builder
                 .host_zone_clickhouse_single_node(
                     id,
-                    ServiceName::Clickhouse,
                     http_address,
                     oximeter_read_mode_enabled,
                 )
