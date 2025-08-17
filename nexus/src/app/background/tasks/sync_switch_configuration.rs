@@ -887,16 +887,41 @@ impl BackgroundTask for SwitchPortSettingsManager {
                     }
                 };
 
-                // TODO: is this correct? Do we place the BgpConfig for both switches in a single Vec to send to the bootstore?
                 let mut bgp: Vec<SledBgpConfig> = switch_bgp_config.iter().map(|(_location, (_id, config))| {
-                    let announcements = bgp_announce_prefixes
-                        .get(&config.bgp_announce_set_id)
-                        .expect("bgp config is present but announce set is not populated")
-                        .iter()
-                        .map(|prefix| {
-                            Ipv4Net::new(prefix.value, prefix.length)
-                                .expect("Prefix4 and Ipv4Net's value types have diverged")
-                        }).collect();
+                    let prefixes = match bgp_announce_prefixes
+                        .get(&config.bgp_announce_set_id) {
+                            Some(v) => v.clone(),
+                            None => {
+                                // There should always be a set of prefixes for a given announce set id.
+                                // If this is `None` we need to audit the history of the specified bgp config
+                                // and announce set to see what went wrong.
+                                error!(
+                                    log,
+                                    "bgp config references an announce set that does not exist";
+                                    "bgp_config_id" => ?config.id(),
+                                    "announce_set_id" => ?config.bgp_announce_set_id,
+                                );
+                                vec![]
+                            },
+                        };
+
+                    let mut announcements = vec![];
+
+                    for prefix in prefixes {
+                        let net = match Ipv4Net::new(prefix.value, prefix.length) {
+                            Ok(v) => v,
+                            Err(e) => {
+                                error!(
+                                    log,
+                                    "failed to create Ipv4Net from Prefix4";
+                                    "prefix4" => ?prefix,
+                                    "error" => %DisplayErrorChain::new(&e),
+                                );
+                                continue;
+                            },
+                        };
+                        announcements.push(net);
+                    }
 
                     SledBgpConfig {
                         asn: config.asn.0,
@@ -913,6 +938,21 @@ impl BackgroundTask for SwitchPortSettingsManager {
                 for (location, port, change) in &changes {
                     let PortSettingsChange::Apply(info) = change else {
                         continue;
+                    };
+
+                    let port_settings_id = match port.port_settings_id {
+                        Some(id) => id,
+                        None => {
+                            // Theoretically this should never be possible. If we have a PortSettingsChange::Apply, that
+                            // means we have an active port_settings record and the port_settings_id should be `Some(Uuid)`.
+                            error!(
+                                log,
+                                "PortSettingsChange::Apply without a port_settings_id";
+                                "port" => ?port,
+                                "info" => ?info,
+                            );
+                            continue;
+                        },
                     };
 
                     let peer_configs = match self.datastore.bgp_peer_configs(opctx, *location, port.port_name.to_string()).await {
@@ -1028,7 +1068,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                             .datastore
                             .communities_for_peer(
                                 opctx,
-                                port.port_settings_id.unwrap(),
+                                port_settings_id,
                                 PHY0, //TODO https://github.com/oxidecomputer/omicron/issues/3062
                                 IpNetwork::from(IpAddr::from(peer.addr))
                             ).await {
@@ -1046,7 +1086,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         //TODO consider awaiting in parallel and joining
                         let allow_import = match self.datastore.allow_import_for_peer(
                             opctx,
-                            port.port_settings_id.unwrap(),
+                            port_settings_id,
                             PHY0, //TODO https://github.com/oxidecomputer/omicron/issues/3062
                             IpNetwork::from(IpAddr::from(peer.addr)),
                         ).await {
@@ -1070,7 +1110,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
 
                         let allow_export = match self.datastore.allow_export_for_peer(
                             opctx,
-                            port.port_settings_id.unwrap(),
+                            port_settings_id,
                             PHY0, //TODO https://github.com/oxidecomputer/omicron/issues/3062
                             IpNetwork::from(IpAddr::from(peer.addr)),
                         ).await {
@@ -1301,14 +1341,29 @@ impl BackgroundTask for SwitchPortSettingsManager {
                     }
 
                     // if at least one succeeded, record this update in the db
+                    let config = match serde_json::to_value(&desired_config) {
+                        Ok(data) => {
+                            BootstoreConfig {
+                                key: NETWORK_KEY.into(),
+                                generation: desired_config.generation as i64,
+                                data,
+                                time_created: chrono::Utc::now(),
+                                time_deleted: None,
+                            }
+                        }
+                        Err(e) => {
+                            error!(
+                                log,
+                                "error while serializing config for storage";
+                                "config" => ?desired_config,
+                                "error" => %e,
+                            );
+                            // if we cannot successfully serialize the config, we cannot store the config
+                            continue;
+                        }
+                    };
+
                     if one_succeeded {
-                        let config = BootstoreConfig {
-                            key: NETWORK_KEY.into(),
-                            generation: desired_config.generation as i64,
-                            data: serde_json::to_value(&desired_config).unwrap(),
-                            time_created: chrono::Utc::now(),
-                            time_deleted: None,
-                        };
                         if let Err(e) = self.datastore.ensure_bootstore_config(opctx, config.clone()).await {
                             // if this fails, worst case scenario is that we will send the bootstore
                             // information it already has on the next run
