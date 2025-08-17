@@ -8572,6 +8572,7 @@ dependencies = [
  "ppv-lite86",
  "predicates",
  "proc-macro2",
+ "proptest",
  "rand 0.8.5",
  "rand 0.9.1",
  "rand_chacha 0.3.1",
