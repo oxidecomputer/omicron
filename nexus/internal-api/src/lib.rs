@@ -28,7 +28,7 @@ use nexus_types::{
             SledAgentInfo, SwitchPutRequest, SwitchPutResponse,
         },
         views::{
-            BackgroundTask, DemoSaga, NatEntryView, MgsUpdateDriverStatus,
+            BackgroundTask, DemoSaga, MgsUpdateDriverStatus, NatEntryView,
             QuiesceStatus, Saga, UpdateStatus,
         },
     },

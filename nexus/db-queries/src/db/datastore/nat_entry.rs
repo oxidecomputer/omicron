@@ -407,7 +407,7 @@ mod test {
 
         // Each change (creation / deletion) to the NAT table should increment the
         // version number of the row in the NAT table
-        let external_address =
+        let external_address1 =
             oxnet::Ipv4Net::host_net("10.0.0.100".parse().unwrap());
 
         let sled_address =
@@ -415,7 +415,7 @@ mod test {
 
         // Add a nat entry.
         let nat1 = NatEntryValues {
-            external_address: external_address.into(),
+            external_address: external_address1.into(),
             first_port: 0.into(),
             last_port: 999.into(),
             sled_address: sled_address.into(),
@@ -439,8 +439,10 @@ mod test {
         assert_eq!(datastore.nat_current_version(&opctx).await.unwrap(), 1);
 
         // Add another nat entry.
+        let external_address2 =
+            oxnet::Ipv6Net::host_net("2001:db8::1".parse().unwrap());
         let nat2 = NatEntryValues {
-            external_address: external_address.into(),
+            external_address: external_address2.into(),
             first_port: 1000.into(),
             last_port: 1999.into(),
             sled_address: sled_address.into(),
