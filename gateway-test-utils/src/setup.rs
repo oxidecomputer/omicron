@@ -64,7 +64,28 @@ impl GatewayTestContext {
     }
 }
 
-pub fn load_test_config(
+pub fn load_test_config() -> (omicron_gateway::Config, sp_sim::Config) {
+    // The test configs are located relative to the directory this file is in.
+    // TODO: embed these with include_str! instead?
+    let manifest_dir = Utf8Path::new(env!("CARGO_MANIFEST_DIR"));
+    let server_config_file_path = manifest_dir.join("configs/config.test.toml");
+    let server_config =
+        match omicron_gateway::Config::from_file(&server_config_file_path) {
+            Ok(config) => config,
+            Err(e) => panic!("failed to load MGS config: {e}"),
+        };
+
+    let sp_sim_config_file_path =
+        manifest_dir.join("configs/sp_sim_config.test.toml");
+    let sp_sim_config =
+        match sp_sim::Config::from_file(&sp_sim_config_file_path) {
+            Ok(config) => config,
+            Err(e) => panic!("failed to load SP simulator config: {e}"),
+        };
+    (server_config, sp_sim_config)
+}
+
+pub fn load_test_config_from(
     sp_sim_config_file: Utf8PathBuf,
 ) -> (omicron_gateway::Config, sp_sim::Config) {
     // The test configs are located relative to the directory this file is in.
@@ -90,8 +111,7 @@ pub async fn test_setup(
     test_name: &str,
     sp_port: SpPort,
 ) -> GatewayTestContext {
-    let (server_config, sp_sim_config) =
-        load_test_config(DEFAULT_SP_SIM_CONFIG.into());
+    let (server_config, sp_sim_config) = load_test_config();
     test_setup_with_config(
         test_name,
         sp_port,
@@ -101,6 +121,15 @@ pub async fn test_setup(
     )
     .await
 }
+
+// TODO-K: Use this
+///// Helper function to load the main server config.
+//fn load_server_config() -> omicron_gateway::Config {
+//    let manifest_dir = Utf8Path::new(env!("CARGO_MANIFEST_DIR"));
+//    let config_path = manifest_dir.join("configs/config.test.toml");
+//    omicron_gateway::Config::from_file(&config_path)
+//        .unwrap_or_else(|e| panic!("failed to load MGS config: {e}"))
+//}
 
 fn expected_location(
     config: &omicron_gateway::Config,

@@ -567,9 +567,7 @@ async fn test_sp_updater_switches_mgs_instances_on_failure() {
 async fn test_sp_updater_delivers_progress() {
     // Start MGS + Sim SP.
     let mgstestctx = {
-        let (mut mgs_config, sp_sim_config) = mgs_setup::load_test_config(
-            mgs_setup::DEFAULT_SP_SIM_CONFIG.into(),
-        );
+        let (mut mgs_config, sp_sim_config) = mgs_setup::load_test_config();
         // Enabling SP metrics collection makes this alread-flaky test even
         // flakier, so let's just turn it off.
         // TODO(eliza): it would be nice if we didn't have to disable metrics in

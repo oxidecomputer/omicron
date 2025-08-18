@@ -651,9 +651,7 @@ async fn test_mgs_metrics(
 ) {
     // Make a MGS
     let (mut mgs_config, sp_sim_config) =
-        gateway_test_utils::setup::load_test_config(
-            gateway_test_utils::setup::DEFAULT_SP_SIM_CONFIG.into(),
-        );
+        gateway_test_utils::setup::load_test_config();
     let mgs = {
         // munge the already-parsed MGS config file to point it at the test
         // Nexus' address.
