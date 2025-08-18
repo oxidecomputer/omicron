@@ -28,6 +28,7 @@ use nexus_types::deployment::ExpectedVersion;
 use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdateDetails;
 use nexus_types::deployment::PendingMgsUpdateHostPhase1Details;
+use nexus_types::deployment::PendingMgsUpdateSpDetails;
 use nexus_types::internal_api::views::InProgressUpdateStatus;
 use nexus_types::internal_api::views::MgsUpdateDriverStatus;
 use nexus_types::internal_api::views::UpdateAttemptStatus;
@@ -126,10 +127,10 @@ impl UpdateDescription<'_> {
                     .unwrap_or_else(|| sp1.expect_sp_inactive_version());
 
                 (
-                    PendingMgsUpdateDetails::Sp {
+                    PendingMgsUpdateDetails::Sp(PendingMgsUpdateSpDetails {
                         expected_active_version,
                         expected_inactive_version,
-                    },
+                    }),
                     has_caboose,
                 )
             }

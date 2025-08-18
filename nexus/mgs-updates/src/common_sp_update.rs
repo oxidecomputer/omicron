@@ -299,8 +299,8 @@ impl SpComponentUpdateHelper {
     pub fn new(details: &PendingMgsUpdateDetails) -> Self {
         let inner: Box<dyn SpComponentUpdateHelperImpl + Send + Sync> =
             match details {
-                PendingMgsUpdateDetails::Sp { .. } => {
-                    Box::new(ReconfiguratorSpUpdater {})
+                PendingMgsUpdateDetails::Sp(details) => {
+                    Box::new(ReconfiguratorSpUpdater::new(details.clone()))
                 }
                 PendingMgsUpdateDetails::Rot { .. } => {
                     Box::new(ReconfiguratorRotUpdater {})

@@ -1467,14 +1467,7 @@ impl PendingMgsUpdate {
 #[serde(tag = "component", rename_all = "snake_case")]
 pub enum PendingMgsUpdateDetails {
     /// the SP itself is being updated
-    Sp {
-        // implicit: component = SP_ITSELF
-        // implicit: firmware slot id = 0 (always 0 for SP itself)
-        /// expected contents of the active slot
-        expected_active_version: ArtifactVersion,
-        /// expected contents of the inactive slot
-        expected_inactive_version: ExpectedVersion,
-    },
+    Sp(PendingMgsUpdateSpDetails),
     /// the RoT is being updated
     Rot {
         // implicit: component = ROT
@@ -1527,19 +1520,9 @@ impl slog::KV for PendingMgsUpdateDetails {
         serializer: &mut dyn slog::Serializer,
     ) -> slog::Result {
         match self {
-            PendingMgsUpdateDetails::Sp {
-                expected_active_version,
-                expected_inactive_version,
-            } => {
+            PendingMgsUpdateDetails::Sp(details) => {
                 serializer.emit_str(Key::from("component"), "sp")?;
-                serializer.emit_str(
-                    Key::from("expected_active_version"),
-                    &expected_active_version.to_string(),
-                )?;
-                serializer.emit_str(
-                    Key::from("expected_inactive_version"),
-                    &format!("{:?}", expected_inactive_version),
-                )
+                slog::KV::serialize(details, record, serializer)
             }
             PendingMgsUpdateDetails::Rot {
                 expected_active_slot,
@@ -1593,6 +1576,38 @@ impl slog::KV for PendingMgsUpdateDetails {
                 slog::KV::serialize(details, record, serializer)
             }
         }
+    }
+}
+
+/// Describes the SP-specific details of a PendingMgsUpdate
+#[derive(
+    Clone, Debug, Eq, PartialEq, JsonSchema, Deserialize, Serialize, Diffable,
+)]
+#[serde(rename_all = "snake_case")]
+pub struct PendingMgsUpdateSpDetails {
+    // implicit: component = SP_ITSELF
+    // implicit: firmware slot id = 0 (always 0 for SP itself)
+    /// expected contents of the active slot
+    pub expected_active_version: ArtifactVersion,
+    /// expected contents of the inactive slot
+    pub expected_inactive_version: ExpectedVersion,
+}
+
+impl slog::KV for PendingMgsUpdateSpDetails {
+    fn serialize(
+        &self,
+        _record: &slog::Record,
+        serializer: &mut dyn slog::Serializer,
+    ) -> slog::Result {
+        let Self { expected_active_version, expected_inactive_version } = self;
+        serializer.emit_str(
+            Key::from("expected_active_version"),
+            &expected_active_version.to_string(),
+        )?;
+        serializer.emit_str(
+            Key::from("expected_inactive_version"),
+            &format!("{expected_inactive_version:?}"),
+        )
     }
 }
 
