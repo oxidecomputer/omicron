@@ -1184,7 +1184,7 @@ impl<'a> Planner<'a> {
                 self.blueprint.comment(update.description());
             }
         }
-        self.blueprint.sled_apply_pending_host_phase_2_changes(
+        self.blueprint.apply_pending_host_phase_2_changes(
             pending_host_phase_2_changes,
         )?;
 

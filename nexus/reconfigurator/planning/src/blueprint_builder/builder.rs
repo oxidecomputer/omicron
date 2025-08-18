@@ -1946,7 +1946,7 @@ impl<'a> BlueprintBuilder<'a> {
         Ok(final_counts.difference_since(initial_counts))
     }
 
-    pub(crate) fn sled_apply_pending_host_phase_2_changes(
+    pub(crate) fn apply_pending_host_phase_2_changes(
         &mut self,
         changes: PendingHostPhase2Changes,
     ) -> Result<(), Error> {
