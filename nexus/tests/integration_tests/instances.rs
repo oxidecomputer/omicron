@@ -2670,7 +2670,10 @@ async fn test_instance_create_delete_network_interface(
             vpc_name: "default".parse().unwrap(),
             subnet_name: "default".parse().unwrap(),
             ip: Some("172.30.0.10".parse().unwrap()),
-            transit_ips: vec!["10.0.0.0/24".parse().unwrap(), "10.1.0.0/24".parse().unwrap()],
+            transit_ips: vec![
+                "10.0.0.0/24".parse().unwrap(),
+                "10.1.0.0/24".parse().unwrap(),
+            ],
         },
         params::InstanceNetworkInterfaceCreate {
             identity: IdentityMetadataCreateParams {
@@ -2736,7 +2739,9 @@ async fn test_instance_create_delete_network_interface(
         );
         // Verify transit_ips are persisted correctly
         assert_eq!(iface.transit_ips.len(), params.transit_ips.len());
-        for (actual, expected) in iface.transit_ips.iter().zip(params.transit_ips.iter()) {
+        for (actual, expected) in
+            iface.transit_ips.iter().zip(params.transit_ips.iter())
+        {
             assert_eq!(actual, expected);
         }
         interfaces.push(iface);

@@ -2205,6 +2205,7 @@ mod tests {
                 description: String::from("description"),
             },
             Some(requested_ip),
+            vec![],
         )
         .unwrap();
         let err = context.datastore()
@@ -2234,6 +2235,7 @@ mod tests {
                 description: String::from("description"),
             },
             Some(requested_ip),
+            vec![],
         )
         .unwrap();
         let inserted_interface = context
@@ -2266,6 +2268,7 @@ mod tests {
                 description: String::from("description"),
             },
             None,
+            vec![],
         )
         .unwrap();
         let err = context.datastore()
@@ -2304,6 +2307,7 @@ mod tests {
                     description: String::from("description"),
                 },
                 None,
+                vec![],
             )
             .unwrap();
             let inserted_interface = context
@@ -2348,6 +2352,7 @@ mod tests {
                 description: String::from("description"),
             },
             None,
+            vec![],
         )
         .unwrap();
         let inserted_interface = context
@@ -2367,6 +2372,7 @@ mod tests {
                 description: String::from("description"),
             },
             Some(inserted_interface.ip.ip()),
+            vec![],
         )
         .unwrap();
         let result = context
@@ -2615,6 +2621,7 @@ mod tests {
                 description: String::from("description"),
             },
             None,
+            vec![],
         )
         .unwrap();
         let _ = context
@@ -2634,6 +2641,7 @@ mod tests {
                 description: String::from("description"),
             },
             None,
+            vec![],
         )
         .unwrap();
         let result = context
@@ -2665,6 +2673,7 @@ mod tests {
                 description: String::from("description"),
             },
             None,
+            vec![],
         )
         .unwrap();
         let _ = context
@@ -2681,6 +2690,7 @@ mod tests {
                 description: String::from("description"),
             },
             None,
+            vec![],
         )
         .unwrap();
         let result = context
@@ -2709,6 +2719,7 @@ mod tests {
                 description: String::from("description"),
             },
             None,
+            vec![],
         )
         .unwrap();
         let _ = context
@@ -2751,6 +2762,7 @@ mod tests {
                 description: String::from("description"),
             },
             None,
+            vec![],
         )
         .unwrap();
         let _ = context
@@ -2769,6 +2781,7 @@ mod tests {
                     description: String::from("description"),
                 },
                 addr,
+                vec![],
             )
             .unwrap();
             let result = context
@@ -2808,6 +2821,7 @@ mod tests {
                     description: String::from("description"),
                 },
                 None,
+                vec![],
             )
             .unwrap();
             let _ = context
@@ -2837,6 +2851,7 @@ mod tests {
                 description: String::from("description"),
             },
             None,
+            vec![],
         )
         .unwrap();
         let result = context
@@ -2870,6 +2885,7 @@ mod tests {
                     description: String::from("description"),
                 },
                 None,
+                vec![],
             )
             .unwrap();
             let result = context
@@ -2914,6 +2930,7 @@ mod tests {
             "The random MAC address {:?} is not a valid {} address",
             inserted.mac, kind,
         );
+        assert_eq!(inserted.transit_ips, incomplete.transit_ips);
     }
 
     // Test that we fail to insert an interface if there are no available slots
@@ -2938,6 +2955,7 @@ mod tests {
                     description: String::from("description"),
                 },
                 None,
+                vec![],
             )
             .unwrap();
             let inserted_interface = context
@@ -2973,6 +2991,7 @@ mod tests {
                 description: String::from("description"),
             },
             None,
+            vec![],
         )
         .unwrap();
         let result = context
@@ -3012,6 +3031,7 @@ mod tests {
                     description: String::from("description"),
                 },
                 None,
+                vec![],
             )
             .unwrap();
             let intf = context
@@ -3039,6 +3059,7 @@ mod tests {
                 description: String::from("description"),
             },
             None,
+            vec![],
         )
         .unwrap();
         let intf = context
@@ -3070,6 +3091,7 @@ mod tests {
                 description: String::from("description"),
             },
             None,
+            vec![],
         )
         .unwrap();
         let intf = context
@@ -3113,6 +3135,7 @@ mod tests {
                 description: String::from("description"),
             },
             Some(IpAddr::V4(addr)),
+            vec![],
         )
         .unwrap();
         let _ = context
@@ -3133,6 +3156,7 @@ mod tests {
                 description: String::from("description"),
             },
             None,
+            vec![],
         )
         .unwrap();
 
@@ -3186,5 +3210,63 @@ mod tests {
             last_available_address(&subnet),
             "fd00::ffff:ffff:ffff:fffe".parse::<IpAddr>().unwrap(),
         );
+    }
+
+    #[tokio::test]
+    async fn test_insert_with_transit_ips() {
+        let context = TestContext::new("test_insert_with_transit_ips", 2).await;
+        let instance = context.create_stopped_instance().await;
+        let instance_id = InstanceUuid::from_untyped_uuid(instance.id());
+
+        // Create transit IPs to test with
+        let transit_ips = vec![
+            "10.0.0.0/24".parse().unwrap(),
+            "192.168.1.0/24".parse().unwrap(),
+            "172.16.0.0/16".parse().unwrap(),
+        ];
+
+        let interface = IncompleteNetworkInterface::new_instance(
+            Uuid::new_v4(),
+            instance_id,
+            context.net1.subnets[0].clone(),
+            IdentityMetadataCreateParams {
+                name: "interface-with-transit".parse().unwrap(),
+                description: String::from("Test interface with transit IPs"),
+            },
+            None, // Auto-assign IP
+            transit_ips.clone(),
+        )
+        .unwrap();
+
+        let inserted_interface = context
+            .datastore()
+            .instance_create_network_interface_raw(
+                context.opctx(),
+                interface.clone(),
+            )
+            .await
+            .expect("Failed to insert interface with transit IPs");
+
+        // Verify the basic interface properties
+        assert_interfaces_eq(&interface, &inserted_interface.clone().into());
+
+        // Verify transit IPs are correctly persisted
+        assert_eq!(
+            inserted_interface.transit_ips.len(),
+            transit_ips.len(),
+            "Transit IPs count should match"
+        );
+
+        for (actual, expected) in
+            inserted_interface.transit_ips.iter().zip(transit_ips.iter())
+        {
+            assert_eq!(
+                actual, expected,
+                "Transit IP {} should match expected {}",
+                actual, expected
+            );
+        }
+
+        context.success().await;
     }
 }

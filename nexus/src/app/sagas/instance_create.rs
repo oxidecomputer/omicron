@@ -682,7 +682,7 @@ async fn create_default_primary_network_interface(
         },
         vpc_name: default_name.clone(),
         subnet_name: default_name.clone(),
-        ip: None, // Request an IP address allocation
+        ip: None,            // Request an IP address allocation
         transit_ips: vec![], // Default interfaces don't use transit IPs
     };
 
