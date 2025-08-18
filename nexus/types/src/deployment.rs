@@ -1469,43 +1469,9 @@ pub enum PendingMgsUpdateDetails {
     /// the SP itself is being updated
     Sp(PendingMgsUpdateSpDetails),
     /// the RoT is being updated
-    Rot {
-        // implicit: component = ROT
-        // implicit: firmware slot id will be the inactive slot
-        // whether we expect the "A" or "B" slot to be active
-        // and its expected version
-        expected_active_slot: ExpectedActiveRotSlot,
-        // expected version of the "A" or "B" slot (opposite to
-        // the active slot as specified above)
-        expected_inactive_version: ExpectedVersion,
-        // under normal operation, this should always match the active slot.
-        // if this field changed without the active slot changing, that might
-        // reflect a bad update.
-        //
-        /// the persistent boot preference written into the current authoritative
-        /// CFPA page (ping or pong)
-        expected_persistent_boot_preference: RotSlot,
-        // if this value changed, but not any of this other information, that could
-        // reflect an attempt to switch to the other slot.
-        //
-        /// the persistent boot preference written into the CFPA scratch page that
-        /// will become the persistent boot preference in the authoritative CFPA
-        /// page upon reboot, unless CFPA update of the authoritative page fails
-        /// for some reason.
-        expected_pending_persistent_boot_preference: Option<RotSlot>,
-        // this field is not in use yet.
-        //
-        /// override persistent preference selection for a single boot
-        expected_transient_boot_preference: Option<RotSlot>,
-    },
-    RotBootloader {
-        // implicit: component = STAGE0
-        // implicit: firmware slot id = 1 (always 1 (Stage0Next) for RoT bootloader)
-        /// expected contents of the stage 0
-        expected_stage0_version: ArtifactVersion,
-        /// expected contents of the stage 0 next
-        expected_stage0_next_version: ExpectedVersion,
-    },
+    Rot(PendingMgsUpdateRotDetails),
+    /// the RoT bootloader is being updated
+    RotBootloader(PendingMgsUpdateRotBootloaderDetails),
     /// the host OS is being updated
     ///
     /// We write the phase 1 via MGS, and have a precheck condition that
@@ -1524,52 +1490,14 @@ impl slog::KV for PendingMgsUpdateDetails {
                 serializer.emit_str(Key::from("component"), "sp")?;
                 slog::KV::serialize(details, record, serializer)
             }
-            PendingMgsUpdateDetails::Rot {
-                expected_active_slot,
-                expected_inactive_version,
-                expected_persistent_boot_preference,
-                expected_pending_persistent_boot_preference,
-                expected_transient_boot_preference,
-            } => {
+            PendingMgsUpdateDetails::Rot(details) => {
                 serializer.emit_str(Key::from("component"), "rot")?;
-                serializer.emit_str(
-                    Key::from("expected_inactive_version"),
-                    &format!("{:?}", expected_inactive_version),
-                )?;
-                serializer.emit_str(
-                    Key::from("expected_active_slot"),
-                    &format!("{:?}", expected_active_slot),
-                )?;
-                serializer.emit_str(
-                    Key::from("expected_persistent_boot_preference"),
-                    &format!("{:?}", expected_persistent_boot_preference),
-                )?;
-                serializer.emit_str(
-                    Key::from("expected_pending_persistent_boot_preference"),
-                    &format!(
-                        "{:?}",
-                        expected_pending_persistent_boot_preference
-                    ),
-                )?;
-                serializer.emit_str(
-                    Key::from("expected_transient_boot_preference"),
-                    &format!("{:?}", expected_transient_boot_preference),
-                )
+                slog::KV::serialize(details, record, serializer)
             }
-            PendingMgsUpdateDetails::RotBootloader {
-                expected_stage0_version,
-                expected_stage0_next_version,
-            } => {
+            PendingMgsUpdateDetails::RotBootloader(details) => {
                 serializer
                     .emit_str(Key::from("component"), "rot_bootloader")?;
-                serializer.emit_str(
-                    Key::from("expected_stage0_version"),
-                    &expected_stage0_version.to_string(),
-                )?;
-                serializer.emit_str(
-                    Key::from("expected_stage0_next_version"),
-                    &format!("{:?}", expected_stage0_next_version),
-                )
+                slog::KV::serialize(details, record, serializer)
             }
             PendingMgsUpdateDetails::HostPhase1(details) => {
                 serializer.emit_str(Key::from("component"), "host_phase_1")?;
@@ -1607,6 +1535,110 @@ impl slog::KV for PendingMgsUpdateSpDetails {
         serializer.emit_str(
             Key::from("expected_inactive_version"),
             &format!("{expected_inactive_version:?}"),
+        )
+    }
+}
+
+/// Describes the RoT-specific details of a PendingMgsUpdate
+#[derive(
+    Clone, Debug, Eq, PartialEq, JsonSchema, Deserialize, Serialize, Diffable,
+)]
+#[serde(rename_all = "snake_case")]
+pub struct PendingMgsUpdateRotDetails {
+    // implicit: component = ROT
+    // implicit: firmware slot id will be the inactive slot
+    // whether we expect the "A" or "B" slot to be active
+    // and its expected version
+    pub expected_active_slot: ExpectedActiveRotSlot,
+    // expected version of the "A" or "B" slot (opposite to
+    // the active slot as specified above)
+    pub expected_inactive_version: ExpectedVersion,
+    // under normal operation, this should always match the active slot.
+    // if this field changed without the active slot changing, that might
+    // reflect a bad update.
+    //
+    /// the persistent boot preference written into the current authoritative
+    /// CFPA page (ping or pong)
+    pub expected_persistent_boot_preference: RotSlot,
+    // if this value changed, but not any of this other information, that could
+    // reflect an attempt to switch to the other slot.
+    //
+    /// the persistent boot preference written into the CFPA scratch page that
+    /// will become the persistent boot preference in the authoritative CFPA
+    /// page upon reboot, unless CFPA update of the authoritative page fails
+    /// for some reason.
+    pub expected_pending_persistent_boot_preference: Option<RotSlot>,
+    // this field is not in use yet.
+    //
+    /// override persistent preference selection for a single boot
+    pub expected_transient_boot_preference: Option<RotSlot>,
+}
+
+impl slog::KV for PendingMgsUpdateRotDetails {
+    fn serialize(
+        &self,
+        _record: &slog::Record,
+        serializer: &mut dyn slog::Serializer,
+    ) -> slog::Result {
+        let Self {
+            expected_active_slot,
+            expected_inactive_version,
+            expected_persistent_boot_preference,
+            expected_pending_persistent_boot_preference,
+            expected_transient_boot_preference,
+        } = self;
+        serializer.emit_str(
+            Key::from("expected_inactive_version"),
+            &format!("{:?}", expected_inactive_version),
+        )?;
+        serializer.emit_str(
+            Key::from("expected_active_slot"),
+            &format!("{:?}", expected_active_slot),
+        )?;
+        serializer.emit_str(
+            Key::from("expected_persistent_boot_preference"),
+            &format!("{:?}", expected_persistent_boot_preference),
+        )?;
+        serializer.emit_str(
+            Key::from("expected_pending_persistent_boot_preference"),
+            &format!("{:?}", expected_pending_persistent_boot_preference),
+        )?;
+        serializer.emit_str(
+            Key::from("expected_transient_boot_preference"),
+            &format!("{:?}", expected_transient_boot_preference),
+        )
+    }
+}
+
+/// Describes the RoT bootloader details of a PendingMgsUpdate
+#[derive(
+    Clone, Debug, Eq, PartialEq, JsonSchema, Deserialize, Serialize, Diffable,
+)]
+#[serde(rename_all = "snake_case")]
+pub struct PendingMgsUpdateRotBootloaderDetails {
+    // implicit: component = STAGE0
+    // implicit: firmware slot id = 1 (always 1 (Stage0Next) for RoT bootloader)
+    /// expected contents of the stage 0
+    pub expected_stage0_version: ArtifactVersion,
+    /// expected contents of the stage 0 next
+    pub expected_stage0_next_version: ExpectedVersion,
+}
+
+impl slog::KV for PendingMgsUpdateRotBootloaderDetails {
+    fn serialize(
+        &self,
+        _record: &slog::Record,
+        serializer: &mut dyn slog::Serializer,
+    ) -> slog::Result {
+        let Self { expected_stage0_version, expected_stage0_next_version } =
+            self;
+        serializer.emit_str(
+            Key::from("expected_stage0_version"),
+            &expected_stage0_version.to_string(),
+        )?;
+        serializer.emit_str(
+            Key::from("expected_stage0_next_version"),
+            &format!("{:?}", expected_stage0_next_version),
         )
     }
 }

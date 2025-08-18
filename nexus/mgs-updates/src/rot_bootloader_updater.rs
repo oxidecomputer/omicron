@@ -22,7 +22,7 @@ use gateway_client::types::SpComponentFirmwareSlot;
 use gateway_client::types::SpType;
 use gateway_messages::RotBootInfo;
 use nexus_types::deployment::PendingMgsUpdate;
-use nexus_types::deployment::PendingMgsUpdateDetails;
+use nexus_types::deployment::PendingMgsUpdateRotBootloaderDetails;
 use slog::Logger;
 use slog::{debug, error, info};
 use slog_error_chain::InlineErrorChain;
@@ -33,7 +33,16 @@ const WAIT_FOR_BOOT_INFO_TIMEOUT: Duration = Duration::from_secs(120);
 
 const WAIT_FOR_BOOT_INFO_INTERVAL: Duration = Duration::from_secs(10);
 
-pub struct ReconfiguratorRotBootloaderUpdater;
+pub struct ReconfiguratorRotBootloaderUpdater {
+    details: PendingMgsUpdateRotBootloaderDetails,
+}
+
+impl ReconfiguratorRotBootloaderUpdater {
+    pub fn new(details: PendingMgsUpdateRotBootloaderDetails) -> Self {
+        Self { details }
+    }
+}
+
 impl SpComponentUpdateHelperImpl for ReconfiguratorRotBootloaderUpdater {
     /// Checks if the component is already updated or ready for update
     fn precheck<'a>(
@@ -94,17 +103,10 @@ impl SpComponentUpdateHelperImpl for ReconfiguratorRotBootloaderUpdater {
             // don't want to roll that back.  (If for some reason we *do* want
             // to do this update, the planner will have to notice that what's
             // here is wrong and update the blueprint.)
-            let PendingMgsUpdateDetails::RotBootloader {
+            let PendingMgsUpdateRotBootloaderDetails {
                 expected_stage0_version,
                 expected_stage0_next_version,
-            } = &update.details
-            else {
-                unreachable!(
-                    "pending MGS update details within \
-                    ReconfiguratorRotBootloaderUpdater will always be for the \
-                    RoT bootloader"
-                );
-            };
+            } = &self.details;
             if found_stage0_version != expected_stage0_version.to_string() {
                 return Err(PrecheckError::WrongActiveVersion {
                     expected: expected_stage0_version.clone(),
