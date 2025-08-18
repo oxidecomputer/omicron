@@ -52,7 +52,7 @@ blueprint-diff latest
 # reflect that update has completed as well. Like before, collect inventory from
 # it and use that collection for the next step. This should report that the
 # update completed, remove that update, and add one for another sled.
-# sled-update-rot 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 --slot-a 1.0.0
+sled-update-rot 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 --slot-a 1.0.0
 inventory-generate
 blueprint-plan latest latest
 blueprint-diff latest
