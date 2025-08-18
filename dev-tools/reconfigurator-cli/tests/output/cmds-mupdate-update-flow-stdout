@@ -2590,12 +2590,12 @@ INFO performed noop image source checks on sled, sled_id: 2b8f0cb3-0295-4b3c-bc5
 INFO performed noop image source checks on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, num_total: 6, num_already_artifact: 6, num_eligible: 0, num_ineligible: 0
 INFO performed noop image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 6, num_already_artifact: 6, num_eligible: 0, num_ineligible: 0
 INFO MGS-driven update completed (will remove it and re-evaluate board), artifact_version: 2.0.0, artifact_hash: 44714733af7600b30a50bfd2cbaf707ff7ee9724073ff70a6732e55a88864cf6, sled_agent_address: [fd00:1122:3344:101::1]:12345, expected_inactive_phase_2_hash: 0c0362b640cece5b9a5e86d8fa683bd2eb84c3e7f90731f597197d604ffa76e3, expected_inactive_phase_1_hash: 0202020202020202020202020202020202020202020202020202020202020202, expected_active_phase_2_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a, expected_active_phase_1_hash: 0101010101010101010101010101010101010101010101010101010101010101, expected_boot_disk: A, expected_active_phase_1_slot: A, component: host_phase_1, sp_slot: 0, sp_type: Sled, serial_number: serial0, part_number: model0
-WARN cannot configure RoT bootloader update for board (missing sign in stage0 caboose from inventory), serial_number: serial0, part_number: model0
-WARN cannot configure RoT update for board (missing sign in caboose from inventory), serial_number: serial0, part_number: model0
+WARN cannot configure RoT bootloader update for board (no matching artifact), serial_number: serial0, part_number: model0
+WARN cannot configure RoT update for board (no matching artifact), serial_number: serial0, part_number: model0
 WARN cannot configure SP update for board (no matching artifact), serial_number: serial0, part_number: model0
 INFO skipping board for MGS-driven update, serial_number: serial0, part_number: model0
-WARN cannot configure RoT bootloader update for board (missing sign in stage0 caboose from inventory), serial_number: serial1, part_number: model1
-WARN cannot configure RoT update for board (missing sign in caboose from inventory), serial_number: serial1, part_number: model1
+WARN cannot configure RoT bootloader update for board (no matching artifact), serial_number: serial1, part_number: model1
+WARN cannot configure RoT update for board (no matching artifact), serial_number: serial1, part_number: model1
 WARN cannot configure SP update for board (no matching artifact), serial_number: serial1, part_number: model1
 INFO configuring MGS-driven update, artifact_version: 2.0.0, artifact_hash: 44714733af7600b30a50bfd2cbaf707ff7ee9724073ff70a6732e55a88864cf6, sled_agent_address: [fd00:1122:3344:102::1]:12345, expected_inactive_phase_2_hash: 0c0362b640cece5b9a5e86d8fa683bd2eb84c3e7f90731f597197d604ffa76e3, expected_inactive_phase_1_hash: 0202020202020202020202020202020202020202020202020202020202020202, expected_active_phase_2_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a, expected_active_phase_1_hash: 0101010101010101010101010101010101010101010101010101010101010101, expected_boot_disk: A, expected_active_phase_1_slot: A, component: host_phase_1, sp_slot: 1, sp_type: Sled, serial_number: serial1, part_number: model1
 INFO reached maximum number of pending MGS-driven updates, max: 1
@@ -2820,16 +2820,16 @@ INFO performed noop image source checks on sled, sled_id: 2b8f0cb3-0295-4b3c-bc5
 INFO performed noop image source checks on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, num_total: 6, num_already_artifact: 6, num_eligible: 0, num_ineligible: 0
 INFO performed noop image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 6, num_already_artifact: 6, num_eligible: 0, num_ineligible: 0
 INFO MGS-driven update completed (will remove it and re-evaluate board), artifact_version: 2.0.0, artifact_hash: 44714733af7600b30a50bfd2cbaf707ff7ee9724073ff70a6732e55a88864cf6, sled_agent_address: [fd00:1122:3344:102::1]:12345, expected_inactive_phase_2_hash: 0c0362b640cece5b9a5e86d8fa683bd2eb84c3e7f90731f597197d604ffa76e3, expected_inactive_phase_1_hash: 0202020202020202020202020202020202020202020202020202020202020202, expected_active_phase_2_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a, expected_active_phase_1_hash: 0101010101010101010101010101010101010101010101010101010101010101, expected_boot_disk: A, expected_active_phase_1_slot: A, component: host_phase_1, sp_slot: 1, sp_type: Sled, serial_number: serial1, part_number: model1
-WARN cannot configure RoT bootloader update for board (missing sign in stage0 caboose from inventory), serial_number: serial1, part_number: model1
-WARN cannot configure RoT update for board (missing sign in caboose from inventory), serial_number: serial1, part_number: model1
+WARN cannot configure RoT bootloader update for board (no matching artifact), serial_number: serial1, part_number: model1
+WARN cannot configure RoT update for board (no matching artifact), serial_number: serial1, part_number: model1
 WARN cannot configure SP update for board (no matching artifact), serial_number: serial1, part_number: model1
 INFO skipping board for MGS-driven update, serial_number: serial1, part_number: model1
-WARN cannot configure RoT bootloader update for board (missing sign in stage0 caboose from inventory), serial_number: serial0, part_number: model0
-WARN cannot configure RoT update for board (missing sign in caboose from inventory), serial_number: serial0, part_number: model0
+WARN cannot configure RoT bootloader update for board (no matching artifact), serial_number: serial0, part_number: model0
+WARN cannot configure RoT update for board (no matching artifact), serial_number: serial0, part_number: model0
 WARN cannot configure SP update for board (no matching artifact), serial_number: serial0, part_number: model0
 INFO skipping board for MGS-driven update, serial_number: serial0, part_number: model0
-WARN cannot configure RoT bootloader update for board (missing sign in stage0 caboose from inventory), serial_number: serial2, part_number: model2
-WARN cannot configure RoT update for board (missing sign in caboose from inventory), serial_number: serial2, part_number: model2
+WARN cannot configure RoT bootloader update for board (no matching artifact), serial_number: serial2, part_number: model2
+WARN cannot configure RoT update for board (no matching artifact), serial_number: serial2, part_number: model2
 WARN cannot configure SP update for board (no matching artifact), serial_number: serial2, part_number: model2
 INFO configuring MGS-driven update, artifact_version: 2.0.0, artifact_hash: 44714733af7600b30a50bfd2cbaf707ff7ee9724073ff70a6732e55a88864cf6, sled_agent_address: [fd00:1122:3344:103::1]:12345, expected_inactive_phase_2_hash: 0c0362b640cece5b9a5e86d8fa683bd2eb84c3e7f90731f597197d604ffa76e3, expected_inactive_phase_1_hash: 0202020202020202020202020202020202020202020202020202020202020202, expected_active_phase_2_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a, expected_active_phase_1_hash: 0101010101010101010101010101010101010101010101010101010101010101, expected_boot_disk: A, expected_active_phase_1_slot: A, component: host_phase_1, sp_slot: 2, sp_type: Sled, serial_number: serial2, part_number: model2
 INFO ran out of boards for MGS-driven update
@@ -3051,16 +3051,16 @@ INFO performed noop image source checks on sled, sled_id: 2b8f0cb3-0295-4b3c-bc5
 INFO performed noop image source checks on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, num_total: 6, num_already_artifact: 6, num_eligible: 0, num_ineligible: 0
 INFO performed noop image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 6, num_already_artifact: 6, num_eligible: 0, num_ineligible: 0
 INFO MGS-driven update completed (will remove it and re-evaluate board), artifact_version: 2.0.0, artifact_hash: 44714733af7600b30a50bfd2cbaf707ff7ee9724073ff70a6732e55a88864cf6, sled_agent_address: [fd00:1122:3344:103::1]:12345, expected_inactive_phase_2_hash: 0c0362b640cece5b9a5e86d8fa683bd2eb84c3e7f90731f597197d604ffa76e3, expected_inactive_phase_1_hash: 0202020202020202020202020202020202020202020202020202020202020202, expected_active_phase_2_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a, expected_active_phase_1_hash: 0101010101010101010101010101010101010101010101010101010101010101, expected_boot_disk: A, expected_active_phase_1_slot: A, component: host_phase_1, sp_slot: 2, sp_type: Sled, serial_number: serial2, part_number: model2
-WARN cannot configure RoT bootloader update for board (missing sign in stage0 caboose from inventory), serial_number: serial2, part_number: model2
-WARN cannot configure RoT update for board (missing sign in caboose from inventory), serial_number: serial2, part_number: model2
+WARN cannot configure RoT bootloader update for board (no matching artifact), serial_number: serial2, part_number: model2
+WARN cannot configure RoT update for board (no matching artifact), serial_number: serial2, part_number: model2
 WARN cannot configure SP update for board (no matching artifact), serial_number: serial2, part_number: model2
 INFO skipping board for MGS-driven update, serial_number: serial2, part_number: model2
-WARN cannot configure RoT bootloader update for board (missing sign in stage0 caboose from inventory), serial_number: serial0, part_number: model0
-WARN cannot configure RoT update for board (missing sign in caboose from inventory), serial_number: serial0, part_number: model0
+WARN cannot configure RoT bootloader update for board (no matching artifact), serial_number: serial0, part_number: model0
+WARN cannot configure RoT update for board (no matching artifact), serial_number: serial0, part_number: model0
 WARN cannot configure SP update for board (no matching artifact), serial_number: serial0, part_number: model0
 INFO skipping board for MGS-driven update, serial_number: serial0, part_number: model0
-WARN cannot configure RoT bootloader update for board (missing sign in stage0 caboose from inventory), serial_number: serial1, part_number: model1
-WARN cannot configure RoT update for board (missing sign in caboose from inventory), serial_number: serial1, part_number: model1
+WARN cannot configure RoT bootloader update for board (no matching artifact), serial_number: serial1, part_number: model1
+WARN cannot configure RoT update for board (no matching artifact), serial_number: serial1, part_number: model1
 WARN cannot configure SP update for board (no matching artifact), serial_number: serial1, part_number: model1
 INFO skipping board for MGS-driven update, serial_number: serial1, part_number: model1
 INFO ran out of boards for MGS-driven update
