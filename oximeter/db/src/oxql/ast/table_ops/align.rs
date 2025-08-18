@@ -595,6 +595,69 @@ mod tests {
     }
 
     #[test]
+    fn test_mean_delta_value_in_window_steady_state() {
+        let raw_data = &[
+            ("2025-08-12T19:17:00.0000Z", "2025-08-12T19:17:10.0000Z", 1000f64),
+            ("2025-08-12T19:17:10.0000Z", "2025-08-12T19:17:20.0000Z", 1000f64),
+            ("2025-08-12T19:17:20.0000Z", "2025-08-12T19:17:30.0000Z", 1000f64),
+            ("2025-08-12T19:17:30.0000Z", "2025-08-12T19:17:40.0000Z", 1000f64),
+            ("2025-08-12T19:17:40.0000Z", "2025-08-12T19:17:50.0000Z", 1000f64),
+            ("2025-08-12T19:17:50.0000Z", "2025-08-12T19:18:00.0000Z", 1000f64),
+        ];
+
+        let start_times: Vec<DateTime<Utc>> =
+            raw_data.into_iter().map(|r| r.0.parse().unwrap()).collect();
+        let timestamps: Vec<DateTime<Utc>> =
+            raw_data.into_iter().map(|r| r.1.parse().unwrap()).collect();
+
+        let input_points: Vec<_> =
+            raw_data.into_iter().map(|r| Some(r.2)).collect();
+
+        let window_start = start_times[0];
+        let window_end = timestamps[timestamps.len() - 1];
+
+        let mean = mean_delta_value_in_window(
+            &start_times,
+            &timestamps,
+            &input_points,
+            window_start,
+            window_end,
+        )
+        .unwrap();
+        assert_eq!(mean.floor(), 100.0);
+    }
+
+    #[test]
+    fn test_mean_delta_value_in_window_steady_state_missing_points() {
+        let raw_data = &[
+            ("2025-08-12T19:17:00.0000Z", "2025-08-12T19:17:10.0000Z", 1000f64),
+            ("2025-08-12T19:17:10.0000Z", "2025-08-12T19:17:40.0000Z", 3000f64),
+            ("2025-08-12T19:17:40.0000Z", "2025-08-12T19:18:00.0000Z", 2000f64),
+        ];
+
+        let start_times: Vec<DateTime<Utc>> =
+            raw_data.into_iter().map(|r| r.0.parse().unwrap()).collect();
+        let timestamps: Vec<DateTime<Utc>> =
+            raw_data.into_iter().map(|r| r.1.parse().unwrap()).collect();
+
+        let input_points: Vec<_> =
+            raw_data.into_iter().map(|r| Some(r.2)).collect();
+
+        let window_start = start_times[0];
+        let window_end = timestamps[timestamps.len() - 1];
+
+        let mean = mean_delta_value_in_window(
+            &start_times,
+            &timestamps,
+            &input_points,
+            window_start,
+            window_end,
+        )
+        .unwrap();
+        assert_eq!(mean.floor(), 100.0);
+    }
+
+    #[test]
     fn test_mean_delta_value_in_window_omicron_8833() {
         let raw_data = &[
             (
