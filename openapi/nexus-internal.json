@@ -2568,6 +2568,14 @@
               }
             ]
           },
+          "nexus_generation": {
+            "description": "The generation of the active group of Nexuses\n\nIf a Nexus instance notices it has a nexus_generation less than this value, it will start to quiesce (see: RFD 588).",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Generation"
+              }
+            ]
+          },
           "oximeter_read_mode": {
             "description": "Whether oximeter should read from a single node or a cluster",
             "allOf": [
@@ -2638,6 +2646,7 @@
           "external_dns_version",
           "id",
           "internal_dns_version",
+          "nexus_generation",
           "oximeter_read_mode",
           "oximeter_read_version",
           "pending_mgs_updates",
@@ -2862,6 +2871,14 @@
               }
             ]
           },
+          "nexus_generation": {
+            "description": "The Nexus generation number\n\nSee [`Blueprint::nexus_generation`].",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Generation"
+              }
+            ]
+          },
           "parent_blueprint_id": {
             "nullable": true,
             "description": "which blueprint this blueprint is based on",
@@ -2892,6 +2909,7 @@
           "external_dns_version",
           "id",
           "internal_dns_version",
+          "nexus_generation",
           "target_release_minimum_generation",
           "time_created"
         ]
@@ -3517,6 +3535,14 @@
                 "description": "The address at which the internal nexus server is reachable.",
                 "type": "string"
               },
+              "nexus_generation": {
+                "description": "Generation number for this Nexus zone. This is used to coordinate handoff between old and new Nexus instances during updates. See RFD 588.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Generation"
+                  }
+                ]
+              },
               "nic": {
                 "description": "The service vNIC providing external connectivity using OPTE.",
                 "allOf": [
@@ -3537,6 +3563,7 @@
               "external_ip",
               "external_tls",
               "internal_address",
+              "nexus_generation",
               "nic",
               "type"
             ]
@@ -4190,6 +4217,21 @@
         "required": [
           "demo_saga_id",
           "saga_id"
+        ]
+      },
+      "DiscretionaryZonePlacement": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "source"
         ]
       },
       "DiskIdentity": {
@@ -6583,7 +6625,7 @@
             "additionalProperties": {
               "type": "array",
               "items": {
-                "type": "string"
+                "$ref": "#/components/schemas/DiscretionaryZonePlacement"
               }
             }
           },
@@ -9183,6 +9225,32 @@
               "synchronized_count",
               "total_internal_dns_zones",
               "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "current_nexus_generation": {
+                "nullable": true,
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Generation"
+                  }
+                ]
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "nexus"
+                ]
+              },
+              "zone_generation": {
+                "$ref": "#/components/schemas/Generation"
+              }
+            },
+            "required": [
+              "type",
+              "zone_generation"
             ]
           }
         ]

@@ -139,6 +139,22 @@ pub enum Error {
     AllocateInternalDnsSubnet(#[from] NoAvailableDnsSubnets),
     #[error("error allocating external networking resources")]
     AllocateExternalNetworking(#[from] ExternalNetworkingError),
+    #[error(
+        "mismatch while setting top-level nexus_generation for blueprint, \
+         expected current value is {expected} but actual value is {actual}"
+    )]
+    NexusGenerationMismatch { expected: Generation, actual: Generation },
+    #[error(
+        "mismatch while setting nexus_generation for a zone with an old image, \
+         expected current value is {expected} but actual value is {actual}"
+    )]
+    OldImageNexusGenerationMismatch { expected: Generation, actual: Generation },
+    #[error(
+        "mismatch while setting nexus_generation for a zone with a new image, \
+         expected current value is {expected} (or that +1) but actual value is \
+         {actual}"
+    )]
+    NewImageNexusGenerationMismatch { expected: Generation, actual: Generation },
     #[error("can only have {INTERNAL_DNS_REDUNDANCY} internal DNS servers")]
     PolicySpecifiesTooManyInternalDnsServers,
     #[error("zone is already up-to-date and should not be updated")]
@@ -357,6 +373,10 @@ pub(crate) enum Operation {
         current_generation: Generation,
         new_generation: Generation,
     },
+    SetNexusGeneration {
+        current_generation: Generation,
+        new_generation: Generation,
+    },
     SledNoopZoneImageSourcesUpdated {
         sled_id: SledUuid,
         count: usize,
@@ -442,6 +462,13 @@ impl fmt::Display for Operation {
                      {current_generation} to {new_generation}"
                 )
             }
+            Self::SetNexusGeneration { current_generation, new_generation } => {
+                write!(
+                    f,
+                    "updated nexus generation from \
+                     {current_generation} to {new_generation}"
+                )
+            }
         }
     }
 }
@@ -492,6 +519,7 @@ pub struct BlueprintBuilder<'a> {
     sled_editors: BTreeMap<SledUuid, SledEditor>,
     cockroachdb_setting_preserve_downgrade: CockroachDbPreserveDowngrade,
     target_release_minimum_generation: Generation,
+    nexus_generation: Generation,
     report: Option<PlanningReport>,
 
     creator: String,
@@ -559,6 +587,7 @@ impl<'a> BlueprintBuilder<'a> {
             internal_dns_version: Generation::new(),
             external_dns_version: Generation::new(),
             target_release_minimum_generation: Generation::new(),
+            nexus_generation: Generation::new(),
             cockroachdb_fingerprint: String::new(),
             cockroachdb_setting_preserve_downgrade:
                 CockroachDbPreserveDowngrade::DoNotModify,
@@ -640,6 +669,7 @@ impl<'a> BlueprintBuilder<'a> {
             pending_mgs_updates: parent_blueprint.pending_mgs_updates.clone(),
             target_release_minimum_generation: parent_blueprint
                 .target_release_minimum_generation,
+            nexus_generation: parent_blueprint.nexus_generation,
             report: None,
             creator: creator.to_owned(),
             operations: Vec::new(),
@@ -822,6 +852,7 @@ impl<'a> BlueprintBuilder<'a> {
             external_dns_version: self.input.external_dns_version(),
             target_release_minimum_generation: self
                 .target_release_minimum_generation,
+            nexus_generation: self.nexus_generation,
             cockroachdb_fingerprint: self
                 .input
                 .cockroachdb_settings()
@@ -1500,6 +1531,137 @@ impl<'a> BlueprintBuilder<'a> {
         sled_id: SledUuid,
         image_source: BlueprintZoneImageSource,
     ) -> Result<(), Error> {
+        let must_have_nexus_zones = true;
+        self.sled_add_zone_nexus_internal(
+            sled_id,
+            image_source,
+            must_have_nexus_zones,
+        )
+    }
+
+    // Determines TLS and DNS server configuration from existing Nexus zones.
+    //
+    // Returns `Some((external_tls, external_dns_servers))` if existing Nexus
+    // zones are found, or `None` if no existing Nexus zones exist.
+    fn determine_nexus_tls_dns_config(&self) -> Option<(bool, Vec<IpAddr>)> {
+        self.parent_blueprint
+            .all_omicron_zones(BlueprintZoneDisposition::any)
+            .find_map(|(_, z)| match &z.zone_type {
+                BlueprintZoneType::Nexus(nexus) => Some((
+                    nexus.external_tls,
+                    nexus.external_dns_servers.clone(),
+                )),
+                _ => None,
+            })
+    }
+
+    // Determines the appropriate generation number for a new Nexus zone.
+    //
+    // Returns `Some(generation)` if a generation can be determined from existing
+    // Nexus zones, or `None` if no existing Nexus zones exist.
+    //
+    // The logic is:
+    // - If any existing Nexus zone has the same image source, reuse its generation
+    // - Otherwise, use the highest existing generation + 1
+    // - If no existing zones exist, return None
+    //
+    // This function also validates that the determined generation matches the
+    // top-level current blueprint generation.
+    fn determine_nexus_generation(
+        &self,
+        image_source: &BlueprintZoneImageSource,
+    ) -> Result<Option<Generation>, Error> {
+        // If any other Nexus in the blueprint has the same image source,
+        // use it. Otherwise, use the highest generation number + 1.
+        //
+        // TODO: This will check the parent blueprint, but perhaps should
+        // also be checking all "pending" updates in "sled_editors".
+        // If we are adding "multiple new nexus zones" in a blueprint,
+        // they'll all happen to get a generation number equal to "the previous
+        // highest generation, plus 1". But if, for some weird reason,
+        // we added multiple Nexuses with different new image sources in a single
+        // blueprint, they'd also get assigned the same generation (which should
+        // be a bug).
+        //
+        // In the meantime: There is a blippy check to verify that all Nexus
+        // zones with the same generation have the same image source.
+        let mut highest_seen_generation = None;
+        let mut same_image_nexus_generation = None;
+
+        for (zone, nexus) in self
+            .parent_blueprint
+            .all_omicron_zones(BlueprintZoneDisposition::any)
+            .filter_map(|(_, z)| match &z.zone_type {
+                BlueprintZoneType::Nexus(nexus) => Some((z, nexus)),
+                _ => None,
+            })
+        {
+            if zone.image_source == *image_source {
+                // If the image matches exactly, use it.
+                same_image_nexus_generation = Some(nexus.nexus_generation);
+                break;
+            } else if let Some(gen) = highest_seen_generation {
+                // Otherwise, use the generation number if it's the highest
+                // we've seen
+                if nexus.nexus_generation > gen {
+                    highest_seen_generation = Some(nexus.nexus_generation);
+                }
+            } else {
+                // Use it regardless if it's the first generation number we've
+                // seen
+                highest_seen_generation = Some(nexus.nexus_generation);
+            }
+        }
+
+        let determined_generation = match same_image_nexus_generation {
+            Some(gen) => Some(gen),
+            None => highest_seen_generation.map(|gen| gen.next()),
+        };
+
+        // Validate that the determined generation matches the top-level current blueprint generation
+        if let Some(gen) = determined_generation {
+            let current_blueprint_gen = self.parent_blueprint.nexus_generation;
+            if same_image_nexus_generation.is_some() {
+                // Existing image - should either match the currently-used Nexus
+                // generation, or be part of a "generation + 1".
+                let matches_current_nexus = current_blueprint_gen == gen;
+                let matches_next_nexus = current_blueprint_gen.next() == gen;
+
+                if !matches_current_nexus && !matches_next_nexus {
+                    return Err(Error::OldImageNexusGenerationMismatch {
+                        expected: current_blueprint_gen,
+                        actual: gen,
+                    });
+                }
+            } else {
+                // New image source - should be current blueprint generation + 1
+                let expected_gen = current_blueprint_gen.next();
+                if gen != expected_gen {
+                    return Err(Error::NewImageNexusGenerationMismatch {
+                        expected: expected_gen,
+                        actual: gen,
+                    });
+                }
+            }
+        }
+
+        Ok(determined_generation)
+    }
+
+    /// Adds a nexus zone on this sled.
+    ///
+    /// If `must_have_nexus_zones` is true, then other Nexus zones
+    /// are used to determine configuration settings (e.g., TLS,
+    /// DNS servers, generation number).
+    ///
+    /// If `must_have_nexus_zones` is false, then these settings
+    /// are permitted to use default values.
+    pub fn sled_add_zone_nexus_internal(
+        &mut self,
+        sled_id: SledUuid,
+        image_source: BlueprintZoneImageSource,
+        must_have_nexus_zones: bool,
+    ) -> Result<(), Error> {
         // Whether Nexus should use TLS and what the external DNS servers it
         // should use are currently provided at rack-setup time, and should be
         // consistent across all Nexus instances. We'll assume we can copy them
@@ -1511,31 +1673,48 @@ impl<'a> BlueprintBuilder<'a> {
         // check that we're if this builder is being used to make such a change,
         // that change is also reflected here in a new zone. Perhaps these
         // settings should be part of `Policy` instead?
-        let (external_tls, external_dns_servers) = self
-            .parent_blueprint
-            .all_omicron_zones(BlueprintZoneDisposition::any)
-            .find_map(|(_, z)| match &z.zone_type {
-                BlueprintZoneType::Nexus(nexus) => Some((
-                    nexus.external_tls,
-                    nexus.external_dns_servers.clone(),
-                )),
-                _ => None,
-            })
-            .ok_or(Error::NoNexusZonesInParentBlueprint)?;
+        let (external_tls, external_dns_servers) =
+            match self.determine_nexus_tls_dns_config() {
+                Some(config) => config,
+                None => {
+                    if must_have_nexus_zones {
+                        return Err(Error::NoNexusZonesInParentBlueprint);
+                    } else {
+                        (false, Vec::new())
+                    }
+                }
+            };
+
+        let nexus_generation =
+            match self.determine_nexus_generation(&image_source)? {
+                Some(generation) => generation,
+                None => {
+                    if must_have_nexus_zones {
+                        return Err(Error::NoNexusZonesInParentBlueprint);
+                    } else {
+                        // If there are no existing Nexus zones, start with whatever the top-level
+                        // blueprint value happens to be.
+                        self.parent_blueprint.nexus_generation
+                    }
+                }
+            };
+
         self.sled_add_zone_nexus_with_config(
             sled_id,
             external_tls,
             external_dns_servers,
             image_source,
+            nexus_generation,
         )
     }
 
-    pub fn sled_add_zone_nexus_with_config(
+    fn sled_add_zone_nexus_with_config(
         &mut self,
         sled_id: SledUuid,
         external_tls: bool,
         external_dns_servers: Vec<IpAddr>,
         image_source: BlueprintZoneImageSource,
+        nexus_generation: Generation,
     ) -> Result<(), Error> {
         let nexus_id = self.rng.sled_rng(sled_id).next_zone();
         let ExternalNetworkingChoice {
@@ -1573,6 +1752,7 @@ impl<'a> BlueprintBuilder<'a> {
             nic,
             external_tls,
             external_dns_servers: external_dns_servers.clone(),
+            nexus_generation,
         });
         let filesystem_pool =
             self.sled_select_zpool(sled_id, zone_type.kind())?;
@@ -2141,6 +2321,32 @@ impl<'a> BlueprintBuilder<'a> {
         }
         self.target_release_minimum_generation = new_generation;
         self.record_operation(Operation::SetTargetReleaseMinimumGeneration {
+            current_generation,
+            new_generation,
+        });
+        Ok(())
+    }
+
+    /// Get the value of `nexus_generation`.
+    pub fn nexus_generation(&self) -> Generation {
+        self.nexus_generation
+    }
+
+    /// Given the current value of `nexus_generation`, set the new value for
+    /// this blueprint.
+    pub fn set_nexus_generation(
+        &mut self,
+        current_generation: Generation,
+        new_generation: Generation,
+    ) -> Result<(), Error> {
+        if self.nexus_generation != current_generation {
+            return Err(Error::NexusGenerationMismatch {
+                expected: current_generation,
+                actual: self.nexus_generation,
+            });
+        }
+        self.nexus_generation = new_generation;
+        self.record_operation(Operation::SetNexusGeneration {
             current_generation,
             new_generation,
         });
@@ -3644,6 +3850,471 @@ pub mod test {
             "tests/output/zone_image_source_change_1.txt",
             &display.to_string(),
         );
+
+        logctx.cleanup_successful();
+    }
+
+    /// Test nexus generation assignment logic for new zones
+    #[test]
+    fn test_nexus_generation_assignment_new_generation() {
+        static TEST_NAME: &str =
+            "test_nexus_generation_assignment_new_generation";
+        let logctx = test_setup_log(TEST_NAME);
+        let mut rng = SimRngState::from_seed(TEST_NAME);
+
+        // Start with a system that has no Nexus zones
+        let (example_system, blueprint) =
+            ExampleSystemBuilder::new(&logctx.log, TEST_NAME)
+                .nexus_count(0)
+                .build();
+        verify_blueprint(&blueprint);
+
+        let mut builder = BlueprintBuilder::new_based_on(
+            &logctx.log,
+            &blueprint,
+            &example_system.input,
+            &example_system.collection,
+            "test",
+            rng.next_planner_rng(),
+        )
+        .expect("failed to create builder");
+
+        // Get first sled
+        let sled_id = example_system
+            .input
+            .all_sled_ids(SledFilter::Commissioned)
+            .next()
+            .unwrap();
+        let image_source = BlueprintZoneImageSource::InstallDataset;
+
+        // Add first Nexus zone - should get generation 1
+        builder
+            .sled_add_zone_nexus_internal(sled_id, image_source.clone(), false)
+            .expect("failed to add nexus zone");
+
+        let blueprint1 = builder.build();
+        verify_blueprint(&blueprint1);
+
+        // Find the nexus zone and verify it has generation 1
+        let nexus_zones: Vec<_> = blueprint1
+            .all_omicron_zones(BlueprintZoneDisposition::any)
+            .filter_map(|(_, zone)| match &zone.zone_type {
+                BlueprintZoneType::Nexus(nexus) => Some(nexus),
+                _ => None,
+            })
+            .collect();
+
+        assert_eq!(nexus_zones.len(), 1);
+        assert_eq!(nexus_zones[0].nexus_generation, Generation::new());
+
+        logctx.cleanup_successful();
+    }
+
+    /// Test that adding a Nexus zone with the same image source as an existing
+    /// Nexus zone re-uses the same generation number
+    #[test]
+    fn test_nexus_generation_assignment_same_image_reuse() {
+        static TEST_NAME: &str =
+            "test_nexus_generation_assignment_same_image_reuse";
+        let logctx = test_setup_log(TEST_NAME);
+        let mut rng = SimRngState::from_seed(TEST_NAME);
+
+        // Start with a system that has one Nexus zone
+        let (example_system, blueprint) =
+            ExampleSystemBuilder::new(&logctx.log, TEST_NAME)
+                .nexus_count(1)
+                .build();
+        verify_blueprint(&blueprint);
+
+        // Get the generation of the existing nexus zone
+        let existing_nexus_gen = blueprint
+            .all_omicron_zones(BlueprintZoneDisposition::any)
+            .find_map(|(_, zone)| match &zone.zone_type {
+                BlueprintZoneType::Nexus(nexus) => {
+                    // We're gonna add a new Nexus with this source in a moment
+                    // - we want to be sure this image_source matches.
+                    assert_eq!(
+                        zone.image_source,
+                        BlueprintZoneImageSource::InstallDataset
+                    );
+                    Some(nexus.nexus_generation)
+                }
+                _ => None,
+            })
+            .expect("should have found existing nexus");
+
+        let mut builder = BlueprintBuilder::new_based_on(
+            &logctx.log,
+            &blueprint,
+            &example_system.input,
+            &example_system.collection,
+            "test",
+            rng.next_planner_rng(),
+        )
+        .expect("failed to create builder");
+
+        // Get a different sled
+        let sled_ids: Vec<_> = example_system
+            .input
+            .all_sled_ids(SledFilter::Commissioned)
+            .collect();
+        let second_sled_id = sled_ids[1];
+        let image_source = BlueprintZoneImageSource::InstallDataset;
+
+        // Add another Nexus zone with same image source - should reuse generation
+        builder
+            .sled_add_zone_nexus_internal(
+                second_sled_id,
+                image_source.clone(),
+                false,
+            )
+            .expect("failed to add nexus zone");
+
+        let blueprint2 = builder.build();
+        verify_blueprint(&blueprint2);
+
+        // Find all nexus zones and verify they have the same generation
+        let nexus_zones: Vec<_> = blueprint2
+            .all_omicron_zones(BlueprintZoneDisposition::any)
+            .filter_map(|(_, zone)| match &zone.zone_type {
+                BlueprintZoneType::Nexus(nexus) => Some(nexus),
+                _ => None,
+            })
+            .collect();
+
+        assert_eq!(nexus_zones.len(), 2);
+        assert_eq!(nexus_zones[0].nexus_generation, existing_nexus_gen);
+        assert_eq!(nexus_zones[1].nexus_generation, existing_nexus_gen);
+
+        logctx.cleanup_successful();
+    }
+
+    /// Test nexus generation assignment logic for different image sources
+    #[test]
+    fn test_nexus_generation_assignment_different_image_increment() {
+        static TEST_NAME: &str =
+            "test_nexus_generation_assignment_different_image_increment";
+        let logctx = test_setup_log(TEST_NAME);
+        let mut rng = SimRngState::from_seed(TEST_NAME);
+
+        // Start with a system that has one Nexus zone
+        let (example_system, blueprint) =
+            ExampleSystemBuilder::new(&logctx.log, TEST_NAME)
+                .nexus_count(1)
+                .build();
+        verify_blueprint(&blueprint);
+
+        // Get the generation of the existing nexus zone
+        let existing_nexus_gen = blueprint
+            .all_omicron_zones(BlueprintZoneDisposition::any)
+            .find_map(|(_, zone)| match &zone.zone_type {
+                BlueprintZoneType::Nexus(nexus) => {
+                    assert_eq!(
+                        zone.image_source,
+                        BlueprintZoneImageSource::InstallDataset
+                    );
+                    Some(nexus.nexus_generation)
+                }
+                _ => None,
+            })
+            .expect("should have found existing nexus");
+
+        let mut builder = BlueprintBuilder::new_based_on(
+            &logctx.log,
+            &blueprint,
+            &example_system.input,
+            &example_system.collection,
+            "test",
+            rng.next_planner_rng(),
+        )
+        .expect("failed to create builder");
+
+        // Get a different sled
+        let sled_ids: Vec<_> = example_system
+            .input
+            .all_sled_ids(SledFilter::Commissioned)
+            .collect();
+        let second_sled_id = sled_ids[1];
+
+        // Use a different image source (artifact vs install dataset)
+        let different_image_source = BlueprintZoneImageSource::Artifact {
+            version: BlueprintArtifactVersion::Available {
+                version: ArtifactVersion::new_const("1.2.3.4"),
+            },
+            hash: ArtifactHash([0x42; 32]),
+        };
+
+        // Add another Nexus zone with different image source - should increment generation
+        builder
+            .sled_add_zone_nexus_internal(
+                second_sled_id,
+                different_image_source.clone(),
+                false,
+            )
+            .expect("failed to add nexus zone");
+
+        let blueprint2 = builder.build();
+        verify_blueprint(&blueprint2);
+
+        // Find all nexus zones and verify generations
+        let mut nexus_zones: Vec<_> = blueprint2
+            .all_omicron_zones(BlueprintZoneDisposition::any)
+            .filter_map(|(_, zone)| match &zone.zone_type {
+                BlueprintZoneType::Nexus(nexus) => Some((zone, nexus)),
+                _ => None,
+            })
+            .collect();
+
+        // Sort by generation to ensure predictable ordering
+        nexus_zones.sort_by_key(|(_, nexus)| nexus.nexus_generation);
+
+        assert_eq!(nexus_zones.len(), 2);
+        assert_eq!(nexus_zones[0].1.nexus_generation, existing_nexus_gen);
+        assert_eq!(
+            nexus_zones[1].1.nexus_generation,
+            existing_nexus_gen.next()
+        );
+
+        // Verify image sources are different
+        assert_eq!(
+            nexus_zones[0].0.image_source,
+            BlueprintZoneImageSource::InstallDataset
+        );
+        assert_eq!(nexus_zones[1].0.image_source, different_image_source);
+
+        logctx.cleanup_successful();
+    }
+
+    /// Test nexus generation assignment logic with mixed old/new image sources
+    ///
+    /// Tests a scenario where we restore redundancy with existing image source
+    /// while also adding zones with new image source for upgrade.
+    #[test]
+    fn test_nexus_generation_assignment_multiple_generations() {
+        static TEST_NAME: &str =
+            "test_nexus_generation_assignment_multiple_generations";
+        let logctx = test_setup_log(TEST_NAME);
+        let mut rng = SimRngState::from_seed(TEST_NAME);
+
+        // Start with a system with one Nexus zone using the install dataset as an image source
+        let (example_system, blueprint) =
+            ExampleSystemBuilder::new(&logctx.log, TEST_NAME)
+                .nsleds(3)
+                .nexus_count(1)
+                .build();
+        verify_blueprint(&blueprint);
+
+        // Get the existing nexus zone's generation (should be generation 1)
+        let existing_nexus_gen = blueprint
+            .all_omicron_zones(BlueprintZoneDisposition::any)
+            .find_map(|(_, zone)| match &zone.zone_type {
+                BlueprintZoneType::Nexus(nexus) => Some(nexus.nexus_generation),
+                _ => None,
+            })
+            .expect("should have found existing nexus");
+
+        let mut builder = BlueprintBuilder::new_based_on(
+            &logctx.log,
+            &blueprint,
+            &example_system.input,
+            &example_system.collection,
+            "test",
+            rng.next_planner_rng(),
+        )
+        .expect("failed to create builder");
+
+        let sled_ids: Vec<_> = example_system
+            .input
+            .all_sled_ids(SledFilter::Commissioned)
+            .collect();
+
+        // Define image sources: A (same as existing Nexus) and B (new)
+        let image_source_a = BlueprintZoneImageSource::InstallDataset;
+        let image_source_b = BlueprintZoneImageSource::Artifact {
+            version: BlueprintArtifactVersion::Available {
+                version: ArtifactVersion::new_const("2.0.0"),
+            },
+            hash: ArtifactHash([0x11; 32]),
+        };
+
+        // In a single BlueprintBuilder step, add:
+        // 1. One zone with image source A (should reuse existing generation)
+        // 2. One zone with image source B (should get existing generation + 1)
+        builder
+            .sled_add_zone_nexus_internal(
+                sled_ids[1],
+                image_source_a.clone(),
+                false,
+            )
+            .expect("failed to add nexus zone with image source A");
+        builder
+            .sled_add_zone_nexus_internal(
+                sled_ids[2],
+                image_source_b.clone(),
+                false,
+            )
+            .expect("failed to add nexus zone with image source B");
+
+        let blueprint2 = builder.build();
+        verify_blueprint(&blueprint2);
+
+        // Collect all nexus zones and organize by image source
+        let mut nexus_by_image: std::collections::HashMap<
+            BlueprintZoneImageSource,
+            Vec<Generation>,
+        > = std::collections::HashMap::new();
+
+        for (_, zone) in
+            blueprint2.all_omicron_zones(BlueprintZoneDisposition::any)
+        {
+            if let BlueprintZoneType::Nexus(nexus) = &zone.zone_type {
+                nexus_by_image
+                    .entry(zone.image_source.clone())
+                    .or_insert_with(Vec::new)
+                    .push(nexus.nexus_generation);
+            }
+        }
+
+        // Should have 2 image sources now
+        assert_eq!(nexus_by_image.len(), 2);
+
+        // Image source A should have 2 zones (original + new) with same generation
+        let image_a_gens = nexus_by_image.get(&image_source_a).unwrap();
+        assert_eq!(image_a_gens.len(), 2);
+        assert_eq!(image_a_gens[0], existing_nexus_gen);
+        assert_eq!(image_a_gens[1], existing_nexus_gen);
+
+        // Image source B should have 1 zone with next generation
+        let image_b_gens = nexus_by_image.get(&image_source_b).unwrap();
+        assert_eq!(image_b_gens.len(), 1);
+        assert_eq!(image_b_gens[0], existing_nexus_gen.next());
+
+        logctx.cleanup_successful();
+    }
+
+    /// Test nexus generation validation against blueprint generation
+    #[test]
+    fn test_nexus_generation_blueprint_validation() {
+        static TEST_NAME: &str = "test_nexus_generation_blueprint_validation";
+        let logctx = test_setup_log(TEST_NAME);
+        let mut rng = SimRngState::from_seed(TEST_NAME);
+
+        // Start with a system that has one Nexus zone
+        let (example_system, mut blueprint) =
+            ExampleSystemBuilder::new(&logctx.log, TEST_NAME)
+                .nexus_count(1)
+                .build();
+        verify_blueprint(&blueprint);
+
+        // Manually modify the blueprint to create a mismatch:
+        // Set the top-level nexus_generation to 2, but keep the zone generation at 1
+        blueprint.nexus_generation = Generation::new().next();
+
+        let mut builder = BlueprintBuilder::new_based_on(
+            &logctx.log,
+            &blueprint,
+            &example_system.input,
+            &example_system.collection,
+            "test",
+            rng.next_planner_rng(),
+        )
+        .expect("failed to create builder");
+
+        let sled_ids: Vec<_> = example_system
+            .input
+            .all_sled_ids(SledFilter::Commissioned)
+            .collect();
+        let image_source = BlueprintZoneImageSource::InstallDataset; // Same as existing
+
+        // Try to add another Nexus zone with same image source
+        // This should fail because existing zone has generation 1 but blueprint has generation 2
+        let result = builder.sled_add_zone_nexus_internal(
+            sled_ids[1],
+            image_source,
+            false,
+        );
+
+        match result {
+            Err(Error::OldImageNexusGenerationMismatch {
+                expected,
+                actual,
+            }) => {
+                assert_eq!(expected, Generation::new().next()); // Blueprint generation
+                assert_eq!(actual, Generation::new()); // Zone generation
+            }
+            other => panic!(
+                "Expected OldImageNexusGenerationMismatch error, got: {:?}",
+                other
+            ),
+        }
+
+        logctx.cleanup_successful();
+    }
+
+    /// Test nexus generation validation for new image source
+    #[test]
+    fn test_nexus_generation_blueprint_validation_new_image() {
+        static TEST_NAME: &str =
+            "test_nexus_generation_blueprint_validation_new_image";
+        let logctx = test_setup_log(TEST_NAME);
+        let mut rng = SimRngState::from_seed(TEST_NAME);
+
+        // Start with a system that has one Nexus zone
+        let (example_system, mut blueprint) =
+            ExampleSystemBuilder::new(&logctx.log, TEST_NAME)
+                .nexus_count(1)
+                .build();
+        verify_blueprint(&blueprint);
+
+        // The zone has generation 1 and blueprint has generation 1
+        // Now modify the blueprint generation to be different from what
+        // the new image source logic would expect
+        blueprint.nexus_generation = Generation::new().next().next(); // Set to generation 3
+
+        let mut builder = BlueprintBuilder::new_based_on(
+            &logctx.log,
+            &blueprint,
+            &example_system.input,
+            &example_system.collection,
+            "test",
+            rng.next_planner_rng(),
+        )
+        .expect("failed to create builder");
+
+        let sled_ids: Vec<_> = example_system
+            .input
+            .all_sled_ids(SledFilter::Commissioned)
+            .collect();
+
+        // Use a different image source (this should get existing generation + 1 = 2)
+        let different_image_source = BlueprintZoneImageSource::Artifact {
+            version: BlueprintArtifactVersion::Available {
+                version: ArtifactVersion::new_const("2.0.0"),
+            },
+            hash: ArtifactHash([0x42; 32]),
+        };
+
+        // Try to add a Nexus zone with different image source
+        // This should fail because the calculated generation (2) doesn't match blueprint generation + 1 (4)
+        let result = builder.sled_add_zone_nexus_internal(
+            sled_ids[1],
+            different_image_source,
+            false,
+        );
+
+        match result {
+            Err(Error::NewImageNexusGenerationMismatch {
+                expected,
+                actual,
+            }) => {
+                assert_eq!(expected, Generation::new().next().next().next()); // Blueprint generation + 1 = 4
+                assert_eq!(actual, Generation::new().next()); // Calculated generation = 2
+            }
+            other => panic!(
+                "Expected NewImageNexusGenerationMismatch error, got: {:?}",
+                other
+            ),
+        }
 
         logctx.cleanup_successful();
     }

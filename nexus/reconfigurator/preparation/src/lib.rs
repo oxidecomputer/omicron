@@ -94,6 +94,7 @@ impl PlanningInputFromDb<'_> {
         opctx: &OpContext,
         datastore: &DataStore,
         chicken_switches: PlannerChickenSwitches,
+        current_nexus_zone_id: Option<OmicronZoneUuid>,
     ) -> Result<PlanningInput, Error> {
         opctx.check_complex_operations_allowed()?;
         // Note we list *all* rows here including the ones for decommissioned
@@ -234,13 +235,16 @@ impl PlanningInputFromDb<'_> {
             old_repo,
             chicken_switches,
         }
-        .build()
+        .build(current_nexus_zone_id)
         .internal_context("assembling planning_input")?;
 
         Ok(planning_input)
     }
 
-    pub fn build(&self) -> Result<PlanningInput, Error> {
+    pub fn build(
+        &self,
+        current_nexus_zone_id: Option<OmicronZoneUuid>,
+    ) -> Result<PlanningInput, Error> {
         let service_ip_pool_ranges =
             self.ip_pool_range_rows.iter().map(IpRange::from).collect();
         let policy = Policy {
@@ -265,6 +269,7 @@ impl PlanningInputFromDb<'_> {
             self.internal_dns_version.into(),
             self.external_dns_version.into(),
             self.cockroachdb_settings.clone(),
+            current_nexus_zone_id,
         );
 
         let mut zpools_by_sled_id = {
@@ -373,6 +378,7 @@ impl PlanningInputFromDb<'_> {
 pub async fn reconfigurator_state_load(
     opctx: &OpContext,
     datastore: &DataStore,
+    current_nexus_zone_id: Option<OmicronZoneUuid>,
 ) -> Result<UnstableReconfiguratorState, anyhow::Error> {
     opctx.check_complex_operations_allowed()?;
     let chicken_switches = datastore
@@ -381,9 +387,13 @@ pub async fn reconfigurator_state_load(
         .map_or_else(PlannerChickenSwitches::default, |switches| {
             switches.switches.planner_switches
         });
-    let planning_input =
-        PlanningInputFromDb::assemble(opctx, datastore, chicken_switches)
-            .await?;
+    let planning_input = PlanningInputFromDb::assemble(
+        opctx,
+        datastore,
+        chicken_switches,
+        current_nexus_zone_id,
+    )
+    .await?;
     let collection_ids = datastore
         .inventory_collections()
         .await

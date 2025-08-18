@@ -480,12 +480,12 @@ impl ExampleSystemBuilder {
                     for _ in 0..nexus_count
                         .on(discretionary_ix, discretionary_sled_count)
                     {
+                        let must_have_nexus_zones = false;
                         builder
-                            .sled_add_zone_nexus_with_config(
+                            .sled_add_zone_nexus_internal(
                                 sled_id,
-                                false,
-                                vec![],
                                 image_source.clone(),
+                                must_have_nexus_zones,
                             )
                             .unwrap();
                     }
@@ -547,6 +547,24 @@ impl ExampleSystemBuilder {
         }
 
         let blueprint = builder.build();
+
+        // Find the first Nexus zone to use as the current Nexus zone ID
+        let current_nexus_zone_id = blueprint
+            .sleds
+            .values()
+            .flat_map(|sled_cfg| sled_cfg.zones.iter())
+            .find_map(|zone| match &zone.zone_type {
+                nexus_types::deployment::BlueprintZoneType::Nexus(_) => {
+                    Some(zone.id)
+                }
+                _ => None,
+            });
+
+        // Set the current Nexus zone ID if we found one
+        if let Some(nexus_zone_id) = current_nexus_zone_id {
+            input_builder.set_current_nexus_zone_id(Some(nexus_zone_id));
+        }
+
         for sled_cfg in blueprint.sleds.values() {
             for zone in sled_cfg.zones.iter() {
                 let service_id = zone.id;

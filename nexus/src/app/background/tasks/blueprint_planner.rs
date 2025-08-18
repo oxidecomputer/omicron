@@ -19,6 +19,7 @@ use nexus_types::internal_api::background::BlueprintPlannerStatus;
 use omicron_common::api::external::LookupType;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::GenericUuid as _;
+use omicron_uuid_kinds::OmicronZoneUuid;
 use serde_json::json;
 use std::sync::Arc;
 use tokio::sync::watch::{self, Receiver, Sender};
@@ -26,6 +27,7 @@ use tokio::sync::watch::{self, Receiver, Sender};
 /// Background task that runs the update planner.
 pub struct BlueprintPlanner {
     datastore: Arc<DataStore>,
+    nexus_id: OmicronZoneUuid,
     rx_chicken_switches: Receiver<ReconfiguratorChickenSwitchesView>,
     rx_inventory: Receiver<Option<CollectionUuid>>,
     rx_blueprint: Receiver<Option<Arc<(BlueprintTarget, Blueprint)>>>,
@@ -35,6 +37,7 @@ pub struct BlueprintPlanner {
 impl BlueprintPlanner {
     pub fn new(
         datastore: Arc<DataStore>,
+        nexus_id: OmicronZoneUuid,
         rx_chicken_switches: Receiver<ReconfiguratorChickenSwitchesView>,
         rx_inventory: Receiver<Option<CollectionUuid>>,
         rx_blueprint: Receiver<Option<Arc<(BlueprintTarget, Blueprint)>>>,
@@ -42,6 +45,7 @@ impl BlueprintPlanner {
         let (tx_blueprint, _) = watch::channel(None);
         Self {
             datastore,
+            nexus_id,
             rx_chicken_switches,
             rx_inventory,
             rx_blueprint,
@@ -118,6 +122,7 @@ impl BlueprintPlanner {
             opctx,
             &self.datastore,
             switches.switches.planner_switches,
+            Some(self.nexus_id),
         )
         .await
         {
@@ -341,6 +346,7 @@ mod test {
         // Finally, spin up the planner background task.
         let mut planner = BlueprintPlanner::new(
             datastore.clone(),
+            nexus.id,
             chicken_switches_collector_rx,
             rx_collector,
             rx_loader.clone(),

@@ -882,6 +882,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                     vni: Vni::SERVICES_VNI,
                     transit_ips: vec![],
                 },
+                nexus_generation: Generation::new(),
             }),
             image_source: BlueprintZoneImageSource::InstallDataset,
         });
@@ -967,6 +968,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             internal_dns_version: dns_config.generation,
             external_dns_version: Generation::new(),
             target_release_minimum_generation: Generation::new(),
+            nexus_generation: Generation::new(),
             cockroachdb_fingerprint: String::new(),
             cockroachdb_setting_preserve_downgrade:
                 CockroachDbPreserveDowngrade::DoNotModify,

@@ -447,6 +447,7 @@ pub async fn run_standalone_server(
                 },
                 external_tls: false,
                 external_dns_servers: vec![],
+                nexus_generation: Generation::new(),
             }),
             filesystem_pool: get_random_zpool(),
             image_source: BlueprintZoneImageSource::InstallDataset,
