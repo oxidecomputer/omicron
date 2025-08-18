@@ -74,7 +74,7 @@ control_plane_memory_earmark_mb = 6144
 # * 64 - 6 (earmark) - 1.875 (`page_t`s)) * 0.6 == 33.675 GiB VMM reservoir
 #
 # or reservoirs just a bit larger than their previous 64 and 32 GiB values.
-vmm_reservoir_percentage = 25
+vmm_reservoir_percentage = 60
 
 # Optionally you can specify the size of the VMM reservoir in MiB.
 # Note vmm_reservoir_percentage and vmm_reservoir_size_mb cannot be specified
@@ -111,7 +111,7 @@ data_links = ["net0", "net1"]
 default_request_body_max_bytes = 1048576
 
 [log]
-level = "debug"
+level = "info"
 mode = "file"
 path = "/dev/stdout"
 if_exists = "append"
