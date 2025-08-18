@@ -2166,6 +2166,7 @@ mod test {
     use super::ExpectedVersion;
     use super::PendingMgsUpdate;
     use super::PendingMgsUpdateDetails;
+    use super::PendingMgsUpdateSpDetails;
     use super::PendingMgsUpdates;
     use crate::inventory::BaseboardId;
     use gateway_client::types::SpType;
@@ -2190,12 +2191,12 @@ mod test {
             }),
             sp_type: SpType::Sled,
             slot_id: 15,
-            details: PendingMgsUpdateDetails::Sp {
+            details: PendingMgsUpdateDetails::Sp(PendingMgsUpdateSpDetails {
                 expected_active_version: "1.0.36".parse().unwrap(),
                 expected_inactive_version: ExpectedVersion::Version(
                     "1.0.36".parse().unwrap(),
                 ),
-            },
+            }),
             artifact_hash: "47266ede81e13f5f1e36623ea8dd963842606b783397e4809a9a5f0bda0f8170".parse().unwrap(),
             artifact_version: "1.0.34".parse().unwrap(),
         };
