@@ -6314,6 +6314,7 @@
             ]
           },
           {
+            "description": "the RoT bootloader is being updated",
             "type": "object",
             "properties": {
               "component": {
