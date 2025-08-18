@@ -2,7 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use gateway_test_utils::setup::DEFAULT_SP_SIM_CONFIG;
 use nexus_config::Database;
 use nexus_config::InternalDns;
 use nexus_test_interface::NexusServer;
@@ -91,20 +90,8 @@ async fn test_nexus_boots_before_dendrite() {
     // inside of Nexus initialization.  We must use MGS_PORT here because Nexus
     // hardcodes it.
     info!(&log, "Starting MGS");
-    builder
-        .start_gateway(
-            SwitchLocation::Switch0,
-            Some(MGS_PORT),
-            Some(DEFAULT_SP_SIM_CONFIG.into()),
-        )
-        .await;
-    builder
-        .start_gateway(
-            SwitchLocation::Switch1,
-            None,
-            Some(DEFAULT_SP_SIM_CONFIG.into()),
-        )
-        .await;
+    builder.start_gateway(SwitchLocation::Switch0, Some(MGS_PORT), None).await;
+    builder.start_gateway(SwitchLocation::Switch1, None, None).await;
     info!(&log, "Started MGS");
 
     let populate = true;
