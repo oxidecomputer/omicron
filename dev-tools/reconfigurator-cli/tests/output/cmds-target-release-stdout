@@ -214,7 +214,7 @@ chicken switches:
     add zones with mupdate override:   false
 
 * 1 pending MGS update:
-  * model0:serial0: RotBootloader { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: NoValidVersion }
+  * model0:serial0: RotBootloader(PendingMgsUpdateRotBootloaderDetails { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: NoValidVersion })
 * zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
 
 
@@ -238,10 +238,10 @@ to:   blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
  PENDING MGS UPDATES:
 
     Pending MGS-managed updates (all baseboards):
-    ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-    sp_type   slot   part_number   serial_number   artifact_hash                                                      artifact_version   details                                                                                                          
-    ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-+   sled      0      model0        serial0         005ea358f1cd316df42465b1e3a0334ea22cc0c0442cf9ddf9b42fbf49780236   1.0.0              RotBootloader { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: NoValidVersion }
+    --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+    sp_type   slot   part_number   serial_number   artifact_hash                                                      artifact_version   details                                                                                                                                                
+    --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
++   sled      0      model0        serial0         005ea358f1cd316df42465b1e3a0334ea22cc0c0442cf9ddf9b42fbf49780236   1.0.0              RotBootloader(PendingMgsUpdateRotBootloaderDetails { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: NoValidVersion })
 
 
 internal DNS:
@@ -396,7 +396,7 @@ chicken switches:
     add zones with mupdate override:   false
 
 * 1 pending MGS update:
-  * model0:serial0: RotBootloader { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: NoValidVersion }
+  * model0:serial0: RotBootloader(PendingMgsUpdateRotBootloaderDetails { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: NoValidVersion })
 * zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
 
 
@@ -580,7 +580,7 @@ chicken switches:
     add zones with mupdate override:   false
 
 * 1 pending MGS update:
-  * model0:serial0: Rot { expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: NoValidVersion, expected_persistent_boot_preference: A, expected_pending_persistent_boot_preference: None, expected_transient_boot_preference: None }
+  * model0:serial0: Rot(PendingMgsUpdateRotDetails { expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: NoValidVersion, expected_persistent_boot_preference: A, expected_pending_persistent_boot_preference: None, expected_transient_boot_preference: None })
 * zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
 
 
@@ -604,11 +604,11 @@ to:   blueprint af934083-59b5-4bf6-8966-6fb5292c29e1
  PENDING MGS UPDATES:
 
     Pending MGS-managed updates (all baseboards):
-    ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-    sp_type   slot   part_number   serial_number   artifact_hash                                                        artifact_version   details                                                                                                                                                                                                                                                                             
-    ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-*   sled      0      model0        serial0         - 005ea358f1cd316df42465b1e3a0334ea22cc0c0442cf9ddf9b42fbf49780236   1.0.0              - RotBootloader { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: NoValidVersion }                                                                                                                                                                 
-     └─                                            + 04e4a7fdb84acca92c8fd3235e26d64ea61bef8a5f98202589fd346989c5720a                      + Rot { expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: NoValidVersion, expected_persistent_boot_preference: A, expected_pending_persistent_boot_preference: None, expected_transient_boot_preference: None }
+    -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+    sp_type   slot   part_number   serial_number   artifact_hash                                                        artifact_version   details                                                                                                                                                                                                                                                                                                         
+    -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+*   sled      0      model0        serial0         - 005ea358f1cd316df42465b1e3a0334ea22cc0c0442cf9ddf9b42fbf49780236   1.0.0              - RotBootloader(PendingMgsUpdateRotBootloaderDetails { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: NoValidVersion })                                                                                                                                                       
+     └─                                            + 04e4a7fdb84acca92c8fd3235e26d64ea61bef8a5f98202589fd346989c5720a                      + Rot(PendingMgsUpdateRotDetails { expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: NoValidVersion, expected_persistent_boot_preference: A, expected_pending_persistent_boot_preference: None, expected_transient_boot_preference: None })
 
 
 internal DNS:
@@ -775,7 +775,7 @@ chicken switches:
     add zones with mupdate override:   false
 
 * 1 pending MGS update:
-  * model0:serial0: Sp { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: NoValidVersion }
+  * model0:serial0: Sp(PendingMgsUpdateSpDetails { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: NoValidVersion })
 * zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
 
 
@@ -799,11 +799,11 @@ to:   blueprint df06bb57-ad42-4431-9206-abff322896c7
  PENDING MGS UPDATES:
 
     Pending MGS-managed updates (all baseboards):
-    ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-    sp_type   slot   part_number   serial_number   artifact_hash                                                        artifact_version   details                                                                                                                                                                                                                                                                             
-    ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-*   sled      0      model0        serial0         - 04e4a7fdb84acca92c8fd3235e26d64ea61bef8a5f98202589fd346989c5720a   1.0.0              - Rot { expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: NoValidVersion, expected_persistent_boot_preference: A, expected_pending_persistent_boot_preference: None, expected_transient_boot_preference: None }
-     └─                                            + 7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670                      + Sp { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: NoValidVersion }                                                                                                                                                                               
+    -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+    sp_type   slot   part_number   serial_number   artifact_hash                                                        artifact_version   details                                                                                                                                                                                                                                                                                                         
+    -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+*   sled      0      model0        serial0         - 04e4a7fdb84acca92c8fd3235e26d64ea61bef8a5f98202589fd346989c5720a   1.0.0              - Rot(PendingMgsUpdateRotDetails { expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: NoValidVersion, expected_persistent_boot_preference: A, expected_pending_persistent_boot_preference: None, expected_transient_boot_preference: None })
+     └─                                            + 7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670                      + Sp(PendingMgsUpdateSpDetails { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: NoValidVersion })                                                                                                                                                                                
 
 
 internal DNS:
@@ -966,7 +966,7 @@ chicken switches:
     add zones with mupdate override:   false
 
 * 1 pending MGS update:
-  * model1:serial1: RotBootloader { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: NoValidVersion }
+  * model1:serial1: RotBootloader(PendingMgsUpdateRotBootloaderDetails { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: NoValidVersion })
 * zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
 
 
@@ -990,11 +990,11 @@ to:   blueprint 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba
  PENDING MGS UPDATES:
 
     Pending MGS-managed updates (all baseboards):
-    ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-    sp_type   slot   part_number   serial_number   artifact_hash                                                      artifact_version   details                                                                                                          
-    ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
--   sled      0      model0        serial0         7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670   1.0.0              Sp { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: NoValidVersion }              
-+   sled      1      model1        serial1         005ea358f1cd316df42465b1e3a0334ea22cc0c0442cf9ddf9b42fbf49780236   1.0.0              RotBootloader { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: NoValidVersion }
+    --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+    sp_type   slot   part_number   serial_number   artifact_hash                                                      artifact_version   details                                                                                                                                                
+    --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-   sled      0      model0        serial0         7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670   1.0.0              Sp(PendingMgsUpdateSpDetails { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: NoValidVersion })                         
++   sled      1      model1        serial1         005ea358f1cd316df42465b1e3a0334ea22cc0c0442cf9ddf9b42fbf49780236   1.0.0              RotBootloader(PendingMgsUpdateRotBootloaderDetails { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: NoValidVersion })
 
 
 internal DNS:
@@ -1162,7 +1162,7 @@ chicken switches:
     add zones with mupdate override:   false
 
 * 1 pending MGS update:
-  * model1:serial1: RotBootloader { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: Version(ArtifactVersion("0.5.0")) }
+  * model1:serial1: RotBootloader(PendingMgsUpdateRotBootloaderDetails { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: Version(ArtifactVersion("0.5.0")) })
 * zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
 
 
@@ -1186,11 +1186,11 @@ to:   blueprint 9034c710-3e57-45f3-99e5-4316145e87ac
  PENDING MGS UPDATES:
 
     Pending MGS-managed updates (all baseboards):
-    ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-    sp_type   slot   part_number   serial_number   artifact_hash                                                      artifact_version   details                                                                                                                               
-    ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-*   sled      1      model1        serial1         005ea358f1cd316df42465b1e3a0334ea22cc0c0442cf9ddf9b42fbf49780236   1.0.0              - RotBootloader { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: NoValidVersion }                   
-     └─                                                                                                                                  + RotBootloader { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: Version(ArtifactVersion("0.5.0")) }
+    -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+    sp_type   slot   part_number   serial_number   artifact_hash                                                      artifact_version   details                                                                                                                                                                     
+    -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+*   sled      1      model1        serial1         005ea358f1cd316df42465b1e3a0334ea22cc0c0442cf9ddf9b42fbf49780236   1.0.0              - RotBootloader(PendingMgsUpdateRotBootloaderDetails { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: NoValidVersion })                   
+     └─                                                                                                                                  + RotBootloader(PendingMgsUpdateRotBootloaderDetails { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: Version(ArtifactVersion("0.5.0")) })
 
 
 internal DNS:
@@ -1353,7 +1353,7 @@ chicken switches:
     add zones with mupdate override:   false
 
 * 1 pending MGS update:
-  * model1:serial1: Rot { expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: NoValidVersion, expected_persistent_boot_preference: A, expected_pending_persistent_boot_preference: None, expected_transient_boot_preference: None }
+  * model1:serial1: Rot(PendingMgsUpdateRotDetails { expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: NoValidVersion, expected_persistent_boot_preference: A, expected_pending_persistent_boot_preference: None, expected_transient_boot_preference: None })
 * zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
 
 
@@ -1377,11 +1377,11 @@ to:   blueprint d60afc57-f15d-476c-bd0f-b1071e2bb976
  PENDING MGS UPDATES:
 
     Pending MGS-managed updates (all baseboards):
-    ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-    sp_type   slot   part_number   serial_number   artifact_hash                                                        artifact_version   details                                                                                                                                                                                                                                                                             
-    ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-*   sled      1      model1        serial1         - 005ea358f1cd316df42465b1e3a0334ea22cc0c0442cf9ddf9b42fbf49780236   1.0.0              - RotBootloader { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: Version(ArtifactVersion("0.5.0")) }                                                                                                                                              
-     └─                                            + 04e4a7fdb84acca92c8fd3235e26d64ea61bef8a5f98202589fd346989c5720a                      + Rot { expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: NoValidVersion, expected_persistent_boot_preference: A, expected_pending_persistent_boot_preference: None, expected_transient_boot_preference: None }
+    -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+    sp_type   slot   part_number   serial_number   artifact_hash                                                        artifact_version   details                                                                                                                                                                                                                                                                                                         
+    -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+*   sled      1      model1        serial1         - 005ea358f1cd316df42465b1e3a0334ea22cc0c0442cf9ddf9b42fbf49780236   1.0.0              - RotBootloader(PendingMgsUpdateRotBootloaderDetails { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: Version(ArtifactVersion("0.5.0")) })                                                                                                                                    
+     └─                                            + 04e4a7fdb84acca92c8fd3235e26d64ea61bef8a5f98202589fd346989c5720a                      + Rot(PendingMgsUpdateRotDetails { expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: NoValidVersion, expected_persistent_boot_preference: A, expected_pending_persistent_boot_preference: None, expected_transient_boot_preference: None })
 
 
 internal DNS:
@@ -1548,7 +1548,7 @@ chicken switches:
     add zones with mupdate override:   false
 
 * 1 pending MGS update:
-  * model1:serial1: Rot { expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: Version(ArtifactVersion("0.5.0")), expected_persistent_boot_preference: A, expected_pending_persistent_boot_preference: None, expected_transient_boot_preference: None }
+  * model1:serial1: Rot(PendingMgsUpdateRotDetails { expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: Version(ArtifactVersion("0.5.0")), expected_persistent_boot_preference: A, expected_pending_persistent_boot_preference: None, expected_transient_boot_preference: None })
 * zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
 
 
@@ -1572,11 +1572,11 @@ to:   blueprint a5a8f242-ffa5-473c-8efd-2acf2dc0b736
  PENDING MGS UPDATES:
 
     Pending MGS-managed updates (all baseboards):
-    --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-    sp_type   slot   part_number   serial_number   artifact_hash                                                      artifact_version   details                                                                                                                                                                                                                                                                                                
-    --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-*   sled      1      model1        serial1         04e4a7fdb84acca92c8fd3235e26d64ea61bef8a5f98202589fd346989c5720a   1.0.0              - Rot { expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: NoValidVersion, expected_persistent_boot_preference: A, expected_pending_persistent_boot_preference: None, expected_transient_boot_preference: None }                   
-     └─                                                                                                                                  + Rot { expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: Version(ArtifactVersion("0.5.0")), expected_persistent_boot_preference: A, expected_pending_persistent_boot_preference: None, expected_transient_boot_preference: None }
+    ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+    sp_type   slot   part_number   serial_number   artifact_hash                                                      artifact_version   details                                                                                                                                                                                                                                                                                                                            
+    ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+*   sled      1      model1        serial1         04e4a7fdb84acca92c8fd3235e26d64ea61bef8a5f98202589fd346989c5720a   1.0.0              - Rot(PendingMgsUpdateRotDetails { expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: NoValidVersion, expected_persistent_boot_preference: A, expected_pending_persistent_boot_preference: None, expected_transient_boot_preference: None })                   
+     └─                                                                                                                                  + Rot(PendingMgsUpdateRotDetails { expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: Version(ArtifactVersion("0.5.0")), expected_persistent_boot_preference: A, expected_pending_persistent_boot_preference: None, expected_transient_boot_preference: None })
 
 
 internal DNS:
@@ -1739,7 +1739,7 @@ chicken switches:
     add zones with mupdate override:   false
 
 * 1 pending MGS update:
-  * model1:serial1: Sp { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: NoValidVersion }
+  * model1:serial1: Sp(PendingMgsUpdateSpDetails { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: NoValidVersion })
 * zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
 
 
@@ -1763,11 +1763,11 @@ to:   blueprint 626487fa-7139-45ec-8416-902271fc730b
  PENDING MGS UPDATES:
 
     Pending MGS-managed updates (all baseboards):
-    ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-    sp_type   slot   part_number   serial_number   artifact_hash                                                        artifact_version   details                                                                                                                                                                                                                                                                                                
-    ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-*   sled      1      model1        serial1         - 04e4a7fdb84acca92c8fd3235e26d64ea61bef8a5f98202589fd346989c5720a   1.0.0              - Rot { expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: Version(ArtifactVersion("0.5.0")), expected_persistent_boot_preference: A, expected_pending_persistent_boot_preference: None, expected_transient_boot_preference: None }
-     └─                                            + 7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670                      + Sp { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: NoValidVersion }                                                                                                                                                                                                  
+    --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+    sp_type   slot   part_number   serial_number   artifact_hash                                                        artifact_version   details                                                                                                                                                                                                                                                                                                                            
+    --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+*   sled      1      model1        serial1         - 04e4a7fdb84acca92c8fd3235e26d64ea61bef8a5f98202589fd346989c5720a   1.0.0              - Rot(PendingMgsUpdateRotDetails { expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: Version(ArtifactVersion("0.5.0")), expected_persistent_boot_preference: A, expected_pending_persistent_boot_preference: None, expected_transient_boot_preference: None })
+     └─                                            + 7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670                      + Sp(PendingMgsUpdateSpDetails { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: NoValidVersion })                                                                                                                                                                                                   
 
 
 internal DNS:
@@ -1933,7 +1933,7 @@ chicken switches:
     add zones with mupdate override:   false
 
 * 1 pending MGS update:
-  * model1:serial1: Sp { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: Version(ArtifactVersion("0.5.0")) }
+  * model1:serial1: Sp(PendingMgsUpdateSpDetails { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: Version(ArtifactVersion("0.5.0")) })
 * zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
 
 
@@ -1957,11 +1957,11 @@ to:   blueprint c1a0d242-9160-40f4-96ae-61f8f40a0b1b
  PENDING MGS UPDATES:
 
     Pending MGS-managed updates (all baseboards):
-    -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-    sp_type   slot   part_number   serial_number   artifact_hash                                                      artifact_version   details                                                                                                                 
-    -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-*   sled      1      model1        serial1         7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670   1.0.0              - Sp { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: NoValidVersion }                   
-     └─                                                                                                                                  + Sp { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: Version(ArtifactVersion("0.5.0")) }
+    ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+    sp_type   slot   part_number   serial_number   artifact_hash                                                      artifact_version   details                                                                                                                                            
+    ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+*   sled      1      model1        serial1         7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670   1.0.0              - Sp(PendingMgsUpdateSpDetails { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: NoValidVersion })                   
+     └─                                                                                                                                  + Sp(PendingMgsUpdateSpDetails { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: Version(ArtifactVersion("0.5.0")) })
 
 
 internal DNS:
@@ -2126,7 +2126,7 @@ chicken switches:
     add zones with mupdate override:   false
 
 * 1 pending MGS update:
-  * model2:serial2: RotBootloader { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: NoValidVersion }
+  * model2:serial2: RotBootloader(PendingMgsUpdateRotBootloaderDetails { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: NoValidVersion })
 * zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
 
 
@@ -2150,11 +2150,11 @@ to:   blueprint afb09faf-a586-4483-9289-04d4f1d8ba23
  PENDING MGS UPDATES:
 
     Pending MGS-managed updates (all baseboards):
-    -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-    sp_type   slot   part_number   serial_number   artifact_hash                                                      artifact_version   details                                                                                                               
-    -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
--   sled      1      model1        serial1         7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670   1.0.0              Sp { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: Version(ArtifactVersion("0.5.0")) }
-+   sled      2      model2        serial2         005ea358f1cd316df42465b1e3a0334ea22cc0c0442cf9ddf9b42fbf49780236   1.0.0              RotBootloader { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: NoValidVersion }     
+    --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+    sp_type   slot   part_number   serial_number   artifact_hash                                                      artifact_version   details                                                                                                                                                
+    --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-   sled      1      model1        serial1         7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670   1.0.0              Sp(PendingMgsUpdateSpDetails { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: Version(ArtifactVersion("0.5.0")) })      
++   sled      2      model2        serial2         005ea358f1cd316df42465b1e3a0334ea22cc0c0442cf9ddf9b42fbf49780236   1.0.0              RotBootloader(PendingMgsUpdateRotBootloaderDetails { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: NoValidVersion })
 
 
 internal DNS:
@@ -2317,7 +2317,7 @@ chicken switches:
     add zones with mupdate override:   false
 
 * 1 pending MGS update:
-  * model2:serial2: Rot { expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: NoValidVersion, expected_persistent_boot_preference: A, expected_pending_persistent_boot_preference: None, expected_transient_boot_preference: None }
+  * model2:serial2: Rot(PendingMgsUpdateRotDetails { expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: NoValidVersion, expected_persistent_boot_preference: A, expected_pending_persistent_boot_preference: None, expected_transient_boot_preference: None })
 * zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
 
 
@@ -2341,11 +2341,11 @@ to:   blueprint ce365dff-2cdb-4f35-a186-b15e20e1e700
  PENDING MGS UPDATES:
 
     Pending MGS-managed updates (all baseboards):
-    ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-    sp_type   slot   part_number   serial_number   artifact_hash                                                        artifact_version   details                                                                                                                                                                                                                                                                             
-    ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-*   sled      2      model2        serial2         - 005ea358f1cd316df42465b1e3a0334ea22cc0c0442cf9ddf9b42fbf49780236   1.0.0              - RotBootloader { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: NoValidVersion }                                                                                                                                                                 
-     └─                                            + 04e4a7fdb84acca92c8fd3235e26d64ea61bef8a5f98202589fd346989c5720a                      + Rot { expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: NoValidVersion, expected_persistent_boot_preference: A, expected_pending_persistent_boot_preference: None, expected_transient_boot_preference: None }
+    -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+    sp_type   slot   part_number   serial_number   artifact_hash                                                        artifact_version   details                                                                                                                                                                                                                                                                                                         
+    -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+*   sled      2      model2        serial2         - 005ea358f1cd316df42465b1e3a0334ea22cc0c0442cf9ddf9b42fbf49780236   1.0.0              - RotBootloader(PendingMgsUpdateRotBootloaderDetails { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: NoValidVersion })                                                                                                                                                       
+     └─                                            + 04e4a7fdb84acca92c8fd3235e26d64ea61bef8a5f98202589fd346989c5720a                      + Rot(PendingMgsUpdateRotDetails { expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: NoValidVersion, expected_persistent_boot_preference: A, expected_pending_persistent_boot_preference: None, expected_transient_boot_preference: None })
 
 
 internal DNS:
@@ -2508,7 +2508,7 @@ chicken switches:
     add zones with mupdate override:   false
 
 * 1 pending MGS update:
-  * model2:serial2: Sp { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: NoValidVersion }
+  * model2:serial2: Sp(PendingMgsUpdateSpDetails { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: NoValidVersion })
 * zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
 
 
@@ -2532,11 +2532,11 @@ to:   blueprint 8f2d1f39-7c88-4701-aa43-56bf281b28c1
  PENDING MGS UPDATES:
 
     Pending MGS-managed updates (all baseboards):
-    ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-    sp_type   slot   part_number   serial_number   artifact_hash                                                        artifact_version   details                                                                                                                                                                                                                                                                             
-    ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-*   sled      2      model2        serial2         - 04e4a7fdb84acca92c8fd3235e26d64ea61bef8a5f98202589fd346989c5720a   1.0.0              - Rot { expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: NoValidVersion, expected_persistent_boot_preference: A, expected_pending_persistent_boot_preference: None, expected_transient_boot_preference: None }
-     └─                                            + 7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670                      + Sp { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: NoValidVersion }                                                                                                                                                                               
+    -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+    sp_type   slot   part_number   serial_number   artifact_hash                                                        artifact_version   details                                                                                                                                                                                                                                                                                                         
+    -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+*   sled      2      model2        serial2         - 04e4a7fdb84acca92c8fd3235e26d64ea61bef8a5f98202589fd346989c5720a   1.0.0              - Rot(PendingMgsUpdateRotDetails { expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: NoValidVersion, expected_persistent_boot_preference: A, expected_pending_persistent_boot_preference: None, expected_transient_boot_preference: None })
+     └─                                            + 7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670                      + Sp(PendingMgsUpdateSpDetails { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: NoValidVersion })                                                                                                                                                                                
 
 
 internal DNS:
@@ -2789,10 +2789,10 @@ to:   blueprint 12d602a6-5ab4-487a-b94e-eb30cdf30300
  PENDING MGS UPDATES:
 
     Pending MGS-managed updates (all baseboards):
-    ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-    sp_type   slot   part_number   serial_number   artifact_hash                                                      artifact_version   details                                                                                            
-    ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
--   sled      2      model2        serial2         7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670   1.0.0              Sp { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: NoValidVersion }
+    -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+    sp_type   slot   part_number   serial_number   artifact_hash                                                      artifact_version   details                                                                                                                       
+    -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-   sled      2      model2        serial2         7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670   1.0.0              Sp(PendingMgsUpdateSpDetails { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: NoValidVersion })
 
 
 internal DNS:
