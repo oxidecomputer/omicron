@@ -57,6 +57,10 @@ pub struct Silo {
     /// unless there's a corresponding entry in this map.
     pub mapped_fleet_roles:
         BTreeMap<shared::SiloRole, BTreeSet<shared::FleetRole>>,
+
+    /// Optionally, silos can have a group name that is automatically granted
+    /// the silo admin role.
+    pub admin_group_name: Option<String>,
 }
 
 /// A collection of resource counts used to describe capacity and utilization
