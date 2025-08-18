@@ -21,6 +21,9 @@ use nexus_types::deployment::ExpectedActiveRotSlot;
 use nexus_types::deployment::ExpectedVersion;
 use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdateDetails;
+use nexus_types::deployment::PendingMgsUpdateRotBootloaderDetails;
+use nexus_types::deployment::PendingMgsUpdateRotDetails;
+use nexus_types::deployment::PendingMgsUpdateSpDetails;
 use nexus_types::deployment::PendingMgsUpdates;
 use nexus_types::deployment::TargetReleaseDescription;
 use nexus_types::inventory::BaseboardId;
@@ -238,10 +241,12 @@ fn mgs_update_status(
     // We check this before anything else because if we get back
     // `MgsUpdateStatus::Done`, then we're done no matter what else is true.
     let update_status = match &update.details {
-        PendingMgsUpdateDetails::RotBootloader {
-            expected_stage0_version,
-            expected_stage0_next_version,
-        } => {
+        PendingMgsUpdateDetails::RotBootloader(
+            PendingMgsUpdateRotBootloaderDetails {
+                expected_stage0_version,
+                expected_stage0_next_version,
+            },
+        ) => {
             let Some(stage0_caboose) =
                 inventory.caboose_for(CabooseWhich::Stage0, baseboard_id)
             else {
@@ -260,10 +265,10 @@ fn mgs_update_status(
                 found_stage0_next_version,
             ))
         }
-        PendingMgsUpdateDetails::Sp {
+        PendingMgsUpdateDetails::Sp(PendingMgsUpdateSpDetails {
             expected_active_version,
             expected_inactive_version,
-        } => {
+        }) => {
             let Some(active_caboose) =
                 inventory.caboose_for(CabooseWhich::SpSlot0, baseboard_id)
             else {
@@ -282,13 +287,13 @@ fn mgs_update_status(
                 found_inactive_version,
             ))
         }
-        PendingMgsUpdateDetails::Rot {
+        PendingMgsUpdateDetails::Rot(PendingMgsUpdateRotDetails {
             expected_active_slot,
             expected_inactive_version,
             expected_persistent_boot_preference,
             expected_pending_persistent_boot_preference,
             expected_transient_boot_preference,
-        } => {
+        }) => {
             let active_caboose_which = match &expected_active_slot.slot {
                 RotSlot::A => CabooseWhich::RotSlotA,
                 RotSlot::B => CabooseWhich::RotSlotB,
@@ -488,6 +493,9 @@ mod test {
     use gateway_client::types::SpType;
     use nexus_types::deployment::ExpectedVersion;
     use nexus_types::deployment::PendingMgsUpdateDetails;
+    use nexus_types::deployment::PendingMgsUpdateRotBootloaderDetails;
+    use nexus_types::deployment::PendingMgsUpdateRotDetails;
+    use nexus_types::deployment::PendingMgsUpdateSpDetails;
     use nexus_types::deployment::PendingMgsUpdates;
     use nexus_types::deployment::TargetReleaseDescription;
     use omicron_test_utils::dev::LogContext;
@@ -671,10 +679,10 @@ mod test {
         // Verify the precondition details of an ordinary update.
         let old_update =
             updates.into_iter().next().expect("at least one update");
-        let PendingMgsUpdateDetails::Sp {
+        let PendingMgsUpdateDetails::Sp(PendingMgsUpdateSpDetails {
             expected_active_version: old_expected_active_version,
             expected_inactive_version: old_expected_inactive_version,
-        } = &old_update.details
+        }) = &old_update.details
         else {
             panic!("expected SP update");
         };
@@ -715,10 +723,10 @@ mod test {
         assert_eq!(old_update.slot_id, new_update.slot_id);
         assert_eq!(old_update.artifact_hash, new_update.artifact_hash);
         assert_eq!(old_update.artifact_version, new_update.artifact_version);
-        let PendingMgsUpdateDetails::Sp {
+        let PendingMgsUpdateDetails::Sp(PendingMgsUpdateSpDetails {
             expected_active_version: new_expected_active_version,
             expected_inactive_version: new_expected_inactive_version,
-        } = &new_update.details
+        }) = &new_update.details
         else {
             panic!("expected SP update");
         };
@@ -756,10 +764,10 @@ mod test {
         assert_eq!(old_update.slot_id, new_update.slot_id);
         assert_eq!(old_update.artifact_hash, new_update.artifact_hash);
         assert_eq!(old_update.artifact_version, new_update.artifact_version);
-        let PendingMgsUpdateDetails::Sp {
+        let PendingMgsUpdateDetails::Sp(PendingMgsUpdateSpDetails {
             expected_active_version: new_expected_active_version,
             expected_inactive_version: new_expected_inactive_version,
-        } = &new_update.details
+        }) = &new_update.details
         else {
             panic!("expected SP update");
         };
@@ -952,11 +960,11 @@ mod test {
         // Verify the precondition details of an ordinary RoT update.
         let old_update =
             updates.into_iter().next().expect("at least one update");
-        let PendingMgsUpdateDetails::Rot {
+        let PendingMgsUpdateDetails::Rot(PendingMgsUpdateRotDetails {
             expected_active_slot: old_expected_active_slot,
             expected_inactive_version: old_expected_inactive_version,
             ..
-        } = &old_update.details
+        }) = &old_update.details
         else {
             panic!("expected RoT update");
         };
@@ -993,11 +1001,11 @@ mod test {
         assert_eq!(old_update.slot_id, new_update.slot_id);
         assert_eq!(old_update.artifact_hash, new_update.artifact_hash);
         assert_eq!(old_update.artifact_version, new_update.artifact_version);
-        let PendingMgsUpdateDetails::Rot {
+        let PendingMgsUpdateDetails::Rot(PendingMgsUpdateRotDetails {
             expected_active_slot: new_expected_active_slot,
             expected_inactive_version: new_expected_inactive_version,
             ..
-        } = &new_update.details
+        }) = &new_update.details
         else {
             panic!("expected RoT update");
         };
@@ -1035,11 +1043,11 @@ mod test {
         assert_eq!(old_update.slot_id, new_update.slot_id);
         assert_eq!(old_update.artifact_hash, new_update.artifact_hash);
         assert_eq!(old_update.artifact_version, new_update.artifact_version);
-        let PendingMgsUpdateDetails::Rot {
+        let PendingMgsUpdateDetails::Rot(PendingMgsUpdateRotDetails {
             expected_active_slot: new_expected_active_slot,
             expected_inactive_version: new_expected_inactive_version,
             ..
-        } = &new_update.details
+        }) = &new_update.details
         else {
             panic!("expected RoT update");
         };
@@ -1239,10 +1247,12 @@ mod test {
         // Verify the precondition details of an ordinary RoT update.
         let old_update =
             updates.into_iter().next().expect("at least one update");
-        let PendingMgsUpdateDetails::RotBootloader {
-            expected_stage0_version: old_expected_stage0_version,
-            expected_stage0_next_version: old_expected_stage0_next_version,
-        } = &old_update.details
+        let PendingMgsUpdateDetails::RotBootloader(
+            PendingMgsUpdateRotBootloaderDetails {
+                expected_stage0_version: old_expected_stage0_version,
+                expected_stage0_next_version: old_expected_stage0_next_version,
+            },
+        ) = &old_update.details
         else {
             panic!("expected RoT bootloader update");
         };
@@ -1283,10 +1293,12 @@ mod test {
         assert_eq!(old_update.slot_id, new_update.slot_id);
         assert_eq!(old_update.artifact_hash, new_update.artifact_hash);
         assert_eq!(old_update.artifact_version, new_update.artifact_version);
-        let PendingMgsUpdateDetails::RotBootloader {
-            expected_stage0_version: new_expected_stage0_version,
-            expected_stage0_next_version: new_expected_stage0_next_version,
-        } = &new_update.details
+        let PendingMgsUpdateDetails::RotBootloader(
+            PendingMgsUpdateRotBootloaderDetails {
+                expected_stage0_version: new_expected_stage0_version,
+                expected_stage0_next_version: new_expected_stage0_next_version,
+            },
+        ) = &new_update.details
         else {
             panic!("expected RoT bootloader update");
         };
@@ -1324,10 +1336,12 @@ mod test {
         assert_eq!(old_update.slot_id, new_update.slot_id);
         assert_eq!(old_update.artifact_hash, new_update.artifact_hash);
         assert_eq!(old_update.artifact_version, new_update.artifact_version);
-        let PendingMgsUpdateDetails::RotBootloader {
-            expected_stage0_version: new_expected_stage0_version,
-            expected_stage0_next_version: new_expected_stage0_next_version,
-        } = &new_update.details
+        let PendingMgsUpdateDetails::RotBootloader(
+            PendingMgsUpdateRotBootloaderDetails {
+                expected_stage0_version: new_expected_stage0_version,
+                expected_stage0_next_version: new_expected_stage0_next_version,
+            },
+        ) = &new_update.details
         else {
             panic!("expected RoT bootloader update");
         };
@@ -1388,10 +1402,10 @@ mod test {
             assert_eq!(first_update.slot_id, 0);
             assert_eq!(first_update.artifact_hash, ARTIFACT_HASH_SP_GIMLET_D);
             assert_eq!(first_update.artifact_version, ARTIFACT_VERSION_2);
-            let PendingMgsUpdateDetails::Sp {
+            let PendingMgsUpdateDetails::Sp(PendingMgsUpdateSpDetails {
                 expected_active_version,
                 expected_inactive_version,
-            } = &first_update.details
+            }) = &first_update.details
             else {
                 panic!("expected SP update");
             };
@@ -1453,10 +1467,10 @@ mod test {
         assert_eq!(first_update.slot_id, 0);
         assert_eq!(first_update.artifact_hash, ARTIFACT_HASH_SP_GIMLET_D);
         assert_eq!(first_update.artifact_version, ARTIFACT_VERSION_2);
-        let PendingMgsUpdateDetails::Sp {
+        let PendingMgsUpdateDetails::Sp(PendingMgsUpdateSpDetails {
             expected_active_version,
             expected_inactive_version,
-        } = &first_update.details
+        }) = &first_update.details
         else {
             panic!("expected SP update");
         };

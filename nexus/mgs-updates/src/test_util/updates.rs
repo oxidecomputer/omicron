@@ -28,6 +28,9 @@ use nexus_types::deployment::ExpectedVersion;
 use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdateDetails;
 use nexus_types::deployment::PendingMgsUpdateHostPhase1Details;
+use nexus_types::deployment::PendingMgsUpdateRotBootloaderDetails;
+use nexus_types::deployment::PendingMgsUpdateRotDetails;
+use nexus_types::deployment::PendingMgsUpdateSpDetails;
 use nexus_types::internal_api::views::InProgressUpdateStatus;
 use nexus_types::internal_api::views::MgsUpdateDriverStatus;
 use nexus_types::internal_api::views::UpdateAttemptStatus;
@@ -126,10 +129,10 @@ impl UpdateDescription<'_> {
                     .unwrap_or_else(|| sp1.expect_sp_inactive_version());
 
                 (
-                    PendingMgsUpdateDetails::Sp {
+                    PendingMgsUpdateDetails::Sp(PendingMgsUpdateSpDetails {
                         expected_active_version,
                         expected_inactive_version,
-                    },
+                    }),
                     has_caboose,
                 )
             }
@@ -163,13 +166,13 @@ impl UpdateDescription<'_> {
                         .or_else(|| sp1.expect_rot_transient_boot_preference());
 
                 (
-                    PendingMgsUpdateDetails::Rot {
+                    PendingMgsUpdateDetails::Rot(PendingMgsUpdateRotDetails {
                         expected_active_slot,
                         expected_inactive_version,
                         expected_persistent_boot_preference,
                         expected_pending_persistent_boot_preference,
                         expected_transient_boot_preference,
-                    },
+                    }),
                     has_caboose,
                 )
             }
@@ -187,10 +190,12 @@ impl UpdateDescription<'_> {
                         .unwrap_or_else(|| sp1.expect_stage0_next_version());
 
                 (
-                    PendingMgsUpdateDetails::RotBootloader {
-                        expected_stage0_version,
-                        expected_stage0_next_version,
-                    },
+                    PendingMgsUpdateDetails::RotBootloader(
+                        PendingMgsUpdateRotBootloaderDetails {
+                            expected_stage0_version,
+                            expected_stage0_next_version,
+                        },
+                    ),
                     has_caboose,
                 )
             }

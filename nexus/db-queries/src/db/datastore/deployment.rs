@@ -85,6 +85,9 @@ use nexus_types::deployment::OximeterReadMode;
 use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdateDetails;
 use nexus_types::deployment::PendingMgsUpdateHostPhase1Details;
+use nexus_types::deployment::PendingMgsUpdateRotBootloaderDetails;
+use nexus_types::deployment::PendingMgsUpdateRotDetails;
+use nexus_types::deployment::PendingMgsUpdateSpDetails;
 use nexus_types::deployment::PendingMgsUpdates;
 use nexus_types::deployment::PlanningReport;
 use nexus_types::inventory::BaseboardId;
@@ -2055,10 +2058,10 @@ async fn insert_pending_mgs_update(
     log: &Logger,
 ) -> Result<(), InsertTxnError> {
     match &update.details {
-        PendingMgsUpdateDetails::Sp {
+        PendingMgsUpdateDetails::Sp(PendingMgsUpdateSpDetails {
             expected_active_version,
             expected_inactive_version,
-        } => {
+        }) => {
             let db_blueprint_id = DbTypedUuid::from(blueprint_id)
                 .into_sql::<diesel::sql_types::Uuid>();
             let db_sp_type =
@@ -2168,13 +2171,13 @@ async fn insert_pending_mgs_update(
                 _expected_inactive_version,
             ) = update_dsl::bp_pending_mgs_update_sp::all_columns();
         }
-        PendingMgsUpdateDetails::Rot {
+        PendingMgsUpdateDetails::Rot(PendingMgsUpdateRotDetails {
             expected_active_slot,
             expected_inactive_version,
             expected_persistent_boot_preference,
             expected_pending_persistent_boot_preference,
             expected_transient_boot_preference,
-        } => {
+        }) => {
             let db_blueprint_id = DbTypedUuid::from(blueprint_id)
                 .into_sql::<diesel::sql_types::Uuid>();
             let db_sp_type =
@@ -2298,10 +2301,12 @@ async fn insert_pending_mgs_update(
                 _expected_transient_boot_preference,
             ) = update_dsl::bp_pending_mgs_update_rot::all_columns();
         }
-        PendingMgsUpdateDetails::RotBootloader {
-            expected_stage0_version,
-            expected_stage0_next_version,
-        } => {
+        PendingMgsUpdateDetails::RotBootloader(
+            PendingMgsUpdateRotBootloaderDetails {
+                expected_stage0_version,
+                expected_stage0_next_version,
+            },
+        ) => {
             let db_blueprint_id = DbTypedUuid::from(blueprint_id)
                 .into_sql::<diesel::sql_types::Uuid>();
             let db_sp_type =
@@ -3578,10 +3583,10 @@ mod tests {
             baseboard_id: baseboard_id.clone(),
             sp_type: sp.sp_type,
             slot_id: sp.sp_slot,
-            details: PendingMgsUpdateDetails::Sp {
+            details: PendingMgsUpdateDetails::Sp(PendingMgsUpdateSpDetails {
                 expected_active_version: "1.0.0".parse().unwrap(),
                 expected_inactive_version: ExpectedVersion::NoValidVersion,
-            },
+            }),
             artifact_hash: ArtifactHash([72; 32]),
             artifact_version: "2.0.0".parse().unwrap(),
         });
@@ -3705,7 +3710,7 @@ mod tests {
             baseboard_id: baseboard_id.clone(),
             sp_type: sp.sp_type,
             slot_id: sp.sp_slot,
-            details: PendingMgsUpdateDetails::Rot {
+            details: PendingMgsUpdateDetails::Rot(PendingMgsUpdateRotDetails {
                 expected_active_slot: ExpectedActiveRotSlot {
                     slot: RotSlot::A,
                     version: "1.0.0".parse().unwrap(),
@@ -3714,7 +3719,7 @@ mod tests {
                 expected_persistent_boot_preference: RotSlot::A,
                 expected_pending_persistent_boot_preference: None,
                 expected_transient_boot_preference: None,
-            },
+            }),
             artifact_hash: ArtifactHash([72; 32]),
             artifact_version: "2.0.0".parse().unwrap(),
         });
@@ -3762,10 +3767,13 @@ mod tests {
             baseboard_id: baseboard_id.clone(),
             sp_type: sp.sp_type,
             slot_id: sp.sp_slot,
-            details: PendingMgsUpdateDetails::RotBootloader {
-                expected_stage0_version: "1.0.0".parse().unwrap(),
-                expected_stage0_next_version: ExpectedVersion::NoValidVersion,
-            },
+            details: PendingMgsUpdateDetails::RotBootloader(
+                PendingMgsUpdateRotBootloaderDetails {
+                    expected_stage0_version: "1.0.0".parse().unwrap(),
+                    expected_stage0_next_version:
+                        ExpectedVersion::NoValidVersion,
+                },
+            ),
             artifact_hash: ArtifactHash([72; 32]),
             artifact_version: "2.0.0".parse().unwrap(),
         });

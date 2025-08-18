@@ -19,6 +19,9 @@ use iddqd::IdOrdMap;
 use nexus_types::deployment::ExpectedVersion;
 use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdateDetails;
+use nexus_types::deployment::PendingMgsUpdateRotBootloaderDetails;
+use nexus_types::deployment::PendingMgsUpdateRotDetails;
+use nexus_types::deployment::PendingMgsUpdateSpDetails;
 use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::Collection;
 use omicron_common::api::external::TufArtifactMeta;
@@ -486,23 +489,26 @@ impl ExpectedUpdates {
         assert_eq!(update.artifact_hash, expected_artifact);
         assert_eq!(update.artifact_version, ARTIFACT_VERSION_2);
         assert_eq!(update.baseboard_id.serial_number, *expected_serial);
-        let (expected_active_version, expected_inactive_version) =
-            match &update.details {
-                PendingMgsUpdateDetails::Rot {
-                    expected_active_slot,
-                    expected_inactive_version,
-                    ..
-                } => (&expected_active_slot.version, expected_inactive_version),
-                PendingMgsUpdateDetails::Sp {
-                    expected_active_version,
-                    expected_inactive_version,
-                } => (expected_active_version, expected_inactive_version),
-                PendingMgsUpdateDetails::RotBootloader {
+        let (expected_active_version, expected_inactive_version) = match &update
+            .details
+        {
+            PendingMgsUpdateDetails::Rot(PendingMgsUpdateRotDetails {
+                expected_active_slot,
+                expected_inactive_version,
+                ..
+            }) => (&expected_active_slot.version, expected_inactive_version),
+            PendingMgsUpdateDetails::Sp(PendingMgsUpdateSpDetails {
+                expected_active_version,
+                expected_inactive_version,
+            }) => (expected_active_version, expected_inactive_version),
+            PendingMgsUpdateDetails::RotBootloader(
+                PendingMgsUpdateRotBootloaderDetails {
                     expected_stage0_version,
                     expected_stage0_next_version,
-                } => (expected_stage0_version, expected_stage0_next_version),
-                PendingMgsUpdateDetails::HostPhase1(_) => unimplemented!(),
-            };
+                },
+            ) => (expected_stage0_version, expected_stage0_next_version),
+            PendingMgsUpdateDetails::HostPhase1(_) => unimplemented!(),
+        };
         assert_eq!(*expected_active_version, ARTIFACT_VERSION_1);
         assert_eq!(*expected_inactive_version, ExpectedVersion::NoValidVersion);
     }
