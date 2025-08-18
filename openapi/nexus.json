@@ -22275,12 +22275,33 @@
             "description": "Tables resulting from the query, each containing timeseries.",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/TableOutput"
+              "$ref": "#/components/schemas/OxqlTable"
             }
           }
         },
         "required": [
           "tables"
+        ]
+      },
+      "OxqlTable": {
+        "description": "A table represents one or more timeseries with the same schema.\n\nA table is the result of an OxQL query. It contains a name, usually the name of the timeseries schema from which the data is derived, and any number of timeseries, which contain the actual data.",
+        "type": "object",
+        "properties": {
+          "name": {
+            "description": "The name of the table.",
+            "type": "string"
+          },
+          "timeseries": {
+            "description": "The set of timeseries in the table, ordered by key.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Timeseries"
+            }
+          }
+        },
+        "required": [
+          "name",
+          "timeseries"
         ]
       },
       "Password": {
@@ -25521,25 +25542,6 @@
         "required": [
           "interface_config_id",
           "vlan_id"
-        ]
-      },
-      "TableOutput": {
-        "description": "A table represents one or more timeseries with the same schema.\n\nA table is the result of an OxQL query. It contains a name, usually the name of the timeseries schema from which the data is derived, and any number of timeseries, which contain the actual data.",
-        "type": "object",
-        "properties": {
-          "name": {
-            "type": "string"
-          },
-          "timeseries": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/Timeseries"
-            }
-          }
-        },
-        "required": [
-          "name",
-          "timeseries"
         ]
       },
       "TargetRelease": {
