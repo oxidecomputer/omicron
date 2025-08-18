@@ -1209,14 +1209,6 @@ impl QueryFragment<Pg> for InsertQuery {
         out.push_sql(", ");
 
         select_from_cte(out.reborrow(), dsl::is_primary::NAME)?;
-        out.push_sql(", ");
-
-        // Add transit_ips field
-        out.push_bind_param::<sql_types::Array<sql_types::Inet>, Vec<IpNetwork>>(
-            &self.interface.transit_ips,
-        )?;
-        out.push_sql(" AS ");
-        out.push_identifier(dsl::transit_ips::NAME)?;
 
         Ok(())
     }
