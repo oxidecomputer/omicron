@@ -187,6 +187,10 @@ webhook_secrets_add                      POST     /v1/webhook-secrets
 webhook_secrets_delete                   DELETE   /v1/webhook-secrets/{secret_id}
 webhook_secrets_list                     GET      /v1/webhook-secrets
 
+API operations found with tag "system/audit-log"
+OPERATION ID                             METHOD   URL PATH
+audit_log_list                           GET      /v1/system/audit-log
+
 API operations found with tag "system/hardware"
 OPERATION ID                             METHOD   URL PATH
 networking_switch_port_apply_settings    POST     /v1/system/hardware/switch-port/{port}/settings
@@ -239,6 +243,7 @@ networking_address_lot_block_list        GET      /v1/system/networking/address-
 networking_address_lot_create            POST     /v1/system/networking/address-lot
 networking_address_lot_delete            DELETE   /v1/system/networking/address-lot/{address_lot}
 networking_address_lot_list              GET      /v1/system/networking/address-lot
+networking_address_lot_view              GET      /v1/system/networking/address-lot/{address_lot}
 networking_allow_list_update             PUT      /v1/system/networking/allow-list
 networking_allow_list_view               GET      /v1/system/networking/allow-list
 networking_bfd_disable                   POST     /v1/system/networking/bfd-disable

@@ -180,6 +180,12 @@ const PUT_UPDATE_REPOSITORY_MAX_BYTES: usize = 4 * GIB;
                     url = "http://docs.oxide.computer/api/alerts"
                 }
             },
+            "system/audit-log" = {
+                description = "These endpoints relate to audit logs.",
+                external_docs = {
+                    url = "http://docs.oxide.computer/api/system-audit-log"
+                }
+            },
             "system/probes" = {
                 description = "Probes for testing network connectivity",
                 external_docs = {
@@ -1623,6 +1629,17 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
         query_params: Query<PaginatedByNameOrId>,
     ) -> Result<HttpResponseOk<ResultsPage<AddressLot>>, HttpError>;
+
+    /// Fetch address lot
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/networking/address-lot/{address_lot}",
+        tags = ["system/networking"],
+    }]
+    async fn networking_address_lot_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::AddressLotPath>,
+    ) -> Result<HttpResponseOk<AddressLotViewResponse>, HttpError>;
 
     /// List blocks in address lot
     #[endpoint {
@@ -3427,6 +3444,37 @@ pub trait NexusExternalApi {
         query_params: Query<params::ProjectSelector>,
         path_params: Path<params::ProbePath>,
     ) -> Result<HttpResponseDeleted, HttpError>;
+
+    // Audit logging
+
+    // See datastore/audit_log.rs for a more detailed explanation of why we sort
+    // by time_completed.
+
+    /// View audit log
+    ///
+    /// A single item in the audit log represents both the beginning and
+    /// end of the logged operation (represented by `time_started` and
+    /// `time_completed`) so that clients do not have to find multiple entries
+    /// and match them up by request ID to get the full picture of an operation.
+    /// Because timestamps may not be unique, entries have also have a unique
+    /// `id` that can be used to deduplicate items fetched from overlapping
+    /// time intervals.
+    ///
+    /// Audit log entries are designed to be immutable: once you see an entry,
+    /// fetching it again will never get you a different result. The list is
+    /// ordered by `time_completed`, not `time_started`. If you fetch the audit
+    /// log for a time range that is fully in the past, the resulting list is
+    /// guaranteed to be complete, i.e., fetching the same timespan again later
+    /// will always produce the same set of entries.
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/audit-log",
+        tags = ["system/audit-log"],
+    }]
+    async fn audit_log_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedByTimeAndId<params::AuditLog>>,
+    ) -> Result<HttpResponseOk<ResultsPage<views::AuditLogEntry>>, HttpError>;
 
     // Console API: logins
 

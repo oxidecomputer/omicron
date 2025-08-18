@@ -187,6 +187,24 @@ CREATE TYPE IF NOT EXISTS omicron.public.sled_state AS ENUM (
     'decommissioned'
 );
 
+-- The model of CPU installed in a particular sled, discovered by sled-agent
+-- and reported to Nexus. This determines what VMs can run on a sled: instances
+-- that require a specific minimum CPU platform can only run on sleds whose
+-- CPUs support all the features of that platform.
+CREATE TYPE IF NOT EXISTS omicron.public.sled_cpu_family AS ENUM (
+    -- Sled-agent didn't recognize the sled's CPU.
+    'unknown',
+
+    -- AMD Milan, or lab CPU close enough that sled-agent reported it as one.
+    'amd_milan',
+
+    -- AMD Turin, or lab CPU close enough that sled-agent reported it as one.
+    'amd_turin',
+
+    -- AMD Turin Dense. There are no "Turin Dense-likes", so this is precise.
+    'amd_turin_dense'
+);
+
 CREATE TABLE IF NOT EXISTS omicron.public.sled (
     /* Identity metadata (asset) */
     id UUID PRIMARY KEY,
@@ -229,7 +247,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.sled (
 
     /* The bound port of the Repo Depot API server, running on the same IP as
        the sled agent server. */
-    repo_depot_port INT4 CHECK (port BETWEEN 0 AND 65535) NOT NULL
+    repo_depot_port INT4 CHECK (port BETWEEN 0 AND 65535) NOT NULL,
+
+    /* The sled's detected CPU family. */
+    cpu_family omicron.public.sled_cpu_family NOT NULL
 );
 
 -- Add an index that ensures a given physical sled (identified by serial and
@@ -2513,6 +2534,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.tuf_artifact (
     -- The generation number this artifact was added for.
     generation_added INT8 NOT NULL,
 
+    -- Sign (root key hash table) hash of a signed RoT or RoT bootloader image.
+    sign BYTES, -- nullable
+
     CONSTRAINT unique_name_version_kind UNIQUE (name, version, kind)
 );
 
@@ -3105,10 +3129,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.lldp_link_config (
     chassis_id STRING(63),
     system_name STRING(63),
     system_description STRING(612),
-    management_ip TEXT,
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
-    time_deleted TIMESTAMPTZ
+    time_deleted TIMESTAMPTZ,
+    management_ip INET
 );
 
 CREATE TABLE IF NOT EXISTS omicron.public.tx_eq_config (
@@ -3514,6 +3538,25 @@ CREATE TYPE IF NOT EXISTS omicron.public.hw_m2_slot AS ENUM (
     'B'
 );
 
+-- host phase 1 active slots found
+CREATE TABLE IF NOT EXISTS omicron.public.inv_host_phase_1_active_slot (
+    -- where this observation came from
+    -- (foreign key into `inv_collection` table)
+    inv_collection_id UUID NOT NULL,
+    -- which system this SP reports it is part of
+    -- (foreign key into `hw_baseboard_id` table)
+    hw_baseboard_id UUID NOT NULL,
+    -- when this observation was made
+    time_collected TIMESTAMPTZ NOT NULL,
+    -- which MGS instance reported this data
+    source TEXT NOT NULL,
+
+    -- active phase 1 slot
+    slot omicron.public.hw_m2_slot NOT NULL,
+
+    PRIMARY KEY (inv_collection_id, hw_baseboard_id)
+);
+
 -- host phase 1 flash hashes found
 -- There are usually two rows here for each row in inv_service_processor, but
 -- not necessarily (either or both slots' hash collection may fail).
@@ -3683,6 +3726,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_sled_agent (
     -- the mupdate override was either successfully read or is not
     -- present.
     mupdate_override_boot_disk_error TEXT,
+
+    -- The sled's CPU family. This is also duplicated with the `sled` table,
+    -- similar to `usable_hardware_threads` and friends above.
+    cpu_family omicron.public.sled_cpu_family NOT NULL,
 
     CONSTRAINT reconciler_status_sled_config_present_if_running CHECK (
         (reconciler_status_kind = 'running'
@@ -4778,7 +4825,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_oximeter_read_policy (
 -- Blueprint information related to pending RoT bootloader upgrades.
 CREATE TABLE IF NOT EXISTS omicron.public.bp_pending_mgs_update_rot_bootloader (
     -- Foreign key into the `blueprint` table
-    blueprint_id UUID,
+    blueprint_id UUID NOT NULL,
     -- identify of the device to be updated
     -- (foreign key into the `hw_baseboard_id` table)
     hw_baseboard_id UUID NOT NULL,
@@ -4799,7 +4846,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_pending_mgs_update_rot_bootloader (
 -- Blueprint information related to pending SP upgrades.
 CREATE TABLE IF NOT EXISTS omicron.public.bp_pending_mgs_update_sp (
     -- Foreign key into the `blueprint` table
-    blueprint_id UUID,
+    blueprint_id UUID NOT NULL,
     -- identify of the device to be updated
     -- (foreign key into the `hw_baseboard_id` table)
     hw_baseboard_id UUID NOT NULL,
@@ -4820,7 +4867,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_pending_mgs_update_sp (
 -- Blueprint information related to pending RoT upgrades.
 CREATE TABLE IF NOT EXISTS omicron.public.bp_pending_mgs_update_rot (
     -- Foreign key into the `blueprint` table
-    blueprint_id UUID,
+    blueprint_id UUID NOT NULL,
     -- identify of the device to be updated
     -- (foreign key into the `hw_baseboard_id` table)
     hw_baseboard_id UUID NOT NULL,
@@ -4838,6 +4885,33 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_pending_mgs_update_rot (
     expected_persistent_boot_preference omicron.public.hw_rot_slot NOT NULL,
     expected_pending_persistent_boot_preference omicron.public.hw_rot_slot,
     expected_transient_boot_preference omicron.public.hw_rot_slot,
+
+    PRIMARY KEY(blueprint_id, hw_baseboard_id)
+);
+
+-- Blueprint information related to pending host OS phase 1 updates.
+CREATE TABLE IF NOT EXISTS omicron.public.bp_pending_mgs_update_host_phase_1 (
+    -- Foreign key into the `blueprint` table
+    blueprint_id UUID NOT NULL,
+    -- identify of the device to be updated
+    -- (foreign key into the `hw_baseboard_id` table)
+    hw_baseboard_id UUID NOT NULL,
+    -- location of this device according to MGS
+    sp_type omicron.public.sp_type NOT NULL,
+    sp_slot INT4 NOT NULL,
+    -- artifact to be deployed to this device
+    artifact_sha256 STRING(64) NOT NULL,
+    artifact_version STRING(64) NOT NULL,
+
+    -- host-phase-1-specific details
+    expected_active_phase_1_slot omicron.public.hw_m2_slot NOT NULL,
+    expected_boot_disk omicron.public.hw_m2_slot NOT NULL,
+    expected_active_phase_1_hash STRING(64) NOT NULL,
+    expected_active_phase_2_hash STRING(64) NOT NULL,
+    expected_inactive_phase_1_hash STRING(64) NOT NULL,
+    expected_inactive_phase_2_hash STRING(64) NOT NULL,
+    sled_agent_ip INET NOT NULL,
+    sled_agent_port INT4 NOT NULL CHECK (sled_agent_port BETWEEN 0 AND 65535),
 
     PRIMARY KEY(blueprint_id, hw_baseboard_id)
 );
@@ -5746,6 +5820,132 @@ CREATE UNIQUE INDEX IF NOT EXISTS one_record_per_volume_resource_usage on omicro
     region_snapshot_snapshot_id
 );
 
+CREATE TYPE IF NOT EXISTS omicron.public.audit_log_actor_kind AS ENUM (
+    'user_builtin',
+    'silo_user',
+    'unauthenticated'
+);
+
+CREATE TYPE IF NOT EXISTS omicron.public.audit_log_result_kind AS ENUM (
+    'success',
+    'error',
+    -- represents the case where we had to clean up a row and artificially
+    -- complete it in order to get it into the log (because entries don't show
+    -- up in the log until they're completed)
+    'timeout'
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.audit_log (
+    id UUID PRIMARY KEY,
+    time_started TIMESTAMPTZ NOT NULL,
+    -- request IDs are UUIDs but let's give them a little extra space
+    -- https://github.com/oxidecomputer/dropshot/blob/83f78e7/dropshot/src/server.rs#L743
+    request_id STRING(63) NOT NULL,
+    request_uri STRING(512) NOT NULL,
+    operation_id STRING(512) NOT NULL,
+    source_ip INET NOT NULL,
+    -- Pulled from request header if present and truncated
+    user_agent STRING(256),
+
+    -- these are all null if the request is unauthenticated. actor_id can
+    -- be present while silo ID is null if the user is built in (non-silo).
+    actor_id UUID,
+    actor_silo_id UUID,
+    -- actor kind indicating builtin user, silo user, or unauthenticated
+    actor_kind omicron.public.audit_log_actor_kind NOT NULL,
+    -- The name of the authn scheme used
+    auth_method STRING(63),
+
+    -- below are fields we can only fill in after the operation
+
+    time_completed TIMESTAMPTZ,
+    http_status_code INT4,
+
+    -- only present on errors
+    error_code STRING,
+    error_message STRING,
+
+    -- result kind indicating success, error, or timeout
+    result_kind omicron.public.audit_log_result_kind,
+
+    -- make sure time_completed and result_kind are either both null or both not
+    CONSTRAINT time_completed_and_result_kind CHECK (
+        (time_completed IS NULL AND result_kind IS NULL)
+        OR (time_completed IS NOT NULL AND result_kind IS NOT NULL)
+    ),
+
+    -- Enforce consistency between result_kind and related fields:
+    -- 'timeout': no HTTP status or error details
+    -- 'success': requires HTTP status, no error details
+    -- 'error': requires HTTP status and error message
+    -- other/NULL: no HTTP status or error details
+    CONSTRAINT result_kind_state_consistency CHECK (
+        CASE result_kind
+            WHEN 'timeout' THEN http_status_code IS NULL AND error_code IS NULL
+                AND error_message IS NULL
+            WHEN 'success' THEN error_code IS NULL AND error_message IS NULL AND
+                http_status_code IS NOT NULL
+            WHEN 'error' THEN http_status_code IS NOT NULL AND error_message IS
+                NOT NULL
+            ELSE http_status_code IS NULL AND error_code IS NULL AND error_message
+                IS NULL
+        END
+    ),
+
+    -- Ensure valid actor ID combinations
+    -- Constraint: actor_kind and actor_id must be consistent
+    CONSTRAINT actor_kind_and_id_consistent CHECK (
+        -- For user_builtin: must have actor_id, must not have actor_silo_id
+        (actor_kind = 'user_builtin' AND actor_id IS NOT NULL AND actor_silo_id IS NULL)
+        OR
+        -- For silo_user: must have both actor_id and actor_silo_id
+        (actor_kind = 'silo_user' AND actor_id IS NOT NULL AND actor_silo_id IS NOT NULL)
+        OR
+        -- For unauthenticated: must not have actor_id or actor_silo_id
+        (actor_kind = 'unauthenticated' AND actor_id IS NULL AND actor_silo_id IS NULL)
+    )
+);
+
+-- When we query the audit log, we filter by time_completed and order by
+-- (time_completed, id). CRDB docs talk about hash-sharded indexes for
+-- sequential keys, but the PK on this table is the ID alone.
+CREATE UNIQUE INDEX IF NOT EXISTS audit_log_by_time_completed
+    ON omicron.public.audit_log (time_completed, id)
+    WHERE time_completed IS NOT NULL;
+
+-- View of audit log entries that have been "completed". This lets us treat that
+-- subset of rows as its own table in the data model code. Completing an entry
+-- means updating the entry after an operation is complete with the result of
+-- the operation. Because we do not intend to fail or roll back the operation
+-- if the completion write fails (while we do abort if the audit log entry
+-- initialization call fails), it is always possible (though rare) that there
+-- will be some incomplete entries remaining for operations that have in fact
+-- completed. We intend to complete those periodically with some kind of job
+-- and most likely mark them with a special third status that is neither success
+-- nor failure.
+CREATE VIEW IF NOT EXISTS omicron.public.audit_log_complete AS
+SELECT
+    id,
+    time_started,
+    request_id,
+    request_uri,
+    operation_id,
+    source_ip,
+    user_agent,
+    actor_id,
+    actor_silo_id,
+    actor_kind,
+    auth_method,
+    time_completed,
+    http_status_code,
+    error_code,
+    error_message,
+    result_kind
+FROM omicron.public.audit_log
+WHERE
+    time_completed IS NOT NULL
+    AND result_kind IS NOT NULL;
+
 /*
  * Alerts
  */
@@ -6313,6 +6513,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.host_ereport (
      */
     report JSONB NOT NULL,
 
+    part_number STRING(63),
+
     PRIMARY KEY (restart_id, ena)
 );
 
@@ -6348,7 +6550,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '174.0.0', NULL)
+    (TRUE, NOW(), NOW(), '181.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

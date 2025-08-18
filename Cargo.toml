@@ -374,7 +374,7 @@ bootstrap-agent-client = { path = "clients/bootstrap-agent-client" }
 buf-list = { version = "1.0.3", features = ["tokio1"] }
 byteorder = "1.5.0"
 bytes = "1.10.1"
-camino = { version = "1.1", features = ["serde1"] }
+camino = { version = "1.1.11", features = ["serde1"] }
 camino-tempfile = "1.4.1"
 camino-tempfile-ext = { version = "0.3.2", features = ["assert-color"] }
 cancel-safe-futures = "0.1.5"
@@ -405,10 +405,10 @@ crossterm = { version = "0.29.0", features = ["event-stream"] }
 # NOTE: if you change the pinned revision of the `crucible` dependencies, you
 # must also update the references in package-manifest.toml to match the new
 # revision.
-crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "e164393a88e7b62598897dc4f53315f083e25333" }
-crucible-pantry-client = { git = "https://github.com/oxidecomputer/crucible", rev = "e164393a88e7b62598897dc4f53315f083e25333" }
-crucible-smf = { git = "https://github.com/oxidecomputer/crucible", rev = "e164393a88e7b62598897dc4f53315f083e25333" }
-crucible-common = { git = "https://github.com/oxidecomputer/crucible", rev = "e164393a88e7b62598897dc4f53315f083e25333" }
+crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "779775d5130ff7a4836f52f48b7e64d1479ee104" }
+crucible-pantry-client = { git = "https://github.com/oxidecomputer/crucible", rev = "779775d5130ff7a4836f52f48b7e64d1479ee104" }
+crucible-smf = { git = "https://github.com/oxidecomputer/crucible", rev = "779775d5130ff7a4836f52f48b7e64d1479ee104" }
+crucible-common = { git = "https://github.com/oxidecomputer/crucible", rev = "779775d5130ff7a4836f52f48b7e64d1479ee104" }
 # NOTE: See above!
 csv = "1.3.1"
 curve25519-dalek = "4"
@@ -422,14 +422,14 @@ derive_more = "0.99.20"
 derive-where = "1.5.0"
 dev-tools-common = { path = "dev-tools/common" }
 # Having the i-implement-... feature here makes diesel go away from the workspace-hack
-diesel = { version = "2.2.11", features = ["i-implement-a-third-party-backend-and-opt-into-breaking-changes", "postgres", "r2d2", "chrono", "serde_json", "network-address", "uuid"] }
+diesel = { version = "2.2.12", features = ["i-implement-a-third-party-backend-and-opt-into-breaking-changes", "postgres", "r2d2", "chrono", "serde_json", "network-address", "uuid"] }
 diesel-dtrace = "0.4.2"
 digest = "0.10.7"
 dns-server = { path = "dns-server" }
 dns-server-api = { path = "dns-server-api" }
 dns-service-client = { path = "clients/dns-service-client" }
-dpd-client = { git = "https://github.com/oxidecomputer/dendrite" }
-dropshot = { version = "0.16.2", features = [ "usdt-probes" ] }
+dpd-client = { git = "https://github.com/oxidecomputer/dendrite", rev = "6e666520620e26432333d9060bc7d249ba9fa92e" }
+dropshot = { version = "0.16.3", features = [ "usdt-probes" ] }
 dyn-clone = "1.0.19"
 either = "1.15.0"
 ereport-types = { path = "ereport/types" }
@@ -580,7 +580,7 @@ omicron-workspace-hack = "0.1.0"
 omicron-zone-package = "0.12.2"
 oxide-client = { path = "clients/oxide-client" }
 oxide-tokio-rt = "0.1.2"
-oxide-vpc = { git = "https://github.com/oxidecomputer/opte", rev = "2d095de2258aa0653d669b72c741f26e608c81a6", features = [ "api", "std" ] }
+oxide-vpc = { git = "https://github.com/oxidecomputer/opte", rev = "6a5d3f336685a2aeb291962ae7f583b9355f3022", features = [ "api", "std" ] }
 oxlog = { path = "dev-tools/oxlog" }
 oxnet = "0.1.3"
 once_cell = "1.21.3"
@@ -590,7 +590,7 @@ openapiv3 = "2.2.0"
 # must match samael's crate!
 openssl = "0.10"
 openssl-sys = "0.9"
-opte-ioctl = { git = "https://github.com/oxidecomputer/opte", rev = "2d095de2258aa0653d669b72c741f26e608c81a6" }
+opte-ioctl = { git = "https://github.com/oxidecomputer/opte", rev = "6a5d3f336685a2aeb291962ae7f583b9355f3022" }
 oso = "0.27"
 owo-colors = "4.2.2"
 oximeter = { path = "oximeter/oximeter" }
@@ -631,13 +631,13 @@ progenitor-client = "0.10.0"
 # NOTE: if you change the pinned revision of the `bhyve_api` and propolis
 # dependencies, you must also update the references in package-manifest.toml to
 # match the new revision.
-bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "c03bd1a29c775acfc65de561b8fc436e2459a633" }
-propolis_api_types = { git = "https://github.com/oxidecomputer/propolis", rev = "c03bd1a29c775acfc65de561b8fc436e2459a633" }
-propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "c03bd1a29c775acfc65de561b8fc436e2459a633" }
-propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "c03bd1a29c775acfc65de561b8fc436e2459a633" }
+bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "23b06c2f452a97fac1dc12561d8451ce876d7c5a" }
+propolis_api_types = { git = "https://github.com/oxidecomputer/propolis", rev = "23b06c2f452a97fac1dc12561d8451ce876d7c5a" }
+propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "23b06c2f452a97fac1dc12561d8451ce876d7c5a" }
+propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "23b06c2f452a97fac1dc12561d8451ce876d7c5a" }
 # NOTE: see above!
 proptest = "1.7.0"
-qorb = "0.4.0"
+qorb = "0.4.1"
 quote = "1.0"
 rand = "0.8.5"
 # We're still in the middle of migrating to rand 0.9.
@@ -672,7 +672,7 @@ semver = { version = "1.0.26", features = ["std", "serde"] }
 serde = { version = "1.0", default-features = false, features = [ "derive", "rc" ] }
 serde_cbor = "0.11.2"
 serde_human_bytes = { git = "https://github.com/oxidecomputer/serde_human_bytes", branch = "main" }
-serde_json = "1.0.141"
+serde_json = "1.0.142"
 serde_tokenstream = "0.2"
 serde_urlencoded = "0.7.1"
 serde_with = { version = "3.14.0", default-features = false, features = ["alloc", "macros"] }

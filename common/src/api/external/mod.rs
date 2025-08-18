@@ -926,6 +926,7 @@ pub enum ResourceType {
     AllowList,
     AntiAffinityGroup,
     AntiAffinityGroupMember,
+    AuditLogEntry,
     BackgroundTask,
     BgpAnnounceSet,
     BgpConfig,
@@ -2588,6 +2589,16 @@ pub struct AddressLotCreateResponse {
     pub blocks: Vec<AddressLotBlock>,
 }
 
+/// An address lot and associated blocks resulting from viewing an address lot.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct AddressLotViewResponse {
+    /// The address lot.
+    pub lot: AddressLot,
+
+    /// The address lot blocks.
+    pub blocks: Vec<AddressLotBlock>,
+}
+
 /// Represents an address lot object, containing the id of the lot that can be
 /// used in other API calls.
 // TODO Add kind attribute to AddressLot
@@ -3409,6 +3420,12 @@ pub struct TufArtifactMeta {
 
     /// The size of the artifact in bytes.
     pub size: u64,
+
+    /// Contents of the `SIGN` field of a Hubris archive caboose, i.e.,
+    /// an identifier for the set of valid signing keys. Currently only
+    /// applicable to RoT image and bootloader artifacts, where it will
+    /// be an LPC55 Root Key Table Hash (RKTH).
+    pub sign: Option<Vec<u8>>,
 }
 
 /// Data about a successful TUF repo import into Nexus.

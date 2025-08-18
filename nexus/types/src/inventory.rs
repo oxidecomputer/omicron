@@ -30,6 +30,7 @@ use nexus_sled_agent_shared::inventory::InventoryDisk;
 use nexus_sled_agent_shared::inventory::InventoryZpool;
 use nexus_sled_agent_shared::inventory::OmicronSledConfig;
 use nexus_sled_agent_shared::inventory::OmicronZoneConfig;
+use nexus_sled_agent_shared::inventory::SledCpuFamily;
 use nexus_sled_agent_shared::inventory::SledRole;
 use nexus_sled_agent_shared::inventory::ZoneImageResolverInventory;
 use omicron_common::api::external::ByteCount;
@@ -106,6 +107,13 @@ pub struct Collection {
     /// table.
     #[serde_as(as = "Vec<(_, _)>")]
     pub sps: BTreeMap<Arc<BaseboardId>, ServiceProcessor>,
+    /// all host phase 1 active slots, keyed by baseboard id
+    ///
+    /// In practice, these will be inserted into the
+    /// `inv_host_phase_1_active_slot` table.
+    #[serde_as(as = "Vec<(_, _)>")]
+    pub host_phase_1_active_slots:
+        BTreeMap<Arc<BaseboardId>, HostPhase1ActiveSlot>,
     /// all host phase 1 flash hashes, keyed first by the phase 1 slot, then the
     /// baseboard id of the sled where they were found
     ///
@@ -176,6 +184,13 @@ pub struct Collection {
 }
 
 impl Collection {
+    pub fn host_phase_1_active_slot_for(
+        &self,
+        baseboard_id: &BaseboardId,
+    ) -> Option<&HostPhase1ActiveSlot> {
+        self.host_phase_1_active_slots.get(baseboard_id)
+    }
+
     pub fn host_phase_1_flash_hash_for(
         &self,
         slot: M2Slot,
@@ -412,6 +427,17 @@ pub struct RotState {
     pub stage0next_error: Option<RotImageError>,
 }
 
+/// Describes a host phase 1 flash active slot found from a service processor
+/// during collection
+#[derive(
+    Clone, Debug, Ord, Eq, PartialOrd, PartialEq, Deserialize, Serialize,
+)]
+pub struct HostPhase1ActiveSlot {
+    pub time_collected: DateTime<Utc>,
+    pub source: String,
+    pub slot: M2Slot,
+}
+
 /// Describes a host phase 1 flash hash found from a service processor
 /// during collection
 #[derive(
@@ -444,6 +470,26 @@ pub enum CabooseWhich {
     RotSlotB,
     Stage0,
     Stage0Next,
+}
+
+impl CabooseWhich {
+    pub fn toggled_slot(&self) -> Self {
+        match self {
+            CabooseWhich::RotSlotA => CabooseWhich::RotSlotB,
+            CabooseWhich::RotSlotB => CabooseWhich::RotSlotA,
+            CabooseWhich::SpSlot0 => CabooseWhich::SpSlot1,
+            CabooseWhich::SpSlot1 => CabooseWhich::SpSlot0,
+            CabooseWhich::Stage0 => CabooseWhich::Stage0Next,
+            CabooseWhich::Stage0Next => CabooseWhich::Stage0,
+        }
+    }
+
+    pub fn from_rot_slot(slot: RotSlot) -> Self {
+        match slot {
+            RotSlot::A => CabooseWhich::RotSlotA,
+            RotSlot::B => CabooseWhich::RotSlotB,
+        }
+    }
 }
 
 /// Root of trust page contents found during a collection
@@ -638,6 +684,7 @@ pub struct SledAgent {
     pub sled_role: SledRole,
     pub usable_hardware_threads: u32,
     pub usable_physical_ram: ByteCount,
+    pub cpu_family: SledCpuFamily,
     pub reservoir_size: ByteCount,
     pub disks: Vec<PhysicalDisk>,
     pub zpools: Vec<Zpool>,

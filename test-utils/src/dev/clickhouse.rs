@@ -1106,7 +1106,7 @@ impl ClickHouseCluster {
     // This is pretty hacky, but used to wait _any_ child in
     // `wait_for_shutdown()`, along with child kind and its index among that
     // kind.
-    fn children_mut(&mut self) -> impl Iterator<Item = ChildWaitInfo> {
+    fn children_mut(&mut self) -> impl Iterator<Item = ChildWaitInfo<'_>> {
         let keepers =
             self.keepers.iter_mut().enumerate().map(|(index, keeper)| {
                 ChildWaitInfo {

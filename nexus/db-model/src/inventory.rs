@@ -8,6 +8,7 @@ use crate::ArtifactHash;
 use crate::Generation;
 use crate::PhysicalDiskKind;
 use crate::omicron_zone_config::{self, OmicronZoneNic};
+use crate::sled_cpu_family::SledCpuFamily;
 use crate::typed_uuid::DbTypedUuid;
 use crate::{
     ByteCount, MacAddr, Name, ServiceKind, SqlU8, SqlU16, SqlU32,
@@ -30,8 +31,8 @@ use nexus_db_schema::schema::inv_zone_manifest_zone;
 use nexus_db_schema::schema::{
     hw_baseboard_id, inv_caboose, inv_clickhouse_keeper_membership,
     inv_cockroachdb_status, inv_collection, inv_collection_error, inv_dataset,
-    inv_host_phase_1_flash_hash, inv_internal_dns,
-    inv_last_reconciliation_dataset_result,
+    inv_host_phase_1_active_slot, inv_host_phase_1_flash_hash,
+    inv_internal_dns, inv_last_reconciliation_dataset_result,
     inv_last_reconciliation_disk_result,
     inv_last_reconciliation_orphaned_dataset,
     inv_last_reconciliation_zone_result, inv_mupdate_override_non_boot,
@@ -62,6 +63,7 @@ use nexus_sled_agent_shared::inventory::{
     ConfigReconcilerInventoryResult, OmicronSledConfig, OmicronZoneConfig,
     OmicronZoneDataset, OmicronZoneImageSource, OmicronZoneType,
 };
+use nexus_types::inventory::HostPhase1ActiveSlot;
 use nexus_types::inventory::{
     BaseboardId, Caboose, CockroachStatus, Collection,
     InternalDnsGenerationStatus, NvmeFirmware, PowerState, RotPage, RotSlot,
@@ -786,6 +788,28 @@ impl From<InvRootOfTrust> for nexus_types::inventory::RotState {
     }
 }
 
+/// See [`nexus_types::inventory::HostPhase1ActiveSlot`].
+#[derive(Queryable, Clone, Debug, Selectable)]
+#[diesel(table_name = inv_host_phase_1_active_slot)]
+pub struct InvHostPhase1ActiveSlot {
+    pub inv_collection_id: Uuid,
+    pub hw_baseboard_id: Uuid,
+    pub time_collected: DateTime<Utc>,
+    pub source: String,
+
+    pub slot: HwM2Slot,
+}
+
+impl From<InvHostPhase1ActiveSlot> for HostPhase1ActiveSlot {
+    fn from(value: InvHostPhase1ActiveSlot) -> Self {
+        Self {
+            time_collected: value.time_collected,
+            source: value.source,
+            slot: value.slot.into(),
+        }
+    }
+}
+
 /// See [`nexus_types::inventory::HostPhase1FlashHash`].
 #[derive(Queryable, Clone, Debug, Selectable)]
 #[diesel(table_name = inv_host_phase_1_flash_hash)]
@@ -887,6 +911,7 @@ pub struct InvSledAgent {
     pub sled_role: SledRole,
     pub usable_hardware_threads: SqlU32,
     pub usable_physical_ram: ByteCount,
+    pub cpu_family: SledCpuFamily,
     pub reservoir_size: ByteCount,
     // Soft foreign key to an `InvOmicronSledConfig`
     pub ledgered_sled_config: Option<DbTypedUuid<OmicronSledConfigKind>>,
@@ -1302,6 +1327,7 @@ impl InvSledAgent {
                 usable_physical_ram: ByteCount::from(
                     sled_agent.usable_physical_ram,
                 ),
+                cpu_family: sled_agent.cpu_family.into(),
                 reservoir_size: ByteCount::from(sled_agent.reservoir_size),
                 ledgered_sled_config: ledgered_sled_config.map(From::from),
                 reconciler_status,

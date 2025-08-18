@@ -6,6 +6,7 @@
 
 use anyhow::{Context, anyhow, bail};
 use camino::{Utf8Path, Utf8PathBuf};
+use chrono::{DateTime, Utc};
 use clap::{ArgAction, ValueEnum};
 use clap::{Args, Parser, Subcommand};
 use daft::Diffable;
@@ -234,6 +235,7 @@ fn process_command(
         Commands::SledUpdateInstallDataset(args) => {
             cmd_sled_update_install_dataset(sim, args)
         }
+        Commands::SledUpdateRot(args) => cmd_sled_update_rot(sim, args),
         Commands::SledUpdateSp(args) => cmd_sled_update_sp(sim, args),
         Commands::SledUpdateRotBootloader(args) => {
             cmd_sled_update_rot_bootlaoder(sim, args)
@@ -292,6 +294,8 @@ enum Commands {
     SledSet(SledSetArgs),
     /// update the install dataset on a sled, simulating a mupdate
     SledUpdateInstallDataset(SledUpdateInstallDatasetArgs),
+    /// simulate updating the sled's RoT versions
+    SledUpdateRot(SledUpdateRotArgs),
     /// simulate updating the sled's RoT Bootloader versions
     SledUpdateRotBootloader(SledUpdateRotBootloaderArgs),
     /// simulate updating the sled's SP versions
@@ -525,6 +529,20 @@ struct SledUpdateSpArgs {
     /// sets the version reported for the SP inactive slot
     #[clap(long, required_unless_present_any = &["active"])]
     inactive: Option<ExpectedVersion>,
+}
+
+#[derive(Debug, Args)]
+struct SledUpdateRotArgs {
+    /// id of the sled
+    sled_id: SledUuid,
+
+    /// sets the version reported for the RoT slot a
+    #[clap(long, required_unless_present_any = &["slot_b"])]
+    slot_a: Option<ExpectedVersion>,
+
+    /// sets the version reported for the RoT slot b
+    #[clap(long, required_unless_present_any = &["slot_a"])]
+    slot_b: Option<ExpectedVersion>,
 }
 
 #[derive(Debug, Args)]
@@ -1077,6 +1095,27 @@ enum SetArgs {
     },
     /// planner chicken switches
     ChickenSwitches(SetChickenSwitchesArgs),
+    /// timestamp for ignoring impossible MGS updates
+    IgnoreImpossibleMgsUpdatesSince {
+        since: SetIgnoreImpossibleMgsUpdatesSinceArgs,
+    },
+}
+
+#[derive(Debug, Clone)]
+struct SetIgnoreImpossibleMgsUpdatesSinceArgs(DateTime<Utc>);
+
+impl FromStr for SetIgnoreImpossibleMgsUpdatesSinceArgs {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s.eq_ignore_ascii_case("now") {
+            return Ok(Self(Utc::now()));
+        }
+        if let Ok(datetime) = humantime::parse_rfc3339(s) {
+            return Ok(Self(datetime.into()));
+        }
+        bail!("invalid timestamp: expected `now` or an RFC3339 timestamp")
+    }
 }
 
 #[derive(Debug, Args)]
@@ -1358,6 +1397,15 @@ fn cmd_sled_show(
     let stage0_next_version = description.sled_stage0_next_version(sled_id)?;
     let sp_active_version = description.sled_sp_active_version(sled_id)?;
     let sp_inactive_version = description.sled_sp_inactive_version(sled_id)?;
+    let rot_active_slot = description.sled_rot_active_slot(sled_id)?;
+    let rot_slot_a_version = description.sled_rot_slot_a_version(sled_id)?;
+    let rot_slot_b_version = description.sled_rot_slot_b_version(sled_id)?;
+    let rot_persistent_boot_preference =
+        description.sled_rot_persistent_boot_preference(sled_id)?;
+    let rot_pending_persistent_boot_preference =
+        description.sled_rot_pending_persistent_boot_preference(sled_id)?;
+    let rot_transient_boot_preference =
+        description.sled_rot_transient_boot_preference(sled_id)?;
     let planning_input = description
         .to_planning_input_builder()
         .context("failed to generate planning_input builder")?
@@ -1368,14 +1416,32 @@ fn cmd_sled_show(
     swriteln!(s, "sled {} ({}, {})", sled_id, sled.policy, sled.state);
     swriteln!(s, "serial {}", sled.baseboard_id.serial_number);
     swriteln!(s, "subnet {}", sled_resources.subnet.net());
-    swriteln!(s, "RoT bootloader stage 0 version:   {:?}", stage0_version);
+    swriteln!(s, "SP active version: {:?}", sp_active_version);
+    swriteln!(s, "SP inactive version: {:?}", sp_inactive_version);
+    swriteln!(s, "RoT bootloader stage 0 version: {:?}", stage0_version);
     swriteln!(
         s,
         "RoT bootloader stage 0 next version: {:?}",
         stage0_next_version
     );
-    swriteln!(s, "SP active version:   {:?}", sp_active_version);
-    swriteln!(s, "SP inactive version: {:?}", sp_inactive_version);
+    swriteln!(s, "RoT active slot: {}", rot_active_slot);
+    swriteln!(s, "RoT slot A version: {:?}", rot_slot_a_version);
+    swriteln!(s, "RoT slot B version: {:?}", rot_slot_b_version);
+    swriteln!(
+        s,
+        "RoT persistent boot preference: {}",
+        rot_persistent_boot_preference
+    );
+    swriteln!(
+        s,
+        "RoT pending persistent boot preference: {:?}",
+        rot_pending_persistent_boot_preference
+    );
+    swriteln!(
+        s,
+        "RoT transient boot preference: {:?}",
+        rot_transient_boot_preference
+    );
     swriteln!(s, "zpools ({}):", sled_resources.zpools.len());
     for (zpool, disk) in &sled_resources.zpools {
         swriteln!(s, "    {:?}", zpool);
@@ -1582,6 +1648,47 @@ fn cmd_sled_update_sp(
     Ok(Some(format!("set sled {} SP versions: {}", sled_id, labels.join(", "))))
 }
 
+fn cmd_sled_update_rot(
+    sim: &mut ReconfiguratorSim,
+    args: SledUpdateRotArgs,
+) -> anyhow::Result<Option<String>> {
+    let mut labels = Vec::new();
+
+    if let Some(slot_a) = &args.slot_a {
+        labels.push(format!("slot a -> {}", slot_a));
+    }
+    if let Some(slot_b) = &args.slot_b {
+        labels.push(format!("slot b -> {}", slot_b));
+    }
+
+    assert!(
+        !labels.is_empty(),
+        "clap configuration requires that at least one argument is specified"
+    );
+
+    let mut state = sim.current_state().to_mut();
+    state.system_mut().description_mut().sled_update_rot_versions(
+        args.sled_id,
+        args.slot_a,
+        args.slot_b,
+    )?;
+
+    sim.commit_and_bump(
+        format!(
+            "reconfigurator-cli sled-update-rot: {}: {}",
+            args.sled_id,
+            labels.join(", "),
+        ),
+        state,
+    );
+
+    Ok(Some(format!(
+        "set sled {} RoT settings: {}",
+        args.sled_id,
+        labels.join(", ")
+    )))
+}
+
 fn cmd_inventory_list(
     sim: &mut ReconfiguratorSim,
 ) -> anyhow::Result<Option<String>> {
@@ -1754,14 +1861,14 @@ fn cmd_blueprint_plan(
         &planning_input,
         creator,
         collection,
+        rng,
     )
-    .context("creating planner")?
-    .with_rng(rng);
+    .context("creating planner")?;
 
     let blueprint = planner.plan().context("generating blueprint")?;
     let rv = format!(
-        "generated blueprint {} based on parent blueprint {}",
-        blueprint.id, parent_blueprint.id,
+        "generated blueprint {} based on parent blueprint {}\n{}",
+        blueprint.id, parent_blueprint.id, blueprint.report,
     );
     system.add_blueprint(blueprint)?;
 
@@ -1799,9 +1906,9 @@ fn cmd_blueprint_edit(
         &planning_input,
         &latest_collection,
         creator,
+        rng,
     )
     .context("creating blueprint builder")?;
-    builder.set_rng(rng);
 
     if let Some(comment) = args.comment {
         builder.comment(comment);
@@ -2393,6 +2500,16 @@ fn cmd_set(
                     current.display()
                 )
             }
+        }
+        SetArgs::IgnoreImpossibleMgsUpdatesSince { since } => {
+            state
+                .system_mut()
+                .description_mut()
+                .set_ignore_impossible_mgs_updates_since(since.0);
+            format!(
+                "ignoring impossible MGS updates since {}",
+                humantime::format_rfc3339_millis(since.0.into())
+            )
         }
     };
 

@@ -710,6 +710,152 @@ impl UpdateStatus {
     }
 }
 
+/// Describes whether Nexus is quiescing or quiesced and what, if anything, is
+/// blocking the quiesce process
+///
+/// **Quiescing** is the process of draining Nexus of running sagas and stopping
+/// all use of the database in preparation for upgrade.  See [`QuiesceState`]
+/// for more on the stages involved.
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct QuiesceStatus {
+    /// what stage of quiescing is Nexus at
+    pub state: QuiesceState,
+
+    /// what sagas are currently running or known needing to be recovered
+    ///
+    /// This should only be non-empty when state is `Running` or
+    /// `WaitingForSagas`.  Entries here prevent transitioning from
+    /// `WaitingForSagas` to `WaitingForDb`.
+    pub sagas_pending: IdOrdMap<PendingSagaInfo>,
+
+    /// what database claims are currently held (by any part of Nexus)
+    ///
+    /// Entries here prevent transitioning from `WaitingForDb` to `Quiesced`.
+    pub db_claims: IdOrdMap<HeldDbClaimInfo>,
+}
+
+/// See [`QuiesceStatus`] for more on Nexus quiescing.
+///
+/// At any given time, Nexus is always in one of these states:
+///
+/// ```text
+/// Running             (normal operation)
+///   |
+///   | quiesce starts
+///   v
+/// WaitingForSagas     (no new sagas are allowed, but some are still running)
+///   |
+///   | no more sagas running
+///   v
+/// WaitingForDb        (no sagas running; no new db connections may be
+///                      acquired by Nexus at-large, but some are still held)
+///   |
+///   | no more database connections held
+///   v
+/// Quiesced            (no sagas running, no database connections in use)
+/// ```
+///
+/// Quiescing is (currently) a one-way trip: once a Nexus process starts
+/// quiescing, it will never go back to normal operation.  It will never go back
+/// to an earlier stage, either.
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+#[serde(tag = "state", content = "quiesce_details")]
+pub enum QuiesceState {
+    /// Normal operation
+    Running,
+    /// New sagas disallowed, but some are still running.
+    WaitingForSagas {
+        time_requested: DateTime<Utc>,
+        #[serde(skip)]
+        time_waiting_for_sagas: Instant,
+    },
+    /// No sagas running, no new database connections may be claimed, but some
+    /// database connections are still held.
+    WaitingForDb {
+        time_requested: DateTime<Utc>,
+        #[serde(skip)]
+        time_waiting_for_sagas: Instant,
+        duration_waiting_for_sagas: Duration,
+        #[serde(skip)]
+        time_waiting_for_db: Instant,
+    },
+    /// Nexus has no sagas running and is not using the database
+    Quiesced {
+        time_requested: DateTime<Utc>,
+        time_quiesced: DateTime<Utc>,
+        duration_waiting_for_sagas: Duration,
+        duration_waiting_for_db: Duration,
+        duration_total: Duration,
+    },
+}
+
+impl QuiesceState {
+    pub fn running() -> QuiesceState {
+        QuiesceState::Running
+    }
+
+    pub fn quiescing(&self) -> bool {
+        match self {
+            QuiesceState::Running => false,
+            QuiesceState::WaitingForSagas { .. }
+            | QuiesceState::WaitingForDb { .. }
+            | QuiesceState::Quiesced { .. } => true,
+        }
+    }
+
+    pub fn fully_quiesced(&self) -> bool {
+        match self {
+            QuiesceState::Running
+            | QuiesceState::WaitingForSagas { .. }
+            | QuiesceState::WaitingForDb { .. } => false,
+            QuiesceState::Quiesced { .. } => true,
+        }
+    }
+}
+
+/// Describes a pending saga (for debugging why quiesce is stuck)
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct PendingSagaInfo {
+    pub saga_id: steno::SagaId,
+    pub saga_name: steno::SagaName,
+    pub time_pending: DateTime<Utc>,
+    /// If true, we know the saga needs to be recovered.  It may or may not be
+    /// running already.
+    ///
+    /// If false, this saga was created in this Nexus process's lifetime.  It's
+    /// still running.
+    pub recovered: bool,
+}
+
+impl IdOrdItem for PendingSagaInfo {
+    type Key<'a> = &'a steno::SagaId;
+
+    fn key(&self) -> Self::Key<'_> {
+        &self.saga_id
+    }
+
+    id_upcast!();
+}
+
+/// Describes an outstanding database claim (for debugging why quiesce is stuck)
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct HeldDbClaimInfo {
+    pub id: u64,
+    pub held_since: DateTime<Utc>,
+    pub debug: String,
+}
+
+impl IdOrdItem for HeldDbClaimInfo {
+    type Key<'a> = &'a u64;
+
+    fn key(&self) -> Self::Key<'_> {
+        &self.id
+    }
+
+    id_upcast!();
+}
+
 #[cfg(test)]
 mod test {
     use super::CompletedAttempt;

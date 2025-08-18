@@ -140,10 +140,10 @@ sp_ereport_ingester.period_secs = 30
 
 [default_region_allocation_strategy]
 # allocate region on 3 random distinct zpools, on 3 random distinct sleds.
-type = "random_with_distinct_sleds"
+# type = "random_with_distinct_sleds"
 
 # the same as random_with_distinct_sleds, but without requiring distinct sleds
-# type = "random"
+type = "random"
 
 # setting `seed` to a fixed value will make dataset selection ordering use the
 # same shuffling order for every region allocation.

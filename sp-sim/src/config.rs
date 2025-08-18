@@ -11,6 +11,7 @@ use gateway_messages::DeviceCapabilities;
 use gateway_messages::DevicePresence;
 use serde::Deserialize;
 use serde::Serialize;
+use std::collections::BTreeMap;
 use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
 use std::path::Path;
@@ -255,5 +256,5 @@ pub struct Ereport {
     pub task_gen: u32,
     pub uptime: u64,
     #[serde(flatten)]
-    pub data: toml::map::Map<String, toml::Value>,
+    pub data: BTreeMap<String, serde_cbor::Value>,
 }

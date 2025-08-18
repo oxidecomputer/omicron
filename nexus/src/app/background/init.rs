@@ -437,6 +437,7 @@ impl BackgroundTasksInitializer {
             nexus_id,
             task_saga_recovery.clone(),
             args.mgs_updates_tx,
+            args.saga_recovery.quiesce.clone(),
         );
         let rx_blueprint_exec = blueprint_executor.watcher();
         driver.register(TaskDefinition {

@@ -140,6 +140,9 @@ pub enum RepositoryError {
     #[error("error reading name from hubris caboose of {0:?}: non-utf8 value")]
     ReadHubrisCabooseNameUtf8(ArtifactId),
 
+    #[error("missing sign from hubris caboose of {0:?}")]
+    MissingHubrisCabooseSign(ArtifactId),
+
     #[error("missing artifact of kind `{0:?}`")]
     MissingArtifactKind(KnownArtifactKind),
 
@@ -203,6 +206,7 @@ impl RepositoryError {
             | RepositoryError::LocateTarget { .. }
             | RepositoryError::TargetHashLength(_)
             | RepositoryError::MissingArtifactKind(_)
+            | RepositoryError::MissingHubrisCabooseSign(_)
             | RepositoryError::MissingTarget(_)
             | RepositoryError::DuplicateHashEntry(_)
             | RepositoryError::DuplicateBoardEntry { .. }
