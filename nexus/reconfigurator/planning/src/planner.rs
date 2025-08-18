@@ -1184,9 +1184,8 @@ impl<'a> Planner<'a> {
                 self.blueprint.comment(update.description());
             }
         }
-        self.blueprint.apply_pending_host_phase_2_changes(
-            pending_host_phase_2_changes,
-        )?;
+        self.blueprint
+            .apply_pending_host_phase_2_changes(pending_host_phase_2_changes)?;
 
         self.blueprint.pending_mgs_updates_replace_all(pending_updates.clone());
         Ok(PlanningMgsUpdatesStepReport::new(pending_updates))
