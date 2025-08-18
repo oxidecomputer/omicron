@@ -1,5 +1,12 @@
 #
-# SP simulator: example config file
+# SP simulator: example config file with customised cabosses
+#
+
+#
+# This file contains a configuration that is different from the default
+# simulated SP configuration file by setting the values for the contents of the
+# cabooses for "SimSidecar0" and "SimGimlet00". This type of configuration file
+# is useful for cases when testing requires specific values for the cabooses.
 #
 
 #

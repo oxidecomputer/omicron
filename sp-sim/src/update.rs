@@ -109,50 +109,14 @@ impl SimSpUpdate {
             rot_b_src,
             stage0_src,
             stage0_next_src,
-        ) = if let Some(c) = &cabooses {
+        ) = if let Some(c) = cabooses {
             (
-                Caboose {
-                    git_commit: c.sp_slot_0.git_commit.clone(),
-                    board: c.sp_slot_0.board.clone(),
-                    name: c.sp_slot_0.name.clone(),
-                    version: c.sp_slot_0.version.clone(),
-                    sign: None,
-                },
-                Caboose {
-                    git_commit: c.sp_slot_1.git_commit.clone(),
-                    board: c.sp_slot_1.board.clone(),
-                    name: c.sp_slot_1.name.clone(),
-                    version: c.sp_slot_1.version.clone(),
-                    sign: None,
-                },
-                Caboose {
-                    git_commit: c.rot_slot_a.git_commit.clone(),
-                    board: c.rot_slot_a.board.clone(),
-                    name: c.rot_slot_a.name.clone(),
-                    version: c.rot_slot_a.version.clone(),
-                    sign: c.rot_slot_a.sign.clone(),
-                },
-                Caboose {
-                    git_commit: c.rot_slot_b.git_commit.clone(),
-                    board: c.rot_slot_b.board.clone(),
-                    name: c.rot_slot_b.name.clone(),
-                    version: c.rot_slot_b.version.clone(),
-                    sign: c.rot_slot_b.sign.clone(),
-                },
-                Caboose {
-                    git_commit: c.stage0.git_commit.clone(),
-                    board: c.stage0.board.clone(),
-                    name: c.stage0.name.clone(),
-                    version: c.stage0.version.clone(),
-                    sign: c.stage0.sign.clone(),
-                },
-                Caboose {
-                    git_commit: c.stage0_next.git_commit.clone(),
-                    board: c.stage0_next.board.clone(),
-                    name: c.stage0_next.name.clone(),
-                    version: c.stage0_next.version.clone(),
-                    sign: c.stage0_next.sign.clone(),
-                },
+                c.sp_slot_0,
+                c.sp_slot_1,
+                c.rot_slot_a,
+                c.rot_slot_b,
+                c.stage0,
+                c.stage0_next,
             )
         } else {
             let sp_board = baseboard_kind.sp_board().to_string();
