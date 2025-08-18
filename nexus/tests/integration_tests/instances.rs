@@ -2670,7 +2670,7 @@ async fn test_instance_create_delete_network_interface(
             vpc_name: "default".parse().unwrap(),
             subnet_name: "default".parse().unwrap(),
             ip: Some("172.30.0.10".parse().unwrap()),
-            transit_ips: vec![],
+            transit_ips: vec!["10.0.0.0/24".parse().unwrap(), "10.1.0.0/24".parse().unwrap()],
         },
         params::InstanceNetworkInterfaceCreate {
             identity: IdentityMetadataCreateParams {
@@ -2680,7 +2680,7 @@ async fn test_instance_create_delete_network_interface(
             vpc_name: "default".parse().unwrap(),
             subnet_name: secondary_subnet.identity.name.clone(),
             ip: Some("172.31.0.11".parse().unwrap()),
-            transit_ips: vec![],
+            transit_ips: vec!["192.168.1.0/24".parse().unwrap()],
         },
     ];
 
@@ -2734,6 +2734,11 @@ async fn test_instance_create_delete_network_interface(
             i == 0,
             "Only the first interface should be primary"
         );
+        // Verify transit_ips are persisted correctly
+        assert_eq!(iface.transit_ips.len(), params.transit_ips.len());
+        for (actual, expected) in iface.transit_ips.iter().zip(params.transit_ips.iter()) {
+            assert_eq!(actual, expected);
+        }
         interfaces.push(iface);
     }
 
@@ -2754,6 +2759,7 @@ async fn test_instance_create_delete_network_interface(
         assert_eq!(iface0.subnet_id, iface1.subnet_id);
         assert_eq!(iface0.ip, iface1.ip);
         assert_eq!(iface0.primary, iface1.primary);
+        assert_eq!(iface0.transit_ips, iface1.transit_ips);
     }
 
     // Verify we cannot delete either interface while the instance is running

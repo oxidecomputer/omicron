@@ -1209,6 +1209,15 @@ impl QueryFragment<Pg> for InsertQuery {
         out.push_sql(", ");
 
         select_from_cte(out.reborrow(), dsl::is_primary::NAME)?;
+        out.push_sql(" AS ");
+        out.push_identifier(dsl::is_primary::NAME)?;
+        out.push_sql(", ");
+
+        out.push_bind_param::<sql_types::Array<sql_types::Inet>, Vec<IpNetwork>>(
+            &self.interface.transit_ips,
+        )?;
+        out.push_sql(" AS ");
+        out.push_identifier(dsl::transit_ips::NAME)?;
 
         Ok(())
     }
@@ -1263,6 +1272,8 @@ impl QueryFragment<Pg> for InsertQueryValues {
         out.push_identifier(dsl::slot::NAME)?;
         out.push_sql(", ");
         out.push_identifier(dsl::is_primary::NAME)?;
+        out.push_sql(", ");
+        out.push_identifier(dsl::transit_ips::NAME)?;
         out.push_sql(") ");
         self.0.walk_ast(out)
     }
