@@ -117,6 +117,7 @@ scopeguard = { version = "1.2.0" }
 semver = { version = "1.0.26", features = ["serde"] }
 serde = { version = "1.0.219", features = ["alloc", "derive", "rc"] }
 serde_json = { version = "1.0.142", features = ["raw_value", "unbounded_depth"] }
+serde_with = { version = "3.14.0" }
 sha1 = { version = "0.10.6", features = ["oid"] }
 sha2 = { version = "0.10.9", features = ["oid"] }
 similar = { version = "2.7.0", features = ["bytes", "inline", "unicode"] }
@@ -254,6 +255,7 @@ scopeguard = { version = "1.2.0" }
 semver = { version = "1.0.26", features = ["serde"] }
 serde = { version = "1.0.219", features = ["alloc", "derive", "rc"] }
 serde_json = { version = "1.0.142", features = ["raw_value", "unbounded_depth"] }
+serde_with = { version = "3.14.0" }
 sha1 = { version = "0.10.6", features = ["oid"] }
 sha2 = { version = "0.10.9", features = ["oid"] }
 similar = { version = "2.7.0", features = ["bytes", "inline", "unicode"] }

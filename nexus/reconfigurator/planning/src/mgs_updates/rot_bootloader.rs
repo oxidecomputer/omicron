@@ -144,6 +144,7 @@ pub fn try_make_update_rot_bootloader(
                     | KnownArtifactKind::Trampoline
                     | KnownArtifactKind::ControlPlane
                     | KnownArtifactKind::Zone
+                    | KnownArtifactKind::MeasurementCorpus
                     | KnownArtifactKind::PscRot
                     | KnownArtifactKind::SwitchRot
                     | KnownArtifactKind::GimletSp
