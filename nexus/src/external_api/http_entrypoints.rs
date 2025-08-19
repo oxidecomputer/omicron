@@ -58,6 +58,7 @@ use nexus_types::{
 use omicron_common::api::external::AddressLot;
 use omicron_common::api::external::AddressLotBlock;
 use omicron_common::api::external::AddressLotCreateResponse;
+use omicron_common::api::external::AddressLotViewResponse;
 use omicron_common::api::external::AffinityGroupMember;
 use omicron_common::api::external::AggregateBgpMessageHistory;
 use omicron_common::api::external::AntiAffinityGroupMember;
@@ -3479,6 +3480,36 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
+    async fn networking_address_lot_view(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<params::AddressLotPath>,
+    ) -> Result<HttpResponseOk<AddressLotViewResponse>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let nexus = &apictx.context.nexus;
+            let path = path_params.into_inner();
+            let lookup = nexus.address_lot_lookup(&opctx, path.address_lot)?;
+            let (.., lot) = lookup.fetch().await?;
+            let blocks = nexus
+                .address_lot_block_list(&opctx, &lookup, None)
+                .await?
+                .into_iter()
+                .map(|p| p.into())
+                .collect();
+            Ok(HttpResponseOk(AddressLotViewResponse {
+                lot: lot.into(),
+                blocks,
+            }))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
     async fn networking_address_lot_delete(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::AddressLotPath>,
@@ -3550,7 +3581,11 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let address_lot_lookup =
                 nexus.address_lot_lookup(&opctx, path.address_lot)?;
             let blocks = nexus
-                .address_lot_block_list(&opctx, &address_lot_lookup, &pagparams)
+                .address_lot_block_list(
+                    &opctx,
+                    &address_lot_lookup,
+                    Some(&pagparams),
+                )
                 .await?
                 .into_iter()
                 .map(|p| p.into())

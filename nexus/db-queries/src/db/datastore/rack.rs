@@ -1019,7 +1019,7 @@ mod test {
     };
     use nexus_types::deployment::{
         BlueprintZoneDisposition, BlueprintZoneImageSource,
-        OmicronZoneExternalSnatIp, OximeterReadMode,
+        OmicronZoneExternalSnatIp, OximeterReadMode, PlanningReport,
     };
     use nexus_types::external_api::shared::SiloIdentityMode;
     use nexus_types::external_api::views::SledState;
@@ -1049,11 +1049,12 @@ mod test {
     // easily specify just the parts that they want.
     impl Default for RackInit {
         fn default() -> Self {
+            let blueprint_id = BlueprintUuid::new_v4();
             RackInit {
                 rack_id: Uuid::parse_str(nexus_test_utils::RACK_UUID).unwrap(),
                 rack_subnet: nexus_test_utils::RACK_SUBNET.parse().unwrap(),
                 blueprint: Blueprint {
-                    id: BlueprintUuid::new_v4(),
+                    id: blueprint_id,
                     sleds: BTreeMap::new(),
                     pending_mgs_updates: PendingMgsUpdates::new(),
                     cockroachdb_setting_preserve_downgrade:
@@ -1069,6 +1070,7 @@ mod test {
                     time_created: Utc::now(),
                     creator: "test suite".to_string(),
                     comment: "test suite".to_string(),
+                    report: PlanningReport::new(blueprint_id),
                 },
                 physical_disks: vec![],
                 zpools: vec![],
@@ -1544,8 +1546,9 @@ mod test {
             .into_iter()
             .collect(),
         );
+        let blueprint_id = BlueprintUuid::new_v4();
         let blueprint = Blueprint {
-            id: BlueprintUuid::new_v4(),
+            id: blueprint_id,
             sleds: make_sled_config_only_zones(blueprint_zones),
             pending_mgs_updates: PendingMgsUpdates::new(),
             cockroachdb_setting_preserve_downgrade:
@@ -1561,6 +1564,7 @@ mod test {
             time_created: now_db_precision(),
             creator: "test suite".to_string(),
             comment: "test blueprint".to_string(),
+            report: PlanningReport::new(blueprint_id),
         };
 
         let rack = datastore
@@ -1805,8 +1809,9 @@ mod test {
             HashMap::from([("api.sys".to_string(), external_records.clone())]),
         );
 
+        let blueprint_id = BlueprintUuid::new_v4();
         let blueprint = Blueprint {
-            id: BlueprintUuid::new_v4(),
+            id: blueprint_id,
             sleds: make_sled_config_only_zones(blueprint_zones),
             pending_mgs_updates: PendingMgsUpdates::new(),
             cockroachdb_setting_preserve_downgrade:
@@ -1822,6 +1827,7 @@ mod test {
             time_created: now_db_precision(),
             creator: "test suite".to_string(),
             comment: "test blueprint".to_string(),
+            report: PlanningReport::new(blueprint_id),
         };
 
         let rack = datastore
@@ -2015,8 +2021,9 @@ mod test {
             .into_iter()
             .collect::<IdMap<_>>(),
         );
+        let blueprint_id = BlueprintUuid::new_v4();
         let blueprint = Blueprint {
-            id: BlueprintUuid::new_v4(),
+            id: blueprint_id,
             sleds: make_sled_config_only_zones(blueprint_zones),
             pending_mgs_updates: PendingMgsUpdates::new(),
             cockroachdb_setting_preserve_downgrade:
@@ -2032,6 +2039,7 @@ mod test {
             time_created: now_db_precision(),
             creator: "test suite".to_string(),
             comment: "test blueprint".to_string(),
+            report: PlanningReport::new(blueprint_id),
         };
 
         let result = datastore
@@ -2155,8 +2163,9 @@ mod test {
             .collect::<IdMap<_>>(),
         );
 
+        let blueprint_id = BlueprintUuid::new_v4();
         let blueprint = Blueprint {
-            id: BlueprintUuid::new_v4(),
+            id: blueprint_id,
             sleds: make_sled_config_only_zones(blueprint_zones),
             pending_mgs_updates: PendingMgsUpdates::new(),
             cockroachdb_setting_preserve_downgrade:
@@ -2172,6 +2181,7 @@ mod test {
             time_created: now_db_precision(),
             creator: "test suite".to_string(),
             comment: "test blueprint".to_string(),
+            report: PlanningReport::new(blueprint_id),
         };
 
         let result = datastore

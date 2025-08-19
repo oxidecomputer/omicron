@@ -262,6 +262,7 @@ mod tests {
     // Test that TypedRng<T, ...> is Send and Sync even if T isn't.
     const _: fn() = || {
         fn assert_send_sync<T: Send + Sync>() {}
+        #[expect(dead_code)]
         struct NotSendSync(*mut u8);
         assert_send_sync::<TypedRng<NotSendSync, StdRng>>();
     };

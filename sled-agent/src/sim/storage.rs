@@ -1291,7 +1291,7 @@ impl Storage {
         }
     }
 
-    pub fn lock(&self) -> std::sync::MutexGuard<StorageInner> {
+    pub fn lock(&self) -> std::sync::MutexGuard<'_, StorageInner> {
         self.inner.lock().unwrap()
     }
 

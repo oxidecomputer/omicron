@@ -5,6 +5,7 @@
 use gateway_client::types::SpComponentCaboose;
 use hubtools::CabooseError;
 
+pub mod host_phase_2_test_state;
 pub mod sp_test_state;
 pub mod step_through;
 pub mod test_artifacts;

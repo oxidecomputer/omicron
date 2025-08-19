@@ -9184,6 +9184,42 @@
       }
     },
     "/v1/system/networking/address-lot/{address_lot}": {
+      "get": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Fetch address lot",
+        "operationId": "networking_address_lot_view",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "address_lot",
+            "description": "Name or ID of the address lot",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AddressLotViewResponse"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
       "delete": {
         "tags": [
           "system/networking"
@@ -13659,6 +13695,31 @@
         },
         "required": [
           "items"
+        ]
+      },
+      "AddressLotViewResponse": {
+        "description": "An address lot and associated blocks resulting from viewing an address lot.",
+        "type": "object",
+        "properties": {
+          "blocks": {
+            "description": "The address lot blocks.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AddressLotBlock"
+            }
+          },
+          "lot": {
+            "description": "The address lot.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AddressLot"
+              }
+            ]
+          }
+        },
+        "required": [
+          "blocks",
+          "lot"
         ]
       },
       "AffinityGroup": {

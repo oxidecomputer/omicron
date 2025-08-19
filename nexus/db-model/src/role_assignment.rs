@@ -164,7 +164,7 @@ mod tests {
     impl crate::DatabaseString for DummyRoles {
         type Error = anyhow::Error;
 
-        fn to_database_string(&self) -> Cow<str> {
+        fn to_database_string(&self) -> Cow<'_, str> {
             unimplemented!()
         }
 

@@ -77,6 +77,7 @@ pub async fn make_resources(
     builder.new_resource(authz::DEVICE_AUTH_REQUEST_LIST);
     builder.new_resource(authz::INVENTORY);
     builder.new_resource(authz::IP_POOL_LIST);
+    builder.new_resource(authz::QUIESCE_STATE);
     builder.new_resource(authz::UPDATE_TRUST_ROOT_LIST);
     builder.new_resource(authz::TARGET_RELEASE_CONFIG);
     builder.new_resource(authz::ALERT_CLASS_LIST);

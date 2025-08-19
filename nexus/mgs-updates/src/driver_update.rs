@@ -109,14 +109,15 @@ impl SpComponentUpdate {
                 firmware_slot: 0,
                 update_id,
             },
-            PendingMgsUpdateDetails::Rot { expected_active_slot, .. } => {
+            PendingMgsUpdateDetails::Rot(details) => {
                 SpComponentUpdate {
                     log: log.clone(),
                     component: SpComponent::ROT,
                     target_sp_type: request.sp_type,
                     target_sp_slot: request.slot_id,
                     // Like the SP, we request an update to the inactive slot
-                    firmware_slot: expected_active_slot
+                    firmware_slot: details
+                        .expected_active_slot
                         .slot()
                         .toggled()
                         .to_u16(),
@@ -130,10 +131,24 @@ impl SpComponentUpdate {
                     target_sp_type: request.sp_type,
                     target_sp_slot: request.slot_id,
                     // The RoT bootloader has two firmware slots, stage0 and
-                    // stage0next. We always request an update to stage0next, which
-                    // is the staging area for the bootloader and in this context
-                    // means "the inactive slot".
+                    // stage0next. We always request an update to stage0next,
+                    // which is the staging area for the bootloader and in this
+                    // context means "the inactive slot".
                     firmware_slot: 1,
+                    update_id,
+                }
+            }
+            PendingMgsUpdateDetails::HostPhase1(details) => {
+                SpComponentUpdate {
+                    log: log.clone(),
+                    component: SpComponent::HOST_CPU_BOOT_FLASH,
+                    target_sp_type: request.sp_type,
+                    target_sp_slot: request.slot_id,
+                    // Like the SP, we request an update to the inactive slot.
+                    firmware_slot: details
+                        .expected_active_phase_1_slot
+                        .toggled()
+                        .to_mgs_firmware_slot(),
                     update_id,
                 }
             }
@@ -520,7 +535,7 @@ async fn wait_for_delivery(
                     "status" => ?update_status,
                 );
 
-                Ok(update_status)
+                Ok::<_, GatewayClientError>(update_status)
             })
             .await?
             .into_inner();
@@ -658,7 +673,12 @@ fn post_update_timeout(update: &PendingMgsUpdate) -> Duration {
         PendingMgsUpdateDetails::RotBootloader { .. } => {
             // Resetting the bootloader requires multiple RoT resets; give this
             // a longer timeout.
-            Duration::from_secs(120)
+            Duration::from_secs(180)
+        }
+        PendingMgsUpdateDetails::HostPhase1(..) => {
+            // Resetting a sled takes several minutes (mostly DRAM training);
+            // give something very generous here to wait for it to come back.
+            Duration::from_secs(30 * 60)
         }
     }
 }
@@ -696,14 +716,31 @@ async fn wait_for_update_done(
             // Check if we're done.
             Ok(PrecheckStatus::UpdateComplete) => return Ok(()),
 
-            // An incorrect version in the "inactive" slot, incorrect active slot,
-            // or non-empty pending_persistent_boot_preference/transient_boot_preference
-            // are normal during the upgrade. We have no reason to think these won't
-            // converge so we proceed with waiting.
+            // Many error statuses are normal during the upgrade:
+            //
+            // * incorrect version or artifact in the "inactive" slot
+            // * incorrect active slot
+            // * incorrect active host phase 2 artifact (this is written by
+            //   sled-agent, and must be done before we pass precheck)
+            // * non-empty pending_persistent_boot_preference (RoT only)
+            // * non-empty transient_boot_preference (RoT only)
+            // * failure to fetch inventory from sled-agent (host OS only)
+            // * failure to determine an active slot artifact
+            //
+            // We have no reason to think these won't converge, so we proceed
+            // with waiting.
             Err(PrecheckError::GatewayClientError(_))
             | Err(PrecheckError::WrongInactiveVersion { .. })
+            | Err(PrecheckError::WrongInactiveArtifact { .. })
+            | Err(PrecheckError::DeterminingInactiveHostPhase2 { .. })
             | Err(PrecheckError::WrongActiveRotSlot { .. })
+            | Err(PrecheckError::WrongActiveHostPhase1Slot { .. })
             | Err(PrecheckError::EphemeralRotBootPreferenceSet)
+            | Err(PrecheckError::SledAgentInventory { .. })
+            | Err(PrecheckError::SledAgentInventoryMissingLastReconciliation)
+            | Err(PrecheckError::MismatchedHostOsActiveSlot { .. })
+            | Err(PrecheckError::DeterminingActiveArtifact { .. })
+            | Err(PrecheckError::DeterminingHostOsBootDisk { .. })
             | Ok(PrecheckStatus::ReadyForUpdate) => {
                 if before.elapsed() >= timeout {
                     return Err(UpdateWaitError::Timeout(timeout));
@@ -713,9 +750,14 @@ async fn wait_for_update_done(
                 continue;
             }
 
-            Err(error @ PrecheckError::WrongDevice { .. })
-            | Err(error @ PrecheckError::WrongActiveVersion { .. })
-            | Err(error @ PrecheckError::RotCommunicationFailed { .. }) => {
+            Err(
+                error @ (PrecheckError::WrongDevice { .. }
+                | PrecheckError::WrongActiveVersion { .. }
+                | PrecheckError::WrongActiveArtifact { .. }
+                | PrecheckError::WrongHostOsBootDisk { .. }
+                | PrecheckError::InvalidHostPhase1Slot { .. }
+                | PrecheckError::RotCommunicationFailed { .. }),
+            ) => {
                 // Stop trying to make this update happen.  It's not going to
                 // happen.
                 return Err(UpdateWaitError::Indeterminate(error));
@@ -723,6 +765,9 @@ async fn wait_for_update_done(
         }
     }
 }
+
+#[cfg(test)]
+mod test_host_phase_1;
 
 #[cfg(test)]
 mod test {

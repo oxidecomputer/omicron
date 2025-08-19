@@ -14,6 +14,7 @@
 mod location_map;
 
 pub use self::location_map::LocationConfig;
+pub use self::location_map::LocationDescriptionConfig;
 pub use self::location_map::LocationDeterminationConfig;
 use self::location_map::LocationMap;
 pub use self::location_map::SwitchPortConfig;
@@ -366,6 +367,32 @@ impl ManagementSwitch {
     pub fn local_switch(&self) -> Result<SpIdentifier, SpLookupError> {
         let location_map = self.location_map()?;
         Ok(location_map.port_to_id(self.local_ignition_controller_port))
+    }
+
+    /// Determine whether our configuration allows us to reset the specified SP.
+    ///
+    /// # Errors
+    ///
+    /// This method will fail if discovery is not yet complete (i.e., we don't
+    /// know the logical identifiers of any SP yet!).
+    pub fn allowed_to_reset_sp(
+        &self,
+        id: SpIdentifier,
+    ) -> Result<bool, SpLookupError> {
+        let location_map = self.location_map()?;
+
+        let allowed = match id.typ {
+            // We allow any non-sled reset.
+            SpType::Switch | SpType::Power => true,
+            SpType::Sled => {
+                // We allow resets to any sled that isn't our local sled...
+                id.slot != location_map.local_sled()
+                    // ... and resets to our local sled if configured to do so.
+                    || location_map.allow_local_sled_sp_reset()
+            }
+        };
+
+        Ok(allowed)
     }
 
     /// Get the handle for communicating with an SP by its switch port.

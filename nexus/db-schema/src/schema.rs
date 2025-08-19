@@ -971,6 +971,7 @@ table! {
         sled_state -> crate::enums::SledStateEnum,
         sled_agent_gen -> Int8,
         repo_depot_port -> Int4,
+        cpu_family -> crate::enums::SledCpuFamilyEnum,
     }
 }
 
@@ -1620,6 +1621,7 @@ table! {
         sled_role -> crate::enums::SledRoleEnum,
         usable_hardware_threads -> Int8,
         usable_physical_ram -> Int8,
+        cpu_family -> crate::enums::SledCpuFamilyEnum,
         reservoir_size -> Int8,
 
         ledgered_sled_config -> Nullable<Uuid>,
@@ -2170,6 +2172,25 @@ table! {
 }
 
 table! {
+    bp_pending_mgs_update_host_phase_1 (blueprint_id, hw_baseboard_id) {
+        blueprint_id -> Uuid,
+        hw_baseboard_id -> Uuid,
+        sp_type -> crate::enums::SpTypeEnum,
+        sp_slot -> Int4,
+        artifact_sha256 -> Text,
+        artifact_version -> Text,
+        expected_active_phase_1_slot -> crate::enums::HwM2SlotEnum,
+        expected_boot_disk -> crate::enums::HwM2SlotEnum,
+        expected_active_phase_1_hash -> Text,
+        expected_active_phase_2_hash -> Text,
+        expected_inactive_phase_1_hash -> Text,
+        expected_inactive_phase_2_hash -> Text,
+        sled_agent_ip -> Inet,
+        sled_agent_port -> Int4,
+    }
+}
+
+table! {
     bootstore_keys (key, generation) {
         key -> Text,
         generation -> Int8,
@@ -2664,6 +2685,8 @@ table! {
         class -> Nullable<Text>,
 
         report -> Jsonb,
+
+        part_number -> Nullable<Text>,
     }
 }
 
