@@ -926,7 +926,7 @@ fn push_interface_validation_cte<'a>(
 ///        <time_created> AS time_created, <time_modified> AS time_modified,
 ///        NULL AS time_deleted, <instance_id> AS instance_id, <vpc_id> AS vpc_id,
 ///        <subnet_id> AS subnet_id, <mac> AS mac, <maybe IP allocation subquery>,
-///        <slot> AS slot, <is_primary> AS is_primary
+///        <slot> AS slot, <is_primary> AS is_primary, <transit_ips> AS transit_ips
 /// ```
 ///
 /// Instance validation
@@ -3249,23 +3249,6 @@ mod tests {
 
         // Verify the basic interface properties
         assert_interfaces_eq(&interface, &inserted_interface.clone().into());
-
-        // Verify transit IPs are correctly persisted
-        assert_eq!(
-            inserted_interface.transit_ips.len(),
-            transit_ips.len(),
-            "Transit IPs count should match"
-        );
-
-        for (actual, expected) in
-            inserted_interface.transit_ips.iter().zip(transit_ips.iter())
-        {
-            assert_eq!(
-                actual, expected,
-                "Transit IP {} should match expected {}",
-                actual, expected
-            );
-        }
 
         context.success().await;
     }

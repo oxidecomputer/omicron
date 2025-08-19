@@ -2737,13 +2737,7 @@ async fn test_instance_create_delete_network_interface(
             i == 0,
             "Only the first interface should be primary"
         );
-        // Verify transit_ips are persisted correctly
-        assert_eq!(iface.transit_ips.len(), params.transit_ips.len());
-        for (actual, expected) in
-            iface.transit_ips.iter().zip(params.transit_ips.iter())
-        {
-            assert_eq!(actual, expected);
-        }
+        assert_eq!(iface.transit_ips, params.transit_ips);
         interfaces.push(iface);
     }
 
