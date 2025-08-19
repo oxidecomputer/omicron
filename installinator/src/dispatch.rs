@@ -279,6 +279,9 @@ impl InstallOpts {
                                         control_plane_hash =
                                             Some(artifact.hash);
                                     }
+                                    InstallinatorArtifactKind::MeasurementCorpus => {
+    // Skip doing anything with this for the moment
+},
                                 }
                             }
 
