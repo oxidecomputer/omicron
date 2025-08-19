@@ -17,7 +17,14 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::datastore::Discoverability;
 use nexus_db_queries::db::datastore::DnsVersionUpdateBuilder;
-use nexus_db_queries::db::identity::{Asset, Resource};
+use nexus_db_queries::db::datastore::SiloGroup;
+use nexus_db_queries::db::datastore::SiloGroupJit;
+use nexus_db_queries::db::datastore::SiloGroupLookup;
+use nexus_db_queries::db::datastore::SiloUser;
+use nexus_db_queries::db::datastore::SiloUserApiOnly;
+use nexus_db_queries::db::datastore::SiloUserJit;
+use nexus_db_queries::db::datastore::SiloUserLookup;
+use nexus_db_queries::db::identity::Resource;
 use nexus_db_queries::{authn, authz};
 use nexus_types::deployment::execution::blueprint_nexus_external_ips;
 use nexus_types::internal_api::params::DnsRecord;
@@ -30,7 +37,6 @@ use omicron_common::api::external::{CreateResult, LookupType};
 use omicron_common::api::external::{DataPageParams, ResourceType};
 use omicron_common::api::external::{DeleteResult, NameOrId};
 use omicron_common::api::external::{Error, InternalContext};
-use omicron_common::bail_unless;
 use omicron_uuid_kinds::SiloGroupUuid;
 use omicron_uuid_kinds::SiloUserUuid;
 use std::net::IpAddr;
@@ -270,17 +276,18 @@ impl super::Nexus {
         authz_silo: &authz::Silo,
         silo_user_id: SiloUserUuid,
         action: authz::Action,
-    ) -> LookupResult<(authz::SiloUser, db::model::SiloUser)> {
+    ) -> LookupResult<(authz::SiloUser, SiloUser)> {
         let (_, authz_silo_user, db_silo_user) =
             LookupPath::new(opctx, self.datastore())
                 .silo_user_id(silo_user_id)
                 .fetch_for(action)
                 .await?;
+
         if db_silo_user.silo_id != authz_silo.id() {
             return Err(authz_silo_user.not_found());
         }
 
-        Ok((authz_silo_user, db_silo_user))
+        Ok((authz_silo_user, db_silo_user.into()))
     }
 
     /// List the users in a Silo
@@ -289,7 +296,7 @@ impl super::Nexus {
         opctx: &OpContext,
         silo_lookup: &lookup::Silo<'_>,
         pagparams: &DataPageParams<'_, Uuid>,
-    ) -> ListResultVec<db::model::SiloUser> {
+    ) -> ListResultVec<SiloUser> {
         let (authz_silo,) = silo_lookup.lookup_for(authz::Action::Read).await?;
         let authz_silo_user_list = authz::SiloUserList::new(authz_silo);
         self.db_datastore
@@ -303,9 +310,9 @@ impl super::Nexus {
         opctx: &OpContext,
         silo_lookup: &lookup::Silo<'_>,
         silo_user_id: SiloUserUuid,
-    ) -> LookupResult<db::model::SiloUser> {
+    ) -> LookupResult<SiloUser> {
         let (authz_silo,) = silo_lookup.lookup_for(authz::Action::Read).await?;
-        let (_, db_silo_user) = self
+        let (_, silo_user) = self
             .silo_user_lookup_by_id(
                 opctx,
                 &authz_silo,
@@ -313,7 +320,7 @@ impl super::Nexus {
                 authz::Action::Read,
             )
             .await?;
-        Ok(db_silo_user)
+        Ok(silo_user)
     }
 
     /// Delete all of user's tokens and sessions
@@ -357,14 +364,14 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         silo_user_id: SiloUserUuid,
-    ) -> LookupResult<(authz::SiloUser, db::model::SiloUser)> {
+    ) -> LookupResult<(authz::SiloUser, SiloUser)> {
         let (_, authz_silo_user, db_silo_user) =
             LookupPath::new(opctx, self.datastore())
                 .silo_user_id(silo_user_id)
                 .fetch()
                 .await?;
 
-        Ok((authz_silo_user, db_silo_user))
+        Ok((authz_silo_user, db_silo_user.into()))
     }
 
     /// List device access tokens for a user in a Silo
@@ -444,36 +451,43 @@ impl super::Nexus {
         opctx: &OpContext,
         silo_lookup: &lookup::Silo<'_>,
         new_user_params: params::UserCreate,
-    ) -> CreateResult<db::model::SiloUser> {
+    ) -> CreateResult<SiloUser> {
         let (authz_silo, db_silo) =
             self.local_idp_fetch_silo(silo_lookup).await?;
         let authz_silo_user_list = authz::SiloUserList::new(authz_silo.clone());
+
         // TODO-cleanup This authz check belongs in silo_user_create().
         opctx
             .authorize(authz::Action::CreateChild, &authz_silo_user_list)
             .await?;
-        let silo_user = db::model::SiloUser::new(
+
+        let silo_user = SiloUserApiOnly::new(
             authz_silo.id(),
             SiloUserUuid::new_v4(),
             new_user_params.external_id.as_ref().to_owned(),
         );
+
         // TODO These two steps should happen in a transaction.
-        let (_, db_silo_user) =
-            self.datastore().silo_user_create(&authz_silo, silo_user).await?;
+        self.datastore()
+            .silo_user_create(&authz_silo, silo_user.clone().into())
+            .await?;
+
         let authz_silo_user = authz::SiloUser::new(
             authz_silo.clone(),
-            db_silo_user.id(),
-            LookupType::by_id(db_silo_user.id()),
+            silo_user.id,
+            LookupType::by_id(silo_user.id),
         );
+
         self.silo_user_password_set_internal(
             opctx,
             &db_silo,
             &authz_silo_user,
-            &db_silo_user,
+            &silo_user,
             new_user_params.password,
         )
         .await?;
-        Ok(db_silo_user)
+
+        Ok(silo_user.into())
     }
 
     /// Delete a user in a Silo's local identity provider
@@ -503,52 +517,63 @@ impl super::Nexus {
         authz_silo: &authz::Silo,
         db_silo: &db::model::Silo,
         authenticated_subject: &authn::silos::AuthenticatedSubject,
-    ) -> LookupResult<db::model::SiloUser> {
+    ) -> LookupResult<SiloUser> {
         // XXX create user permission?
         opctx.authorize(authz::Action::CreateChild, authz_silo).await?;
         opctx.authorize(authz::Action::ListChildren, authz_silo).await?;
 
         let fetch_result = self
             .datastore()
-            .silo_user_fetch_by_external_id(
+            .silo_user_fetch(
                 opctx,
                 &authz_silo,
-                &authenticated_subject.external_id,
+                &match db_silo.user_provision_type {
+                    db::model::UserProvisionType::ApiOnly => {
+                        SiloUserLookup::ApiOnly {
+                            external_id: &authenticated_subject.external_id,
+                        }
+                    }
+
+                    db::model::UserProvisionType::Jit => SiloUserLookup::Jit {
+                        external_id: &authenticated_subject.external_id,
+                    },
+                },
             )
             .await?;
 
-        let (authz_silo_user, db_silo_user) = if let Some(existing_silo_user) =
-            fetch_result
-        {
-            existing_silo_user
-        } else {
-            // In this branch, no user exists for the authenticated subject
-            // external id. The next action depends on the silo's user
-            // provision type.
-            match db_silo.user_provision_type {
-                // If the user provision type is ApiOnly, do not create a
-                // new user if one does not exist.
-                db::model::UserProvisionType::ApiOnly => {
-                    return Err(Error::Unauthenticated {
-                            internal_message: "User must exist before login when user provision type is ApiOnly".to_string(),
-                    });
-                }
+        let (authz_silo_user, silo_user) =
+            if let Some(existing_silo_user) = fetch_result {
+                existing_silo_user
+            } else {
+                // In this branch, no user exists for the authenticated subject
+                // external id. The next action depends on the silo's user
+                // provision type.
+                match db_silo.user_provision_type {
+                    // If the user provision type is ApiOnly, do not create a
+                    // new user if one does not exist.
+                    db::model::UserProvisionType::ApiOnly => {
+                        return Err(Error::Unauthenticated {
+                            internal_message: "User must exist before login \
+                            when user provision type is ApiOnly"
+                                .to_string(),
+                        });
+                    }
 
-                // If the user provision type is JIT, then create the user if
-                // one does not exist
-                db::model::UserProvisionType::Jit => {
-                    let silo_user = db::model::SiloUser::new(
-                        authz_silo.id(),
-                        SiloUserUuid::new_v4(),
-                        authenticated_subject.external_id.clone(),
-                    );
+                    // If the user provision type is JIT, then create the user
+                    // if one does not exist
+                    db::model::UserProvisionType::Jit => {
+                        let silo_user = SiloUserJit::new(
+                            authz_silo.id(),
+                            SiloUserUuid::new_v4(),
+                            authenticated_subject.external_id.clone(),
+                        );
 
-                    self.db_datastore
-                        .silo_user_create(&authz_silo, silo_user)
-                        .await?
+                        self.db_datastore
+                            .silo_user_create(&authz_silo, silo_user.into())
+                            .await?
+                    }
                 }
-            }
-        };
+            };
 
         // Gather a list of groups that the user is part of based on what the
         // IdP sent us. Also, if the silo user provision type is Jit, create
@@ -558,13 +583,13 @@ impl super::Nexus {
             Vec::with_capacity(authenticated_subject.groups.len());
 
         for group in &authenticated_subject.groups {
-            let silo_group = match db_silo.user_provision_type {
+            let silo_group = match &db_silo.user_provision_type {
                 db::model::UserProvisionType::ApiOnly => {
                     self.db_datastore
                         .silo_group_optional_lookup(
                             opctx,
                             &authz_silo,
-                            group.clone(),
+                            &SiloGroupLookup::ApiOnly { external_id: &group },
                         )
                         .await?
                 }
@@ -574,7 +599,7 @@ impl super::Nexus {
                         .silo_group_lookup_or_create_by_name(
                             opctx,
                             &authz_silo,
-                            &group,
+                            &SiloGroupLookup::Jit { external_id: &group },
                         )
                         .await?;
 
@@ -597,7 +622,7 @@ impl super::Nexus {
             )
             .await?;
 
-        Ok(db_silo_user)
+        Ok(silo_user)
     }
 
     // Silo user passwords
@@ -616,7 +641,8 @@ impl super::Nexus {
     ) -> UpdateResult<()> {
         let (authz_silo, db_silo) =
             self.local_idp_fetch_silo(silo_lookup).await?;
-        let (authz_silo_user, db_silo_user) = self
+
+        let (authz_silo_user, silo_user) = self
             .silo_user_lookup_by_id(
                 opctx,
                 &authz_silo,
@@ -624,11 +650,21 @@ impl super::Nexus {
                 authz::Action::Modify,
             )
             .await?;
+
+        let silo_user = match &silo_user {
+            SiloUser::ApiOnly(user) => user,
+            SiloUser::Jit(_) => {
+                return Err(Error::invalid_request(
+                    "invalid user type for password set",
+                ));
+            }
+        };
+
         self.silo_user_password_set_internal(
             opctx,
             &db_silo,
             &authz_silo_user,
-            &db_silo_user,
+            silo_user,
             password_value,
         )
         .await
@@ -643,7 +679,7 @@ impl super::Nexus {
         opctx: &OpContext,
         db_silo: &db::model::Silo,
         authz_silo_user: &authz::SiloUser,
-        db_silo_user: &db::model::SiloUser,
+        silo_user: &SiloUserApiOnly,
         password_value: params::UserPassword,
     ) -> UpdateResult<()> {
         let password_hash = match password_value {
@@ -667,7 +703,7 @@ impl super::Nexus {
                 opctx,
                 db_silo,
                 authz_silo_user,
-                db_silo_user,
+                silo_user,
                 password_hash,
             )
             .await
@@ -724,7 +760,7 @@ impl super::Nexus {
         opctx: &OpContext,
         silo_lookup: &lookup::Silo<'_>,
         credentials: params::UsernamePasswordCredentials,
-    ) -> Result<db::model::SiloUser, Error> {
+    ) -> Result<SiloUser, Error> {
         let (authz_silo, _) = self.local_idp_fetch_silo(silo_lookup).await?;
 
         // NOTE: It's very important that we not bail out early if we fail to
@@ -735,10 +771,12 @@ impl super::Nexus {
         // exist.  Rate limiting might help.  See omicron#2184.
         let fetch_user = self
             .datastore()
-            .silo_user_fetch_by_external_id(
+            .silo_user_fetch(
                 opctx,
                 &authz_silo,
-                credentials.username.as_ref(),
+                &SiloUserLookup::ApiOnly {
+                    external_id: credentials.username.as_ref(),
+                },
             )
             .await?;
         let verified = self
@@ -749,12 +787,13 @@ impl super::Nexus {
             )
             .await?;
         if verified {
-            bail_unless!(
-                fetch_user.is_some(),
-                "passed password verification without a valid user"
-            );
-            let db_user = fetch_user.unwrap().1;
-            Ok(db_user)
+            if let Some((_, user)) = fetch_user {
+                Ok(user)
+            } else {
+                Err(Error::internal_error(
+                    "passed password verification without a valid user",
+                ))
+            }
         } else {
             Err(Error::Unauthenticated {
                 internal_message: "Failed password verification".to_string(),
@@ -764,15 +803,37 @@ impl super::Nexus {
 
     // Silo groups
 
-    pub async fn silo_group_lookup_or_create_by_name(
+    pub async fn silo_group_lookup_or_create_by_name<'a>(
         &self,
         opctx: &OpContext,
         authz_silo: &authz::Silo,
-        external_id: &String,
-    ) -> LookupResult<db::model::SiloGroup> {
+        silo_group_lookup: &'a SiloGroupLookup<'a>,
+    ) -> LookupResult<SiloGroup> {
+        // Traditionally the only group created for ApiOnly silos is the group
+        // with the silo admin group name that is created during silo creation.
+        // This function's "lookup or create" behaviour should be restricted to
+        // JIT silos to prevent accidentally creating a group in an ApiOnly
+        // silo.
+        //
+        // Note: as of this writing there's currently no API call for creating
+        // and deleting groups for ApiOnly silos. There's also no API call for
+        // creating and deleting groups for JIT silos, but this "lookup or
+        // create" behaviour is how they're supposed to work anyway!
+
+        let SiloGroupLookup::Jit { external_id } = silo_group_lookup else {
+            return Err(Error::invalid_request(format!(
+                "cannot create group by name for {:?} provision type",
+                silo_group_lookup.user_provision_type(),
+            )));
+        };
+
         match self
             .db_datastore
-            .silo_group_optional_lookup(opctx, authz_silo, external_id.clone())
+            .silo_group_optional_lookup(
+                opctx,
+                authz_silo,
+                &SiloGroupLookup::Jit { external_id },
+            )
             .await?
         {
             Some(silo_group) => Ok(silo_group),
@@ -782,11 +843,12 @@ impl super::Nexus {
                     .silo_group_ensure(
                         opctx,
                         authz_silo,
-                        db::model::SiloGroup::new(
-                            SiloGroupUuid::new_v4(),
+                        SiloGroupJit::new(
                             authz_silo.id(),
-                            external_id.clone(),
-                        ),
+                            SiloGroupUuid::new_v4(),
+                            external_id.to_string(),
+                        )
+                        .into(),
                     )
                     .await
             }
@@ -1030,11 +1092,16 @@ impl super::Nexus {
             .await
     }
 
-    pub fn silo_group_lookup<'a>(
-        &'a self,
-        opctx: &'a OpContext,
-        group_id: &'a SiloGroupUuid,
-    ) -> lookup::SiloGroup<'a> {
-        LookupPath::new(opctx, &self.db_datastore).silo_group_id(*group_id)
+    pub async fn silo_group_lookup(
+        &self,
+        opctx: &OpContext,
+        group_id: &SiloGroupUuid,
+    ) -> LookupResult<SiloGroup> {
+        let (.., db_silo_group) = LookupPath::new(opctx, &self.db_datastore)
+            .silo_group_id(*group_id)
+            .fetch()
+            .await?;
+
+        Ok(db_silo_group.into())
     }
 }

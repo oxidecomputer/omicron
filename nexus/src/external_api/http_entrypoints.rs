@@ -7071,8 +7071,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let path = path_params.into_inner();
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
-            let (.., group) =
-                nexus.silo_group_lookup(&opctx, &path.group_id).fetch().await?;
+            let group = nexus.silo_group_lookup(&opctx, &path.group_id).await?;
             Ok(HttpResponseOk(group.into()))
         };
         apictx
