@@ -10,6 +10,7 @@ use super::mgs_update_status_inactive_versions;
 use nexus_types::deployment::ExpectedVersion;
 use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdateDetails;
+use nexus_types::deployment::PendingMgsUpdateRotBootloaderDetails;
 use nexus_types::inventory::BaseboardId;
 use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::Collection;
@@ -205,10 +206,12 @@ pub fn try_make_update_rot_bootloader(
         baseboard_id: baseboard_id.clone(),
         sp_type: sp_info.sp_type,
         slot_id: sp_info.sp_slot,
-        details: PendingMgsUpdateDetails::RotBootloader {
-            expected_stage0_version,
-            expected_stage0_next_version,
-        },
+        details: PendingMgsUpdateDetails::RotBootloader(
+            PendingMgsUpdateRotBootloaderDetails {
+                expected_stage0_version,
+                expected_stage0_next_version,
+            },
+        ),
         artifact_hash: artifact.hash,
         artifact_version: artifact.id.version.clone(),
     })

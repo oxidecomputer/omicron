@@ -21,7 +21,7 @@ use futures::future::BoxFuture;
 use gateway_client::SpComponent;
 use gateway_client::types::SpType;
 use nexus_types::deployment::PendingMgsUpdate;
-use nexus_types::deployment::PendingMgsUpdateDetails;
+use nexus_types::deployment::PendingMgsUpdateSpDetails;
 use slog::Logger;
 use slog::{debug, info};
 use tokio::sync::watch;
@@ -150,7 +150,16 @@ impl SpComponentUpdater for SpUpdater {
     }
 }
 
-pub struct ReconfiguratorSpUpdater;
+pub struct ReconfiguratorSpUpdater {
+    details: PendingMgsUpdateSpDetails,
+}
+
+impl ReconfiguratorSpUpdater {
+    pub fn new(details: PendingMgsUpdateSpDetails) -> Self {
+        Self { details }
+    }
+}
+
 impl SpComponentUpdateHelperImpl for ReconfiguratorSpUpdater {
     /// Checks if the component is already updated or ready for update
     fn precheck<'a>(
@@ -209,16 +218,10 @@ impl SpComponentUpdateHelperImpl for ReconfiguratorSpUpdater {
             // don't want to roll that back.  (If for some reason we *do* want
             // to do this update, the planner will have to notice that what's
             // here is wrong and update the blueprint.)
-            let PendingMgsUpdateDetails::Sp {
+            let PendingMgsUpdateSpDetails {
                 expected_active_version,
                 expected_inactive_version,
-            } = &update.details
-            else {
-                unreachable!(
-                    "pending MGS update details within ReconfiguratorSpUpdater \
-                    will always be for the SP"
-                );
-            };
+            } = &self.details;
             if caboose.version != expected_active_version.to_string() {
                 return Err(PrecheckError::WrongActiveVersion {
                     expected: expected_active_version.clone(),

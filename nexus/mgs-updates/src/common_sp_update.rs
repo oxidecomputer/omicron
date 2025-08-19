@@ -299,15 +299,15 @@ impl SpComponentUpdateHelper {
     pub fn new(details: &PendingMgsUpdateDetails) -> Self {
         let inner: Box<dyn SpComponentUpdateHelperImpl + Send + Sync> =
             match details {
-                PendingMgsUpdateDetails::Sp { .. } => {
-                    Box::new(ReconfiguratorSpUpdater {})
+                PendingMgsUpdateDetails::Sp(details) => {
+                    Box::new(ReconfiguratorSpUpdater::new(details.clone()))
                 }
-                PendingMgsUpdateDetails::Rot { .. } => {
-                    Box::new(ReconfiguratorRotUpdater {})
+                PendingMgsUpdateDetails::Rot(details) => {
+                    Box::new(ReconfiguratorRotUpdater::new(details.clone()))
                 }
-                PendingMgsUpdateDetails::RotBootloader { .. } => {
-                    Box::new(ReconfiguratorRotBootloaderUpdater {})
-                }
+                PendingMgsUpdateDetails::RotBootloader(details) => Box::new(
+                    ReconfiguratorRotBootloaderUpdater::new(details.clone()),
+                ),
                 PendingMgsUpdateDetails::HostPhase1(details) => Box::new(
                     ReconfiguratorHostPhase1Updater::new(details.clone()),
                 ),

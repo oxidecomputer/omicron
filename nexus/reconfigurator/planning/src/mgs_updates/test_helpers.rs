@@ -35,6 +35,9 @@ use nexus_types::deployment::ExpectedVersion;
 use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdateDetails;
 use nexus_types::deployment::PendingMgsUpdateHostPhase1Details;
+use nexus_types::deployment::PendingMgsUpdateRotBootloaderDetails;
+use nexus_types::deployment::PendingMgsUpdateRotDetails;
+use nexus_types::deployment::PendingMgsUpdateSpDetails;
 use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::Collection;
 use omicron_common::api::external::Generation;
@@ -616,19 +619,21 @@ impl ExpectedUpdates {
         let (expected_active_version, expected_inactive_version) = match &update
             .details
         {
-            PendingMgsUpdateDetails::Rot {
+            PendingMgsUpdateDetails::Rot(PendingMgsUpdateRotDetails {
                 expected_active_slot,
                 expected_inactive_version,
                 ..
-            } => (&expected_active_slot.version, expected_inactive_version),
-            PendingMgsUpdateDetails::Sp {
+            }) => (&expected_active_slot.version, expected_inactive_version),
+            PendingMgsUpdateDetails::Sp(PendingMgsUpdateSpDetails {
                 expected_active_version,
                 expected_inactive_version,
-            } => (expected_active_version, expected_inactive_version),
-            PendingMgsUpdateDetails::RotBootloader {
-                expected_stage0_version,
-                expected_stage0_next_version,
-            } => (expected_stage0_version, expected_stage0_next_version),
+            }) => (expected_active_version, expected_inactive_version),
+            PendingMgsUpdateDetails::RotBootloader(
+                PendingMgsUpdateRotBootloaderDetails {
+                    expected_stage0_version,
+                    expected_stage0_next_version,
+                },
+            ) => (expected_stage0_version, expected_stage0_next_version),
             PendingMgsUpdateDetails::HostPhase1(
                 PendingMgsUpdateHostPhase1Details {
                     expected_active_phase_1_slot,

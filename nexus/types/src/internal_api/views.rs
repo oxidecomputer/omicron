@@ -863,6 +863,7 @@ mod test {
     use crate::deployment::ExpectedVersion;
     use crate::deployment::PendingMgsUpdate;
     use crate::deployment::PendingMgsUpdateDetails;
+    use crate::deployment::PendingMgsUpdateSpDetails;
     use crate::internal_api::views::UpdateAttemptStatus;
     use crate::inventory::BaseboardId;
     use chrono::Utc;
@@ -902,10 +903,13 @@ mod test {
                 baseboard_id: baseboard_id.clone(),
                 sp_type: SpType::Sled,
                 slot_id: 12,
-                details: PendingMgsUpdateDetails::Sp {
-                    expected_active_version: "1.0.0".parse().unwrap(),
-                    expected_inactive_version: ExpectedVersion::NoValidVersion,
-                },
+                details: PendingMgsUpdateDetails::Sp(
+                    PendingMgsUpdateSpDetails {
+                        expected_active_version: "1.0.0".parse().unwrap(),
+                        expected_inactive_version:
+                            ExpectedVersion::NoValidVersion,
+                    },
+                ),
                 artifact_hash,
                 artifact_version: "2.0.0".parse().unwrap(),
             },
