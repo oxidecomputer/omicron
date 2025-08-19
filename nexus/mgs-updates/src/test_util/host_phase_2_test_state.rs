@@ -202,6 +202,7 @@ mod api_impl {
     use nexus_sled_agent_shared::inventory::Inventory;
     use nexus_sled_agent_shared::inventory::MupdateOverrideInventory;
     use nexus_sled_agent_shared::inventory::OmicronSledConfig;
+    use nexus_sled_agent_shared::inventory::SledCpuFamily;
     use nexus_sled_agent_shared::inventory::SledRole;
     use nexus_sled_agent_shared::inventory::ZoneImageResolverInventory;
     use nexus_sled_agent_shared::inventory::ZoneManifestInventory;
@@ -313,6 +314,7 @@ mod api_impl {
                 usable_hardware_threads: 64,
                 usable_physical_ram: (1 << 30).into(),
                 reservoir_size: (1 << 29).into(),
+                cpu_family: SledCpuFamily::AmdMilan,
                 disks: Vec::new(),
                 zpools: Vec::new(),
                 datasets: Vec::new(),

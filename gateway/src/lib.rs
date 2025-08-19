@@ -20,6 +20,7 @@ use futures::StreamExt;
 use futures::stream::FuturesUnordered;
 use gateway_sp_comms::InMemoryHostPhase2Provider;
 pub use management_switch::LocationConfig;
+pub use management_switch::LocationDescriptionConfig;
 pub use management_switch::LocationDeterminationConfig;
 pub use management_switch::ManagementSwitch;
 pub use management_switch::RetryConfig;

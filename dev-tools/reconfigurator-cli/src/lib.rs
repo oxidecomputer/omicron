@@ -28,7 +28,6 @@ use nexus_reconfigurator_simulation::{BlueprintId, CollectionId, SimState};
 use nexus_reconfigurator_simulation::{SimStateBuilder, SimTufRepoSource};
 use nexus_reconfigurator_simulation::{SimTufRepoDescription, Simulator};
 use nexus_sled_agent_shared::inventory::ZoneKind;
-use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::execution;
 use nexus_types::deployment::execution::blueprint_external_dns_config;
@@ -43,6 +42,7 @@ use nexus_types::deployment::{
     BlueprintZoneImageSource, PendingMgsUpdateDetails,
 };
 use nexus_types::deployment::{OmicronZoneNic, TargetReleaseDescription};
+use nexus_types::deployment::{PendingMgsUpdateSpDetails, PlanningInput};
 use nexus_types::external_api::views::SledPolicy;
 use nexus_types::external_api::views::SledProvisionPolicy;
 use nexus_types::inventory::CollectionDisplayCliFilter;
@@ -1861,14 +1861,14 @@ fn cmd_blueprint_plan(
         &planning_input,
         creator,
         collection,
+        rng,
     )
-    .context("creating planner")?
-    .with_rng(rng);
+    .context("creating planner")?;
 
     let blueprint = planner.plan().context("generating blueprint")?;
     let rv = format!(
-        "generated blueprint {} based on parent blueprint {}",
-        blueprint.id, parent_blueprint.id,
+        "generated blueprint {} based on parent blueprint {}\n{}",
+        blueprint.id, parent_blueprint.id, blueprint.report,
     );
     system.add_blueprint(blueprint)?;
 
@@ -1906,9 +1906,9 @@ fn cmd_blueprint_edit(
         &planning_input,
         &latest_collection,
         creator,
+        rng,
     )
     .context("creating blueprint builder")?;
-    builder.set_rng(rng);
 
     if let Some(comment) = args.comment {
         builder.comment(comment);
@@ -2026,10 +2026,10 @@ fn cmd_blueprint_edit(
                 SpUpdateComponent::Sp {
                     expected_active_version,
                     expected_inactive_version,
-                } => PendingMgsUpdateDetails::Sp {
+                } => PendingMgsUpdateDetails::Sp(PendingMgsUpdateSpDetails {
                     expected_active_version,
                     expected_inactive_version,
-                },
+                }),
             };
 
             let artifact_version = ArtifactVersion::new(version)

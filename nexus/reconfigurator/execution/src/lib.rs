@@ -21,6 +21,7 @@ use nexus_types::deployment::execution::{
     Overridables, ReconfiguratorExecutionSpec, SharedStepHandle, Sled,
     StepHandle, StepResult, UpdateEngine,
 };
+use nexus_types::quiesce::SagaQuiesceHandle;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use slog::info;
 use slog_error_chain::InlineErrorChain;
@@ -56,6 +57,7 @@ pub struct RealizeArgs<'a> {
     pub sender: mpsc::Sender<Event>,
     pub overrides: Option<&'a Overridables>,
     pub mgs_updates: watch::Sender<PendingMgsUpdates>,
+    pub saga_quiesce: SagaQuiesceHandle,
 }
 
 impl<'a> RealizeArgs<'a> {
@@ -103,6 +105,7 @@ pub struct RequiredRealizeArgs<'a> {
     pub blueprint: &'a Blueprint,
     pub sender: mpsc::Sender<Event>,
     pub mgs_updates: watch::Sender<PendingMgsUpdates>,
+    pub saga_quiesce: SagaQuiesceHandle,
 }
 
 impl<'a> From<RequiredRealizeArgs<'a>> for RealizeArgs<'a> {
@@ -117,6 +120,7 @@ impl<'a> From<RequiredRealizeArgs<'a>> for RealizeArgs<'a> {
             sender: value.sender,
             overrides: None,
             mgs_updates: value.mgs_updates,
+            saga_quiesce: value.saga_quiesce,
         }
     }
 }
@@ -162,6 +166,7 @@ pub async fn realize_blueprint(
         sender,
         overrides,
         mgs_updates,
+        saga_quiesce,
     } = exec_ctx;
 
     let opctx = opctx.child(BTreeMap::from([(
@@ -262,6 +267,7 @@ pub async fn realize_blueprint(
         datastore,
         blueprint,
         nexus_id,
+        saga_quiesce,
     );
 
     register_cockroachdb_settings_step(
@@ -593,6 +599,7 @@ fn register_reassign_sagas_step<'a>(
     datastore: &'a DataStore,
     blueprint: &'a Blueprint,
     nexus_id: Option<OmicronZoneUuid>,
+    saga_quiesce: SagaQuiesceHandle,
 ) -> StepHandle<bool> {
     registrar
         .new_step(
@@ -604,22 +611,49 @@ fn register_reassign_sagas_step<'a>(
                         .into();
                 };
 
-                // For any expunged Nexus zones, re-assign in-progress sagas to
-                // some other Nexus.  If this fails for some reason, it doesn't
-                // affect anything else.
-                let sec_id = nexus_db_model::SecId::from(nexus_id);
-                let reassigned = sagas::reassign_sagas_from_expunged(
-                    opctx, datastore, blueprint, sec_id,
-                )
-                .await
-                .context("failed to re-assign sagas");
-                match reassigned {
-                    Ok(needs_saga_recovery) => {
-                        Ok(StepSuccess::new(needs_saga_recovery).build())
+                // Re-assign sagas, but only if we're allowed to.  If Nexus is
+                // quiescing, we don't want to assign any new sagas to
+                // ourselves.
+                let result = saga_quiesce.reassign_if_possible(async || {
+                    // For any expunged Nexus zones, re-assign in-progress sagas
+                    // to some other Nexus.  If this fails for some reason, it
+                    // doesn't affect anything else.
+                    let sec_id = nexus_db_model::SecId::from(nexus_id);
+                    let reassigned = sagas::reassign_sagas_from_expunged(
+                        opctx, datastore, blueprint, sec_id,
+                    )
+                    .await
+                    .context("failed to re-assign sagas");
+                    match reassigned {
+                        Ok(needs_saga_recovery) => (
+                            StepSuccess::new(needs_saga_recovery).build(),
+                            needs_saga_recovery,
+                        ),
+                        Err(error) => {
+                            // It's possible that we failed after having
+                            // re-assigned sagas in the database.
+                            let maybe_reassigned = true;
+                            (
+                                StepWarning::new(false, error.to_string())
+                                    .build(),
+                                maybe_reassigned,
+                            )
+                        }
                     }
-                    Err(error) => {
-                        Ok(StepWarning::new(false, error.to_string()).build())
-                    }
+                });
+
+                match result.await {
+                    // Re-assignment is allowed, and we did try.  It may or may
+                    // not have succeeded.  Either way, that's reflected in
+                    // `step_result`.
+                    Ok(step_result) => Ok(step_result),
+                    // Re-assignment is disallowed.  Report this step skipped
+                    // with an explanation of why.
+                    Err(error) => StepSkipped::new(
+                        false,
+                        InlineErrorChain::new(&error).to_string(),
+                    )
+                    .into(),
                 }
             },
         )

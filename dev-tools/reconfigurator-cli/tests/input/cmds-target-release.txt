@@ -31,46 +31,108 @@ sled-list
 blueprint-list
 inventory-list
 
-# First step: upgrade one SP.
-blueprint-plan dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21 f45ba181-4b56-42cc-a762-874d90184a43
-blueprint-diff dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
+# First step: upgrade one RoT bootloader.
+blueprint-plan latest latest
+blueprint-diff latest
 
 # If we generate another plan, there should be no change.
-blueprint-plan 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1 f45ba181-4b56-42cc-a762-874d90184a43
-blueprint-diff 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1 58d5e830-0884-47d8-a7cd-b2b3751adeb4
+blueprint-plan latest latest
+blueprint-diff latest
 
-# Now, update the simulated SP to reflect that the update completed.
+# Now, update the simulated RoT bootloader to reflect that the update completed.
 # Collect inventory from it and use that collection for another planning step.
 # This should report that the update completed, remove that update, and add one
+# for an SP on the same sled.
+sled-update-rot-bootloader 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 --stage0 1.0.0
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+# After the RoT bootloader update has completed, we update the simulated RoT to
+# reflect that update has completed as well.
+# Like before, collect inventory from it and use that collection for the next
+# step.
+# This should report that the update completed, remove that update, and add one
 # for another sled.
+sled-update-rot 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 --slot-a 1.0.0
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+# We repeat the same procedure with the SP
 sled-update-sp 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 --active 1.0.0
 inventory-generate
-blueprint-plan 58d5e830-0884-47d8-a7cd-b2b3751adeb4 eb0796d5-ab8a-4f7b-a884-b4aeacb8ab51
-blueprint-diff 58d5e830-0884-47d8-a7cd-b2b3751adeb4 af934083-59b5-4bf6-8966-6fb5292c29e1
+blueprint-plan latest latest
+blueprint-diff latest
 
 # This time, make it more interesting.  Change the inactive slot contents of
-# the simulated SP.  This should make the configured update impossible and cause
-# the planner to fix it. To test this, we also need to tell the planner not to
-# ignore this update even though it's quite new.
+# the simulated RoT bootloader.  This should make the configured update
+# impossible and cause the planner to fix it. To test this, we also need to tell
+# the planner not to ignore this update even though it's quite new.
+set ignore-impossible-mgs-updates-since now
+sled-update-rot-bootloader 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c --stage0-next 0.5.0
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+# Now simulate the update completing successfully.
+# Like before, we should see a pending RoT update for this sled.
+sled-update-rot-bootloader 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c --stage0 1.0.0
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+# Now we'll change the inactive slot contents of the simulated RoT. Like with
+# the RoT bootloader, this should make the update impossible and cause the
+# planner to fix it.
+set ignore-impossible-mgs-updates-since now
+sled-update-rot 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c --slot-b 0.5.0
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+# Now simulate the update completing successfully.
+# Like before, we should see a pending SP update for this sled.
+sled-update-rot 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c --slot-a 1.0.0
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+# We repeat the same procedure with the SP. Like with the RoT, this should make
+# the update impossible and cause the planner to fix it.
 set ignore-impossible-mgs-updates-since now
 sled-update-sp 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c --inactive 0.5.0
 inventory-generate
-blueprint-plan af934083-59b5-4bf6-8966-6fb5292c29e1 61f451b3-2121-4ed6-91c7-a550054f6c21
-blueprint-diff af934083-59b5-4bf6-8966-6fb5292c29e1 df06bb57-ad42-4431-9206-abff322896c7
+blueprint-plan latest latest
+blueprint-diff latest
 
-# Now simulate the update completing successfully.
-# Another planning step should try to update the last sled.
+# Let's simulate the successful SP update as well.
+# A few more planning steps should try to update the last sled.
 sled-update-sp 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c --active 1.0.0
 inventory-generate
-blueprint-plan df06bb57-ad42-4431-9206-abff322896c7 b1bda47d-2c19-4fba-96e3-d9df28db7436
-blueprint-diff df06bb57-ad42-4431-9206-abff322896c7 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba
+blueprint-plan latest latest
+blueprint-diff latest
+
+# Update the RoT bootloader on the last sled.
+# There should be a pending RoT update.
+sled-update-rot-bootloader d81c6a84-79b8-4958-ae41-ea46c9b19763 --stage0 1.0.0
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+# Update the RoT on the last sled.
+# There should be one last pending SP update.
+sled-update-rot d81c6a84-79b8-4958-ae41-ea46c9b19763 --slot-a 1.0.0
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
 
 # Finish updating the last sled and do one more planning run.
 # This should update one control plane zone.
 sled-update-sp d81c6a84-79b8-4958-ae41-ea46c9b19763 --active 1.0.0
 inventory-generate
-blueprint-plan 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba a71f7a73-35a6-45e8-acbe-f1c5925eed69
-blueprint-diff 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba 9034c710-3e57-45f3-99e5-4316145e87ac
+blueprint-plan latest latest
+blueprint-diff latest
 
 # We should continue walking through the update. We need to build out a
 # reconfigurator-cli subcommand to simulate updated zone image sources (just

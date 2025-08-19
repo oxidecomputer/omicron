@@ -8,6 +8,8 @@
 use super::MgsClients;
 use super::UpdateProgress;
 use crate::host_phase1_updater::ReconfiguratorHostPhase1Updater;
+use crate::mgs_clients::GatewaySpComponentResetError;
+use crate::mgs_clients::RetryableMgsError;
 use crate::rot_bootloader_updater::ReconfiguratorRotBootloaderUpdater;
 use crate::rot_updater::ReconfiguratorRotUpdater;
 use crate::sp_updater::ReconfiguratorSpUpdater;
@@ -45,6 +47,8 @@ type SledAgentClientError =
 pub enum SpComponentUpdateError {
     #[error("error communicating with MGS")]
     MgsCommunication(#[from] GatewayClientError),
+    #[error("error resetting component via MGS")]
+    MgsResetComponent(#[from] GatewaySpComponentResetError),
     #[error("different update is now preparing ({0})")]
     DifferentUpdatePreparing(Uuid),
     #[error("different update is now in progress ({0})")]
@@ -124,7 +128,7 @@ pub(super) async fn deliver_update(
                 updater.logger(), "update started";
                 "mgs_addr" => client.baseurl(),
             );
-            Ok(())
+            Ok::<_, GatewayClientError>(())
         })
         .await?;
 
@@ -146,7 +150,7 @@ pub(super) async fn deliver_update(
                     "status" => ?update_status,
                 );
 
-                Ok(update_status)
+                Ok::<_, GatewayClientError>(update_status)
             })
             .await?;
 
@@ -295,15 +299,15 @@ impl SpComponentUpdateHelper {
     pub fn new(details: &PendingMgsUpdateDetails) -> Self {
         let inner: Box<dyn SpComponentUpdateHelperImpl + Send + Sync> =
             match details {
-                PendingMgsUpdateDetails::Sp { .. } => {
-                    Box::new(ReconfiguratorSpUpdater {})
+                PendingMgsUpdateDetails::Sp(details) => {
+                    Box::new(ReconfiguratorSpUpdater::new(details.clone()))
                 }
-                PendingMgsUpdateDetails::Rot { .. } => {
-                    Box::new(ReconfiguratorRotUpdater {})
+                PendingMgsUpdateDetails::Rot(details) => {
+                    Box::new(ReconfiguratorRotUpdater::new(details.clone()))
                 }
-                PendingMgsUpdateDetails::RotBootloader { .. } => {
-                    Box::new(ReconfiguratorRotBootloaderUpdater {})
-                }
+                PendingMgsUpdateDetails::RotBootloader(details) => Box::new(
+                    ReconfiguratorRotBootloaderUpdater::new(details.clone()),
+                ),
                 PendingMgsUpdateDetails::HostPhase1(details) => Box::new(
                     ReconfiguratorHostPhase1Updater::new(details.clone()),
                 ),
@@ -450,6 +454,9 @@ pub enum PostUpdateError {
     #[error("communicating with MGS")]
     GatewayClientError(#[from] GatewayClientError),
 
+    #[error("resetting component via MGS")]
+    GatewaySpComponentResetError(#[from] GatewaySpComponentResetError),
+
     #[error("transient error: {message:?}")]
     TransientError { message: String },
 
@@ -461,7 +468,10 @@ impl PostUpdateError {
     pub fn is_fatal(&self) -> bool {
         match self {
             PostUpdateError::GatewayClientError(error) => {
-                !matches!(error, gateway_client::Error::CommunicationError(_))
+                !error.should_try_next_mgs()
+            }
+            PostUpdateError::GatewaySpComponentResetError(error) => {
+                !error.should_try_next_mgs()
             }
             PostUpdateError::TransientError { .. } => false,
             PostUpdateError::FatalError { .. } => true,

@@ -127,7 +127,11 @@ fn expected_location(
     sp_port: SpPort,
 ) -> String {
     let config = &config.switch.location;
-    let mut locations = config.names.iter().cloned().collect::<HashSet<_>>();
+    let mut locations = config
+        .description
+        .iter()
+        .map(|d| d.name.as_str())
+        .collect::<HashSet<_>>();
 
     for determination in &config.determination {
         let refined = match sp_port {
@@ -135,11 +139,11 @@ fn expected_location(
             SpPort::Two => &determination.sp_port_2,
         };
 
-        locations.retain(|name| refined.contains(name));
+        locations.retain(|name| refined.iter().any(|s| s == name));
     }
 
     assert_eq!(locations.len(), 1);
-    locations.into_iter().next().unwrap()
+    locations.into_iter().next().unwrap().to_string()
 }
 
 pub async fn test_setup_with_config(

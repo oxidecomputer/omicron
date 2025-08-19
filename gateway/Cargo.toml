@@ -23,6 +23,7 @@ gateway-types.workspace = true
 hex.workspace = true
 http.workspace = true
 hyper.workspace = true
+iddqd.workspace = true
 illumos-utils.workspace = true
 ipcc.workspace = true
 omicron-common.workspace = true

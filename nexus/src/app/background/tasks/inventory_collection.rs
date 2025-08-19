@@ -267,6 +267,7 @@ mod test {
     use crate::app::background::BackgroundTask;
     use nexus_db_model::Generation;
     use nexus_db_model::SledBaseboard;
+    use nexus_db_model::SledCpuFamily;
     use nexus_db_model::SledSystemHardware;
     use nexus_db_model::SledUpdate;
     use nexus_db_queries::context::OpContext;
@@ -443,6 +444,7 @@ mod test {
                     usable_physical_ram: ByteCount::from_gibibytes_u32(16)
                         .into(),
                     reservoir_size: ByteCount::from_gibibytes_u32(8).into(),
+                    cpu_family: SledCpuFamily::AmdMilan,
                 },
                 rack_id,
                 Generation::new(),

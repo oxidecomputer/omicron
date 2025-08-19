@@ -971,6 +971,7 @@ table! {
         sled_state -> crate::enums::SledStateEnum,
         sled_agent_gen -> Int8,
         repo_depot_port -> Int4,
+        cpu_family -> crate::enums::SledCpuFamilyEnum,
     }
 }
 
@@ -1620,6 +1621,7 @@ table! {
         sled_role -> crate::enums::SledRoleEnum,
         usable_hardware_threads -> Int8,
         usable_physical_ram -> Int8,
+        cpu_family -> crate::enums::SledCpuFamilyEnum,
         reservoir_size -> Int8,
 
         ledgered_sled_config -> Nullable<Uuid>,

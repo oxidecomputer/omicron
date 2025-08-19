@@ -15,6 +15,7 @@ use crate::common_sp_update::PostUpdateError;
 use crate::common_sp_update::PrecheckError;
 use crate::common_sp_update::PrecheckStatus;
 use crate::common_sp_update::error_means_caboose_is_invalid;
+use crate::mgs_clients::GatewaySpComponentResetError;
 use futures::FutureExt;
 use futures::future::BoxFuture;
 use gateway_client::SpComponent;
@@ -23,7 +24,7 @@ use gateway_client::types::SpComponentFirmwareSlot;
 use gateway_client::types::SpType;
 use gateway_types::rot::RotSlot;
 use nexus_types::deployment::PendingMgsUpdate;
-use nexus_types::deployment::PendingMgsUpdateDetails;
+use nexus_types::deployment::PendingMgsUpdateRotDetails;
 use slog::Logger;
 use slog::{debug, info};
 use tokio::sync::watch;
@@ -152,7 +153,7 @@ impl RotUpdater {
     async fn finalize_update_via_reset(
         &self,
         client: &gateway_client::Client,
-    ) -> Result<(), GatewayClientError> {
+    ) -> Result<(), GatewaySpComponentResetError> {
         client
             .sp_component_reset(self.sp_type, self.sp_slot, self.component())
             .await?;
@@ -204,7 +205,16 @@ impl SpComponentUpdater for RotUpdater {
     }
 }
 
-pub struct ReconfiguratorRotUpdater;
+pub struct ReconfiguratorRotUpdater {
+    details: PendingMgsUpdateRotDetails,
+}
+
+impl ReconfiguratorRotUpdater {
+    pub fn new(details: PendingMgsUpdateRotDetails) -> Self {
+        Self { details }
+    }
+}
+
 impl SpComponentUpdateHelperImpl for ReconfiguratorRotUpdater {
     /// Checks if the component is already updated or ready for update
     fn precheck<'a>(
@@ -235,18 +245,12 @@ impl SpComponentUpdateHelperImpl for ReconfiguratorRotUpdater {
                 });
             }
 
-            let PendingMgsUpdateDetails::Rot {
+            let PendingMgsUpdateRotDetails {
                 expected_inactive_version,
                 expected_active_slot,
                 expected_persistent_boot_preference,
                 ..
-            } = &update.details
-            else {
-                unreachable!(
-                    "pending MGS update details within ReconfiguratorRotUpdater \
-                    will always be for the RoT"
-                );
-            };
+            } = &self.details;
 
             let (
                 active, pending_persistent_boot_preference, transient_boot_preference
@@ -382,21 +386,12 @@ impl SpComponentUpdateHelperImpl for ReconfiguratorRotUpdater {
             debug!(log, "attempting to set active slot");
             mgs_clients
                 .try_all_serially(log, move |mgs_client| async move {
-                    let inactive_slot = match &update.details {
-                        PendingMgsUpdateDetails::Rot {
-                            expected_active_slot,
-                            ..
-                        } => expected_active_slot.slot().toggled().to_u16(),
-                        PendingMgsUpdateDetails::Sp { .. }
-                        | PendingMgsUpdateDetails::RotBootloader { .. }
-                        | PendingMgsUpdateDetails::HostPhase1(_) => {
-                            unreachable!(
-                                "pending MGS update details within \
-                                 ReconfiguratorRotUpdater will always be \
-                                 for the RoT"
-                            )
-                        }
-                    };
+                    let inactive_slot = self
+                        .details
+                        .expected_active_slot
+                        .slot()
+                        .toggled()
+                        .to_u16();
                     let persist = true;
                     mgs_client
                         .sp_component_active_slot_set(
@@ -407,7 +402,7 @@ impl SpComponentUpdateHelperImpl for ReconfiguratorRotUpdater {
                             &SpComponentFirmwareSlot { slot: inactive_slot },
                         )
                         .await?;
-                    Ok(())
+                    Ok::<_, GatewayClientError>(())
                 })
                 .await?;
 
@@ -420,8 +415,7 @@ impl SpComponentUpdateHelperImpl for ReconfiguratorRotUpdater {
                             update.slot_id,
                             SpComponent::ROT.const_as_str(),
                         )
-                        .await?;
-                    Ok(())
+                        .await
                 })
                 .await?;
             Ok(())

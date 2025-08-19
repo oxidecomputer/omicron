@@ -85,7 +85,11 @@ use nexus_types::deployment::OximeterReadMode;
 use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdateDetails;
 use nexus_types::deployment::PendingMgsUpdateHostPhase1Details;
+use nexus_types::deployment::PendingMgsUpdateRotBootloaderDetails;
+use nexus_types::deployment::PendingMgsUpdateRotDetails;
+use nexus_types::deployment::PendingMgsUpdateSpDetails;
 use nexus_types::deployment::PendingMgsUpdates;
+use nexus_types::deployment::PlanningReport;
 use nexus_types::inventory::BaseboardId;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
@@ -1310,6 +1314,9 @@ impl DataStore {
             )?;
         }
 
+        // FIXME: Once reports are stored in the database, read them out here.
+        let report = PlanningReport::new(blueprint_id);
+
         Ok(Blueprint {
             id: blueprint_id,
             pending_mgs_updates,
@@ -1326,6 +1333,7 @@ impl DataStore {
             time_created,
             creator,
             comment,
+            report,
         })
     }
 
@@ -2050,10 +2058,10 @@ async fn insert_pending_mgs_update(
     log: &Logger,
 ) -> Result<(), InsertTxnError> {
     match &update.details {
-        PendingMgsUpdateDetails::Sp {
+        PendingMgsUpdateDetails::Sp(PendingMgsUpdateSpDetails {
             expected_active_version,
             expected_inactive_version,
-        } => {
+        }) => {
             let db_blueprint_id = DbTypedUuid::from(blueprint_id)
                 .into_sql::<diesel::sql_types::Uuid>();
             let db_sp_type =
@@ -2163,13 +2171,13 @@ async fn insert_pending_mgs_update(
                 _expected_inactive_version,
             ) = update_dsl::bp_pending_mgs_update_sp::all_columns();
         }
-        PendingMgsUpdateDetails::Rot {
+        PendingMgsUpdateDetails::Rot(PendingMgsUpdateRotDetails {
             expected_active_slot,
             expected_inactive_version,
             expected_persistent_boot_preference,
             expected_pending_persistent_boot_preference,
             expected_transient_boot_preference,
-        } => {
+        }) => {
             let db_blueprint_id = DbTypedUuid::from(blueprint_id)
                 .into_sql::<diesel::sql_types::Uuid>();
             let db_sp_type =
@@ -2293,10 +2301,12 @@ async fn insert_pending_mgs_update(
                 _expected_transient_boot_preference,
             ) = update_dsl::bp_pending_mgs_update_rot::all_columns();
         }
-        PendingMgsUpdateDetails::RotBootloader {
-            expected_stage0_version,
-            expected_stage0_next_version,
-        } => {
+        PendingMgsUpdateDetails::RotBootloader(
+            PendingMgsUpdateRotBootloaderDetails {
+                expected_stage0_version,
+                expected_stage0_next_version,
+            },
+        ) => {
             let db_blueprint_id = DbTypedUuid::from(blueprint_id)
                 .into_sql::<diesel::sql_types::Uuid>();
             let db_sp_type =
@@ -2951,6 +2961,7 @@ mod tests {
     use nexus_reconfigurator_planning::blueprint_builder::EnsureMultiple;
     use nexus_reconfigurator_planning::example::ExampleSystemBuilder;
     use nexus_reconfigurator_planning::example::example;
+    use nexus_reconfigurator_planning::planner::PlannerRng;
     use nexus_types::deployment::BlueprintArtifactVersion;
     use nexus_types::deployment::BlueprintHostPhase2DesiredContents;
     use nexus_types::deployment::BlueprintHostPhase2DesiredSlots;
@@ -3343,6 +3354,7 @@ mod tests {
             &planning_input,
             &collection,
             "test",
+            PlannerRng::from_entropy(),
         )
         .expect("failed to create builder");
 
@@ -3571,10 +3583,10 @@ mod tests {
             baseboard_id: baseboard_id.clone(),
             sp_type: sp.sp_type,
             slot_id: sp.sp_slot,
-            details: PendingMgsUpdateDetails::Sp {
+            details: PendingMgsUpdateDetails::Sp(PendingMgsUpdateSpDetails {
                 expected_active_version: "1.0.0".parse().unwrap(),
                 expected_inactive_version: ExpectedVersion::NoValidVersion,
-            },
+            }),
             artifact_hash: ArtifactHash([72; 32]),
             artifact_version: "2.0.0".parse().unwrap(),
         });
@@ -3687,6 +3699,7 @@ mod tests {
             &planning_input,
             &collection,
             "dummy",
+            PlannerRng::from_entropy(),
         )
         .expect("failed to create builder");
 
@@ -3697,7 +3710,7 @@ mod tests {
             baseboard_id: baseboard_id.clone(),
             sp_type: sp.sp_type,
             slot_id: sp.sp_slot,
-            details: PendingMgsUpdateDetails::Rot {
+            details: PendingMgsUpdateDetails::Rot(PendingMgsUpdateRotDetails {
                 expected_active_slot: ExpectedActiveRotSlot {
                     slot: RotSlot::A,
                     version: "1.0.0".parse().unwrap(),
@@ -3706,7 +3719,7 @@ mod tests {
                 expected_persistent_boot_preference: RotSlot::A,
                 expected_pending_persistent_boot_preference: None,
                 expected_transient_boot_preference: None,
-            },
+            }),
             artifact_hash: ArtifactHash([72; 32]),
             artifact_version: "2.0.0".parse().unwrap(),
         });
@@ -3743,6 +3756,7 @@ mod tests {
             &planning_input,
             &collection,
             "dummy",
+            PlannerRng::from_entropy(),
         )
         .expect("failed to create builder");
 
@@ -3753,10 +3767,13 @@ mod tests {
             baseboard_id: baseboard_id.clone(),
             sp_type: sp.sp_type,
             slot_id: sp.sp_slot,
-            details: PendingMgsUpdateDetails::RotBootloader {
-                expected_stage0_version: "1.0.0".parse().unwrap(),
-                expected_stage0_next_version: ExpectedVersion::NoValidVersion,
-            },
+            details: PendingMgsUpdateDetails::RotBootloader(
+                PendingMgsUpdateRotBootloaderDetails {
+                    expected_stage0_version: "1.0.0".parse().unwrap(),
+                    expected_stage0_next_version:
+                        ExpectedVersion::NoValidVersion,
+                },
+            ),
             artifact_hash: ArtifactHash([72; 32]),
             artifact_version: "2.0.0".parse().unwrap(),
         });
@@ -3793,6 +3810,7 @@ mod tests {
             &planning_input,
             &collection,
             "dummy",
+            PlannerRng::from_entropy(),
         )
         .expect("failed to create builder");
 
@@ -3850,6 +3868,7 @@ mod tests {
             &planning_input,
             &collection,
             "dummy",
+            PlannerRng::from_entropy(),
         )
         .expect("failed to create builder")
         .build();
@@ -3927,6 +3946,7 @@ mod tests {
             &EMPTY_PLANNING_INPUT,
             &collection,
             "test2",
+            PlannerRng::from_entropy(),
         )
         .expect("failed to create builder")
         .build();
@@ -3936,6 +3956,7 @@ mod tests {
             &EMPTY_PLANNING_INPUT,
             &collection,
             "test3",
+            PlannerRng::from_entropy(),
         )
         .expect("failed to create builder")
         .build();
@@ -4036,6 +4057,7 @@ mod tests {
             &EMPTY_PLANNING_INPUT,
             &collection,
             "test3",
+            PlannerRng::from_entropy(),
         )
         .expect("failed to create builder")
         .build();
@@ -4081,6 +4103,7 @@ mod tests {
             &EMPTY_PLANNING_INPUT,
             &collection,
             "test2",
+            PlannerRng::from_entropy(),
         )
         .expect("failed to create builder")
         .build();
@@ -4313,6 +4336,7 @@ mod tests {
             &example_system.input,
             &example_system.collection,
             &format!("{test_name}-2"),
+            PlannerRng::from_entropy(),
         )
         .expect("failed to create builder")
         .build();

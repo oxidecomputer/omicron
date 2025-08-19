@@ -591,7 +591,7 @@ async fn test_trust_root_operations(cptestctx: &ControlPlaneTestContext) {
         .expect("trust root list failed")
         .parsed_body()
         .expect("failed to parse list response");
-    assert_eq!(response.items, &[trust_root_view.clone()]);
+    assert_eq!(response.items, std::slice::from_ref(&trust_root_view.clone()));
 
     // GET /v1/system/update/trust-roots/{id}
     let id_url = format!("{TRUST_ROOTS_URL}/{}", trust_root_view.id);

@@ -24,6 +24,7 @@ use nexus_sled_agent_shared::inventory::InventoryDisk;
 use nexus_sled_agent_shared::inventory::InventoryZpool;
 use nexus_sled_agent_shared::inventory::MupdateOverrideBootInventory;
 use nexus_sled_agent_shared::inventory::OmicronSledConfig;
+use nexus_sled_agent_shared::inventory::SledCpuFamily;
 use nexus_sled_agent_shared::inventory::SledRole;
 use nexus_sled_agent_shared::inventory::ZoneImageResolverInventory;
 use nexus_sled_agent_shared::inventory::ZoneKind;
@@ -1277,6 +1278,7 @@ impl Sled {
                 sled_id,
                 usable_hardware_threads: 10,
                 usable_physical_ram: ByteCount::from(1024 * 1024),
+                cpu_family: SledCpuFamily::AmdMilan,
                 // Populate disks, appearing like a real device.
                 disks: zpools
                     .values()
@@ -1484,6 +1486,7 @@ impl Sled {
             sled_id,
             usable_hardware_threads: inv_sled_agent.usable_hardware_threads,
             usable_physical_ram: inv_sled_agent.usable_physical_ram,
+            cpu_family: inv_sled_agent.cpu_family,
             disks: vec![],
             zpools: vec![],
             datasets: vec![],
@@ -1728,9 +1731,9 @@ impl Sled {
         Caboose {
             board: board.clone(),
             git_commit: String::from("unknown"),
-            name: board,
+            name: board.clone(),
             version: version.to_string(),
-            sign: None,
+            sign: Some(board),
         }
     }
 
@@ -1750,9 +1753,9 @@ impl Sled {
         Caboose {
             board: board.clone(),
             git_commit: String::from("unknown"),
-            name: board,
+            name: board.clone(),
             version: version.to_string(),
-            sign: None,
+            sign: Some(board),
         }
     }
 

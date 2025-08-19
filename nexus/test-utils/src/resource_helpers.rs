@@ -1523,7 +1523,7 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
             .expect("Cannot find sled")
     }
 
-    pub fn zpools(&self) -> ZpoolIterator {
+    pub fn zpools(&self) -> ZpoolIterator<'_> {
         ZpoolIterator {
             sleds: &self.sleds,
             sled: self.sleds.keys().next().copied(),

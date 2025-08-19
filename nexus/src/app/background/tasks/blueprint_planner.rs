@@ -11,6 +11,7 @@ use nexus_auth::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_reconfigurator_planning::planner::Planner;
+use nexus_reconfigurator_planning::planner::PlannerRng;
 use nexus_reconfigurator_preparation::PlanningInputFromDb;
 use nexus_types::deployment::ReconfiguratorChickenSwitchesView;
 use nexus_types::deployment::{Blueprint, BlueprintTarget};
@@ -140,6 +141,7 @@ impl BlueprintPlanner {
             &input,
             "blueprint_planner",
             &collection,
+            PlannerRng::from_entropy(),
         ) {
             Ok(planner) => planner,
             Err(error) => {
@@ -249,8 +251,13 @@ impl BlueprintPlanner {
         }
 
         // We have a new target!
+        let report = blueprint.report.clone();
         self.tx_blueprint.send_replace(Some(Arc::new((target, blueprint))));
-        BlueprintPlannerStatus::Targeted { parent_blueprint_id, blueprint_id }
+        BlueprintPlannerStatus::Targeted {
+            parent_blueprint_id,
+            blueprint_id,
+            report,
+        }
     }
 }
 
@@ -272,9 +279,12 @@ mod test {
     use crate::app::background::tasks::inventory_collection::InventoryCollector;
     use nexus_inventory::now_db_precision;
     use nexus_test_utils_macros::nexus_test;
-    use nexus_types::deployment::{
-        PendingMgsUpdates, PlannerChickenSwitches,
-        ReconfiguratorChickenSwitches,
+    use nexus_types::{
+        deployment::{
+            PendingMgsUpdates, PlannerChickenSwitches,
+            ReconfiguratorChickenSwitches,
+        },
+        quiesce::SagaQuiesceHandle,
     };
     use omicron_uuid_kinds::OmicronZoneUuid;
 
@@ -347,8 +357,10 @@ mod test {
             BlueprintPlannerStatus::Targeted {
                 parent_blueprint_id,
                 blueprint_id,
+                report,
             } if parent_blueprint_id == initial_blueprint.id
-                && blueprint_id != initial_blueprint.id =>
+                && blueprint_id != initial_blueprint.id
+                && blueprint_id == report.blueprint_id =>
             {
                 blueprint_id
             }
@@ -411,6 +423,7 @@ mod test {
             OmicronZoneUuid::new_v4(),
             Activator::new(),
             dummy_tx,
+            SagaQuiesceHandle::new(opctx.log.clone()),
         );
         let value = executor.activate(&opctx).await;
         let value = value.as_object().expect("response is not a JSON object");
