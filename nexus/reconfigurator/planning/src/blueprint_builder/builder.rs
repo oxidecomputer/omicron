@@ -14,6 +14,7 @@ use crate::blueprint_editor::ExternalSnatNetworkingChoice;
 use crate::blueprint_editor::NoAvailableDnsSubnets;
 use crate::blueprint_editor::SledEditError;
 use crate::blueprint_editor::SledEditor;
+use crate::mgs_updates::PendingHostPhase2Changes;
 use crate::planner::NoopConvertGlobalIneligibleReason;
 use crate::planner::NoopConvertInfo;
 use crate::planner::NoopConvertSledIneligibleReason;
@@ -1943,6 +1944,16 @@ impl<'a> BlueprintBuilder<'a> {
             .map_err(|err| Error::SledEditError { sled_id, err })?;
         let final_counts = editor.edit_counts();
         Ok(final_counts.difference_since(initial_counts))
+    }
+
+    pub(crate) fn apply_pending_host_phase_2_changes(
+        &mut self,
+        changes: PendingHostPhase2Changes,
+    ) -> Result<(), Error> {
+        for (sled_id, slot, contents) in changes.into_iter() {
+            self.sled_set_host_phase_2_slot(sled_id, slot, contents)?;
+        }
+        Ok(())
     }
 
     pub fn sled_set_host_phase_2(

@@ -15,6 +15,7 @@ use crate::blueprint_builder::Operation;
 use crate::blueprint_editor::DisksEditError;
 use crate::blueprint_editor::SledEditError;
 use crate::mgs_updates::ImpossibleUpdatePolicy;
+use crate::mgs_updates::PlannedMgsUpdates;
 use crate::mgs_updates::plan_mgs_updates;
 use crate::planner::image_source::NoopConvertZoneStatus;
 use crate::planner::omicron_zone_placement::PlacementError;
@@ -187,7 +188,7 @@ impl<'a> Planner<'a> {
         // Only plan MGS-based updates updates if there are no outstanding
         // MUPdate overrides.
         let mgs_updates = if plan_mupdate_override_res.is_empty() {
-            self.do_plan_mgs_updates()
+            self.do_plan_mgs_updates()?
         } else {
             PlanningMgsUpdatesStepReport::new(PendingMgsUpdates::new())
         };
@@ -1117,7 +1118,9 @@ impl<'a> Planner<'a> {
 
     /// Update at most one MGS-managed device (SP, RoT, etc.), if any are out of
     /// date.
-    fn do_plan_mgs_updates(&mut self) -> PlanningMgsUpdatesStepReport {
+    fn do_plan_mgs_updates(
+        &mut self,
+    ) -> Result<PlanningMgsUpdatesStepReport, Error> {
         // Determine which baseboards we will consider updating.
         //
         // Sleds may be present but not adopted as part of the control plane.
@@ -1162,27 +1165,30 @@ impl<'a> Planner<'a> {
             } else {
                 ImpossibleUpdatePolicy::Reevaluate
             };
-        let next = plan_mgs_updates(
-            &self.log,
-            &self.inventory,
-            &included_baseboards,
-            current_updates,
-            current_artifacts,
-            NUM_CONCURRENT_MGS_UPDATES,
-            impossible_update_policy,
-        );
-        if next != *current_updates {
+        let PlannedMgsUpdates { pending_updates, pending_host_phase_2_changes } =
+            plan_mgs_updates(
+                &self.log,
+                &self.inventory,
+                &included_baseboards,
+                current_updates,
+                current_artifacts,
+                NUM_CONCURRENT_MGS_UPDATES,
+                impossible_update_policy,
+            );
+        if pending_updates != *current_updates {
             // This will only add comments if our set of updates changed _and_
             // we have at least one update. If we went from "some updates" to
             // "no updates", that's not really comment-worthy; presumably we'll
             // do something else comment-worthy in a subsequent step.
-            for update in next.iter() {
+            for update in pending_updates.iter() {
                 self.blueprint.comment(update.description());
             }
         }
+        self.blueprint
+            .apply_pending_host_phase_2_changes(pending_host_phase_2_changes)?;
 
-        self.blueprint.pending_mgs_updates_replace_all(next.clone());
-        PlanningMgsUpdatesStepReport::new(next)
+        self.blueprint.pending_mgs_updates_replace_all(pending_updates.clone());
+        Ok(PlanningMgsUpdatesStepReport::new(pending_updates))
     }
 
     /// Update at most one existing zone to use a new image source.

@@ -449,10 +449,7 @@ impl SystemDescription {
         sled_id: SledUuid,
         sled_config: OmicronSledConfig,
     ) -> anyhow::Result<&mut Self> {
-        let sled = self.sleds.get_mut(&sled_id).with_context(|| {
-            format!("attempted to access sled {} not found in system", sled_id)
-        })?;
-        let sled = Arc::make_mut(sled);
+        let sled = self.get_sled_mut(sled_id)?;
 
         sled.inventory_sled_agent.ledgered_sled_config =
             Some(sled_config.clone());
@@ -475,10 +472,8 @@ impl SystemDescription {
         sled_id: SledUuid,
         policy: SledPolicy,
     ) -> anyhow::Result<&mut Self> {
-        let sled = self.sleds.get_mut(&sled_id).with_context(|| {
-            format!("attempted to access sled {} not found in system", sled_id)
-        })?;
-        Arc::make_mut(sled).policy = policy;
+        let sled = self.get_sled_mut(sled_id)?;
+        sled.policy = policy;
         Ok(self)
     }
 
@@ -490,11 +485,9 @@ impl SystemDescription {
         sled_id: SledUuid,
         visibility: SledInventoryVisibility,
     ) -> anyhow::Result<SledInventoryVisibility> {
-        let sled = self.sleds.get_mut(&sled_id).with_context(|| {
-            format!("attempted to access sled {} not found in system", sled_id)
-        })?;
-        let prev = Arc::make_mut(sled).inventory_visibility;
-        Arc::make_mut(sled).inventory_visibility = visibility;
+        let sled = self.get_sled_mut(sled_id)?;
+        let prev = sled.inventory_visibility;
+        sled.inventory_visibility = visibility;
         Ok(prev)
     }
 
@@ -507,10 +500,7 @@ impl SystemDescription {
         stage0_version: Option<ArtifactVersion>,
         stage0_next_version: Option<ExpectedVersion>,
     ) -> anyhow::Result<&mut Self> {
-        let sled = self.sleds.get_mut(&sled_id).with_context(|| {
-            format!("attempted to access sled {} not found in system", sled_id)
-        })?;
-        let sled = Arc::make_mut(sled);
+        let sled = self.get_sled_mut(sled_id)?;
         sled.set_rot_bootloader_versions(stage0_version, stage0_next_version);
         Ok(self)
     }
@@ -544,11 +534,38 @@ impl SystemDescription {
         active_version: Option<ArtifactVersion>,
         inactive_version: Option<ExpectedVersion>,
     ) -> anyhow::Result<&mut Self> {
-        let sled = self.sleds.get_mut(&sled_id).with_context(|| {
-            format!("attempted to access sled {} not found in system", sled_id)
-        })?;
-        let sled = Arc::make_mut(sled);
+        let sled = self.get_sled_mut(sled_id)?;
         sled.set_sp_versions(active_version, inactive_version);
+        Ok(self)
+    }
+
+    /// Update the host OS phase 1 artifacts reported for a sled.
+    ///
+    /// Where `None` is provided, no changes are made.
+    pub fn sled_update_host_phase_1_artifacts(
+        &mut self,
+        sled_id: SledUuid,
+        active: Option<M2Slot>,
+        slot_a: Option<ArtifactHash>,
+        slot_b: Option<ArtifactHash>,
+    ) -> anyhow::Result<&mut Self> {
+        let sled = self.get_sled_mut(sled_id)?;
+        sled.set_host_phase_1_artifacts(active, slot_a, slot_b);
+        Ok(self)
+    }
+
+    /// Update the host OS phase 2 artifacts reported for a sled.
+    ///
+    /// Where `None` is provided, no changes are made.
+    pub fn sled_update_host_phase_2_artifacts(
+        &mut self,
+        sled_id: SledUuid,
+        boot_disk: Option<M2Slot>,
+        slot_a: Option<ArtifactHash>,
+        slot_b: Option<ArtifactHash>,
+    ) -> anyhow::Result<&mut Self> {
+        let sled = self.get_sled_mut(sled_id)?;
+        sled.set_host_phase_2_artifacts(boot_disk, slot_a, slot_b);
         Ok(self)
     }
 
@@ -558,10 +575,7 @@ impl SystemDescription {
         sled_id: SledUuid,
         boot_inventory: Result<ZoneManifestBootInventory, String>,
     ) -> anyhow::Result<&mut Self> {
-        let sled = self.sleds.get_mut(&sled_id).with_context(|| {
-            format!("attempted to access sled {} not found in system", sled_id)
-        })?;
-        let sled = Arc::make_mut(sled);
+        let sled = self.get_sled_mut(sled_id)?;
         sled.set_zone_manifest(boot_inventory);
         Ok(self)
     }
@@ -715,10 +729,7 @@ impl SystemDescription {
         sled_id: SledUuid,
         mupdate_override: Option<MupdateOverrideUuid>,
     ) -> anyhow::Result<Result<Option<MupdateOverrideUuid>, String>> {
-        let sled = self.sleds.get_mut(&sled_id).with_context(|| {
-            format!("attempted to access sled {} not found in system", sled_id)
-        })?;
-        let sled = Arc::make_mut(sled);
+        let sled = self.get_sled_mut(sled_id)?;
         Ok(sled.set_mupdate_override(Ok(mupdate_override)))
     }
 
@@ -730,10 +741,7 @@ impl SystemDescription {
         sled_id: SledUuid,
         message: String,
     ) -> anyhow::Result<Result<Option<MupdateOverrideUuid>, String>> {
-        let sled = self.sleds.get_mut(&sled_id).with_context(|| {
-            format!("attempted to access sled {} not found in system", sled_id)
-        })?;
-        let sled = Arc::make_mut(sled);
+        let sled = self.get_sled_mut(sled_id)?;
         Ok(sled.set_mupdate_override(Err(message)))
     }
 
@@ -1723,6 +1731,68 @@ impl Sled {
                     }
                 }
             }
+        }
+    }
+
+    /// Update the reported host OS phase 1 artifacts
+    ///
+    /// If either field is `None`, that field is _unchanged_.
+    // Note that this means there's no way to _unset_ the version.
+    fn set_host_phase_1_artifacts(
+        &mut self,
+        active: Option<M2Slot>,
+        slot_a: Option<ArtifactHash>,
+        slot_b: Option<ArtifactHash>,
+    ) {
+        if let Some(active) = active {
+            self.sp_host_phase_1_active_slot = Some(active);
+        }
+
+        if let Some(slot_a) = slot_a {
+            self.sp_host_phase_1_hash_flash.insert(M2Slot::A, slot_a);
+        }
+
+        if let Some(slot_b) = slot_b {
+            self.sp_host_phase_1_hash_flash.insert(M2Slot::B, slot_b);
+        }
+    }
+
+    /// Update the reported host OS phase 2 artifacts
+    ///
+    /// If either field is `None`, that field is _unchanged_.
+    // Note that this means there's no way to _unset_ the version.
+    fn set_host_phase_2_artifacts(
+        &mut self,
+        boot_disk: Option<M2Slot>,
+        slot_a: Option<ArtifactHash>,
+        slot_b: Option<ArtifactHash>,
+    ) {
+        let last_reconciliation = self
+            .inventory_sled_agent
+            .last_reconciliation
+            .as_mut()
+            .expect("simulated system populates last reconciliation");
+
+        if let Some(boot_disk) = boot_disk {
+            last_reconciliation.boot_partitions.boot_disk = Ok(boot_disk);
+        }
+
+        if let Some(slot_a) = slot_a {
+            last_reconciliation
+                .boot_partitions
+                .slot_a
+                .as_mut()
+                .expect("simulated system populates OS slots")
+                .artifact_hash = slot_a;
+        }
+
+        if let Some(slot_b) = slot_b {
+            last_reconciliation
+                .boot_partitions
+                .slot_b
+                .as_mut()
+                .expect("simulated system populates OS slots")
+                .artifact_hash = slot_b;
         }
     }
 
