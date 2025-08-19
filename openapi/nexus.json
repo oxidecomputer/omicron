@@ -16819,9 +16819,17 @@
             "description": "Human-readable name that can identify the user",
             "type": "string"
           },
+          "fleet_viewer": {
+            "description": "Whether this user has the viewer role on the fleet. Used by the web console to determine whether to show system-level UI.",
+            "type": "boolean"
+          },
           "id": {
             "type": "string",
             "format": "uuid"
+          },
+          "silo_admin": {
+            "description": "Whether this user has the admin role on their silo. Used by the web console to determine whether to show admin-only UI elements.",
+            "type": "boolean"
           },
           "silo_id": {
             "description": "Uuid of the silo to which this user belongs",
@@ -16839,7 +16847,9 @@
         },
         "required": [
           "display_name",
+          "fleet_viewer",
           "id",
+          "silo_admin",
           "silo_id",
           "silo_name"
         ]
