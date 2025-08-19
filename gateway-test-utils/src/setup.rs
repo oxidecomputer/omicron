@@ -34,7 +34,7 @@ use uuid::Uuid;
 // import it or have our own?
 const RACK_UUID: &str = "c19a698f-c6f9-4a17-ae30-20d711b8f7dc";
 pub const DEFAULT_SP_SIM_CONFIG: &str =
-    concat!(env!("CARGO_MANIFEST_DIR"), "configs/sp_sim_config.test.toml");
+    concat!(env!("CARGO_MANIFEST_DIR"), "/configs/sp_sim_config.test.toml");
 
 pub struct GatewayTestContext {
     pub client: ClientTestContext,
