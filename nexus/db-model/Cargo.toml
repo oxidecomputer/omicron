@@ -15,6 +15,7 @@ anyhow.workspace = true
 camino.workspace = true
 chrono.workspace = true
 clickhouse-admin-types.workspace = true
+cockroach-admin-types.workspace = true
 derive-where.workspace = true
 diesel = { workspace = true, features = ["postgres", "r2d2", "chrono", "serde_json", "network-address", "uuid"] }
 hex.workspace = true
