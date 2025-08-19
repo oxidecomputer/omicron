@@ -39,7 +39,7 @@ external_dns_servers = ["1.1.1.1", "9.9.9.9"]
 
 [deployment.dropshot_external]
 # IP Address and TCP port on which to listen for the external API
-bind_address = "127.0.0.1:12220"
+bind_address = "0.0.0.0:12220"
 default_request_body_max_bytes = 1048576
 # To have Nexus's external HTTP endpoint use TLS, uncomment the line below.  You
 # will also need to provide an initial TLS certificate during rack
