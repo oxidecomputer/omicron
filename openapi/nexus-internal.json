@@ -1471,10 +1471,10 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "title": "Array_of_Ipv4NatEntryView",
+                  "title": "Array_of_NatEntryView",
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/Ipv4NatEntryView"
+                    "$ref": "#/components/schemas/NatEntryView"
                   }
                 }
               }
@@ -5169,53 +5169,6 @@
           }
         ]
       },
-      "Ipv4NatEntryView": {
-        "description": "NAT Record",
-        "type": "object",
-        "properties": {
-          "deleted": {
-            "type": "boolean"
-          },
-          "external_address": {
-            "type": "string",
-            "format": "ipv4"
-          },
-          "first_port": {
-            "type": "integer",
-            "format": "uint16",
-            "minimum": 0
-          },
-          "gen": {
-            "type": "integer",
-            "format": "int64"
-          },
-          "last_port": {
-            "type": "integer",
-            "format": "uint16",
-            "minimum": 0
-          },
-          "mac": {
-            "$ref": "#/components/schemas/MacAddr"
-          },
-          "sled_address": {
-            "type": "string",
-            "format": "ipv6"
-          },
-          "vni": {
-            "$ref": "#/components/schemas/Vni"
-          }
-        },
-        "required": [
-          "deleted",
-          "external_address",
-          "first_port",
-          "gen",
-          "last_port",
-          "mac",
-          "sled_address",
-          "vni"
-        ]
-      },
       "Ipv4Net": {
         "example": "192.168.1.0/24",
         "title": "An IPv4 subnet",
@@ -5560,6 +5513,53 @@
         "pattern": "^(?![0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$)^[a-z]([a-zA-Z0-9-]*[a-zA-Z0-9]+)?$",
         "minLength": 1,
         "maxLength": 63
+      },
+      "NatEntryView": {
+        "description": "NAT Record\n\nA NAT record maps an external IP address, used by an instance or externally-facing service like Nexus, to the hosting sled.",
+        "type": "object",
+        "properties": {
+          "deleted": {
+            "type": "boolean"
+          },
+          "external_address": {
+            "type": "string",
+            "format": "ip"
+          },
+          "first_port": {
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          },
+          "gen": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "last_port": {
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          },
+          "mac": {
+            "$ref": "#/components/schemas/MacAddr"
+          },
+          "sled_address": {
+            "type": "string",
+            "format": "ipv6"
+          },
+          "vni": {
+            "$ref": "#/components/schemas/Vni"
+          }
+        },
+        "required": [
+          "deleted",
+          "external_address",
+          "first_port",
+          "gen",
+          "last_port",
+          "mac",
+          "sled_address",
+          "vni"
+        ]
       },
       "NetworkInterface": {
         "description": "Information required to construct a virtual network interface",

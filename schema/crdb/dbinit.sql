@@ -5149,9 +5149,9 @@ FROM
 WHERE
     instance.time_deleted IS NULL AND vmm.time_deleted IS NULL;
 
-CREATE SEQUENCE IF NOT EXISTS omicron.public.ipv4_nat_version START 1 INCREMENT 1;
+CREATE SEQUENCE IF NOT EXISTS omicron.public.nat_version START 1 INCREMENT 1;
 
-CREATE TABLE IF NOT EXISTS omicron.public.ipv4_nat_entry (
+CREATE TABLE IF NOT EXISTS omicron.public.nat_entry (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     external_address INET NOT NULL,
     first_port INT4 NOT NULL,
@@ -5159,13 +5159,13 @@ CREATE TABLE IF NOT EXISTS omicron.public.ipv4_nat_entry (
     sled_address INET NOT NULL,
     vni INT4 NOT NULL,
     mac INT8 NOT NULL,
-    version_added INT8 NOT NULL DEFAULT nextval('omicron.public.ipv4_nat_version'),
+    version_added INT8 NOT NULL DEFAULT nextval('omicron.public.nat_version'),
     version_removed INT8,
     time_created TIMESTAMPTZ NOT NULL DEFAULT now(),
     time_deleted TIMESTAMPTZ
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS ipv4_nat_version_added ON omicron.public.ipv4_nat_entry (
+CREATE UNIQUE INDEX IF NOT EXISTS nat_version_added ON omicron.public.nat_entry (
     version_added
 )
 STORING (
@@ -5179,15 +5179,15 @@ STORING (
     time_deleted
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS overlapping_ipv4_nat_entry ON omicron.public.ipv4_nat_entry (
+CREATE UNIQUE INDEX IF NOT EXISTS overlapping_nat_entry ON omicron.public.nat_entry (
     external_address,
     first_port,
     last_port
 ) WHERE time_deleted IS NULL;
 
-CREATE INDEX IF NOT EXISTS ipv4_nat_lookup ON omicron.public.ipv4_nat_entry (external_address, first_port, last_port, sled_address, vni, mac);
+CREATE INDEX IF NOT EXISTS nat_lookup ON omicron.public.nat_entry (external_address, first_port, last_port, sled_address, vni, mac);
 
-CREATE UNIQUE INDEX IF NOT EXISTS ipv4_nat_version_removed ON omicron.public.ipv4_nat_entry (
+CREATE UNIQUE INDEX IF NOT EXISTS nat_version_removed ON omicron.public.nat_entry (
     version_removed
 )
 STORING (
@@ -5200,6 +5200,82 @@ STORING (
     time_created,
     time_deleted
 );
+
+CREATE INDEX IF NOT EXISTS nat_lookup_by_vni ON omicron.public.nat_entry (
+  vni
+)
+STORING (
+  external_address,
+  first_port,
+  last_port,
+  sled_address,
+  mac,
+  version_added,
+  version_removed,
+  time_created,
+  time_deleted
+);
+
+/*
+ * A view of the ipv4 nat change history
+ * used to summarize changes for external viewing
+ */
+CREATE VIEW IF NOT EXISTS omicron.public.nat_changes
+AS
+-- Subquery:
+-- We need to be able to order partial changesets. ORDER BY on separate columns
+-- will not accomplish this, so we'll do this by interleaving version_added
+-- and version_removed (version_removed taking priority if NOT NULL) and then sorting
+-- on the appropriate version numbers at call time.
+WITH interleaved_versions AS (
+  -- fetch all active NAT entries (entries that have not been soft deleted)
+  SELECT
+    external_address,
+    first_port,
+    last_port,
+    sled_address,
+    vni,
+    mac,
+    -- rename version_added to version
+    version_added AS version,
+    -- create a new virtual column, boolean value representing whether or not
+    -- the record has been soft deleted
+    (version_removed IS NOT NULL) as deleted
+  FROM omicron.public.nat_entry
+  WHERE version_removed IS NULL
+
+  -- combine the datasets, unifying the version_added and version_removed
+  -- columns to a single `version` column so we can interleave and sort the entries
+  UNION
+
+  -- fetch all inactive NAT entries (entries that have been soft deleted)
+  SELECT
+    external_address,
+    first_port,
+    last_port,
+    sled_address,
+    vni,
+    mac,
+    -- rename version_removed to version
+    version_removed AS version,
+    -- create a new virtual column, boolean value representing whether or not
+    -- the record has been soft deleted
+    (version_removed IS NOT NULL) as deleted
+  FROM omicron.public.nat_entry
+  WHERE version_removed IS NOT NULL
+)
+-- this is our new "table"
+-- here we select the columns from the subquery defined above
+SELECT
+  external_address,
+  first_port,
+  last_port,
+  sled_address,
+  vni,
+  mac,
+  version,
+  deleted
+FROM interleaved_versions;
 
 CREATE TYPE IF NOT EXISTS omicron.public.bfd_mode AS ENUM (
     'single_hop',
@@ -5225,81 +5301,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_bfd_session ON omicron.public.bfd_sessi
     switch
 ) WHERE time_deleted IS NULL;
 
-CREATE INDEX IF NOT EXISTS ipv4_nat_lookup_by_vni ON omicron.public.ipv4_nat_entry (
-  vni
-)
-STORING (
-  external_address,
-  first_port,
-  last_port,
-  sled_address,
-  mac,
-  version_added,
-  version_removed,
-  time_created,
-  time_deleted
-);
-
-/*
- * A view of the ipv4 nat change history
- * used to summarize changes for external viewing
- */
-CREATE VIEW IF NOT EXISTS omicron.public.ipv4_nat_changes
-AS
--- Subquery:
--- We need to be able to order partial changesets. ORDER BY on separate columns
--- will not accomplish this, so we'll do this by interleaving version_added
--- and version_removed (version_removed taking priority if NOT NULL) and then sorting
--- on the appropriate version numbers at call time.
-WITH interleaved_versions AS (
-  -- fetch all active NAT entries (entries that have not been soft deleted)
-  SELECT
-    external_address,
-    first_port,
-    last_port,
-    sled_address,
-    vni,
-    mac,
-    -- rename version_added to version
-    version_added AS version,
-    -- create a new virtual column, boolean value representing whether or not
-    -- the record has been soft deleted
-    (version_removed IS NOT NULL) as deleted
-  FROM omicron.public.ipv4_nat_entry
-  WHERE version_removed IS NULL
-
-  -- combine the datasets, unifying the version_added and version_removed
-  -- columns to a single `version` column so we can interleave and sort the entries
-  UNION
-
-  -- fetch all inactive NAT entries (entries that have been soft deleted)
-  SELECT
-    external_address,
-    first_port,
-    last_port,
-    sled_address,
-    vni,
-    mac,
-    -- rename version_removed to version
-    version_removed AS version,
-    -- create a new virtual column, boolean value representing whether or not
-    -- the record has been soft deleted
-    (version_removed IS NOT NULL) as deleted
-  FROM omicron.public.ipv4_nat_entry
-  WHERE version_removed IS NOT NULL
-)
--- this is our new "table"
--- here we select the columns from the subquery defined above
-SELECT
-  external_address,
-  first_port,
-  last_port,
-  sled_address,
-  vni,
-  mac,
-  version,
-  deleted
-FROM interleaved_versions;
 
 CREATE TABLE IF NOT EXISTS omicron.public.probe (
     id UUID NOT NULL PRIMARY KEY,
@@ -6549,7 +6550,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '180.0.0', NULL)
+    (TRUE, NOW(), NOW(), '181.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

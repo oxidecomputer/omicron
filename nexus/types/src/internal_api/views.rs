@@ -34,7 +34,7 @@ use serde::Serialize;
 use std::collections::BTreeMap;
 use std::collections::VecDeque;
 use std::fmt::Display;
-use std::net::Ipv4Addr;
+use std::net::IpAddr;
 use std::net::Ipv6Addr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -334,9 +334,12 @@ pub struct LastResultCompleted {
 }
 
 /// NAT Record
+///
+/// A NAT record maps an external IP address, used by an instance or
+/// externally-facing service like Nexus, to the hosting sled.
 #[derive(Clone, Debug, Serialize, JsonSchema)]
-pub struct Ipv4NatEntryView {
-    pub external_address: Ipv4Addr,
+pub struct NatEntryView {
+    pub external_address: IpAddr,
     pub first_port: u16,
     pub last_port: u16,
     pub sled_address: Ipv6Addr,

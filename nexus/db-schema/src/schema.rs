@@ -653,7 +653,7 @@ table! {
 }
 
 table! {
-    ipv4_nat_entry (id) {
+    nat_entry (id) {
         id -> Uuid,
         external_address -> Inet,
         first_port -> Int4,
@@ -668,9 +668,9 @@ table! {
     }
 }
 
-// View used for summarizing changes to ipv4_nat_entry
+// View used for summarizing changes to nat_entry
 table! {
-    ipv4_nat_changes (version) {
+    nat_changes (version) {
         external_address -> Inet,
         first_port -> Int4,
         last_port -> Int4,
@@ -683,9 +683,9 @@ table! {
 }
 
 // This is the sequence used for the version number
-// in ipv4_nat_entry.
+// in nat_entry.
 table! {
-    ipv4_nat_version (last_value) {
+    nat_version (last_value) {
         last_value -> Int8,
         log_cnt -> Int8,
         is_called -> Bool,
