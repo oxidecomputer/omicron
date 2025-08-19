@@ -7152,17 +7152,28 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let (authz_silo, silo) =
                 nexus.current_silo_lookup(&opctx)?.fetch().await?;
 
+            // only eat Forbidden errors indicating lack of perms. other errors
+            // blow up normally
+            let fleet_viewer =
+                match opctx.authorize(authz::Action::Read, &authz::FLEET).await
+                {
+                    Ok(()) => true,
+                    Err(Error::Forbidden) => false,
+                    Err(e) => return Err(e.into()),
+                };
+            let silo_admin =
+                match opctx.authorize(authz::Action::Modify, &authz_silo).await
+                {
+                    Ok(()) => true,
+                    Err(Error::Forbidden) => false,
+                    Err(e) => return Err(e.into()),
+                };
+
             Ok(HttpResponseOk(views::CurrentUser {
                 user: user.into(),
                 silo_name: silo.name().clone(),
-                fleet_viewer: opctx
-                    .authorize(authz::Action::Read, &authz::FLEET)
-                    .await
-                    .is_ok(),
-                silo_admin: opctx
-                    .authorize(authz::Action::Modify, &authz_silo)
-                    .await
-                    .is_ok(),
+                fleet_viewer,
+                silo_admin,
             }))
         };
         apictx
