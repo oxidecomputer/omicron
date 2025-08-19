@@ -1197,11 +1197,11 @@ sql_exec_latency_bucket{le="0.01"} 25
         // Malformed lines (missing values, extra spaces, etc.)
         let malformed_input = "
 metric_name_no_value
-metric_name_with_space \
+metric_name_with_space \n\
 metric_name_multiple spaces here
 = value_no_name
  leading_space_metric 123
-trailing_space_metric 456 \
+trailing_space_metric 456 \n\
 metric{label=value} 789
 metric{malformed=label value} 999
 ";
