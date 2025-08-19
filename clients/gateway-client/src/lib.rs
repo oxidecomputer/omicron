@@ -48,7 +48,7 @@ use types::ComponentFirmwareHashStatus;
 // call into each other. Since `gateway` is a lower-level service and never
 // calls into Nexus, the current scheme is okay.)
 progenitor::generate_api!(
-    spec = "../../openapi/gateway/gateway-latest.json",
+    spec = "../../openapi/gateway.json",
     interface = Positional,
     inner_type = slog::Logger,
     pre_hook = (|log: &slog::Logger, request: &reqwest::Request| {

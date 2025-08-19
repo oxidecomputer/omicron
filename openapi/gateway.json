@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "1.0.0"
+    "version": "0.0.1"
   },
   "paths": {
     "/ignition": {
