@@ -10,6 +10,7 @@
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use cockroach_admin_client::Client;
+use cockroach_admin_types::NodeId;
 use futures::stream::{FuturesUnordered, StreamExt};
 use parallel_task_set::ParallelTaskSet;
 use serde::{Deserialize, Serialize};
@@ -760,93 +761,6 @@ impl PrometheusMetrics {
     }
 }
 
-/// CockroachDB Node ID
-///
-/// This field is stored internally as a String to avoid questions
-/// about size, signedness, etc - it can be treated as an arbitrary
-/// unique identifier.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize)]
-pub struct NodeId(pub String);
-
-impl NodeId {
-    pub fn new(id: String) -> Self {
-        Self(id)
-    }
-
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-impl std::fmt::Display for NodeId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-impl std::str::FromStr for NodeId {
-    type Err = std::convert::Infallible;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(Self(s.to_string()))
-    }
-}
-
-// When parsing the underlying NodeId, we force it to be interpreted
-// as a String. Without this custom Deserialize implementation, we
-// encounter parsing errors when querying endpoints which return the
-// NodeId as an integer.
-impl<'de> serde::Deserialize<'de> for NodeId {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        use serde::de::{Error, Visitor};
-        use std::fmt;
-
-        struct NodeIdVisitor;
-
-        impl<'de> Visitor<'de> for NodeIdVisitor {
-            type Value = NodeId;
-
-            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-                formatter
-                    .write_str("a string or integer representing a node ID")
-            }
-
-            fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
-            where
-                E: Error,
-            {
-                Ok(NodeId(value.to_string()))
-            }
-
-            fn visit_string<E>(self, value: String) -> Result<Self::Value, E>
-            where
-                E: Error,
-            {
-                Ok(NodeId(value))
-            }
-
-            fn visit_i64<E>(self, value: i64) -> Result<Self::Value, E>
-            where
-                E: Error,
-            {
-                Ok(NodeId(value.to_string()))
-            }
-
-            fn visit_u64<E>(self, value: u64) -> Result<Self::Value, E>
-            where
-                E: Error,
-            {
-                Ok(NodeId(value.to_string()))
-            }
-        }
-
-        deserializer.deserialize_any(NodeIdVisitor)
-    }
-}
-
 /// CockroachDB node liveness status
 ///
 /// From CockroachDB's [NodeLivenessStatus protobuf enum](https://github.com/cockroachdb/cockroach/blob/release-21.1/pkg/kv/kvserver/liveness/livenesspb/liveness.proto#L107-L138)
@@ -1283,11 +1197,11 @@ sql_exec_latency_bucket{le="0.01"} 25
         // Malformed lines (missing values, extra spaces, etc.)
         let malformed_input = r#"
 metric_name_no_value
-metric_name_with_space 
+metric_name_with_space
 metric_name_multiple spaces here
 = value_no_name
  leading_space_metric 123
-trailing_space_metric 456 
+trailing_space_metric 456
 metric{label=value} 789
 metric{malformed=label value} 999
 "#;
