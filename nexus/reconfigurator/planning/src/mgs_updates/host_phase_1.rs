@@ -413,8 +413,9 @@ pub(super) fn try_make_update(
     let mut phase_1_artifacts = Vec::with_capacity(1);
     let mut phase_2_artifacts = Vec::with_capacity(1);
     for artifact in &current_artifacts.artifacts {
-        // TODO Need to choose gimlet vs cosmo here! Need help from tufaceous to
-        // tell us which is which.
+        // TODO-correctness Need to choose gimlet vs cosmo here! Need help from
+        // tufaceous to tell us which is which.
+        // https://github.com/oxidecomputer/omicron/issues/8777
         if artifact.id.kind == ArtifactKind::HOST_PHASE_1 {
             phase_1_artifacts.push(artifact);
         } else if artifact.id.kind == ArtifactKind::HOST_PHASE_2 {
