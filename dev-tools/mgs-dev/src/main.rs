@@ -59,7 +59,7 @@ impl MgsRunArgs {
 
         println!("mgs-dev: setting up MGS ... ");
         let (mut mgs_config, sp_sim_config) =
-            gateway_test_utils::setup::load_test_config_from(
+            gateway_test_utils::setup::load_test_config(
                 self.sp_sim_config_file.clone(),
             );
         if let Some(addr) = self.nexus_address {

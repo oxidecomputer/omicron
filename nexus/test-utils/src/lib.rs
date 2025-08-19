@@ -17,6 +17,7 @@ use dropshot::test_util::ClientTestContext;
 use dropshot::test_util::LogContext;
 use futures::FutureExt;
 use futures::future::BoxFuture;
+use gateway_test_utils::setup::DEFAULT_SP_SIM_CONFIG;
 use gateway_test_utils::setup::GatewayTestContext;
 use hickory_resolver::TokioResolver;
 use hickory_resolver::config::NameServerConfig;
@@ -328,7 +329,7 @@ pub async fn test_setup<N: NexusServer>(
         sim::SimMode::Explicit,
         None,
         extra_sled_agents,
-        None,
+        DEFAULT_SP_SIM_CONFIG.into(),
     )
     .await
 }
@@ -675,13 +676,11 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         &mut self,
         switch_location: SwitchLocation,
         port: Option<u16>,
-        sp_sim_config_file: Option<Utf8PathBuf>,
+        sp_sim_config_file: Utf8PathBuf,
     ) {
         debug!(&self.logctx.log, "Starting Management Gateway");
-        let (mgs_config, sp_sim_config) = match sp_sim_config_file {
-            Some(c) => gateway_test_utils::setup::load_test_config_from(c),
-            None => gateway_test_utils::setup::load_test_config(),
-        };
+        let (mgs_config, sp_sim_config) =
+            gateway_test_utils::setup::load_test_config(sp_sim_config_file);
 
         let mgs_addr =
             port.map(|port| SocketAddrV6::new(Ipv6Addr::LOCALHOST, port, 0, 0));
@@ -1589,7 +1588,7 @@ enum PopulateCrdb {
 pub async fn omicron_dev_setup_with_config<N: NexusServer>(
     config: &mut NexusConfig,
     extra_sled_agents: u16,
-    gateway_config_file: Option<Utf8PathBuf>,
+    gateway_config_file: Utf8PathBuf,
 ) -> Result<ControlPlaneTestContext<N>> {
     let builder =
         ControlPlaneTestContextBuilder::<N>::new("omicron-dev", config);
@@ -1628,7 +1627,7 @@ pub async fn test_setup_with_config<N: NexusServer>(
     sim_mode: sim::SimMode,
     initial_cert: Option<Certificate>,
     extra_sled_agents: u16,
-    gateway_config_file: Option<Utf8PathBuf>,
+    gateway_config_file: Utf8PathBuf,
 ) -> ControlPlaneTestContext<N> {
     let builder = ControlPlaneTestContextBuilder::<N>::new(test_name, config);
     setup_with_config_impl(
@@ -1648,7 +1647,7 @@ async fn setup_with_config_impl<N: NexusServer>(
     sim_mode: sim::SimMode,
     initial_cert: Option<Certificate>,
     extra_sled_agents: u16,
-    gateway_config_file: Option<Utf8PathBuf>,
+    gateway_config_file: Utf8PathBuf,
 ) -> ControlPlaneTestContext<N> {
     const STEP_TIMEOUT: Duration = Duration::from_secs(60);
 

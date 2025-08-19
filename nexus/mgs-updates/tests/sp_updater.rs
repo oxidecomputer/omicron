@@ -7,7 +7,7 @@
 use gateway_client::SpComponent;
 use gateway_client::types::SpType;
 use gateway_messages::{SpPort, UpdateInProgressStatus, UpdateStatus};
-use gateway_test_utils::setup as mgs_setup;
+use gateway_test_utils::setup::{self as mgs_setup, DEFAULT_SP_SIM_CONFIG};
 use hubtools::RawHubrisArchive;
 use hubtools::{CabooseBuilder, HubrisArchiveBuilder};
 use nexus_mgs_updates::{MgsClients, SpUpdater, UpdateProgress};
@@ -567,7 +567,8 @@ async fn test_sp_updater_switches_mgs_instances_on_failure() {
 async fn test_sp_updater_delivers_progress() {
     // Start MGS + Sim SP.
     let mgstestctx = {
-        let (mut mgs_config, sp_sim_config) = mgs_setup::load_test_config();
+        let (mut mgs_config, sp_sim_config) =
+            mgs_setup::load_test_config(DEFAULT_SP_SIM_CONFIG.into());
         // Enabling SP metrics collection makes this alread-flaky test even
         // flakier, so let's just turn it off.
         // TODO(eliza): it would be nice if we didn't have to disable metrics in

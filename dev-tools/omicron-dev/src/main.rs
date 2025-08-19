@@ -80,12 +80,11 @@ impl RunAllArgs {
         }
 
         println!("omicron-dev: setting up all services ... ");
-        let cptestctx =
-            nexus_test_utils::omicron_dev_setup_with_config::<
-                omicron_nexus::Server,
-            >(&mut config, 0, Some(self.gateway_config.clone()))
-            .await
-            .context("error setting up services")?;
+        let cptestctx = nexus_test_utils::omicron_dev_setup_with_config::<
+            omicron_nexus::Server,
+        >(&mut config, 0, self.gateway_config.clone())
+        .await
+        .context("error setting up services")?;
 
         println!("omicron-dev: Adding disks to first sled agent");
 
