@@ -4018,6 +4018,7 @@ mod tests {
                         description: "A NIC...".into(),
                     },
                     None,
+                    vec![],
                 )
                 .unwrap(),
             )
