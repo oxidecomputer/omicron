@@ -309,7 +309,7 @@ impl TestState {
                 for s in removed_nodes {
                     // The same selection can be chosen more than once. so we
                     // must add the extra check rather than shrinking the length
-                    // of the `removed_nodes` iterator with `take`.;
+                    // of the `removed_nodes` iterator with `take`.
                     if nodes_to_remove.len() == max_nodes_to_remove {
                         break;
                     }
@@ -398,6 +398,38 @@ impl TestState {
         self.invariant_nodes_have_committed_if_nexus_has_acks()?;
         self.invariant_nodes_not_coordinating_and_computing_key_share_simultaneously()?;
         self.invariant_no_alarms()?;
+        self.invariant_expunged_nodes_have_actually_been_expunged()?;
+        Ok(())
+    }
+
+    /// For all expunged nodes ensure that either:
+    ///  * they know they are expunged
+    ///  * have a latest committed configuration where they are still a member
+    ///  * have no committed configurations
+    fn invariant_expunged_nodes_have_actually_been_expunged(
+        &self,
+    ) -> Result<(), TestCaseError> {
+        for id in &self.tq_state.expunged {
+            let (_, ctx) =
+                self.tq_state.sut.nodes.get(id).expect("node exists");
+            let ps = ctx.persistent_state();
+            if ps.is_expunged() {
+                continue;
+            }
+            if let Some(config) = ps.latest_committed_configuration() {
+                let nexus_config = self
+                    .tq_state
+                    .nexus
+                    .configs
+                    .get(&config.epoch)
+                    .expect("config exists");
+                prop_assert!(config.members.contains_key(ctx.platform_id()));
+                prop_assert!(nexus_config.members.contains(ctx.platform_id()));
+            } else {
+                continue;
+            }
+        }
+
         Ok(())
     }
 
