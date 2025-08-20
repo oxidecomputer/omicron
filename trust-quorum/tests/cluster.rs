@@ -659,6 +659,6 @@ fn test_trust_quorum_protocol(input: TestInput) {
         "skipped_actions" => state.skipped_actions
     );
 
-    //    let _ = std::fs::remove_file(event_log_path);
+    let _ = std::fs::remove_file(event_log_path);
     logctx.cleanup_successful();
 }
