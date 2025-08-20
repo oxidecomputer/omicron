@@ -218,6 +218,18 @@ impl SagaQuiesceHandle {
         let _ = self.inner.subscribe().wait_for(|q| q.is_fully_drained()).await;
     }
 
+    /// Wait for the initial determination to be made about whether sagas are
+    /// allowed or not.
+    pub async fn wait_for_determination(&self) {
+        let _ = self
+            .inner
+            .subscribe()
+            .wait_for(|q| {
+                q.new_sagas_allowed != SagasAllowed::DisallowedUnknown
+            })
+            .await;
+    }
+
     /// Returns information about running sagas (involves a clone)
     pub fn sagas_pending(&self) -> IdOrdMap<PendingSagaInfo> {
         self.inner.borrow().sagas_pending.clone()

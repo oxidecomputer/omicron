@@ -621,6 +621,14 @@ impl Nexus {
         }
     }
 
+    // Waits for Nexus to determine whether sagas are supposed to be quiesced
+    //
+    // This is used by the test suite because most tests assume that sagas are
+    // operational as soon as they start.
+    pub(crate) async fn wait_for_saga_determination(&self) {
+        self.quiesce.sagas().wait_for_determination().await;
+    }
+
     pub(crate) async fn external_tls_config(
         &self,
         tls_enabled: bool,

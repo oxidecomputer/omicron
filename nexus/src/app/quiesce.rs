@@ -92,13 +92,13 @@ impl NexusQuiesceHandle {
             }
         });
 
+        // Immediately (synchronously) update the saga quiesce status.  It's
+        // okay to do this even if there wasn't a change.
+        self.sagas.set_quiescing(quiescing);
+
         if changed && quiescing {
-            // Immediately quiesce sagas.
-            self.sagas.set_quiescing(quiescing);
             // Asynchronously complete the rest of the quiesce process.
-            if quiescing {
-                tokio::spawn(do_quiesce(self.clone()));
-            }
+            tokio::spawn(do_quiesce(self.clone()));
         }
     }
 }
