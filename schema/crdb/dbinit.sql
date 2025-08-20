@@ -2537,6 +2537,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.tuf_artifact (
     -- Sign (root key hash table) hash of a signed RoT or RoT bootloader image.
     sign BYTES, -- nullable
 
+    -- Board (caboose BORD) for artifacts that are Hubris archives.
+    board TEXT, -- nullable (null for non-Hubris artifacts)
+
     CONSTRAINT unique_name_version_kind UNIQUE (name, version, kind)
 );
 
