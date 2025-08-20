@@ -314,6 +314,19 @@ impl Node {
         from: PlatformId,
         config: Configuration,
     ) {
+        // The sender sent us a configuration even though we are not part of the
+        // configuration. This is a bug on the sender's part, but doesn't rise
+        // to the level of an alarm. Log an error.
+        if !config.members.contains_key(ctx.platform_id()) {
+            error!(
+                self.log,
+                "Received CommitAdvance, but not a member of configuration";
+                "from" => %from,
+                "epoch" => %config.epoch
+            );
+            return;
+        }
+
         // We may have already advanced by the time we receive this message.
         // Let's check.
         if ctx.persistent_state().commits.contains(&config.epoch) {
@@ -354,6 +367,7 @@ impl Node {
                     config2: config.clone(),
                     from: from.clone(),
                 });
+                return;
             }
         } else {
             ctx.update_persistent_state(|ps| {
@@ -430,7 +444,7 @@ impl Node {
             }
         }
 
-        // We either were collectiong shares for an old epoch or haven't started
+        // We either were collecting shares for an old epoch or haven't started
         // yet.
         self.key_share_computer =
             Some(KeyShareComputer::new(&self.log, ctx, config));
@@ -461,7 +475,7 @@ impl Node {
                 info!(
                     self.log,
                     concat!(
-                        "Received 'GetShare'` from stale node. ",
+                        "Received 'GetShare' from stale node. ",
                         "Responded with 'CommitAdvance'."
                     );
                     "from" => %from,

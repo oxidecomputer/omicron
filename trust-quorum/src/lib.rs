@@ -9,9 +9,12 @@
 //! All persistent state and all networking is managed outside of this
 //! implementation.
 
+use crypto::Sha3_256Digest;
 use daft::Diffable;
 use derive_more::Display;
+use gfss::shamir::Share;
 use serde::{Deserialize, Serialize};
+use slog::{Logger, error, warn};
 
 mod compute_key_share;
 mod configuration;
@@ -132,4 +135,53 @@ pub struct Envelope {
     pub to: PlatformId,
     pub from: PlatformId,
     pub msg: PeerMsg,
+}
+
+/// Check if a received share is valid for a given configuration
+///
+/// Return true if valid, false otherwise.
+pub fn validate_share(
+    log: &Logger,
+    config: &Configuration,
+    from: &PlatformId,
+    epoch: Epoch,
+    share: &Share,
+) -> bool {
+    // Are we trying to retrieve shares for `epoch`?
+    if epoch != config.epoch {
+        warn!(
+            log,
+            "Received Share from node with wrong epoch";
+            "received_epoch" => %epoch,
+            "from" => %from
+        );
+        return false;
+    }
+
+    // Is the sender a member of the configuration `epoch`?
+    // Was the sender a member of the configuration at `old_epoch`?
+    let Some(expected_digest) = config.members.get(&from) else {
+        warn!(
+            log,
+            "Received Share from unexpected node";
+            "epoch" => %epoch,
+            "from" => %from
+        );
+        return false;
+    };
+
+    // Does the share hash match what we expect?
+    let mut digest = Sha3_256Digest::default();
+    share.digest::<sha3::Sha3_256>(&mut digest.0);
+    if digest != *expected_digest {
+        error!(
+            log,
+            "Received share with invalid digest";
+            "epoch" => %epoch,
+            "from" => %from
+        );
+        return false;
+    }
+
+    true
 }
