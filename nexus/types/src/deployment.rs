@@ -388,7 +388,7 @@ impl Blueprint {
 
     /// Returns whether the given Nexus instance should be quiescing or quiesced
     /// in preparation for handoff to the next generation
-    pub fn nexus_quiescing(
+    pub fn is_nexus_quiescing(
         &self,
         nexus_id: OmicronZoneUuid,
     ) -> Result<bool, anyhow::Error> {

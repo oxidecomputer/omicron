@@ -108,7 +108,7 @@ impl BlueprintExecutor {
         // blueprint before enabling sagas, since we already know if we're
         // quiescing or not); and (2) because we want to do it even if blueprint
         // execution is disabled.
-        match blueprint.nexus_quiescing(self.nexus_id) {
+        match blueprint.is_nexus_quiescing(self.nexus_id) {
             Ok(quiescing) => {
                 debug!(
                     &opctx.log,
