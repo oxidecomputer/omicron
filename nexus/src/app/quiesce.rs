@@ -250,24 +250,27 @@ mod test {
         let QuiesceState::Quiesced {
             time_requested,
             time_quiesced,
-            duration_waiting_for_sagas,
-            duration_waiting_for_db,
+            duration_draining_sagas,
+            duration_draining_db,
+            duration_recording_quiesce,
             duration_total,
         } = status.state
         else {
             panic!("not quiesced");
         };
         let duration_total = Duration::from(duration_total);
-        let duration_waiting_for_sagas =
-            Duration::from(duration_waiting_for_sagas);
-        let duration_waiting_for_db = Duration::from(duration_waiting_for_db);
+        let duration_draining_sagas = Duration::from(duration_draining_sagas);
+        let duration_draining_db = Duration::from(duration_draining_db);
+        let duration_recording_quiesce =
+            Duration::from(duration_recording_quiesce);
         assert!(time_requested >= before);
         assert!(time_requested <= after);
         assert!(time_quiesced >= before);
         assert!(time_quiesced <= after);
         assert!(time_quiesced >= time_requested);
-        assert!(duration_total >= duration_waiting_for_sagas);
-        assert!(duration_total >= duration_waiting_for_db);
+        assert!(duration_total >= duration_draining_sagas);
+        assert!(duration_total >= duration_draining_db);
+        assert!(duration_total >= duration_recording_quiesce);
         assert!(duration_total <= (after - before).to_std().unwrap());
         assert!(status.sagas_pending.is_empty());
         assert!(status.db_claims.is_empty());
@@ -341,7 +344,7 @@ mod test {
         debug!(log, "found quiesce status"; "status" => ?quiesce_status);
         assert_matches!(
             quiesce_status.state,
-            QuiesceState::WaitingForSagas { .. }
+            QuiesceState::DrainingSagas { .. }
         );
         assert!(quiesce_status.sagas_pending.contains_key(&demo_saga.saga_id));
         // We should see at least one held database claim from the one we took
@@ -404,7 +407,7 @@ mod test {
                     .map_err(|e| CondCheckError::Failed(e))?
                     .into_inner();
                 debug!(log, "found quiesce state"; "state" => ?rv);
-                if !matches!(rv.state, QuiesceState::WaitingForDb { .. }) {
+                if !matches!(rv.state, QuiesceState::DrainingDb { .. }) {
                     return Err(CondCheckError::<NexusClientError>::NotYet);
                 }
                 assert!(rv.sagas_pending.is_empty());
