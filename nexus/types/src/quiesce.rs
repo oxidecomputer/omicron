@@ -12,6 +12,7 @@ use iddqd::IdOrdMap;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::Generation;
 use slog::Logger;
+use slog::error;
 use slog::info;
 use slog::o;
 use slog_error_chain::InlineErrorChain;
@@ -27,15 +28,20 @@ use tokio::sync::watch;
 enum SagasAllowed {
     /// New sagas may be started (normal condition)
     Allowed,
-    /// New sagas may not be started (happens during quiesce)
-    Disallowed,
+    /// New sagas may not be started because we're quiescing or quiesced
+    DisallowedQuiesce,
+    /// New sagas may not be started because we just started up and haven't
+    /// determined if we're quiescing yet
+    DisallowedUnknown,
 }
 
 #[derive(Debug, Error)]
-#[error(
-    "saga creation and reassignment are disallowed (Nexus quiescing/quiesced)"
-)]
-pub struct NoSagasAllowedError;
+pub enum NoSagasAllowedError {
+    #[error("saga creation is disallowed (quiescing/quiesced)")]
+    Quiescing,
+    #[error("saga creation is disallowed (unknown yet if we're quiescing)")]
+    Unknown,
+}
 impl From<NoSagasAllowedError> for Error {
     fn from(value: NoSagasAllowedError) -> Self {
         Error::unavail(&value.to_string())
@@ -80,7 +86,7 @@ pub struct SagaQuiesceHandle {
     //     mutate the data, using it to protect data and not code.
     //
     // (2) `watch::Receiver` provides a really handy `wait_for()` method` that
-    //     we use in `wait_for_quiesced()`.  Besides being convenient, this
+    //     we use in `wait_for_drained()`.  Besides being convenient, this
     //     would be surprisingly hard for us to implement ourselves with a
     //     `Mutex`.  Traditionally, you'd use a combination Mutex/Condvar for
     //     this.  But we'd want to use a `std` Mutex (since tokio Mutex's
@@ -140,7 +146,7 @@ struct SagaQuiesceInner {
 impl SagaQuiesceHandle {
     pub fn new(log: Logger) -> SagaQuiesceHandle {
         let (inner, _) = watch::channel(SagaQuiesceInner {
-            new_sagas_allowed: SagasAllowed::Allowed,
+            new_sagas_allowed: SagasAllowed::DisallowedUnknown,
             sagas_pending: IdOrdMap::new(),
             first_recovery_complete: false,
             reassignment_generation: Generation::new(),
@@ -151,26 +157,65 @@ impl SagaQuiesceHandle {
         SagaQuiesceHandle { log, inner }
     }
 
-    /// Disallow new sagas from being started or re-assigned to this Nexus
+    /// Set the intended quiescing state
     ///
-    /// This is currently a one-way trip.  Sagas cannot be un-quiesced.
-    pub fn quiesce(&self) {
-        // Log this before changing the config to make sure this message
-        // appears before messages from code paths that saw this change.
-        info!(&self.log, "starting saga quiesce");
-        self.inner
-            .send_modify(|q| q.new_sagas_allowed = SagasAllowed::Disallowed);
+    /// Quiescing is currently a one-way trip.  Once we start quiescing, we
+    /// cannot then re-enable sagas.
+    pub fn set_quiescing(&self, quiescing: bool) {
+        self.inner.send_if_modified(|q| {
+            let new_state = if quiescing {
+                SagasAllowed::DisallowedQuiesce
+            } else {
+                SagasAllowed::Allowed
+            };
+
+            match q.new_sagas_allowed {
+                SagasAllowed::DisallowedUnknown => {
+                    info!(
+                        &self.log,
+                        "initial quiesce state";
+                        "initial_state" => ?new_state
+                    );
+                    q.new_sagas_allowed = new_state;
+                    true
+                }
+                SagasAllowed::Allowed if quiescing => {
+                    info!(&self.log, "saga quiesce starting");
+                    q.new_sagas_allowed = SagasAllowed::DisallowedQuiesce;
+                    true
+                }
+                SagasAllowed::DisallowedQuiesce if !quiescing => {
+                    // This should be impossible.  Report a problem.
+                    error!(
+                        &self.log,
+                        "asked to stop quiescing after previously quiescing"
+                    );
+                    false
+                }
+                _ => {
+                    // There's no transition happening in these cases:
+                    // - SagasAllowed::Allowed and we're not quiescing
+                    // - SagasAllowed::DisallowedQuiesce and we're now quiescing
+                    false
+                }
+            }
+        });
     }
 
-    /// Returns whether sagas are fully quiesced
-    pub fn is_fully_quiesced(&self) -> bool {
-        self.inner.borrow().is_fully_quiesced()
+    /// Returns whether sagas are fully drained
+    ///
+    /// Note that this state can change later if new sagas get assigned to this
+    /// Nexus.
+    pub fn is_fully_drained(&self) -> bool {
+        self.inner.borrow().is_fully_drained()
     }
 
-    /// Wait for sagas to be quiesced
-    pub async fn wait_for_quiesced(&self) {
-        let _ =
-            self.inner.subscribe().wait_for(|q| q.is_fully_quiesced()).await;
+    /// Wait for sagas to become drained
+    ///
+    /// Note that new sagas can still be assigned to this Nexus, resulting in it
+    /// no longer being fully drained.
+    pub async fn wait_for_drained(&self) {
+        let _ = self.inner.subscribe().wait_for(|q| q.is_fully_drained()).await;
     }
 
     /// Returns information about running sagas (involves a clone)
@@ -180,13 +225,10 @@ impl SagaQuiesceHandle {
 
     /// Record an operation that might assign sagas to this Nexus
     ///
-    /// If reassignment is currently allowed, `f` will be invoked to potentially
-    /// re-assign sagas.  `f` returns `(T, bool)`, where `T` is whatever value
-    /// you want and is returned back from this function.  The boolean indicates
-    /// whether any sagas may have been assigned to the current Nexus.
-    ///
-    /// If reassignment is currently disallowed (because Nexus is quiescing),
-    /// `f` is not invoked and an error describing this condition is returned.
+    /// `f` will be invoked to potentially re-assign sagas.  `f` returns `(T,
+    /// bool)`, where `T` is whatever value you want and is returned back from
+    /// this function.  The boolean indicates whether any sagas may have been
+    /// assigned to the current Nexus.
     ///
     /// Only one of these may be outstanding at a time.  It should not be called
     /// concurrently.  This is easy today because this is only invoked by a few
@@ -204,27 +246,22 @@ impl SagaQuiesceHandle {
     // mis-use (e.g., by forgetting to call `reassignment_done()`).  But we keep
     // the other two functions around because it's easier to write tests against
     // those.
-    pub async fn reassign_if_possible<F, T>(
-        &self,
-        f: F,
-    ) -> Result<T, NoSagasAllowedError>
+    pub async fn reassign_sagas<F, T>(&self, f: F) -> T
     where
         F: AsyncFnOnce() -> (T, bool),
     {
-        let in_progress = self.reassignment_start()?;
+        let in_progress = self.reassignment_start();
         let (result, maybe_reassigned) = f().await;
         in_progress.reassignment_done(maybe_reassigned);
-        Ok(result)
+        result
     }
 
     /// Record that we've begun a re-assignment operation.
     ///
     /// Only one of these may be outstanding at a time.  The caller must call
     /// `reassignment_done()` before starting another one of these.
-    fn reassignment_start(
-        &self,
-    ) -> Result<SagaReassignmentInProgress, NoSagasAllowedError> {
-        let okay = self.inner.send_if_modified(|q| {
+    fn reassignment_start(&self) -> SagaReassignmentInProgress {
+        self.inner.send_modify(|q| {
             assert!(
                 !q.reassignment_pending,
                 "two calls to reassignment_start() without intervening call \
@@ -232,21 +269,11 @@ impl SagaQuiesceHandle {
                  reassign_if_possible()?)"
             );
 
-            if q.new_sagas_allowed != SagasAllowed::Allowed {
-                return false;
-            }
-
             q.reassignment_pending = true;
-            true
         });
 
-        if okay {
-            info!(&self.log, "allowing saga re-assignment pass");
-            Ok(SagaReassignmentInProgress { q: self.clone() })
-        } else {
-            info!(&self.log, "disallowing saga re-assignment pass");
-            Err(NoSagasAllowedError)
-        }
+        info!(&self.log, "starting saga re-assignment pass");
+        SagaReassignmentInProgress { q: self.clone() }
     }
 
     /// Record that we've finished an operation that might assign new sagas to
@@ -262,10 +289,10 @@ impl SagaQuiesceHandle {
             q.reassignment_pending = false;
 
             // If we may have assigned new sagas to ourselves, bump the
-            // generation number.  We won't quiesce until a recovery pass has
-            // finished that *started* with this generation number.  So this
-            // ensures that we won't quiesce until any sagas that may have been
-            // assigned to us have been recovered.
+            // generation number.  We won't report being drained until a
+            // recovery pass has finished that *started* with this generation
+            // number.  So this ensures that we won't report being drained until
+            // any sagas that may have been assigned to us have been recovered.
             if maybe_reassigned {
                 q.reassignment_generation = q.reassignment_generation.next();
             }
@@ -344,7 +371,7 @@ impl SagaQuiesceHandle {
 
     /// Report that a saga has started running
     ///
-    /// This fails if sagas are quiesced.
+    /// This fails if sagas are quiescing or quiesced.
     ///
     /// Callers must also call `saga_completion_future()` to make sure it's
     /// recorded when this saga finishes.
@@ -353,9 +380,18 @@ impl SagaQuiesceHandle {
         saga_id: steno::SagaId,
         saga_name: &steno::SagaName,
     ) -> Result<NewlyPendingSagaRef, NoSagasAllowedError> {
+        let mut error: Option<NoSagasAllowedError> = None;
         let okay = self.inner.send_if_modified(|q| {
-            if q.new_sagas_allowed != SagasAllowed::Allowed {
-                return false;
+            match q.new_sagas_allowed {
+                SagasAllowed::Allowed => (),
+                SagasAllowed::DisallowedQuiesce => {
+                    error = Some(NoSagasAllowedError::Quiescing);
+                    return false;
+                }
+                SagasAllowed::DisallowedUnknown => {
+                    error = Some(NoSagasAllowedError::Unknown);
+                    return false;
+                }
             }
 
             q.sagas_pending
@@ -379,12 +415,15 @@ impl SagaQuiesceHandle {
                 init_finished: false,
             })
         } else {
+            let error =
+                error.expect("error is always set when disallowing sagas");
             info!(
                 &self.log,
                 "disallowing saga creation";
-                "saga_id" => saga_id.to_string()
+                "saga_id" => saga_id.to_string(),
+                InlineErrorChain::new(&error),
             );
-            Err(NoSagasAllowedError)
+            Err(error)
         }
     }
 
@@ -403,8 +442,8 @@ impl SagaQuiesceHandle {
     /// sagas that might possibly have finished already.)
     ///
     /// Unlike `saga_created()`, this cannot fail as a result of sagas being
-    /// quiesced.  That's because a saga that *needs* to be recovered is a
-    /// blocker for quiesce, whether it's running or not.  So we need to
+    /// quiescing/quiesced.  That's because a saga that *needs* to be recovered
+    /// is a blocker for quiesce, whether it's running or not.  So we need to
     /// actually run and finish it.  We do still want to prevent ourselves from
     /// taking on sagas needing recovery -- that's why we fail
     /// `reassign_if_possible()` when saga creation is disallowed.
@@ -438,10 +477,13 @@ impl SagaQuiesceHandle {
 }
 
 impl SagaQuiesceInner {
-    /// Returns whether sagas are fully and permanently quiesced
-    pub fn is_fully_quiesced(&self) -> bool {
+    /// Returns whether sagas are fully drained
+    ///
+    /// This condition is not permanent.  New sagas can be re-assigned to this
+    /// Nexus.
+    pub fn is_fully_drained(&self) -> bool {
         // No new sagas may be created
-        self.new_sagas_allowed == SagasAllowed::Disallowed
+        self.new_sagas_allowed == SagasAllowed::DisallowedQuiesce
             // and there are none currently running
             && self.sagas_pending.is_empty()
             // and there are none from a previous lifetime that still need to be
@@ -640,32 +682,30 @@ mod test {
         // Set up a new handle.  Complete the first saga recovery immediately so
         // that that doesn't block quiescing.
         let qq = SagaQuiesceHandle::new(log.clone());
+        qq.set_quiescing(false);
         let recovery = qq.recovery_start();
         recovery.recovery_done(true);
 
-        // It's still not fully quiesced because we haven't asked it to quiesce
+        // It's still not fully drained because we haven't asked it to quiesce
         // yet.
         assert!(qq.sagas_pending().is_empty());
-        assert!(!qq.is_fully_quiesced());
+        assert!(!qq.is_fully_drained());
 
-        // Now start quiescing.  It should immediately report itself as
-        // quiesced.  There's nothing asynchronous in this path.  (It would be
-        // okay if there were.)
-        qq.quiesce();
-        assert!(qq.is_fully_quiesced());
+        // Now start quiescing.  It should immediately report itself as drained.
+        // There's nothing asynchronous in this path.  (It would be okay if
+        // there were.)
+        qq.set_quiescing(true);
+        assert!(qq.is_fully_drained());
 
-        // It's not allowed to create sagas or begin re-assignment after
-        // quiescing has started, let alone finished.
+        // It's not allowed to create sagas after quiescing has started, let
+        // alone finished.
         let _ = qq
             .saga_create(*SAGA_ID, &SAGA_NAME)
             .expect_err("cannot create saga after quiescing started");
-        let _ = qq
-            .reassignment_start()
-            .expect_err("cannot start re-assignment after quiescing started");
 
-        // Waiting for quiesce should complete immediately.
-        qq.wait_for_quiesced().await;
-        assert!(qq.is_fully_quiesced());
+        // Waiting for drain should complete immediately.
+        qq.wait_for_drained().await;
+        assert!(qq.is_fully_drained());
 
         logctx.cleanup_successful();
     }
@@ -680,6 +720,7 @@ mod test {
         // Set up a new handle.  Complete the first saga recovery immediately so
         // that that doesn't block quiescing.
         let qq = SagaQuiesceHandle::new(log.clone());
+        qq.set_quiescing(false);
         let recovery = qq.recovery_start();
         recovery.recovery_done(true);
 
@@ -690,15 +731,15 @@ mod test {
         assert!(!qq.sagas_pending().is_empty());
 
         // Start quiescing.
-        qq.quiesce();
-        assert!(!qq.is_fully_quiesced());
+        qq.set_quiescing(true);
+        assert!(!qq.is_fully_drained());
 
         // Dropping the returned handle is as good as completing the saga.
         drop(started);
         assert!(qq.sagas_pending().is_empty());
-        assert!(qq.is_fully_quiesced());
-        qq.wait_for_quiesced().await;
-        assert!(qq.is_fully_quiesced());
+        assert!(qq.is_fully_drained());
+        qq.wait_for_drained().await;
+        assert!(qq.is_fully_drained());
 
         logctx.cleanup_successful();
     }
@@ -715,6 +756,7 @@ mod test {
         // Set up a new handle.  Complete the first saga recovery immediately so
         // that that doesn't block quiescing.
         let qq = SagaQuiesceHandle::new(log.clone());
+        qq.set_quiescing(false);
         let recovery = qq.recovery_start();
         recovery.recovery_done(true);
 
@@ -730,8 +772,8 @@ mod test {
         assert!(!qq.sagas_pending().is_empty());
 
         // Quiesce should block on the saga finishing.
-        qq.quiesce();
-        assert!(!qq.is_fully_quiesced());
+        qq.set_quiescing(true);
+        assert!(!qq.is_fully_drained());
 
         // "Finish" the saga.
         tx.send(saga_result()).unwrap();
@@ -740,15 +782,15 @@ mod test {
         // able to notice that the saga finished yet.  It's not that important
         // to assert this but it emphasizes that it really is waiting for
         // something to happen.
-        assert!(!qq.is_fully_quiesced());
+        assert!(!qq.is_fully_drained());
 
         // The consumer's completion future ought to be unblocked now.
         let _ = consumer_completion.await;
 
         // Wait for quiescing to finish.  This should be immediate.
-        qq.wait_for_quiesced().await;
+        qq.wait_for_drained().await;
         assert!(qq.sagas_pending().is_empty());
-        assert!(qq.is_fully_quiesced());
+        assert!(qq.is_fully_drained());
 
         logctx.cleanup_successful();
     }
@@ -761,24 +803,25 @@ mod test {
 
         // Set up a new handle.
         let qq = SagaQuiesceHandle::new(log.clone());
+        qq.set_quiescing(false);
 
-        // Quiesce should block on recovery having completed successfully once.
-        qq.quiesce();
-        assert!(!qq.is_fully_quiesced());
+        // Drain should block on recovery having completed successfully once.
+        qq.set_quiescing(true);
+        assert!(!qq.is_fully_drained());
 
         // Act like the first recovery failed.  Quiescing should still be
         // blocked.
         let recovery = qq.recovery_start();
         recovery.recovery_done(false);
-        assert!(!qq.is_fully_quiesced());
+        assert!(!qq.is_fully_drained());
 
         // Finish a normal saga recovery.  Quiescing should proceed.
         // This happens synchronously (though it doesn't have to).
         let recovery = qq.recovery_start();
         recovery.recovery_done(true);
-        assert!(qq.is_fully_quiesced());
-        qq.wait_for_quiesced().await;
-        assert!(qq.is_fully_quiesced());
+        assert!(qq.is_fully_drained());
+        qq.wait_for_drained().await;
+        assert!(qq.is_fully_drained());
 
         logctx.cleanup_successful();
     }
@@ -792,25 +835,25 @@ mod test {
         // Set up a new handle.  Complete the first saga recovery immediately so
         // that that doesn't block quiescing.
         let qq = SagaQuiesceHandle::new(log.clone());
+        qq.set_quiescing(false);
         let recovery = qq.recovery_start();
         recovery.recovery_done(true);
 
         // Begin saga re-assignment.
-        let reassignment =
-            qq.reassignment_start().expect("can re-assign when not quiescing");
+        let reassignment = qq.reassignment_start();
 
         // Begin quiescing.
-        qq.quiesce();
+        qq.set_quiescing(true);
 
         // Quiescing is blocked.
-        assert!(!qq.is_fully_quiesced());
+        assert!(!qq.is_fully_drained());
 
         // When re-assignment finishes *without* having re-assigned anything,
         // then we're immediately all set.
         reassignment.reassignment_done(false);
-        assert!(qq.is_fully_quiesced());
-        qq.wait_for_quiesced().await;
-        assert!(qq.is_fully_quiesced());
+        assert!(qq.is_fully_drained());
+        qq.wait_for_drained().await;
+        assert!(qq.is_fully_drained());
 
         logctx.cleanup_successful();
     }
@@ -826,36 +869,36 @@ mod test {
         // Set up a new handle.  Complete the first saga recovery immediately so
         // that that doesn't block quiescing.
         let qq = SagaQuiesceHandle::new(log.clone());
+        qq.set_quiescing(false);
         let recovery = qq.recovery_start();
         recovery.recovery_done(true);
 
         // Begin saga re-assignment.
-        let reassignment =
-            qq.reassignment_start().expect("can re-assign when not quiescing");
+        let reassignment = qq.reassignment_start();
 
         // Begin quiescing.
-        qq.quiesce();
+        qq.set_quiescing(true);
 
         // Quiescing is blocked.
-        assert!(!qq.is_fully_quiesced());
+        assert!(!qq.is_fully_drained());
 
         // When re-assignment finishes and re-assigned sagas, we're still
         // blocked.
         reassignment.reassignment_done(true);
-        assert!(!qq.is_fully_quiesced());
+        assert!(!qq.is_fully_drained());
 
         // If the next recovery pass fails, we're still blocked.
         let recovery = qq.recovery_start();
         recovery.recovery_done(false);
-        assert!(!qq.is_fully_quiesced());
+        assert!(!qq.is_fully_drained());
 
         // Once a recovery pass succeeds, we're good.
         let recovery = qq.recovery_start();
         recovery.recovery_done(true);
-        assert!(qq.is_fully_quiesced());
+        assert!(qq.is_fully_drained());
 
-        qq.wait_for_quiesced().await;
-        assert!(qq.is_fully_quiesced());
+        qq.wait_for_drained().await;
+        assert!(qq.is_fully_drained());
 
         logctx.cleanup_successful();
     }
@@ -874,18 +917,18 @@ mod test {
         // Set up a new handle.  Complete the first saga recovery immediately so
         // that that doesn't block quiescing.
         let qq = SagaQuiesceHandle::new(log.clone());
+        qq.set_quiescing(false);
         let recovery = qq.recovery_start();
         recovery.recovery_done(true);
 
         // Begin saga re-assignment.
-        let reassignment =
-            qq.reassignment_start().expect("can re-assign when not quiescing");
+        let reassignment = qq.reassignment_start();
 
         // Begin quiescing.
-        qq.quiesce();
+        qq.set_quiescing(true);
 
         // Quiescing is blocked.
-        assert!(!qq.is_fully_quiesced());
+        assert!(!qq.is_fully_drained());
 
         // Start a recovery pass.
         let recovery = qq.recovery_start();
@@ -893,25 +936,25 @@ mod test {
         // When re-assignment finishes and re-assigned sagas, we're still
         // blocked.
         reassignment.reassignment_done(true);
-        assert!(!qq.is_fully_quiesced());
+        assert!(!qq.is_fully_drained());
 
         // Even if this recovery pass succeeds, we're still blocked, because it
         // started before re-assignment finished and so isn't guaranteed to have
         // seen all the re-assigned sagas.
         recovery.recovery_done(true);
-        assert!(!qq.is_fully_quiesced());
+        assert!(!qq.is_fully_drained());
 
         // If the next pass fails, we're still blocked.
         let recovery = qq.recovery_start();
         recovery.recovery_done(false);
-        assert!(!qq.is_fully_quiesced());
+        assert!(!qq.is_fully_drained());
 
         // Finally, we have a successful pass that unblocks us.
         let recovery = qq.recovery_start();
         recovery.recovery_done(true);
-        assert!(qq.is_fully_quiesced());
-        qq.wait_for_quiesced().await;
-        assert!(qq.is_fully_quiesced());
+        assert!(qq.is_fully_drained());
+        qq.wait_for_drained().await;
+        assert!(qq.is_fully_drained());
 
         logctx.cleanup_successful();
     }
@@ -930,23 +973,23 @@ mod test {
         // Set up a new handle.  Complete the first saga recovery immediately so
         // that that doesn't block quiescing.
         let qq = SagaQuiesceHandle::new(log.clone());
+        qq.set_quiescing(false);
         let recovery = qq.recovery_start();
         recovery.recovery_done(true);
 
         // Begin saga re-assignment.
-        let reassignment =
-            qq.reassignment_start().expect("can re-assign when not quiescing");
+        let reassignment = qq.reassignment_start();
 
         // Begin quiescing.
-        qq.quiesce();
+        qq.set_quiescing(true);
 
         // Quiescing is blocked.
-        assert!(!qq.is_fully_quiesced());
+        assert!(!qq.is_fully_drained());
 
         // When re-assignment finishes and re-assigned sagas, we're still
         // blocked because we haven't run recovery.
         reassignment.reassignment_done(true);
-        assert!(!qq.is_fully_quiesced());
+        assert!(!qq.is_fully_drained());
 
         // Start a recovery pass.  Pretend like we found something.
         let recovery = qq.recovery_start();
@@ -958,7 +1001,7 @@ mod test {
         recovery.recovery_done(true);
 
         // We're still not quiesced because that saga is still running.
-        assert!(!qq.is_fully_quiesced());
+        assert!(!qq.is_fully_drained());
 
         // Finish the recovered saga.  That should unblock quiesce.
         tx.send(saga_result()).unwrap();
@@ -966,8 +1009,8 @@ mod test {
         // The consumer's completion future ought to be unblocked now.
         let _ = consumer_completion.await;
 
-        qq.wait_for_quiesced().await;
-        assert!(qq.is_fully_quiesced());
+        qq.wait_for_drained().await;
+        assert!(qq.is_fully_drained());
 
         logctx.cleanup_successful();
     }
@@ -983,6 +1026,7 @@ mod test {
 
         // Set up a new handle.
         let qq = SagaQuiesceHandle::new(log.clone());
+        qq.set_quiescing(false);
         // Start a recovery pass.  Pretend like we found something.
         let recovery = qq.recovery_start();
         let pending = recovery.record_saga_recovery(*SAGA_ID, &SAGA_NAME);
@@ -993,19 +1037,65 @@ mod test {
         recovery.recovery_done(true);
 
         // Begin quiescing.
-        qq.quiesce();
+        qq.set_quiescing(true);
 
         // Quiescing is blocked.
-        assert!(!qq.is_fully_quiesced());
+        assert!(!qq.is_fully_drained());
 
-        // Finish the recovered saga.  That should unblock quiesce.
+        // Finish the recovered saga.  That should unblock drain.
         tx.send(saga_result()).unwrap();
 
-        qq.wait_for_quiesced().await;
-        assert!(qq.is_fully_quiesced());
+        qq.wait_for_drained().await;
+        assert!(qq.is_fully_drained());
 
         // The consumer's completion future ought to be unblocked now.
         let _ = consumer_completion.await;
+
+        logctx.cleanup_successful();
+    }
+
+    /// Tests that sagas are disabled at the start
+    #[tokio::test]
+    async fn test_quiesce_sagas_disabled_on_startup() {
+        let logctx = test_setup_log("test_quiesce_block_on_recovered_sagas");
+        let log = &logctx.log;
+
+        let qq = SagaQuiesceHandle::new(log.clone());
+        assert!(!qq.is_fully_drained());
+        let _ = qq
+            .saga_create(*SAGA_ID, &SAGA_NAME)
+            .expect_err("cannot create saga in initial state");
+        qq.recovery_start().recovery_done(true);
+        qq.set_quiescing(true);
+        assert!(qq.is_fully_drained());
+        let _ = qq
+            .saga_create(*SAGA_ID, &SAGA_NAME)
+            .expect_err("cannot create saga after quiescing");
+
+        // It's allowed to start a new re-assignment pass.  That prevents us
+        // from being drained.
+        let reassignment = qq.reassignment_start();
+        assert!(!qq.is_fully_drained());
+        reassignment.reassignment_done(false);
+        // We're fully drained as soon as this one is done, since we know we
+        // didn't assign any sagas.
+        assert!(qq.is_fully_drained());
+
+        // Try again.  This time, we'll act like we did reassign sagas.
+        let reassignment = qq.reassignment_start();
+        assert!(!qq.is_fully_drained());
+        reassignment.reassignment_done(true);
+        assert!(!qq.is_fully_drained());
+        // Do a failed recovery pass.  We still won't be fully drained.
+        let recovery = qq.recovery_start();
+        assert!(!qq.is_fully_drained());
+        recovery.recovery_done(false);
+        assert!(!qq.is_fully_drained());
+        // Do a successful recovery pass.  We'll be drained again.
+        let recovery = qq.recovery_start();
+        assert!(!qq.is_fully_drained());
+        recovery.recovery_done(true);
+        assert!(qq.is_fully_drained());
 
         logctx.cleanup_successful();
     }

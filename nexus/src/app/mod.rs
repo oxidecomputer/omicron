@@ -27,7 +27,6 @@ use nexus_db_queries::db;
 use nexus_mgs_updates::ArtifactCache;
 use nexus_mgs_updates::MgsUpdateDriver;
 use nexus_types::deployment::PendingMgsUpdates;
-use nexus_types::quiesce::SagaQuiesceHandle;
 use omicron_common::address::DENDRITE_PORT;
 use omicron_common::address::MGD_PORT;
 use omicron_common::address::MGS_PORT;
@@ -111,11 +110,11 @@ pub(crate) mod sagas;
 // TODO: When referring to API types, we should try to include
 // the prefix unless it is unambiguous.
 
+use crate::app::quiesce::NexusQuiesceHandle;
 pub(crate) use nexus_db_model::MAX_NICS_PER_INSTANCE;
 pub(crate) use nexus_db_queries::db::queries::disk::MAX_DISKS_PER_INSTANCE;
 use nexus_mgs_updates::DEFAULT_RETRY_TIMEOUT;
 use nexus_types::internal_api::views::MgsUpdateDriverStatus;
-use nexus_types::internal_api::views::QuiesceState;
 use sagas::demo::CompletingDemoSagas;
 
 // XXX: Might want to recast as max *floating* IPs, we have at most one
@@ -280,11 +279,8 @@ pub struct Nexus {
     #[allow(dead_code)]
     repo_depot_resolver: Box<dyn qorb::resolver::Resolver>,
 
-    /// whether Nexus is quiescing, and how far it's gotten
-    quiesce: watch::Sender<QuiesceState>,
-
-    /// details about saga quiescing
-    saga_quiesce: SagaQuiesceHandle,
+    /// state of overall Nexus quiesce activity
+    quiesce: NexusQuiesceHandle,
 }
 
 impl Nexus {
@@ -336,6 +332,8 @@ impl Nexus {
             sec_store,
         ));
 
+        let quiesce = NexusQuiesceHandle::new(&log, db_datastore.clone());
+
         // It's a bit of a red flag to use an unbounded channel.
         //
         // This particular channel is used to send a Uuid from the saga executor
@@ -360,14 +358,11 @@ impl Nexus {
         // task.  If someone changed the config, they'd have to remember to
         // update this here.  This doesn't seem worth it.
         let (saga_create_tx, saga_recovery_rx) = mpsc::unbounded_channel();
-        let saga_quiesce = SagaQuiesceHandle::new(
-            log.new(o!("component" => "SagaQuiesceHandle")),
-        );
         let sagas = Arc::new(SagaExecutor::new(
             Arc::clone(&sec_client),
             log.new(o!("component" => "SagaExecutor")),
             saga_create_tx,
-            saga_quiesce.clone(),
+            quiesce.sagas(),
         ));
 
         // Create a channel for replicating repository artifacts. 16 is a
@@ -465,8 +460,6 @@ impl Nexus {
         let mgs_update_status_rx = mgs_update_driver.status_rx();
         let _mgs_driver_task = tokio::spawn(mgs_update_driver.run());
 
-        let (quiesce, _) = watch::channel(QuiesceState::running());
-
         let nexus = Nexus {
             id: config.deployment.id,
             rack_id,
@@ -520,7 +513,6 @@ impl Nexus {
             mgs_resolver,
             repo_depot_resolver,
             quiesce,
-            saga_quiesce,
         };
 
         // TODO-cleanup all the extra Arcs here seems wrong
@@ -570,6 +562,7 @@ impl Nexus {
                     webhook_delivery_client: task_nexus
                         .webhook_delivery_client
                         .clone(),
+                    nexus_quiesce: task_nexus.quiesce.clone(),
 
                     saga_recovery: SagaRecoveryHelpers {
                         recovery_opctx: saga_recovery_opctx,
@@ -577,7 +570,7 @@ impl Nexus {
                         sec_client: sec_client.clone(),
                         registry: sagas::ACTION_REGISTRY.clone(),
                         sagas_started_rx: saga_recovery_rx,
-                        quiesce: task_nexus.saga_quiesce.clone(),
+                        quiesce: task_nexus.quiesce.sagas(),
                     },
                     tuf_artifact_replication_rx,
                     mgs_updates_tx,
