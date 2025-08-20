@@ -10,7 +10,6 @@ use std::time::Instant;
 
 use crate::SIM_GIMLET_BOARD;
 use crate::SIM_ROT_BOARD;
-use crate::SIM_ROT_STAGE0_BOARD;
 use crate::SIM_SIDECAR_BOARD;
 use crate::helpers::rot_slot_id_from_u16;
 use crate::helpers::rot_slot_id_to_u16;
@@ -148,7 +147,7 @@ impl SimSpUpdate {
                 CabooseValue::Caboose(
                     hubtools::CabooseBuilder::default()
                         .git_commit(STAGE0_GITC0)
-                        .board(SIM_ROT_STAGE0_BOARD)
+                        .board(SIM_ROT_BOARD)
                         .name(rot_name)
                         .version(STAGE0_VERS0)
                         .sign(ROT_STAGING_DEVEL_SIGN)
@@ -157,7 +156,7 @@ impl SimSpUpdate {
                 CabooseValue::Caboose(
                     hubtools::CabooseBuilder::default()
                         .git_commit(STAGE0_GITC1)
-                        .board(SIM_ROT_STAGE0_BOARD)
+                        .board(SIM_ROT_BOARD)
                         .name(rot_name)
                         .version(STAGE0_VERS1)
                         .sign(ROT_STAGING_DEVEL_SIGN)
@@ -695,10 +694,9 @@ impl BaseboardKind {
     }
 
     fn rot_name(&self) -> &str {
-        match self {
-            BaseboardKind::Gimlet => "SimGimletRot",
-            BaseboardKind::Sidecar => "SimSidecarRot",
-        }
+        // In production, all RoTs claim to have the board `oxide-rot-1`. We'll
+        // do something similar but distinct here.
+        "SimRot"
     }
 }
 

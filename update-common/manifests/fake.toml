@@ -79,7 +79,7 @@ archive_a = { kind = "fake", size = "512KiB" }
 archive_b = { kind = "fake", size = "512KiB" }
 
 [[artifact.gimlet_rot_bootloader]]
-name = "SimRotStage0"
+name = "SimRot"
 version = "1.0.0"
 source = { kind = "fake", size = "1MiB" }
 
