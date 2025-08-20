@@ -3668,7 +3668,9 @@ dependencies = [
  "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
+ "openapi-manager-types",
  "schemars",
+ "semver 1.0.26",
  "serde",
  "uuid",
 ]
@@ -7751,6 +7753,7 @@ dependencies = [
  "expectorate",
  "futures",
  "gateway-api",
+ "gateway-client",
  "gateway-messages",
  "gateway-sp-comms",
  "gateway-test-utils",

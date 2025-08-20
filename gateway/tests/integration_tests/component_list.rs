@@ -4,15 +4,12 @@
 
 // Copyright 2022 Oxide Computer Company
 
-use dropshot::test_util;
+use gateway_client::types::{SpComponentInfo, SpComponentPresence};
 use gateway_messages::DeviceCapabilities;
 use gateway_messages::SpComponent;
 use gateway_messages::SpPort;
 use gateway_test_utils::current_simulator_state;
 use gateway_test_utils::setup;
-use gateway_types::component::SpComponentInfo;
-use gateway_types::component::SpComponentList;
-use gateway_types::component::SpComponentPresence;
 use gateway_types::component::SpType;
 
 #[tokio::test]
@@ -35,8 +32,11 @@ async fn component_list() {
     assert!(sim_state.iter().all(|sp| sp.state.is_ok()));
 
     // Get the component list for sled 0.
-    let url = format!("{}", client.url("/sp/sled/0/component"));
-    let resp: SpComponentList = test_util::object_get(client, &url).await;
+    let resp = client
+        .sp_component_list(gateway_client::types::SpType::Sled, 0)
+        .await
+        .unwrap()
+        .into_inner();
 
     assert_eq!(
         resp.components,
@@ -135,8 +135,11 @@ async fn component_list() {
     );
 
     // Get the component list for sled 1.
-    let url = format!("{}", client.url("/sp/sled/1/component"));
-    let resp: SpComponentList = test_util::object_get(client, &url).await;
+    let resp = client
+        .sp_component_list(gateway_client::types::SpType::Sled, 1)
+        .await
+        .unwrap()
+        .into_inner();
 
     assert_eq!(
         resp.components,
@@ -235,8 +238,11 @@ async fn component_list() {
     );
 
     // Get the component list for switch 0.
-    let url = format!("{}", client.url("/sp/switch/0/component"));
-    let resp: SpComponentList = test_util::object_get(client, &url).await;
+    let resp = client
+        .sp_component_list(gateway_client::types::SpType::Switch, 0)
+        .await
+        .unwrap()
+        .into_inner();
 
     assert_eq!(
         resp.components,
