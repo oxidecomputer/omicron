@@ -955,9 +955,18 @@ pub struct User {
 pub struct CurrentUser {
     #[serde(flatten)]
     pub user: User,
-
     /** Name of the silo to which this user belongs. */
     pub silo_name: Name,
+    /**
+     * Whether this user has the viewer role on the fleet. Used by the web
+     * console to determine whether to show system-level UI.
+     */
+    pub fleet_viewer: bool,
+    /**
+     * Whether this user has the admin role on their silo. Used by the web
+     * console to determine whether to show admin-only UI elements.
+     */
+    pub silo_admin: bool,
 }
 
 // SILO GROUPS
