@@ -10,7 +10,7 @@ use crate::nexus::{
 use crate::{Event, member_universe};
 use daft::{BTreeMapDiff, BTreeSetDiff, Diffable, Leaf};
 use iddqd::IdOrdMap;
-use slog::Logger;
+use slog::{Logger, info};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Display;
 use trust_quorum::{
@@ -280,6 +280,11 @@ impl TqState {
             NexusReply::AckedPreparesFromCoordinator { epoch, acks } => {
                 if epoch == latest_config.epoch {
                     latest_config.prepared_members.extend(acks);
+
+                    if latest_config.can_commit() {
+                        drop(latest_config);
+                        self.nexus_commit();
+                    }
                 }
             }
             NexusReply::CommitAck { from, epoch } => {
@@ -346,6 +351,47 @@ impl TqState {
         self.nexus.configs.insert_unique(nexus_config).expect("new config");
         self.send_reconfigure_msg();
         self.send_envelopes_from_coordinator();
+    }
+
+    // Commit at nexus when preparing
+    fn nexus_commit(&mut self) {
+        let mut latest_config = self.nexus.latest_config_mut();
+        info!(
+            self.log,
+            "nexus committed";
+            "epoch" => %latest_config.epoch,
+            "coordinator" => %latest_config.coordinator
+        );
+
+        latest_config.op = NexusOp::Committed;
+
+        let new_members = latest_config.members.clone();
+        let new_epoch = latest_config.epoch;
+
+        // Expunge any removed nodes from the last committed configuration
+        if let Some(last_committed_epoch) = latest_config.last_committed_epoch {
+            // Release our mutable borrow
+            drop(latest_config);
+
+            let last_committed_config = self
+                .nexus
+                .configs
+                .get(&last_committed_epoch)
+                .expect("config exists");
+
+            let expunged =
+                last_committed_config.members.difference(&new_members).cloned();
+
+            for e in expunged {
+                info!(
+                    self.log,
+                    "expunged node";
+                    "epoch" => %new_epoch,
+                    "platform_id" => %e
+                );
+                self.expunged.insert(e);
+            }
+        }
     }
 }
 
@@ -528,7 +574,7 @@ fn display_nexus_state_diff(
     f: &mut std::fmt::Formatter<'_>,
 ) -> std::fmt::Result {
     if diff.configs.modified().count() != 0 {
-        writeln!(f, "  nexus state changed:")?;
+        writeln!(f, "nexus state changed:")?;
     }
 
     // Nexus configs can only be added or modified

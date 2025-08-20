@@ -65,7 +65,7 @@ pub enum PeerMsgKind {
     LrtqShare(LrtqShare),
 
     /// Inform a node that it is no longer part of the trust quorum as of the
-    /// given epoch
+    /// given epoch, which the responder knows is commmitted.
     Expunged(Epoch),
 
     /// Inform a node that it is utilizing an old committed onfiguration and

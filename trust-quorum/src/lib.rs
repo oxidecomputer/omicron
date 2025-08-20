@@ -39,7 +39,9 @@ pub use node::{Node, NodeDiff};
 // public only for docs.
 pub use node_ctx::NodeHandlerCtx;
 pub use node_ctx::{NodeCallerCtx, NodeCommonCtx, NodeCtx, NodeCtxDiff};
-pub use persistent_state::{PersistentState, PersistentStateSummary};
+pub use persistent_state::{
+    ExpungedMetadata, PersistentState, PersistentStateSummary,
+};
 
 #[derive(
     Debug,
