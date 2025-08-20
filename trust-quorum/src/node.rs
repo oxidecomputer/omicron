@@ -101,9 +101,10 @@ impl Node {
         };
 
         if let Some(kcs) = &self.key_share_computer {
-            // We know from our `ValidatedReconfigureMsg` that we haven't seen a newer
-            // configuration and we have the correct last committed configuration. Therefore if we are computing a key share,
-            // we must be doing it for a stale commit and should cancel it.
+            // We know from our `ValidatedReconfigureMsg` that we haven't seen
+            // a newer configuration and we have the correct last committed
+            // configuration. Therefore if we are computing a key share, we must
+            // be doing it for a stale commit and should cancel it.
             //
             // I don't think it's actually possible to hit this condition, but
             // we check anyway.
@@ -138,6 +139,19 @@ impl Node {
     ) -> Result<(), CommitError> {
         {
             let ps = ctx.persistent_state();
+
+            if let Some(expunged) = &ps.expunged {
+                error!(
+                    self.log,
+                    "Commit attempted on expunged node";
+                    "expunged_epoch" => %expunged.epoch,
+                    "expunging_node" => %expunged.from
+                );
+                return Err(CommitError::Expunged {
+                    epoch: expunged.epoch,
+                    from: expunged.from.clone(),
+                });
+            }
 
             // If we have a configuration the rack id must match the one from
             // Nexus
@@ -385,6 +399,10 @@ impl Node {
                 ps.expunged = Some(ExpungedMetadata { epoch, from });
                 true
             });
+
+            // Stop coordinating and computing a key share
+            self.coordinator_state = None;
+            self.key_share_computer = None;
         } else {
             let m = concat!(
                 "Received Expunge message, but we have no configurations. ",
@@ -820,6 +838,8 @@ pub enum CommitError {
     ),
     #[error("cannot commit: not prepared for epoch {0}")]
     NotPrepared(Epoch),
+    #[error("cannot commit: expunged at epoch {epoch} by {from}")]
+    Expunged { epoch: Epoch, from: PlatformId },
 }
 
 #[cfg(test)]
