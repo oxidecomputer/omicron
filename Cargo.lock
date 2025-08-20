@@ -14211,6 +14211,7 @@ dependencies = [
 [[package]]
 name = "tufaceous"
 version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=john%2Ffake-rot-distinct-sign#59387cad23518c5e5c6700f1147877187eb3e30f"
 dependencies = [
  "anyhow",
  "camino",
@@ -14231,6 +14232,7 @@ dependencies = [
 [[package]]
 name = "tufaceous-artifact"
 version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=john%2Ffake-rot-distinct-sign#59387cad23518c5e5c6700f1147877187eb3e30f"
 dependencies = [
  "daft",
  "hex",
@@ -14247,6 +14249,7 @@ dependencies = [
 [[package]]
 name = "tufaceous-brand-metadata"
 version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=john%2Ffake-rot-distinct-sign#59387cad23518c5e5c6700f1147877187eb3e30f"
 dependencies = [
  "semver 1.0.26",
  "serde",
@@ -14258,6 +14261,7 @@ dependencies = [
 [[package]]
 name = "tufaceous-lib"
 version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=john%2Ffake-rot-distinct-sign#59387cad23518c5e5c6700f1147877187eb3e30f"
 dependencies = [
  "anyhow",
  "async-trait",

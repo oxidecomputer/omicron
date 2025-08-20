@@ -41,9 +41,9 @@ INFO extracting uploaded archive to <EXTRACTING_UPLOADED_ARCHIVE_TO_REDACTED>
 INFO created directory to store extracted artifacts, path: <CREATED_DIRECTORY_TO_STORE_EXTRACTED_ARTIFACTS_PATH_REDACTED>
 INFO added artifact, name: installinator_document, kind: installinator_document, version: 1.0.0, hash: c6ae866031d1183094c92cde9d9d1fd5f18356abc81a842ce31471b473fd5582, length: 367
 INFO added artifact, name: SimGimletSp, kind: gimlet_sp, version: 1.0.0, hash: cf66c7fccc4099163b6a6bd7a08c8bd20b1491238912914ed556886212ab66aa, length: 723
-INFO added artifact, name: SimRot, kind: gimlet_rot_image_a, version: 1.0.0, hash: 4e9a903763afcbbddb99762b2fd8f176a94b9ac905571d7a4da4081b04e5b544, length: 777
-INFO added artifact, name: SimRot, kind: gimlet_rot_image_b, version: 1.0.0, hash: 4e9a903763afcbbddb99762b2fd8f176a94b9ac905571d7a4da4081b04e5b544, length: 777
-INFO added artifact, name: SimRot, kind: gimlet_rot_bootloader, version: 1.0.0, hash: 646995b6aa067120198ca1be654fc07efcc39216735def0e11bb65b07ac8fae3, length: 795
+INFO added artifact, name: SimRot, kind: gimlet_rot_image_a, version: 1.0.0, hash: 4f27bd358f508ee6945b4440c51d9997d2dc65012b07f87abd4856785d396b67, length: 770
+INFO added artifact, name: SimRot, kind: gimlet_rot_image_b, version: 1.0.0, hash: 4f27bd358f508ee6945b4440c51d9997d2dc65012b07f87abd4856785d396b67, length: 770
+INFO added artifact, name: SimRot, kind: gimlet_rot_bootloader, version: 1.0.0, hash: 4f27bd358f508ee6945b4440c51d9997d2dc65012b07f87abd4856785d396b67, length: 770
 INFO added artifact, name: fake-host, kind: host_phase_1, version: 1.0.0, hash: 2053f8594971bbf0a7326c833e2ffc12b065b9d823b9c0b967d275fa595e4e89, length: 524288
 INFO added artifact, name: fake-host, kind: host_phase_2, version: 1.0.0, hash: f3dd0c7a1bd4500ea0d8bcf67581f576d47752b2f1998a4cb0f0c3155c483008, length: 1048576
 INFO added artifact, name: fake-trampoline, kind: trampoline_phase_1, version: 1.0.0, hash: 9b7575cad720f017e936fe5994fc4e21fe040acaaf83c2edd86132aa3d667c7b, length: 524288
@@ -60,13 +60,13 @@ INFO added artifact, name: ntp, kind: zone, version: 1.0.0, hash: 67593d686ed04a
 INFO added artifact, name: nexus, kind: zone, version: 1.0.0, hash: 0e32b4a3e5d3668bb1d6a16fb06b74dc60b973fa479dcee0aae3adbb52bf1388, length: 1682
 INFO added artifact, name: oximeter, kind: zone, version: 1.0.0, hash: 048d8fe8cdef5b175aad714d0f148aa80ce36c9114ac15ce9d02ed3d37877a77, length: 1682
 INFO added artifact, name: fake-psc-sp, kind: psc_sp, version: 1.0.0, hash: c52c4eb908345683a6bb6c289ec7bb6a0b0b6cc9121107d70dd7bdc88418bcf4, length: 720
-INFO added artifact, name: fake-psc-rot, kind: psc_rot_image_a, version: 1.0.0, hash: 0a775fa2df57d7a820955d5b61bdbee3c8d770787aedeccfa9b68d9d9821c0c1, length: 777
-INFO added artifact, name: fake-psc-rot, kind: psc_rot_image_b, version: 1.0.0, hash: 0a775fa2df57d7a820955d5b61bdbee3c8d770787aedeccfa9b68d9d9821c0c1, length: 777
-INFO added artifact, name: fake-psc-rot-bootloader, kind: psc_rot_bootloader, version: 1.0.0, hash: c3c5c7fca2262242d40a5d9411bc1673b5117e22eb1a0cad5411e8c350717196, length: 786
+INFO added artifact, name: fake-psc-rot, kind: psc_rot_image_a, version: 1.0.0, hash: 852aa6ea25e7d4f1256cb3e12085beeed208de668277c2e2bedb52c6c214de92, length: 758
+INFO added artifact, name: fake-psc-rot, kind: psc_rot_image_b, version: 1.0.0, hash: 852aa6ea25e7d4f1256cb3e12085beeed208de668277c2e2bedb52c6c214de92, length: 758
+INFO added artifact, name: fake-psc-rot-bootloader, kind: psc_rot_bootloader, version: 1.0.0, hash: 852aa6ea25e7d4f1256cb3e12085beeed208de668277c2e2bedb52c6c214de92, length: 758
 INFO added artifact, name: fake-switch-sp, kind: switch_sp, version: 1.0.0, hash: 31bf0882c4133c9a3ba3e44a90fb7315f2fe8d231e9de03b4d0e8ffe16eb2b36, length: 721
-INFO added artifact, name: fake-switch-rot, kind: switch_rot_image_a, version: 1.0.0, hash: b2e0c3f6cffd6af4838b79af8cd06dbc5c46371c651026fc447d9aafa6a2a416, length: 771
-INFO added artifact, name: fake-switch-rot, kind: switch_rot_image_b, version: 1.0.0, hash: b2e0c3f6cffd6af4838b79af8cd06dbc5c46371c651026fc447d9aafa6a2a416, length: 771
-INFO added artifact, name: fake-switch-rot-bootloader, kind: switch_rot_bootloader, version: 1.0.0, hash: d7144fbce4f4a1b73a0354d31d5d8adf32add4a98a3455659edf7da22efaa68f, length: 800
+INFO added artifact, name: fake-switch-rot, kind: switch_rot_image_a, version: 1.0.0, hash: f9c348f43c4b6bcbc8d8376311cdaf52cc5fca6f5555d8618659b1490ff88220, length: 772
+INFO added artifact, name: fake-switch-rot, kind: switch_rot_image_b, version: 1.0.0, hash: f9c348f43c4b6bcbc8d8376311cdaf52cc5fca6f5555d8618659b1490ff88220, length: 772
+INFO added artifact, name: fake-switch-rot-bootloader, kind: switch_rot_bootloader, version: 1.0.0, hash: f9c348f43c4b6bcbc8d8376311cdaf52cc5fca6f5555d8618659b1490ff88220, length: 772
 set target release based on repo-1.0.0.zip
 
 
@@ -106,9 +106,9 @@ INFO extracting uploaded archive to <EXTRACTING_UPLOADED_ARCHIVE_TO_REDACTED>
 INFO created directory to store extracted artifacts, path: <CREATED_DIRECTORY_TO_STORE_EXTRACTED_ARTIFACTS_PATH_REDACTED>
 INFO added artifact, name: installinator_document, kind: installinator_document, version: 2.0.0, hash: 065b2b7cde09474c9a1bcf98a8f9c93129f617e074404c6aa76164f440a5627f, length: 367
 INFO added artifact, name: fake-gimlet-sp, kind: gimlet_sp, version: 2.0.0, hash: 7a0f89d5651e09eff085e79ac1faab7a8479d539813a4d913bb868024f2240d6, length: 723
-INFO added artifact, name: fake-gimlet-rot, kind: gimlet_rot_image_a, version: 2.0.0, hash: 253d5d0cc0d54707350a25fc2dd0890114d34013d29e45085039a2145af7cc2c, length: 779
-INFO added artifact, name: fake-gimlet-rot, kind: gimlet_rot_image_b, version: 2.0.0, hash: 253d5d0cc0d54707350a25fc2dd0890114d34013d29e45085039a2145af7cc2c, length: 779
-INFO added artifact, name: fake-gimlet-rot-bootloader, kind: gimlet_rot_bootloader, version: 2.0.0, hash: 323421b14384a1249298d3d025ac4305e233c57d4e38838ef08ab77bc985a1a5, length: 798
+INFO added artifact, name: fake-gimlet-rot, kind: gimlet_rot_image_a, version: 2.0.0, hash: e532cd4eb14e4a7af7e49e9c93ae1ea04dbca72e26faa12aedad85ec15de4c81, length: 768
+INFO added artifact, name: fake-gimlet-rot, kind: gimlet_rot_image_b, version: 2.0.0, hash: e532cd4eb14e4a7af7e49e9c93ae1ea04dbca72e26faa12aedad85ec15de4c81, length: 768
+INFO added artifact, name: fake-gimlet-rot-bootloader, kind: gimlet_rot_bootloader, version: 2.0.0, hash: e532cd4eb14e4a7af7e49e9c93ae1ea04dbca72e26faa12aedad85ec15de4c81, length: 768
 INFO added artifact, name: fake-host, kind: host_phase_1, version: 2.0.0, hash: 44714733af7600b30a50bfd2cbaf707ff7ee9724073ff70a6732e55a88864cf6, length: 524288
 INFO added artifact, name: fake-host, kind: host_phase_2, version: 2.0.0, hash: 0c0362b640cece5b9a5e86d8fa683bd2eb84c3e7f90731f597197d604ffa76e3, length: 1048576
 INFO added artifact, name: fake-trampoline, kind: trampoline_phase_1, version: non-semver, hash: 24f8ca0d52da5238644b11964c6feda854c7530820713efefa7ac91683b3fc76, length: 524288
@@ -125,13 +125,13 @@ INFO added artifact, name: ntp, kind: zone, version: 2.0.0, hash: d76e26198daed6
 INFO added artifact, name: nexus, kind: zone, version: 2.0.0, hash: e9b7035f41848a987a798c15ac424cc91dd662b1af0920d58d8aa1ebad7467b6, length: 1683
 INFO added artifact, name: oximeter, kind: zone, version: 2.0.0, hash: 9f4bc56a15d5fd943fdac94309994b8fd73aa2be1ec61faf44bfcf2356c9dc23, length: 1683
 INFO added artifact, name: fake-psc-sp, kind: psc_sp, version: 2.0.0, hash: 2210c5831155a440541d4669e1d2ae0efec2052016f469102bd75bf7bc183cf5, length: 724
-INFO added artifact, name: fake-psc-rot, kind: psc_rot_image_a, version: 2.0.0, hash: 5201a3b57d7a13935f8e605658d1e22a11e309527aa6ad23d6e8a40f311ab77a, length: 774
-INFO added artifact, name: fake-psc-rot, kind: psc_rot_image_b, version: 2.0.0, hash: 5201a3b57d7a13935f8e605658d1e22a11e309527aa6ad23d6e8a40f311ab77a, length: 774
-INFO added artifact, name: fake-psc-rot-bootloader, kind: psc_rot_bootloader, version: 2.0.0, hash: 3c473a67527413b7f13e56819007c5ee6ec5ac2c173d4ea149c11d47c3799492, length: 789
+INFO added artifact, name: fake-psc-rot, kind: psc_rot_image_a, version: 2.0.0, hash: aa66c539a73621c95445b136732f62b1bc3ff9cea9663b827f17843e8007343f, length: 766
+INFO added artifact, name: fake-psc-rot, kind: psc_rot_image_b, version: 2.0.0, hash: aa66c539a73621c95445b136732f62b1bc3ff9cea9663b827f17843e8007343f, length: 766
+INFO added artifact, name: fake-psc-rot-bootloader, kind: psc_rot_bootloader, version: 2.0.0, hash: aa66c539a73621c95445b136732f62b1bc3ff9cea9663b827f17843e8007343f, length: 766
 INFO added artifact, name: fake-switch-sp, kind: switch_sp, version: 2.0.0, hash: 3bc2a8f4f361c461ac7ecd95da6531a43e4050a09ab595b94e3821ad6022f369, length: 726
-INFO added artifact, name: fake-switch-rot, kind: switch_rot_image_a, version: 2.0.0, hash: 2c04b375a29a0167ff818a793197666828d3e396f7f2212c400705fd8657b050, length: 775
-INFO added artifact, name: fake-switch-rot, kind: switch_rot_image_b, version: 2.0.0, hash: 2c04b375a29a0167ff818a793197666828d3e396f7f2212c400705fd8657b050, length: 775
-INFO added artifact, name: fake-switch-rot-bootloader, kind: switch_rot_bootloader, version: non-semver-2, hash: 97725d9ced7ad5dbf995cb41c759042c27fab10f38bc83913328e838cec8c499, length: 795
+INFO added artifact, name: fake-switch-rot, kind: switch_rot_image_a, version: 2.0.0, hash: ec912c28aec928df061eebf39bdd69f2e32d095b92f138a2e7a30cbf22dce06d, length: 764
+INFO added artifact, name: fake-switch-rot, kind: switch_rot_image_b, version: 2.0.0, hash: ec912c28aec928df061eebf39bdd69f2e32d095b92f138a2e7a30cbf22dce06d, length: 764
+INFO added artifact, name: fake-switch-rot-bootloader, kind: switch_rot_bootloader, version: non-semver-2, hash: 58777684a77509acb5dbfb2b7238d85b6a19434c8586ea07524cd62cfe8b3351, length: 775
 sled b82ede02-399c-48c6-a1de-411df4fa49a7: install dataset updated: from repo at repo-2.0.0.zip (system version 2.0.0)
 
 
