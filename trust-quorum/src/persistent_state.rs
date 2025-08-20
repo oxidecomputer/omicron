@@ -9,6 +9,7 @@
 use crate::crypto::LrtqShare;
 use crate::{Configuration, Epoch, PlatformId};
 use bootstore::schemes::v0::SharePkgCommon as LrtqShareData;
+use daft::Diffable;
 use gfss::shamir::Share;
 use iddqd::IdOrdMap;
 use omicron_uuid_kinds::{GenericUuid, RackUuid};
@@ -16,7 +17,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
 /// All the persistent state for this protocol
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, Diffable)]
+#[cfg_attr(feature = "danger_partial_eq_ct_wrapper", derive(PartialEq, Eq))]
 pub struct PersistentState {
     // If this node was an LRTQ node, sled-agent will start it with the ledger
     // data it read from disk. This allows us to upgrade from LRTQ.

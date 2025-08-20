@@ -9,6 +9,7 @@ use anyhow::anyhow;
 use anyhow::bail;
 use camino::Utf8Path;
 use clap::Parser;
+use reedline::Prompt;
 use reedline::Reedline;
 use reedline::Signal;
 use std::fs::File;
@@ -108,13 +109,24 @@ pub fn run_repl_from_file<C: Parser>(
 pub fn run_repl_on_stdin<C: Parser>(
     run_one: &mut dyn FnMut(C) -> anyhow::Result<Option<String>>,
 ) -> anyhow::Result<()> {
-    let mut ed = Reedline::create();
+    let ed = Reedline::create();
     let prompt = reedline::DefaultPrompt::new(
         reedline::DefaultPromptSegment::Empty,
         reedline::DefaultPromptSegment::Empty,
     );
+    run_repl_on_stdin_customized(ed, &prompt, run_one)
+}
+
+/// Runs a REPL using stdin/stdout with a customized `Reedline` and `Prompt`
+///
+/// See docs for [`run_repl_on_stdin`]
+pub fn run_repl_on_stdin_customized<C: Parser>(
+    mut ed: Reedline,
+    prompt: &dyn Prompt,
+    run_one: &mut dyn FnMut(C) -> anyhow::Result<Option<String>>,
+) -> anyhow::Result<()> {
     loop {
-        match ed.read_line(&prompt) {
+        match ed.read_line(prompt) {
             Ok(Signal::Success(buffer)) => {
                 // Strip everything after '#' as a comment.
                 let entry = match buffer.split_once('#') {

@@ -137,6 +137,16 @@ impl Share {
     }
 }
 
+#[cfg(feature = "danger_partial_eq_ct_wrapper")]
+impl PartialEq for Share {
+    fn eq(&self, other: &Self) -> bool {
+        self.x_coordinate == other.x_coordinate
+            && self.y_coordinates == other.y_coordinates
+    }
+}
+#[cfg(feature = "danger_partial_eq_ct_wrapper")]
+impl Eq for Share {}
+
 impl std::fmt::Debug for Share {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("KeyShareGf256").finish()
