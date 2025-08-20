@@ -464,7 +464,7 @@ impl Display for TqStateDiff<'_> {
                 display_node_ctx_diff(ctx_diff, f)?;
 
                 // Add a blank line between modified nodes
-                writeln!(f, "")?;
+                writeln!(f)?;
             }
         }
 
@@ -566,11 +566,10 @@ fn display_underlay_network_diff(
     let added = after.difference(&before).count();
     let removed = before.difference(&after).count();
 
-    writeln!(f, "  {} new nexus replies in flight on underlay network", added)?;
+    writeln!(f, "  {added} new nexus replies in flight on underlay network")?;
     writeln!(
         f,
-        "  {} nexus replies delivered to nexus from underlay network",
-        removed
+        "  {removed} nexus replies delivered to nexus from underlay network",
     )?;
 
     Ok(())
@@ -582,14 +581,14 @@ fn display_bootstrap_network_diff(
 ) -> std::fmt::Result {
     if !diff.added.is_empty() {
         writeln!(f, "  messages newly in flight on bootstrap network:")?;
-        for (id, _) in &diff.added {
+        for id in diff.added.keys() {
             writeln!(f, "    destination:  {id}")?;
         }
     }
 
     if !diff.removed.is_empty() {
         writeln!(f, "  all messages delivered from bootstrap network:")?;
-        for (id, _) in &diff.removed {
+        for id in diff.removed.keys() {
             writeln!(f, "    destination:  {id}")?;
         }
     }
@@ -623,27 +622,27 @@ fn display_node_ctx_diff(
 
     if !diff.persistent_state().shares.added.is_empty() {
         writeln!(f, "  our share added to persistent state: ")?;
-        for (e, _) in &diff.persistent_state().shares.added {
-            writeln!(f, "    epoch: {}", e)?;
+        for e in diff.persistent_state().shares.added.keys() {
+            writeln!(f, "    epoch: {e}")?;
         }
     }
     if !diff.persistent_state().shares.removed.is_empty() {
         writeln!(f, "  our share removed from persistent state: ")?;
-        for (e, _) in &diff.persistent_state().shares.removed {
-            writeln!(f, "    epoch: {}", e)?;
+        for e in diff.persistent_state().shares.removed.keys() {
+            writeln!(f, "    epoch: {e}")?;
         }
     }
 
     if !diff.persistent_state().commits.added.is_empty() {
         writeln!(f, "  commit added to persistent state: ")?;
         for e in &diff.persistent_state().commits.added {
-            writeln!(f, "    epoch: {}", e)?;
+            writeln!(f, "    epoch: {e}")?;
         }
     }
     if !diff.persistent_state().commits.removed.is_empty() {
         writeln!(f, "  commit removed from persistent state: ")?;
         for e in &diff.persistent_state().commits.removed {
-            writeln!(f, "    epoch: {}", e)?;
+            writeln!(f, "    epoch: {e}")?;
         }
     }
 
@@ -718,7 +717,7 @@ fn display_node_diff(
 
             // They are both `Some`, so figure out what changed
             // by recursing
-            let diff = before.diff(&after);
+            let diff = before.diff(after);
             display_coordinator_state_diff(diff, f)?;
         }
     }
@@ -793,13 +792,13 @@ pub fn display_validated_reconfigure_msg_diff(
     if !diff.members().added.is_empty() {
         writeln!(f, "    added members:")?;
         for member in &diff.members().added {
-            writeln!(f, "        {}", member)?;
+            writeln!(f, "        {member}")?;
         }
     }
     if !diff.members().removed.is_empty() {
         writeln!(f, "    removed members:")?;
         for member in &diff.members().removed {
-            writeln!(f, "        {}", member)?;
+            writeln!(f, "        {member}")?;
         }
     }
     if diff.threshold().is_modified() {
@@ -846,19 +845,17 @@ pub fn display_coordinator_operation_diff(
         ) => {
             // If the collection epoch changed, then only report that
             if old_epoch != after_old_epoch {
+                #[allow(clippy::uninlined_format_args)]
                 writeln!(
                     f,
                     "    collecting shares: epoch changed: {} -> {}",
                     old_epoch, after_old_epoch
                 )?;
-            } else {
-                if old_collected_shares != after_old_collected_shares {
-                    writeln!(
-                        f,
-                        "    collected shares changed at epoch: {}",
-                        old_epoch
-                    )?;
-                }
+            } else if old_collected_shares != after_old_collected_shares {
+                writeln!(
+                    f,
+                    "    collected shares changed at epoch: {old_epoch}",
+                )?;
             }
         }
         (

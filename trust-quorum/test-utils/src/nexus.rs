@@ -111,6 +111,7 @@ pub struct NexusState {
 }
 
 impl NexusState {
+    #[allow(clippy::new_without_default)]
     pub fn new() -> NexusState {
         NexusState { rack_id: RackUuid::new_v4(), configs: IdOrdMap::new() }
     }
