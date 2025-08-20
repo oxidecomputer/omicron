@@ -134,7 +134,10 @@ impl Instance {
             user_data: params.user_data.clone(),
             ncpus: params.ncpus.into(),
             memory: params.memory.into(),
-            hostname: params.hostname.to_string(),
+            hostname: match &params.hostname {
+                Some(hostname) => hostname.to_string(),
+                None => params.identity.name.to_string(),
+            },
             auto_restart,
             // Intentionally ignore `params.boot_disk_id` here: we can't set
             // `boot_disk_id` until the referenced disk is attached.

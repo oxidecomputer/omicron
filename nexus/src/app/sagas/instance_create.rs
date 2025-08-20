@@ -1284,7 +1284,7 @@ pub mod test {
                 },
                 ncpus: InstanceCpuCount::try_from(2).unwrap(),
                 memory: ByteCount::from_gibibytes_u32(4),
-                hostname: "inst".parse().unwrap(),
+                hostname: Some("inst".parse().unwrap()),
                 user_data: vec![],
                 ssh_public_keys: None,
                 network_interfaces:

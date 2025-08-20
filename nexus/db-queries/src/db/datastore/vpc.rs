@@ -3972,7 +3972,7 @@ mod tests {
                         },
                         ncpus: external::InstanceCpuCount(1),
                         memory: 10.into(),
-                        hostname: "insty".parse().unwrap(),
+                        hostname: Some("insty".parse().unwrap()),
                         user_data: vec![],
                         network_interfaces:
                             params::InstanceNetworkInterfaceAttachment::None,

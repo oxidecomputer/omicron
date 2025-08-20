@@ -80,7 +80,7 @@ impl ResourceAllocator {
                 },
                 ncpus: InstanceCpuCount(cpus),
                 memory: ByteCount::from_gibibytes_u32(memory),
-                hostname: "host".parse().unwrap(),
+                hostname: Some("host".parse().unwrap()),
                 user_data: b"#cloud-config\nsystem_info:\n  default_user:\n    name: oxide"
                     .to_vec(),
                 ssh_public_keys:  Some(Vec::new()),

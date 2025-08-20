@@ -3647,6 +3647,9 @@ mod test {
         for name in valid_names {
             eprintln!("check name \"{}\" (should be valid)", name);
             assert_eq!(name, name.parse::<Name>().unwrap().as_str());
+            // make sure valid names are also valid hostnames so we can use names as
+            // fallback hostnames, e.g., in instance create
+            assert_eq!(name, name.parse::<Hostname>().unwrap().as_str());
         }
     }
 

@@ -161,7 +161,7 @@ async fn test_project_deletion_with_instance(
             },
             ncpus: InstanceCpuCount(4),
             memory: ByteCount::from_gibibytes_u32(1),
-            hostname: "the-host".parse().unwrap(),
+            hostname: Some("the-host".parse().unwrap()),
             user_data: b"none".to_vec(),
             ssh_public_keys: Some(Vec::new()),
             network_interfaces:

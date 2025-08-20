@@ -648,7 +648,7 @@ pub static DEMO_INSTANCE_CREATE: LazyLock<params::InstanceCreate> =
         },
         ncpus: InstanceCpuCount(1),
         memory: ByteCount::from_gibibytes_u32(16),
-        hostname: "demo-instance".parse().unwrap(),
+        hostname: Some("demo-instance".parse().unwrap()),
         user_data: vec![],
         ssh_public_keys: Some(Vec::new()),
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,

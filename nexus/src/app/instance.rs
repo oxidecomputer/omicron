@@ -2453,7 +2453,7 @@ mod tests {
             },
             ncpus: InstanceCpuCount(1),
             memory: ByteCount::from_gibibytes_u32(1),
-            hostname: Hostname::try_from("elysium").unwrap(),
+            hostname: Some(Hostname::try_from("elysium").unwrap()),
             user_data: vec![],
             network_interfaces: InstanceNetworkInterfaceAttachment::None,
             external_ips: vec![],

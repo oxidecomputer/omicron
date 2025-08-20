@@ -57,7 +57,7 @@ async fn create_instance_expect_failure(
         },
         ncpus: InstanceCpuCount(1),
         memory: ByteCount::from_gibibytes_u32(1),
-        hostname: name.parse().unwrap(),
+        hostname: Some(name.parse().unwrap()),
         user_data: vec![],
         ssh_public_keys: Some(Vec::new()),
         network_interfaces,

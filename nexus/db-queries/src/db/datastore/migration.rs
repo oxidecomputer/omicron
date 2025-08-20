@@ -228,7 +228,7 @@ mod tests {
                         },
                         ncpus: 2i64.try_into().unwrap(),
                         memory: ByteCount::from_gibibytes_u32(16),
-                        hostname: "myhostname".try_into().unwrap(),
+                        hostname: Some("myhostname".try_into().unwrap()),
                         user_data: Vec::new(),
                         network_interfaces:
                             params::InstanceNetworkInterfaceAttachment::None,
