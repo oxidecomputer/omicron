@@ -5,9 +5,7 @@
 //! State of a reconfiguration coordinator inside a [`crate::Node`]
 
 use crate::configuration::ConfigurationDiff;
-use crate::crypto::{
-    LrtqShare, PlaintextRackSecrets, Sha3_256Digest, ShareDigestLrtq,
-};
+use crate::crypto::{LrtqShare, PlaintextRackSecrets, ShareDigestLrtq};
 use crate::validators::{ReconfigurationError, ValidatedReconfigureMsg};
 use crate::{Configuration, Epoch, PeerMsgKind, PlatformId, RackSecret};
 use crate::{NodeHandlerCtx, ValidatedReconfigureMsgDiff};
@@ -317,39 +315,15 @@ impl CoordinatorState {
                     "new_epoch" => new_epoch.to_string()
                 ));
 
-                // Are we trying to retrieve shares for `epoch`?
-                if *old_epoch != epoch {
-                    warn!(
-                        log,
-                        "Received Share from node with wrong epoch";
-                        "received_epoch" => %epoch,
-                        "from" => %from
-                    );
+                if !crate::validate_share(
+                    &self.log,
+                    &old_config,
+                    &from,
+                    epoch,
+                    &share,
+                ) {
+                    // Logging done inside `validate_share`
                     return;
-                }
-
-                // Was the sender a member of the configuration at `old_epoch`?
-                let Some(expected_digest) = old_config.members.get(&from)
-                else {
-                    warn!(
-                        log,
-                        "Received Share from unexpected node";
-                        "received_epoch" => %epoch,
-                        "from" => %from
-                    );
-                    return;
-                };
-
-                // Does the share hash match what we expect?
-                let mut digest = Sha3_256Digest::default();
-                share.digest::<sha3::Sha3_256>(&mut digest.0);
-                if digest != *expected_digest {
-                    error!(
-                        log,
-                        "Received share with invalid digest";
-                        "received_epoch" => %epoch,
-                        "from" => %from
-                    );
                 }
 
                 // A valid share was received. Is it new?
@@ -443,6 +417,12 @@ impl CoordinatorState {
                 };
 
                 // Save the encrypted rack secrets in the current configuration
+                //
+                // A new configuration is always created with a `None` value
+                // for `encrypted_rack_secrets`, as it gets filled in here.
+                //
+                // If we change that it's a programmer error that will be caught
+                // immediately by our tests.
                 assert!(self.configuration.encrypted_rack_secrets.is_none());
                 self.configuration.encrypted_rack_secrets =
                     Some(new_encrypted_rack_secrets);
