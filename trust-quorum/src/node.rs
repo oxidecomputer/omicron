@@ -568,6 +568,16 @@ impl Node {
             return;
         }
 
+        if !config.members.contains_key(ctx.platform_id()) {
+            error!(
+                self.log,
+                "Received Prepare when not a member of configuration";
+                "from" => %from,
+                "prepare_epoch" => %config.epoch
+            );
+            return;
+        }
+
         // We always save the config and share if we haven't committed a later
         // configuration. If we have seen a newer `Prepare`, it's possible
         // that that configuration will not commit, and the latest committed
@@ -594,7 +604,10 @@ impl Node {
             );
         }
         // If we are coordinating for an older epoch, then we should stop
-        // coordinating. This epoch will never commit.
+        // coordinating. The configuration at this epoch will either never
+        // commit, or has already committed without us learning about it from
+        // Nexus. In either case the rest of the system has moved on and we
+        // should stop coordinating.
         if let Some(cs) = &self.coordinator_state {
             if msg_epoch > cs.reconfigure_msg().epoch() {
                 // This prepare is for a newer configuration than the one we are

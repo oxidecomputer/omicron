@@ -211,13 +211,14 @@ impl CoordinatorState {
             #[expect(unused)]
             CoordinatorOperation::CollectLrtqShares { members, shares } => {}
             CoordinatorOperation::Prepare { prepares, .. } => {
-                for (platform_id, (config, share)) in
-                    prepares.clone().into_iter()
-                {
+                for (platform_id, (config, share)) in prepares.iter() {
                     if ctx.connected().contains(&platform_id) {
                         ctx.send(
-                            platform_id,
-                            PeerMsgKind::Prepare { config, share },
+                            platform_id.clone(),
+                            PeerMsgKind::Prepare {
+                                config: config.clone(),
+                                share: share.clone(),
+                            },
                         );
                     }
                 }
@@ -241,7 +242,6 @@ impl CoordinatorState {
             } => {}
             CoordinatorOperation::CollectLrtqShares { members, shares } => {}
             CoordinatorOperation::Prepare { prepares, prepare_acks } => {
-                let rack_id = self.reconfigure_msg.rack_id();
                 if let Some((config, share)) = prepares.get(&to) {
                     ctx.send(
                         to,
