@@ -76,6 +76,8 @@ mod planning_report;
 mod zone_type;
 
 use crate::inventory::BaseboardId;
+use anyhow::anyhow;
+use anyhow::bail;
 pub use blueprint_diff::BlueprintDiffSummary;
 use blueprint_display::BpPendingMgsUpdates;
 pub use chicken_switches::PlannerChickenSwitches;
@@ -382,6 +384,26 @@ impl Blueprint {
     /// blueprint.
     pub fn display(&self) -> BlueprintDisplay<'_> {
         BlueprintDisplay { blueprint: self }
+    }
+
+    /// Returns whether the given Nexus instance should be quiescing or quiesced
+    /// in preparation for handoff to the next generation
+    pub fn nexus_quiescing(
+        &self,
+        nexus_id: OmicronZoneUuid,
+    ) -> Result<bool, anyhow::Error> {
+        let zone = self
+            .all_omicron_zones(|_z| true)
+            .find(|(_sled_id, zone_config)| zone_config.id == nexus_id)
+            .ok_or_else(|| {
+                anyhow!("zone {} does not exist in blueprint", nexus_id)
+            })?
+            .1;
+        let BlueprintZoneType::Nexus(zone_config) = &zone.zone_type else {
+            bail!("zone {} is not a Nexus zone", nexus_id);
+        };
+
+        Ok(zone_config.nexus_generation < self.nexus_generation)
     }
 }
 
