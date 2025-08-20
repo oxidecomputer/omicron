@@ -397,8 +397,7 @@ fn cmd_run(tqdb: &mut Tqdb) -> anyhow::Result<Option<String>> {
             .cloned()
             .find(|&i| i > tqdb.next_event)
             .unwrap_or(tqdb.events.len());
-        let events: Vec<_> =
-            tqdb.events[tqdb.next_event..end].iter().cloned().collect();
+        let events: Vec<_> = tqdb.events[tqdb.next_event..end].to_vec();
         for event in events {
             tqdb.current_state.apply_event(event);
             num_events += 1;
@@ -436,8 +435,7 @@ fn cmd_step(
 
     let mut s = String::new();
     let mut applied_events = 0;
-    let events: Vec<_> =
-        tqdb.events[tqdb.next_event..end].iter().cloned().collect();
+    let events: Vec<_> = tqdb.events[tqdb.next_event..end].to_vec();
     for event in events {
         writeln!(&mut s, "{}  {event:#?}", tqdb.next_event)?;
         tqdb.current_state.apply_event(event.clone());
@@ -526,11 +524,10 @@ fn cmd_snapshot(
     let output = if let Some(index) = index {
         if index < tqdb.next_event {
             tqdb.pending_snapshots.insert(index);
-            format!(
-                "Setting pending snapshot.\n
+            "Setting pending snapshot.\n
                 Already applied event however.
                 Use 'rewind' to start over."
-            )
+                .to_string()
         } else if index > tqdb.events.len() {
             bail!(
                 "index out of bounds. Only {} total events.",
@@ -538,14 +535,14 @@ fn cmd_snapshot(
             );
         } else {
             tqdb.pending_snapshots.insert(index);
-            format!("Setting pending snapshot")
+            "Setting pending snapshot".to_string()
         }
     } else {
         tqdb.snapshots.insert(
             tqdb.next_event.checked_sub(1).unwrap(),
             tqdb.current_state.clone(),
         );
-        format!("Taking snapshot at current state")
+        "Taking snapshot at current state".to_string()
     };
 
     Ok(Some(output))
