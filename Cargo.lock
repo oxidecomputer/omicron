@@ -8271,6 +8271,7 @@ dependencies = [
  "clap",
  "omicron-workspace-hack",
  "reedline",
+ "subprocess",
 ]
 
 [[package]]
