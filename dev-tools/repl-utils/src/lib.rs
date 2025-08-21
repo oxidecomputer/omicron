@@ -155,7 +155,7 @@ fn process_entry<C: Parser>(
     // the REPL command into.
     let mut split = entry.splitn(2, '|');
 
-    // Parse the line of input before any `!` as a REPL command.
+    // Parse the line of input before any `|` as a REPL command.
     //
     // Using `split_whitespace()` like this is going to be a problem if we ever
     // want to support arguments with whitespace in them (using quotes).  But
