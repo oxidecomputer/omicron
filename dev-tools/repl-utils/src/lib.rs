@@ -15,6 +15,7 @@ use reedline::Signal;
 use std::fs::File;
 use std::io::BufRead;
 use std::io::BufReader;
+use std::io::Write;
 use subprocess::Exec;
 
 /// Runs the same kind of REPL as `run_repl_on_stdin()`, but reads commands from
@@ -165,14 +166,16 @@ fn process_entry<C: Parser>(
     // element of the iterator as the REPL command to parse via clap. Use the
     // second element, if it exists, as the shell command to pipe the output of
     // the REPL command into.
-    let mut split = entry.splitn(2, '|');
+    let mut split = entry.splitn(2, '!');
 
     // Parse the line of input before any `!` as a REPL command.
     //
     // Using `split_whitespace()` like this is going to be a problem if we ever
     // want to support arguments with whitespace in them (using quotes).  But
     // it's good enough for now.
-    let parts = split.next().unwrap().split_whitespace();
+    //
+    // SAFETY: There is always at least one element in the iterator.
+    let parts = split.next().expect("element exists").split_whitespace();
 
     let parsed_command = C::command()
         .multicall(true)
@@ -198,8 +201,24 @@ fn process_entry<C: Parser>(
         Err(error) => println!("error: {:#}", error),
         Ok(Some(repl_cmd_output)) => {
             if let Some(shell_cmd) = split.next() {
-                let cmd = format!("echo '{repl_cmd_output}' | {shell_cmd}");
-                Exec::shell(cmd).join().unwrap();
+                let mut child_stdin =
+                    Exec::shell(shell_cmd).stream_stdin().unwrap();
+                let mut written_bytes = 0;
+                let to_write = repl_cmd_output.len();
+                while written_bytes < to_write {
+                    match child_stdin
+                        .write(&repl_cmd_output.as_bytes()[written_bytes..])
+                    {
+                        Ok(0) => break,
+                        Ok(n) => written_bytes += n,
+                        Err(_) => {
+                            // We expect broken pipe errors frequently. And
+                            // there's nothing we can do besides ignore or print
+                            // them out. Ignoring seems to work best.
+                            break;
+                        }
+                    }
+                }
             } else {
                 println!("{repl_cmd_output}");
             }
