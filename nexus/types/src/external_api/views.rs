@@ -1545,38 +1545,20 @@ pub struct UpdatesTrustRoot {
     pub root_role: TufSignedRootRole,
 }
 
+// TODO: figure out how to make target release and last blueprint not optional
+
+// TODO: add problems. see PlanningReport and do_plan
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 pub struct UpdateStatus {
     /// Current target release information
     pub target_release: Option<TargetRelease>,
 
     /// Count of components running each release version
-    pub components_by_release: BTreeMap<String, ComponentCounts>,
+    pub components_by_release: BTreeMap<String, usize>,
 
     /// Time when the last blueprint was created
     pub last_blueprint_time: Option<DateTime<Utc>>,
-
-    /// List of problems blocking forward progress
-    pub blockers: Vec<UpdateBlocker>,
-}
-
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
-pub struct ComponentCounts {
-    pub zone_count: u32,
-    pub sp_count: u32,
-}
-
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
-pub struct UpdateBlocker {
-    pub description: String,
-    pub severity: BlockerSeverity,
-}
-
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum BlockerSeverity {
-    Warning,
-    Error,
 }
 
 fn expected_one_of<T: strum::VariantArray + fmt::Display>() -> String {
