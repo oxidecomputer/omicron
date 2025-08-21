@@ -373,7 +373,9 @@ pub fn get_64_subnet(
 ///
 /// The first address in the range is guaranteed to be no greater than the last
 /// address.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, Ord, PartialOrd,
+)]
 #[serde(untagged)]
 pub enum IpRange {
     V4(Ipv4Range),
@@ -507,7 +509,16 @@ impl From<Ipv6Range> for IpRange {
 ///
 /// The first address must be less than or equal to the last address.
 #[derive(
-    Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema,
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+    PartialOrd,
+    Ord,
 )]
 #[serde(try_from = "AnyIpv4Range")]
 pub struct Ipv4Range {
@@ -571,7 +582,16 @@ impl TryFrom<AnyIpv4Range> for Ipv4Range {
 ///
 /// The first address must be less than or equal to the last address.
 #[derive(
-    Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema,
+    PartialOrd,
+    Ord,
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    Deserialize,
+    Serialize,
+    JsonSchema,
 )]
 #[serde(try_from = "AnyIpv6Range")]
 pub struct Ipv6Range {
