@@ -6875,15 +6875,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let nexus = &apictx.context.nexus;
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
-            let target_release =
-                nexus.datastore().target_release_get_current(&opctx).await?;
-            Ok(HttpResponseOk(
-                nexus
-                    .datastore()
-                    .target_release_view(&opctx, &target_release)
-                    .await?,
-            ));
-            Ok(views::UpdateStatus {})
+            let status = nexus.update_status_external(&opctx).await?;
+            Ok(HttpResponseOk(status))
         };
         apictx
             .context
