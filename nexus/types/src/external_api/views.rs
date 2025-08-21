@@ -1590,6 +1590,9 @@ pub struct UpdatesTrustRoot {
     pub root_role: TufSignedRootRole,
 }
 
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+pub struct UpdateStatus {}
+
 fn expected_one_of<T: strum::VariantArray + fmt::Display>() -> String {
     use std::fmt::Write;
     let mut msg = "expected one of:".to_string();
