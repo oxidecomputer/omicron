@@ -13,6 +13,7 @@ use nexus_db_model::{TufRepoDescription, TufTrustRoot};
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::{datastore::SQL_BATCH_SIZE, pagination::Paginator};
 use nexus_types::external_api::shared::TufSignedRootRole;
+use nexus_types::external_api::views;
 use omicron_common::api::external::{
     DataPageParams, Error, TufRepoInsertResponse, TufRepoInsertStatus,
 };
@@ -148,5 +149,202 @@ impl super::Nexus {
             .tuf_trust_root_delete(opctx, &authz)
             .await
             .map_err(HttpError::from)
+    }
+
+    /// Get external update status with aggregated component counts and blockers
+    pub async fn update_status_external(
+        &self,
+        opctx: &OpContext,
+    ) -> Result<views::UpdateStatus, HttpError> {
+        // Get target release information
+        let target_release =
+            match self.datastore().target_release_get_current(opctx).await {
+                Ok(tr) => Some(
+                    self.datastore().target_release_view(opctx, &tr).await?,
+                ),
+                Err(_) => None, // No target release set
+            };
+
+        // Get component status using read-only queries
+        let components_by_release =
+            self.get_component_status_readonly(opctx).await?;
+
+        // Get last blueprint time
+        let last_blueprint_time = self.get_last_blueprint_time(opctx).await?;
+
+        // Generate blockers (placeholder for now)
+        let blockers = self.generate_blockers(opctx).await?;
+
+        Ok(views::UpdateStatus {
+            target_release,
+            components_by_release,
+            last_blueprint_time,
+            blockers,
+        })
+    }
+
+    /// Get the time of the most recently created blueprint
+    async fn get_last_blueprint_time(
+        &self,
+        opctx: &OpContext,
+    ) -> Result<Option<chrono::DateTime<chrono::Utc>>, HttpError> {
+        use omicron_common::api::external::DataPageParams;
+
+        let blueprints = self
+            .datastore()
+            .blueprints_list(opctx, &DataPageParams::max_page())
+            .await
+            .map_err(HttpError::from)?;
+
+        let latest_time =
+            blueprints.into_iter().map(|bp| bp.time_created).max();
+
+        Ok(latest_time)
+    }
+
+    /// Generate list of blockers (placeholder implementation)
+    async fn generate_blockers(
+        &self,
+        _opctx: &OpContext,
+    ) -> Result<Vec<views::UpdateBlocker>, HttpError> {
+        // TODO: Implement actual blocker detection based on planning reports
+        // For now, return empty list
+        Ok(Vec::new())
+    }
+
+    /// Get component status using read-only queries to avoid batch operations
+    async fn get_component_status_readonly(
+        &self,
+        opctx: &OpContext,
+    ) -> Result<
+        std::collections::BTreeMap<String, views::ComponentCounts>,
+        HttpError,
+    > {
+        use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
+        use std::collections::BTreeMap;
+        use std::collections::HashMap;
+
+        let mut counts = BTreeMap::new();
+
+        // Get the latest inventory collection
+        let Some(inventory) = self
+            .datastore()
+            .inventory_get_latest_collection(opctx)
+            .await
+            .map_err(HttpError::from)?
+        else {
+            // No inventory collection available, return empty counts
+            return Ok(counts);
+        };
+
+        // Build hash-to-version mappings from TUF repos (current and previous)
+        let mut hash_to_version = HashMap::new();
+
+        // Get current target release
+        if let Ok(target_release) =
+            self.datastore().target_release_get_current(opctx).await
+        {
+            if let Some(tuf_repo_id) = target_release.tuf_repo_id {
+                if let Ok(tuf_repo_desc) = self
+                    .datastore()
+                    .tuf_repo_get_by_id(opctx, tuf_repo_id.into())
+                    .await
+                {
+                    let version_name =
+                        format!("v{}", tuf_repo_desc.repo.system_version);
+                    for artifact in &tuf_repo_desc.artifacts {
+                        hash_to_version
+                            .insert(artifact.sha256, version_name.clone());
+                    }
+                }
+            }
+        }
+
+        // Get previous target release (if exists)
+        // For simplicity, we'll try to get one generation back
+        if let Ok(current) =
+            self.datastore().target_release_get_current(opctx).await
+        {
+            if let Some(prev_gen) = current.generation.prev() {
+                if let Ok(Some(prev_release)) = self
+                    .datastore()
+                    .target_release_get_generation(
+                        opctx,
+                        nexus_db_model::Generation(prev_gen),
+                    )
+                    .await
+                {
+                    if let Some(prev_tuf_repo_id) = prev_release.tuf_repo_id {
+                        if let Ok(prev_tuf_repo_desc) = self
+                            .datastore()
+                            .tuf_repo_get_by_id(opctx, prev_tuf_repo_id.into())
+                            .await
+                        {
+                            let prev_version_name = format!(
+                                "v{}",
+                                prev_tuf_repo_desc.repo.system_version
+                            );
+                            for artifact in &prev_tuf_repo_desc.artifacts {
+                                // Only add if not already present (current takes priority)
+                                hash_to_version
+                                    .entry(artifact.sha256)
+                                    .or_insert(prev_version_name.clone());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Count zones by version using the hash mappings
+        for agent in inventory.sled_agents.iter() {
+            if let Some(reconciliation) = &agent.last_reconciliation {
+                for (_zone_config, _result) in
+                    reconciliation.reconciled_omicron_zones()
+                {
+                    let version_key = match &_zone_config.image_source {
+                        OmicronZoneImageSource::InstallDataset => {
+                            "install_dataset".to_string()
+                        }
+                        OmicronZoneImageSource::Artifact { hash } => {
+                            // Convert tufaceous_artifact::ArtifactHash to nexus_db_model::ArtifactHash
+                            let db_hash = nexus_db_model::ArtifactHash(*hash);
+                            // Map hash to actual version if possible
+                            hash_to_version
+                                .get(&db_hash)
+                                .cloned()
+                                .unwrap_or_else(|| {
+                                    format!(
+                                        "unknown_artifact_{}",
+                                        &hash.to_string()[..8]
+                                    )
+                                })
+                        }
+                    };
+
+                    let entry =
+                        counts.entry(version_key).or_insert_with(|| {
+                            views::ComponentCounts {
+                                zone_count: 0,
+                                sp_count: 0,
+                            }
+                        });
+                    entry.zone_count += 1;
+                }
+            }
+        }
+
+        // Count SPs - for now we can't easily determine SP versions without
+        // complex operations, so group them all together
+        let sp_count = inventory.sps.len() as u32;
+        if sp_count > 0 {
+            let entry =
+                counts.entry("sp_firmware".to_string()).or_insert_with(|| {
+                    views::ComponentCounts { zone_count: 0, sp_count: 0 }
+                });
+            entry.sp_count = sp_count;
+        }
+
+        Ok(counts)
     }
 }

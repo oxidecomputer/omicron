@@ -12,9 +12,10 @@ use nexus_db_queries::context::OpContext;
 use nexus_test_utils::background::run_tuf_artifact_replication_step;
 use nexus_test_utils::background::wait_tuf_artifact_replication_step;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
+use nexus_test_utils::resource_helpers::object_get;
 use nexus_test_utils::test_setup;
 use nexus_test_utils_macros::nexus_test;
-use nexus_types::external_api::views::UpdatesTrustRoot;
+use nexus_types::external_api::views;
 use omicron_common::api::external::{
     TufRepoGetResponse, TufRepoInsertResponse, TufRepoInsertStatus,
 };
@@ -573,7 +574,7 @@ async fn test_trust_root_operations(cptestctx: &ControlPlaneTestContext) {
         TestTrustRoot::generate().await.expect("trust root generation failed");
 
     // POST /v1/system/update/trust-roots
-    let trust_root_view: UpdatesTrustRoot = trust_root
+    let trust_root_view: views::UpdatesTrustRoot = trust_root
         .to_upload_request(client, StatusCode::CREATED)
         .execute()
         .await
@@ -584,20 +585,21 @@ async fn test_trust_root_operations(cptestctx: &ControlPlaneTestContext) {
     // GET /v1/system/update/trust-roots
     let request = RequestBuilder::new(client, Method::GET, TRUST_ROOTS_URL)
         .expect_status(Some(StatusCode::OK));
-    let response: ResultsPage<UpdatesTrustRoot> = NexusRequest::new(request)
-        .authn_as(AuthnMode::PrivilegedUser)
-        .execute()
-        .await
-        .expect("trust root list failed")
-        .parsed_body()
-        .expect("failed to parse list response");
+    let response: ResultsPage<views::UpdatesTrustRoot> =
+        NexusRequest::new(request)
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute()
+            .await
+            .expect("trust root list failed")
+            .parsed_body()
+            .expect("failed to parse list response");
     assert_eq!(response.items, std::slice::from_ref(&trust_root_view.clone()));
 
     // GET /v1/system/update/trust-roots/{id}
     let id_url = format!("{TRUST_ROOTS_URL}/{}", trust_root_view.id);
     let request = RequestBuilder::new(client, Method::GET, &id_url)
         .expect_status(Some(StatusCode::OK));
-    let response: UpdatesTrustRoot = NexusRequest::new(request)
+    let response: views::UpdatesTrustRoot = NexusRequest::new(request)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
@@ -616,12 +618,23 @@ async fn test_trust_root_operations(cptestctx: &ControlPlaneTestContext) {
         .expect("trust root delete failed");
     let request = RequestBuilder::new(client, Method::GET, TRUST_ROOTS_URL)
         .expect_status(Some(StatusCode::OK));
-    let response: ResultsPage<UpdatesTrustRoot> = NexusRequest::new(request)
-        .authn_as(AuthnMode::PrivilegedUser)
-        .execute()
-        .await
-        .expect("trust root list after delete failed")
-        .parsed_body()
-        .expect("failed to parse list after delete response");
+    let response: ResultsPage<views::UpdatesTrustRoot> =
+        NexusRequest::new(request)
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute()
+            .await
+            .expect("trust root list after delete failed")
+            .parsed_body()
+            .expect("failed to parse list after delete response");
     assert!(response.items.is_empty());
+}
+
+#[nexus_test]
+async fn test_update_status(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+
+    let status: views::UpdateStatus =
+        object_get(client, "/v1/system/update/status").await;
+
+    dbg!(status);
 }
