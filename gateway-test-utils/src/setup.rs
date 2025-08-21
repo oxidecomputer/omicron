@@ -100,12 +100,40 @@ pub async fn test_setup(
     .await
 }
 
+pub async fn test_setup_metrics_disabled(
+    test_name: &str,
+    sp_port: SpPort,
+) -> GatewayTestContext {
+    let (mut server_config, sp_sim_config) = load_test_config();
+    match server_config.metrics.as_mut() {
+        Some(cfg) => {
+            cfg.disabled = true;
+        }
+        None => {
+            server_config.metrics =
+                Some(MetricsConfig { disabled: true, ..Default::default() });
+        }
+    }
+    test_setup_with_config(
+        test_name,
+        sp_port,
+        server_config,
+        &sp_sim_config,
+        None,
+    )
+    .await
+}
+
 fn expected_location(
     config: &omicron_gateway::Config,
     sp_port: SpPort,
 ) -> String {
     let config = &config.switch.location;
-    let mut locations = config.names.iter().cloned().collect::<HashSet<_>>();
+    let mut locations = config
+        .description
+        .iter()
+        .map(|d| d.name.as_str())
+        .collect::<HashSet<_>>();
 
     for determination in &config.determination {
         let refined = match sp_port {
@@ -113,11 +141,11 @@ fn expected_location(
             SpPort::Two => &determination.sp_port_2,
         };
 
-        locations.retain(|name| refined.contains(name));
+        locations.retain(|name| refined.iter().any(|s| s == name));
     }
 
     assert_eq!(locations.len(), 1);
-    locations.into_iter().next().unwrap()
+    locations.into_iter().next().unwrap().to_string()
 }
 
 pub async fn test_setup_with_config(

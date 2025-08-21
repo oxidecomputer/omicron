@@ -24,6 +24,7 @@ use nexus_sled_agent_shared::inventory::InventoryDisk;
 use nexus_sled_agent_shared::inventory::InventoryZpool;
 use nexus_sled_agent_shared::inventory::MupdateOverrideBootInventory;
 use nexus_sled_agent_shared::inventory::OmicronSledConfig;
+use nexus_sled_agent_shared::inventory::SledCpuFamily;
 use nexus_sled_agent_shared::inventory::SledRole;
 use nexus_sled_agent_shared::inventory::ZoneImageResolverInventory;
 use nexus_sled_agent_shared::inventory::ZoneKind;
@@ -448,10 +449,7 @@ impl SystemDescription {
         sled_id: SledUuid,
         sled_config: OmicronSledConfig,
     ) -> anyhow::Result<&mut Self> {
-        let sled = self.sleds.get_mut(&sled_id).with_context(|| {
-            format!("attempted to access sled {} not found in system", sled_id)
-        })?;
-        let sled = Arc::make_mut(sled);
+        let sled = self.get_sled_mut(sled_id)?;
 
         sled.inventory_sled_agent.ledgered_sled_config =
             Some(sled_config.clone());
@@ -474,10 +472,8 @@ impl SystemDescription {
         sled_id: SledUuid,
         policy: SledPolicy,
     ) -> anyhow::Result<&mut Self> {
-        let sled = self.sleds.get_mut(&sled_id).with_context(|| {
-            format!("attempted to access sled {} not found in system", sled_id)
-        })?;
-        Arc::make_mut(sled).policy = policy;
+        let sled = self.get_sled_mut(sled_id)?;
+        sled.policy = policy;
         Ok(self)
     }
 
@@ -489,11 +485,9 @@ impl SystemDescription {
         sled_id: SledUuid,
         visibility: SledInventoryVisibility,
     ) -> anyhow::Result<SledInventoryVisibility> {
-        let sled = self.sleds.get_mut(&sled_id).with_context(|| {
-            format!("attempted to access sled {} not found in system", sled_id)
-        })?;
-        let prev = Arc::make_mut(sled).inventory_visibility;
-        Arc::make_mut(sled).inventory_visibility = visibility;
+        let sled = self.get_sled_mut(sled_id)?;
+        let prev = sled.inventory_visibility;
+        sled.inventory_visibility = visibility;
         Ok(prev)
     }
 
@@ -506,10 +500,7 @@ impl SystemDescription {
         stage0_version: Option<ArtifactVersion>,
         stage0_next_version: Option<ExpectedVersion>,
     ) -> anyhow::Result<&mut Self> {
-        let sled = self.sleds.get_mut(&sled_id).with_context(|| {
-            format!("attempted to access sled {} not found in system", sled_id)
-        })?;
-        let sled = Arc::make_mut(sled);
+        let sled = self.get_sled_mut(sled_id)?;
         sled.set_rot_bootloader_versions(stage0_version, stage0_next_version);
         Ok(self)
     }
@@ -543,11 +534,38 @@ impl SystemDescription {
         active_version: Option<ArtifactVersion>,
         inactive_version: Option<ExpectedVersion>,
     ) -> anyhow::Result<&mut Self> {
-        let sled = self.sleds.get_mut(&sled_id).with_context(|| {
-            format!("attempted to access sled {} not found in system", sled_id)
-        })?;
-        let sled = Arc::make_mut(sled);
+        let sled = self.get_sled_mut(sled_id)?;
         sled.set_sp_versions(active_version, inactive_version);
+        Ok(self)
+    }
+
+    /// Update the host OS phase 1 artifacts reported for a sled.
+    ///
+    /// Where `None` is provided, no changes are made.
+    pub fn sled_update_host_phase_1_artifacts(
+        &mut self,
+        sled_id: SledUuid,
+        active: Option<M2Slot>,
+        slot_a: Option<ArtifactHash>,
+        slot_b: Option<ArtifactHash>,
+    ) -> anyhow::Result<&mut Self> {
+        let sled = self.get_sled_mut(sled_id)?;
+        sled.set_host_phase_1_artifacts(active, slot_a, slot_b);
+        Ok(self)
+    }
+
+    /// Update the host OS phase 2 artifacts reported for a sled.
+    ///
+    /// Where `None` is provided, no changes are made.
+    pub fn sled_update_host_phase_2_artifacts(
+        &mut self,
+        sled_id: SledUuid,
+        boot_disk: Option<M2Slot>,
+        slot_a: Option<ArtifactHash>,
+        slot_b: Option<ArtifactHash>,
+    ) -> anyhow::Result<&mut Self> {
+        let sled = self.get_sled_mut(sled_id)?;
+        sled.set_host_phase_2_artifacts(boot_disk, slot_a, slot_b);
         Ok(self)
     }
 
@@ -557,10 +575,7 @@ impl SystemDescription {
         sled_id: SledUuid,
         boot_inventory: Result<ZoneManifestBootInventory, String>,
     ) -> anyhow::Result<&mut Self> {
-        let sled = self.sleds.get_mut(&sled_id).with_context(|| {
-            format!("attempted to access sled {} not found in system", sled_id)
-        })?;
-        let sled = Arc::make_mut(sled);
+        let sled = self.get_sled_mut(sled_id)?;
         sled.set_zone_manifest(boot_inventory);
         Ok(self)
     }
@@ -585,6 +600,127 @@ impl SystemDescription {
         Ok(sled.sp_inactive_caboose().map(|c| c.version.as_ref()))
     }
 
+    pub fn sled_sp_state(
+        &self,
+        sled_id: SledUuid,
+    ) -> anyhow::Result<Option<&(u16, SpState)>> {
+        let sled = self.get_sled(sled_id)?;
+        Ok(sled.sp_state())
+    }
+
+    /// Update the RoT versions reported for a sled.
+    ///
+    /// Where `None` is provided, no changes are made.
+    pub fn sled_update_rot_versions(
+        &mut self,
+        sled_id: SledUuid,
+        slot_a_version: Option<ExpectedVersion>,
+        slot_b_version: Option<ExpectedVersion>,
+    ) -> anyhow::Result<&mut Self> {
+        let sled = self.get_sled_mut(sled_id)?;
+        sled.set_rot_versions(slot_a_version, slot_b_version);
+        Ok(self)
+    }
+
+    pub fn sled_rot_active_slot(
+        &self,
+        sled_id: SledUuid,
+    ) -> anyhow::Result<RotSlot> {
+        let sp_state = self.sled_sp_state(sled_id)?;
+        sp_state
+            .ok_or_else(|| {
+                anyhow!("failed to retrieve SP state from sled id: {sled_id}")
+            })
+            .and_then(|(_hw_slot, sp_state)| match sp_state.rot.clone() {
+                RotState::V2 { active, .. } | RotState::V3 { active, .. } => {
+                    Ok(active)
+                }
+                RotState::CommunicationFailed { message } => Err(anyhow!(
+                    "failed to retrieve active RoT slot due to \
+                        communication failure: {message}"
+                )),
+            })
+    }
+
+    pub fn sled_rot_persistent_boot_preference(
+        &self,
+        sled_id: SledUuid,
+    ) -> anyhow::Result<RotSlot> {
+        let sp_state = self.sled_sp_state(sled_id)?;
+        sp_state
+            .ok_or_else(|| {
+                anyhow!("failed to retrieve SP state from sled id: {sled_id}")
+            })
+            .and_then(|(_hw_slot, sp_state)| match sp_state.rot.clone() {
+                RotState::V2 { persistent_boot_preference, .. }
+                | RotState::V3 { persistent_boot_preference, .. } => {
+                    Ok(persistent_boot_preference)
+                }
+                RotState::CommunicationFailed { message } => Err(anyhow!(
+                    "failed to retrieve persistent boot preference slot \
+                        due to communication failure: {message}"
+                )),
+            })
+    }
+
+    pub fn sled_rot_pending_persistent_boot_preference(
+        &self,
+        sled_id: SledUuid,
+    ) -> anyhow::Result<Option<RotSlot>> {
+        let sp_state = self.sled_sp_state(sled_id)?;
+        sp_state
+            .ok_or_else(|| {
+                anyhow!("failed to retrieve SP state from sled id: {sled_id}")
+            })
+            .and_then(|(_hw_slot, sp_state)| match sp_state.rot.clone() {
+                RotState::V2 { pending_persistent_boot_preference, .. }
+                | RotState::V3 { pending_persistent_boot_preference, .. } => {
+                    Ok(pending_persistent_boot_preference)
+                }
+                RotState::CommunicationFailed { message } => Err(anyhow!(
+                    "failed to retrieve pending persistent boot \
+                        preference slot due to communication failure: {message}"
+                )),
+            })
+    }
+
+    pub fn sled_rot_transient_boot_preference(
+        &self,
+        sled_id: SledUuid,
+    ) -> anyhow::Result<Option<RotSlot>> {
+        let sp_state = self.sled_sp_state(sled_id)?;
+        sp_state
+            .ok_or_else(|| {
+                anyhow!("failed to retrieve SP state from sled id: {sled_id}")
+            })
+            .and_then(|(_hw_slot, sp_state)| match sp_state.rot.clone() {
+                RotState::V2 { transient_boot_preference, .. }
+                | RotState::V3 { transient_boot_preference, .. } => {
+                    Ok(transient_boot_preference)
+                }
+                RotState::CommunicationFailed { message } => Err(anyhow!(
+                    "failed to retrieve transient boot preference slot \
+                        due to communication failure: {message}"
+                )),
+            })
+    }
+
+    pub fn sled_rot_slot_a_version(
+        &self,
+        sled_id: SledUuid,
+    ) -> anyhow::Result<Option<&str>> {
+        let sled = self.get_sled(sled_id)?;
+        Ok(sled.rot_slot_a_caboose().map(|c| c.version.as_ref()))
+    }
+
+    pub fn sled_rot_slot_b_version(
+        &self,
+        sled_id: SledUuid,
+    ) -> anyhow::Result<Option<&str>> {
+        let sled = self.get_sled(sled_id)?;
+        Ok(sled.rot_slot_b_caboose().map(|c| c.version.as_ref()))
+    }
+
     /// Set a sled's mupdate override field.
     ///
     /// Returns the previous value, or previous error if set.
@@ -593,10 +729,7 @@ impl SystemDescription {
         sled_id: SledUuid,
         mupdate_override: Option<MupdateOverrideUuid>,
     ) -> anyhow::Result<Result<Option<MupdateOverrideUuid>, String>> {
-        let sled = self.sleds.get_mut(&sled_id).with_context(|| {
-            format!("attempted to access sled {} not found in system", sled_id)
-        })?;
-        let sled = Arc::make_mut(sled);
+        let sled = self.get_sled_mut(sled_id)?;
         Ok(sled.set_mupdate_override(Ok(mupdate_override)))
     }
 
@@ -608,10 +741,7 @@ impl SystemDescription {
         sled_id: SledUuid,
         message: String,
     ) -> anyhow::Result<Result<Option<MupdateOverrideUuid>, String>> {
-        let sled = self.sleds.get_mut(&sled_id).with_context(|| {
-            format!("attempted to access sled {} not found in system", sled_id)
-        })?;
-        let sled = Arc::make_mut(sled);
+        let sled = self.get_sled_mut(sled_id)?;
         Ok(sled.set_mupdate_override(Err(message)))
     }
 
@@ -792,6 +922,42 @@ impl SystemDescription {
                             },
                         )
                         .context("recording SP inactive caboose")?;
+                }
+
+                if let Some(slot_a) = &s.rot_slot_a_caboose() {
+                    builder
+                        .found_caboose(
+                            &baseboard_id,
+                            CabooseWhich::RotSlotA,
+                            "fake MGS 1",
+                            SpComponentCaboose {
+                                board: slot_a.board.clone(),
+                                epoch: None,
+                                git_commit: slot_a.git_commit.clone(),
+                                name: slot_a.name.clone(),
+                                sign: slot_a.sign.clone(),
+                                version: slot_a.version.clone(),
+                            },
+                        )
+                        .context("recording RoT slot a caboose")?;
+                }
+
+                if let Some(slot_b) = &s.rot_slot_b_caboose() {
+                    builder
+                        .found_caboose(
+                            &baseboard_id,
+                            CabooseWhich::RotSlotB,
+                            "fake MGS 1",
+                            SpComponentCaboose {
+                                board: slot_b.board.clone(),
+                                epoch: None,
+                                git_commit: slot_b.git_commit.clone(),
+                                name: slot_b.name.clone(),
+                                sign: slot_b.sign.clone(),
+                                version: slot_b.version.clone(),
+                            },
+                        )
+                        .context("recording RoT slot b caboose")?;
                 }
             }
 
@@ -995,6 +1161,8 @@ pub struct SledHwInventory<'a> {
     pub sp_host_phase_1_hash_flash: BTreeMap<M2Slot, ArtifactHash>,
     pub sp_active: Option<Arc<nexus_types::inventory::Caboose>>,
     pub sp_inactive: Option<Arc<nexus_types::inventory::Caboose>>,
+    pub rot_slot_a: Option<Arc<nexus_types::inventory::Caboose>>,
+    pub rot_slot_b: Option<Arc<nexus_types::inventory::Caboose>>,
 }
 
 /// Our abstract description of a `Sled`
@@ -1016,6 +1184,8 @@ pub struct Sled {
     sp_host_phase_1_hash_flash: BTreeMap<M2Slot, ArtifactHash>,
     sp_active_caboose: Option<Arc<nexus_types::inventory::Caboose>>,
     sp_inactive_caboose: Option<Arc<nexus_types::inventory::Caboose>>,
+    rot_slot_a_caboose: Option<Arc<nexus_types::inventory::Caboose>>,
+    rot_slot_b_caboose: Option<Arc<nexus_types::inventory::Caboose>>,
 }
 
 impl Sled {
@@ -1116,6 +1286,7 @@ impl Sled {
                 sled_id,
                 usable_hardware_threads: 10,
                 usable_physical_ram: ByteCount::from(1024 * 1024),
+                cpu_family: SledCpuFamily::AmdMilan,
                 // Populate disks, appearing like a real device.
                 disks: zpools
                     .values()
@@ -1179,6 +1350,10 @@ impl Sled {
                 String::from("0.0.1"),
             ))),
             sp_inactive_caboose: None,
+            rot_slot_a_caboose: Some(Arc::new(Self::default_rot_caboose(
+                String::from("0.0.2"),
+            ))),
+            rot_slot_b_caboose: None,
         }
     }
 
@@ -1223,6 +1398,10 @@ impl Sled {
             inventory_sp.as_ref().and_then(|hw| hw.sp_active.clone());
         let sp_inactive_caboose =
             inventory_sp.as_ref().and_then(|hw| hw.sp_inactive.clone());
+        let rot_slot_a_caboose =
+            inventory_sp.as_ref().and_then(|hw| hw.rot_slot_a.clone());
+        let rot_slot_b_caboose =
+            inventory_sp.as_ref().and_then(|hw| hw.rot_slot_b.clone());
         let inventory_sp = inventory_sp.map(|sledhw| {
             // RotStateV3 unconditionally sets all of these
             let sp_state = if sledhw.rot.slot_a_sha3_256_digest.is_some()
@@ -1315,6 +1494,7 @@ impl Sled {
             sled_id,
             usable_hardware_threads: inv_sled_agent.usable_hardware_threads,
             usable_physical_ram: inv_sled_agent.usable_physical_ram,
+            cpu_family: inv_sled_agent.cpu_family,
             disks: vec![],
             zpools: vec![],
             datasets: vec![],
@@ -1338,6 +1518,8 @@ impl Sled {
             sp_host_phase_1_hash_flash,
             sp_active_caboose,
             sp_inactive_caboose,
+            rot_slot_a_caboose,
+            rot_slot_b_caboose,
         }
     }
 
@@ -1380,6 +1562,14 @@ impl Sled {
         &self.inventory_sled_agent
     }
 
+    fn rot_slot_a_caboose(&self) -> Option<&Caboose> {
+        self.rot_slot_a_caboose.as_deref()
+    }
+
+    fn rot_slot_b_caboose(&self) -> Option<&Caboose> {
+        self.rot_slot_b_caboose.as_deref()
+    }
+
     fn sp_active_caboose(&self) -> Option<&Caboose> {
         self.sp_active_caboose.as_deref()
     }
@@ -1409,7 +1599,6 @@ impl Sled {
     /// Update the reported RoT bootloader versions
     ///
     /// If either field is `None`, that field is _unchanged_.
-    // Note that this means there's no way to _unset_ the version.
     fn set_rot_bootloader_versions(
         &mut self,
         stage0_version: Option<ArtifactVersion>,
@@ -1495,14 +1684,126 @@ impl Sled {
         }
     }
 
+    /// Update the reported RoT versions
+    ///
+    /// If either field is `None`, that field is _unchanged_.
+    // Note that this means there's no way to _unset_ the version.
+    fn set_rot_versions(
+        &mut self,
+        slot_a_version: Option<ExpectedVersion>,
+        slot_b_version: Option<ExpectedVersion>,
+    ) {
+        if let Some(slot_a_version) = slot_a_version {
+            match slot_a_version {
+                ExpectedVersion::NoValidVersion => {
+                    self.rot_slot_a_caboose = None;
+                }
+                ExpectedVersion::Version(v) => {
+                    match &mut self.rot_slot_a_caboose {
+                        Some(caboose) => {
+                            Arc::make_mut(caboose).version = v.to_string()
+                        }
+                        new @ None => {
+                            *new = Some(Arc::new(Self::default_rot_caboose(
+                                v.to_string(),
+                            )));
+                        }
+                    }
+                }
+            }
+        }
+
+        if let Some(slot_b_version) = slot_b_version {
+            match slot_b_version {
+                ExpectedVersion::NoValidVersion => {
+                    self.rot_slot_b_caboose = None;
+                }
+                ExpectedVersion::Version(v) => {
+                    match &mut self.rot_slot_b_caboose {
+                        Some(caboose) => {
+                            Arc::make_mut(caboose).version = v.to_string()
+                        }
+                        new @ None => {
+                            *new = Some(Arc::new(Self::default_rot_caboose(
+                                v.to_string(),
+                            )));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Update the reported host OS phase 1 artifacts
+    ///
+    /// If either field is `None`, that field is _unchanged_.
+    // Note that this means there's no way to _unset_ the version.
+    fn set_host_phase_1_artifacts(
+        &mut self,
+        active: Option<M2Slot>,
+        slot_a: Option<ArtifactHash>,
+        slot_b: Option<ArtifactHash>,
+    ) {
+        if let Some(active) = active {
+            self.sp_host_phase_1_active_slot = Some(active);
+        }
+
+        if let Some(slot_a) = slot_a {
+            self.sp_host_phase_1_hash_flash.insert(M2Slot::A, slot_a);
+        }
+
+        if let Some(slot_b) = slot_b {
+            self.sp_host_phase_1_hash_flash.insert(M2Slot::B, slot_b);
+        }
+    }
+
+    /// Update the reported host OS phase 2 artifacts
+    ///
+    /// If either field is `None`, that field is _unchanged_.
+    // Note that this means there's no way to _unset_ the version.
+    fn set_host_phase_2_artifacts(
+        &mut self,
+        boot_disk: Option<M2Slot>,
+        slot_a: Option<ArtifactHash>,
+        slot_b: Option<ArtifactHash>,
+    ) {
+        let last_reconciliation = self
+            .inventory_sled_agent
+            .last_reconciliation
+            .as_mut()
+            .expect("simulated system populates last reconciliation");
+
+        if let Some(boot_disk) = boot_disk {
+            last_reconciliation.boot_partitions.boot_disk = Ok(boot_disk);
+        }
+
+        if let Some(slot_a) = slot_a {
+            last_reconciliation
+                .boot_partitions
+                .slot_a
+                .as_mut()
+                .expect("simulated system populates OS slots")
+                .artifact_hash = slot_a;
+        }
+
+        if let Some(slot_b) = slot_b {
+            last_reconciliation
+                .boot_partitions
+                .slot_b
+                .as_mut()
+                .expect("simulated system populates OS slots")
+                .artifact_hash = slot_b;
+        }
+    }
+
     fn default_rot_bootloader_caboose(version: String) -> Caboose {
         let board = sp_sim::SIM_ROT_STAGE0_BOARD.to_string();
         Caboose {
             board: board.clone(),
             git_commit: String::from("unknown"),
-            name: board,
+            name: board.clone(),
             version: version.to_string(),
-            sign: None,
+            sign: Some(board),
         }
     }
 
@@ -1514,6 +1815,17 @@ impl Sled {
             name: board,
             version: version.to_string(),
             sign: None,
+        }
+    }
+
+    fn default_rot_caboose(version: String) -> Caboose {
+        let board = sp_sim::SIM_ROT_BOARD.to_string();
+        Caboose {
+            board: board.clone(),
+            git_commit: String::from("unknown"),
+            name: board.clone(),
+            version: version.to_string(),
+            sign: Some(board),
         }
     }
 

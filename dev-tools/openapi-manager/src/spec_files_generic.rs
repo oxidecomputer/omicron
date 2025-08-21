@@ -400,23 +400,32 @@ impl<'a, T: ApiLoad + AsRawFiles> ApiSpecFilesBuilder<'a, T> {
         basename: &str,
     ) -> Option<ApiSpecFileName> {
         match ApiSpecFileName::parse_lockstep(&self.apis, basename) {
-            Err(
-                warning @ (BadLockstepFileName::NoSuchApi
-                | BadLockstepFileName::NotLockstep),
-            ) if T::MISCONFIGURATIONS_ALLOWED => {
-                // When we're looking at the blessed files, the caller provides
-                // `misconfigurations_okay: true` and we treat these as
-                // warnings because the configuration for an API may have
-                // changed between the blessed files and the local changes.
-                //
-                // - NoSuchApi: somebody is deleting an API locally
-                // - NotLockstep: somebody is converting a lockstep API to a
-                //   versioned one
-                let warning = anyhow!(warning)
-                    .context(format!("skipping file {:?}", basename));
+            // When we're looking at the blessed files, the caller provides
+            // `misconfigurations_okay: true` and we treat these as
+            // warnings because the configuration for an API may have
+            // changed between the blessed files and the local changes.
+            Err(warning @ BadLockstepFileName::NoSuchApi)
+                if T::MISCONFIGURATIONS_ALLOWED =>
+            {
+                let warning = anyhow!(
+                    "skipping file {basename:?}: {warning} \
+                    (this is expected if you are deleting an API)"
+                );
                 self.load_warning(warning);
                 None
             }
+            Err(warning @ BadLockstepFileName::NotLockstep)
+                if T::MISCONFIGURATIONS_ALLOWED =>
+            {
+                let warning = anyhow!(
+                    "skipping file {basename:?}: {warning} \
+                    (this is expected if you are converting \
+                    a lockstep API to a versioned one)"
+                );
+                self.load_warning(warning);
+                None
+            }
+
             Err(warning @ BadLockstepFileName::MissingJsonSuffix) => {
                 // Even if the caller didn't provide `problems_okay: true`, it's
                 // not a big deal to have an extra file here.  This could be an

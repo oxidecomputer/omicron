@@ -189,7 +189,12 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
         &["db", "sleds", "-F", "discretionary"],
         &["mgs", "inventory"],
         &["nexus", "background-tasks", "doc"],
-        &["nexus", "background-tasks", "show"],
+        // Hide "currently executing" to avoid a test flake in case a task is
+        // running while this command is run. But note that there are other
+        // output lines (particularly "last completed activation") which can
+        // potentially be flaky. We haven't seen "last completed activation"
+        // actually being flaky yet, though.
+        &["nexus", "background-tasks", "show", "--no-executing-info"],
         // background tasks: test picking out specific names
         &["nexus", "background-tasks", "show", "saga_recovery"],
         &[

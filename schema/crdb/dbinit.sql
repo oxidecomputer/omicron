@@ -187,6 +187,24 @@ CREATE TYPE IF NOT EXISTS omicron.public.sled_state AS ENUM (
     'decommissioned'
 );
 
+-- The model of CPU installed in a particular sled, discovered by sled-agent
+-- and reported to Nexus. This determines what VMs can run on a sled: instances
+-- that require a specific minimum CPU platform can only run on sleds whose
+-- CPUs support all the features of that platform.
+CREATE TYPE IF NOT EXISTS omicron.public.sled_cpu_family AS ENUM (
+    -- Sled-agent didn't recognize the sled's CPU.
+    'unknown',
+
+    -- AMD Milan, or lab CPU close enough that sled-agent reported it as one.
+    'amd_milan',
+
+    -- AMD Turin, or lab CPU close enough that sled-agent reported it as one.
+    'amd_turin',
+
+    -- AMD Turin Dense. There are no "Turin Dense-likes", so this is precise.
+    'amd_turin_dense'
+);
+
 CREATE TABLE IF NOT EXISTS omicron.public.sled (
     /* Identity metadata (asset) */
     id UUID PRIMARY KEY,
@@ -229,7 +247,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.sled (
 
     /* The bound port of the Repo Depot API server, running on the same IP as
        the sled agent server. */
-    repo_depot_port INT4 CHECK (port BETWEEN 0 AND 65535) NOT NULL
+    repo_depot_port INT4 CHECK (port BETWEEN 0 AND 65535) NOT NULL,
+
+    /* The sled's detected CPU family. */
+    cpu_family omicron.public.sled_cpu_family NOT NULL
 );
 
 -- Add an index that ensures a given physical sled (identified by serial and
@@ -3108,10 +3129,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.lldp_link_config (
     chassis_id STRING(63),
     system_name STRING(63),
     system_description STRING(612),
-    management_ip TEXT,
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
-    time_deleted TIMESTAMPTZ
+    time_deleted TIMESTAMPTZ,
+    management_ip INET
 );
 
 CREATE TABLE IF NOT EXISTS omicron.public.tx_eq_config (
@@ -3705,6 +3726,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_sled_agent (
     -- the mupdate override was either successfully read or is not
     -- present.
     mupdate_override_boot_disk_error TEXT,
+
+    -- The sled's CPU family. This is also duplicated with the `sled` table,
+    -- similar to `usable_hardware_threads` and friends above.
+    cpu_family omicron.public.sled_cpu_family NOT NULL,
 
     CONSTRAINT reconciler_status_sled_config_present_if_running CHECK (
         (reconciler_status_kind = 'running'
@@ -4800,7 +4825,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_oximeter_read_policy (
 -- Blueprint information related to pending RoT bootloader upgrades.
 CREATE TABLE IF NOT EXISTS omicron.public.bp_pending_mgs_update_rot_bootloader (
     -- Foreign key into the `blueprint` table
-    blueprint_id UUID,
+    blueprint_id UUID NOT NULL,
     -- identify of the device to be updated
     -- (foreign key into the `hw_baseboard_id` table)
     hw_baseboard_id UUID NOT NULL,
@@ -4821,7 +4846,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_pending_mgs_update_rot_bootloader (
 -- Blueprint information related to pending SP upgrades.
 CREATE TABLE IF NOT EXISTS omicron.public.bp_pending_mgs_update_sp (
     -- Foreign key into the `blueprint` table
-    blueprint_id UUID,
+    blueprint_id UUID NOT NULL,
     -- identify of the device to be updated
     -- (foreign key into the `hw_baseboard_id` table)
     hw_baseboard_id UUID NOT NULL,
@@ -4842,7 +4867,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_pending_mgs_update_sp (
 -- Blueprint information related to pending RoT upgrades.
 CREATE TABLE IF NOT EXISTS omicron.public.bp_pending_mgs_update_rot (
     -- Foreign key into the `blueprint` table
-    blueprint_id UUID,
+    blueprint_id UUID NOT NULL,
     -- identify of the device to be updated
     -- (foreign key into the `hw_baseboard_id` table)
     hw_baseboard_id UUID NOT NULL,
@@ -4860,6 +4885,33 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_pending_mgs_update_rot (
     expected_persistent_boot_preference omicron.public.hw_rot_slot NOT NULL,
     expected_pending_persistent_boot_preference omicron.public.hw_rot_slot,
     expected_transient_boot_preference omicron.public.hw_rot_slot,
+
+    PRIMARY KEY(blueprint_id, hw_baseboard_id)
+);
+
+-- Blueprint information related to pending host OS phase 1 updates.
+CREATE TABLE IF NOT EXISTS omicron.public.bp_pending_mgs_update_host_phase_1 (
+    -- Foreign key into the `blueprint` table
+    blueprint_id UUID NOT NULL,
+    -- identify of the device to be updated
+    -- (foreign key into the `hw_baseboard_id` table)
+    hw_baseboard_id UUID NOT NULL,
+    -- location of this device according to MGS
+    sp_type omicron.public.sp_type NOT NULL,
+    sp_slot INT4 NOT NULL,
+    -- artifact to be deployed to this device
+    artifact_sha256 STRING(64) NOT NULL,
+    artifact_version STRING(64) NOT NULL,
+
+    -- host-phase-1-specific details
+    expected_active_phase_1_slot omicron.public.hw_m2_slot NOT NULL,
+    expected_boot_disk omicron.public.hw_m2_slot NOT NULL,
+    expected_active_phase_1_hash STRING(64) NOT NULL,
+    expected_active_phase_2_hash STRING(64) NOT NULL,
+    expected_inactive_phase_1_hash STRING(64) NOT NULL,
+    expected_inactive_phase_2_hash STRING(64) NOT NULL,
+    sled_agent_ip INET NOT NULL,
+    sled_agent_port INT4 NOT NULL CHECK (sled_agent_port BETWEEN 0 AND 65535),
 
     PRIMARY KEY(blueprint_id, hw_baseboard_id)
 );
@@ -5097,9 +5149,9 @@ FROM
 WHERE
     instance.time_deleted IS NULL AND vmm.time_deleted IS NULL;
 
-CREATE SEQUENCE IF NOT EXISTS omicron.public.ipv4_nat_version START 1 INCREMENT 1;
+CREATE SEQUENCE IF NOT EXISTS omicron.public.nat_version START 1 INCREMENT 1;
 
-CREATE TABLE IF NOT EXISTS omicron.public.ipv4_nat_entry (
+CREATE TABLE IF NOT EXISTS omicron.public.nat_entry (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     external_address INET NOT NULL,
     first_port INT4 NOT NULL,
@@ -5107,13 +5159,13 @@ CREATE TABLE IF NOT EXISTS omicron.public.ipv4_nat_entry (
     sled_address INET NOT NULL,
     vni INT4 NOT NULL,
     mac INT8 NOT NULL,
-    version_added INT8 NOT NULL DEFAULT nextval('omicron.public.ipv4_nat_version'),
+    version_added INT8 NOT NULL DEFAULT nextval('omicron.public.nat_version'),
     version_removed INT8,
     time_created TIMESTAMPTZ NOT NULL DEFAULT now(),
     time_deleted TIMESTAMPTZ
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS ipv4_nat_version_added ON omicron.public.ipv4_nat_entry (
+CREATE UNIQUE INDEX IF NOT EXISTS nat_version_added ON omicron.public.nat_entry (
     version_added
 )
 STORING (
@@ -5127,15 +5179,15 @@ STORING (
     time_deleted
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS overlapping_ipv4_nat_entry ON omicron.public.ipv4_nat_entry (
+CREATE UNIQUE INDEX IF NOT EXISTS overlapping_nat_entry ON omicron.public.nat_entry (
     external_address,
     first_port,
     last_port
 ) WHERE time_deleted IS NULL;
 
-CREATE INDEX IF NOT EXISTS ipv4_nat_lookup ON omicron.public.ipv4_nat_entry (external_address, first_port, last_port, sled_address, vni, mac);
+CREATE INDEX IF NOT EXISTS nat_lookup ON omicron.public.nat_entry (external_address, first_port, last_port, sled_address, vni, mac);
 
-CREATE UNIQUE INDEX IF NOT EXISTS ipv4_nat_version_removed ON omicron.public.ipv4_nat_entry (
+CREATE UNIQUE INDEX IF NOT EXISTS nat_version_removed ON omicron.public.nat_entry (
     version_removed
 )
 STORING (
@@ -5148,6 +5200,82 @@ STORING (
     time_created,
     time_deleted
 );
+
+CREATE INDEX IF NOT EXISTS nat_lookup_by_vni ON omicron.public.nat_entry (
+  vni
+)
+STORING (
+  external_address,
+  first_port,
+  last_port,
+  sled_address,
+  mac,
+  version_added,
+  version_removed,
+  time_created,
+  time_deleted
+);
+
+/*
+ * A view of the ipv4 nat change history
+ * used to summarize changes for external viewing
+ */
+CREATE VIEW IF NOT EXISTS omicron.public.nat_changes
+AS
+-- Subquery:
+-- We need to be able to order partial changesets. ORDER BY on separate columns
+-- will not accomplish this, so we'll do this by interleaving version_added
+-- and version_removed (version_removed taking priority if NOT NULL) and then sorting
+-- on the appropriate version numbers at call time.
+WITH interleaved_versions AS (
+  -- fetch all active NAT entries (entries that have not been soft deleted)
+  SELECT
+    external_address,
+    first_port,
+    last_port,
+    sled_address,
+    vni,
+    mac,
+    -- rename version_added to version
+    version_added AS version,
+    -- create a new virtual column, boolean value representing whether or not
+    -- the record has been soft deleted
+    (version_removed IS NOT NULL) as deleted
+  FROM omicron.public.nat_entry
+  WHERE version_removed IS NULL
+
+  -- combine the datasets, unifying the version_added and version_removed
+  -- columns to a single `version` column so we can interleave and sort the entries
+  UNION
+
+  -- fetch all inactive NAT entries (entries that have been soft deleted)
+  SELECT
+    external_address,
+    first_port,
+    last_port,
+    sled_address,
+    vni,
+    mac,
+    -- rename version_removed to version
+    version_removed AS version,
+    -- create a new virtual column, boolean value representing whether or not
+    -- the record has been soft deleted
+    (version_removed IS NOT NULL) as deleted
+  FROM omicron.public.nat_entry
+  WHERE version_removed IS NOT NULL
+)
+-- this is our new "table"
+-- here we select the columns from the subquery defined above
+SELECT
+  external_address,
+  first_port,
+  last_port,
+  sled_address,
+  vni,
+  mac,
+  version,
+  deleted
+FROM interleaved_versions;
 
 CREATE TYPE IF NOT EXISTS omicron.public.bfd_mode AS ENUM (
     'single_hop',
@@ -5173,81 +5301,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_bfd_session ON omicron.public.bfd_sessi
     switch
 ) WHERE time_deleted IS NULL;
 
-CREATE INDEX IF NOT EXISTS ipv4_nat_lookup_by_vni ON omicron.public.ipv4_nat_entry (
-  vni
-)
-STORING (
-  external_address,
-  first_port,
-  last_port,
-  sled_address,
-  mac,
-  version_added,
-  version_removed,
-  time_created,
-  time_deleted
-);
-
-/*
- * A view of the ipv4 nat change history
- * used to summarize changes for external viewing
- */
-CREATE VIEW IF NOT EXISTS omicron.public.ipv4_nat_changes
-AS
--- Subquery:
--- We need to be able to order partial changesets. ORDER BY on separate columns
--- will not accomplish this, so we'll do this by interleaving version_added
--- and version_removed (version_removed taking priority if NOT NULL) and then sorting
--- on the appropriate version numbers at call time.
-WITH interleaved_versions AS (
-  -- fetch all active NAT entries (entries that have not been soft deleted)
-  SELECT
-    external_address,
-    first_port,
-    last_port,
-    sled_address,
-    vni,
-    mac,
-    -- rename version_added to version
-    version_added AS version,
-    -- create a new virtual column, boolean value representing whether or not
-    -- the record has been soft deleted
-    (version_removed IS NOT NULL) as deleted
-  FROM omicron.public.ipv4_nat_entry
-  WHERE version_removed IS NULL
-
-  -- combine the datasets, unifying the version_added and version_removed
-  -- columns to a single `version` column so we can interleave and sort the entries
-  UNION
-
-  -- fetch all inactive NAT entries (entries that have been soft deleted)
-  SELECT
-    external_address,
-    first_port,
-    last_port,
-    sled_address,
-    vni,
-    mac,
-    -- rename version_removed to version
-    version_removed AS version,
-    -- create a new virtual column, boolean value representing whether or not
-    -- the record has been soft deleted
-    (version_removed IS NOT NULL) as deleted
-  FROM omicron.public.ipv4_nat_entry
-  WHERE version_removed IS NOT NULL
-)
--- this is our new "table"
--- here we select the columns from the subquery defined above
-SELECT
-  external_address,
-  first_port,
-  last_port,
-  sled_address,
-  vni,
-  mac,
-  version,
-  deleted
-FROM interleaved_versions;
 
 CREATE TABLE IF NOT EXISTS omicron.public.probe (
     id UUID NOT NULL PRIMARY KEY,
@@ -6497,7 +6550,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '177.0.0', NULL)
+    (TRUE, NOW(), NOW(), '181.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

@@ -14,6 +14,7 @@ use crate::blueprint_editor::ExternalSnatNetworkingChoice;
 use crate::blueprint_editor::NoAvailableDnsSubnets;
 use crate::blueprint_editor::SledEditError;
 use crate::blueprint_editor::SledEditor;
+use crate::mgs_updates::PendingHostPhase2Changes;
 use crate::planner::NoopConvertGlobalIneligibleReason;
 use crate::planner::NoopConvertInfo;
 use crate::planner::NoopConvertSledIneligibleReason;
@@ -53,6 +54,7 @@ use nexus_types::deployment::OximeterReadMode;
 use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdates;
 use nexus_types::deployment::PlanningInput;
+use nexus_types::deployment::PlanningReport;
 use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::SledResources;
 use nexus_types::deployment::TufRepoContentsError;
@@ -72,6 +74,7 @@ use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::api::internal::shared::NetworkInterfaceKind;
 use omicron_common::disk::M2Slot;
 use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
+use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::MupdateOverrideUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
@@ -467,6 +470,9 @@ pub struct BlueprintBuilder<'a> {
     /// The latest inventory collection
     collection: &'a Collection,
 
+    /// The ID that the completed blueprint will have
+    new_blueprint_id: BlueprintUuid,
+
     // These fields are used to allocate resources for sleds.
     input: &'a PlanningInput,
 
@@ -486,13 +492,14 @@ pub struct BlueprintBuilder<'a> {
     sled_editors: BTreeMap<SledUuid, SledEditor>,
     cockroachdb_setting_preserve_downgrade: CockroachDbPreserveDowngrade,
     target_release_minimum_generation: Generation,
+    report: Option<PlanningReport>,
 
     creator: String,
     operations: Vec<Operation>,
     comments: Vec<String>,
     pending_mgs_updates: PendingMgsUpdates,
 
-    // Random number generator for new UUIDs
+    /// Random number generator for new UUIDs
     rng: PlannerRng,
 }
 
@@ -542,8 +549,10 @@ impl<'a> BlueprintBuilder<'a> {
             .collect::<BTreeMap<_, _>>();
         let num_sleds = sleds.len();
 
+        let id = rng.next_blueprint();
+        let report = PlanningReport::new(id);
         Blueprint {
-            id: rng.next_blueprint(),
+            id,
             sleds,
             pending_mgs_updates: PendingMgsUpdates::new(),
             parent_blueprint_id: None,
@@ -559,6 +568,7 @@ impl<'a> BlueprintBuilder<'a> {
             time_created: now_db_precision(),
             creator: creator.to_owned(),
             comment: format!("starting blueprint with {num_sleds} empty sleds"),
+            report,
         }
     }
 
@@ -570,6 +580,7 @@ impl<'a> BlueprintBuilder<'a> {
         input: &'a PlanningInput,
         inventory: &'a Collection,
         creator: &str,
+        mut rng: PlannerRng,
     ) -> anyhow::Result<BlueprintBuilder<'a>> {
         let log = log.new(o!(
             "component" => "BlueprintBuilder",
@@ -620,6 +631,7 @@ impl<'a> BlueprintBuilder<'a> {
             log,
             parent_blueprint,
             collection: inventory,
+            new_blueprint_id: rng.next_blueprint(),
             input,
             resource_allocator: OnceCell::new(),
             sled_editors,
@@ -628,15 +640,20 @@ impl<'a> BlueprintBuilder<'a> {
             pending_mgs_updates: parent_blueprint.pending_mgs_updates.clone(),
             target_release_minimum_generation: parent_blueprint
                 .target_release_minimum_generation,
+            report: None,
             creator: creator.to_owned(),
             operations: Vec::new(),
             comments: Vec::new(),
-            rng: PlannerRng::from_entropy(),
+            rng,
         })
     }
 
     pub fn parent_blueprint(&self) -> &Blueprint {
         &self.parent_blueprint
+    }
+
+    pub fn new_blueprint_id(&self) -> BlueprintUuid {
+        self.new_blueprint_id
     }
 
     fn resource_allocator(
@@ -702,7 +719,7 @@ impl<'a> BlueprintBuilder<'a> {
 
     /// Assemble a final [`Blueprint`] based on the contents of the builder
     pub fn build(mut self) -> Blueprint {
-        let blueprint_id = self.rng.next_blueprint();
+        let blueprint_id = self.new_blueprint_id();
 
         // Collect the Omicron zones config for all sleds, including sleds that
         // are no longer in service and need expungement work.
@@ -824,6 +841,9 @@ impl<'a> BlueprintBuilder<'a> {
                 .chain(self.operations.iter().map(|op| op.to_string()))
                 .collect::<Vec<String>>()
                 .join(", "),
+            report: self
+                .report
+                .unwrap_or_else(|| PlanningReport::new(blueprint_id)),
         }
     }
 
@@ -854,12 +874,9 @@ impl<'a> BlueprintBuilder<'a> {
             .map_err(|err| Error::SledEditError { sled_id, err })
     }
 
-    /// Within tests, set an RNG for deterministic results.
-    ///
-    /// This will ensure that tests that use this builder will produce the same
-    /// results each time they are run.
-    pub fn set_rng(&mut self, rng: PlannerRng) -> &mut Self {
-        self.rng = rng;
+    /// Set the planning report for this blueprint.
+    pub fn set_report(&mut self, report: PlanningReport) -> &mut Self {
+        self.report = Some(report);
         self
     }
 
@@ -1929,6 +1946,16 @@ impl<'a> BlueprintBuilder<'a> {
         Ok(final_counts.difference_since(initial_counts))
     }
 
+    pub(crate) fn apply_pending_host_phase_2_changes(
+        &mut self,
+        changes: PendingHostPhase2Changes,
+    ) -> Result<(), Error> {
+        for (sled_id, slot, contents) in changes.into_iter() {
+            self.sled_set_host_phase_2_slot(sled_id, slot, contents)?;
+        }
+        Ok(())
+    }
+
     pub fn sled_set_host_phase_2(
         &mut self,
         sled_id: SledUuid,
@@ -2687,7 +2714,6 @@ pub mod test {
     fn test_basic() {
         static TEST_NAME: &str = "blueprint_builder_test_basic";
         let logctx = test_setup_log(TEST_NAME);
-
         let mut rng = SimRngState::from_seed(TEST_NAME);
         let (mut example, blueprint1) = ExampleSystemBuilder::new_with_rng(
             &logctx.log,
@@ -2702,6 +2728,7 @@ pub mod test {
             &example.input,
             &example.collection,
             "test_basic",
+            rng.next_planner_rng(),
         )
         .expect("failed to create builder");
 
@@ -2753,6 +2780,7 @@ pub mod test {
             &input,
             &example.collection,
             "test_basic",
+            rng.next_planner_rng(),
         )
         .expect("failed to create builder");
         let new_sled_resources = &input
@@ -2870,6 +2898,7 @@ pub mod test {
     fn test_decommissioned_sleds() {
         static TEST_NAME: &str = "blueprint_builder_test_decommissioned_sleds";
         let logctx = test_setup_log(TEST_NAME);
+        let mut rng = SimRngState::from_seed(TEST_NAME);
         let (collection, input, mut blueprint1) =
             example(&logctx.log, TEST_NAME);
         verify_blueprint(&blueprint1);
@@ -2920,6 +2949,7 @@ pub mod test {
             &input,
             &collection,
             "test_decommissioned_sleds",
+            rng.next_planner_rng(),
         )
         .expect("created builder")
         .build();
@@ -2957,6 +2987,7 @@ pub mod test {
             &input,
             &collection,
             "test_decommissioned_sleds",
+            rng.next_planner_rng(),
         )
         .expect("created builder")
         .build();
@@ -2973,6 +3004,7 @@ pub mod test {
     fn test_add_physical_disks() {
         static TEST_NAME: &str = "blueprint_builder_test_add_physical_disks";
         let logctx = test_setup_log(TEST_NAME);
+        let mut rng = SimRngState::from_seed(TEST_NAME);
 
         // Start with an empty system (sleds with no zones). However, we leave
         // the disks around so that `sled_add_disks` can add them.
@@ -2992,6 +3024,7 @@ pub mod test {
                 &input,
                 &collection,
                 "test",
+                rng.next_planner_rng(),
             )
             .expect("failed to create builder");
 
@@ -3077,6 +3110,7 @@ pub mod test {
     fn test_datasets_for_zpools_and_zones() {
         static TEST_NAME: &str = "test_datasets_for_zpools_and_zones";
         let logctx = test_setup_log(TEST_NAME);
+        let mut rng = SimRngState::from_seed(TEST_NAME);
         let (collection, input, blueprint) = example(&logctx.log, TEST_NAME);
 
         // Creating the "example" blueprint should already invoke
@@ -3091,6 +3125,7 @@ pub mod test {
             &input,
             &collection,
             "test",
+            rng.next_planner_rng(),
         )
         .expect("failed to create builder");
 
@@ -3145,6 +3180,7 @@ pub mod test {
             &input,
             &collection,
             "test",
+            rng.next_planner_rng(),
         )
         .expect("failed to create builder");
 
@@ -3184,6 +3220,7 @@ pub mod test {
             &input,
             &collection,
             "test",
+            rng.next_planner_rng(),
         )
         .expect("failed to create builder");
 
@@ -3206,6 +3243,7 @@ pub mod test {
         static TEST_NAME: &str =
             "blueprint_builder_test_add_nexus_with_no_existing_nexus_zones";
         let logctx = test_setup_log(TEST_NAME);
+        let mut rng = SimRngState::from_seed(TEST_NAME);
 
         // Start with an empty system (sleds with no zones).
         let (example, parent) =
@@ -3224,6 +3262,7 @@ pub mod test {
             &input,
             &collection,
             "test",
+            rng.next_planner_rng(),
         )
         .expect("failed to create builder");
 
@@ -3251,6 +3290,7 @@ pub mod test {
     fn test_add_nexus_error_cases() {
         static TEST_NAME: &str = "blueprint_builder_test_add_nexus_error_cases";
         let logctx = test_setup_log(TEST_NAME);
+        let mut rng = SimRngState::from_seed(TEST_NAME);
         let (mut collection, mut input, mut parent) =
             example(&logctx.log, TEST_NAME);
 
@@ -3330,6 +3370,7 @@ pub mod test {
                 &input,
                 &collection,
                 "test",
+                rng.next_planner_rng(),
             )
             .expect("failed to create builder");
             builder
@@ -3350,6 +3391,7 @@ pub mod test {
                 &input,
                 &collection,
                 "test",
+                rng.next_planner_rng(),
             )
             .expect("failed to create builder");
             for _ in 0..3 {
@@ -3389,6 +3431,7 @@ pub mod test {
                 &input,
                 &collection,
                 "test",
+                rng.next_planner_rng(),
             )
             .expect("failed to create builder");
             let err = builder
@@ -3424,6 +3467,7 @@ pub mod test {
     fn test_ensure_cockroachdb() {
         static TEST_NAME: &str = "blueprint_builder_test_ensure_cockroachdb";
         let logctx = test_setup_log(TEST_NAME);
+        let mut rng = SimRngState::from_seed(TEST_NAME);
 
         // Start with an example system (no CRDB zones).
         let (example, parent) =
@@ -3464,6 +3508,7 @@ pub mod test {
             &input,
             &collection,
             "test",
+            rng.next_planner_rng(),
         )
         .expect("constructed builder");
         for _ in 0..num_sled_zpools {
@@ -3506,6 +3551,7 @@ pub mod test {
             &input,
             &collection,
             "test",
+            rng.next_planner_rng(),
         )
         .expect("constructed builder");
         for _ in 0..num_sled_zpools {
@@ -3539,6 +3585,7 @@ pub mod test {
         static TEST_NAME: &str = "builder_zone_image_source_change_diff";
         let logctx = test_setup_log(TEST_NAME);
         let log = logctx.log.clone();
+        let mut rng = SimRngState::from_seed(TEST_NAME);
 
         // Use our example system.
         let (system, blueprint1) =
@@ -3551,9 +3598,9 @@ pub mod test {
             &system.input,
             &system.collection,
             TEST_NAME,
+            rng.next_planner_rng(),
         )
         .expect("built blueprint builder");
-        blueprint_builder.set_rng(PlannerRng::from_seed((TEST_NAME, "bp2")));
 
         let sled_id = system
             .input

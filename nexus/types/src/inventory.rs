@@ -30,6 +30,7 @@ use nexus_sled_agent_shared::inventory::InventoryDisk;
 use nexus_sled_agent_shared::inventory::InventoryZpool;
 use nexus_sled_agent_shared::inventory::OmicronSledConfig;
 use nexus_sled_agent_shared::inventory::OmicronZoneConfig;
+use nexus_sled_agent_shared::inventory::SledCpuFamily;
 use nexus_sled_agent_shared::inventory::SledRole;
 use nexus_sled_agent_shared::inventory::ZoneImageResolverInventory;
 use omicron_common::api::external::ByteCount;
@@ -471,6 +472,26 @@ pub enum CabooseWhich {
     Stage0Next,
 }
 
+impl CabooseWhich {
+    pub fn toggled_slot(&self) -> Self {
+        match self {
+            CabooseWhich::RotSlotA => CabooseWhich::RotSlotB,
+            CabooseWhich::RotSlotB => CabooseWhich::RotSlotA,
+            CabooseWhich::SpSlot0 => CabooseWhich::SpSlot1,
+            CabooseWhich::SpSlot1 => CabooseWhich::SpSlot0,
+            CabooseWhich::Stage0 => CabooseWhich::Stage0Next,
+            CabooseWhich::Stage0Next => CabooseWhich::Stage0,
+        }
+    }
+
+    pub fn from_rot_slot(slot: RotSlot) -> Self {
+        match slot {
+            RotSlot::A => CabooseWhich::RotSlotA,
+            RotSlot::B => CabooseWhich::RotSlotB,
+        }
+    }
+}
+
 /// Root of trust page contents found during a collection
 ///
 /// These are normalized in the database.  Each distinct `RotPage` is assigned a
@@ -663,6 +684,7 @@ pub struct SledAgent {
     pub sled_role: SledRole,
     pub usable_hardware_threads: u32,
     pub usable_physical_ram: ByteCount,
+    pub cpu_family: SledCpuFamily,
     pub reservoir_size: ByteCount,
     pub disks: Vec<PhysicalDisk>,
     pub zpools: Vec<Zpool>,

@@ -340,7 +340,7 @@ mod test {
     use nexus_db_lookup::LookupPath;
     use nexus_sled_agent_shared::inventory::{
         Baseboard, ConfigReconcilerInventoryStatus, Inventory, InventoryDisk,
-        SledRole, ZoneImageResolverInventory,
+        SledCpuFamily, SledRole, ZoneImageResolverInventory,
     };
     use nexus_types::identity::Asset;
     use omicron_common::api::external::ByteCount;
@@ -693,6 +693,7 @@ mod test {
                     sled_id: SledUuid::from_untyped_uuid(sled.id()),
                     usable_hardware_threads: 10,
                     usable_physical_ram: ByteCount::from(1024 * 1024),
+                    cpu_family: SledCpuFamily::AmdMilan,
                     disks,
                     zpools: vec![],
                     datasets: vec![],

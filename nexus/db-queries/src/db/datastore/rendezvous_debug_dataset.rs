@@ -248,7 +248,7 @@ mod tests {
             .expect("inserted dataset");
         assert_eq!(
             datastore.debug_dataset_list_all_batched(opctx).await.unwrap(),
-            [dataset.clone()],
+            std::slice::from_ref(&dataset),
         );
 
         // Tombstoning it should now succeed, and we should see the tombstoned

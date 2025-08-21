@@ -40,6 +40,7 @@ use nexus_db_queries::db::pub_test_utils::crdb;
 use nexus_sled_agent_shared::inventory::HostPhase2DesiredSlots;
 use nexus_sled_agent_shared::inventory::OmicronSledConfig;
 use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
+use nexus_sled_agent_shared::inventory::SledCpuFamily;
 use nexus_sled_agent_shared::recovery_silo::RecoverySiloConfig;
 use nexus_test_interface::NexusServer;
 use nexus_types::deployment::Blueprint;
@@ -58,6 +59,7 @@ use nexus_types::deployment::OmicronZoneExternalFloatingAddr;
 use nexus_types::deployment::OmicronZoneExternalFloatingIp;
 use nexus_types::deployment::OmicronZoneExternalSnatIp;
 use nexus_types::deployment::OximeterReadMode;
+use nexus_types::deployment::PlanningReport;
 use nexus_types::deployment::blueprint_zone_type;
 use nexus_types::external_api::views::SledState;
 use nexus_types::internal_api::params::DnsConfigParams;
@@ -961,8 +963,9 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             .blueprint_sleds
             .take()
             .expect("should have already made blueprint sled configs");
+        let id = BlueprintUuid::new_v4();
         let blueprint = Blueprint {
-            id: BlueprintUuid::new_v4(),
+            id,
             sleds,
             pending_mgs_updates: PendingMgsUpdates::new(),
             parent_blueprint_id: None,
@@ -980,6 +983,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             time_created: Utc::now(),
             creator: "nexus-test-utils".to_string(),
             comment: "initial test blueprint".to_string(),
+            report: PlanningReport::new(id),
         };
 
         self.initial_blueprint_id = Some(blueprint.id);
@@ -1921,7 +1925,18 @@ pub async fn start_sled_agent(
         Some(nexus_address),
         Some(update_directory),
         sim::ZpoolConfig::None,
+        SledCpuFamily::AmdMilan,
     );
+    start_sled_agent_with_config(log, &config, sled_index, simulated_upstairs)
+        .await
+}
+
+pub async fn start_sled_agent_with_config(
+    log: Logger,
+    config: &sim::Config,
+    sled_index: u16,
+    simulated_upstairs: &Arc<sim::SimulatedUpstairs>,
+) -> Result<sim::Server, String> {
     let server =
         sim::Server::start(&config, &log, true, simulated_upstairs, sled_index)
             .await

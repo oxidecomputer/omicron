@@ -58,6 +58,7 @@ use nexus_types::{
 use omicron_common::api::external::AddressLot;
 use omicron_common::api::external::AddressLotBlock;
 use omicron_common::api::external::AddressLotCreateResponse;
+use omicron_common::api::external::AddressLotViewResponse;
 use omicron_common::api::external::AffinityGroupMember;
 use omicron_common::api::external::AggregateBgpMessageHistory;
 use omicron_common::api::external::AntiAffinityGroupMember;
@@ -3479,6 +3480,36 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
+    async fn networking_address_lot_view(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<params::AddressLotPath>,
+    ) -> Result<HttpResponseOk<AddressLotViewResponse>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let nexus = &apictx.context.nexus;
+            let path = path_params.into_inner();
+            let lookup = nexus.address_lot_lookup(&opctx, path.address_lot)?;
+            let (.., lot) = lookup.fetch().await?;
+            let blocks = nexus
+                .address_lot_block_list(&opctx, &lookup, None)
+                .await?
+                .into_iter()
+                .map(|p| p.into())
+                .collect();
+            Ok(HttpResponseOk(AddressLotViewResponse {
+                lot: lot.into(),
+                blocks,
+            }))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
     async fn networking_address_lot_delete(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::AddressLotPath>,
@@ -3550,7 +3581,11 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let address_lot_lookup =
                 nexus.address_lot_lookup(&opctx, path.address_lot)?;
             let blocks = nexus
-                .address_lot_block_list(&opctx, &address_lot_lookup, &pagparams)
+                .address_lot_block_list(
+                    &opctx,
+                    &address_lot_lookup,
+                    Some(&pagparams),
+                )
                 .await?
                 .into_iter()
                 .map(|p| p.into())
@@ -6536,7 +6571,11 @@ impl NexusExternalApi for NexusExternalApiImpl {
             nexus
                 .timeseries_query(&opctx, &query)
                 .await
-                .map(|tables| HttpResponseOk(views::OxqlQueryResult { tables }))
+                .map(|tables| {
+                    HttpResponseOk(views::OxqlQueryResult {
+                        tables: tables.into_iter().map(Into::into).collect(),
+                    })
+                })
                 .map_err(HttpError::from)
         };
         apictx
@@ -6563,7 +6602,11 @@ impl NexusExternalApi for NexusExternalApiImpl {
             nexus
                 .timeseries_query_project(&opctx, &project_lookup, &query)
                 .await
-                .map(|tables| HttpResponseOk(views::OxqlQueryResult { tables }))
+                .map(|tables| {
+                    HttpResponseOk(views::OxqlQueryResult {
+                        tables: tables.into_iter().map(Into::into).collect(),
+                    })
+                })
                 .map_err(HttpError::from)
         };
         apictx
@@ -7106,10 +7149,31 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
             let user = nexus.silo_user_fetch_self(&opctx).await?;
-            let (_, silo) = nexus.current_silo_lookup(&opctx)?.fetch().await?;
+            let (authz_silo, silo) =
+                nexus.current_silo_lookup(&opctx)?.fetch().await?;
+
+            // only eat Forbidden errors indicating lack of perms. other errors
+            // blow up normally
+            let fleet_viewer =
+                match opctx.authorize(authz::Action::Read, &authz::FLEET).await
+                {
+                    Ok(()) => true,
+                    Err(Error::Forbidden) => false,
+                    Err(e) => return Err(e.into()),
+                };
+            let silo_admin =
+                match opctx.authorize(authz::Action::Modify, &authz_silo).await
+                {
+                    Ok(()) => true,
+                    Err(Error::Forbidden) => false,
+                    Err(e) => return Err(e.into()),
+                };
+
             Ok(HttpResponseOk(views::CurrentUser {
                 user: user.into(),
                 silo_name: silo.name().clone(),
+                fleet_viewer,
+                silo_admin,
             }))
         };
         apictx

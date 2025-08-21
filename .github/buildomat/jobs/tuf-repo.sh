@@ -57,7 +57,7 @@
 #:
 #: [[publish]]
 #: series = "rot-all"
-#: name = "incorporation.p5m"
+#: name = "incorporation.p5p"
 #: from_output = "/work/incorporation.p5p"
 #:
 

@@ -1155,6 +1155,7 @@ impl ServicePortBuilder {
 mod tests {
     use super::*;
     use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryStatus;
+    use nexus_sled_agent_shared::inventory::SledCpuFamily;
     use nexus_sled_agent_shared::inventory::ZoneImageResolverInventory;
     use omicron_common::address::IpRange;
     use omicron_common::api::external::ByteCount;
@@ -1372,6 +1373,7 @@ mod tests {
                 baseboard: Baseboard::Unknown,
                 usable_hardware_threads: 32,
                 usable_physical_ram: ByteCount::try_from(1_u64 << 40).unwrap(),
+                cpu_family: SledCpuFamily::AmdMilan,
                 reservoir_size: ByteCount::try_from(1_u64 << 40).unwrap(),
                 disks,
                 zpools: vec![],

@@ -40,9 +40,9 @@ use omicron_uuid_kinds::{SledUuid, ZpoolUuid};
 use schemars::schema::{Schema, SchemaObject};
 use schemars::{JsonSchema, SchemaGenerator};
 use serde::{Deserialize, Serialize};
-// Export this type for convenience -- this way, dependents don't have to
+// Export these types for convenience -- this way, dependents don't have to
 // depend on sled-hardware-types.
-pub use sled_hardware_types::Baseboard;
+pub use sled_hardware_types::{Baseboard, SledCpuFamily};
 use strum::EnumIter;
 use tufaceous_artifact::{ArtifactHash, KnownArtifactKind};
 
@@ -121,6 +121,7 @@ pub struct Inventory {
     pub baseboard: Baseboard,
     pub usable_hardware_threads: u32,
     pub usable_physical_ram: ByteCount,
+    pub cpu_family: SledCpuFamily,
     pub reservoir_size: ByteCount,
     pub disks: Vec<InventoryDisk>,
     pub zpools: Vec<InventoryZpool>,
@@ -273,6 +274,18 @@ pub struct BootPartitionContents {
         schema_with = "SnakeCaseResult::<BootPartitionDetails, String>::json_schema"
     )]
     pub slot_b: Result<BootPartitionDetails, String>,
+}
+
+impl BootPartitionContents {
+    pub fn slot_details(
+        &self,
+        slot: M2Slot,
+    ) -> &Result<BootPartitionDetails, String> {
+        match slot {
+            M2Slot::A => &self.slot_a,
+            M2Slot::B => &self.slot_b,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
@@ -557,7 +570,7 @@ impl ZoneManifestBootInventory {
     }
 
     /// Returns a displayer for this inventory.
-    pub fn display(&self) -> ZoneManifestBootInventoryDisplay {
+    pub fn display(&self) -> ZoneManifestBootInventoryDisplay<'_> {
         ZoneManifestBootInventoryDisplay { inner: self }
     }
 }

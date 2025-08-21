@@ -1444,6 +1444,8 @@ impl DataStore {
                                 sled_agent.usable_physical_ram,
                             )
                             .into_sql::<diesel::sql_types::Int8>(),
+                            nexus_db_model::SledCpuFamily::from(sled_agent.cpu_family)
+                            .into_sql::<nexus_db_schema::enums::SledCpuFamilyEnum>(),
                             nexus_db_model::ByteCount::from(
                                 sled_agent.reservoir_size,
                             )
@@ -1498,6 +1500,7 @@ impl DataStore {
                                 sa_dsl::sled_role,
                                 sa_dsl::usable_hardware_threads,
                                 sa_dsl::usable_physical_ram,
+                                sa_dsl::cpu_family,
                                 sa_dsl::reservoir_size,
                                 sa_dsl::ledgered_sled_config,
                                 sa_dsl::reconciler_status_kind,
@@ -1529,6 +1532,7 @@ impl DataStore {
                         _sled_role,
                         _usable_hardware_threads,
                         _usable_physical_ram,
+                        _cpu_family,
                         _reservoir_size,
                         _ledgered_sled_config,
                         _reconciler_status_kind,
@@ -3958,6 +3962,7 @@ impl DataStore {
                 sled_role: s.sled_role.into(),
                 usable_hardware_threads: u32::from(s.usable_hardware_threads),
                 usable_physical_ram: s.usable_physical_ram.into(),
+                cpu_family: s.cpu_family.into(),
                 reservoir_size: s.reservoir_size.into(),
                 // For disks, zpools, and datasets, the map for a sled ID is
                 // only populated if there is at least one disk/zpool/dataset
@@ -4366,13 +4371,13 @@ pub trait DataStoreInventoryTest: Send + Sync {
     /// This does not paginate.
     fn inventory_collections(
         &self,
-    ) -> BoxFuture<anyhow::Result<Vec<InvCollection>>>;
+    ) -> BoxFuture<'_, anyhow::Result<Vec<InvCollection>>>;
 }
 
 impl DataStoreInventoryTest for DataStore {
     fn inventory_collections(
         &self,
-    ) -> BoxFuture<anyhow::Result<Vec<InvCollection>>> {
+    ) -> BoxFuture<'_, anyhow::Result<Vec<InvCollection>>> {
         async {
             let conn = self
                 .pool_connection_for_tests()

@@ -323,6 +323,7 @@ mod test {
     use nexus_inventory::now_db_precision;
     use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
     use nexus_reconfigurator_planning::example::ExampleSystemBuilder;
+    use nexus_reconfigurator_planning::planner::PlannerRng;
     use nexus_reconfigurator_preparation::PlanningInputFromDb;
     use nexus_sled_agent_shared::inventory::OmicronZoneConfig;
     use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
@@ -350,6 +351,7 @@ mod test {
     use nexus_types::deployment::OximeterReadPolicy;
     use nexus_types::deployment::PendingMgsUpdates;
     use nexus_types::deployment::PlannerChickenSwitches;
+    use nexus_types::deployment::PlanningReport;
     use nexus_types::deployment::SledFilter;
     use nexus_types::deployment::TufRepoPolicy;
     use nexus_types::deployment::blueprint_zone_type;
@@ -707,8 +709,9 @@ mod test {
 
         let dns_empty = dns_config_empty();
         let initial_dns_generation = dns_empty.generation;
+        let blueprint_id = BlueprintUuid::new_v4();
         let mut blueprint = Blueprint {
-            id: BlueprintUuid::new_v4(),
+            id: blueprint_id,
             sleds: blueprint_sleds,
             pending_mgs_updates: PendingMgsUpdates::new(),
             cockroachdb_setting_preserve_downgrade:
@@ -724,6 +727,7 @@ mod test {
             time_created: now_db_precision(),
             creator: "test-suite".to_string(),
             comment: "test blueprint".to_string(),
+            report: PlanningReport::new(blueprint_id),
         };
 
         // To make things slightly more interesting, let's add a zone that's
@@ -1524,6 +1528,7 @@ mod test {
             &planning_input,
             &collection,
             "test suite",
+            PlannerRng::from_entropy(),
         )
         .unwrap();
         let sled_id =

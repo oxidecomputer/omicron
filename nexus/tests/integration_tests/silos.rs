@@ -2004,7 +2004,7 @@ async fn test_local_silo_users(cptestctx: &ControlPlaneTestContext) {
         client,
         &silo1,
         &AuthnMode::SiloUser(admin_user.id),
-        &[admin_user.clone()],
+        std::slice::from_ref(&admin_user),
     )
     .await;
 }
