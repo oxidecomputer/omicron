@@ -37,7 +37,6 @@ async fn get_set_target_release() -> Result<()> {
             .unwrap()
             .parsed_body()
             .unwrap();
-    assert_eq!(target_release.generation, 1);
     assert!(target_release.time_requested < Utc::now());
     assert_eq!(target_release.release_source, TargetReleaseSource::Unspecified);
 
@@ -71,9 +70,8 @@ async fn get_set_target_release() -> Result<()> {
         assert_eq!(system_version, response.recorded.repo.system_version);
 
         let target_release =
-            set_target_release(client, system_version.clone()).await?;
+            set_target_release(client, &system_version).await?;
         let after = Utc::now();
-        assert_eq!(target_release.generation, 2);
         assert!(target_release.time_requested >= before);
         assert!(target_release.time_requested <= after);
         assert_eq!(
@@ -103,9 +101,8 @@ async fn get_set_target_release() -> Result<()> {
         assert_eq!(system_version, response.recorded.repo.system_version);
 
         let target_release =
-            set_target_release(client, system_version.clone()).await?;
+            set_target_release(client, &system_version).await?;
         let after = Utc::now();
-        assert_eq!(target_release.generation, 3);
         assert!(target_release.time_requested >= before);
         assert!(target_release.time_requested <= after);
         assert_eq!(
@@ -116,7 +113,7 @@ async fn get_set_target_release() -> Result<()> {
 
     // Attempting to downgrade to an earlier system version (2.0.0 → 1.0.0)
     // should not be allowed.
-    set_target_release(client, Version::new(1, 0, 0))
+    set_target_release(client, &Version::new(1, 0, 0))
         .await
         .expect_err("shouldn't be able to downgrade system");
 
@@ -124,9 +121,9 @@ async fn get_set_target_release() -> Result<()> {
     Ok(())
 }
 
-async fn set_target_release(
+pub async fn set_target_release(
     client: &ClientTestContext,
-    system_version: Version,
+    system_version: &Version,
 ) -> Result<TargetRelease> {
     NexusRequest::new(
         RequestBuilder::new(
@@ -134,7 +131,9 @@ async fn set_target_release(
             Method::PUT,
             "/v1/system/update/target-release",
         )
-        .body(Some(&SetTargetReleaseParams { system_version }))
+        .body(Some(&SetTargetReleaseParams {
+            system_version: system_version.clone(),
+        }))
         .expect_status(Some(StatusCode::CREATED)),
     )
     .authn_as(AuthnMode::PrivilegedUser)

@@ -2560,6 +2560,14 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                     ),
                 ],
             },
+            VerifyEndpoint {
+                url: "/v1/system/update/status",
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::Get,
+                ],
+            },
             /* Metrics */
             VerifyEndpoint {
                 url: &DEMO_SYSTEM_METRICS_URL,

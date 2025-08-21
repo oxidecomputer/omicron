@@ -6893,6 +6893,24 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
+    async fn update_status(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<views::UpdateStatus>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let status = nexus.update_status_external(&opctx).await?;
+            Ok(HttpResponseOk(status))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
     // Silo users
 
     async fn user_list(

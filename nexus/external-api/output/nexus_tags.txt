@@ -304,6 +304,7 @@ system_update_trust_root_list            GET      /v1/system/update/trust-roots
 system_update_trust_root_view            GET      /v1/system/update/trust-roots/{trust_root_id}
 target_release_update                    PUT      /v1/system/update/target-release
 target_release_view                      GET      /v1/system/update/target-release
+update_status                            GET      /v1/system/update/status
 
 API operations found with tag "tokens"
 OPERATION ID                             METHOD   URL PATH

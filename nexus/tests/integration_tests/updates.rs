@@ -12,8 +12,10 @@ use nexus_db_queries::context::OpContext;
 use nexus_test_utils::background::run_tuf_artifact_replication_step;
 use nexus_test_utils::background::wait_tuf_artifact_replication_step;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
+use nexus_test_utils::resource_helpers::object_get;
 use nexus_test_utils::test_setup;
 use nexus_test_utils_macros::nexus_test;
+use nexus_types::external_api::views;
 use nexus_types::external_api::views::UpdatesTrustRoot;
 use omicron_common::api::external::{
     TufRepoGetResponse, TufRepoInsertResponse, TufRepoInsertStatus,
@@ -25,10 +27,13 @@ use std::collections::HashSet;
 use std::fmt::Debug;
 use tough::editor::signed::SignedRole;
 use tough::schema::Root;
+use tufaceous_artifact::ArtifactVersion;
 use tufaceous_artifact::KnownArtifactKind;
 use tufaceous_lib::Key;
 use tufaceous_lib::assemble::{ArtifactManifest, OmicronRepoAssembler};
 use tufaceous_lib::assemble::{DeserializedManifest, ManifestTweak};
+
+use crate::integration_tests::target_release::set_target_release;
 
 const TRUST_ROOTS_URL: &str = "/v1/system/update/trust-roots";
 
@@ -624,4 +629,90 @@ async fn test_trust_root_operations(cptestctx: &ControlPlaneTestContext) {
         .parsed_body()
         .expect("failed to parse list after delete response");
     assert!(response.items.is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_update_status() -> Result<()> {
+    let cptestctx =
+        test_setup::<omicron_nexus::Server>("test_update_uninitialized", 0)
+            .await;
+    let client = &cptestctx.external_client;
+    let logctx = &cptestctx.logctx;
+
+    // initial status
+    let status: views::UpdateStatus =
+        object_get(client, "/v1/system/update/status").await;
+    assert_eq!(
+        status.target_release.release_source,
+        views::TargetReleaseSource::Unspecified
+    );
+    let counts = status.components_by_release_version;
+    assert_eq!(counts.get("install dataset").unwrap(), &7);
+    assert_eq!(counts.get("unknown").unwrap(), &15);
+
+    // hold onto this to compare it to later values
+    let time_last_progress = status.time_last_progress;
+
+    // Upload a fake TUF repo and set it as the target release
+    let trust_root = TestTrustRoot::generate().await?;
+    trust_root.to_upload_request(client, StatusCode::CREATED).execute().await?;
+    trust_root
+        .assemble_repo(&logctx.log, &[])
+        .await?
+        .to_upload_request(client, StatusCode::OK)
+        .execute()
+        .await?;
+    let v1 = Version::new(1, 0, 0);
+    set_target_release(client, &v1).await?;
+
+    let status: views::UpdateStatus =
+        object_get(client, "/v1/system/update/status").await;
+    assert_eq!(
+        status.target_release.release_source,
+        views::TargetReleaseSource::SystemVersion { version: v1 }
+    );
+
+    // blueprint time doesn't change
+    assert_eq!(time_last_progress, status.time_last_progress);
+
+    let counts = status.components_by_release_version;
+    assert_eq!(counts.get("install dataset").unwrap(), &7);
+    assert_eq!(counts.get("unknown").unwrap(), &15);
+
+    // do it again so there are two, so both versions are associated with tuf repos
+    let v2 = Version::new(2, 0, 0);
+    let tweaks = &[
+        ManifestTweak::SystemVersion(v2.clone()),
+        ManifestTweak::ArtifactVersion {
+            kind: KnownArtifactKind::SwitchRotBootloader,
+            version: ArtifactVersion::new("non-semver-2").unwrap(),
+        },
+    ];
+    let trust_root = TestTrustRoot::generate().await?;
+    trust_root.to_upload_request(client, StatusCode::CREATED).execute().await?;
+    trust_root
+        .assemble_repo(&logctx.log, tweaks)
+        .await?
+        .to_upload_request(client, StatusCode::OK)
+        .execute()
+        .await?;
+    set_target_release(client, &v2).await?;
+
+    let status: views::UpdateStatus =
+        object_get(client, "/v1/system/update/status").await;
+
+    assert_eq!(
+        status.target_release.release_source,
+        views::TargetReleaseSource::SystemVersion { version: v2 }
+    );
+
+    // blueprint time doesn't change
+    assert_eq!(time_last_progress, status.time_last_progress);
+
+    let counts = status.components_by_release_version;
+    assert_eq!(counts.get("install dataset").unwrap(), &7);
+    assert_eq!(counts.get("unknown").unwrap(), &15);
+
+    cptestctx.teardown().await;
+    Ok(())
 }

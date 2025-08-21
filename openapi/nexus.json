@@ -10992,6 +10992,32 @@
         }
       }
     },
+    "/v1/system/update/status": {
+      "get": {
+        "tags": [
+          "system/update"
+        ],
+        "operationId": "update_status",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateStatus"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/v1/system/update/target-release": {
       "get": {
         "tags": [
@@ -25690,11 +25716,6 @@
         "description": "View of a system software target release.",
         "type": "object",
         "properties": {
-          "generation": {
-            "description": "The target-release generation number.",
-            "type": "integer",
-            "format": "int64"
-          },
           "release_source": {
             "description": "The source of the target release.",
             "allOf": [
@@ -25710,7 +25731,6 @@
           }
         },
         "required": [
-          "generation",
           "release_source",
           "time_requested"
         ]
@@ -26214,6 +26234,38 @@
               "rpm"
             ]
           }
+        ]
+      },
+      "UpdateStatus": {
+        "type": "object",
+        "properties": {
+          "components_by_release_version": {
+            "description": "Count of components running each release version",
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer",
+              "format": "uint",
+              "minimum": 0
+            }
+          },
+          "target_release": {
+            "description": "Current target release config",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TargetRelease"
+              }
+            ]
+          },
+          "time_last_progress": {
+            "description": "Time of last meaningful change to update status\n\nInternally, this represents the last time a blueprint (proposed system configuration) was made a target by the update system.",
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "components_by_release_version",
+          "target_release",
+          "time_last_progress"
         ]
       },
       "UpdatesTrustRoot": {

@@ -1549,9 +1549,6 @@ pub enum TargetReleaseSource {
 /// View of a system software target release.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 pub struct TargetRelease {
-    /// The target-release generation number.
-    pub generation: i64,
-
     /// The time it was set as the target release.
     pub time_requested: DateTime<Utc>,
 
@@ -1569,6 +1566,21 @@ pub struct UpdatesTrustRoot {
     /// The trusted root role itself, a JSON document as described by The Update
     /// Framework.
     pub root_role: TufSignedRootRole,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+pub struct UpdateStatus {
+    /// Current target release config
+    pub target_release: TargetRelease,
+
+    /// Count of components running each release version
+    pub components_by_release_version: BTreeMap<String, usize>,
+
+    /// Time of last meaningful change to update status
+    ///
+    /// Internally, this represents the last time a blueprint (proposed system
+    /// configuration) was made a target by the update system.
+    pub time_last_progress: DateTime<Utc>,
 }
 
 fn expected_one_of<T: strum::VariantArray + fmt::Display>() -> String {

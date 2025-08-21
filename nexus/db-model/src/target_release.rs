@@ -66,7 +66,6 @@ impl TargetRelease {
         release_source: views::TargetReleaseSource,
     ) -> views::TargetRelease {
         views::TargetRelease {
-            generation: (&self.generation.0).into(),
             time_requested: self.time_requested,
             release_source,
         }

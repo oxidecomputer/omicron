@@ -3072,6 +3072,15 @@ pub trait NexusExternalApi {
         params: TypedBody<params::SetTargetReleaseParams>,
     ) -> Result<HttpResponseCreated<views::TargetRelease>, HttpError>;
 
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/update/status",
+        tags = ["system/update"],
+    }]
+    async fn update_status(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<views::UpdateStatus>, HttpError>;
+
     // Silo users
 
     /// List users
