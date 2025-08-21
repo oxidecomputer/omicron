@@ -9,6 +9,7 @@ workspace = true
 
 [dependencies]
 anyhow.workspace = true
+camino.workspace = true
 clap.workspace = true
 futures.workspace = true
 gateway-messages.workspace = true
