@@ -5728,6 +5728,55 @@
         "description": "Password hashes must be in PHC (Password Hashing Competition) string format.  Passwords must be hashed with Argon2id.  Password hashes may be rejected if the parameters appear not to be secure enough.",
         "type": "string"
       },
+      "NexusGenerationBumpWaitingOn": {
+        "oneOf": [
+          {
+            "description": "Waiting for non-Nexus zones to finish updating",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "non_nexus_zone_update"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "Waiting for enough new Nexus zones to appear",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "new_nexus_bringup"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "Waiting for zones to propagate to inventory",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "zone_propagation"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          }
+        ]
+      },
       "NodeName": {
         "description": "Unique name for a saga [`Node`]\n\nEach node requires a string name that's unique within its DAG.  The name is used to identify its output.  Nodes that depend on a given node (either directly or indirectly) can access the node's output using its name.",
         "type": "string"
@@ -6787,6 +6836,28 @@
           "pending_mgs_updates"
         ]
       },
+      "PlanningNexusGenerationBumpReport": {
+        "type": "object",
+        "properties": {
+          "next_generation": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Generation"
+              }
+            ]
+          },
+          "waiting_on": {
+            "nullable": true,
+            "description": "What are we waiting on to increase the generation number?",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/NexusGenerationBumpWaitingOn"
+              }
+            ]
+          }
+        }
+      },
       "PlanningNoopImageSourceConvertedZones": {
         "description": "How many of the total install-dataset zones were noop-converted to use the artifact store on a particular sled.",
         "type": "object",
@@ -7043,6 +7114,9 @@
           "mgs_updates": {
             "$ref": "#/components/schemas/PlanningMgsUpdatesStepReport"
           },
+          "nexus_generation_bump": {
+            "$ref": "#/components/schemas/PlanningNexusGenerationBumpReport"
+          },
           "noop_image_source": {
             "$ref": "#/components/schemas/PlanningNoopImageSourceStepReport"
           },
@@ -7058,6 +7132,7 @@
           "decommission",
           "expunge",
           "mgs_updates",
+          "nexus_generation_bump",
           "noop_image_source",
           "zone_updates"
         ]
