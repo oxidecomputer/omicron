@@ -104,7 +104,8 @@ pub async fn test_setup_metrics_disabled(
     test_name: &str,
     sp_port: SpPort,
 ) -> GatewayTestContext {
-    let (mut server_config, sp_sim_config) = load_test_config();
+    let (mut server_config, sp_sim_config) =
+        load_test_config(DEFAULT_SP_SIM_CONFIG.into());
     match server_config.metrics.as_mut() {
         Some(cfg) => {
             cfg.disabled = true;
