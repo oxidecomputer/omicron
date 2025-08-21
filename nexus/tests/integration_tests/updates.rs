@@ -26,10 +26,13 @@ use std::collections::HashSet;
 use std::fmt::Debug;
 use tough::editor::signed::SignedRole;
 use tough::schema::Root;
+use tufaceous_artifact::ArtifactVersion;
 use tufaceous_artifact::KnownArtifactKind;
 use tufaceous_lib::Key;
 use tufaceous_lib::assemble::{ArtifactManifest, OmicronRepoAssembler};
 use tufaceous_lib::assemble::{DeserializedManifest, ManifestTweak};
+
+use crate::integration_tests::target_release::set_target_release;
 
 const TRUST_ROOTS_URL: &str = "/v1/system/update/trust-roots";
 
@@ -629,12 +632,59 @@ async fn test_trust_root_operations(cptestctx: &ControlPlaneTestContext) {
     assert!(response.items.is_empty());
 }
 
-#[nexus_test]
-async fn test_update_status(cptestctx: &ControlPlaneTestContext) {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_update_status() -> Result<()> {
+    let cptestctx =
+        test_setup::<omicron_nexus::Server>("test_update_uninitialized", 0)
+            .await;
     let client = &cptestctx.external_client;
+    let logctx = &cptestctx.logctx;
+
+    // Upload a fake TUF repo and set it as the target release
+    let trust_root = TestTrustRoot::generate().await?;
+    trust_root.to_upload_request(client, StatusCode::CREATED).execute().await?;
+    trust_root
+        .assemble_repo(&logctx.log, &[])
+        .await?
+        .to_upload_request(client, StatusCode::OK)
+        .execute()
+        .await?;
+    let v1 = Version::new(1, 0, 0);
+    set_target_release(client, v1).await?;
+
+    // do it again so there are two, so both versions are associated with tuf repos
+    let v2 = Version::new(2, 0, 0);
+    let tweaks = &[
+        ManifestTweak::SystemVersion(v2.clone()),
+        ManifestTweak::ArtifactVersion {
+            kind: KnownArtifactKind::SwitchRotBootloader,
+            version: ArtifactVersion::new("non-semver-2").unwrap(),
+        },
+    ];
+    let trust_root = TestTrustRoot::generate().await?;
+    trust_root.to_upload_request(client, StatusCode::CREATED).execute().await?;
+    trust_root
+        .assemble_repo(&logctx.log, tweaks)
+        .await?
+        .to_upload_request(client, StatusCode::OK)
+        .execute()
+        .await?;
+    set_target_release(client, v2.clone()).await?;
 
     let status: views::UpdateStatus =
         object_get(client, "/v1/system/update/status").await;
 
-    dbg!(status);
+    dbg!(status.clone());
+
+    assert_eq!(
+        status.target_release.unwrap().release_source,
+        views::TargetReleaseSource::SystemVersion { version: v2 }
+    );
+
+    let counts = status.components_by_release;
+    assert_eq!(counts.get("install dataset").unwrap(), &7);
+    assert_eq!(counts.get("unknown").unwrap(), &8);
+
+    cptestctx.teardown().await;
+    Ok(())
 }

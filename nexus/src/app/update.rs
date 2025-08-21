@@ -9,16 +9,20 @@ use dropshot::HttpError;
 use futures::Stream;
 use nexus_auth::authz;
 use nexus_db_lookup::LookupPath;
-use nexus_db_model::{TufRepoDescription, TufTrustRoot};
+use nexus_db_model::{Generation, TufRepoDescription, TufTrustRoot};
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::{datastore::SQL_BATCH_SIZE, pagination::Paginator};
+use nexus_types::deployment::TargetReleaseDescription;
 use nexus_types::external_api::shared::TufSignedRootRole;
 use nexus_types::external_api::views;
+use nexus_types::internal_api::views as internal_views;
+use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::{
     DataPageParams, Error, TufRepoInsertResponse, TufRepoInsertStatus,
 };
 use omicron_uuid_kinds::{GenericUuid, TufTrustRootUuid};
 use semver::Version;
+use std::collections::BTreeMap;
 use update_common::artifacts::{
     ArtifactsWithPlan, ControlPlaneZonesMode, VerificationMode,
 };
@@ -61,8 +65,7 @@ impl super::Nexus {
         let response = self
             .db_datastore
             .tuf_repo_insert(opctx, artifacts_with_plan.description())
-            .await
-            .map_err(HttpError::from)?;
+            .await?;
 
         // If we inserted a new repository, move the `ArtifactsWithPlan` (which
         // carries with it the `Utf8TempDir`s storing the artifacts) into the
@@ -155,7 +158,7 @@ impl super::Nexus {
     pub async fn update_status_external(
         &self,
         opctx: &OpContext,
-    ) -> Result<views::UpdateStatus, HttpError> {
+    ) -> Result<views::UpdateStatus, Error> {
         // Get target release information
         let target_release =
             match self.datastore().target_release_get_current(opctx).await {
@@ -165,170 +168,97 @@ impl super::Nexus {
                 Err(_) => None, // No target release set
             };
 
-        // Get component status using read-only queries
         let components_by_release =
-            self.get_component_status_readonly(opctx).await?;
+            self.component_version_counts(opctx).await?;
 
-        let last_blueprint_time = self
-            .datastore()
-            .blueprint_get_latest_time(opctx)
-            .await
-            .map_err(HttpError::from)?;
+        let last_blueprint_time =
+            self.datastore().blueprint_get_latest_time(opctx).await?;
 
-        // Generate blockers (placeholder for now)
-        let blockers = self.generate_blockers(opctx).await?;
+        // TODO: Figure out how to list things blocking progress
 
         Ok(views::UpdateStatus {
             target_release,
             components_by_release,
             last_blueprint_time,
-            blockers,
         })
     }
 
-    /// Generate list of blockers (placeholder implementation)
-    async fn generate_blockers(
-        &self,
-        _opctx: &OpContext,
-    ) -> Result<Vec<views::UpdateBlocker>, HttpError> {
-        // TODO: Implement actual blocker detection based on planning reports
-        // For now, return empty list
-        Ok(Vec::new())
-    }
-
     /// Get component status using read-only queries to avoid batch operations
-    async fn get_component_status_readonly(
+    async fn component_version_counts(
         &self,
         opctx: &OpContext,
-    ) -> Result<
-        std::collections::BTreeMap<String, views::ComponentCounts>,
-        HttpError,
-    > {
-        use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
-        use std::collections::BTreeMap;
-        use std::collections::HashMap;
-
-        let mut counts = BTreeMap::new();
-
+    ) -> Result<BTreeMap<String, usize>, Error> {
         // Get the latest inventory collection
-        let Some(inventory) = self
-            .datastore()
-            .inventory_get_latest_collection(opctx)
-            .await
-            .map_err(HttpError::from)?
+        let Some(inventory) =
+            self.datastore().inventory_get_latest_collection(opctx).await?
         else {
             // No inventory collection available, return empty counts
-            return Ok(counts);
+            return Ok(BTreeMap::new());
         };
 
-        // Build hash-to-version mappings from TUF repos (current and previous)
-        let mut hash_to_version = HashMap::new();
+        let target_release =
+            self.datastore().target_release_get_current(opctx).await?;
 
-        // Get current target release
-        if let Ok(target_release) =
-            self.datastore().target_release_get_current(opctx).await
-        {
-            if let Some(tuf_repo_id) = target_release.tuf_repo_id {
-                if let Ok(tuf_repo_desc) = self
-                    .datastore()
-                    .tuf_repo_get_by_id(opctx, tuf_repo_id.into())
-                    .await
-                {
-                    let version_name =
-                        format!("v{}", tuf_repo_desc.repo.system_version);
-                    for artifact in &tuf_repo_desc.artifacts {
-                        hash_to_version
-                            .insert(artifact.sha256, version_name.clone());
-                    }
-                }
-            }
-        }
+        let Some(target_release_tuf_repo_id) = target_release.tuf_repo_id
+        else {
+            return Err(Error::internal_error(
+                "target release has no TUF repo",
+            ));
+        };
+        let target_release_desc = self
+            .datastore()
+            .tuf_repo_get_by_id(opctx, target_release_tuf_repo_id.into())
+            .await?
+            .into_external();
+
+        // TODO: fall back to TargetReleaseDescription::Initial if there's no
+        // previous release. Might not want to eat *all* errors, though.
 
         // Get previous target release (if exists)
         // For simplicity, we'll try to get one generation back
-        if let Ok(current) =
-            self.datastore().target_release_get_current(opctx).await
-        {
-            if let Some(prev_gen) = current.generation.prev() {
-                if let Ok(Some(prev_release)) = self
-                    .datastore()
-                    .target_release_get_generation(
-                        opctx,
-                        nexus_db_model::Generation(prev_gen),
-                    )
-                    .await
-                {
-                    if let Some(prev_tuf_repo_id) = prev_release.tuf_repo_id {
-                        if let Ok(prev_tuf_repo_desc) = self
-                            .datastore()
-                            .tuf_repo_get_by_id(opctx, prev_tuf_repo_id.into())
-                            .await
-                        {
-                            let prev_version_name = format!(
-                                "v{}",
-                                prev_tuf_repo_desc.repo.system_version
-                            );
-                            for artifact in &prev_tuf_repo_desc.artifacts {
-                                // Only add if not already present (current takes priority)
-                                hash_to_version
-                                    .entry(artifact.sha256)
-                                    .or_insert(prev_version_name.clone());
-                            }
-                        }
-                    }
-                }
-            }
+        let Some(prev_gen) = target_release.generation.prev() else {
+            return Err(Error::internal_error(
+                "target release has no prev gen",
+            ));
+        };
+
+        let prev_release = self
+            .datastore()
+            .target_release_get_generation(opctx, Generation(prev_gen))
+            .await
+            .internal_context("fetching previous target release")?;
+        let Some(prev_release_tuf_repo_id) =
+            prev_release.and_then(|r| r.tuf_repo_id)
+        else {
+            return Err(Error::internal_error("prev release has no TUF repo"));
+        };
+        let prev_release_desc = self
+            .datastore()
+            .tuf_repo_get_by_id(opctx, prev_release_tuf_repo_id.into())
+            .await?
+            .into_external();
+
+        // TODO: It's weird to use the internal view this way. On the other hand
+        // it feels silly to extract a shared structure that's basically the
+        // same as this struct.
+        let status = internal_views::UpdateStatus::new(
+            &TargetReleaseDescription::TufRepo(prev_release_desc),
+            &TargetReleaseDescription::TufRepo(target_release_desc),
+            &inventory,
+        );
+
+        let zone_versions = status
+            .zones
+            .values()
+            .flat_map(|zones| zones.iter().map(|zone| zone.version.clone()));
+        let sp_versions = status.sps.values().flat_map(|sp| {
+            [sp.slot0_version.clone(), sp.slot1_version.clone()]
+        });
+
+        let mut counts = BTreeMap::new();
+        for version in zone_versions.chain(sp_versions) {
+            *counts.entry(version.to_string()).or_insert(0) += 1;
         }
-
-        // Count zones by version using the hash mappings
-        for agent in inventory.sled_agents.iter() {
-            if let Some(reconciliation) = &agent.last_reconciliation {
-                for (_zone_config, _result) in
-                    reconciliation.reconciled_omicron_zones()
-                {
-                    let version_key = match &_zone_config.image_source {
-                        OmicronZoneImageSource::InstallDataset => {
-                            "install_dataset".to_string()
-                        }
-                        OmicronZoneImageSource::Artifact { hash } => {
-                            // Convert tufaceous_artifact::ArtifactHash to nexus_db_model::ArtifactHash
-                            let db_hash = nexus_db_model::ArtifactHash(*hash);
-                            // Map hash to actual version if possible
-                            hash_to_version
-                                .get(&db_hash)
-                                .cloned()
-                                .unwrap_or_else(|| {
-                                    format!(
-                                        "unknown_artifact_{}",
-                                        &hash.to_string()[..8]
-                                    )
-                                })
-                        }
-                    };
-
-                    let entry =
-                        counts.entry(version_key).or_insert_with(|| {
-                            views::ComponentCounts {
-                                zone_count: 0,
-                                sp_count: 0,
-                            }
-                        });
-                    entry.zone_count += 1;
-                }
-            }
-        }
-
-        // Count SPs - for now we can't easily determine SP versions without
-        // complex operations, so group them all together
-        let sp_count = inventory.sps.len() as u32;
-        if sp_count > 0 {
-            let entry =
-                counts.entry("sp_firmware".to_string()).or_insert_with(|| {
-                    views::ComponentCounts { zone_count: 0, sp_count: 0 }
-                });
-            entry.sp_count = sp_count;
-        }
-
         Ok(counts)
     }
 }

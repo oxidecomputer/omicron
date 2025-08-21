@@ -16603,13 +16603,6 @@
           4096
         ]
       },
-      "BlockerSeverity": {
-        "type": "string",
-        "enum": [
-          "warning",
-          "error"
-        ]
-      },
       "ByteCount": {
         "description": "Byte count to express memory or storage capacity.",
         "type": "integer",
@@ -16724,25 +16717,6 @@
         },
         "required": [
           "items"
-        ]
-      },
-      "ComponentCounts": {
-        "type": "object",
-        "properties": {
-          "sp_count": {
-            "type": "integer",
-            "format": "uint32",
-            "minimum": 0
-          },
-          "zone_count": {
-            "type": "integer",
-            "format": "uint32",
-            "minimum": 0
-          }
-        },
-        "required": [
-          "sp_count",
-          "zone_count"
         ]
       },
       "ConsoleSession": {
@@ -26150,36 +26124,16 @@
           }
         ]
       },
-      "UpdateBlocker": {
-        "type": "object",
-        "properties": {
-          "description": {
-            "type": "string"
-          },
-          "severity": {
-            "$ref": "#/components/schemas/BlockerSeverity"
-          }
-        },
-        "required": [
-          "description",
-          "severity"
-        ]
-      },
       "UpdateStatus": {
         "type": "object",
         "properties": {
-          "blockers": {
-            "description": "List of problems blocking forward progress",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/UpdateBlocker"
-            }
-          },
           "components_by_release": {
             "description": "Count of components running each release version",
             "type": "object",
             "additionalProperties": {
-              "$ref": "#/components/schemas/ComponentCounts"
+              "type": "integer",
+              "format": "uint",
+              "minimum": 0
             }
           },
           "last_blueprint_time": {
@@ -26199,7 +26153,6 @@
           }
         },
         "required": [
-          "blockers",
           "components_by_release"
         ]
       },

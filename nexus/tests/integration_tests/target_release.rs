@@ -124,7 +124,7 @@ async fn get_set_target_release() -> Result<()> {
     Ok(())
 }
 
-async fn set_target_release(
+pub async fn set_target_release(
     client: &ClientTestContext,
     system_version: Version,
 ) -> Result<TargetRelease> {
