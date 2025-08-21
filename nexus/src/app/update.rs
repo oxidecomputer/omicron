@@ -169,8 +169,11 @@ impl super::Nexus {
         let components_by_release =
             self.get_component_status_readonly(opctx).await?;
 
-        // Get last blueprint time
-        let last_blueprint_time = self.get_last_blueprint_time(opctx).await?;
+        let last_blueprint_time = self
+            .datastore()
+            .blueprint_get_latest_time(opctx)
+            .await
+            .map_err(HttpError::from)?;
 
         // Generate blockers (placeholder for now)
         let blockers = self.generate_blockers(opctx).await?;
@@ -181,25 +184,6 @@ impl super::Nexus {
             last_blueprint_time,
             blockers,
         })
-    }
-
-    /// Get the time of the most recently created blueprint
-    async fn get_last_blueprint_time(
-        &self,
-        opctx: &OpContext,
-    ) -> Result<Option<chrono::DateTime<chrono::Utc>>, HttpError> {
-        use omicron_common::api::external::DataPageParams;
-
-        let blueprints = self
-            .datastore()
-            .blueprints_list(opctx, &DataPageParams::max_page())
-            .await
-            .map_err(HttpError::from)?;
-
-        let latest_time =
-            blueprints.into_iter().map(|bp| bp.time_created).max();
-
-        Ok(latest_time)
     }
 
     /// Generate list of blockers (placeholder implementation)
