@@ -1514,10 +1514,12 @@ name = "clickhouse-admin-test-utils"
 version = "0.1.0"
 dependencies = [
  "camino",
+ "camino-tempfile",
  "clickhouse-admin-types",
  "clickward",
  "dropshot",
  "omicron-workspace-hack",
+ "thiserror 2.0.12",
 ]
 
 [[package]]
@@ -8437,6 +8439,7 @@ dependencies = [
  "camino",
  "camino-tempfile",
  "chrono",
+ "clickhouse-admin-test-utils",
  "dropshot",
  "expectorate",
  "filetime",
@@ -9085,6 +9088,7 @@ dependencies = [
  "chrono",
  "chrono-tz",
  "clap",
+ "clickhouse-admin-test-utils",
  "clickward",
  "const_format",
  "criterion",

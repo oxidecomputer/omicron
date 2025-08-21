@@ -107,6 +107,7 @@ quote.workspace = true
 [dev-dependencies]
 assert_matches.workspace = true
 camino-tempfile.workspace = true
+clickhouse-admin-test-utils.workspace = true
 criterion = { workspace = true, features = [ "async_tokio" ] }
 expectorate.workspace = true
 itertools.workspace = true

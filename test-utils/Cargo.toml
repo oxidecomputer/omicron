@@ -42,6 +42,7 @@ uuid.workspace = true
 
 [dev-dependencies]
 chrono.workspace = true
+clickhouse-admin-test-utils.workspace = true
 expectorate.workspace = true
 gethostname.workspace = true
 serde.workspace = true

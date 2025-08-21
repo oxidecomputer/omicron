@@ -12,5 +12,9 @@ camino.workspace = true
 clickhouse-admin-types.workspace = true
 clickward.workspace = true
 dropshot.workspace = true
+thiserror.workspace = true
 
 omicron-workspace-hack.workspace = true
+
+[dev-dependencies]
+camino-tempfile.workspace = true

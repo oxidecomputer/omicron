@@ -4,8 +4,8 @@
 
 use camino::Utf8PathBuf;
 use clickhouse_admin_test_utils::{
-    DEFAULT_CLICKHOUSE_ADMIN_BASE_PORTS,
-    default_clickhouse_cluster_test_deployment,
+    allocate_available_ports,
+    clickhouse_cluster_test_deployment_with_dynamic_ports,
     default_clickhouse_log_ctx_and_path,
 };
 use clickhouse_admin_types::{
@@ -29,25 +29,28 @@ fn log() -> slog::Logger {
 // In Clickward, keeper server ports are assigned by adding i to each
 // base port. Keeper IDs are also assigned with consecutive numbers
 // starting with 1.
-fn get_keeper_server_port(keeper_id: KeeperId) -> u16 {
+fn get_keeper_server_port(base_ports: &clickward::BasePorts, keeper_id: KeeperId) -> u16 {
     let raw_id = keeper_id.0;
     // We can safely unwrap raw_id as the Keeper IDs we use for testing are
     // all in the single digits
-    DEFAULT_CLICKHOUSE_ADMIN_BASE_PORTS.keeper + u16::try_from(raw_id).unwrap()
+    base_ports.keeper + u16::try_from(raw_id).unwrap()
 }
 
-fn get_keeper_raft_port(keeper_id: KeeperId) -> u16 {
+fn get_keeper_raft_port(base_ports: &clickward::BasePorts, keeper_id: KeeperId) -> u16 {
     let raw_id = keeper_id.0;
-    DEFAULT_CLICKHOUSE_ADMIN_BASE_PORTS.raft + u16::try_from(raw_id).unwrap()
+    base_ports.raft + u16::try_from(raw_id).unwrap()
 }
 
 #[tokio::test]
 async fn test_lgif_parsing() -> anyhow::Result<()> {
+    // Use dynamic port allocation for test isolation
+    let base_ports = allocate_available_ports(Some(25000), Some(10))?;
+    
     let clickhouse_cli = ClickhouseCli::new(
         Utf8PathBuf::from_str("clickhouse")?,
         SocketAddrV6::new(
             Ipv6Addr::LOCALHOST,
-            get_keeper_server_port(KeeperId(1)),
+            get_keeper_server_port(&base_ports, KeeperId(1)),
             0,
             0,
         ),
@@ -64,11 +67,14 @@ async fn test_lgif_parsing() -> anyhow::Result<()> {
 
 #[tokio::test]
 async fn test_raft_config_parsing() -> anyhow::Result<()> {
+    // Use dynamic port allocation for test isolation
+    let base_ports = allocate_available_ports(Some(26000), Some(10))?;
+    
     let clickhouse_cli = ClickhouseCli::new(
         Utf8PathBuf::from_str("clickhouse").unwrap(),
         SocketAddrV6::new(
             Ipv6Addr::LOCALHOST,
-            get_keeper_server_port(KeeperId(1)),
+            get_keeper_server_port(&base_ports, KeeperId(1)),
             0,
             0,
         ),
@@ -81,7 +87,7 @@ async fn test_raft_config_parsing() -> anyhow::Result<()> {
     let num_keepers = 3;
 
     for i in 1..=num_keepers {
-        let raft_port = get_keeper_raft_port(KeeperId(i));
+        let raft_port = get_keeper_raft_port(&base_ports, KeeperId(i));
         keeper_servers.insert(KeeperServerInfo {
             server_id: clickhouse_admin_types::KeeperId(i),
             host: ClickhouseHost::Ipv6("::1".parse().unwrap()),
@@ -100,11 +106,14 @@ async fn test_raft_config_parsing() -> anyhow::Result<()> {
 
 #[tokio::test]
 async fn test_keeper_conf_parsing() -> anyhow::Result<()> {
+    // Use dynamic port allocation for test isolation
+    let base_ports = allocate_available_ports(Some(27000), Some(10))?;
+    
     let clickhouse_cli = ClickhouseCli::new(
         Utf8PathBuf::from_str("clickhouse").unwrap(),
         SocketAddrV6::new(
             Ipv6Addr::LOCALHOST,
-            get_keeper_server_port(KeeperId(1)),
+            get_keeper_server_port(&base_ports, KeeperId(1)),
             0,
             0,
         ),
@@ -120,11 +129,14 @@ async fn test_keeper_conf_parsing() -> anyhow::Result<()> {
 
 #[tokio::test]
 async fn test_keeper_cluster_membership() -> anyhow::Result<()> {
+    // Use dynamic port allocation for test isolation
+    let base_ports = allocate_available_ports(Some(28000), Some(10))?;
+    
     let clickhouse_cli = ClickhouseCli::new(
         Utf8PathBuf::from_str("clickhouse").unwrap(),
         SocketAddrV6::new(
             Ipv6Addr::LOCALHOST,
-            get_keeper_server_port(KeeperId(1)),
+            get_keeper_server_port(&base_ports, KeeperId(1)),
             0,
             0,
         ),
@@ -167,7 +179,7 @@ async fn test_teardown() -> anyhow::Result<()> {
 
     info!(&logctx.log, "Tearing down ClickHouse cluster"; "path" => ?path);
 
-    let deployment = default_clickhouse_cluster_test_deployment(path.clone());
+    let deployment = clickhouse_cluster_test_deployment_with_dynamic_ports(path.clone())?;
     deployment.teardown()?;
     std::fs::remove_dir_all(path)?;
     logctx.cleanup_successful();

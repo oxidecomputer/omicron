@@ -3,7 +3,8 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use anyhow::Context;
-use clickward::{BasePorts, Deployment, DeploymentConfig, KeeperId};
+use clickward::{Deployment, DeploymentConfig, KeeperId};
+use clickhouse_admin_test_utils::allocate_available_ports;
 use dropshot::test_util::log_prefix_for_test;
 use omicron_test_utils::dev::poll;
 use omicron_test_utils::dev::test_setup_log;
@@ -17,7 +18,7 @@ use std::time::Duration;
 
 pub struct TestInput {
     n_projects: usize,
-    n_instances: usize,
+    n_instances: usize, 
     n_cpus: usize,
     n_samples: usize,
 }
@@ -49,10 +50,17 @@ async fn test_schemas_disjoint() -> anyhow::Result<()> {
     let path = parent_dir.join(format!("{prefix}-oximeter-clickward-test"));
     std::fs::create_dir(&path)?;
 
-    let mut deployment = Deployment::new_with_default_port_config(
-        path.clone(),
-        "oximeter_cluster".to_string(),
-    );
+    // Use dynamic port allocation to allow tests to run in parallel
+    let base_ports = allocate_available_ports(Some(18000), Some(20))
+        .context("Failed to allocate available ports for test_schemas_disjoint")?;
+    
+    let config = DeploymentConfig {
+        path: path.clone(),
+        base_ports,
+        cluster_name: "oximeter_cluster".to_string(),
+    };
+    
+    let mut deployment = Deployment::new(config);
 
     // We are not testing replication here. We are just testing that the tables
     // loaded by each sql file are not loaded by the other sql file.
@@ -133,15 +141,9 @@ async fn test_cluster() -> anyhow::Result<()> {
     let path = parent_dir.join(format!("{prefix}-oximeter-clickward-test"));
     std::fs::create_dir(&path)?;
 
-    // We use the default ports in `test_schemas_disjoint` and must use a
-    // separate set here in case the two tests run concurrently.
-    let base_ports = BasePorts {
-        keeper: 19000,
-        raft: 19100,
-        clickhouse_tcp: 19200,
-        clickhouse_http: 19300,
-        clickhouse_interserver_http: 19400,
-    };
+    // Use dynamic port allocation to allow tests to run in parallel
+    let base_ports = allocate_available_ports(Some(19000), Some(20))
+        .context("Failed to allocate available ports for test_cluster")?;
 
     let config = DeploymentConfig {
         path: path.clone(),

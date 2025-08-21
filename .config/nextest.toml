@@ -34,12 +34,11 @@ setup = 'clickhouse-cluster'
 command = 'cargo run -p clickhouse-cluster-dev'
 
 [test-groups]
-# The ClickHouse cluster tests currently rely on a hard-coded set of ports for
-# the nodes in the cluster. We would like to relax this in the future, at which
-# point this test-group configuration can be removed or at least loosened to
-# support testing in parallel. For now, enforce strict serialization for all
-# tests with `replicated` in the name.
-clickhouse-cluster = { max-threads = 1 }
+# ClickHouse cluster tests that still use hard-coded ports (being migrated)
+# Tests that have been updated to use dynamic port allocation can run in parallel
+clickhouse-cluster-legacy = { max-threads = 1 }
+# New ClickHouse tests with dynamic port allocation can run with limited parallelism
+clickhouse-cluster = { max-threads = 3 }
 # While most Omicron tests operate with their own simulated control plane, the
 # live-tests operate on a more realistic, shared control plane and test
 # behaviors that conflict with each other.  They need to be run serially.
@@ -54,8 +53,15 @@ filter = 'package(oximeter-db) and test(=client::tests::test_replicated) + test(
 priority = 20
 
 [[profile.default.overrides]]
-filter = 'package(oximeter-db) and test(replicated) + package(omicron-clickhouse-admin)'
+# Tests that have been migrated to use dynamic port allocation - can run in parallel
+filter = '(package(oximeter-db) and (test(=test_cluster) or test(=test_schemas_disjoint))) or package(omicron-clickhouse-admin) or (package(omicron-test-utils) and test(wait_for_ports))'
 test-group = 'clickhouse-cluster'
+priority = 15
+
+[[profile.default.overrides]]
+# Legacy tests that still use hard-coded ports - keep these serialized for now  
+filter = 'package(oximeter-db) and test(replicated) and not (test(=test_cluster) or test(=test_schemas_disjoint))'
+test-group = 'clickhouse-cluster-legacy'
 # client::tests::test_replicated is part of this filter, but it's matched with
 # the higher priority (20) first. The other tests in this group are run after
 # that.

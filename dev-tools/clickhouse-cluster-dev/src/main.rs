@@ -12,6 +12,7 @@ use anyhow::{Context, Result};
 use clickhouse_admin_test_utils::{
     default_clickhouse_cluster_test_deployment,
     default_clickhouse_log_ctx_and_path,
+    clickhouse_cluster_test_deployment_with_dynamic_ports,
 };
 use clickward::KeeperId;
 use oximeter_db::Client;

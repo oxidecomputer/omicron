@@ -1330,8 +1330,13 @@ mod tests {
     use std::{io::Write, sync::Arc, time::Duration};
     use tokio::{sync::Mutex, task::spawn, time::sleep};
 
-    const EXPECTED_HTTP_PORT: u16 = 12345;
-    const EXPECTED_TCP_PORT: u16 = 12346;
+    /// Generate dynamic test ports to avoid conflicts between parallel tests
+    fn get_test_ports() -> (u16, u16) {
+        // Use clickhouse-admin-test-utils for consistent port allocation
+        let base_ports = clickhouse_admin_test_utils::allocate_available_ports(Some(12000), Some(10))
+            .expect("Should be able to allocate test ports");
+        (base_ports.clickhouse_http, base_ports.clickhouse_tcp)
+    }
 
     #[tokio::test]
     async fn test_clickhouse_in_path() {
@@ -1348,33 +1353,37 @@ mod tests {
     async fn wait_for_ports_finds_actual_ports() {
         // Test the nominal case, where ClickHouse writes out the lines with
         // the ports, and then the sentinel indicating readiness.
+        let (expected_http_port, expected_tcp_port) = get_test_ports();
+        
         let mut file = NamedUtf8TempFile::new().unwrap();
         writeln!(file, "A garbage line").unwrap();
         writeln!(
             file,
             "{}:{}",
-            CLICKHOUSE_HTTP_PORT_NEEDLE, EXPECTED_HTTP_PORT,
+            CLICKHOUSE_HTTP_PORT_NEEDLE, expected_http_port,
         )
         .unwrap();
         writeln!(file, "Another garbage line").unwrap();
-        writeln!(file, "{}:{}", CLICKHOUSE_TCP_PORT_NEEDLE, EXPECTED_TCP_PORT)
+        writeln!(file, "{}:{}", CLICKHOUSE_TCP_PORT_NEEDLE, expected_tcp_port)
             .unwrap();
         writeln!(file, "{}", CLICKHOUSE_READY).unwrap();
         file.flush().unwrap();
         let ports = wait_for_ports(&file.path()).await.unwrap();
-        assert_eq!(ports.http, EXPECTED_HTTP_PORT);
-        assert_eq!(ports.native, EXPECTED_TCP_PORT);
+        assert_eq!(ports.http, expected_http_port);
+        assert_eq!(ports.native, expected_tcp_port);
     }
 
     #[should_panic]
     #[tokio::test]
     async fn wait_for_ports_panics_with_sentinel_but_no_ports() {
+        let (expected_http_port, _expected_tcp_port) = get_test_ports();
+        
         let mut file = NamedUtf8TempFile::new().unwrap();
         writeln!(file, "A garbage line").unwrap();
         writeln!(
             file,
             "{}:{}",
-            CLICKHOUSE_HTTP_PORT_NEEDLE, EXPECTED_HTTP_PORT,
+            CLICKHOUSE_HTTP_PORT_NEEDLE, expected_http_port,
         )
         .unwrap();
         writeln!(file, "Another garbage line").unwrap();
@@ -1385,6 +1394,8 @@ mod tests {
 
     #[tokio::test]
     async fn wait_for_ports_waits_for_sentinel_line() {
+        let (expected_http_port, expected_tcp_port) = get_test_ports();
+        
         let file = Arc::new(Mutex::new(NamedUtf8TempFile::new().unwrap()));
         // Start a task that slowly writes lines into the file. This ensures
         // that we wait for a while until the sentinel line is written.
@@ -1394,10 +1405,10 @@ mod tests {
                 String::from("A garbage line"),
                 format!(
                     "{}:{}",
-                    CLICKHOUSE_HTTP_PORT_NEEDLE, EXPECTED_HTTP_PORT
+                    CLICKHOUSE_HTTP_PORT_NEEDLE, expected_http_port
                 ),
                 String::from("Another garbage line"),
-                format!("{}:{}", CLICKHOUSE_TCP_PORT_NEEDLE, EXPECTED_TCP_PORT),
+                format!("{}:{}", CLICKHOUSE_TCP_PORT_NEEDLE, expected_tcp_port),
                 String::from(CLICKHOUSE_READY),
             ] {
                 {
@@ -1410,8 +1421,8 @@ mod tests {
         });
         let path = file.lock().await.path().to_owned();
         let ports = wait_for_ports(&path).await.unwrap();
-        assert_eq!(ports.http, EXPECTED_HTTP_PORT);
-        assert_eq!(ports.native, EXPECTED_TCP_PORT);
+        assert_eq!(ports.http, expected_http_port);
+        assert_eq!(ports.native, expected_tcp_port);
     }
 
     #[tokio::test]
