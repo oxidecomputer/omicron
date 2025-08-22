@@ -694,7 +694,7 @@ pub trait NexusExternalApi {
 
     /// List IP pools
     ///
-    /// Operator endpoint to list all IP pools across the system.
+    /// List all IP pools regardless of silo links.
     #[endpoint {
         method = GET,
         path = "/v1/system/ip-pools",
@@ -717,8 +717,6 @@ pub trait NexusExternalApi {
     ) -> Result<HttpResponseCreated<views::IpPool>, HttpError>;
 
     /// Fetch IP pool
-    ///
-    /// Operator endpoint to view an IP pool.
     #[endpoint {
         method = GET,
         path = "/v1/system/ip-pools/{pool}",

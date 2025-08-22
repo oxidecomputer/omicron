@@ -8248,7 +8248,7 @@
           "system/ip-pools"
         ],
         "summary": "List IP pools",
-        "description": "Operator endpoint to list all IP pools across the system.",
+        "description": "List all IP pools regardless of silo.",
         "operationId": "system_ip_pool_list",
         "parameters": [
           {
@@ -8343,7 +8343,6 @@
           "system/ip-pools"
         ],
         "summary": "Fetch IP pool",
-        "description": "Operator endpoint to view an IP pool.",
         "operationId": "system_ip_pool_view",
         "parameters": [
           {
