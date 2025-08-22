@@ -338,25 +338,21 @@ fn mgs_update_status(
             expected_pending_persistent_boot_preference,
             expected_transient_boot_preference,
         }) => {
-            let active_caboose_which = match &expected_active_slot.slot {
-                RotSlot::A => CabooseWhich::RotSlotA,
-                RotSlot::B => CabooseWhich::RotSlotB,
-            };
-
-            let Some(active_caboose) =
-                inventory.caboose_for(active_caboose_which, baseboard_id)
-            else {
-                return Err(MgsUpdateStatusError::MissingActiveCaboose);
-            };
-
-            let found_inactive_version = inventory
-                .caboose_for(active_caboose_which.toggled_slot(), baseboard_id)
-                .map(|c| c.caboose.version.as_ref());
-
             let rot_state = inventory
                 .rots
                 .get(baseboard_id)
                 .ok_or(MgsUpdateStatusError::MissingRotState)?;
+
+            let active_slot = rot_state.active_slot;
+
+            let active_caboose_which = match &active_slot {
+                RotSlot::A => CabooseWhich::RotSlotA,
+                RotSlot::B => CabooseWhich::RotSlotB,
+            };
+
+            let active_caboose = inventory
+                .caboose_for(active_caboose_which, baseboard_id)
+                .ok_or(MgsUpdateStatusError::MissingActiveCaboose)?;
 
             let found_active_version =
                 ArtifactVersion::new(active_caboose.caboose.version.clone())
@@ -365,8 +361,21 @@ fn mgs_update_status(
                     })?;
 
             let found_active_slot = ExpectedActiveRotSlot {
-                slot: rot_state.active_slot,
+                slot: active_slot,
                 version: found_active_version,
+            };
+
+            let found_inactive_version = inventory
+                .caboose_for(active_caboose_which.toggled_slot(), baseboard_id)
+                .map(|c| c.caboose.version.as_ref());
+
+            let found = RotUpdateState {
+                active_slot: found_active_slot,
+                persistent_boot_preference: rot_state
+                    .persistent_boot_preference,
+                pending_persistent_boot_preference: rot_state
+                    .pending_persistent_boot_preference,
+                transient_boot_preference: rot_state.transient_boot_preference,
             };
 
             let expected = RotUpdateState {
@@ -376,15 +385,6 @@ fn mgs_update_status(
                 pending_persistent_boot_preference:
                     *expected_pending_persistent_boot_preference,
                 transient_boot_preference: *expected_transient_boot_preference,
-            };
-
-            let found = RotUpdateState {
-                active_slot: found_active_slot,
-                persistent_boot_preference: rot_state
-                    .persistent_boot_preference,
-                pending_persistent_boot_preference: rot_state
-                    .pending_persistent_boot_preference,
-                transient_boot_preference: rot_state.transient_boot_preference,
             };
 
             mgs_update_status_rot(
