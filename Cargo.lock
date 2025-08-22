@@ -6076,6 +6076,7 @@ name = "mgs-dev"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "camino",
  "clap",
  "futures",
  "gateway-messages",
@@ -7697,10 +7698,12 @@ name = "omicron-dev"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "camino",
  "clap",
  "dropshot",
  "expectorate",
  "futures",
+ "gateway-test-utils",
  "libc",
  "nexus-config",
  "nexus-test-interface",
@@ -12807,6 +12810,7 @@ dependencies = [
  "gateway-types",
  "hex",
  "hubtools",
+ "nexus-types",
  "nix 0.30.1",
  "omicron-common",
  "omicron-workspace-hack",
