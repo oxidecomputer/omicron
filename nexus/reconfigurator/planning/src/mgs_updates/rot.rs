@@ -168,11 +168,11 @@ pub fn try_make_update_rot(
         .filter(|a| {
             // A matching RoT artifact will have:
             //
-            // - "name" matching the board name (found above from caboose)
+            // - "board" matching the board name (found above from caboose)
             // - "kind" matching one of the known RoT kinds
             // - "sign" matching the rkth (found above from caboose)
 
-            if a.id.name != *board {
+            if a.board.as_ref() != Some(board) {
                 return false;
             }
 

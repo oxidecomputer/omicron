@@ -6076,6 +6076,7 @@ name = "mgs-dev"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "camino",
  "clap",
  "futures",
  "gateway-messages",
@@ -7701,10 +7702,12 @@ name = "omicron-dev"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "camino",
  "clap",
  "dropshot",
  "expectorate",
  "futures",
+ "gateway-test-utils",
  "libc",
  "nexus-config",
  "nexus-test-interface",
@@ -12811,6 +12814,7 @@ dependencies = [
  "gateway-types",
  "hex",
  "hubtools",
+ "nexus-types",
  "nix 0.30.1",
  "omicron-common",
  "omicron-workspace-hack",
@@ -14215,7 +14219,7 @@ dependencies = [
 [[package]]
 name = "tufaceous"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#570f7cbd227a6522afdf6cc0c2bfafb08f2efdbd"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#57832718056c6585b4cddb4f3ebc04b9a07c7bd7"
 dependencies = [
  "anyhow",
  "camino",
@@ -14236,7 +14240,7 @@ dependencies = [
 [[package]]
 name = "tufaceous-artifact"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#570f7cbd227a6522afdf6cc0c2bfafb08f2efdbd"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#57832718056c6585b4cddb4f3ebc04b9a07c7bd7"
 dependencies = [
  "daft",
  "hex",
@@ -14253,7 +14257,7 @@ dependencies = [
 [[package]]
 name = "tufaceous-brand-metadata"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#570f7cbd227a6522afdf6cc0c2bfafb08f2efdbd"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#57832718056c6585b4cddb4f3ebc04b9a07c7bd7"
 dependencies = [
  "semver 1.0.26",
  "serde",
@@ -14265,7 +14269,7 @@ dependencies = [
 [[package]]
 name = "tufaceous-lib"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#570f7cbd227a6522afdf6cc0c2bfafb08f2efdbd"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#57832718056c6585b4cddb4f3ebc04b9a07c7bd7"
 dependencies = [
  "anyhow",
  "async-trait",

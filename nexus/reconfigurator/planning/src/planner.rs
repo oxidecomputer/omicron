@@ -5519,6 +5519,7 @@ pub(crate) mod test {
                 },
                 hash: ArtifactHash([0; 32]),
                 size: 0,
+                board: None,
                 sign: None,
             }
         };

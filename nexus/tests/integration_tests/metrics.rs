@@ -9,6 +9,7 @@ use crate::integration_tests::instances::{
 };
 use chrono::Utc;
 use dropshot::HttpErrorResponseBody;
+use gateway_test_utils::setup::DEFAULT_SP_SIM_CONFIG;
 use http::{Method, StatusCode};
 use nexus_auth::authn::USER_TEST_UNPRIVILEGED;
 use nexus_db_queries::db::identity::Asset;
@@ -652,7 +653,9 @@ async fn test_mgs_metrics(
 ) {
     // Make a MGS
     let (mut mgs_config, sp_sim_config) =
-        gateway_test_utils::setup::load_test_config();
+        gateway_test_utils::setup::load_test_config(
+            DEFAULT_SP_SIM_CONFIG.into(),
+        );
     let mgs = {
         // munge the already-parsed MGS config file to point it at the test
         // Nexus' address.
