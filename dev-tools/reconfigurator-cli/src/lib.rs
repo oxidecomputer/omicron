@@ -544,7 +544,7 @@ struct SledUpdateSpArgs {
 #[derive(Debug, Args)]
 struct SledUpdateRotArgs {
     /// id of the sled
-    sled_id: SledUuid,
+    sled_id: SledOpt,
 
     /// sets the version reported for the RoT slot a
     #[clap(long, required_unless_present_any = &["slot_b"])]
@@ -1713,26 +1713,23 @@ fn cmd_sled_update_rot(
     );
 
     let mut state = sim.current_state().to_mut();
-    state.system_mut().description_mut().sled_update_rot_versions(
-        args.sled_id,
+    let system = state.system_mut();
+    let sled_id = args.sled_id.to_sled_id(system.description())?;
+    system.description_mut().sled_update_rot_versions(
+        sled_id,
         args.slot_a,
         args.slot_b,
     )?;
 
     sim.commit_and_bump(
         format!(
-            "reconfigurator-cli sled-update-rot: {}: {}",
-            args.sled_id,
+            "reconfigurator-cli sled-update-rot: {sled_id}: {}",
             labels.join(", "),
         ),
         state,
     );
 
-    Ok(Some(format!(
-        "set sled {} RoT settings: {}",
-        args.sled_id,
-        labels.join(", ")
-    )))
+    Ok(Some(format!("set sled {sled_id} RoT settings: {}", labels.join(", "))))
 }
 
 fn cmd_sled_update_host_phase_1(

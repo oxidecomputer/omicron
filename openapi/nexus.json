@@ -25757,6 +25757,11 @@
         "description": "Metadata about an individual TUF artifact.\n\nFound within a `TufRepoDescription`.",
         "type": "object",
         "properties": {
+          "board": {
+            "nullable": true,
+            "description": "Contents of the `BORD` field of a Hubris archive caboose. Only applicable to artifacts that are Hubris archives.\n\nThis field should always be `Some(_)` if `sign` is `Some(_)`, but the opposite is not true (SP images will have a `board` but not a `sign`).",
+            "type": "string"
+          },
           "hash": {
             "description": "The hash of the artifact.",
             "type": "string",
