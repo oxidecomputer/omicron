@@ -433,6 +433,7 @@ mod tests {
     use omicron_common::address::NEXUS_OPTE_IPV4_SUBNET;
     use omicron_common::address::NTP_OPTE_IPV4_SUBNET;
     use omicron_common::address::NUM_SOURCE_NAT_PORTS;
+    use omicron_common::api::external::Generation;
     use omicron_common::api::external::MacAddr;
     use omicron_common::api::external::Vni;
     use omicron_common::zpool_name::ZpoolName;
@@ -617,6 +618,7 @@ mod tests {
                             nic: self.nexus_nic.clone(),
                             external_tls: false,
                             external_dns_servers: Vec::new(),
+                            nexus_generation: Generation::new(),
                         },
                     ),
                     image_source: BlueprintZoneImageSource::InstallDataset,

@@ -81,6 +81,7 @@ pub struct Blueprint {
     pub creator: String,
     pub comment: String,
     pub target_release_minimum_generation: Generation,
+    pub nexus_generation: Generation,
 }
 
 impl From<&'_ nexus_types::deployment::Blueprint> for Blueprint {
@@ -100,6 +101,7 @@ impl From<&'_ nexus_types::deployment::Blueprint> for Blueprint {
             target_release_minimum_generation: Generation(
                 bp.target_release_minimum_generation,
             ),
+            nexus_generation: Generation(bp.nexus_generation),
         }
     }
 }
@@ -113,6 +115,7 @@ impl From<Blueprint> for nexus_types::deployment::BlueprintMetadata {
             external_dns_version: *value.external_dns_version,
             target_release_minimum_generation: *value
                 .target_release_minimum_generation,
+            nexus_generation: *value.nexus_generation,
             cockroachdb_fingerprint: value.cockroachdb_fingerprint,
             cockroachdb_setting_preserve_downgrade:
                 CockroachDbPreserveDowngrade::from_optional_string(
@@ -524,6 +527,7 @@ pub struct BpOmicronZone {
 
     pub image_source: DbBpZoneImageSource,
     pub image_artifact_sha256: Option<ArtifactHash>,
+    pub nexus_generation: Option<Generation>,
 }
 
 impl BpOmicronZone {
@@ -585,6 +589,7 @@ impl BpOmicronZone {
             snat_ip: None,
             snat_first_port: None,
             snat_last_port: None,
+            nexus_generation: None,
         };
 
         match &blueprint_zone.zone_type {
@@ -716,6 +721,7 @@ impl BpOmicronZone {
                 nic,
                 external_tls,
                 external_dns_servers,
+                nexus_generation,
             }) => {
                 // Set the common fields
                 bp_omicron_zone
@@ -733,6 +739,8 @@ impl BpOmicronZone {
                         .map(IpNetwork::from)
                         .collect(),
                 );
+                bp_omicron_zone.nexus_generation =
+                    Some(Generation::from(*nexus_generation));
             }
             BlueprintZoneType::Oximeter(blueprint_zone_type::Oximeter {
                 address,
@@ -938,6 +946,9 @@ impl BpOmicronZone {
                         .into_iter()
                         .map(|i| i.ip())
                         .collect(),
+                    nexus_generation: *self.nexus_generation.ok_or_else(
+                        || anyhow!("expected 'nexus_generation'"),
+                    )?,
                 })
             }
             ZoneType::Oximeter => {

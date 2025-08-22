@@ -3330,12 +3330,12 @@ mod tests {
                     )
                     .expect("ensured disks");
             }
+            let must_have_nexus_zones = false;
             builder
-                .sled_add_zone_nexus_with_config(
+                .sled_add_zone_nexus_internal(
                     sled_ids[2],
-                    false,
-                    Vec::new(),
                     BlueprintZoneImageSource::InstallDataset,
+                    must_have_nexus_zones,
                 )
                 .expect("added nexus to third sled");
             builder.build()
@@ -3405,12 +3405,12 @@ mod tests {
             )
             .expect("created blueprint builder");
             for &sled_id in &sled_ids {
+                let must_have_nexus_zones = false;
                 builder
-                    .sled_add_zone_nexus_with_config(
+                    .sled_add_zone_nexus_internal(
                         sled_id,
-                        false,
-                        Vec::new(),
                         BlueprintZoneImageSource::InstallDataset,
+                        must_have_nexus_zones,
                     )
                     .expect("added nexus to third sled");
             }

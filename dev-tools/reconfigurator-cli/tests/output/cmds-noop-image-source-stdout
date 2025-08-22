@@ -180,6 +180,7 @@ chicken switches:
 * waiting on MUPdate overrides
 * MUPdate overrides exist
 * zone updates waiting on MUPdate overrides
+* waiting to update top-level nexus_generation: pending non-nexus zone updates
 
 
 
@@ -345,6 +346,7 @@ to:   blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4
     internal DNS version:::   1 (unchanged)
     external DNS version:::   1 (unchanged)
     target release min gen:   1 (unchanged)
+    nexus gen::::::::::::::   1 (unchanged)
 
  OXIMETER SETTINGS:
     generation:   1 (unchanged)
@@ -538,6 +540,7 @@ chicken switches:
 * waiting on MUPdate overrides
 * MUPdate overrides exist
 * zone updates waiting on MUPdate overrides
+* waiting to update top-level nexus_generation: pending non-nexus zone updates
 
 
 
@@ -594,6 +597,7 @@ to:   blueprint af934083-59b5-4bf6-8966-6fb5292c29e1
     internal DNS version:::   1 (unchanged)
     external DNS version:::   1 (unchanged)
     target release min gen:   1 (unchanged)
+    nexus gen::::::::::::::   1 (unchanged)
 
  OXIMETER SETTINGS:
     generation:   1 (unchanged)
