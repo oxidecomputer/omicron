@@ -650,8 +650,9 @@ fn register_reassign_sagas_step<'a>(
                 Ok(saga_quiesce
                     .reassign_sagas(async || {
                         // For any expunged Nexus zones, re-assign in-progress
-                        // sagas to some other Nexus.  If this fails for some
-                        // reason, it doesn't affect anything else.
+                        // sagas to `nexus_id` (which, in practice, is
+                        // ourselves).  If this fails for some reason, it
+                        // doesn't affect anything else.
                         let sec_id = nexus_db_model::SecId::from(nexus_id);
                         let reassigned = sagas::reassign_sagas_from_expunged(
                             opctx, datastore, blueprint, sec_id,
