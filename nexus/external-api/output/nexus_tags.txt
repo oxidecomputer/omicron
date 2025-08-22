@@ -134,10 +134,10 @@ system_policy_view                       GET      /v1/system/policy
 
 API operations found with tag "projects"
 OPERATION ID                             METHOD   URL PATH
+ip_pool_list                             GET      /v1/ip-pools
+ip_pool_view                             GET      /v1/ip-pools/{pool}
 project_create                           POST     /v1/projects
 project_delete                           DELETE   /v1/projects/{project}
-project_ip_pool_list                     GET      /v1/ip-pools
-project_ip_pool_view                     GET      /v1/ip-pools/{pool}
 project_list                             GET      /v1/projects
 project_policy_update                    PUT      /v1/projects/{project}/policy
 project_policy_view                      GET      /v1/projects/{project}/policy
@@ -215,7 +215,6 @@ API operations found with tag "system/ip-pools"
 OPERATION ID                             METHOD   URL PATH
 ip_pool_create                           POST     /v1/system/ip-pools
 ip_pool_delete                           DELETE   /v1/system/ip-pools/{pool}
-ip_pool_list                             GET      /v1/system/ip-pools
 ip_pool_range_add                        POST     /v1/system/ip-pools/{pool}/ranges/add
 ip_pool_range_list                       GET      /v1/system/ip-pools/{pool}/ranges
 ip_pool_range_remove                     POST     /v1/system/ip-pools/{pool}/ranges/remove
@@ -229,7 +228,8 @@ ip_pool_silo_unlink                      DELETE   /v1/system/ip-pools/{pool}/sil
 ip_pool_silo_update                      PUT      /v1/system/ip-pools/{pool}/silos/{silo}
 ip_pool_update                           PUT      /v1/system/ip-pools/{pool}
 ip_pool_utilization_view                 GET      /v1/system/ip-pools/{pool}/utilization
-ip_pool_view                             GET      /v1/system/ip-pools/{pool}
+system_ip_pool_list                      GET      /v1/system/ip-pools
+system_ip_pool_view                      GET      /v1/system/ip-pools/{pool}
 
 API operations found with tag "system/metrics"
 OPERATION ID                             METHOD   URL PATH

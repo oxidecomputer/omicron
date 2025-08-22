@@ -5286,7 +5286,8 @@
           "projects"
         ],
         "summary": "List IP pools",
-        "operationId": "project_ip_pool_list",
+        "description": "For the current silo.",
+        "operationId": "ip_pool_list",
         "parameters": [
           {
             "in": "query",
@@ -5345,7 +5346,7 @@
           "projects"
         ],
         "summary": "Fetch IP pool",
-        "operationId": "project_ip_pool_view",
+        "operationId": "ip_pool_view",
         "parameters": [
           {
             "in": "path",
@@ -8247,7 +8248,8 @@
           "system/ip-pools"
         ],
         "summary": "List IP pools",
-        "operationId": "ip_pool_list",
+        "description": "Operator endpoint to list all IP pools across the system.",
+        "operationId": "system_ip_pool_list",
         "parameters": [
           {
             "in": "query",
@@ -8341,7 +8343,8 @@
           "system/ip-pools"
         ],
         "summary": "Fetch IP pool",
-        "operationId": "ip_pool_view",
+        "description": "Operator endpoint to view an IP pool.",
+        "operationId": "system_ip_pool_view",
         "parameters": [
           {
             "in": "path",

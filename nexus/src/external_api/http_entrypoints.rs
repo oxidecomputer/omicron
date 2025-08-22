@@ -1093,7 +1093,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
     // IP Pools
 
-    async fn project_ip_pool_list(
+    async fn ip_pool_list(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<PaginatedByNameOrId>,
     ) -> Result<HttpResponseOk<ResultsPage<views::SiloIpPool>>, HttpError> {
@@ -1128,7 +1128,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
-    async fn project_ip_pool_view(
+    async fn ip_pool_view(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::IpPoolPath>,
     ) -> Result<HttpResponseOk<views::SiloIpPool>, HttpError> {
@@ -1152,7 +1152,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
-    async fn ip_pool_list(
+    async fn system_ip_pool_list(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<PaginatedByNameOrId>,
     ) -> Result<HttpResponseOk<ResultsPage<IpPool>>, HttpError> {
@@ -1204,7 +1204,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
-    async fn ip_pool_view(
+    async fn system_ip_pool_view(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::IpPoolPath>,
     ) -> Result<HttpResponseOk<views::IpPool>, HttpError> {
