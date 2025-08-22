@@ -125,7 +125,7 @@ impl NoopConvertInfo {
                     NoopConvertSledIneligibleReason::MupdateOverride {
                         mupdate_override_id,
                         zones,
-                        host_phase_2,
+                        host_phase_2: Box::new(host_phase_2),
                     },
                 )
             } else {
@@ -374,7 +374,7 @@ pub(crate) enum NoopConvertSledIneligibleReason {
         /// Information about host phase 2.
         ///
         /// Stored for reasons similar to `zones` above.
-        host_phase_2: NoopConvertHostPhase2Slots,
+        host_phase_2: Box<NoopConvertHostPhase2Slots>,
     },
 
     /// An error was obtained while retrieving mupdate override information.

@@ -867,7 +867,9 @@ impl ActiveSledEditor {
                                     mupdate_override_id: inv_override
                                         .mupdate_override_id,
                                     zones,
-                                    host_phase_2: eligible.host_phase_2.clone(),
+                                    host_phase_2: Box::new(
+                                        eligible.host_phase_2.clone(),
+                                    ),
                                 },
                             );
                         }
@@ -948,7 +950,7 @@ impl ActiveSledEditor {
                                 info.status = NoopConvertSledStatus::Eligible(
                                     NoopConvertSledEligible {
                                         zones,
-                                        host_phase_2: host_phase_2.clone(),
+                                        host_phase_2: *host_phase_2.clone(),
                                     },
                                 );
                                 Ok(EnsureMupdateOverrideAction::BpClearOverride {
