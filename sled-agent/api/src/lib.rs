@@ -66,6 +66,7 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
+    (2, REMOVE_DESTROY_ORPHANED_DATASETS_CHICKEN_SWITCH),
     (1, INITIAL),
 ]);
 
@@ -701,6 +702,36 @@ pub trait SledAgentApi {
         path_params: Path<SledDiagnosticsLogsDownloadPathParm>,
         query_params: Query<SledDiagnosticsLogsDownloadQueryParam>,
     ) -> Result<http::Response<Body>, HttpError>;
+
+    /// This endpoint reports the status of the `destroy_orphaned_datasets`
+    /// chicken switch. It will be removed with omicron#6177.
+    #[endpoint {
+        method = GET,
+        path = "/chicken-switch/destroy-orphaned-datasets",
+        versions = ..VERSION_REMOVE_DESTROY_ORPHANED_DATASETS_CHICKEN_SWITCH,
+    }]
+    async fn chicken_switch_destroy_orphaned_datasets_get(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<ChickenSwitchDestroyOrphanedDatasets>, HttpError>;
+
+    /// This endpoint sets the `destroy_orphaned_datasets` chicken switch
+    /// (allowing sled-agent to delete datasets it believes are orphaned). It
+    /// will be removed with omicron#6177.
+    #[endpoint {
+        method = PUT,
+        path = "/chicken-switch/destroy-orphaned-datasets",
+    }]
+    async fn chicken_switch_destroy_orphaned_datasets_put(
+        request_context: RequestContext<Self::Context>,
+        body: TypedBody<ChickenSwitchDestroyOrphanedDatasets>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+}
+
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+pub struct ChickenSwitchDestroyOrphanedDatasets {
+    /// If true, sled-agent will attempt to destroy durable ZFS datasets that it
+    /// believes were associated with now-expunged Omicron zones.
+    pub destroy_orphans: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]

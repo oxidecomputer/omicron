@@ -777,6 +777,20 @@ impl SledAgentApi for SledAgentSimImpl {
     ) -> Result<http::Response<dropshot::Body>, HttpError> {
         method_unimplemented()
     }
+
+    async fn chicken_switch_destroy_orphaned_datasets_get(
+        _request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<ChickenSwitchDestroyOrphanedDatasets>, HttpError>
+    {
+        method_unimplemented()
+    }
+
+    async fn chicken_switch_destroy_orphaned_datasets_put(
+        _request_context: RequestContext<Self::Context>,
+        _body: TypedBody<ChickenSwitchDestroyOrphanedDatasets>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        method_unimplemented()
+    }
 }
 
 fn method_unimplemented<T>() -> Result<T, HttpError> {
