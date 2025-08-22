@@ -201,11 +201,11 @@ impl TqState {
             Event::SendNexusReplyOnUnderlay(reply) => {
                 self.apply_event_send_nexus_reply_on_underlay(reply)
             }
-            Event::DeliverEnvelope { destination } => {
-                self.apply_event_deliver_envelope(destination);
+            Event::DeliverEnvelope(envelope) => {
+                self.apply_event_deliver_envelope(envelope);
             }
-            Event::DeliverNexusReply => {
-                self.apply_event_deliver_nexus_reply();
+            Event::DeliverNexusReply(reply) => {
+                self.apply_event_deliver_nexus_reply(reply);
             }
             Event::CommitConfiguration(dest) => {
                 self.apply_event_commit(dest);
@@ -273,9 +273,10 @@ impl TqState {
         self.underlay_network.push(reply);
     }
 
-    fn apply_event_deliver_nexus_reply(&mut self) {
+    fn apply_event_deliver_nexus_reply(&mut self, recorded_reply: NexusReply) {
         let mut latest_config = self.nexus.latest_config_mut();
         let reply = self.underlay_network.pop().expect("reply exists");
+        assert_eq!(recorded_reply, reply);
         match reply {
             NexusReply::AckedPreparesFromCoordinator { epoch, acks } => {
                 if epoch == latest_config.epoch {
@@ -301,13 +302,21 @@ impl TqState {
         latest_config.op = NexusOp::Aborted;
     }
 
-    fn apply_event_deliver_envelope(&mut self, destination: PlatformId) {
+    fn apply_event_deliver_envelope(&mut self, recorded_envelope: Envelope) {
         let envelope = self
             .bootstrap_network
-            .get_mut(&destination)
+            .get_mut(&recorded_envelope.to)
             .unwrap()
             .pop()
             .expect("envelope in bootstrap network");
+
+        // The recorded envelope must be exactly the same as the one pulled
+        // off the bootstrap network. We ignore crypto data because we don't
+        // currently seed and track random number generators. For our purposes,
+        // validating the other fields is enough, because the test will fail if
+        // the crypto doesn't work and decrypt to the same plaintext.
+        assert!(recorded_envelope.equal_except_for_crypto_data(&envelope));
+
         let (node, ctx) =
             self.sut.nodes.get_mut(&envelope.to).expect("destination exists");
         node.handle(ctx, envelope.from, envelope.msg);

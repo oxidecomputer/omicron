@@ -842,6 +842,11 @@ opt-level = 3
 [profile.dev.package.bootstore]
 opt-level = 3
 
+[profile.dev.package.trust-quorum]
+opt-level = 3
+[profile.dev.package.trust-quorum-test-utils]
+opt-level = 3
+
 # Crypto stuff always needs optimizations
 [profile.dev.package.sha3]
 opt-level = 3

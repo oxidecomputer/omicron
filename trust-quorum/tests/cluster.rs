@@ -12,7 +12,7 @@ use proptest::collection::{btree_set, size_range};
 use proptest::prelude::*;
 use proptest::sample::Selector;
 use slog::{Logger, info, o};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use test_strategy::{Arbitrary, proptest};
 use trust_quorum::{
     CoordinatorOperation, Epoch, NodeCommonCtx, PlatformId, Threshold,
@@ -22,6 +22,7 @@ use trust_quorum_test_utils::{
     Event, EventLog,
     nexus::{NexusConfig, NexusOp, NexusReply},
 };
+use uuid::Uuid;
 
 /// The state of our test
 #[derive(Clone, Diffable)]
@@ -93,13 +94,13 @@ impl TestState {
             for event in &events {
                 event_log.record(event);
             }
-            let check_invariants = !events.is_empty();
+            let skip_actions = events.is_empty();
             for event in events {
+                let affected_nodes = event.affected_nodes();
                 self.tq_state.apply_event(event);
+                self.check_invariants(affected_nodes)?;
             }
-            if check_invariants {
-                self.check_invariants()?;
-            } else {
+            if skip_actions {
                 self.skipped_actions += 1;
             }
         }
@@ -108,15 +109,15 @@ impl TestState {
 
     fn action_to_events(&self, action: Action) -> Vec<Event> {
         match action {
-            Action::DeliverEnvelopes(indices) => {
-                self.action_to_events_deliver_envelopes(indices)
+            Action::DeliverEnvelope(selector) => {
+                self.action_to_events_deliver_envelope(selector)
             }
             Action::PollPrepareAcks => {
                 self.action_to_events_poll_prepare_acks()
             }
-            Action::Commit(indices) => self.action_to_events_commit(indices),
-            Action::DeliverNexusReplies(n) => {
-                self.action_to_events_deliver_nexus_replies(n)
+            Action::Commit(index) => self.action_to_events_commit(index),
+            Action::DeliverNexusReply => {
+                self.action_to_events_deliver_nexus_reply()
             }
             Action::Reconfigure {
                 num_added_nodes,
@@ -132,35 +133,28 @@ impl TestState {
         }
     }
 
-    fn action_to_events_deliver_envelopes(
+    fn action_to_events_deliver_envelope(
         &self,
-        indices: Vec<Index>,
+        selector: Selector,
     ) -> Vec<Event> {
         let mut events = vec![];
-        let destinations: Vec<_> =
-            self.tq_state.bootstrap_network.keys().cloned().collect();
-        if destinations.is_empty() {
+        if self.tq_state.bootstrap_network.is_empty() {
             // nothing to do
             return events;
         }
+        let destination =
+            selector.select(self.tq_state.bootstrap_network.keys());
 
-        // Add an event only if there is actually an envelope to send
-        let mut counts = BTreeMap::new();
-        for index in indices {
-            let id = index.get(&destinations);
-            let count = counts.entry(id).or_insert(0usize);
-            *count += 1;
-            let num_envelopes = self
-                .tq_state
-                .bootstrap_network
-                .get(id)
-                .expect("destination exists")
-                .len();
-            if *count <= num_envelopes {
-                events.push(Event::DeliverEnvelope { destination: id.clone() });
-            }
-        }
-
+        // We pop from the back and push on the front
+        let envelope = self
+            .tq_state
+            .bootstrap_network
+            .get(destination)
+            .expect("destination exists")
+            .last()
+            .expect("envelope exists")
+            .clone();
+        events.push(Event::DeliverEnvelope(envelope));
         events
     }
 
@@ -223,7 +217,7 @@ impl TestState {
         events
     }
 
-    fn action_to_events_commit(&self, indices: Vec<Index>) -> Vec<Event> {
+    fn action_to_events_commit(&self, index: Index) -> Vec<Event> {
         let mut events = vec![];
         let latest_config = self.tq_state.nexus.latest_config();
         if latest_config.op != NexusOp::Committed {
@@ -238,25 +232,17 @@ impl TestState {
             return events;
         }
 
-        // De-duplicate the Index->PlatformId mapping
-        let mut nodes: BTreeSet<PlatformId> = BTreeSet::new();
-        for index in indices {
-            let id = *index.get(&committable);
-            nodes.insert(id.clone());
-        }
-        for node in nodes {
-            events.push(Event::CommitConfiguration(node));
-        }
+        let id = index.get(&committable);
+        events.push(Event::CommitConfiguration((*id).clone()));
         events
     }
 
-    fn action_to_events_deliver_nexus_replies(&self, n: usize) -> Vec<Event> {
-        let mut events = vec![];
-        let n = usize::min(n, self.tq_state.underlay_network.len());
-        for _ in 0..n {
-            events.push(Event::DeliverNexusReply);
+    fn action_to_events_deliver_nexus_reply(&self) -> Vec<Event> {
+        if let Some(reply) = self.tq_state.underlay_network.last() {
+            vec![Event::DeliverNexusReply(reply.clone())]
+        } else {
+            vec![]
         }
-        events
     }
 
     fn action_to_events_reconfigure(
@@ -392,13 +378,25 @@ impl TestState {
     ///
     /// We typically only check the current configuration as the checks hold
     /// inductively as configurations advance.
-    fn check_invariants(&self) -> Result<(), TestCaseError> {
-        self.invariant_all_nodes_have_same_configuration_per_epoch()?;
-        self.invariant_nodes_have_prepared_if_coordinator_has_acks()?;
-        self.invariant_nodes_have_committed_if_nexus_has_acks()?;
-        self.invariant_nodes_not_coordinating_and_computing_key_share_simultaneously()?;
-        self.invariant_no_alarms()?;
-        self.invariant_expunged_nodes_have_actually_been_expunged()?;
+    ///
+    /// Furthermore, we only test the modified node where we can to prevent
+    /// having to loop over all nodes when they haven't changed.
+    fn check_invariants(
+        &self,
+        affected_nodes: Vec<PlatformId>,
+    ) -> Result<(), TestCaseError> {
+        self.invariant_all_nodes_have_same_configuration_per_epoch(
+            &affected_nodes,
+        )?;
+        self.invariant_nodes_have_prepared_if_coordinator_has_acks(
+            &affected_nodes,
+        )?;
+        self.invariant_nodes_have_committed_if_nexus_has_acks(&affected_nodes)?;
+        self.invariant_nodes_not_coordinating_and_computing_key_share_simultaneously(&affected_nodes)?;
+        self.invariant_no_alarms(&affected_nodes)?;
+        self.invariant_expunged_nodes_have_actually_been_expunged(
+            &affected_nodes,
+        )?;
         Ok(())
     }
 
@@ -408,25 +406,30 @@ impl TestState {
     ///  * have no committed configurations
     fn invariant_expunged_nodes_have_actually_been_expunged(
         &self,
+        affected_nodes: &[PlatformId],
     ) -> Result<(), TestCaseError> {
-        for id in &self.tq_state.expunged {
-            let (_, ctx) =
-                self.tq_state.sut.nodes.get(id).expect("node exists");
-            let ps = ctx.persistent_state();
-            if ps.is_expunged() {
-                continue;
-            }
-            if let Some(config) = ps.latest_committed_configuration() {
-                let nexus_config = self
-                    .tq_state
-                    .nexus
-                    .configs
-                    .get(&config.epoch)
-                    .expect("config exists");
-                prop_assert!(config.members.contains_key(ctx.platform_id()));
-                prop_assert!(nexus_config.members.contains(ctx.platform_id()));
-            } else {
-                continue;
+        for id in affected_nodes {
+            if self.tq_state.expunged.contains(id) {
+                let (_, ctx) =
+                    self.tq_state.sut.nodes.get(id).expect("node exists");
+                let ps = ctx.persistent_state();
+                if ps.is_expunged() {
+                    continue;
+                }
+                if let Some(config) = ps.latest_committed_configuration() {
+                    let nexus_config = self
+                        .tq_state
+                        .nexus
+                        .configs
+                        .get(&config.epoch)
+                        .expect("config exists");
+                    prop_assert!(
+                        config.members.contains_key(ctx.platform_id())
+                    );
+                    prop_assert!(
+                        nexus_config.members.contains(ctx.platform_id())
+                    );
+                }
             }
         }
 
@@ -439,8 +442,11 @@ impl TestState {
     /// Sometimes nodes may not have a configuration for a given epoch.
     fn invariant_all_nodes_have_same_configuration_per_epoch(
         &self,
+        affected_nodes: &[PlatformId],
     ) -> Result<(), TestCaseError> {
-        for (id, (_, ctx)) in &self.tq_state.sut.nodes {
+        for id in affected_nodes {
+            let (_, ctx) =
+                self.tq_state.sut.nodes.get(id).expect("node exists");
             let diff = self
                 .tq_state
                 .all_coordinated_configs
@@ -466,6 +472,7 @@ impl TestState {
     /// only have acknowledgments from nodes that have seen the `Prepare`.
     fn invariant_nodes_have_prepared_if_coordinator_has_acks(
         &self,
+        affected_nodes: &[PlatformId],
     ) -> Result<(), TestCaseError> {
         let (acked, epoch) = {
             let latest_config = self.tq_state.nexus.latest_config();
@@ -494,12 +501,15 @@ impl TestState {
             }
             (acked, latest_config.epoch)
         };
-        // Make sure the coordinator actually is coordinating for this epoch
 
-        for id in acked {
-            let (_, ctx) =
-                self.tq_state.sut.nodes.get(&id).expect("node exists");
-            prop_assert!(ctx.persistent_state().has_prepared(epoch));
+        // If any affected node was one of the acked nodes, then it should have
+        // prepared for this epoch.
+        for id in affected_nodes {
+            if acked.contains(id) {
+                let (_, ctx) =
+                    self.tq_state.sut.nodes.get(&id).expect("node exists");
+                prop_assert!(ctx.persistent_state().has_prepared(epoch));
+            }
         }
 
         Ok(())
@@ -513,18 +523,21 @@ impl TestState {
     /// configuration and share for this epoch.
     fn invariant_nodes_have_committed_if_nexus_has_acks(
         &self,
+        affected_nodes: &[PlatformId],
     ) -> Result<(), TestCaseError> {
         let latest_config = self.tq_state.nexus.latest_config();
         if latest_config.op != NexusOp::Committed {
             return Ok(());
         }
 
-        for id in &latest_config.committed_members {
-            let (_, ctx) =
-                self.tq_state.sut.nodes.get(&id).expect("node exists");
-            let ps = ctx.persistent_state();
-            prop_assert!(ps.commits.contains(&latest_config.epoch));
-            prop_assert!(ps.has_prepared(latest_config.epoch));
+        for id in affected_nodes {
+            if latest_config.committed_members.contains(id) {
+                let (_, ctx) =
+                    self.tq_state.sut.nodes.get(id).expect("node exists");
+                let ps = ctx.persistent_state();
+                prop_assert!(ps.commits.contains(&latest_config.epoch));
+                prop_assert!(ps.has_prepared(latest_config.epoch));
+            }
         }
 
         Ok(())
@@ -541,8 +554,11 @@ impl TestState {
     //   key share for the latest committed configuration that they know of.
     fn invariant_nodes_not_coordinating_and_computing_key_share_simultaneously(
         &self,
+        affected_nodes: &[PlatformId],
     ) -> Result<(), TestCaseError> {
-        for (id, (node, _)) in &self.tq_state.sut.nodes {
+        for id in affected_nodes {
+            let (node, _) =
+                self.tq_state.sut.nodes.get(id).expect("node exists");
             prop_assert!(
                 !(node.get_coordinator_state().is_some()
                     && node.is_computing_key_share()),
@@ -554,9 +570,14 @@ impl TestState {
         Ok(())
     }
 
-    // Ensure there has been no alarm at any node
-    fn invariant_no_alarms(&self) -> Result<(), TestCaseError> {
-        for (id, (_, ctx)) in &self.tq_state.sut.nodes {
+    // Ensure there has been no alarm at any affected node
+    fn invariant_no_alarms(
+        &self,
+        affected_nodes: &[PlatformId],
+    ) -> Result<(), TestCaseError> {
+        for id in affected_nodes {
+            let (_, ctx) =
+                self.tq_state.sut.nodes.get(id).expect("node exists");
             let alarms = ctx.alarms();
             prop_assert!(
                 alarms.is_empty(),
@@ -573,17 +594,12 @@ impl TestState {
 #[derive(Debug, Arbitrary)]
 #[allow(clippy::large_enum_variant)]
 pub enum Action {
-    /// For each indexed member deliver an in-flight bootstrap network msg if
-    /// there is one.
+    /// Deliver an in-flight bootstrap network msg if there is one.
     ///
-    /// The indexes here are used to index into the `PlatformIds` of
+    /// The selector here is used to index into the `PlatformIds` of
     /// `test_state.bootstrap_network`.
-    ///
-    /// We may deliver more than one message to each member.
-    #[weight(4)]
-    DeliverEnvelopes(
-        #[any(size_range(1..MAX_DELIVERED_ENVELOPES).lift())] Vec<Index>,
-    ),
+    #[weight(30)]
+    DeliverEnvelope(Selector),
 
     /// Have Nexus poll the coordinator for the latest configuration if it is
     /// still being prepared.
@@ -592,19 +608,19 @@ pub enum Action {
     /// simulates recording this information in CRDB. If Nexus has witnessed
     /// that enough nodes have acked prepares then it changes the config
     /// operation to committed.
-    #[weight(4)]
+    #[weight(10)]
     PollPrepareAcks,
 
     /// If the current configuration at nexus is marked `NexusOp::Committed`
-    /// then call `Node::commit_configuration` for each indexed
+    /// then call `Node::commit_configuration` for the indexed
     /// node in `NexusConfig::prepared_members` that is not also in
     /// `NexusConfig::committed_members`.
-    #[weight(4)]
-    Commit(#[any(size_range(1..MAX_CONCURRENT_COMMITS).lift())] Vec<Index>),
+    #[weight(10)]
+    Commit(Index),
 
     /// Deliver in-flight messages to Nexus from the underlay network
-    #[weight(4)]
-    DeliverNexusReplies(#[strategy(1..10usize)] usize),
+    #[weight(10)]
+    DeliverNexusReply,
 
     /// Generate a new configuration by adding a number of *new* (non-expunged)
     /// nodes to the cluster from `member_universe` and removing the specific
@@ -621,15 +637,25 @@ pub enum Action {
 }
 
 const MIN_CLUSTER_SIZE: usize = 3;
-const MAX_CLUSTER_SIZE: usize = 20;
-const MEMBER_UNIVERSE_SIZE: usize = 40;
+const MAX_CLUSTER_SIZE: usize = 12;
+const MEMBER_UNIVERSE_SIZE: usize = 16;
 const MAX_INITIAL_DOWN_NODES: usize = 5;
 const MAX_ADDED_NODES: usize = 5;
 const MAX_REMOVED_NODES: usize = 3;
-const MAX_DELIVERED_ENVELOPES: usize = 20;
-const MAX_CONCURRENT_COMMITS: usize = 10;
-const MIN_ACTIONS: usize = 100;
-const MAX_ACTIONS: usize = 1000;
+
+// This is how long each test case is
+const MIN_ACTIONS: usize = 300;
+const MAX_ACTIONS: usize = 2000;
+
+// This is the number of test cases to run. We prefer to run longer tests with
+// fewer test cases to maximize the results of each one having an interesting
+// interleaving while stepping through multiple configurations. This is
+// particularly true since we generate actions before tests run, and therefore
+// don't know which actions are valid.
+//
+// We can always set this much higher for periodic runs, but we want to limit it
+// primarily for CI and general testing.
+const MAX_TEST_CASES: u32 = 100;
 
 /// Information about configurations used at test generation time
 #[derive(Debug, Clone, Arbitrary)]
@@ -666,11 +692,14 @@ pub struct TestInput {
     actions: Vec<Action>,
 }
 
-#[proptest]
+#[proptest(cases = MAX_TEST_CASES)]
 fn test_trust_quorum_protocol(input: TestInput) {
-    let logctx = test_setup_log("test_trust_quorum_protocol");
-    let (parent_dir, prefix) = log_prefix_for_test(logctx.test_name());
-    let event_log_path = parent_dir.join(format!("{prefix}-events.json"));
+    // We add a uuid so that we can match log files and event traces
+    // across multiple proptest runs.
+    let test_name = format!("test_trust_quorum_protocol_{}", Uuid::new_v4());
+    let logctx = test_setup_log(test_name.as_str());
+    let (parent_dir, _) = log_prefix_for_test(logctx.test_name());
+    let event_log_path = parent_dir.join(format!("{test_name}.events.json"));
     let mut event_log = EventLog::new(&event_log_path);
 
     let log = logctx.log.new(o!("component" => "tq-proptest"));
