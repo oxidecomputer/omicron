@@ -51,6 +51,7 @@ use nexus_db_queries::authn::{Actor, Reason};
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::model::{DeviceAccessToken, DeviceAuthRequest};
+use omicron_uuid_kinds::SiloUserUuid;
 
 use anyhow::anyhow;
 use nexus_types::external_api::params;
@@ -99,7 +100,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         user_code: String,
-        silo_user_id: Uuid,
+        silo_user_id: SiloUserUuid,
     ) -> CreateResult<DeviceAccessToken> {
         let (.., authz_request, db_request) =
             LookupPath::new(opctx, &self.db_datastore)
@@ -208,7 +209,7 @@ impl super::Nexus {
                 e => Reason::UnknownError { source: e },
             })?;
 
-        let silo_user_id = db_access_token.silo_user_id;
+        let silo_user_id = db_access_token.silo_user_id();
         let (.., db_silo_user) = LookupPath::new(opctx, &self.db_datastore)
             .silo_user_id(silo_user_id)
             .fetch()

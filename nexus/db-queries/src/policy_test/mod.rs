@@ -77,11 +77,10 @@ async fn test_iam_roles_behavior() {
         .role_assignment_replace_visible(
             &opctx,
             &main_silo,
-            &[shared::RoleAssignment {
-                identity_type: shared::IdentityType::SiloUser,
-                identity_id: USER_TEST_PRIVILEGED.id(),
-                role_name: SiloRole::Admin,
-            }],
+            &[shared::RoleAssignment::for_silo_user(
+                USER_TEST_PRIVILEGED.id(),
+                SiloRole::Admin,
+            )],
         )
         .await
         .unwrap();
@@ -343,11 +342,10 @@ async fn test_conferred_roles() {
         .role_assignment_replace_visible(
             &opctx,
             &main_silo,
-            &[shared::RoleAssignment {
-                identity_type: shared::IdentityType::SiloUser,
-                identity_id: USER_TEST_PRIVILEGED.id(),
-                role_name: SiloRole::Admin,
-            }],
+            &[shared::RoleAssignment::for_silo_user(
+                USER_TEST_PRIVILEGED.id(),
+                SiloRole::Admin,
+            )],
         )
         .await
         .unwrap();

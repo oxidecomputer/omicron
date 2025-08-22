@@ -84,7 +84,7 @@ async fn test_silo_group_users(cptestctx: &ControlPlaneTestContext) {
     let authz_silo_user = authz::SiloUser::new(
         authz_silo,
         USER_TEST_UNPRIVILEGED.id(),
-        LookupType::ById(USER_TEST_UNPRIVILEGED.id()),
+        LookupType::by_id(USER_TEST_UNPRIVILEGED.id()),
     );
 
     // Now add unprivileged user to the group, and we should see only that user

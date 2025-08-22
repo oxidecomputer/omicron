@@ -4,11 +4,11 @@
 //! Built-in users
 
 use omicron_common::api;
+use omicron_uuid_kinds::BuiltInUserUuid;
 use std::sync::LazyLock;
-use uuid::Uuid;
 
 pub struct UserBuiltinConfig {
-    pub id: Uuid,
+    pub id: BuiltInUserUuid,
     pub name: api::external::Name,
     pub description: &'static str,
 }
@@ -20,7 +20,9 @@ impl UserBuiltinConfig {
         description: &'static str,
     ) -> UserBuiltinConfig {
         UserBuiltinConfig {
-            id: id.parse().expect("invalid uuid for builtin user id"),
+            id: id
+                .parse()
+                .expect("invalid built-in user uuid for builtin user id"),
             name: name.parse().expect("invalid name for builtin user name"),
             description,
         }
@@ -94,7 +96,7 @@ pub static USER_EXTERNAL_AUTHN: LazyLock<UserBuiltinConfig> =
 
 #[cfg(test)]
 mod test {
-    use super::super::assert_valid_uuid;
+    use super::super::assert_valid_typed_uuid;
     use super::USER_DB_INIT;
     use super::USER_EXTERNAL_AUTHN;
     use super::USER_INTERNAL_API;
@@ -104,11 +106,11 @@ mod test {
 
     #[test]
     fn test_builtin_user_ids_are_valid() {
-        assert_valid_uuid(&USER_SERVICE_BALANCER.id);
-        assert_valid_uuid(&USER_DB_INIT.id);
-        assert_valid_uuid(&USER_INTERNAL_API.id);
-        assert_valid_uuid(&USER_EXTERNAL_AUTHN.id);
-        assert_valid_uuid(&USER_INTERNAL_READ.id);
-        assert_valid_uuid(&USER_SAGA_RECOVERY.id);
+        assert_valid_typed_uuid(&USER_SERVICE_BALANCER.id);
+        assert_valid_typed_uuid(&USER_DB_INIT.id);
+        assert_valid_typed_uuid(&USER_INTERNAL_API.id);
+        assert_valid_typed_uuid(&USER_EXTERNAL_AUTHN.id);
+        assert_valid_typed_uuid(&USER_INTERNAL_READ.id);
+        assert_valid_typed_uuid(&USER_SAGA_RECOVERY.id);
     }
 }

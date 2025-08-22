@@ -13,14 +13,17 @@ use ipnetwork::IpNetwork;
 use nexus_db_schema::schema::{audit_log, audit_log_complete};
 use nexus_types::external_api::views;
 use omicron_common::api::external::Error;
+use omicron_uuid_kinds::BuiltInUserUuid;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::SiloUserUuid;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 /// Actor information for audit log initialization. Inspired by `authn::Actor`
 #[derive(Clone, Debug)]
 pub enum AuditLogActor {
-    UserBuiltin { user_builtin_id: Uuid },
-    SiloUser { silo_user_id: Uuid, silo_id: Uuid },
+    UserBuiltin { user_builtin_id: BuiltInUserUuid },
+    SiloUser { silo_user_id: SiloUserUuid, silo_id: Uuid },
     Unauthenticated,
 }
 
@@ -126,12 +129,16 @@ impl From<AuditLogEntryInitParams> for AuditLogEntryInit {
         } = params;
 
         let (actor_id, actor_silo_id, actor_kind) = match actor {
-            AuditLogActor::UserBuiltin { user_builtin_id } => {
-                (Some(user_builtin_id), None, AuditLogActorKind::UserBuiltin)
-            }
-            AuditLogActor::SiloUser { silo_user_id, silo_id } => {
-                (Some(silo_user_id), Some(silo_id), AuditLogActorKind::SiloUser)
-            }
+            AuditLogActor::UserBuiltin { user_builtin_id } => (
+                Some(user_builtin_id.into_untyped_uuid()),
+                None,
+                AuditLogActorKind::UserBuiltin,
+            ),
+            AuditLogActor::SiloUser { silo_user_id, silo_id } => (
+                Some(silo_user_id.into_untyped_uuid()),
+                Some(silo_id),
+                AuditLogActorKind::SiloUser,
+            ),
             AuditLogActor::Unauthenticated => {
                 (None, None, AuditLogActorKind::Unauthenticated)
             }
@@ -274,7 +281,11 @@ impl TryFrom<AuditLogEntry> for views::AuditLogEntry {
                             "UserBuiltin actor missing actor_id",
                         )
                     })?;
-                    views::AuditLogEntryActor::UserBuiltin { user_builtin_id }
+                    views::AuditLogEntryActor::UserBuiltin {
+                        user_builtin_id: BuiltInUserUuid::from_untyped_uuid(
+                            user_builtin_id,
+                        ),
+                    }
                 }
                 AuditLogActorKind::SiloUser => {
                     let silo_user_id = entry.actor_id.ok_or_else(|| {
@@ -286,7 +297,9 @@ impl TryFrom<AuditLogEntry> for views::AuditLogEntry {
                         )
                     })?;
                     views::AuditLogEntryActor::SiloUser {
-                        silo_user_id,
+                        silo_user_id: SiloUserUuid::from_untyped_uuid(
+                            silo_user_id,
+                        ),
                         silo_id,
                     }
                 }

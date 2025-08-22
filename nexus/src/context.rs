@@ -21,6 +21,7 @@ use nexus_db_queries::{authn, authz, db};
 use omicron_common::address::{AZ_PREFIX, Ipv6Subnet};
 use omicron_uuid_kinds::ConsoleSessionUuid;
 use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::SiloUserUuid;
 use oximeter::types::ProducerRegistry;
 use oximeter_instruments::http::{HttpService, LatencyTracker};
 use slog::Logger;
@@ -442,7 +443,7 @@ impl authn::external::AuthenticatorContext for ServerContext {
 impl authn::external::SiloUserSilo for ServerContext {
     async fn silo_user_silo(
         &self,
-        silo_user_id: Uuid,
+        silo_user_id: SiloUserUuid,
     ) -> Result<Uuid, authn::Reason> {
         let opctx = self.nexus.opctx_external_authn();
         self.nexus.lookup_silo_for_authn(opctx, silo_user_id).await

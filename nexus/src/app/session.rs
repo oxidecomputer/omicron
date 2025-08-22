@@ -20,6 +20,7 @@ use omicron_common::api::external::LookupType;
 use omicron_common::api::external::UpdateResult;
 use omicron_uuid_kinds::ConsoleSessionUuid;
 use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::SiloUserUuid;
 use rand::{RngCore, SeedableRng, rngs::StdRng};
 use uuid::Uuid;
 
@@ -56,7 +57,7 @@ impl super::Nexus {
             self.db_datastore.session_lookup_by_token(&opctx, token).await?;
 
         let (.., db_silo_user) = LookupPath::new(opctx, &self.db_datastore)
-            .silo_user_id(db_session.silo_user_id)
+            .silo_user_id(db_session.silo_user_id())
             .fetch()
             .await?;
 
@@ -91,7 +92,7 @@ impl super::Nexus {
     pub(crate) async fn lookup_silo_for_authn(
         &self,
         opctx: &OpContext,
-        silo_user_id: Uuid,
+        silo_user_id: SiloUserUuid,
     ) -> Result<Uuid, Reason> {
         let (.., db_silo_user) = LookupPath::new(opctx, &self.db_datastore)
             .silo_user_id(silo_user_id)

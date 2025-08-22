@@ -11,7 +11,9 @@ use nexus_db_schema::schema::{device_access_token, device_auth_request};
 
 use chrono::{DateTime, Duration, Utc};
 use nexus_types::external_api::views;
-use omicron_uuid_kinds::{AccessTokenKind, GenericUuid, TypedUuid};
+use omicron_uuid_kinds::{
+    AccessTokenKind, GenericUuid, SiloUserKind, SiloUserUuid, TypedUuid,
+};
 use rand::{Rng, RngCore, SeedableRng, distributions::Slice, rngs::StdRng};
 use std::num::NonZeroU32;
 use uuid::Uuid;
@@ -134,7 +136,7 @@ pub struct DeviceAccessToken {
     pub token: String,
     pub client_id: Uuid,
     pub device_code: String,
-    pub silo_user_id: Uuid,
+    silo_user_id: DbTypedUuid<SiloUserKind>,
     pub time_requested: DateTime<Utc>,
     pub time_created: DateTime<Utc>,
     pub time_expires: Option<DateTime<Utc>>,
@@ -145,7 +147,7 @@ impl DeviceAccessToken {
         client_id: Uuid,
         device_code: String,
         time_requested: DateTime<Utc>,
-        silo_user_id: Uuid,
+        silo_user_id: SiloUserUuid,
         time_expires: Option<DateTime<Utc>>,
     ) -> Self {
         let now = Utc::now();
@@ -157,7 +159,7 @@ impl DeviceAccessToken {
             token: generate_token(),
             client_id,
             device_code,
-            silo_user_id,
+            silo_user_id: silo_user_id.into(),
             time_requested,
             time_created: now,
             time_expires,
@@ -171,6 +173,10 @@ impl DeviceAccessToken {
     pub fn expires(mut self, time: DateTime<Utc>) -> Self {
         self.time_expires = Some(time);
         self
+    }
+
+    pub fn silo_user_id(&self) -> SiloUserUuid {
+        self.silo_user_id.into()
     }
 }
 

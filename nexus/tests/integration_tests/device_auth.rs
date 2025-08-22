@@ -30,6 +30,7 @@ use nexus_types::external_api::{
         DeviceAccessTokenGrant, DeviceAccessTokenType, DeviceAuthResponse,
     },
 };
+use omicron_uuid_kinds::SiloUserUuid;
 
 use http::{StatusCode, header, method::Method};
 use omicron_sled_agent::sim;
@@ -848,7 +849,7 @@ async fn get_tokens_priv(
 
 async fn list_user_tokens(
     testctx: &ClientTestContext,
-    user_id: Uuid,
+    user_id: SiloUserUuid,
 ) -> Vec<views::DeviceAccessToken> {
     NexusRequest::object_get(testctx, "/v1/me/access-tokens")
         .authn_as(AuthnMode::SiloUser(user_id))
@@ -859,7 +860,7 @@ async fn list_user_tokens(
 
 async fn list_user_sessions(
     testctx: &ClientTestContext,
-    user_id: Uuid,
+    user_id: SiloUserUuid,
 ) -> Vec<views::ConsoleSession> {
     let url = format!("/v1/users/{}/sessions", user_id);
     NexusRequest::object_get(testctx, &url)

@@ -31,6 +31,8 @@ use omicron_common::api::external::{DataPageParams, ResourceType};
 use omicron_common::api::external::{DeleteResult, NameOrId};
 use omicron_common::api::external::{Error, InternalContext};
 use omicron_common::bail_unless;
+use omicron_uuid_kinds::SiloGroupUuid;
+use omicron_uuid_kinds::SiloUserUuid;
 use std::net::IpAddr;
 use std::str::FromStr;
 use uuid::Uuid;
@@ -266,7 +268,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         authz_silo: &authz::Silo,
-        silo_user_id: Uuid,
+        silo_user_id: SiloUserUuid,
         action: authz::Action,
     ) -> LookupResult<(authz::SiloUser, db::model::SiloUser)> {
         let (_, authz_silo_user, db_silo_user) =
@@ -300,7 +302,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         silo_lookup: &lookup::Silo<'_>,
-        silo_user_id: Uuid,
+        silo_user_id: SiloUserUuid,
     ) -> LookupResult<db::model::SiloUser> {
         let (authz_silo,) = silo_lookup.lookup_for(authz::Action::Read).await?;
         let (_, db_silo_user) = self
@@ -318,7 +320,7 @@ impl super::Nexus {
     pub(crate) async fn current_silo_user_logout(
         &self,
         opctx: &OpContext,
-        silo_user_id: Uuid,
+        silo_user_id: SiloUserUuid,
     ) -> UpdateResult<()> {
         let (_, authz_silo_user, _) = LookupPath::new(opctx, self.datastore())
             .silo_user_id(silo_user_id)
@@ -354,7 +356,7 @@ impl super::Nexus {
     pub(crate) async fn current_silo_user_lookup(
         &self,
         opctx: &OpContext,
-        silo_user_id: Uuid,
+        silo_user_id: SiloUserUuid,
     ) -> LookupResult<(authz::SiloUser, db::model::SiloUser)> {
         let (_, authz_silo_user, db_silo_user) =
             LookupPath::new(opctx, self.datastore())
@@ -369,7 +371,7 @@ impl super::Nexus {
     pub(crate) async fn silo_user_token_list(
         &self,
         opctx: &OpContext,
-        silo_user_id: Uuid,
+        silo_user_id: SiloUserUuid,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<db::model::DeviceAccessToken> {
         let (_, authz_silo_user, _db_silo_user) =
@@ -389,7 +391,7 @@ impl super::Nexus {
     pub(crate) async fn silo_user_session_list(
         &self,
         opctx: &OpContext,
-        silo_user_id: Uuid,
+        silo_user_id: SiloUserUuid,
         pagparams: &DataPageParams<'_, Uuid>,
         // TODO: https://github.com/oxidecomputer/omicron/issues/8625
         idle_ttl: TimeDelta,
@@ -452,7 +454,7 @@ impl super::Nexus {
             .await?;
         let silo_user = db::model::SiloUser::new(
             authz_silo.id(),
-            Uuid::new_v4(),
+            SiloUserUuid::new_v4(),
             new_user_params.external_id.as_ref().to_owned(),
         );
         // TODO These two steps should happen in a transaction.
@@ -461,7 +463,7 @@ impl super::Nexus {
         let authz_silo_user = authz::SiloUser::new(
             authz_silo.clone(),
             db_silo_user.id(),
-            LookupType::ById(db_silo_user.id()),
+            LookupType::by_id(db_silo_user.id()),
         );
         self.silo_user_password_set_internal(
             opctx,
@@ -479,7 +481,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         silo_lookup: &lookup::Silo<'_>,
-        silo_user_id: Uuid,
+        silo_user_id: SiloUserUuid,
     ) -> DeleteResult {
         let (authz_silo, _) = self.local_idp_fetch_silo(silo_lookup).await?;
 
@@ -537,7 +539,7 @@ impl super::Nexus {
                 db::model::UserProvisionType::Jit => {
                     let silo_user = db::model::SiloUser::new(
                         authz_silo.id(),
-                        Uuid::new_v4(),
+                        SiloUserUuid::new_v4(),
                         authenticated_subject.external_id.clone(),
                     );
 
@@ -552,7 +554,7 @@ impl super::Nexus {
         // IdP sent us. Also, if the silo user provision type is Jit, create
         // silo groups if new groups from the IdP are seen.
 
-        let mut silo_user_group_ids: Vec<Uuid> =
+        let mut silo_user_group_ids: Vec<SiloGroupUuid> =
             Vec::with_capacity(authenticated_subject.groups.len());
 
         for group in &authenticated_subject.groups {
@@ -609,7 +611,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         silo_lookup: &lookup::Silo<'_>,
-        silo_user_id: Uuid,
+        silo_user_id: SiloUserUuid,
         password_value: params::UserPassword,
     ) -> UpdateResult<()> {
         let (authz_silo, db_silo) =
@@ -781,7 +783,7 @@ impl super::Nexus {
                         opctx,
                         authz_silo,
                         db::model::SiloGroup::new(
-                            Uuid::new_v4(),
+                            SiloGroupUuid::new_v4(),
                             authz_silo.id(),
                             external_id.clone(),
                         ),
@@ -1031,7 +1033,7 @@ impl super::Nexus {
     pub fn silo_group_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
-        group_id: &'a Uuid,
+        group_id: &'a SiloGroupUuid,
     ) -> lookup::SiloGroup<'a> {
         LookupPath::new(opctx, &self.db_datastore).silo_group_id(*group_id)
     }
