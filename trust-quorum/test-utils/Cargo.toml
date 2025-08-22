@@ -16,6 +16,6 @@ omicron-uuid-kinds.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 slog.workspace = true
-trust-quorum = { workspace = true, features = ["danger_partial_eq_ct_wrapper"] }
+trust-quorum = { workspace = true, features = ["danger_partial_eq_ct_wrapper", "testing"] }
 
 omicron-workspace-hack.workspace = true

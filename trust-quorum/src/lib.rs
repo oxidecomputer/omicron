@@ -139,6 +139,15 @@ pub struct Envelope {
     pub msg: PeerMsg,
 }
 
+#[cfg(feature = "testing")]
+impl Envelope {
+    pub fn equal_except_for_crypto_data(&self, other: &Self) -> bool {
+        self.to == other.to
+            && self.from == other.from
+            && self.msg.equal_except_for_crypto_data(&other.msg)
+    }
+}
+
 /// Check if a received share is valid for a given configuration
 ///
 /// Return true if valid, false otherwise.
