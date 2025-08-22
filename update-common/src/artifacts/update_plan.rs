@@ -336,7 +336,7 @@ impl<'a> UpdatePlanBuilder<'a> {
 
         let board = Board(caboose.board);
 
-        let slot = match sp_map.entry(board) {
+        let slot = match sp_map.entry(board.clone()) {
             btree_map::Entry::Vacant(slot) => slot,
             btree_map::Entry::Occupied(slot) => {
                 return Err(RepositoryError::DuplicateBoardEntry {
@@ -364,6 +364,7 @@ impl<'a> UpdatePlanBuilder<'a> {
             artifact_id,
             data,
             artifact_kind.into(),
+            Some(board),
             None,
             self.log,
         )?;
@@ -442,7 +443,7 @@ impl<'a> UpdatePlanBuilder<'a> {
             }
             hash_map::Entry::Vacant(slot) => slot.insert(vec![RotSignTarget {
                 id: artifact_id.clone(),
-                bord: bootloader_caboose.board,
+                bord: bootloader_caboose.board.clone(),
             }]),
         };
 
@@ -464,6 +465,7 @@ impl<'a> UpdatePlanBuilder<'a> {
             artifact_id,
             data,
             bootloader_kind,
+            Some(Board(bootloader_caboose.board)),
             Some(sign),
             self.log,
         )?;
@@ -579,7 +581,7 @@ impl<'a> UpdatePlanBuilder<'a> {
 
         let target_a = RotSignTarget {
             id: artifact_id.clone(),
-            bord: image_a_caboose.board,
+            bord: image_a_caboose.board.clone(),
         };
 
         match self.rot_by_sign.entry(entry_a) {
@@ -613,7 +615,7 @@ impl<'a> UpdatePlanBuilder<'a> {
 
         let target_b = RotSignTarget {
             id: artifact_id.clone(),
-            bord: image_b_caboose.board,
+            bord: image_b_caboose.board.clone(),
         };
 
         // We already checked for duplicate boards, no need to check again
@@ -643,6 +645,7 @@ impl<'a> UpdatePlanBuilder<'a> {
             artifact_id.clone(),
             rot_a_data,
             rot_a_kind,
+            Some(Board(image_a_caboose.board)),
             Some(sign_a),
             self.log,
         )?;
@@ -650,6 +653,7 @@ impl<'a> UpdatePlanBuilder<'a> {
             artifact_id,
             rot_b_data,
             rot_b_kind,
+            Some(Board(image_b_caboose.board)),
             Some(sign_b),
             self.log,
         )?;
@@ -694,12 +698,14 @@ impl<'a> UpdatePlanBuilder<'a> {
             phase_1_data,
             ArtifactKind::HOST_PHASE_1,
             None,
+            None,
             self.log,
         )?;
         self.record_extracted_artifact(
             artifact_id,
             phase_2_data,
             ArtifactKind::HOST_PHASE_2,
+            None,
             None,
             self.log,
         )?;
@@ -753,12 +759,14 @@ impl<'a> UpdatePlanBuilder<'a> {
             phase_1_data,
             ArtifactKind::TRAMPOLINE_PHASE_1,
             None,
+            None,
             self.log,
         )?;
         self.record_extracted_artifact(
             artifact_id,
             phase_2_data,
             ArtifactKind::TRAMPOLINE_PHASE_2,
+            None,
             None,
             self.log,
         )?;
@@ -790,6 +798,7 @@ impl<'a> UpdatePlanBuilder<'a> {
             artifact_id,
             data,
             artifact_kind,
+            None,
             None,
             self.log,
         )?;
@@ -827,6 +836,7 @@ impl<'a> UpdatePlanBuilder<'a> {
                     data,
                     KnownArtifactKind::ControlPlane.into(),
                     None,
+                    None,
                     self.log,
                 )?;
             }
@@ -861,6 +871,7 @@ impl<'a> UpdatePlanBuilder<'a> {
             artifact_id,
             data,
             artifact_kind,
+            None,
             None,
             self.log,
         )?;
@@ -1027,6 +1038,7 @@ impl<'a> UpdatePlanBuilder<'a> {
                 data,
                 KnownArtifactKind::Zone.into(),
                 None,
+                None,
                 self.log,
             )?;
             Ok(())
@@ -1050,6 +1062,7 @@ impl<'a> UpdatePlanBuilder<'a> {
         tuf_repo_artifact_id: ArtifactId,
         data: ExtractedArtifactDataHandle,
         data_kind: ArtifactKind,
+        board: Option<Board>,
         sign: Option<Vec<u8>>,
         log: &Logger,
     ) -> Result<(), RepositoryError> {
@@ -1093,6 +1106,7 @@ impl<'a> UpdatePlanBuilder<'a> {
             id: artifacts_meta_id,
             hash: data.hash(),
             size: data.file_size() as u64,
+            board: board.map(|b| b.0),
             sign,
         });
         by_hash_slot.insert(data);

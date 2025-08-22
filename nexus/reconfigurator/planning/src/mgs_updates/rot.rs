@@ -12,6 +12,7 @@ use nexus_types::deployment::ExpectedActiveRotSlot;
 use nexus_types::deployment::ExpectedVersion;
 use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdateDetails;
+use nexus_types::deployment::PendingMgsUpdateRotDetails;
 use nexus_types::inventory::BaseboardId;
 use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::Collection;
@@ -167,11 +168,11 @@ pub fn try_make_update_rot(
         .filter(|a| {
             // A matching RoT artifact will have:
             //
-            // - "name" matching the board name (found above from caboose)
+            // - "board" matching the board name (found above from caboose)
             // - "kind" matching one of the known RoT kinds
             // - "sign" matching the rkth (found above from caboose)
 
-            if a.id.name != *board {
+            if a.board.as_ref() != Some(board) {
                 return false;
             }
 
@@ -273,7 +274,7 @@ pub fn try_make_update_rot(
         baseboard_id: baseboard_id.clone(),
         sp_type: sp_info.sp_type,
         slot_id: sp_info.sp_slot,
-        details: PendingMgsUpdateDetails::Rot {
+        details: PendingMgsUpdateDetails::Rot(PendingMgsUpdateRotDetails {
             expected_active_slot,
             expected_inactive_version,
             expected_persistent_boot_preference: rot_state
@@ -282,7 +283,7 @@ pub fn try_make_update_rot(
                 .pending_persistent_boot_preference,
             expected_transient_boot_preference: rot_state
                 .transient_boot_preference,
-        },
+        }),
         artifact_hash: artifact.hash,
         artifact_version: artifact.id.version.clone(),
     })

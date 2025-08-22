@@ -166,6 +166,7 @@ pub struct TufArtifact {
     artifact_size: i64,
     pub generation_added: Generation,
     pub sign: Option<Vec<u8>>,
+    pub board: Option<String>,
 }
 
 impl TufArtifact {
@@ -175,6 +176,7 @@ impl TufArtifact {
         sha256: ArtifactHash,
         artifact_size: u64,
         generation_added: external::Generation,
+        board: Option<String>,
         sign: Option<Vec<u8>>,
     ) -> Self {
         Self {
@@ -186,6 +188,7 @@ impl TufArtifact {
             sha256,
             artifact_size: artifact_size as i64,
             generation_added: generation_added.into(),
+            board,
             sign,
         }
     }
@@ -205,6 +208,7 @@ impl TufArtifact {
             artifact.hash.into(),
             artifact.size,
             generation_added,
+            artifact.board,
             artifact.sign,
         )
     }
@@ -219,6 +223,7 @@ impl TufArtifact {
             },
             hash: self.sha256.into(),
             size: self.artifact_size as u64,
+            board: self.board,
             sign: self.sign,
         }
     }

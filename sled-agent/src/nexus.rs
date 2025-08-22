@@ -77,6 +77,28 @@ impl ConvertInto<nexus_client::types::Baseboard>
     }
 }
 
+impl ConvertInto<nexus_client::types::SledCpuFamily>
+    for sled_hardware_types::SledCpuFamily
+{
+    fn convert(self) -> nexus_client::types::SledCpuFamily {
+        use sled_hardware_types::SledCpuFamily as SharedSledCpuFamily;
+        match self {
+            SharedSledCpuFamily::Unknown => {
+                nexus_client::types::SledCpuFamily::Unknown
+            }
+            SharedSledCpuFamily::AmdMilan => {
+                nexus_client::types::SledCpuFamily::AmdMilan
+            }
+            SharedSledCpuFamily::AmdTurin => {
+                nexus_client::types::SledCpuFamily::AmdTurin
+            }
+            SharedSledCpuFamily::AmdTurinDense => {
+                nexus_client::types::SledCpuFamily::AmdTurinDense
+            }
+        }
+    }
+}
+
 // Somewhat arbitrary bound size, large enough that we should never hit it.
 const QUEUE_SIZE: usize = 256;
 
@@ -275,6 +297,7 @@ impl NexusNotifierTask {
                     .usable_physical_ram_bytes()
                     .into(),
                 reservoir_size: vmm_reservoir_manager.reservoir_size().into(),
+                cpu_family: hardware.cpu_family().convert(),
                 generation,
                 decommissioned: false,
             }
@@ -654,6 +677,7 @@ mod test {
                 usable_physical_ram: ByteCount::from(1024 * 1024 * 1024u32)
                     .into(),
                 reservoir_size: ByteCount::from(0u32).into(),
+                cpu_family: nexus_client::types::SledCpuFamily::Unknown,
                 generation: Generation::new(),
                 decommissioned: false,
             }));

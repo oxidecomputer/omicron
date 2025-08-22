@@ -72,6 +72,7 @@ mod clickhouse;
 pub mod execution;
 mod network_resources;
 mod planning_input;
+mod planning_report;
 mod zone_type;
 
 use crate::inventory::BaseboardId;
@@ -122,6 +123,21 @@ pub use planning_input::TargetReleaseDescription;
 pub use planning_input::TufRepoContentsError;
 pub use planning_input::TufRepoPolicy;
 pub use planning_input::ZpoolFilter;
+pub use planning_report::CockroachdbUnsafeToShutdown;
+pub use planning_report::PlanningAddStepReport;
+pub use planning_report::PlanningCockroachdbSettingsStepReport;
+pub use planning_report::PlanningDecommissionStepReport;
+pub use planning_report::PlanningExpungeStepReport;
+pub use planning_report::PlanningMgsUpdatesStepReport;
+pub use planning_report::PlanningMupdateOverrideStepReport;
+pub use planning_report::PlanningNoopImageSourceSkipSledReason;
+pub use planning_report::PlanningNoopImageSourceSkipZoneReason;
+pub use planning_report::PlanningNoopImageSourceStepReport;
+pub use planning_report::PlanningReport;
+pub use planning_report::PlanningZoneUpdatesStepReport;
+pub use planning_report::ZoneAddWaitingOn;
+pub use planning_report::ZoneUnsafeToShutdown;
+pub use planning_report::ZoneUpdatesWaitingOn;
 pub use zone_type::BlueprintZoneType;
 pub use zone_type::DurableDataset;
 pub use zone_type::blueprint_zone_type;
@@ -235,12 +251,17 @@ pub struct Blueprint {
     /// when this blueprint was generated (for debugging)
     #[daft(ignore)]
     pub time_created: chrono::DateTime<chrono::Utc>,
+
     /// identity of the component that generated the blueprint (for debugging)
     /// This would generally be the Uuid of a Nexus instance.
     pub creator: String,
+
     /// human-readable string describing why this blueprint was created
     /// (for debugging)
     pub comment: String,
+
+    /// Report on the planning session that resulted in this blueprint
+    pub report: PlanningReport,
 }
 
 impl Blueprint {
@@ -634,6 +655,7 @@ impl fmt::Display for BlueprintDisplay<'_> {
             time_created: _,
             creator: _,
             comment: _,
+            report,
         } = self.blueprint;
 
         writeln!(f, "blueprint  {}", id)?;
@@ -745,6 +767,8 @@ impl fmt::Display for BlueprintDisplay<'_> {
                 )
             )?;
         }
+
+        writeln!(f, "\n{report}")?;
 
         Ok(())
     }
@@ -1443,52 +1467,11 @@ impl PendingMgsUpdate {
 #[serde(tag = "component", rename_all = "snake_case")]
 pub enum PendingMgsUpdateDetails {
     /// the SP itself is being updated
-    Sp {
-        // implicit: component = SP_ITSELF
-        // implicit: firmware slot id = 0 (always 0 for SP itself)
-        /// expected contents of the active slot
-        expected_active_version: ArtifactVersion,
-        /// expected contents of the inactive slot
-        expected_inactive_version: ExpectedVersion,
-    },
+    Sp(PendingMgsUpdateSpDetails),
     /// the RoT is being updated
-    Rot {
-        // implicit: component = ROT
-        // implicit: firmware slot id will be the inactive slot
-        // whether we expect the "A" or "B" slot to be active
-        // and its expected version
-        expected_active_slot: ExpectedActiveRotSlot,
-        // expected version of the "A" or "B" slot (opposite to
-        // the active slot as specified above)
-        expected_inactive_version: ExpectedVersion,
-        // under normal operation, this should always match the active slot.
-        // if this field changed without the active slot changing, that might
-        // reflect a bad update.
-        //
-        /// the persistent boot preference written into the current authoritative
-        /// CFPA page (ping or pong)
-        expected_persistent_boot_preference: RotSlot,
-        // if this value changed, but not any of this other information, that could
-        // reflect an attempt to switch to the other slot.
-        //
-        /// the persistent boot preference written into the CFPA scratch page that
-        /// will become the persistent boot preference in the authoritative CFPA
-        /// page upon reboot, unless CFPA update of the authoritative page fails
-        /// for some reason.
-        expected_pending_persistent_boot_preference: Option<RotSlot>,
-        // this field is not in use yet.
-        //
-        /// override persistent preference selection for a single boot
-        expected_transient_boot_preference: Option<RotSlot>,
-    },
-    RotBootloader {
-        // implicit: component = STAGE0
-        // implicit: firmware slot id = 1 (always 1 (Stage0Next) for RoT bootloader)
-        /// expected contents of the stage 0
-        expected_stage0_version: ArtifactVersion,
-        /// expected contents of the stage 0 next
-        expected_stage0_next_version: ExpectedVersion,
-    },
+    Rot(PendingMgsUpdateRotDetails),
+    /// the RoT bootloader is being updated
+    RotBootloader(PendingMgsUpdateRotBootloaderDetails),
     /// the host OS is being updated
     ///
     /// We write the phase 1 via MGS, and have a precheck condition that
@@ -1503,72 +1486,160 @@ impl slog::KV for PendingMgsUpdateDetails {
         serializer: &mut dyn slog::Serializer,
     ) -> slog::Result {
         match self {
-            PendingMgsUpdateDetails::Sp {
-                expected_active_version,
-                expected_inactive_version,
-            } => {
+            PendingMgsUpdateDetails::Sp(details) => {
                 serializer.emit_str(Key::from("component"), "sp")?;
-                serializer.emit_str(
-                    Key::from("expected_active_version"),
-                    &expected_active_version.to_string(),
-                )?;
-                serializer.emit_str(
-                    Key::from("expected_inactive_version"),
-                    &format!("{:?}", expected_inactive_version),
-                )
+                slog::KV::serialize(details, record, serializer)
             }
-            PendingMgsUpdateDetails::Rot {
-                expected_active_slot,
-                expected_inactive_version,
-                expected_persistent_boot_preference,
-                expected_pending_persistent_boot_preference,
-                expected_transient_boot_preference,
-            } => {
+            PendingMgsUpdateDetails::Rot(details) => {
                 serializer.emit_str(Key::from("component"), "rot")?;
-                serializer.emit_str(
-                    Key::from("expected_inactive_version"),
-                    &format!("{:?}", expected_inactive_version),
-                )?;
-                serializer.emit_str(
-                    Key::from("expected_active_slot"),
-                    &format!("{:?}", expected_active_slot),
-                )?;
-                serializer.emit_str(
-                    Key::from("expected_persistent_boot_preference"),
-                    &format!("{:?}", expected_persistent_boot_preference),
-                )?;
-                serializer.emit_str(
-                    Key::from("expected_pending_persistent_boot_preference"),
-                    &format!(
-                        "{:?}",
-                        expected_pending_persistent_boot_preference
-                    ),
-                )?;
-                serializer.emit_str(
-                    Key::from("expected_transient_boot_preference"),
-                    &format!("{:?}", expected_transient_boot_preference),
-                )
+                slog::KV::serialize(details, record, serializer)
             }
-            PendingMgsUpdateDetails::RotBootloader {
-                expected_stage0_version,
-                expected_stage0_next_version,
-            } => {
+            PendingMgsUpdateDetails::RotBootloader(details) => {
                 serializer
                     .emit_str(Key::from("component"), "rot_bootloader")?;
-                serializer.emit_str(
-                    Key::from("expected_stage0_version"),
-                    &expected_stage0_version.to_string(),
-                )?;
-                serializer.emit_str(
-                    Key::from("expected_stage0_next_version"),
-                    &format!("{:?}", expected_stage0_next_version),
-                )
+                slog::KV::serialize(details, record, serializer)
             }
             PendingMgsUpdateDetails::HostPhase1(details) => {
                 serializer.emit_str(Key::from("component"), "host_phase_1")?;
                 slog::KV::serialize(details, record, serializer)
             }
         }
+    }
+}
+
+/// Describes the SP-specific details of a PendingMgsUpdate
+#[derive(
+    Clone, Debug, Eq, PartialEq, JsonSchema, Deserialize, Serialize, Diffable,
+)]
+#[serde(rename_all = "snake_case")]
+pub struct PendingMgsUpdateSpDetails {
+    // implicit: component = SP_ITSELF
+    // implicit: firmware slot id = 0 (always 0 for SP itself)
+    /// expected contents of the active slot
+    pub expected_active_version: ArtifactVersion,
+    /// expected contents of the inactive slot
+    pub expected_inactive_version: ExpectedVersion,
+}
+
+impl slog::KV for PendingMgsUpdateSpDetails {
+    fn serialize(
+        &self,
+        _record: &slog::Record,
+        serializer: &mut dyn slog::Serializer,
+    ) -> slog::Result {
+        let Self { expected_active_version, expected_inactive_version } = self;
+        serializer.emit_str(
+            Key::from("expected_active_version"),
+            &expected_active_version.to_string(),
+        )?;
+        serializer.emit_str(
+            Key::from("expected_inactive_version"),
+            &format!("{expected_inactive_version:?}"),
+        )
+    }
+}
+
+/// Describes the RoT-specific details of a PendingMgsUpdate
+#[derive(
+    Clone, Debug, Eq, PartialEq, JsonSchema, Deserialize, Serialize, Diffable,
+)]
+#[serde(rename_all = "snake_case")]
+pub struct PendingMgsUpdateRotDetails {
+    // implicit: component = ROT
+    // implicit: firmware slot id will be the inactive slot
+    // whether we expect the "A" or "B" slot to be active
+    // and its expected version
+    pub expected_active_slot: ExpectedActiveRotSlot,
+    // expected version of the "A" or "B" slot (opposite to
+    // the active slot as specified above)
+    pub expected_inactive_version: ExpectedVersion,
+    // under normal operation, this should always match the active slot.
+    // if this field changed without the active slot changing, that might
+    // reflect a bad update.
+    //
+    /// the persistent boot preference written into the current authoritative
+    /// CFPA page (ping or pong)
+    pub expected_persistent_boot_preference: RotSlot,
+    // if this value changed, but not any of this other information, that could
+    // reflect an attempt to switch to the other slot.
+    //
+    /// the persistent boot preference written into the CFPA scratch page that
+    /// will become the persistent boot preference in the authoritative CFPA
+    /// page upon reboot, unless CFPA update of the authoritative page fails
+    /// for some reason.
+    pub expected_pending_persistent_boot_preference: Option<RotSlot>,
+    // this field is not in use yet.
+    //
+    /// override persistent preference selection for a single boot
+    pub expected_transient_boot_preference: Option<RotSlot>,
+}
+
+impl slog::KV for PendingMgsUpdateRotDetails {
+    fn serialize(
+        &self,
+        _record: &slog::Record,
+        serializer: &mut dyn slog::Serializer,
+    ) -> slog::Result {
+        let Self {
+            expected_active_slot,
+            expected_inactive_version,
+            expected_persistent_boot_preference,
+            expected_pending_persistent_boot_preference,
+            expected_transient_boot_preference,
+        } = self;
+        serializer.emit_str(
+            Key::from("expected_inactive_version"),
+            &format!("{:?}", expected_inactive_version),
+        )?;
+        serializer.emit_str(
+            Key::from("expected_active_slot"),
+            &format!("{:?}", expected_active_slot),
+        )?;
+        serializer.emit_str(
+            Key::from("expected_persistent_boot_preference"),
+            &format!("{:?}", expected_persistent_boot_preference),
+        )?;
+        serializer.emit_str(
+            Key::from("expected_pending_persistent_boot_preference"),
+            &format!("{:?}", expected_pending_persistent_boot_preference),
+        )?;
+        serializer.emit_str(
+            Key::from("expected_transient_boot_preference"),
+            &format!("{:?}", expected_transient_boot_preference),
+        )
+    }
+}
+
+/// Describes the RoT bootloader details of a PendingMgsUpdate
+#[derive(
+    Clone, Debug, Eq, PartialEq, JsonSchema, Deserialize, Serialize, Diffable,
+)]
+#[serde(rename_all = "snake_case")]
+pub struct PendingMgsUpdateRotBootloaderDetails {
+    // implicit: component = STAGE0
+    // implicit: firmware slot id = 1 (always 1 (Stage0Next) for RoT bootloader)
+    /// expected contents of the stage 0
+    pub expected_stage0_version: ArtifactVersion,
+    /// expected contents of the stage 0 next
+    pub expected_stage0_next_version: ExpectedVersion,
+}
+
+impl slog::KV for PendingMgsUpdateRotBootloaderDetails {
+    fn serialize(
+        &self,
+        _record: &slog::Record,
+        serializer: &mut dyn slog::Serializer,
+    ) -> slog::Result {
+        let Self { expected_stage0_version, expected_stage0_next_version } =
+            self;
+        serializer.emit_str(
+            Key::from("expected_stage0_version"),
+            &expected_stage0_version.to_string(),
+        )?;
+        serializer.emit_str(
+            Key::from("expected_stage0_next_version"),
+            &format!("{:?}", expected_stage0_next_version),
+        )
     }
 }
 
@@ -2095,6 +2166,7 @@ mod test {
     use super::ExpectedVersion;
     use super::PendingMgsUpdate;
     use super::PendingMgsUpdateDetails;
+    use super::PendingMgsUpdateSpDetails;
     use super::PendingMgsUpdates;
     use crate::inventory::BaseboardId;
     use gateway_client::types::SpType;
@@ -2119,12 +2191,12 @@ mod test {
             }),
             sp_type: SpType::Sled,
             slot_id: 15,
-            details: PendingMgsUpdateDetails::Sp {
+            details: PendingMgsUpdateDetails::Sp(PendingMgsUpdateSpDetails {
                 expected_active_version: "1.0.36".parse().unwrap(),
                 expected_inactive_version: ExpectedVersion::Version(
                     "1.0.36".parse().unwrap(),
                 ),
-            },
+            }),
             artifact_hash: "47266ede81e13f5f1e36623ea8dd963842606b783397e4809a9a5f0bda0f8170".parse().unwrap(),
             artifact_version: "1.0.34".parse().unwrap(),
         };

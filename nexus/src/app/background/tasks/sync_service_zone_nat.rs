@@ -14,14 +14,13 @@ use futures::FutureExt;
 use futures::future::BoxFuture;
 use internal_dns_resolver::Resolver;
 use nexus_db_lookup::LookupPath;
-use nexus_db_model::Ipv4NatValues;
+use nexus_db_model::NatEntryValues;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_sled_agent_shared::inventory::OmicronZoneType;
 use omicron_common::address::{MAX_PORT, MIN_PORT};
 use omicron_uuid_kinds::GenericUuid;
 use serde_json::json;
-use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 
 // Minumum number of boundary NTP zones that should be present in a valid
@@ -99,7 +98,7 @@ impl BackgroundTask for ServiceZoneNatTracker {
                 }
             };
 
-            let mut ipv4_nat_values: Vec<Ipv4NatValues> = vec![];
+            let mut nat_values: Vec<NatEntryValues> = vec![];
             let mut ntp_count = 0;
             let mut nexus_count = 0;
             let mut dns_count = 0;
@@ -144,27 +143,13 @@ impl BackgroundTask for ServiceZoneNatTracker {
                         OmicronZoneType::BoundaryNtp {
                             nic, snat_cfg, ..
                         } => {
-                            let external_ip = match snat_cfg.ip {
-                                IpAddr::V4(addr) => addr,
-                                IpAddr::V6(_) => {
-                                    error!(
-                                        &log,
-                                        "ipv6 addresses for service zone nat not implemented";
-                                    );
-                                    continue;
-                                }
-                            };
-
-                            let external_address =
-                                oxnet::Ipv4Net::new(external_ip, 32)
-                                    .unwrap();
-
+                            let external_address = nexus_db_model::IpNet::from(
+                                oxnet::IpNet::host_net(snat_cfg.ip)
+                            );
                             let (snat_first_port, snat_last_port) =
                                 snat_cfg.port_range_raw();
-                            let nat_value = Ipv4NatValues {
-                                external_address: nexus_db_model::Ipv4Net(
-                                        external_address,
-                                ),
+                            let nat_value = NatEntryValues {
+                                external_address,
                                 first_port: snat_first_port.into(),
                                 last_port: snat_last_port.into(),
                                 sled_address: sled_address.into(),
@@ -172,30 +157,16 @@ impl BackgroundTask for ServiceZoneNatTracker {
                                 mac: nexus_db_model::MacAddr(nic.mac),
                             };
 
-                            // Append ipv4 nat entry
-                            ipv4_nat_values.push(nat_value);
+                            // Append NAT entry
+                            nat_values.push(nat_value);
                             ntp_count += 1;
                         }
                         OmicronZoneType::Nexus { nic, external_ip, .. } => {
-                            let external_ip = match external_ip {
-                                IpAddr::V4(addr) => addr,
-                                IpAddr::V6(_) => {
-                                    error!(
-                                        &log,
-                                        "ipv6 addresses for service zone nat not implemented";
-                                    );
-                                    continue;
-                                }
-                            };
-
-                            let external_address =
-                                oxnet::Ipv4Net::new(external_ip, 32)
-                                    .unwrap();
-
-                            let nat_value = Ipv4NatValues {
-                                external_address: nexus_db_model::Ipv4Net(
-                                        external_address,
-                                ),
+                            let external_address = nexus_db_model::IpNet::from(
+                                oxnet::IpNet::host_net(external_ip)
+                            );
+                            let nat_value = NatEntryValues {
+                                external_address,
                                 first_port: MIN_PORT.into(),
                                 last_port: MAX_PORT.into(),
                                 sled_address: sled_address.into(),
@@ -203,32 +174,16 @@ impl BackgroundTask for ServiceZoneNatTracker {
                                 mac: nexus_db_model::MacAddr(nic.mac),
                             };
 
-                            // Append ipv4 nat entry
-                            ipv4_nat_values.push(nat_value);
+                            // Append NAT entry
+                            nat_values.push(nat_value);
                             nexus_count += 1;
                         },
                         OmicronZoneType::ExternalDns { nic, dns_address, .. } => {
-                            let external_ip = match dns_address {
-                                SocketAddr::V4(v4) => {
-                                    *v4.ip()
-                                },
-                                SocketAddr::V6(_) => {
-                                    error!(
-                                        &log,
-                                        "ipv6 addresses for service zone nat not implemented";
-                                    );
-                                    continue;
-                                },
-                            };
-
-                            let external_address =
-                                oxnet::Ipv4Net::new(external_ip, 32)
-                                    .unwrap();
-
-                            let nat_value = Ipv4NatValues {
-                                external_address: nexus_db_model::Ipv4Net(
-                                        external_address,
-                                ),
+                            let external_address = nexus_db_model::IpNet::from(
+                                oxnet::IpNet::host_net(dns_address.ip())
+                            );
+                            let nat_value = NatEntryValues {
+                                external_address,
                                 first_port: MIN_PORT.into(),
                                 last_port: MAX_PORT.into(),
                                 sled_address: sled_address.into(),
@@ -236,8 +191,8 @@ impl BackgroundTask for ServiceZoneNatTracker {
                                 mac: nexus_db_model::MacAddr(nic.mac),
                             };
 
-                            // Append ipv4 nat entry
-                            ipv4_nat_values.push(nat_value);
+                            // Append NAT entry
+                            nat_values.push(nat_value);
                             dns_count += 1;
                         },
                         // we explictly list all cases instead of using a wildcard,
@@ -260,7 +215,7 @@ impl BackgroundTask for ServiceZoneNatTracker {
             // if we make it this far this should not be empty:
             // * nexus is running so we should at least have generated a nat value for it
             // * nexus requies other services zones that require nat to come up first
-            if ipv4_nat_values.is_empty() {
+            if nat_values.is_empty() {
                 error!(
                     &log,
                     "nexus is running but no service zone nat values could be generated from inventory";
@@ -303,7 +258,7 @@ impl BackgroundTask for ServiceZoneNatTracker {
             }
 
             // reconcile service zone nat entries
-            let result = match self.datastore.ipv4_nat_sync_service_zones(opctx, &ipv4_nat_values).await {
+            let result = match self.datastore.nat_sync_service_zones(opctx, &nat_values).await {
                 Ok(num) => num,
                 Err(e) => {
                     error!(

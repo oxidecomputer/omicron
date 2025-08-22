@@ -900,6 +900,7 @@ impl JsonSchema for Hostname {
 // General types used to implement API resources
 
 /// Identifies a type of API resource
+// NOTE: Please keep this enum in alphabetical order.
 #[derive(
     Clone,
     Copy,
@@ -919,77 +920,77 @@ pub enum ResourceType {
     AddressLotBlock,
     AffinityGroup,
     AffinityGroupMember,
-    AntiAffinityGroup,
-    AntiAffinityGroupMember,
     Alert,
     AlertReceiver,
     AllowList,
+    AntiAffinityGroup,
+    AntiAffinityGroupMember,
     AuditLogEntry,
     BackgroundTask,
-    BgpConfig,
     BgpAnnounceSet,
+    BgpConfig,
     Blueprint,
-    Fleet,
-    Silo,
-    SiloUser,
-    SiloGroup,
-    SiloQuotas,
-    IdentityProvider,
-    SamlIdentityProvider,
-    SshKey,
     Certificate,
     ConsoleSession,
-    DeviceAuthRequest,
-    DeviceAccessToken,
-    Project,
     Dataset,
+    DeviceAccessToken,
+    DeviceAuthRequest,
     Disk,
+    Fleet,
+    FloatingIp,
+    IdentityProvider,
     Image,
-    SiloImage,
-    ProjectImage,
     Instance,
-    LoopbackAddress,
-    SiloAuthSettings,
-    SwitchPortSettings,
-    SupportBundle,
-    IpPool,
-    IpPoolResource,
     InstanceNetworkInterface,
     InternetGateway,
-    InternetGatewayIpPool,
     InternetGatewayIpAddress,
+    InternetGatewayIpPool,
+    IpPool,
+    IpPoolResource,
+    LldpLinkConfig,
+    LoopbackAddress,
+    MetricProducer,
+    NatEntry,
+    Oximeter,
     PhysicalDisk,
+    Probe,
+    ProbeNetworkInterface,
+    Project,
+    ProjectImage,
     Rack,
+    RoleBuiltin,
+    RouterRoute,
+    SagaDbg,
+    SamlIdentityProvider,
     Service,
     ServiceNetworkInterface,
+    Silo,
+    SiloAuthSettings,
+    SiloGroup,
+    SiloImage,
+    SiloQuotas,
+    SiloUser,
     Sled,
     SledInstance,
     SledLedger,
-    Switch,
-    SagaDbg,
     Snapshot,
+    SshKey,
+    SupportBundle,
+    Switch,
+    SwitchPort,
+    SwitchPortSettings,
+    TufArtifact,
+    TufRepo,
+    TufTrustRoot,
+    UserBuiltin,
+    Vmm,
     Volume,
     Vpc,
     VpcFirewallRule,
-    VpcSubnet,
     VpcRouter,
-    RouterRoute,
-    Oximeter,
-    MetricProducer,
-    RoleBuiltin,
-    TufRepo,
-    TufArtifact,
-    TufTrustRoot,
-    SwitchPort,
-    UserBuiltin,
-    Zpool,
-    Vmm,
-    Ipv4NatEntry,
-    FloatingIp,
-    Probe,
-    ProbeNetworkInterface,
-    LldpLinkConfig,
+    VpcSubnet,
     WebhookSecret,
+    Zpool,
 }
 
 // IDENTITY METADATA
@@ -2587,6 +2588,16 @@ pub struct AddressLotCreateResponse {
     pub blocks: Vec<AddressLotBlock>,
 }
 
+/// An address lot and associated blocks resulting from viewing an address lot.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct AddressLotViewResponse {
+    /// The address lot.
+    pub lot: AddressLot,
+
+    /// The address lot blocks.
+    pub blocks: Vec<AddressLotBlock>,
+}
+
 /// Represents an address lot object, containing the id of the lot that can be
 /// used in other API calls.
 // TODO Add kind attribute to AddressLot
@@ -3408,6 +3419,13 @@ pub struct TufArtifactMeta {
 
     /// The size of the artifact in bytes.
     pub size: u64,
+
+    /// Contents of the `BORD` field of a Hubris archive caboose. Only
+    /// applicable to artifacts that are Hubris archives.
+    ///
+    /// This field should always be `Some(_)` if `sign` is `Some(_)`, but the
+    /// opposite is not true (SP images will have a `board` but not a `sign`).
+    pub board: Option<String>,
 
     /// Contents of the `SIGN` field of a Hubris archive caboose, i.e.,
     /// an identifier for the set of valid signing keys. Currently only

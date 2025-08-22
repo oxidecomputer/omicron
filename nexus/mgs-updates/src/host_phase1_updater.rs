@@ -129,10 +129,6 @@
 //!      and the upgrade will be complete.
 
 use super::MgsClients;
-use super::SpComponentUpdateError;
-use super::UpdateProgress;
-use super::common_sp_update::SpComponentUpdater;
-use super::common_sp_update::deliver_update;
 use crate::SpComponentUpdateHelperImpl;
 use crate::common_sp_update::PostUpdateError;
 use crate::common_sp_update::PrecheckError;
@@ -150,13 +146,10 @@ use omicron_common::disk::M2Slot;
 use sled_agent_client::Client as SledAgentClient;
 use slog::Logger;
 use slog::debug;
-use slog::info;
 use slog_error_chain::InlineErrorChain;
 use std::time::Duration;
-use tokio::sync::watch;
 use tufaceous_artifact::ArtifactHash;
 use tufaceous_artifact::ArtifactKind;
-use uuid::Uuid;
 
 // Hashing the current phase 1 contents on the SP is an asynchronous operation:
 // we request a hash and then poll until the hashing completes. We have to pick
@@ -164,166 +157,6 @@ use uuid::Uuid;
 // take a few seconds, so set something very generous here that would indicate
 // something very wrong.
 const PHASE_1_HASHING_TIMEOUT: Duration = Duration::from_secs(60);
-
-type GatewayClientError = gateway_client::Error<gateway_client::types::Error>;
-
-pub struct HostPhase1Updater {
-    log: Logger,
-    progress: watch::Sender<Option<UpdateProgress>>,
-    sp_type: SpType,
-    sp_slot: u16,
-    target_host_slot: u16,
-    update_id: Uuid,
-    // TODO-clarity maybe a newtype for this? TBD how we get this from
-    // wherever it's stored, which might give us a stronger type already.
-    phase1_data: Vec<u8>,
-}
-
-impl HostPhase1Updater {
-    pub fn new(
-        sp_type: SpType,
-        sp_slot: u16,
-        target_host_slot: u16,
-        update_id: Uuid,
-        phase1_data: Vec<u8>,
-        log: &Logger,
-    ) -> Self {
-        let log = log.new(slog::o!(
-            "component" => "HostPhase1Updater",
-            "sp_type" => format!("{sp_type:?}"),
-            "sp_slot" => sp_slot,
-            "target_host_slot" => target_host_slot,
-            "update_id" => format!("{update_id}"),
-        ));
-        let progress = watch::Sender::new(None);
-        Self {
-            log,
-            progress,
-            sp_type,
-            sp_slot,
-            target_host_slot,
-            update_id,
-            phase1_data,
-        }
-    }
-
-    pub fn progress_watcher(&self) -> watch::Receiver<Option<UpdateProgress>> {
-        self.progress.subscribe()
-    }
-
-    /// Drive this host phase 1 update to completion (or failure).
-    ///
-    /// Only one MGS instance is required to drive an update; however, if
-    /// multiple MGS instances are available and passed to this method and an
-    /// error occurs communicating with one instance, `HostPhase1Updater` will
-    /// try the remaining instances before failing.
-    pub async fn update(
-        mut self,
-        mgs_clients: &mut MgsClients,
-    ) -> Result<(), SpComponentUpdateError> {
-        // The async block below wants a `&self` reference, but we take `self`
-        // for API clarity (to start a new update, the caller should construct a
-        // new instance of the updater). Create a `&self` ref that we use
-        // through the remainder of this method.
-        let me = &self;
-
-        // Prior to delivering the update, ensure the correct target slot is
-        // activated.
-        //
-        // TODO-correctness Should we be doing this, or should a higher level
-        // executor set this up before calling us?
-        mgs_clients
-            .try_all_serially(&self.log, |client| async move {
-                me.mark_target_slot_active(&client).await
-            })
-            .await?;
-
-        // Deliver and drive the update to completion
-        deliver_update(&mut self, mgs_clients).await?;
-
-        // Unlike SP and RoT updates, we have nothing to do after delivery of
-        // the update completes; signal to any watchers that we're done.
-        self.progress.send_replace(Some(UpdateProgress::Complete));
-
-        // wait for any progress watchers to be dropped before we return;
-        // otherwise, they'll get `RecvError`s when trying to check the current
-        // status
-        self.progress.closed().await;
-
-        Ok(())
-    }
-
-    async fn mark_target_slot_active(
-        &self,
-        client: &gateway_client::Client,
-    ) -> Result<(), GatewayClientError> {
-        // TODO-correctness Should we always persist this choice?
-        let persist = true;
-
-        let slot = self.firmware_slot();
-
-        // TODO-correctness Until
-        // https://github.com/oxidecomputer/hubris/issues/1172 is fixed, the
-        // host must be in A2 for this operation to succeed. After it is fixed,
-        // there will still be a window while a host is booting where this
-        // operation can fail. How do we handle this?
-        client
-            .sp_component_active_slot_set(
-                self.sp_type,
-                self.sp_slot,
-                self.component(),
-                persist,
-                &SpComponentFirmwareSlot { slot },
-            )
-            .await?;
-
-        // TODO-correctness Should we send some kind of update to
-        // `self.progress`? We haven't actually started delivering an update
-        // yet, but it seems weird to give no indication that we have
-        // successfully (potentially) modified the state of the target sled.
-
-        info!(
-            self.log, "host phase1 target slot marked active";
-            "mgs_addr" => client.baseurl(),
-        );
-
-        Ok(())
-    }
-}
-
-impl SpComponentUpdater for HostPhase1Updater {
-    fn component(&self) -> &'static str {
-        SpComponent::HOST_CPU_BOOT_FLASH.const_as_str()
-    }
-
-    fn target_sp_type(&self) -> SpType {
-        self.sp_type
-    }
-
-    fn target_sp_slot(&self) -> u16 {
-        self.sp_slot
-    }
-
-    fn firmware_slot(&self) -> u16 {
-        self.target_host_slot
-    }
-
-    fn update_id(&self) -> Uuid {
-        self.update_id
-    }
-
-    fn update_data(&self) -> Vec<u8> {
-        self.phase1_data.clone()
-    }
-
-    fn progress(&self) -> &watch::Sender<Option<UpdateProgress>> {
-        &self.progress
-    }
-
-    fn logger(&self) -> &Logger {
-        &self.log
-    }
-}
 
 pub struct ReconfiguratorHostPhase1Updater {
     details: PendingMgsUpdateHostPhase1Details,
@@ -482,7 +315,7 @@ impl ReconfiguratorHostPhase1Updater {
     ) -> Result<ArtifactHash, PrecheckError> {
         match mgs_clients
             .try_all_serially(log, move |mgs_client| async move {
-                match mgs_client
+                mgs_client
                     .host_phase_1_flash_hash_calculate_with_timeout(
                         sp_type,
                         sp_slot,
@@ -490,31 +323,17 @@ impl ReconfiguratorHostPhase1Updater {
                         PHASE_1_HASHING_TIMEOUT,
                     )
                     .await
-                {
-                    // The return types here are a little weird;
-                    // `try_all_serially()` requires us to return a `Result<T,
-                    // GatewayClientError>`, but
-                    // `host_phase_1_flash_hash_calculate_with_timeout()`
-                    // returns a `HostPhase1HashError`; its `RequestError`
-                    // variant _contains_ a `GatewayClientError`. We convert
-                    // that specific variant into its `GatewayClientError`, and
-                    // return a `Result<Result<_, HostPhase1HashError>,
-                    // GatewayClientError>. We unpack the inner result in a
-                    // `match` after `try_all_serially()`.
-                    Ok(hash) => Ok(Ok(hash)),
-                    Err(HostPhase1HashError::RequestError { err, .. }) => {
-                        Err(err)
-                    }
-                    Err(err) => Ok(Err(err)),
-                }
             })
-            .await?
+            .await
         {
             Ok(hash) => Ok(ArtifactHash(hash)),
             Err(HostPhase1HashError::RequestError { err, .. }) => {
                 Err(err.into())
             }
-            Err(err) => Err(PrecheckError::DeterminingActiveArtifact {
+            Err(
+                err @ (HostPhase1HashError::Timeout(_)
+                | HostPhase1HashError::ContentsModifiedWhileHashing),
+            ) => Err(PrecheckError::DeterminingActiveArtifact {
                 kind: ArtifactKind::HOST_PHASE_1,
                 err: InlineErrorChain::new(&err).to_string(),
             }),
@@ -566,7 +385,7 @@ impl ReconfiguratorHostPhase1Updater {
         log: &Logger,
     ) -> Result<(), PrecheckError> {
         let PendingMgsUpdateHostPhase1Details {
-            expected_boot_disk: expected_active_boot_disk,
+            expected_boot_disk,
             expected_active_phase_2_hash,
             expected_inactive_phase_2_hash,
             ..
@@ -577,7 +396,7 @@ impl ReconfiguratorHostPhase1Updater {
             self.get_boot_partition_inventory_from_sled_agent(log).await?;
 
         // Confirm the expected boot disk.
-        match (sled_inventory.boot_disk, *expected_active_boot_disk) {
+        match (sled_inventory.boot_disk, *expected_boot_disk) {
             (Ok(found), expected) if found == expected => (),
             (Ok(found), expected) => {
                 return Err(PrecheckError::WrongHostOsBootDisk {
@@ -594,7 +413,7 @@ impl ReconfiguratorHostPhase1Updater {
         // can't proceed: either our update has become impossible due to other
         // changes (requires replanning), or we're waiting for sled-agent to
         // write the phase 2 we expect.
-        let (active, inactive) = match expected_active_boot_disk {
+        let (active, inactive) = match expected_boot_disk {
             M2Slot::A => (sled_inventory.slot_a, sled_inventory.slot_b),
             M2Slot::B => (sled_inventory.slot_b, sled_inventory.slot_a),
         };

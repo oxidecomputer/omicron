@@ -9187,6 +9187,42 @@
       }
     },
     "/v1/system/networking/address-lot/{address_lot}": {
+      "get": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Fetch address lot",
+        "operationId": "networking_address_lot_view",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "address_lot",
+            "description": "Name or ID of the address lot",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AddressLotViewResponse"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
       "delete": {
         "tags": [
           "system/networking"
@@ -13671,6 +13707,31 @@
           "items"
         ]
       },
+      "AddressLotViewResponse": {
+        "description": "An address lot and associated blocks resulting from viewing an address lot.",
+        "type": "object",
+        "properties": {
+          "blocks": {
+            "description": "The address lot blocks.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AddressLotBlock"
+            }
+          },
+          "lot": {
+            "description": "The address lot.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AddressLot"
+              }
+            ]
+          }
+        },
+        "required": [
+          "blocks",
+          "lot"
+        ]
+      },
       "AffinityGroup": {
         "description": "View of an Affinity Group",
         "type": "object",
@@ -16758,9 +16819,17 @@
             "description": "Human-readable name that can identify the user",
             "type": "string"
           },
+          "fleet_viewer": {
+            "description": "Whether this user has the viewer role on the fleet. Used by the web console to determine whether to show system-level UI.",
+            "type": "boolean"
+          },
           "id": {
             "type": "string",
             "format": "uuid"
+          },
+          "silo_admin": {
+            "description": "Whether this user has the admin role on their silo. Used by the web console to determine whether to show admin-only UI elements.",
+            "type": "boolean"
           },
           "silo_id": {
             "description": "Uuid of the silo to which this user belongs",
@@ -16778,7 +16847,9 @@
         },
         "required": [
           "display_name",
+          "fleet_viewer",
           "id",
+          "silo_admin",
           "silo_id",
           "silo_name"
         ]
@@ -20525,6 +20596,14 @@
               }
             ]
           },
+          "transit_ips": {
+            "description": "A set of additional networks that this interface may send and receive traffic on.",
+            "default": [],
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IpNet"
+            }
+          },
           "vpc_name": {
             "description": "The VPC in which to create the interface.",
             "allOf": [
@@ -22214,12 +22293,33 @@
             "description": "Tables resulting from the query, each containing timeseries.",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/Table"
+              "$ref": "#/components/schemas/OxqlTable"
             }
           }
         },
         "required": [
           "tables"
+        ]
+      },
+      "OxqlTable": {
+        "description": "A table represents one or more timeseries with the same schema.\n\nA table is the result of an OxQL query. It contains a name, usually the name of the timeseries schema from which the data is derived, and any number of timeseries, which contain the actual data.",
+        "type": "object",
+        "properties": {
+          "name": {
+            "description": "The name of the table.",
+            "type": "string"
+          },
+          "timeseries": {
+            "description": "The set of timeseries in the table, ordered by key.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Timeseries"
+            }
+          }
+        },
+        "required": [
+          "name",
+          "timeseries"
         ]
       },
       "Password": {
@@ -25462,25 +25562,6 @@
           "vlan_id"
         ]
       },
-      "Table": {
-        "description": "A table represents one or more timeseries with the same schema.\n\nA table is the result of an OxQL query. It contains a name, usually the name of the timeseries schema from which the data is derived, and any number of timeseries, which contain the actual data.",
-        "type": "object",
-        "properties": {
-          "name": {
-            "type": "string"
-          },
-          "timeseries": {
-            "type": "object",
-            "additionalProperties": {
-              "$ref": "#/components/schemas/Timeseries"
-            }
-          }
-        },
-        "required": [
-          "name",
-          "timeseries"
-        ]
-      },
       "TargetRelease": {
         "description": "View of a system software target release.",
         "type": "object",
@@ -25676,6 +25757,11 @@
         "description": "Metadata about an individual TUF artifact.\n\nFound within a `TufRepoDescription`.",
         "type": "object",
         "properties": {
+          "board": {
+            "nullable": true,
+            "description": "Contents of the `BORD` field of a Hubris archive caboose. Only applicable to artifacts that are Hubris archives.\n\nThis field should always be `Some(_)` if `sign` is `Some(_)`, but the opposite is not true (SP images will have a `board` but not a `sign`).",
+            "type": "string"
+          },
           "hash": {
             "description": "The hash of the artifact.",
             "type": "string",

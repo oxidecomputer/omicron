@@ -34,7 +34,7 @@ use serde::Serialize;
 use std::collections::BTreeMap;
 use std::collections::VecDeque;
 use std::fmt::Display;
-use std::net::Ipv4Addr;
+use std::net::IpAddr;
 use std::net::Ipv6Addr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -334,9 +334,12 @@ pub struct LastResultCompleted {
 }
 
 /// NAT Record
+///
+/// A NAT record maps an external IP address, used by an instance or
+/// externally-facing service like Nexus, to the hosting sled.
 #[derive(Clone, Debug, Serialize, JsonSchema)]
-pub struct Ipv4NatEntryView {
-    pub external_address: Ipv4Addr,
+pub struct NatEntryView {
+    pub external_address: IpAddr,
     pub first_port: u16,
     pub last_port: u16,
     pub sled_address: Ipv6Addr,
@@ -718,12 +721,12 @@ pub struct QuiesceStatus {
     /// what stage of quiescing is Nexus at
     pub state: QuiesceState,
 
-    /// what sagas are currently running
+    /// what sagas are currently running or known needing to be recovered
     ///
     /// This should only be non-empty when state is `Running` or
     /// `WaitingForSagas`.  Entries here prevent transitioning from
     /// `WaitingForSagas` to `WaitingForDb`.
-    pub sagas_running: IdOrdMap<RunningSagaInfo>,
+    pub sagas_pending: IdOrdMap<PendingSagaInfo>,
 
     /// what database claims are currently held (by any part of Nexus)
     ///
@@ -811,15 +814,21 @@ impl QuiesceState {
     }
 }
 
-/// Describes a running saga (for debugging why quiesce is stuck)
+/// Describes a pending saga (for debugging why quiesce is stuck)
 #[derive(Debug, Clone, Serialize, JsonSchema)]
-pub struct RunningSagaInfo {
+pub struct PendingSagaInfo {
     pub saga_id: steno::SagaId,
     pub saga_name: steno::SagaName,
-    pub time_started: DateTime<Utc>,
+    pub time_pending: DateTime<Utc>,
+    /// If true, we know the saga needs to be recovered.  It may or may not be
+    /// running already.
+    ///
+    /// If false, this saga was created in this Nexus process's lifetime.  It's
+    /// still running.
+    pub recovered: bool,
 }
 
-impl IdOrdItem for RunningSagaInfo {
+impl IdOrdItem for PendingSagaInfo {
     type Key<'a> = &'a steno::SagaId;
 
     fn key(&self) -> Self::Key<'_> {
@@ -857,6 +866,7 @@ mod test {
     use crate::deployment::ExpectedVersion;
     use crate::deployment::PendingMgsUpdate;
     use crate::deployment::PendingMgsUpdateDetails;
+    use crate::deployment::PendingMgsUpdateSpDetails;
     use crate::internal_api::views::UpdateAttemptStatus;
     use crate::inventory::BaseboardId;
     use chrono::Utc;
@@ -896,10 +906,13 @@ mod test {
                 baseboard_id: baseboard_id.clone(),
                 sp_type: SpType::Sled,
                 slot_id: 12,
-                details: PendingMgsUpdateDetails::Sp {
-                    expected_active_version: "1.0.0".parse().unwrap(),
-                    expected_inactive_version: ExpectedVersion::NoValidVersion,
-                },
+                details: PendingMgsUpdateDetails::Sp(
+                    PendingMgsUpdateSpDetails {
+                        expected_active_version: "1.0.0".parse().unwrap(),
+                        expected_inactive_version:
+                            ExpectedVersion::NoValidVersion,
+                    },
+                ),
                 artifact_hash,
                 artifact_version: "2.0.0".parse().unwrap(),
             },

@@ -47,8 +47,8 @@ use nexus_types::internal_api::params::SwitchPutRequest;
 use nexus_types::internal_api::params::SwitchPutResponse;
 use nexus_types::internal_api::views::BackgroundTask;
 use nexus_types::internal_api::views::DemoSaga;
-use nexus_types::internal_api::views::Ipv4NatEntryView;
 use nexus_types::internal_api::views::MgsUpdateDriverStatus;
+use nexus_types::internal_api::views::NatEntryView;
 use nexus_types::internal_api::views::QuiesceStatus;
 use nexus_types::internal_api::views::Saga;
 use nexus_types::internal_api::views::UpdateStatus;
@@ -682,7 +682,7 @@ impl NexusInternalApi for NexusInternalApiImpl {
         rqctx: RequestContext<Self::Context>,
         path_params: Path<RpwNatPathParam>,
         query_params: Query<RpwNatQueryParam>,
-    ) -> Result<HttpResponseOk<Vec<Ipv4NatEntryView>>, HttpError> {
+    ) -> Result<HttpResponseOk<Vec<NatEntryView>>, HttpError> {
         let apictx = &rqctx.context().context;
         let handler = async {
             let opctx =
@@ -692,7 +692,7 @@ impl NexusInternalApi for NexusInternalApiImpl {
             let query = query_params.into_inner();
             let mut changeset = nexus
                 .datastore()
-                .ipv4_nat_changeset(&opctx, path.from_gen, query.limit)
+                .nat_changeset(&opctx, path.from_gen, query.limit)
                 .await?;
             changeset.sort_by_key(|e| e.gen);
             Ok(HttpResponseOk(changeset))

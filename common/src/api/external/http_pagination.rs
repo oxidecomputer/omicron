@@ -200,7 +200,7 @@ where
 fn data_page_params_with_limit<S>(
     limit: NonZeroU32,
     pag_params: &PaginationParams<S, PageSelector<S, S::MarkerValue>>,
-) -> Result<DataPageParams<S::MarkerValue>, HttpError>
+) -> Result<DataPageParams<'_, S::MarkerValue>, HttpError>
 where
     S: ScanParams,
 {

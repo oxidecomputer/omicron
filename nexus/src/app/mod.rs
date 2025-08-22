@@ -27,6 +27,7 @@ use nexus_db_queries::db;
 use nexus_mgs_updates::ArtifactCache;
 use nexus_mgs_updates::MgsUpdateDriver;
 use nexus_types::deployment::PendingMgsUpdates;
+use nexus_types::quiesce::SagaQuiesceHandle;
 use omicron_common::address::DENDRITE_PORT;
 use omicron_common::address::MGD_PORT;
 use omicron_common::address::MGS_PORT;
@@ -281,6 +282,9 @@ pub struct Nexus {
 
     /// whether Nexus is quiescing, and how far it's gotten
     quiesce: watch::Sender<QuiesceState>,
+
+    /// details about saga quiescing
+    saga_quiesce: SagaQuiesceHandle,
 }
 
 impl Nexus {
@@ -356,10 +360,14 @@ impl Nexus {
         // task.  If someone changed the config, they'd have to remember to
         // update this here.  This doesn't seem worth it.
         let (saga_create_tx, saga_recovery_rx) = mpsc::unbounded_channel();
+        let saga_quiesce = SagaQuiesceHandle::new(
+            log.new(o!("component" => "SagaQuiesceHandle")),
+        );
         let sagas = Arc::new(SagaExecutor::new(
             Arc::clone(&sec_client),
             log.new(o!("component" => "SagaExecutor")),
             saga_create_tx,
+            saga_quiesce.clone(),
         ));
 
         // Create a channel for replicating repository artifacts. 16 is a
@@ -512,6 +520,7 @@ impl Nexus {
             mgs_resolver,
             repo_depot_resolver,
             quiesce,
+            saga_quiesce,
         };
 
         // TODO-cleanup all the extra Arcs here seems wrong
@@ -568,6 +577,7 @@ impl Nexus {
                         sec_client: sec_client.clone(),
                         registry: sagas::ACTION_REGISTRY.clone(),
                         sagas_started_rx: saga_recovery_rx,
+                        quiesce: task_nexus.saga_quiesce.clone(),
                     },
                     tuf_artifact_replication_rx,
                     mgs_updates_tx,
@@ -1042,7 +1052,7 @@ impl Nexus {
 
     pub(crate) fn demo_sagas(
         &self,
-    ) -> Result<std::sync::MutexGuard<CompletingDemoSagas>, Error> {
+    ) -> Result<std::sync::MutexGuard<'_, CompletingDemoSagas>, Error> {
         self.demo_sagas.lock().map_err(|error| {
             Error::internal_error(&format!(
                 "failed to acquire demo_sagas lock: {:#}",

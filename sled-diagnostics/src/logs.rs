@@ -853,7 +853,7 @@ fn sort_cockroach_extra_logs(logs: &[LogFile]) -> HashMap<&str, ExtraLogs<'_>> {
 /// - service-1.log.4
 /// - service-2.stderr.log
 /// - service-2.stderr.log.2
-fn parse_extra_log(logfile: &LogFile) -> Option<ExtraLogKind> {
+fn parse_extra_log(logfile: &LogFile) -> Option<ExtraLogKind<'_>> {
     static RE: LazyLock<Regex> = LazyLock::new(|| {
         //Regex explanation:
         // ^                : start of the line

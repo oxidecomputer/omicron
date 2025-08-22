@@ -402,6 +402,9 @@ parent:    02697f74-b14a-4418-90f0-c28b2a3a6aa9
 
  PENDING MGS-MANAGED UPDATES: 0
 
+empty planning report for blueprint ade5749d-bdf3-4fab-a8ae-00bea01b3a5a.
+
+
 
 
 > inventory-generate
@@ -518,6 +521,9 @@ parent:    02697f74-b14a-4418-90f0-c28b2a3a6aa9
 
  PENDING MGS-MANAGED UPDATES: 0
 
+empty planning report for blueprint ade5749d-bdf3-4fab-a8ae-00bea01b3a5a.
+
+
 
 
 > # Exercise `blueprint-diff` arguments.
@@ -544,21 +550,20 @@ T ENA ID                                   PARENT                               
 
 > blueprint-plan ade5749d-bdf3-4fab-a8ae-00bea01b3a5a
 INFO skipping noop image source check for all sleds, reason: no target release is currently set
-INFO found sled missing NTP zone (will add one), sled_id: 89d02b1b-478c-401a-8e28-7a26f74fa41b
-INFO sufficient BoundaryNtp zones exist in plan, desired_count: 0, current_count: 0
-WARN failed to place all new desired Clickhouse zones, placed: 0, wanted_to_place: 1
-INFO sufficient ClickhouseKeeper zones exist in plan, desired_count: 0, current_count: 0
-INFO sufficient ClickhouseServer zones exist in plan, desired_count: 0, current_count: 0
-INFO sufficient CockroachDb zones exist in plan, desired_count: 0, current_count: 0
-WARN failed to place all new desired CruciblePantry zones, placed: 0, wanted_to_place: 3
-WARN failed to place all new desired InternalDns zones, placed: 0, wanted_to_place: 3
-INFO sufficient ExternalDns zones exist in plan, desired_count: 0, current_count: 0
-WARN failed to place all new desired Nexus zones, placed: 0, wanted_to_place: 3
-INFO sufficient Oximeter zones exist in plan, desired_count: 0, current_count: 0
 WARN cannot issue more MGS-driven updates (no current artifacts)
 INFO some zones not yet up-to-date, sled_id: 89d02b1b-478c-401a-8e28-7a26f74fa41b, zones_currently_updating: [ZoneCurrentlyUpdating { zone_id: b3c9c041-d2f0-4767-bdaf-0e52e9d7a013 (service), zone_kind: InternalNtp, reason: MissingInInventory { bp_image_source: InstallDataset } }]
-INFO will ensure cockroachdb setting, setting: cluster.preserve_downgrade_option, value: DoNotModify
 generated blueprint 86db3308-f817-4626-8838-4085949a6a41 based on parent blueprint ade5749d-bdf3-4fab-a8ae-00bea01b3a5a
+planning report for blueprint 86db3308-f817-4626-8838-4085949a6a41:
+chicken switches:
+    add zones with mupdate override:   false
+
+* discretionary zone placement waiting for NTP zones on sleds: 89d02b1b-478c-401a-8e28-7a26f74fa41b
+* missing NTP zone on sled 89d02b1b-478c-401a-8e28-7a26f74fa41b
+* only placed 0/1 desired clickhouse zones
+* only placed 0/3 desired crucible_pantry zones
+* only placed 0/3 desired internal_dns zones
+* only placed 0/3 desired nexus zones
+
 
 > blueprint-list
 T ENA ID                                   PARENT                               TIME_CREATED             
@@ -1030,6 +1035,9 @@ parent:    02697f74-b14a-4418-90f0-c28b2a3a6aa9
 
  PENDING MGS-MANAGED UPDATES: 0
 
+empty planning report for blueprint ade5749d-bdf3-4fab-a8ae-00bea01b3a5a.
+
+
 
 > inventory-show latest all
 collection: 9e187896-7809-46d0-9210-d75be1b3c4d4
@@ -1050,10 +1058,10 @@ Sled serial0
         A    0101010101010101010101010101010101010101010101010101010101010101 
         B    0202020202020202020202020202020202020202020202020202020202020202 
     cabooses:
-        SLOT     BOARD        NAME         VERSION GIT_COMMIT SIGN 
-        SpSlot0  SimGimletSp  SimGimletSp  0.0.1   unknown    n/a  
-        RotSlotA SimRot       SimRot       0.0.2   unknown    n/a  
-        Stage0   SimRotStage0 SimRotStage0 0.0.1   unknown    n/a  
+        SLOT     BOARD       NAME        VERSION GIT_COMMIT SIGN        
+        SpSlot0  SimGimletSp SimGimletSp 0.0.1   unknown    n/a         
+        RotSlotA SimRot      SimRot      0.0.2   unknown    sign-gimlet 
+        Stage0   SimRot      SimRot      0.0.1   unknown    sign-gimlet 
     RoT pages:
         SLOT DATA_BASE64 
     RoT: active slot: slot A
@@ -1075,10 +1083,10 @@ Sled serial1
         A    0101010101010101010101010101010101010101010101010101010101010101 
         B    0202020202020202020202020202020202020202020202020202020202020202 
     cabooses:
-        SLOT     BOARD        NAME         VERSION GIT_COMMIT SIGN 
-        SpSlot0  SimGimletSp  SimGimletSp  0.0.1   unknown    n/a  
-        RotSlotA SimRot       SimRot       0.0.2   unknown    n/a  
-        Stage0   SimRotStage0 SimRotStage0 0.0.1   unknown    n/a  
+        SLOT     BOARD       NAME        VERSION GIT_COMMIT SIGN        
+        SpSlot0  SimGimletSp SimGimletSp 0.0.1   unknown    n/a         
+        RotSlotA SimRot      SimRot      0.0.2   unknown    sign-gimlet 
+        Stage0   SimRot      SimRot      0.0.1   unknown    sign-gimlet 
     RoT pages:
         SLOT DATA_BASE64 
     RoT: active slot: slot A
@@ -1100,10 +1108,10 @@ Sled serial2
         A    0101010101010101010101010101010101010101010101010101010101010101 
         B    0202020202020202020202020202020202020202020202020202020202020202 
     cabooses:
-        SLOT     BOARD        NAME         VERSION GIT_COMMIT SIGN 
-        SpSlot0  SimGimletSp  SimGimletSp  0.0.1   unknown    n/a  
-        RotSlotA SimRot       SimRot       0.0.2   unknown    n/a  
-        Stage0   SimRotStage0 SimRotStage0 0.0.1   unknown    n/a  
+        SLOT     BOARD       NAME        VERSION GIT_COMMIT SIGN        
+        SpSlot0  SimGimletSp SimGimletSp 0.0.1   unknown    n/a         
+        RotSlotA SimRot      SimRot      0.0.2   unknown    sign-gimlet 
+        Stage0   SimRot      SimRot      0.0.1   unknown    sign-gimlet 
     RoT pages:
         SLOT DATA_BASE64 
     RoT: active slot: slot A
@@ -1119,6 +1127,7 @@ sled 2eb69596-f081-4e2d-9425-9994926e0832 (role = Gimlet, serial serial1)
     found at:    <REDACTED_TIMESTAMP> from fake sled agent
     address:     [fd00:1122:3344:102::1]:12345
     usable hw threads:   10
+    CPU family:          amd_milan
     usable memory (GiB): 0
     reservoir (GiB):     0
     physical disks:
@@ -1233,6 +1242,7 @@ sled 32d8d836-4d8a-4e54-8fa9-f31d79c42646 (role = Gimlet, serial serial2)
     found at:    <REDACTED_TIMESTAMP> from fake sled agent
     address:     [fd00:1122:3344:103::1]:12345
     usable hw threads:   10
+    CPU family:          amd_milan
     usable memory (GiB): 0
     reservoir (GiB):     0
     physical disks:
@@ -1347,6 +1357,7 @@ sled 89d02b1b-478c-401a-8e28-7a26f74fa41b (role = Gimlet, serial serial0)
     found at:    <REDACTED_TIMESTAMP> from fake sled agent
     address:     [fd00:1122:3344:101::1]:12345
     usable hw threads:   10
+    CPU family:          amd_milan
     usable memory (GiB): 0
     reservoir (GiB):     0
     physical disks:
@@ -1572,20 +1583,10 @@ INTERNAL DNS STATUS
 > # sled to be expunged.
 > blueprint-plan latest
 INFO skipping noop image source check for all sleds, reason: no target release is currently set
-INFO sufficient BoundaryNtp zones exist in plan, desired_count: 0, current_count: 0
-INFO sufficient Clickhouse zones exist in plan, desired_count: 1, current_count: 1
-INFO sufficient ClickhouseKeeper zones exist in plan, desired_count: 0, current_count: 0
-INFO sufficient ClickhouseServer zones exist in plan, desired_count: 0, current_count: 0
-INFO sufficient CockroachDb zones exist in plan, desired_count: 0, current_count: 0
-INFO sufficient CruciblePantry zones exist in plan, desired_count: 3, current_count: 3
-INFO sufficient InternalDns zones exist in plan, desired_count: 3, current_count: 3
-INFO sufficient ExternalDns zones exist in plan, desired_count: 3, current_count: 3
-INFO sufficient Nexus zones exist in plan, desired_count: 3, current_count: 3
-INFO sufficient Oximeter zones exist in plan, desired_count: 0, current_count: 0
 WARN cannot issue more MGS-driven updates (no current artifacts)
-INFO all zones up-to-date
-INFO will ensure cockroachdb setting, setting: cluster.preserve_downgrade_option, value: DoNotModify
 generated blueprint 86db3308-f817-4626-8838-4085949a6a41 based on parent blueprint ade5749d-bdf3-4fab-a8ae-00bea01b3a5a
+empty planning report for blueprint 86db3308-f817-4626-8838-4085949a6a41.
+
 
 > blueprint-diff ade5749d-bdf3-4fab-a8ae-00bea01b3a5a latest
 from: blueprint ade5749d-bdf3-4fab-a8ae-00bea01b3a5a

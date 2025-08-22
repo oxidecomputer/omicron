@@ -653,7 +653,7 @@ table! {
 }
 
 table! {
-    ipv4_nat_entry (id) {
+    nat_entry (id) {
         id -> Uuid,
         external_address -> Inet,
         first_port -> Int4,
@@ -668,9 +668,9 @@ table! {
     }
 }
 
-// View used for summarizing changes to ipv4_nat_entry
+// View used for summarizing changes to nat_entry
 table! {
-    ipv4_nat_changes (version) {
+    nat_changes (version) {
         external_address -> Inet,
         first_port -> Int4,
         last_port -> Int4,
@@ -683,9 +683,9 @@ table! {
 }
 
 // This is the sequence used for the version number
-// in ipv4_nat_entry.
+// in nat_entry.
 table! {
-    ipv4_nat_version (last_value) {
+    nat_version (last_value) {
         last_value -> Int8,
         log_cnt -> Int8,
         is_called -> Bool,
@@ -971,6 +971,7 @@ table! {
         sled_state -> crate::enums::SledStateEnum,
         sled_agent_gen -> Int8,
         repo_depot_port -> Int4,
+        cpu_family -> crate::enums::SledCpuFamilyEnum,
     }
 }
 
@@ -1416,6 +1417,7 @@ table! {
         artifact_size -> Int8,
         generation_added -> Int8,
         sign -> Nullable<Binary>,
+        board -> Nullable<Text>,
     }
 }
 
@@ -1620,6 +1622,7 @@ table! {
         sled_role -> crate::enums::SledRoleEnum,
         usable_hardware_threads -> Int8,
         usable_physical_ram -> Int8,
+        cpu_family -> crate::enums::SledCpuFamilyEnum,
         reservoir_size -> Int8,
 
         ledgered_sled_config -> Nullable<Uuid>,
@@ -2166,6 +2169,25 @@ table! {
         expected_persistent_boot_preference -> crate::enums::HwRotSlotEnum,
         expected_pending_persistent_boot_preference -> Nullable<crate::enums::HwRotSlotEnum>,
         expected_transient_boot_preference -> Nullable<crate::enums::HwRotSlotEnum>,
+    }
+}
+
+table! {
+    bp_pending_mgs_update_host_phase_1 (blueprint_id, hw_baseboard_id) {
+        blueprint_id -> Uuid,
+        hw_baseboard_id -> Uuid,
+        sp_type -> crate::enums::SpTypeEnum,
+        sp_slot -> Int4,
+        artifact_sha256 -> Text,
+        artifact_version -> Text,
+        expected_active_phase_1_slot -> crate::enums::HwM2SlotEnum,
+        expected_boot_disk -> crate::enums::HwM2SlotEnum,
+        expected_active_phase_1_hash -> Text,
+        expected_active_phase_2_hash -> Text,
+        expected_inactive_phase_1_hash -> Text,
+        expected_inactive_phase_2_hash -> Text,
+        sled_agent_ip -> Inet,
+        sled_agent_port -> Int4,
     }
 }
 

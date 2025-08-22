@@ -2,7 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use rand08::RngCore;
 use rand08::rngs::OsRng;
 use secrecy::{ExposeSecret, SecretBox};
 use std::fmt::Debug;
@@ -64,13 +63,9 @@ impl RackSecret {
     /// Create a secret based on Curve25519
     pub fn new() -> RackSecret {
         let mut rng = OsRng;
-        let mut scalar_bytes = [0u8; 64];
-        rng.fill_bytes(&mut scalar_bytes);
 
         RackSecret {
-            secret: SecretBox::new(Box::new(
-                Scalar::from_bytes_mod_order_wide(&scalar_bytes),
-            )),
+            secret: SecretBox::new(Box::new(Scalar::random(&mut rng))),
         }
     }
 

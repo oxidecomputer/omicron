@@ -926,7 +926,7 @@ fn push_interface_validation_cte<'a>(
 ///        <time_created> AS time_created, <time_modified> AS time_modified,
 ///        NULL AS time_deleted, <instance_id> AS instance_id, <vpc_id> AS vpc_id,
 ///        <subnet_id> AS subnet_id, <mac> AS mac, <maybe IP allocation subquery>,
-///        <slot> AS slot, <is_primary> AS is_primary
+///        <slot> AS slot, <is_primary> AS is_primary, <transit_ips> AS transit_ips
 /// ```
 ///
 /// Instance validation
@@ -1204,8 +1204,20 @@ impl QueryFragment<Pg> for InsertQuery {
         } else {
             select_from_cte(out.reborrow(), dsl::slot::NAME)?;
         }
+        out.push_sql(" AS ");
+        out.push_identifier(dsl::slot::NAME)?;
         out.push_sql(", ");
+
         select_from_cte(out.reborrow(), dsl::is_primary::NAME)?;
+        out.push_sql(" AS ");
+        out.push_identifier(dsl::is_primary::NAME)?;
+        out.push_sql(", ");
+
+        out.push_bind_param::<sql_types::Array<sql_types::Inet>, Vec<IpNetwork>>(
+            &self.interface.transit_ips,
+        )?;
+        out.push_sql(" AS ");
+        out.push_identifier(dsl::transit_ips::NAME)?;
 
         Ok(())
     }
@@ -1260,6 +1272,8 @@ impl QueryFragment<Pg> for InsertQueryValues {
         out.push_identifier(dsl::slot::NAME)?;
         out.push_sql(", ");
         out.push_identifier(dsl::is_primary::NAME)?;
+        out.push_sql(", ");
+        out.push_identifier(dsl::transit_ips::NAME)?;
         out.push_sql(") ");
         self.0.walk_ast(out)
     }
@@ -2191,6 +2205,7 @@ mod tests {
                 description: String::from("description"),
             },
             Some(requested_ip),
+            vec![],
         )
         .unwrap();
         let err = context.datastore()
@@ -2220,6 +2235,7 @@ mod tests {
                 description: String::from("description"),
             },
             Some(requested_ip),
+            vec![],
         )
         .unwrap();
         let inserted_interface = context
@@ -2252,6 +2268,7 @@ mod tests {
                 description: String::from("description"),
             },
             None,
+            vec![],
         )
         .unwrap();
         let err = context.datastore()
@@ -2290,6 +2307,7 @@ mod tests {
                     description: String::from("description"),
                 },
                 None,
+                vec![],
             )
             .unwrap();
             let inserted_interface = context
@@ -2334,6 +2352,7 @@ mod tests {
                 description: String::from("description"),
             },
             None,
+            vec![],
         )
         .unwrap();
         let inserted_interface = context
@@ -2353,6 +2372,7 @@ mod tests {
                 description: String::from("description"),
             },
             Some(inserted_interface.ip.ip()),
+            vec![],
         )
         .unwrap();
         let result = context
@@ -2601,6 +2621,7 @@ mod tests {
                 description: String::from("description"),
             },
             None,
+            vec![],
         )
         .unwrap();
         let _ = context
@@ -2620,6 +2641,7 @@ mod tests {
                 description: String::from("description"),
             },
             None,
+            vec![],
         )
         .unwrap();
         let result = context
@@ -2651,6 +2673,7 @@ mod tests {
                 description: String::from("description"),
             },
             None,
+            vec![],
         )
         .unwrap();
         let _ = context
@@ -2667,6 +2690,7 @@ mod tests {
                 description: String::from("description"),
             },
             None,
+            vec![],
         )
         .unwrap();
         let result = context
@@ -2695,6 +2719,7 @@ mod tests {
                 description: String::from("description"),
             },
             None,
+            vec![],
         )
         .unwrap();
         let _ = context
@@ -2737,6 +2762,7 @@ mod tests {
                 description: String::from("description"),
             },
             None,
+            vec![],
         )
         .unwrap();
         let _ = context
@@ -2755,6 +2781,7 @@ mod tests {
                     description: String::from("description"),
                 },
                 addr,
+                vec![],
             )
             .unwrap();
             let result = context
@@ -2794,6 +2821,7 @@ mod tests {
                     description: String::from("description"),
                 },
                 None,
+                vec![],
             )
             .unwrap();
             let _ = context
@@ -2823,6 +2851,7 @@ mod tests {
                 description: String::from("description"),
             },
             None,
+            vec![],
         )
         .unwrap();
         let result = context
@@ -2856,6 +2885,7 @@ mod tests {
                     description: String::from("description"),
                 },
                 None,
+                vec![],
             )
             .unwrap();
             let result = context
@@ -2900,6 +2930,7 @@ mod tests {
             "The random MAC address {:?} is not a valid {} address",
             inserted.mac, kind,
         );
+        assert_eq!(inserted.transit_ips, incomplete.transit_ips);
     }
 
     // Test that we fail to insert an interface if there are no available slots
@@ -2924,6 +2955,7 @@ mod tests {
                     description: String::from("description"),
                 },
                 None,
+                vec![],
             )
             .unwrap();
             let inserted_interface = context
@@ -2959,6 +2991,7 @@ mod tests {
                 description: String::from("description"),
             },
             None,
+            vec![],
         )
         .unwrap();
         let result = context
@@ -2998,6 +3031,7 @@ mod tests {
                     description: String::from("description"),
                 },
                 None,
+                vec![],
             )
             .unwrap();
             let intf = context
@@ -3025,6 +3059,7 @@ mod tests {
                 description: String::from("description"),
             },
             None,
+            vec![],
         )
         .unwrap();
         let intf = context
@@ -3056,6 +3091,7 @@ mod tests {
                 description: String::from("description"),
             },
             None,
+            vec![],
         )
         .unwrap();
         let intf = context
@@ -3099,6 +3135,7 @@ mod tests {
                 description: String::from("description"),
             },
             Some(IpAddr::V4(addr)),
+            vec![],
         )
         .unwrap();
         let _ = context
@@ -3119,6 +3156,7 @@ mod tests {
                 description: String::from("description"),
             },
             None,
+            vec![],
         )
         .unwrap();
 
@@ -3172,5 +3210,46 @@ mod tests {
             last_available_address(&subnet),
             "fd00::ffff:ffff:ffff:fffe".parse::<IpAddr>().unwrap(),
         );
+    }
+
+    #[tokio::test]
+    async fn test_insert_with_transit_ips() {
+        let context = TestContext::new("test_insert_with_transit_ips", 2).await;
+        let instance = context.create_stopped_instance().await;
+        let instance_id = InstanceUuid::from_untyped_uuid(instance.id());
+
+        // Create transit IPs to test with
+        let transit_ips = vec![
+            "10.0.0.0/24".parse().unwrap(),
+            "192.168.1.0/24".parse().unwrap(),
+            "172.16.0.0/16".parse().unwrap(),
+        ];
+
+        let interface = IncompleteNetworkInterface::new_instance(
+            Uuid::new_v4(),
+            instance_id,
+            context.net1.subnets[0].clone(),
+            IdentityMetadataCreateParams {
+                name: "interface-with-transit".parse().unwrap(),
+                description: String::from("Test interface with transit IPs"),
+            },
+            None, // Auto-assign IP
+            transit_ips.clone(),
+        )
+        .unwrap();
+
+        let inserted_interface = context
+            .datastore()
+            .instance_create_network_interface_raw(
+                context.opctx(),
+                interface.clone(),
+            )
+            .await
+            .expect("Failed to insert interface with transit IPs");
+
+        // Verify the basic interface properties
+        assert_interfaces_eq(&interface, &inserted_interface.clone().into());
+
+        context.success().await;
     }
 }

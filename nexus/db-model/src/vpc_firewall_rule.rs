@@ -70,7 +70,7 @@ NewtypeDeref! { () pub struct VpcFirewallRuleProtocol(external::VpcFirewallRuleP
 impl DatabaseString for VpcFirewallRuleProtocol {
     type Error = <external::VpcFirewallRuleProtocol as FromStr>::Err;
 
-    fn to_database_string(&self) -> Cow<str> {
+    fn to_database_string(&self) -> Cow<'_, str> {
         self.0.to_string().into()
     }
 
@@ -93,7 +93,7 @@ NewtypeDeref! { () pub struct VpcFirewallRuleTarget(external::VpcFirewallRuleTar
 impl DatabaseString for VpcFirewallRuleTarget {
     type Error = <external::VpcFirewallRuleTarget as FromStr>::Err;
 
-    fn to_database_string(&self) -> Cow<str> {
+    fn to_database_string(&self) -> Cow<'_, str> {
         self.0.to_string().into()
     }
 
@@ -116,7 +116,7 @@ NewtypeDeref! { () pub struct VpcFirewallRuleHostFilter(external::VpcFirewallRul
 impl DatabaseString for VpcFirewallRuleHostFilter {
     type Error = <external::VpcFirewallRuleHostFilter as FromStr>::Err;
 
-    fn to_database_string(&self) -> Cow<str> {
+    fn to_database_string(&self) -> Cow<'_, str> {
         self.0.to_string().into()
     }
 

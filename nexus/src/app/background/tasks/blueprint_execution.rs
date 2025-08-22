@@ -13,8 +13,11 @@ use nexus_db_queries::db::DataStore;
 use nexus_reconfigurator_execution::{
     RealizeBlueprintOutput, RequiredRealizeArgs,
 };
-use nexus_types::deployment::{
-    Blueprint, BlueprintTarget, PendingMgsUpdates, execution::EventBuffer,
+use nexus_types::{
+    deployment::{
+        Blueprint, BlueprintTarget, PendingMgsUpdates, execution::EventBuffer,
+    },
+    quiesce::SagaQuiesceHandle,
 };
 use omicron_uuid_kinds::OmicronZoneUuid;
 use serde_json::json;
@@ -32,6 +35,7 @@ pub struct BlueprintExecutor {
     tx: watch::Sender<usize>,
     saga_recovery: Activator,
     mgs_update_tx: watch::Sender<PendingMgsUpdates>,
+    saga_quiesce: SagaQuiesceHandle,
 }
 
 impl BlueprintExecutor {
@@ -44,6 +48,7 @@ impl BlueprintExecutor {
         nexus_id: OmicronZoneUuid,
         saga_recovery: Activator,
         mgs_update_tx: watch::Sender<PendingMgsUpdates>,
+        saga_quiesce: SagaQuiesceHandle,
     ) -> BlueprintExecutor {
         let (tx, _) = watch::channel(0);
         BlueprintExecutor {
@@ -54,6 +59,7 @@ impl BlueprintExecutor {
             tx,
             saga_recovery,
             mgs_update_tx,
+            saga_quiesce,
         }
     }
 
@@ -113,6 +119,7 @@ impl BlueprintExecutor {
                 blueprint,
                 sender,
                 mgs_updates: self.mgs_update_tx.clone(),
+                saga_quiesce: self.saga_quiesce.clone(),
             }
             .as_nexus(self.nexus_id),
         )
@@ -180,7 +187,8 @@ mod test {
     use id_map::IdMap;
     use itertools::Itertools as _;
     use nexus_db_model::{
-        ByteCount, SledBaseboard, SledSystemHardware, SledUpdate, Zpool,
+        ByteCount, SledBaseboard, SledCpuFamily, SledSystemHardware,
+        SledUpdate, Zpool,
     };
     use nexus_db_queries::authn;
     use nexus_db_queries::context::OpContext;
@@ -196,9 +204,10 @@ mod test {
         BlueprintTarget, BlueprintZoneConfig, BlueprintZoneDisposition,
         BlueprintZoneImageSource, BlueprintZoneType,
         CockroachDbPreserveDowngrade, OximeterReadMode, PendingMgsUpdates,
-        blueprint_zone_type,
+        PlanningReport, blueprint_zone_type,
     };
     use nexus_types::external_api::views::SledState;
+    use nexus_types::quiesce::SagaQuiesceHandle;
     use omicron_common::api::external;
     use omicron_common::api::external::Generation;
     use omicron_common::zpool_name::ZpoolName;
@@ -276,6 +285,7 @@ mod test {
             time_created: chrono::Utc::now(),
             creator: "test".to_string(),
             comment: "test blueprint".to_string(),
+            report: PlanningReport::new(id),
         };
 
         datastore
@@ -359,6 +369,7 @@ mod test {
                     usable_hardware_threads: 4,
                     usable_physical_ram: ByteCount(1000.into()),
                     reservoir_size: ByteCount(999.into()),
+                    cpu_family: SledCpuFamily::AmdMilan,
                 },
                 rack_id,
                 nexus_db_model::Generation::new(),
@@ -378,6 +389,7 @@ mod test {
             OmicronZoneUuid::new_v4(),
             Activator::new(),
             dummy_tx,
+            SagaQuiesceHandle::new(opctx.log.clone()),
         );
 
         // Now we're ready.

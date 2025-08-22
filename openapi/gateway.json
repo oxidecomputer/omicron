@@ -875,10 +875,10 @@
             "description": "resource updated"
           },
           "4XX": {
-            "$ref": "#/components/responses/Error"
+            "$ref": "#/components/responses/SpComponentResetError"
           },
           "5XX": {
-            "$ref": "#/components/responses/Error"
+            "$ref": "#/components/responses/SpComponentResetError"
           }
         }
       }
@@ -3300,6 +3300,49 @@
           }
         ]
       },
+      "SpComponentResetError": {
+        "description": "The error type returned by the `sp_component_reset()` MGS endpoint.",
+        "oneOf": [
+          {
+            "description": "MGS refuses to reset its own sled's SP.",
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "reset_sp_of_local_sled"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
+            "description": "Other dropshot errors.",
+            "type": "object",
+            "properties": {
+              "error_code": {
+                "nullable": true,
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "other"
+                ]
+              }
+            },
+            "required": [
+              "message",
+              "state"
+            ]
+          }
+        ]
+      },
       "SpIdentifier": {
         "type": "object",
         "properties": {
@@ -3953,6 +3996,16 @@
           "application/json": {
             "schema": {
               "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "SpComponentResetError": {
+        "description": "SpComponentResetError",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/SpComponentResetError"
             }
           }
         }

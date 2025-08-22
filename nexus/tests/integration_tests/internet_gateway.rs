@@ -373,6 +373,7 @@ async fn test_setup(c: &ClientTestContext) {
             ip: None,
             subnet_name: "default".parse().unwrap(),
             vpc_name: VPC_NAME.parse().unwrap(),
+            transit_ips: vec![],
         },
     ]);
     let _inst = create_instance_with(

@@ -15,7 +15,7 @@ use uuid::Uuid;
 pub use propolis_client::{CrucibleOpts, VolumeConstructionRequest};
 
 progenitor::generate_api!(
-    spec = "../../openapi/sled-agent.json",
+    spec = "../../openapi/sled-agent/sled-agent-latest.json",
     interface = Positional,
     inner_type = slog::Logger,
     pre_hook = (|log: &slog::Logger, request: &reqwest::Request| {

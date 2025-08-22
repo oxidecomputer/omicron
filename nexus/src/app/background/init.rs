@@ -380,9 +380,8 @@ impl BackgroundTasksInitializer {
         }
 
         driver.register(TaskDefinition {
-            name: "nat_v4_garbage_collector",
-            description:
-                "prunes soft-deleted IPV4 NAT entries from ipv4_nat_entry \
+            name: "nat_garbage_collector",
+            description: "prunes soft-deleted NAT entries from nat_entry \
                  table based on a predetermined retention policy",
             period: config.nat_cleanup.period_secs,
             task_impl: Box::new(nat_cleanup::Ipv4NatGarbageCollector::new(
@@ -438,6 +437,7 @@ impl BackgroundTasksInitializer {
             nexus_id,
             task_saga_recovery.clone(),
             args.mgs_updates_tx,
+            args.saga_recovery.quiesce.clone(),
         );
         let rx_blueprint_exec = blueprint_executor.watcher();
         driver.register(TaskDefinition {
