@@ -1590,6 +1590,22 @@ pub struct UpdatesTrustRoot {
     pub root_role: TufSignedRootRole,
 }
 
+// TODO: figure out how to make target release and last blueprint not optional
+
+// TODO: add problems. see PlanningReport and do_plan
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+pub struct UpdateStatus {
+    /// Current target release information
+    pub target_release: Option<TargetRelease>,
+
+    /// Count of components running each release version
+    pub components_by_release: BTreeMap<String, usize>,
+
+    /// Time when the last blueprint was created
+    pub last_blueprint_time: Option<DateTime<Utc>>,
+}
+
 fn expected_one_of<T: strum::VariantArray + fmt::Display>() -> String {
     use std::fmt::Write;
     let mut msg = "expected one of:".to_string();
