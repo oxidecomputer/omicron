@@ -1001,26 +1001,4 @@ impl SledAgentApi for SledAgentImpl {
             .await
             .map_err(HttpError::from)
     }
-
-    async fn chicken_switch_destroy_orphaned_datasets_get(
-        request_context: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<ChickenSwitchDestroyOrphanedDatasets>, HttpError>
-    {
-        let sa = request_context.context();
-        let destroy_orphans = sa.chicken_switch_destroy_orphaned_datasets();
-        Ok(HttpResponseOk(ChickenSwitchDestroyOrphanedDatasets {
-            destroy_orphans,
-        }))
-    }
-
-    async fn chicken_switch_destroy_orphaned_datasets_put(
-        request_context: RequestContext<Self::Context>,
-        body: TypedBody<ChickenSwitchDestroyOrphanedDatasets>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let ChickenSwitchDestroyOrphanedDatasets { destroy_orphans } =
-            body.into_inner();
-        let sa = request_context.context();
-        sa.set_chicken_switch_destroy_orphaned_datasets(destroy_orphans);
-        Ok(HttpResponseUpdatedNoContent())
-    }
 }

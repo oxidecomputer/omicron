@@ -803,21 +803,5 @@ mod api_impl {
         ) -> Result<http::Response<Body>, HttpError> {
             unimplemented!()
         }
-
-        async fn chicken_switch_destroy_orphaned_datasets_get(
-            _request_context: RequestContext<Self::Context>,
-        ) -> Result<
-            HttpResponseOk<ChickenSwitchDestroyOrphanedDatasets>,
-            HttpError,
-        > {
-            unimplemented!()
-        }
-
-        async fn chicken_switch_destroy_orphaned_datasets_put(
-            _request_context: RequestContext<Self::Context>,
-            _body: TypedBody<ChickenSwitchDestroyOrphanedDatasets>,
-        ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-            unimplemented!()
-        }
     }
 }
