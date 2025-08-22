@@ -314,6 +314,15 @@ impl SledEditor {
         }
     }
 
+    pub fn host_phase_2(&self) -> BlueprintHostPhase2DesiredSlots {
+        match &self.0 {
+            InnerSledEditor::Active(editor) => editor.host_phase_2(),
+            InnerSledEditor::Decommissioned(edited) => {
+                edited.config.host_phase_2.clone()
+            }
+        }
+    }
+
     /// Returns the remove_mupdate_override field for this sled.
     pub fn get_remove_mupdate_override(&self) -> Option<MupdateOverrideUuid> {
         match &self.0 {
@@ -638,6 +647,10 @@ impl ActiveSledEditor {
         self.zones.zones(filter)
     }
 
+    pub fn host_phase_2(&self) -> BlueprintHostPhase2DesiredSlots {
+        self.host_phase_2.value()
+    }
+
     pub fn ensure_disk(
         &mut self,
         disk: BlueprintPhysicalDiskConfig,
@@ -854,6 +867,7 @@ impl ActiveSledEditor {
                                     mupdate_override_id: inv_override
                                         .mupdate_override_id,
                                     zones,
+                                    host_phase_2: eligible.host_phase_2.clone(),
                                 },
                             );
                         }
@@ -918,6 +932,7 @@ impl ActiveSledEditor {
                             NoopConvertSledIneligibleReason::MupdateOverride {
                                 mupdate_override_id,
                                 zones,
+                                host_phase_2,
                             },
                         ) => {
                             // Check that the mupdate override is the same as
@@ -931,7 +946,10 @@ impl ActiveSledEditor {
                                 let zones =
                                     mem::replace(zones, IdOrdMap::new());
                                 info.status = NoopConvertSledStatus::Eligible(
-                                    NoopConvertSledEligible { zones },
+                                    NoopConvertSledEligible {
+                                        zones,
+                                        host_phase_2: host_phase_2.clone(),
+                                    },
                                 );
                                 Ok(EnsureMupdateOverrideAction::BpClearOverride {
                                     prev_bp_override: bp_override,
