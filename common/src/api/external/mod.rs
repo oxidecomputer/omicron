@@ -3421,6 +3421,13 @@ pub struct TufArtifactMeta {
     /// The size of the artifact in bytes.
     pub size: u64,
 
+    /// Contents of the `BORD` field of a Hubris archive caboose. Only
+    /// applicable to artifacts that are Hubris archives.
+    ///
+    /// This field should always be `Some(_)` if `sign` is `Some(_)`, but the
+    /// opposite is not true (SP images will have a `board` but not a `sign`).
+    pub board: Option<String>,
+
     /// Contents of the `SIGN` field of a Hubris archive caboose, i.e.,
     /// an identifier for the set of valid signing keys. Currently only
     /// applicable to RoT image and bootloader artifacts, where it will

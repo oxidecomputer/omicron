@@ -633,7 +633,10 @@ impl<'a> Planner<'a> {
                 continue;
             }
 
-            if zone_counts.num_eligible > 0 {
+            if zone_counts.num_eligible > 0
+                || eligible.host_phase_2.slot_a.is_eligible()
+                || eligible.host_phase_2.slot_b.is_eligible()
+            {
                 report.converted(
                     sled.sled_id,
                     zone_counts.num_eligible,
@@ -5587,6 +5590,7 @@ pub(crate) mod test {
                 },
                 hash: ArtifactHash([0; 32]),
                 size: 0,
+                board: None,
                 sign: None,
             }
         };

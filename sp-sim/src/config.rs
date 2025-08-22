@@ -9,6 +9,7 @@ use crate::sensors;
 use dropshot::ConfigLogging;
 use gateway_messages::DeviceCapabilities;
 use gateway_messages::DevicePresence;
+use nexus_types::inventory::Caboose;
 use serde::Deserialize;
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -71,6 +72,17 @@ impl slog::KV for NetworkConfig {
     }
 }
 
+/// Configuration for every caboose in the SP
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct SpCabooses {
+    pub sp_slot_0: Caboose,
+    pub sp_slot_1: Caboose,
+    pub rot_slot_a: Caboose,
+    pub rot_slot_b: Caboose,
+    pub stage0: Caboose,
+    pub stage0_next: Caboose,
+}
+
 /// Common configuration for all flavors of SP
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct SpCommonConfig {
@@ -101,6 +113,10 @@ pub struct SpCommonConfig {
     /// Fake ereport configuration
     #[serde(default)]
     pub ereport_config: EreportConfig,
+    /// Configurable caboose values. If unset, these will be
+    /// populated with default values
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cabooses: Option<SpCabooses>,
 }
 
 /// Configuration of a simulated SP component
