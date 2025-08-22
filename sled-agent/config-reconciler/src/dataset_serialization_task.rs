@@ -2046,10 +2046,7 @@ mod tests {
 
         // Destroy all orphans.
         let orphans = task_handle
-            .datasets_destroy_orphans(
-                dataset_configs,
-                currently_managed_zpools,
-            )
+            .datasets_destroy_orphans(dataset_configs, currently_managed_zpools)
             .await
             .expect("no task error")
             .expect("no zfs error");

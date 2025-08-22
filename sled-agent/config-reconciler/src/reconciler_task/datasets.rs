@@ -71,16 +71,10 @@ impl OmicronDatasets {
                 },
             })
             .collect();
-        Self {
-            datasets,
-            orphaned_datasets: IdOrdMap::new(),
-            dataset_task,
-        }
+        Self { datasets, orphaned_datasets: IdOrdMap::new(), dataset_task }
     }
 
-    pub(super) fn new(
-        dataset_task: DatasetTaskHandle,
-    ) -> Self {
+    pub(super) fn new(dataset_task: DatasetTaskHandle) -> Self {
         Self {
             datasets: IdMap::default(),
             orphaned_datasets: IdOrdMap::new(),
