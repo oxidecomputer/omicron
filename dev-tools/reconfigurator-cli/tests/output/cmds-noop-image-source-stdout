@@ -39,11 +39,10 @@ created repo-2.0.0.zip for system version 2.0.0
 > set target-release repo-1.0.0.zip
 INFO extracting uploaded archive to <EXTRACTING_UPLOADED_ARCHIVE_TO_REDACTED>
 INFO created directory to store extracted artifacts, path: <CREATED_DIRECTORY_TO_STORE_EXTRACTED_ARTIFACTS_PATH_REDACTED>
-INFO added artifact, name: installinator_document, kind: installinator_document, version: 1.0.0, hash: c6ae866031d1183094c92cde9d9d1fd5f18356abc81a842ce31471b473fd5582, length: 367
-INFO added artifact, name: SimGimletSp, kind: gimlet_sp, version: 1.0.0, hash: 68465b8e3f808f475510b525cfd62086d37ddd57688bd854184fdafb2b2198a4, length: 732
-INFO added artifact, name: SimRot, kind: gimlet_rot_image_a, version: 1.0.0, hash: d11e65f934bf0de51df2e5b484f61ee72072417b43ac87f33e958008428e7b02, length: 783
-INFO added artifact, name: SimRot, kind: gimlet_rot_image_b, version: 1.0.0, hash: d11e65f934bf0de51df2e5b484f61ee72072417b43ac87f33e958008428e7b02, length: 783
-INFO added artifact, name: SimRot, kind: gimlet_rot_bootloader, version: 1.0.0, hash: 5b0f601b1fbb8674db9c751a02f8b14f8e6d4e8470f4f7b686fecb2c49ec11f9, length: 797
+INFO added artifact, name: fake-gimlet-sp, kind: gimlet_sp, version: 1.0.0, hash: 68465b8e3f808f475510b525cfd62086d37ddd57688bd854184fdafb2b2198a4, length: 732
+INFO added artifact, name: fake-rot, kind: gimlet_rot_image_a, version: 1.0.0, hash: d11e65f934bf0de51df2e5b484f61ee72072417b43ac87f33e958008428e7b02, length: 783
+INFO added artifact, name: fake-rot, kind: gimlet_rot_image_b, version: 1.0.0, hash: d11e65f934bf0de51df2e5b484f61ee72072417b43ac87f33e958008428e7b02, length: 783
+INFO added artifact, name: fake-rot-bootloader, kind: gimlet_rot_bootloader, version: 1.0.0, hash: 5b0f601b1fbb8674db9c751a02f8b14f8e6d4e8470f4f7b686fecb2c49ec11f9, length: 797
 INFO added artifact, name: fake-host, kind: host_phase_1, version: 1.0.0, hash: 2053f8594971bbf0a7326c833e2ffc12b065b9d823b9c0b967d275fa595e4e89, length: 524288
 INFO added artifact, name: fake-host, kind: host_phase_2, version: 1.0.0, hash: f3dd0c7a1bd4500ea0d8bcf67581f576d47752b2f1998a4cb0f0c3155c483008, length: 1048576
 INFO added artifact, name: fake-trampoline, kind: trampoline_phase_1, version: 1.0.0, hash: 9b7575cad720f017e936fe5994fc4e21fe040acaaf83c2edd86132aa3d667c7b, length: 524288
@@ -67,6 +66,7 @@ INFO added artifact, name: fake-switch-sp, kind: switch_sp, version: 1.0.0, hash
 INFO added artifact, name: fake-switch-rot, kind: switch_rot_image_a, version: 1.0.0, hash: 32307d6d75c9707e8499ba4a4d379f99c0358237b6e190ff6a8024b470f62342, length: 774
 INFO added artifact, name: fake-switch-rot, kind: switch_rot_image_b, version: 1.0.0, hash: 32307d6d75c9707e8499ba4a4d379f99c0358237b6e190ff6a8024b470f62342, length: 774
 INFO added artifact, name: fake-switch-rot-bootloader, kind: switch_rot_bootloader, version: 1.0.0, hash: 70836d170abd5621f95bb4225987b27b3d3dd6168e73cd60e44309bdfeb94e98, length: 804
+INFO added artifact, name: installinator_document, kind: installinator_document, version: 1.0.0, hash: c6ae866031d1183094c92cde9d9d1fd5f18356abc81a842ce31471b473fd5582, length: 367
 set target release based on repo-1.0.0.zip
 
 
@@ -104,7 +104,6 @@ sled aff6c093-197d-42c5-ad80-9f10ba051a34: install dataset updated: to target re
 > sled-update-install-dataset serial4 --from-repo repo-2.0.0.zip
 INFO extracting uploaded archive to <EXTRACTING_UPLOADED_ARCHIVE_TO_REDACTED>
 INFO created directory to store extracted artifacts, path: <CREATED_DIRECTORY_TO_STORE_EXTRACTED_ARTIFACTS_PATH_REDACTED>
-INFO added artifact, name: installinator_document, kind: installinator_document, version: 2.0.0, hash: 065b2b7cde09474c9a1bcf98a8f9c93129f617e074404c6aa76164f440a5627f, length: 367
 INFO added artifact, name: fake-gimlet-sp, kind: gimlet_sp, version: 2.0.0, hash: ac329e461b20cfdeaeb225456226b1dc3042e7254d238cc2ccf2903b18a69991, length: 731
 INFO added artifact, name: fake-gimlet-rot, kind: gimlet_rot_image_a, version: 2.0.0, hash: 3ab29e804bcbf382370f9f071b2f0ed71e5bb6af8b01474fcc2a414caccfc9be, length: 782
 INFO added artifact, name: fake-gimlet-rot, kind: gimlet_rot_image_b, version: 2.0.0, hash: 3ab29e804bcbf382370f9f071b2f0ed71e5bb6af8b01474fcc2a414caccfc9be, length: 782
@@ -132,6 +131,7 @@ INFO added artifact, name: fake-switch-sp, kind: switch_sp, version: 2.0.0, hash
 INFO added artifact, name: fake-switch-rot, kind: switch_rot_image_a, version: 2.0.0, hash: ad32d98232043a39d076b5b90b506fad406767e0ce1298507e1733bc4e576740, length: 791
 INFO added artifact, name: fake-switch-rot, kind: switch_rot_image_b, version: 2.0.0, hash: ad32d98232043a39d076b5b90b506fad406767e0ce1298507e1733bc4e576740, length: 791
 INFO added artifact, name: fake-switch-rot-bootloader, kind: switch_rot_bootloader, version: non-semver-2, hash: ceae102fa428d81aa6c5d9e1c742fb9ca1091ce5b2797ed0bb14615cf678d342, length: 811
+INFO added artifact, name: installinator_document, kind: installinator_document, version: 2.0.0, hash: 065b2b7cde09474c9a1bcf98a8f9c93129f617e074404c6aa76164f440a5627f, length: 367
 sled b82ede02-399c-48c6-a1de-411df4fa49a7: install dataset updated: from repo at repo-2.0.0.zip (system version 2.0.0)
 
 

@@ -32,11 +32,10 @@ created repo-1.0.0.zip for system version 1.0.0
 > set target-release repo-1.0.0.zip
 INFO extracting uploaded archive to <EXTRACTING_UPLOADED_ARCHIVE_TO_REDACTED>
 INFO created directory to store extracted artifacts, path: <CREATED_DIRECTORY_TO_STORE_EXTRACTED_ARTIFACTS_PATH_REDACTED>
-INFO added artifact, name: installinator_document, kind: installinator_document, version: 1.0.0, hash: c6ae866031d1183094c92cde9d9d1fd5f18356abc81a842ce31471b473fd5582, length: 367
-INFO added artifact, name: SimGimletSp, kind: gimlet_sp, version: 1.0.0, hash: 68465b8e3f808f475510b525cfd62086d37ddd57688bd854184fdafb2b2198a4, length: 732
-INFO added artifact, name: SimRot, kind: gimlet_rot_image_a, version: 1.0.0, hash: d11e65f934bf0de51df2e5b484f61ee72072417b43ac87f33e958008428e7b02, length: 783
-INFO added artifact, name: SimRot, kind: gimlet_rot_image_b, version: 1.0.0, hash: d11e65f934bf0de51df2e5b484f61ee72072417b43ac87f33e958008428e7b02, length: 783
-INFO added artifact, name: SimRot, kind: gimlet_rot_bootloader, version: 1.0.0, hash: 5b0f601b1fbb8674db9c751a02f8b14f8e6d4e8470f4f7b686fecb2c49ec11f9, length: 797
+INFO added artifact, name: fake-gimlet-sp, kind: gimlet_sp, version: 1.0.0, hash: 68465b8e3f808f475510b525cfd62086d37ddd57688bd854184fdafb2b2198a4, length: 732
+INFO added artifact, name: fake-rot, kind: gimlet_rot_image_a, version: 1.0.0, hash: d11e65f934bf0de51df2e5b484f61ee72072417b43ac87f33e958008428e7b02, length: 783
+INFO added artifact, name: fake-rot, kind: gimlet_rot_image_b, version: 1.0.0, hash: d11e65f934bf0de51df2e5b484f61ee72072417b43ac87f33e958008428e7b02, length: 783
+INFO added artifact, name: fake-rot-bootloader, kind: gimlet_rot_bootloader, version: 1.0.0, hash: 5b0f601b1fbb8674db9c751a02f8b14f8e6d4e8470f4f7b686fecb2c49ec11f9, length: 797
 INFO added artifact, name: fake-host, kind: host_phase_1, version: 1.0.0, hash: 2053f8594971bbf0a7326c833e2ffc12b065b9d823b9c0b967d275fa595e4e89, length: 524288
 INFO added artifact, name: fake-host, kind: host_phase_2, version: 1.0.0, hash: f3dd0c7a1bd4500ea0d8bcf67581f576d47752b2f1998a4cb0f0c3155c483008, length: 1048576
 INFO added artifact, name: fake-trampoline, kind: trampoline_phase_1, version: 1.0.0, hash: 9b7575cad720f017e936fe5994fc4e21fe040acaaf83c2edd86132aa3d667c7b, length: 524288
@@ -60,6 +59,7 @@ INFO added artifact, name: fake-switch-sp, kind: switch_sp, version: 1.0.0, hash
 INFO added artifact, name: fake-switch-rot, kind: switch_rot_image_a, version: 1.0.0, hash: 32307d6d75c9707e8499ba4a4d379f99c0358237b6e190ff6a8024b470f62342, length: 774
 INFO added artifact, name: fake-switch-rot, kind: switch_rot_image_b, version: 1.0.0, hash: 32307d6d75c9707e8499ba4a4d379f99c0358237b6e190ff6a8024b470f62342, length: 774
 INFO added artifact, name: fake-switch-rot-bootloader, kind: switch_rot_bootloader, version: 1.0.0, hash: 70836d170abd5621f95bb4225987b27b3d3dd6168e73cd60e44309bdfeb94e98, length: 804
+INFO added artifact, name: installinator_document, kind: installinator_document, version: 1.0.0, hash: c6ae866031d1183094c92cde9d9d1fd5f18356abc81a842ce31471b473fd5582, length: 367
 set target release based on repo-1.0.0.zip
 
 
@@ -71,11 +71,10 @@ internal DNS generations: 1
 external DNS generations: 1
 target number of Nexus instances: default
 target release (generation 2): 1.0.0 (system-update-v1.0.0.zip)
-    artifact: c6ae866031d1183094c92cde9d9d1fd5f18356abc81a842ce31471b473fd5582 installinator_document (installinator_document version 1.0.0)
-    artifact: 68465b8e3f808f475510b525cfd62086d37ddd57688bd854184fdafb2b2198a4 gimlet_sp (SimGimletSp version 1.0.0)
-    artifact: d11e65f934bf0de51df2e5b484f61ee72072417b43ac87f33e958008428e7b02 gimlet_rot_image_a (SimRot version 1.0.0)
-    artifact: d11e65f934bf0de51df2e5b484f61ee72072417b43ac87f33e958008428e7b02 gimlet_rot_image_b (SimRot version 1.0.0)
-    artifact: 5b0f601b1fbb8674db9c751a02f8b14f8e6d4e8470f4f7b686fecb2c49ec11f9 gimlet_rot_bootloader (SimRot version 1.0.0)
+    artifact: 68465b8e3f808f475510b525cfd62086d37ddd57688bd854184fdafb2b2198a4 gimlet_sp (fake-gimlet-sp version 1.0.0)
+    artifact: d11e65f934bf0de51df2e5b484f61ee72072417b43ac87f33e958008428e7b02 gimlet_rot_image_a (fake-rot version 1.0.0)
+    artifact: d11e65f934bf0de51df2e5b484f61ee72072417b43ac87f33e958008428e7b02 gimlet_rot_image_b (fake-rot version 1.0.0)
+    artifact: 5b0f601b1fbb8674db9c751a02f8b14f8e6d4e8470f4f7b686fecb2c49ec11f9 gimlet_rot_bootloader (fake-rot-bootloader version 1.0.0)
     artifact: 2053f8594971bbf0a7326c833e2ffc12b065b9d823b9c0b967d275fa595e4e89 host_phase_1 (fake-host version 1.0.0)
     artifact: f3dd0c7a1bd4500ea0d8bcf67581f576d47752b2f1998a4cb0f0c3155c483008 host_phase_2 (fake-host version 1.0.0)
     artifact: 9b7575cad720f017e936fe5994fc4e21fe040acaaf83c2edd86132aa3d667c7b trampoline_phase_1 (fake-trampoline version 1.0.0)
@@ -99,6 +98,7 @@ target release (generation 2): 1.0.0 (system-update-v1.0.0.zip)
     artifact: 32307d6d75c9707e8499ba4a4d379f99c0358237b6e190ff6a8024b470f62342 switch_rot_image_a (fake-switch-rot version 1.0.0)
     artifact: 32307d6d75c9707e8499ba4a4d379f99c0358237b6e190ff6a8024b470f62342 switch_rot_image_b (fake-switch-rot version 1.0.0)
     artifact: 70836d170abd5621f95bb4225987b27b3d3dd6168e73cd60e44309bdfeb94e98 switch_rot_bootloader (fake-switch-rot-bootloader version 1.0.0)
+    artifact: c6ae866031d1183094c92cde9d9d1fd5f18356abc81a842ce31471b473fd5582 installinator_document (installinator_document version 1.0.0)
 chicken switches:
     add zones with mupdate override:   false
 
@@ -149,11 +149,10 @@ internal DNS generations: 1
 external DNS generations: 1
 target number of Nexus instances: default
 target release (generation 2): 1.0.0 (system-update-v1.0.0.zip)
-    artifact: c6ae866031d1183094c92cde9d9d1fd5f18356abc81a842ce31471b473fd5582 installinator_document (installinator_document version 1.0.0)
-    artifact: 68465b8e3f808f475510b525cfd62086d37ddd57688bd854184fdafb2b2198a4 gimlet_sp (SimGimletSp version 1.0.0)
-    artifact: d11e65f934bf0de51df2e5b484f61ee72072417b43ac87f33e958008428e7b02 gimlet_rot_image_a (SimRot version 1.0.0)
-    artifact: d11e65f934bf0de51df2e5b484f61ee72072417b43ac87f33e958008428e7b02 gimlet_rot_image_b (SimRot version 1.0.0)
-    artifact: 5b0f601b1fbb8674db9c751a02f8b14f8e6d4e8470f4f7b686fecb2c49ec11f9 gimlet_rot_bootloader (SimRot version 1.0.0)
+    artifact: 68465b8e3f808f475510b525cfd62086d37ddd57688bd854184fdafb2b2198a4 gimlet_sp (fake-gimlet-sp version 1.0.0)
+    artifact: d11e65f934bf0de51df2e5b484f61ee72072417b43ac87f33e958008428e7b02 gimlet_rot_image_a (fake-rot version 1.0.0)
+    artifact: d11e65f934bf0de51df2e5b484f61ee72072417b43ac87f33e958008428e7b02 gimlet_rot_image_b (fake-rot version 1.0.0)
+    artifact: 5b0f601b1fbb8674db9c751a02f8b14f8e6d4e8470f4f7b686fecb2c49ec11f9 gimlet_rot_bootloader (fake-rot-bootloader version 1.0.0)
     artifact: 2053f8594971bbf0a7326c833e2ffc12b065b9d823b9c0b967d275fa595e4e89 host_phase_1 (fake-host version 1.0.0)
     artifact: f3dd0c7a1bd4500ea0d8bcf67581f576d47752b2f1998a4cb0f0c3155c483008 host_phase_2 (fake-host version 1.0.0)
     artifact: 9b7575cad720f017e936fe5994fc4e21fe040acaaf83c2edd86132aa3d667c7b trampoline_phase_1 (fake-trampoline version 1.0.0)
@@ -177,6 +176,7 @@ target release (generation 2): 1.0.0 (system-update-v1.0.0.zip)
     artifact: 32307d6d75c9707e8499ba4a4d379f99c0358237b6e190ff6a8024b470f62342 switch_rot_image_a (fake-switch-rot version 1.0.0)
     artifact: 32307d6d75c9707e8499ba4a4d379f99c0358237b6e190ff6a8024b470f62342 switch_rot_image_b (fake-switch-rot version 1.0.0)
     artifact: 70836d170abd5621f95bb4225987b27b3d3dd6168e73cd60e44309bdfeb94e98 switch_rot_bootloader (fake-switch-rot-bootloader version 1.0.0)
+    artifact: c6ae866031d1183094c92cde9d9d1fd5f18356abc81a842ce31471b473fd5582 installinator_document (installinator_document version 1.0.0)
 chicken switches:
     add zones with mupdate override:   false
 
