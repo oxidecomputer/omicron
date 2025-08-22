@@ -124,6 +124,12 @@ impl HostPhase2TestContext {
                 bind_address: "[::1]:0".parse().unwrap(),
                 ..Default::default()
             })
+            .version_policy(dropshot::VersionPolicy::Dynamic(Box::new(
+                dropshot::ClientSpecifiesVersionInHeader::new(
+                    omicron_common::api::VERSION_HEADER,
+                    sled_agent_api::VERSION_REMOVE_DESTROY_ORPHANED_DATASETS_CHICKEN_SWITCH,
+                ),
+            )))
             .start()
             .context("failed to create dropshot server")?
         };
