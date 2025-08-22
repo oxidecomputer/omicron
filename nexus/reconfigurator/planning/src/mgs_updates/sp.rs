@@ -101,10 +101,10 @@ pub fn try_make_update_sp(
         .filter(|a| {
             // A matching SP artifact will have:
             //
-            // - "name" matching the board name (found above from caboose)
+            // - "board" matching the board name (found above from caboose)
             // - "kind" matching one of the known SP kinds
 
-            if a.id.name != *board {
+            if a.board.as_ref() != Some(board) {
                 return false;
             }
 

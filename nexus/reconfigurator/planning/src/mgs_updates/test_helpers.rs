@@ -301,6 +301,7 @@ impl TestBoards {
             name: &str,
             kind: ArtifactKind,
             hash: ArtifactHash,
+            board: Option<&str>,
             sign: Option<Vec<u8>>,
         ) -> TufArtifactMeta {
             TufArtifactMeta {
@@ -311,6 +312,7 @@ impl TestBoards {
                 },
                 hash,
                 size: 0, // unused here
+                board: board.map(|s| s.to_string()),
                 sign,
             }
         }
@@ -323,11 +325,13 @@ impl TestBoards {
                 KnownArtifactKind::ControlPlane.into(),
                 ARTIFACT_HASH_CONTROL_PLANE,
                 None,
+                None,
             ),
             make_artifact(
                 "nexus",
                 KnownArtifactKind::Zone.into(),
                 ARTIFACT_HASH_NEXUS,
+                None,
                 None,
             ),
             make_artifact(
@@ -335,113 +339,130 @@ impl TestBoards {
                 ArtifactKind::HOST_PHASE_1,
                 ARTIFACT_HASH_HOST_PHASE_1,
                 None,
+                None,
             ),
             make_artifact(
                 "host-os-phase-2",
                 ArtifactKind::HOST_PHASE_2,
                 ARTIFACT_HASH_HOST_PHASE_2,
                 None,
+                None,
             ),
             make_artifact(
                 "gimlet-d",
                 KnownArtifactKind::GimletSp.into(),
                 test_artifact_for_board("gimlet-d"),
+                Some("gimlet-d"),
                 None,
             ),
             make_artifact(
                 "gimlet-e",
                 KnownArtifactKind::GimletSp.into(),
                 test_artifact_for_board("gimlet-e"),
+                Some("gimlet-e"),
                 None,
             ),
             make_artifact(
                 "sidecar-b",
                 KnownArtifactKind::SwitchSp.into(),
                 test_artifact_for_board("sidecar-b"),
+                Some("sidecar-b"),
                 None,
             ),
             make_artifact(
                 "sidecar-c",
                 KnownArtifactKind::SwitchSp.into(),
                 test_artifact_for_board("sidecar-c"),
+                Some("sidecar-c"),
                 None,
             ),
             make_artifact(
                 "psc-b",
                 KnownArtifactKind::PscSp.into(),
                 test_artifact_for_board("psc-b"),
+                Some("psc-b"),
                 None,
             ),
             make_artifact(
                 "psc-c",
                 KnownArtifactKind::PscSp.into(),
                 test_artifact_for_board("psc-c"),
+                Some("psc-c"),
                 None,
             ),
             make_artifact(
-                "oxide-rot-1",
+                "oxide-rot-1-fake-key",
                 ArtifactKind::GIMLET_ROT_IMAGE_A,
                 test_artifact_for_artifact_kind(
                     ArtifactKind::GIMLET_ROT_IMAGE_A,
                 ),
+                Some("oxide-rot-1"),
                 Some(ROT_SIGN_GIMLET.into()),
             ),
             make_artifact(
-                "oxide-rot-1",
+                "oxide-rot-1-fake-key",
                 ArtifactKind::GIMLET_ROT_IMAGE_B,
                 test_artifact_for_artifact_kind(
                     ArtifactKind::GIMLET_ROT_IMAGE_B,
                 ),
+                Some("oxide-rot-1"),
                 Some(ROT_SIGN_GIMLET.into()),
             ),
             make_artifact(
-                "oxide-rot-1",
+                "oxide-rot-1-fake-key",
                 ArtifactKind::PSC_ROT_IMAGE_A,
                 test_artifact_for_artifact_kind(ArtifactKind::PSC_ROT_IMAGE_A),
+                Some("oxide-rot-1"),
                 Some(ROT_SIGN_PSC.into()),
             ),
             make_artifact(
-                "oxide-rot-1",
+                "oxide-rot-1-fake-key",
                 ArtifactKind::PSC_ROT_IMAGE_B,
                 test_artifact_for_artifact_kind(ArtifactKind::PSC_ROT_IMAGE_B),
+                Some("oxide-rot-1"),
                 Some(ROT_SIGN_PSC.into()),
             ),
             make_artifact(
-                "oxide-rot-1",
+                "oxide-rot-1-fake-key",
                 ArtifactKind::SWITCH_ROT_IMAGE_A,
                 test_artifact_for_artifact_kind(
                     ArtifactKind::SWITCH_ROT_IMAGE_A,
                 ),
+                Some("oxide-rot-1"),
                 Some(ROT_SIGN_SWITCH.into()),
             ),
             make_artifact(
-                "oxide-rot-1",
+                "oxide-rot-1-fake-key",
                 ArtifactKind::SWITCH_ROT_IMAGE_B,
                 test_artifact_for_artifact_kind(
                     ArtifactKind::SWITCH_ROT_IMAGE_B,
                 ),
+                Some("oxide-rot-1"),
                 Some(ROT_SIGN_SWITCH.into()),
             ),
             make_artifact(
-                "oxide-rot-1",
+                "bootloader-fake-key",
                 ArtifactKind::GIMLET_ROT_STAGE0,
                 test_artifact_for_artifact_kind(
                     ArtifactKind::GIMLET_ROT_STAGE0,
                 ),
+                Some("oxide-rot-1"),
                 Some(ROT_SIGN_GIMLET.into()),
             ),
             make_artifact(
-                "oxide-rot-1",
+                "bootloader-fake-key",
                 ArtifactKind::PSC_ROT_STAGE0,
                 test_artifact_for_artifact_kind(ArtifactKind::PSC_ROT_STAGE0),
+                Some("oxide-rot-1"),
                 Some(ROT_SIGN_PSC.into()),
             ),
             make_artifact(
-                "oxide-rot-1",
+                "bootloader-fake-key",
                 ArtifactKind::SWITCH_ROT_STAGE0,
                 test_artifact_for_artifact_kind(
                     ArtifactKind::SWITCH_ROT_STAGE0,
                 ),
+                Some("oxide-rot-1"),
                 Some(ROT_SIGN_SWITCH.into()),
             ),
         ];
