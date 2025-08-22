@@ -80,13 +80,22 @@ impl NexusQuiesceHandle {
                     *q = new_state;
                     true
                 }
-                QuiesceState::Running if quiescing => {
-                    info!(&self.log, "quiesce starting");
-                    *q = new_state;
-                    true
+                QuiesceState::Running => {
+                    if quiescing {
+                        info!(&self.log, "quiesce starting");
+                        *q = new_state;
+                        true
+                    } else {
+                        // We're not quiescing and not being asked to quiesce.
+                        // Nothing to do.
+                        false
+                    }
                 }
-                _ => {
-                    // All other cases are either impossible or no-ops.
+                QuiesceState::DrainingSagas { .. }
+                | QuiesceState::DrainingDb { .. }
+                | QuiesceState::RecordingQuiesce { .. }
+                | QuiesceState::Quiesced { .. } => {
+                    // Once we start quiescing, we never go back.
                     false
                 }
             }

@@ -163,14 +163,13 @@ impl SagaQuiesceHandle {
     /// cannot then re-enable sagas.
     pub fn set_quiescing(&self, quiescing: bool) {
         self.inner.send_if_modified(|q| {
-            let new_state = if quiescing {
-                SagasAllowed::DisallowedQuiesce
-            } else {
-                SagasAllowed::Allowed
-            };
-
             match q.new_sagas_allowed {
                 SagasAllowed::DisallowedUnknown => {
+                    let new_state = if quiescing {
+                        SagasAllowed::DisallowedQuiesce
+                    } else {
+                        SagasAllowed::Allowed
+                    };
                     info!(
                         &self.log,
                         "initial quiesce state";
@@ -179,23 +178,25 @@ impl SagaQuiesceHandle {
                     q.new_sagas_allowed = new_state;
                     true
                 }
-                SagasAllowed::Allowed if quiescing => {
-                    info!(&self.log, "saga quiesce starting");
-                    q.new_sagas_allowed = SagasAllowed::DisallowedQuiesce;
-                    true
+                SagasAllowed::Allowed => {
+                    if quiescing {
+                        info!(&self.log, "saga quiesce starting");
+                        q.new_sagas_allowed = SagasAllowed::DisallowedQuiesce;
+                        true
+                    } else {
+                        false
+                    }
                 }
-                SagasAllowed::DisallowedQuiesce if !quiescing => {
-                    // This should be impossible.  Report a problem.
-                    error!(
-                        &self.log,
-                        "asked to stop quiescing after previously quiescing"
-                    );
-                    false
-                }
-                _ => {
-                    // There's no transition happening in these cases:
-                    // - SagasAllowed::Allowed and we're not quiescing
-                    // - SagasAllowed::DisallowedQuiesce and we're now quiescing
+                SagasAllowed::DisallowedQuiesce => {
+                    if !quiescing {
+                        // This should be impossible.  Report a problem.
+                        error!(
+                            &self.log,
+                            "asked to stop quiescing after previously quiescing"
+                        );
+                    }
+
+                    // Either way, we're not changing anything.
                     false
                 }
             }
@@ -393,7 +394,7 @@ impl SagaQuiesceHandle {
         saga_name: &steno::SagaName,
     ) -> Result<NewlyPendingSagaRef, NoSagasAllowedError> {
         let mut error: Option<NoSagasAllowedError> = None;
-        let okay = self.inner.send_if_modified(|q| {
+        self.inner.send_if_modified(|q| {
             match q.new_sagas_allowed {
                 SagasAllowed::Allowed => (),
                 SagasAllowed::DisallowedQuiesce => {
@@ -417,7 +418,15 @@ impl SagaQuiesceHandle {
             true
         });
 
-        if okay {
+        if let Some(error) = error {
+            info!(
+                &self.log,
+                "disallowing saga creation";
+                "saga_id" => saga_id.to_string(),
+                InlineErrorChain::new(&error),
+            );
+            Err(error)
+        } else {
             let log = self.log.new(o!("saga_id" => saga_id.to_string()));
             info!(&log, "tracking newly created saga");
             Ok(NewlyPendingSagaRef {
@@ -426,16 +435,6 @@ impl SagaQuiesceHandle {
                 saga_id,
                 init_finished: false,
             })
-        } else {
-            let error =
-                error.expect("error is always set when disallowing sagas");
-            info!(
-                &self.log,
-                "disallowing saga creation";
-                "saga_id" => saga_id.to_string(),
-                InlineErrorChain::new(&error),
-            );
-            Err(error)
         }
     }
 
