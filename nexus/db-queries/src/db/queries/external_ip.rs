@@ -866,7 +866,7 @@ impl RunQueryDsl<DbConnection> for NextExternalIp {}
 #[cfg(test)]
 mod tests {
     use crate::authz;
-    use crate::db::datastore::SERVICE_IP_POOL_NAME;
+    use crate::db::datastore::SERVICE_IPV4_POOL_NAME;
     use crate::db::identity::Resource;
     use crate::db::model::IpKind;
     use crate::db::model::IpPool;
@@ -881,6 +881,7 @@ mod tests {
     use nexus_db_model::InstanceCpuCount;
     use nexus_db_model::IpPoolResource;
     use nexus_db_model::IpPoolResourceType;
+    use nexus_db_model::IpVersion;
     use nexus_sled_agent_shared::inventory::ZoneKind;
     use nexus_types::deployment::OmicronZoneExternalFloatingIp;
     use nexus_types::deployment::OmicronZoneExternalIp;
@@ -920,10 +921,13 @@ mod tests {
             range: IpRange,
             is_default: bool,
         ) -> authz::IpPool {
-            let pool = IpPool::new(&IdentityMetadataCreateParams {
-                name: String::from(name).parse().unwrap(),
-                description: format!("ip pool {}", name),
-            });
+            let pool = IpPool::new(
+                &IdentityMetadataCreateParams {
+                    name: name.parse().unwrap(),
+                    description: format!("ip pool {}", name),
+                },
+                IpVersion::V4,
+            );
 
             self.db
                 .datastore()
@@ -1341,7 +1345,7 @@ mod tests {
             Ipv4Addr::new(10, 0, 0, 4),
         ))
         .unwrap();
-        context.initialize_ip_pool(SERVICE_IP_POOL_NAME, ip_range).await;
+        context.initialize_ip_pool(SERVICE_IPV4_POOL_NAME, ip_range).await;
 
         let ip_10_0_0_2 =
             OmicronZoneExternalIp::Floating(OmicronZoneExternalFloatingIp {
@@ -1546,7 +1550,7 @@ mod tests {
             Ipv4Addr::new(10, 0, 0, 4),
         ))
         .unwrap();
-        context.initialize_ip_pool(SERVICE_IP_POOL_NAME, ip_range).await;
+        context.initialize_ip_pool(SERVICE_IPV4_POOL_NAME, ip_range).await;
 
         let ip_10_0_0_5 =
             OmicronZoneExternalIp::Floating(OmicronZoneExternalFloatingIp {

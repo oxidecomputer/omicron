@@ -2954,6 +2954,7 @@ mod tests {
     use crate::db::pub_test_utils::TestDatabase;
     use crate::db::raw_query_builder::QueryBuilder;
     use gateway_types::rot::RotSlot;
+    use nexus_db_model::IpVersion;
     use nexus_inventory::CollectionBuilder;
     use nexus_inventory::now_db_precision;
     use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
@@ -4221,12 +4222,17 @@ mod tests {
             Ipv4Addr::new(10, 0, 0, 10),
         ))
         .unwrap();
-        let (service_ip_pool, _) = datastore
-            .ip_pools_service_lookup(&opctx)
+        let (service_authz_ip_pool, service_ip_pool) = datastore
+            .ip_pools_service_lookup(&opctx, IpVersion::V4)
             .await
             .expect("lookup service ip pool");
         datastore
-            .ip_pool_add_range(&opctx, &service_ip_pool, &ip_range)
+            .ip_pool_add_range(
+                &opctx,
+                &service_authz_ip_pool,
+                &service_ip_pool,
+                &ip_range,
+            )
             .await
             .expect("add range to service ip pool");
         let zone_id = OmicronZoneUuid::new_v4();
@@ -4353,13 +4359,14 @@ mod tests {
                     .map(|(ip, _nic)| ip.ip())
             })
             .expect("found external IP");
-        let (service_ip_pool, _) = datastore
-            .ip_pools_service_lookup(&opctx)
+        let (service_authz_ip_pool, service_ip_pool) = datastore
+            .ip_pools_service_lookup(&opctx, IpVersion::V4)
             .await
             .expect("lookup service ip pool");
         datastore
             .ip_pool_add_range(
                 &opctx,
+                &service_authz_ip_pool,
                 &service_ip_pool,
                 &IpRange::try_from((nexus_ip, nexus_ip))
                     .expect("valid IP range"),
