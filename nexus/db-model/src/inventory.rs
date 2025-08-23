@@ -2918,7 +2918,7 @@ pub struct InvCockroachStatus {
 impl InvCockroachStatus {
     pub fn new(
         inv_collection_id: CollectionUuid,
-        node_id: omicron_cockroach_metrics::NodeId,
+        node_id: cockroach_admin_types::NodeId,
         status: &CockroachStatus,
     ) -> Result<Self, anyhow::Error> {
         Ok(Self {
