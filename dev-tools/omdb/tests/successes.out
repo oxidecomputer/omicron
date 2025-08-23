@@ -32,9 +32,7 @@ changes:                    names added: 3, names removed: 0
 
 +  @                                                  NS   ns1.oxide-dev.test
 +  ns1                                                AAAA ::1
-+  test-suite-silo.sys                                (records: 2)
-+      A    127.0.0.1
-+      AAAA 100::1
++  test-suite-silo.sys                                A    127.0.0.1
 ---------------------------------------------
 stderr:
 note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
@@ -48,9 +46,7 @@ External zone: oxide-dev.test
   NAME                                               RECORDS
   @                                                  NS   ns1.oxide-dev.test
   ns1                                                AAAA ::1
-  test-suite-silo.sys                                (records: 2)
-      A    127.0.0.1
-      AAAA 100::1
+  test-suite-silo.sys                                A    127.0.0.1
 ---------------------------------------------
 stderr:
 note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
@@ -1541,7 +1537,6 @@ parent:    <none>
     oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_external_dns_..........<REDACTED_UUID>...........      ..........<REDACTED_UUID>...........   in service    none    none          off        
     oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_internal_dns_..........<REDACTED_UUID>...........      ..........<REDACTED_UUID>...........   in service    none    none          off        
     oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_nexus_..........<REDACTED_UUID>...........             ..........<REDACTED_UUID>...........   in service    none    none          off        
-    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_nexus_..........<REDACTED_UUID>...........             ..........<REDACTED_UUID>...........   in service    none    none          off        
     oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_ntp_..........<REDACTED_UUID>...........               ..........<REDACTED_UUID>...........   in service    none    none          off        
 
 
@@ -1556,7 +1551,6 @@ parent:    <none>
     external_dns      ..........<REDACTED_UUID>...........   install dataset   in service    ::1             
     internal_dns      ..........<REDACTED_UUID>...........   install dataset   in service    ::1             
     nexus             ..........<REDACTED_UUID>...........   install dataset   in service    ::ffff:127.0.0.1
-    nexus             ..........<REDACTED_UUID>...........   install dataset   in service    ::1             
 
 
  COCKROACHDB SETTINGS:
@@ -1667,7 +1661,6 @@ parent:    <none>
     oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_external_dns_..........<REDACTED_UUID>...........      ..........<REDACTED_UUID>...........   in service    none    none          off        
     oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_internal_dns_..........<REDACTED_UUID>...........      ..........<REDACTED_UUID>...........   in service    none    none          off        
     oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_nexus_..........<REDACTED_UUID>...........             ..........<REDACTED_UUID>...........   in service    none    none          off        
-    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_nexus_..........<REDACTED_UUID>...........             ..........<REDACTED_UUID>...........   in service    none    none          off        
     oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_ntp_..........<REDACTED_UUID>...........               ..........<REDACTED_UUID>...........   in service    none    none          off        
 
 
@@ -1682,7 +1675,6 @@ parent:    <none>
     external_dns      ..........<REDACTED_UUID>...........   install dataset   in service    ::1             
     internal_dns      ..........<REDACTED_UUID>...........   install dataset   in service    ::1             
     nexus             ..........<REDACTED_UUID>...........   install dataset   in service    ::ffff:127.0.0.1
-    nexus             ..........<REDACTED_UUID>...........   install dataset   in service    ::1             
 
 
  COCKROACHDB SETTINGS:
