@@ -28,7 +28,6 @@ use oxnet::Ipv4Net;
 use parse_display::Display;
 use parse_display::FromStr;
 use rand::Rng;
-use rand::thread_rng;
 use schemars::JsonSchema;
 use semver::Version;
 use serde::Deserialize;
@@ -2303,15 +2302,15 @@ impl MacAddr {
 
     /// Generate a random MAC address for a guest network interface
     pub fn random_guest() -> Self {
-        let value =
-            thread_rng().gen_range(Self::MIN_GUEST_ADDR..=Self::MAX_GUEST_ADDR);
+        let value = rand::rng()
+            .random_range(Self::MIN_GUEST_ADDR..=Self::MAX_GUEST_ADDR);
         Self::from_i64(value)
     }
 
     /// Generate a random MAC address in the system address range
     pub fn random_system() -> Self {
-        let value = thread_rng()
-            .gen_range((Self::MAX_SYSTEM_RESV + 1)..=Self::MAX_SYSTEM_ADDR);
+        let value = rand::rng()
+            .random_range((Self::MAX_SYSTEM_RESV + 1)..=Self::MAX_SYSTEM_ADDR);
         Self::from_i64(value)
     }
 
@@ -2455,12 +2454,12 @@ impl Vni {
 
     /// Create a new random VNI.
     pub fn random() -> Self {
-        Self(rand::thread_rng().gen_range(Self::MIN_GUEST_VNI..=Self::MAX_VNI))
+        Self(rand::rng().random_range(Self::MIN_GUEST_VNI..=Self::MAX_VNI))
     }
 
     /// Create a new random VNI in the Oxide-reserved space.
     pub fn random_system() -> Self {
-        Self(rand::thread_rng().gen_range(0..Self::MIN_GUEST_VNI))
+        Self(rand::rng().random_range(0..Self::MIN_GUEST_VNI))
     }
 }
 
