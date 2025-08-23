@@ -113,7 +113,9 @@ pub struct NexusState {
 impl NexusState {
     #[allow(clippy::new_without_default)]
     pub fn new() -> NexusState {
-        NexusState { rack_id: RackUuid::new_v4(), configs: IdOrdMap::new() }
+        // We end up replaying events in tqdb, and can't use a random rack
+        // uuid.
+        NexusState { rack_id: RackUuid::nil(), configs: IdOrdMap::new() }
     }
 
     // Create a `ReconfigureMsg` for the latest nexus config

@@ -30,6 +30,14 @@ pub struct PeerMsg {
     pub kind: PeerMsgKind,
 }
 
+impl PeerMsg {
+    #[cfg(feature = "testing")]
+    pub fn equal_except_for_crypto_data(&self, other: &Self) -> bool {
+        self.rack_id == other.rack_id
+            && self.kind.equal_except_for_crypto_data(&other.kind)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "danger_partial_eq_ct_wrapper", derive(PartialEq, Eq))]
 pub enum PeerMsgKind {
@@ -90,6 +98,30 @@ impl PeerMsgKind {
             Self::LrtqShare(_) => "lrtq_share",
             Self::Expunged(_) => "expunged",
             Self::CommitAdvance(_) => "commit_advance",
+        }
+    }
+
+    /// This is useful for our replay tests without having to worry about seeding
+    /// the various random number generators in our production code.
+    #[cfg(feature = "testing")]
+    pub fn equal_except_for_crypto_data(&self, other: &Self) -> bool {
+        match (self, other) {
+            (
+                Self::Prepare { config: config1, .. },
+                Self::Prepare { config: config2, .. },
+            ) => config1.equal_except_for_crypto_data(config2),
+            (Self::Config(config1), Self::Config(config2)) => {
+                config1.equal_except_for_crypto_data(config2)
+            }
+            (
+                Self::Share { epoch: epoch1, .. },
+                Self::Share { epoch: epoch2, .. },
+            ) => epoch1 == epoch2,
+            (Self::LrtqShare(_), Self::LrtqShare(_)) => true,
+            (Self::CommitAdvance(config1), Self::CommitAdvance(config2)) => {
+                config1.equal_except_for_crypto_data(config2)
+            }
+            (s, o) => s == o,
         }
     }
 }

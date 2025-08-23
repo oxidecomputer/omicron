@@ -7,7 +7,7 @@
 use crate::nexus::{NexusConfig, NexusReply};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
-use trust_quorum::{Epoch, PlatformId};
+use trust_quorum::{Envelope, Epoch, PlatformId};
 
 /// An event that can be fed into our system under test (SUT)
 ///
@@ -22,12 +22,30 @@ pub enum Event {
     },
     AbortConfiguration(Epoch),
     SendNexusReplyOnUnderlay(NexusReply),
-    /// Pull an envelope off the bootstrap network and call `Node::handle`
-    DeliverEnvelope {
-        destination: PlatformId,
-    },
+    /// Call `Node::handle` with the given Envelope.
+    ///
+    /// Since replay is deterministic, we actually know what this value is,
+    /// even though a prior event may not have yet sent the message.
+    DeliverEnvelope(Envelope),
     /// Pull a `NexusReply` off the underlay network and update the `NexusState`
-    DeliverNexusReply,
+    DeliverNexusReply(NexusReply),
     CommitConfiguration(PlatformId),
     Reconfigure(NexusConfig),
+}
+
+impl Event {
+    /// Return which nodes the event may have mutated.
+    pub fn affected_nodes(&self) -> Vec<PlatformId> {
+        match self {
+            Self::InitialSetup { config, crashed_nodes, .. } => {
+                config.members.union(&crashed_nodes).cloned().collect()
+            }
+            Self::AbortConfiguration(_) => vec![],
+            Self::SendNexusReplyOnUnderlay(_) => vec![],
+            Self::DeliverEnvelope(envelope) => vec![envelope.to.clone()],
+            Self::DeliverNexusReply(_) => vec![],
+            Self::CommitConfiguration(id) => vec![id.clone()],
+            Self::Reconfigure(_) => vec![],
+        }
+    }
 }
