@@ -280,7 +280,9 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
         .extra_variable_length(
             "cockroachdb_fingerprint",
             &initial_blueprint.cockroachdb_fingerprint,
-        );
+        )
+        // Error numbers vary between operating systems.
+        .field("os error", r"\d+");
 
     let crdb_version =
         initial_blueprint.cockroachdb_setting_preserve_downgrade.to_string();

@@ -582,7 +582,7 @@ task: "crdb_node_id_collector"
   last completed activation: <REDACTED ITERATIONS>, triggered by a dependent task completing
 >>>>>>> 127d5a805 (add the "second" Nexus to the test suite blueprint; fix omdb tests)
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-warning: unknown background task: "crdb_node_id_collector" (don't know how to interpret details: Object {"errors": Array [Object {"err": String("failed to fetch node ID for zone ..........<REDACTED_UUID>........... at http://[::1]:REDACTED_PORT: Communication Error: error sending request for url (http://[::1]:REDACTED_PORT/node/id): error sending request for url (http://[::1]:REDACTED_PORT/node/id): client error (Connect): tcp connect error: Connection refused (os error 146)"), "zone_id": String("..........<REDACTED_UUID>...........")}], "nsuccess": Number(0)})
+warning: unknown background task: "crdb_node_id_collector" (don't know how to interpret details: Object {"errors": Array [Object {"err": String("failed to fetch node ID for zone ..........<REDACTED_UUID>........... at http://[::1]:REDACTED_PORT: Communication Error: error sending request for url (http://[::1]:REDACTED_PORT/node/id): error sending request for url (http://[::1]:REDACTED_PORT/node/id): client error (Connect): tcp connect error: Connection refused (os error <OS_ERROR_REDACTED>)"), "zone_id": String("..........<REDACTED_UUID>...........")}], "nsuccess": Number(0)})
 
 task: "decommissioned_disk_cleaner"
   configured period: every <REDACTED_DURATION>m
@@ -1140,7 +1140,7 @@ task: "crdb_node_id_collector"
   last completed activation: <REDACTED ITERATIONS>, triggered by a dependent task completing
 >>>>>>> 127d5a805 (add the "second" Nexus to the test suite blueprint; fix omdb tests)
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-warning: unknown background task: "crdb_node_id_collector" (don't know how to interpret details: Object {"errors": Array [Object {"err": String("failed to fetch node ID for zone ..........<REDACTED_UUID>........... at http://[::1]:REDACTED_PORT: Communication Error: error sending request for url (http://[::1]:REDACTED_PORT/node/id): error sending request for url (http://[::1]:REDACTED_PORT/node/id): client error (Connect): tcp connect error: Connection refused (os error 146)"), "zone_id": String("..........<REDACTED_UUID>...........")}], "nsuccess": Number(0)})
+warning: unknown background task: "crdb_node_id_collector" (don't know how to interpret details: Object {"errors": Array [Object {"err": String("failed to fetch node ID for zone ..........<REDACTED_UUID>........... at http://[::1]:REDACTED_PORT: Communication Error: error sending request for url (http://[::1]:REDACTED_PORT/node/id): error sending request for url (http://[::1]:REDACTED_PORT/node/id): client error (Connect): tcp connect error: Connection refused (os error <OS_ERROR_REDACTED>)"), "zone_id": String("..........<REDACTED_UUID>...........")}], "nsuccess": Number(0)})
 
 task: "decommissioned_disk_cleaner"
   configured period: every <REDACTED_DURATION>m
