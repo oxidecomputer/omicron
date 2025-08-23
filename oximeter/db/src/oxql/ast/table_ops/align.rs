@@ -358,7 +358,8 @@ fn mean_delta_value_in_window(
         .copied()
         .zip(times.into_iter().copied())
         .zip(vals.into_iter().copied());
-    let count = (last_timestamp - first_timestamp).max(1) as f64;
+    let diff = window_end - window_start;
+    let count = diff.num_seconds().max(1) as f64;
     let mut maybe_sum = None;
     for it in iter.filter_map(|((start, time), maybe_val)| {
         let Some(val) = maybe_val else {
@@ -592,6 +593,279 @@ mod tests {
             input_points.last().unwrap().unwrap() / 2.0,
             "This overlaps the last interval by half",
         );
+    }
+
+    #[test]
+    fn test_mean_delta_value_in_window_steady_state() {
+        // 1000 bytes every 10 seconds -> 100 bytes per second
+        let raw_data = &[
+            ("2025-08-12T19:17:00.0000Z", "2025-08-12T19:17:10.0000Z", 1000f64),
+            ("2025-08-12T19:17:10.0000Z", "2025-08-12T19:17:20.0000Z", 1000f64),
+            ("2025-08-12T19:17:20.0000Z", "2025-08-12T19:17:30.0000Z", 1000f64),
+            ("2025-08-12T19:17:30.0000Z", "2025-08-12T19:17:40.0000Z", 1000f64),
+            ("2025-08-12T19:17:40.0000Z", "2025-08-12T19:17:50.0000Z", 1000f64),
+            ("2025-08-12T19:17:50.0000Z", "2025-08-12T19:18:00.0000Z", 1000f64),
+        ];
+
+        let start_times: Vec<DateTime<Utc>> =
+            raw_data.into_iter().map(|r| r.0.parse().unwrap()).collect();
+        let timestamps: Vec<DateTime<Utc>> =
+            raw_data.into_iter().map(|r| r.1.parse().unwrap()).collect();
+
+        let input_points: Vec<_> =
+            raw_data.into_iter().map(|r| Some(r.2)).collect();
+
+        let window_start = start_times[0];
+        let window_end = timestamps[timestamps.len() - 1];
+
+        let mean = mean_delta_value_in_window(
+            &start_times,
+            &timestamps,
+            &input_points,
+            window_start,
+            window_end,
+        )
+        .unwrap();
+        assert_eq!(mean.floor(), 100.0);
+    }
+
+    #[test]
+    fn test_mean_delta_value_in_window_steady_state_faster() {
+        // 1000 bytes every 5 seconds -> 200 bytes per second
+        let raw_data = &[
+            ("2025-08-12T19:17:00.0000Z", "2025-08-12T19:17:05.0000Z", 1000f64),
+            ("2025-08-12T19:17:05.0000Z", "2025-08-12T19:17:10.0000Z", 1000f64),
+            ("2025-08-12T19:17:10.0000Z", "2025-08-12T19:17:15.0000Z", 1000f64),
+            ("2025-08-12T19:17:15.0000Z", "2025-08-12T19:17:20.0000Z", 1000f64),
+            ("2025-08-12T19:17:20.0000Z", "2025-08-12T19:17:25.0000Z", 1000f64),
+            ("2025-08-12T19:17:25.0000Z", "2025-08-12T19:17:30.0000Z", 1000f64),
+        ];
+
+        let start_times: Vec<DateTime<Utc>> =
+            raw_data.into_iter().map(|r| r.0.parse().unwrap()).collect();
+        let timestamps: Vec<DateTime<Utc>> =
+            raw_data.into_iter().map(|r| r.1.parse().unwrap()).collect();
+
+        let input_points: Vec<_> =
+            raw_data.into_iter().map(|r| Some(r.2)).collect();
+
+        let window_start = start_times[0];
+        let window_end = timestamps[timestamps.len() - 1];
+
+        let mean = mean_delta_value_in_window(
+            &start_times,
+            &timestamps,
+            &input_points,
+            window_start,
+            window_end,
+        )
+        .unwrap();
+        assert_eq!(mean.floor(), 200.0);
+    }
+
+    #[test]
+    fn test_mean_delta_value_in_window_steady_state_missing_points() {
+        // 1000 bytes every 10 seconds with some gaps -> 100 bytes per second
+        let raw_data = &[
+            ("2025-08-12T19:17:00.0000Z", "2025-08-12T19:17:10.0000Z", 1000f64),
+            ("2025-08-12T19:17:10.0000Z", "2025-08-12T19:17:40.0000Z", 3000f64),
+            ("2025-08-12T19:17:40.0000Z", "2025-08-12T19:18:00.0000Z", 2000f64),
+        ];
+
+        let start_times: Vec<DateTime<Utc>> =
+            raw_data.into_iter().map(|r| r.0.parse().unwrap()).collect();
+        let timestamps: Vec<DateTime<Utc>> =
+            raw_data.into_iter().map(|r| r.1.parse().unwrap()).collect();
+
+        let input_points: Vec<_> =
+            raw_data.into_iter().map(|r| Some(r.2)).collect();
+
+        let window_start = start_times[0];
+        let window_end = timestamps[timestamps.len() - 1];
+
+        let mean = mean_delta_value_in_window(
+            &start_times,
+            &timestamps,
+            &input_points,
+            window_start,
+            window_end,
+        )
+        .unwrap();
+        assert_eq!(mean.floor(), 100.0);
+    }
+    #[test]
+    fn test_mean_delta_value_in_window_steady_state_offset_window() {
+        // 1000 bytes every 10 seconds -> 100 bytes per second
+        // Not aligned to the window
+        let raw_data = &[
+            ("2025-08-12T19:16:55.0000Z", "2025-08-12T19:17:05.0000Z", 1000f64),
+            ("2025-08-12T19:17:05.0000Z", "2025-08-12T19:17:15.0000Z", 1000f64),
+            ("2025-08-12T19:17:15.0000Z", "2025-08-12T19:17:25.0000Z", 1000f64),
+            ("2025-08-12T19:17:25.0000Z", "2025-08-12T19:17:35.0000Z", 1000f64),
+            ("2025-08-12T19:17:35.0000Z", "2025-08-12T19:17:45.0000Z", 1000f64),
+            ("2025-08-12T19:17:45.0000Z", "2025-08-12T19:17:55.0000Z", 1000f64),
+            ("2025-08-12T19:17:55.0000Z", "2025-08-12T19:18:05.0000Z", 1000f64),
+        ];
+
+        let start_times: Vec<DateTime<Utc>> =
+            raw_data.into_iter().map(|r| r.0.parse().unwrap()).collect();
+        let timestamps: Vec<DateTime<Utc>> =
+            raw_data.into_iter().map(|r| r.1.parse().unwrap()).collect();
+
+        let input_points: Vec<_> =
+            raw_data.into_iter().map(|r| Some(r.2)).collect();
+
+        let window_start: DateTime<Utc> =
+            "2025-08-12T19:17:00.0000Z".parse().unwrap();
+        let window_end: DateTime<Utc> =
+            "2025-08-12T19:18:00.0000Z".parse().unwrap();
+
+        let mean = mean_delta_value_in_window(
+            &start_times,
+            &timestamps,
+            &input_points,
+            window_start,
+            window_end,
+        )
+        .unwrap();
+        assert_eq!(mean.floor(), 100.0);
+    }
+
+    #[test]
+    fn test_mean_delta_value_in_window_changing_rate_offset_window() {
+        // This should come out to 400/sec for 5 seconds, then 100/sec for 50 seconds, then 700/sec
+        // for 5 seconds -> (400*5+100*50+700*5)/60 -> 175/sec
+        let raw_data = &[
+            ("2025-08-12T19:16:55.0000Z", "2025-08-12T19:17:05.0000Z", 4000f64),
+            ("2025-08-12T19:17:05.0000Z", "2025-08-12T19:17:15.0000Z", 1000f64),
+            ("2025-08-12T19:17:15.0000Z", "2025-08-12T19:17:25.0000Z", 1000f64),
+            ("2025-08-12T19:17:25.0000Z", "2025-08-12T19:17:35.0000Z", 1000f64),
+            ("2025-08-12T19:17:35.0000Z", "2025-08-12T19:17:45.0000Z", 1000f64),
+            ("2025-08-12T19:17:45.0000Z", "2025-08-12T19:17:55.0000Z", 1000f64),
+            ("2025-08-12T19:17:55.0000Z", "2025-08-12T19:18:05.0000Z", 7000f64),
+        ];
+
+        let start_times: Vec<DateTime<Utc>> =
+            raw_data.into_iter().map(|r| r.0.parse().unwrap()).collect();
+        let timestamps: Vec<DateTime<Utc>> =
+            raw_data.into_iter().map(|r| r.1.parse().unwrap()).collect();
+
+        let input_points: Vec<_> =
+            raw_data.into_iter().map(|r| Some(r.2)).collect();
+
+        let window_start: DateTime<Utc> =
+            "2025-08-12T19:17:00.0000Z".parse().unwrap();
+        let window_end: DateTime<Utc> =
+            "2025-08-12T19:18:00.0000Z".parse().unwrap();
+
+        let mean = mean_delta_value_in_window(
+            &start_times,
+            &timestamps,
+            &input_points,
+            window_start,
+            window_end,
+        )
+        .unwrap();
+        assert_eq!(mean.floor(), 175.0);
+    }
+
+    #[test]
+    fn test_mean_delta_value_in_window_omicron_8833() {
+        let raw_data = &[
+            (
+                "2025-08-12T19:16:58.435139391Z",
+                "2025-08-12T19:17:08.667092681Z",
+                17946389286f64,
+            ),
+            (
+                "2025-08-12T19:17:08.667092681Z",
+                "2025-08-12T19:17:08.671475687Z",
+                10642397f64,
+            ),
+            (
+                "2025-08-12T19:17:08.671475687Z",
+                "2025-08-12T19:17:18.672813543Z",
+                23427496526f64,
+            ),
+            (
+                "2025-08-12T19:17:18.672813543Z",
+                "2025-08-12T19:17:18.676645448Z",
+                9152142f64,
+            ),
+            (
+                "2025-08-12T19:17:18.676645448Z",
+                "2025-08-12T19:17:28.677720972Z",
+                23184788665f64,
+            ),
+            (
+                "2025-08-12T19:17:28.677720972Z",
+                "2025-08-12T19:17:28.680720Z",
+                6997216f64,
+            ),
+            (
+                "2025-08-12T19:17:28.680720Z",
+                "2025-08-12T19:17:38.686374025Z",
+                23235718961f64,
+            ),
+            (
+                "2025-08-12T19:17:38.686374025Z",
+                "2025-08-12T19:17:38.690303163Z",
+                9409791f64,
+            ),
+            (
+                "2025-08-12T19:17:38.690303163Z",
+                "2025-08-12T19:17:48.692740660Z",
+                23351532686f64,
+            ),
+            (
+                "2025-08-12T19:17:48.692740660Z",
+                "2025-08-12T19:17:48.696535415Z",
+                9172642f64,
+            ),
+            (
+                "2025-08-12T19:17:48.696535415Z",
+                "2025-08-12T19:17:58.696374741Z",
+                23404009995f64,
+            ),
+            (
+                "2025-08-12T19:17:58.696374741Z",
+                "2025-08-12T19:17:58.699059787Z",
+                180f64,
+            ),
+            (
+                "2025-08-12T19:17:58.699059787Z",
+                "2025-08-12T19:18:08.703955072Z",
+                17285523156f64,
+            ),
+            (
+                "2025-08-12T19:18:08.703955072Z",
+                "2025-08-12T19:18:08.706654946Z",
+                6431618f64,
+            ),
+        ];
+
+        let start_times: Vec<DateTime<Utc>> =
+            raw_data.into_iter().map(|r| r.0.parse().unwrap()).collect();
+        let timestamps: Vec<DateTime<Utc>> =
+            raw_data.into_iter().map(|r| r.1.parse().unwrap()).collect();
+
+        let input_points: Vec<_> =
+            raw_data.into_iter().map(|r| Some(r.2)).collect();
+
+        let window_start: DateTime<Utc> =
+            "2025-08-12T19:17:00.0Z".parse().unwrap();
+        let window_end: DateTime<Utc> =
+            "2025-08-12T19:18:00.0Z".parse().unwrap();
+
+        let mean = mean_delta_value_in_window(
+            &start_times,
+            &timestamps,
+            &input_points,
+            window_start,
+            window_end,
+        )
+        .unwrap();
+        assert_eq!(mean.floor(), 2234970962.0,);
     }
 
     #[test]
