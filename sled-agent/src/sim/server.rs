@@ -120,6 +120,12 @@ impl Server {
             dropshot_log,
         )
         .config(config.dropshot.clone())
+        .version_policy(dropshot::VersionPolicy::Dynamic(Box::new(
+            dropshot::ClientSpecifiesVersionInHeader::new(
+                omicron_common::api::VERSION_HEADER,
+                sled_agent_api::VERSION_REMOVE_DESTROY_ORPHANED_DATASETS_CHICKEN_SWITCH,
+            ),
+        )))
         .start()
         .map_err(|error| anyhow!("initializing server: {}", error))?;
 
