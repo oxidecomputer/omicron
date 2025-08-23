@@ -539,7 +539,7 @@ mod test {
     use super::test_helpers::ARTIFACT_HASH_ROT_BOOTLOADER_GIMLET;
     use super::test_helpers::ARTIFACT_HASH_ROT_BOOTLOADER_SWITCH;
     use super::test_helpers::ARTIFACT_HASH_ROT_GIMLET_B;
-    use super::test_helpers::ARTIFACT_HASH_ROT_SWITCH_B;
+    use super::test_helpers::ARTIFACT_HASH_ROT_SWITCH_A;
     use super::test_helpers::ARTIFACT_HASH_SP_GIMLET_D;
     use super::test_helpers::ARTIFACT_HASH_SP_SIDECAR_C;
     use super::test_helpers::ARTIFACT_VERSION_1;
@@ -549,6 +549,7 @@ mod test {
     use dropshot::ConfigLogging;
     use dropshot::ConfigLoggingLevel;
     use gateway_client::types::SpType;
+    use gateway_types::rot::RotSlot;
     use nexus_types::deployment::ExpectedVersion;
     use nexus_types::deployment::PendingMgsUpdateDetails;
     use nexus_types::deployment::PendingMgsUpdateRotBootloaderDetails;
@@ -916,15 +917,22 @@ mod test {
         assert_eq!(updates, later_updates);
 
         // At this point, we're ready to test that when the first SpType update
-        // completes, then the second one *is* started.  This tests three
+        // completes, then the second one *is* started.  This tests four
         // different things: first that we noticed the first one completed,
-        // second that we noticed another thing needed an update, and third that
-        // the planner schedules the updates in the correct order: first RoT,
-        // and second SP.
+        // second that we noticed another thing needed an update, third that
+        // an update is correctly configured if we change the active slot, and
+        // fourth that the planner schedules the updates in the correct order:
+        // first RoT, and second SP.
         let later_collection = test_boards
             .collection_builder()
             .sp_active_version_exception(SpType::Switch, 1, ARTIFACT_VERSION_1)
             .rot_active_version_exception(SpType::Switch, 1, ARTIFACT_VERSION_1)
+            .rot_active_slot_exception(SpType::Switch, 1, RotSlot::B)
+            .rot_persistent_boot_preference_exception(
+                SpType::Switch,
+                1,
+                RotSlot::B,
+            )
             .build();
         let PlannedMgsUpdates { pending_updates: later_updates, .. } =
             plan_mgs_updates(
@@ -943,7 +951,7 @@ mod test {
         assert_eq!(next_update.baseboard_id.serial_number, "switch_1");
         assert_eq!(next_update.sp_type, SpType::Switch);
         assert_eq!(next_update.slot_id, 1);
-        assert_eq!(next_update.artifact_hash, ARTIFACT_HASH_ROT_SWITCH_B);
+        assert_eq!(next_update.artifact_hash, ARTIFACT_HASH_ROT_SWITCH_A);
         assert_eq!(next_update.artifact_version, ARTIFACT_VERSION_2);
 
         // Finally, test that when all components are in spec, then no updates
