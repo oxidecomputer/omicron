@@ -839,7 +839,12 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         self.record_nexus_zone(self.config.clone(), address, 0);
         self.nexus_internal = Some(nexus_internal);
         self.nexus_internal_addr = Some(nexus_internal_addr);
+        Ok(())
+    }
 
+    pub async fn configure_second_nexus(&mut self) {
+        let log = &self.logctx.log;
+        debug!(log, "Configuring second Nexus (not to run)");
         // Besides the Nexus that we just started, add an entry in the blueprint
         // for the Nexus that developers can start using
         // nexus/examples/config-second.toml.
@@ -876,7 +881,6 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             );
         };
         self.record_nexus_zone(second_nexus_config, second_internal_address, 1);
-        Ok(())
     }
 
     fn record_nexus_zone(
@@ -1656,6 +1660,7 @@ pub async fn omicron_dev_setup_with_config<N: NexusServer>(
         sim::SimMode::Auto,
         None,
         extra_sled_agents,
+        true,
     )
     .await)
 }
@@ -1675,6 +1680,7 @@ pub async fn test_setup_with_config<N: NexusServer>(
         sim_mode,
         initial_cert,
         extra_sled_agents,
+        false,
     )
     .await
 }
@@ -1685,6 +1691,7 @@ async fn setup_with_config_impl<N: NexusServer>(
     sim_mode: sim::SimMode,
     initial_cert: Option<Certificate>,
     extra_sled_agents: u16,
+    second_nexus: bool,
 ) -> ControlPlaneTestContext<N> {
     const STEP_TIMEOUT: Duration = Duration::from_secs(60);
 
@@ -1817,6 +1824,20 @@ async fn setup_with_config_impl<N: NexusServer>(
             STEP_TIMEOUT,
         )
         .await;
+
+    if second_nexus {
+        builder
+            .init_with_steps(
+                vec![(
+                    "configure_second_nexus",
+                    Box::new(|builder| {
+                        builder.configure_second_nexus().boxed()
+                    }),
+                )],
+                STEP_TIMEOUT,
+            )
+            .await;
+    }
 
     // The first and second sled agents have special UUIDs, and any extra ones
     // after that are random.
