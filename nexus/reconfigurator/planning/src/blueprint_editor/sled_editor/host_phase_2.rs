@@ -22,6 +22,13 @@ impl HostPhase2Editor {
         }
     }
 
+    pub fn value(&self) -> BlueprintHostPhase2DesiredSlots {
+        BlueprintHostPhase2DesiredSlots {
+            slot_a: self.slot_a.value().clone(),
+            slot_b: self.slot_b.value().clone(),
+        }
+    }
+
     /// Set the host phase 2 information for this sled, returning the previous value.
     pub fn set_value(
         &mut self,
