@@ -13,3 +13,4 @@ camino.workspace = true
 clap.workspace = true
 reedline.workspace = true
 omicron-workspace-hack.workspace = true
+subprocess.workspace = true
