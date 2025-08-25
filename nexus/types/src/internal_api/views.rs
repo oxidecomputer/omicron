@@ -23,6 +23,7 @@ use omicron_common::api::external::MacAddr;
 use omicron_common::api::external::ObjectStream;
 use omicron_common::api::external::TufArtifactMeta;
 use omicron_common::api::external::Vni;
+use omicron_common::disk::M2Slot;
 use omicron_common::snake_case_result;
 use omicron_common::snake_case_result::SnakeCaseResult;
 use omicron_uuid_kinds::DemoSagaUuid;
@@ -572,6 +573,23 @@ impl IdOrdItem for ZoneStatus {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct SledAgentUpdateStatus {
+    pub sled_id: SledUuid,
+    pub zones: IdOrdMap<ZoneStatus>,
+    pub host_phase_2: (),
+}
+
+impl IdOrdItem for SledAgentUpdateStatus {
+    type Key<'a> = SledUuid;
+
+    fn key(&self) -> Self::Key<'_> {
+        self.sled_id
+    }
+
+    id_upcast!();
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RotBootloaderStatus {
     pub stage_0_version: TufRepoVersion,
     pub stage_0_next_version: TufRepoVersion,
@@ -591,20 +609,10 @@ pub struct SpStatus {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct SledAgentUpdateStatus {
-    pub sled_id: SledUuid,
-    pub zones: IdOrdMap<ZoneStatus>,
-    pub host_phase_2: (),
-}
-
-impl IdOrdItem for SledAgentUpdateStatus {
-    type Key<'a> = SledUuid;
-
-    fn key(&self) -> Self::Key<'_> {
-        self.sled_id
-    }
-
-    id_upcast!();
+pub struct HostPhase1Status {
+    pub active_slot: Option<M2Slot>,
+    pub slot_a_version: TufRepoVersion,
+    pub slot_b_version: TufRepoVersion,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -616,7 +624,7 @@ pub struct MgsDrivenUpdateStatus {
     pub rot_bootloader: RotBootloaderStatus,
     pub rot: RotStatus,
     pub sp: SpStatus,
-    pub host_os_phase_1: (),
+    pub host_os_phase_1: HostPhase1Status,
 }
 
 impl MgsDrivenUpdateStatus {
@@ -662,27 +670,68 @@ impl MgsDrivenUpdateStatusBuilder<'_> {
             baseboard_description: self.baseboard_id.to_string(),
             sled_id: self.sled_ids.get(self.baseboard_id).copied(),
             rot_bootloader: RotBootloaderStatus {
-                stage_0_version: self.version_for(CabooseWhich::Stage0),
+                stage_0_version: self.version_for_caboose(CabooseWhich::Stage0),
                 stage_0_next_version: self
-                    .version_for(CabooseWhich::Stage0Next),
+                    .version_for_caboose(CabooseWhich::Stage0Next),
             },
             rot: RotStatus {
                 active_slot: self
                     .inventory
                     .rot_state_for(self.baseboard_id)
                     .map(|state| state.active_slot),
-                slot_a_version: self.version_for(CabooseWhich::RotSlotA),
-                slot_b_version: self.version_for(CabooseWhich::RotSlotB),
+                slot_a_version: self
+                    .version_for_caboose(CabooseWhich::RotSlotA),
+                slot_b_version: self
+                    .version_for_caboose(CabooseWhich::RotSlotB),
             },
             sp: SpStatus {
-                slot0_version: self.version_for(CabooseWhich::SpSlot0),
-                slot1_version: self.version_for(CabooseWhich::SpSlot1),
+                slot0_version: self.version_for_caboose(CabooseWhich::SpSlot0),
+                slot1_version: self.version_for_caboose(CabooseWhich::SpSlot1),
             },
-            host_os_phase_1: (),
+            host_os_phase_1: HostPhase1Status {
+                active_slot: self
+                    .inventory
+                    .host_phase_1_active_slot_for(self.baseboard_id)
+                    .map(|s| s.slot),
+                slot_a_version: self.version_for_host_phase_1(M2Slot::A),
+                slot_b_version: self.version_for_host_phase_1(M2Slot::B),
+            },
         }
     }
 
-    fn version_for(&self, which: CabooseWhich) -> TufRepoVersion {
+    fn version_for_host_phase_1(&self, slot: M2Slot) -> TufRepoVersion {
+        let Some(artifact_hash) = self
+            .inventory
+            .host_phase_1_flash_hash_for(slot, self.baseboard_id)
+            .map(|h| h.hash)
+        else {
+            return TufRepoVersion::Unknown;
+        };
+
+        // We could also filter down on a.id.kind, but we don't really need to:
+        // we're checking a sha256 hash from inventory, so we only expect one
+        // match anyway.
+        let matching_artifact = |a: &TufArtifactMeta| a.hash == artifact_hash;
+
+        if let Some(new) = self.new.tuf_repo() {
+            if new.artifacts.iter().any(matching_artifact) {
+                return TufRepoVersion::Version(
+                    new.repo.system_version.clone(),
+                );
+            }
+        }
+        if let Some(old) = self.old.tuf_repo() {
+            if old.artifacts.iter().any(matching_artifact) {
+                return TufRepoVersion::Version(
+                    old.repo.system_version.clone(),
+                );
+            }
+        }
+
+        TufRepoVersion::Unknown
+    }
+
+    fn version_for_caboose(&self, which: CabooseWhich) -> TufRepoVersion {
         let Some(caboose) = self
             .inventory
             .caboose_for(which, self.baseboard_id)
