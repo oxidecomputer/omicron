@@ -105,6 +105,18 @@ impl IpPool {
             rcgen: 0,
         }
     }
+
+    pub fn new_v4(
+        pool_identity: &external::IdentityMetadataCreateParams,
+    ) -> Self {
+        Self::new(pool_identity, IpVersion::V4)
+    }
+
+    pub fn new_v6(
+        pool_identity: &external::IdentityMetadataCreateParams,
+    ) -> Self {
+        Self::new(pool_identity, IpVersion::V6)
+    }
 }
 
 impl From<IpPool> for views::IpPool {

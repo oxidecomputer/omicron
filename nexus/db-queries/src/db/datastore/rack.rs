@@ -990,10 +990,10 @@ impl DataStore {
             // make default for the internal silo. only need to do this if
             // the create went through, i.e., if it wasn't already there
             //
-            // TODO-completeness: We're linking the IPv4 pool only here, but we
-            // need a way for the operator to control this, either at RSS or
-            // through the API. An alternative is to not set a default at all,
-            // even though both are linked.
+            // TODO-completeness: We're linking both IP pools here, but only the
+            // IPv4 pool is set as a default. We need a way for the operator to
+            // control this, either at RSS or through the API. An alternative is
+            // to not set a default at all, even though both are linked.
             //
             // See https://github.com/oxidecomputer/omicron/issues/8884
             if internal_created {

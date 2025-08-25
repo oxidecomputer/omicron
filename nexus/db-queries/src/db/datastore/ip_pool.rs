@@ -1087,16 +1087,26 @@ impl DataStore {
     ) -> CreateResult<IpPoolRange> {
         use nexus_db_schema::schema::ip_pool_range::dsl;
         opctx.authorize(authz::Action::CreateChild, authz_pool).await?;
-        let pool_id = authz_pool.id();
+
+        // Sanity check that the provided DB and authz pools match.
+        if pool.id() != authz_pool.id() {
+            return Err(Error::internal_error(&format!(
+                "DB and authz IP Pool object IDs must match, but \
+                DB ID is '{}' and authz ID is '{}'",
+                pool.id(),
+                authz_pool.id(),
+            )));
+        }
 
         // First ensure the IP range matches the IP version of the pool.
+        let pool_id = authz_pool.id();
         if pool.ip_version != range.version().into() {
             return Err(Error::invalid_request(format!(
                 "Cannot add IP{} address range to \
                 IP{} pool with ID \"{}\"",
                 range.version(),
                 pool.ip_version,
-                pool.id(),
+                pool_id,
             )));
         }
 
