@@ -16,6 +16,8 @@ use gateway_types::rot::RotSlot;
 use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
 use iddqd::id_upcast;
+use nexus_sled_agent_shared::inventory::BootPartitionContents;
+use nexus_sled_agent_shared::inventory::BootPartitionDetails;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryResult;
 use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
 use nexus_sled_agent_shared::inventory::OmicronZoneType;
@@ -42,6 +44,7 @@ use std::time::Duration;
 use std::time::Instant;
 use steno::SagaResultErr;
 use steno::UndoActionError;
+use tufaceous_artifact::ArtifactHash;
 use tufaceous_artifact::ArtifactKind;
 use tufaceous_artifact::KnownArtifactKind;
 use uuid::Uuid;
@@ -538,6 +541,33 @@ pub enum TufRepoVersion {
     Error(String),
 }
 
+impl TufRepoVersion {
+    fn for_artifact(
+        old: &TargetReleaseDescription,
+        new: &TargetReleaseDescription,
+        artifact_hash: ArtifactHash,
+    ) -> TufRepoVersion {
+        let matching_artifact = |a: &TufArtifactMeta| a.hash == artifact_hash;
+
+        if let Some(new) = new.tuf_repo() {
+            if new.artifacts.iter().any(matching_artifact) {
+                return TufRepoVersion::Version(
+                    new.repo.system_version.clone(),
+                );
+            }
+        }
+        if let Some(old) = old.tuf_repo() {
+            if old.artifacts.iter().any(matching_artifact) {
+                return TufRepoVersion::Version(
+                    old.repo.system_version.clone(),
+                );
+            }
+        }
+
+        TufRepoVersion::Unknown
+    }
+}
+
 impl Display for TufRepoVersion {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -573,10 +603,43 @@ impl IdOrdItem for ZoneStatus {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct HostPhase2Status {
+    pub boot_disk: Option<Result<M2Slot, String>>,
+    pub slot_a_version: TufRepoVersion,
+    pub slot_b_version: TufRepoVersion,
+}
+
+impl HostPhase2Status {
+    fn new(
+        inv: &BootPartitionContents,
+        old: &TargetReleaseDescription,
+        new: &TargetReleaseDescription,
+    ) -> Self {
+        Self {
+            boot_disk: Some(inv.boot_disk.clone()),
+            slot_a_version: Self::slot_version(old, new, &inv.slot_a),
+            slot_b_version: Self::slot_version(old, new, &inv.slot_b),
+        }
+    }
+
+    fn slot_version(
+        old: &TargetReleaseDescription,
+        new: &TargetReleaseDescription,
+        details: &Result<BootPartitionDetails, String>,
+    ) -> TufRepoVersion {
+        let artifact_hash = match details.as_ref() {
+            Ok(details) => details.artifact_hash,
+            Err(err) => return TufRepoVersion::Error(err.clone()),
+        };
+        TufRepoVersion::for_artifact(old, new, artifact_hash)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct SledAgentUpdateStatus {
     pub sled_id: SledUuid,
     pub zones: IdOrdMap<ZoneStatus>,
-    pub host_phase_2: (),
+    pub host_phase_2: HostPhase2Status,
 }
 
 impl IdOrdItem for SledAgentUpdateStatus {
@@ -708,27 +771,7 @@ impl MgsDrivenUpdateStatusBuilder<'_> {
             return TufRepoVersion::Unknown;
         };
 
-        // We could also filter down on a.id.kind, but we don't really need to:
-        // we're checking a sha256 hash from inventory, so we only expect one
-        // match anyway.
-        let matching_artifact = |a: &TufArtifactMeta| a.hash == artifact_hash;
-
-        if let Some(new) = self.new.tuf_repo() {
-            if new.artifacts.iter().any(matching_artifact) {
-                return TufRepoVersion::Version(
-                    new.repo.system_version.clone(),
-                );
-            }
-        }
-        if let Some(old) = self.old.tuf_repo() {
-            if old.artifacts.iter().any(matching_artifact) {
-                return TufRepoVersion::Version(
-                    old.repo.system_version.clone(),
-                );
-            }
-        }
-
-        TufRepoVersion::Unknown
+        TufRepoVersion::for_artifact(self.old, self.new, artifact_hash)
     }
 
     fn version_for_caboose(&self, which: CabooseWhich) -> TufRepoVersion {
@@ -806,27 +849,40 @@ impl UpdateStatus {
         let sleds = inventory
             .sled_agents
             .iter()
-            .map(|sa| SledAgentUpdateStatus {
-                sled_id: sa.sled_id,
-                zones: sa
-                    .last_reconciliation
-                    .iter()
-                    .flat_map(|inv| {
-                        inv.reconciled_omicron_zones().map(|(conf, res)| {
-                            ZoneStatus {
-                                zone_id: conf.id,
-                                zone_type: conf.zone_type.clone(),
-                                version: Self::zone_image_source_to_version(
-                                    old,
-                                    new,
-                                    &conf.image_source,
-                                    res,
-                                ),
-                            }
+            .map(|sa| {
+                let Some(inv) = sa.last_reconciliation.as_ref() else {
+                    return SledAgentUpdateStatus {
+                        sled_id: sa.sled_id,
+                        zones: IdOrdMap::new(),
+                        host_phase_2: HostPhase2Status {
+                            boot_disk: None,
+                            slot_a_version: TufRepoVersion::Unknown,
+                            slot_b_version: TufRepoVersion::Unknown,
+                        },
+                    };
+                };
+
+                SledAgentUpdateStatus {
+                    sled_id: sa.sled_id,
+                    zones: inv
+                        .reconciled_omicron_zones()
+                        .map(|(conf, res)| ZoneStatus {
+                            zone_id: conf.id,
+                            zone_type: conf.zone_type.clone(),
+                            version: Self::zone_image_source_to_version(
+                                old,
+                                new,
+                                &conf.image_source,
+                                res,
+                            ),
                         })
-                    })
-                    .collect(),
-                host_phase_2: (),
+                        .collect(),
+                    host_phase_2: HostPhase2Status::new(
+                        &inv.boot_partitions,
+                        old,
+                        new,
+                    ),
+                }
             })
             .collect();
 
