@@ -331,6 +331,16 @@ impl From<omicron_common::api::internal::shared::NetworkInterfaceKind>
     }
 }
 
+trait ApiVersionHeader {
+    fn api_version_header(self, api_version: &'static str) -> Self;
+}
+
+impl ApiVersionHeader for reqwest::RequestBuilder {
+    fn api_version_header(self, api_version: &'static str) -> Self {
+        self.header("api-version", api_version)
+    }
+}
+
 /// Exposes additional [`Client`] interfaces for use by the test suite. These
 /// are bonus endpoints, not generated in the real client.
 #[async_trait]
@@ -353,6 +363,7 @@ impl TestInterfaces for Client {
         let url = format!("{}/vmms/{}/poke-single-step", baseurl, id);
         client
             .post(url)
+            .api_version_header(self.api_version())
             .send()
             .await
             .expect("instance_single_step() failed unexpectedly");
@@ -364,6 +375,7 @@ impl TestInterfaces for Client {
         let url = format!("{}/vmms/{}/poke", baseurl, id);
         client
             .post(url)
+            .api_version_header(self.api_version())
             .send()
             .await
             .expect("instance_finish_transition() failed unexpectedly");
@@ -375,6 +387,7 @@ impl TestInterfaces for Client {
         let url = format!("{}/disks/{}/poke", baseurl, id);
         client
             .post(url)
+            .api_version_header(self.api_version())
             .send()
             .await
             .expect("disk_finish_transition() failed unexpectedly");
@@ -390,6 +403,7 @@ impl TestInterfaces for Client {
         let url = format!("{baseurl}/vmms/{id}/sim-migration-source");
         client
             .post(url)
+            .api_version_header(self.api_version())
             .json(&params)
             .send()
             .await
