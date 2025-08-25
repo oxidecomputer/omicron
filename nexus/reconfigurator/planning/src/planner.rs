@@ -5971,7 +5971,7 @@ pub(crate) mod test {
             let mut result = BTreeMap::new();
             for i in 1..=COCKROACHDB_REDUNDANCY {
                 result.insert(
-                    omicron_cockroach_metrics::NodeId(i.to_string()),
+                    cockroach_admin_types::NodeId(i.to_string()),
                     CockroachStatus {
                         ranges_underreplicated: Some(0),
                         liveness_live_nodes: Some(GOAL_REDUNDANCY),
@@ -6012,7 +6012,7 @@ pub(crate) mod test {
         *example
             .collection
             .cockroach_status
-            .get_mut(&omicron_cockroach_metrics::NodeId("1".to_string()))
+            .get_mut(&cockroach_admin_types::NodeId("1".to_string()))
             .unwrap() = CockroachStatus {
             ranges_underreplicated: Some(1),
             liveness_live_nodes: Some(GOAL_REDUNDANCY),
@@ -6030,7 +6030,7 @@ pub(crate) mod test {
         *example
             .collection
             .cockroach_status
-            .get_mut(&omicron_cockroach_metrics::NodeId("1".to_string()))
+            .get_mut(&cockroach_admin_types::NodeId("1".to_string()))
             .unwrap() = CockroachStatus {
             ranges_underreplicated: Some(0),
             liveness_live_nodes: Some(GOAL_REDUNDANCY - 1),
