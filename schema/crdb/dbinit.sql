@@ -6550,7 +6550,7 @@ CREATE TYPE IF NOT EXISTS omicron.public.db_metadata_nexus_state AS ENUM (
     'not_yet',
 
     -- This Nexus has committed to no longer accessing this database
-    'inactive'
+    'quiesced'
 );
 
 -- Nexuses which may be attempting to access the database, and a state

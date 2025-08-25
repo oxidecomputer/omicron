@@ -34,7 +34,7 @@ pub enum HandoffError {
     #[error(
         "Cannot perform handoff: \
          {active_count} Nexus instance(s) are still active. \
-         All instances must be inactive or not_yet before handoff can proceed."
+         All instances must be quiesced or not_yet before handoff can proceed."
     )]
     ActiveNexusInstancesExist { active_count: u32 },
 
@@ -331,8 +331,8 @@ impl DataStore {
                 info!(&self.log, "Nexus does not yet have access to the database"; "nexus_id" => ?nexus_id);
                 NexusAccess::DoesNotHaveAccessYet
             }
-            DbMetadataNexusState::Inactive => {
-                let msg = "Nexus locked out of database access (inactive)";
+            DbMetadataNexusState::Quiesced => {
+                let msg = "Nexus locked out of database access (quiesced)";
                 error!(&self.log, "{msg}"; "nexus_id" => ?nexus_id);
                 NexusAccess::LockedOut
             }
@@ -817,14 +817,14 @@ impl DataStore {
     ) -> Result<(), diesel::result::Error> {
         use nexus_db_schema::schema::db_metadata_nexus::dsl;
 
-        // Before proceeding, all records must be in the "inactive" or "not_yet" states.
+        // Before proceeding, all records must be in the "quiesced" or "not_yet" states.
         //
         // We explicitly look for any records violating this, rather than explicitly looking for
         // "active" records, as to protect ourselves from future states being added over time.
         let active_count: nexus_db_model::SqlU32 = dsl::db_metadata_nexus
             .filter(
                 dsl::state
-                    .ne(DbMetadataNexusState::Inactive)
+                    .ne(DbMetadataNexusState::Quiesced)
                     .and(dsl::state.ne(DbMetadataNexusState::NotYet)),
             )
             .count()
@@ -874,7 +874,7 @@ impl DataStore {
     /// Attempts to perform a handoff to activate this Nexus for database access.
     ///
     /// This function checks that:
-    /// 1. ALL records in db_metadata_nexus are in "not_yet" or "inactive" states
+    /// 1. ALL records in db_metadata_nexus are in "not_yet" or "quiesced" states
     /// 2. The specified nexus_id has a record which is "not_yet"
     ///
     /// If both conditions are met, it updates ALL "not_yet" records to "active".
@@ -1389,7 +1389,7 @@ mod test {
         let nexus2_id = OmicronZoneUuid::new_v4();
         let nexus3_id = OmicronZoneUuid::new_v4();
 
-        // Insert records: one active, one not_yet, one inactive
+        // Insert records: one active, one not_yet, one quiesced
         datastore
             .database_nexus_access_insert(
                 nexus1_id,
@@ -1407,10 +1407,10 @@ mod test {
         datastore
             .database_nexus_access_insert(
                 nexus3_id,
-                DbMetadataNexusState::Inactive,
+                DbMetadataNexusState::Quiesced,
             )
             .await
-            .expect("Failed to insert inactive nexus");
+            .expect("Failed to insert quiesced nexus");
 
         // Attempt handoff with nexus2 - should fail because nexus1 is active
         let result = datastore.attempt_handoff(nexus2_id).await;
@@ -1449,7 +1449,7 @@ mod test {
         datastore
             .database_nexus_access_insert(
                 nexus2_id,
-                DbMetadataNexusState::Inactive,
+                DbMetadataNexusState::Quiesced,
             )
             .await
             .expect("Failed to insert nexus2");
@@ -1486,7 +1486,7 @@ mod test {
         // Set up test data: create nexus records where our target is in wrong state
         let nexus1_id = OmicronZoneUuid::new_v4();
         let nexus2_id = OmicronZoneUuid::new_v4();
-        let inactive_nexus_id = OmicronZoneUuid::new_v4();
+        let quiesced_nexus_id = OmicronZoneUuid::new_v4();
 
         datastore
             .database_nexus_access_insert(
@@ -1504,18 +1504,18 @@ mod test {
             .expect("Failed to insert nexus2");
         datastore
             .database_nexus_access_insert(
-                inactive_nexus_id,
-                DbMetadataNexusState::Inactive,
+                quiesced_nexus_id,
+                DbMetadataNexusState::Quiesced,
             )
             .await
-            .expect("Failed to insert inactive nexus");
+            .expect("Failed to insert quiesced nexus");
 
-        // Attempt handoff with inactive nexus - should fail
-        let result = datastore.attempt_handoff(inactive_nexus_id).await;
+        // Attempt handoff with quiesced nexus - should fail
+        let result = datastore.attempt_handoff(quiesced_nexus_id).await;
         assert!(result.is_err());
         let error_msg = format!("{}", result.unwrap_err());
         assert!(
-            error_msg.contains("is in state Inactive"),
+            error_msg.contains("is in state Quiesced"),
             "Expected error about wrong state, got: {}",
             error_msg
         );
@@ -1525,9 +1525,9 @@ mod test {
             error_msg
         );
         assert!(
-            error_msg.contains(&inactive_nexus_id.to_string()),
+            error_msg.contains(&quiesced_nexus_id.to_string()),
             "Expected error to contain nexus ID {}, got: {}",
-            inactive_nexus_id,
+            quiesced_nexus_id,
             error_msg
         );
 
@@ -1542,7 +1542,7 @@ mod test {
         let datastore =
             DataStore::new_unchecked(logctx.log.clone(), db.pool().clone());
 
-        // Set up test data: create multiple nexus records in not_yet and inactive states
+        // Set up test data: create multiple nexus records in not_yet and quiesced states
         let nexus1_id = OmicronZoneUuid::new_v4();
         let nexus2_id = OmicronZoneUuid::new_v4();
         let nexus3_id = OmicronZoneUuid::new_v4();
@@ -1564,12 +1564,12 @@ mod test {
         datastore
             .database_nexus_access_insert(
                 nexus3_id,
-                DbMetadataNexusState::Inactive,
+                DbMetadataNexusState::Quiesced,
             )
             .await
             .expect("Failed to insert nexus3");
 
-        // Verify initial state: all not_yet or inactive
+        // Verify initial state: all not_yet or quiesced
         let nexus1_before = datastore
             .database_nexus_access(nexus1_id)
             .await
@@ -1588,7 +1588,7 @@ mod test {
 
         assert_eq!(nexus1_before.state(), DbMetadataNexusState::NotYet);
         assert_eq!(nexus2_before.state(), DbMetadataNexusState::NotYet);
-        assert_eq!(nexus3_before.state(), DbMetadataNexusState::Inactive);
+        assert_eq!(nexus3_before.state(), DbMetadataNexusState::Quiesced);
 
         // Attempt handoff with nexus2 - should succeed
         let result = datastore.attempt_handoff(nexus2_id).await;
@@ -1597,7 +1597,7 @@ mod test {
         }
         assert!(result.is_ok());
 
-        // Verify final state: all not_yet records should now be active, inactive should remain inactive
+        // Verify final state: all not_yet records should now be active, quiesced should remain quiesced
         let nexus1_after = datastore
             .database_nexus_access(nexus1_id)
             .await
@@ -1616,7 +1616,7 @@ mod test {
 
         assert_eq!(nexus1_after.state(), DbMetadataNexusState::Active);
         assert_eq!(nexus2_after.state(), DbMetadataNexusState::Active);
-        assert_eq!(nexus3_after.state(), DbMetadataNexusState::Inactive); // Should remain unchanged
+        assert_eq!(nexus3_after.state(), DbMetadataNexusState::Quiesced); // Should remain unchanged
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -1735,11 +1735,11 @@ mod test {
 
         let nexus_id = OmicronZoneUuid::new_v4();
 
-        // Insert our nexus as inactive (locked out)
+        // Insert our nexus as quiesced (locked out)
         datastore
             .database_nexus_access_insert(
                 nexus_id,
-                DbMetadataNexusState::Inactive,
+                DbMetadataNexusState::Quiesced,
             )
             .await
             .expect("Failed to insert nexus record");

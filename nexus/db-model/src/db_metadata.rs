@@ -49,7 +49,7 @@ impl_enum_type!(
     // Enum values
     Active => b"active"
     NotYet => b"not_yet"
-    Inactive => b"inactive"
+    Quiesced => b"quiesced"
 );
 
 #[derive(
