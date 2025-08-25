@@ -30,6 +30,7 @@ use schemars::JsonSchema;
 use semver::Version;
 use serde::Deserialize;
 use serde::Serialize;
+use std::collections::BTreeMap;
 use std::collections::VecDeque;
 use std::fmt::Display;
 use std::net::IpAddr;
@@ -603,6 +604,25 @@ pub struct MgsDrivenUpdateStatus {
     pub host_os_phase_1: (),
 }
 
+impl MgsDrivenUpdateStatus {
+    fn new(
+        inventory: &Collection,
+        baseboard_id: &BaseboardId,
+        old: &TargetReleaseDescription,
+        new: &TargetReleaseDescription,
+        sled_ids: &BTreeMap<&BaseboardId, SledUuid>,
+    ) -> Self {
+        MgsDrivenUpdateStatusBuilder {
+            inventory,
+            baseboard_id,
+            old,
+            new,
+            sled_ids,
+        }
+        .build()
+    }
+}
+
 impl IdOrdItem for MgsDrivenUpdateStatus {
     type Key<'a> = &'a str;
 
@@ -618,9 +638,29 @@ struct MgsDrivenUpdateStatusBuilder<'a> {
     baseboard_id: &'a BaseboardId,
     old: &'a TargetReleaseDescription,
     new: &'a TargetReleaseDescription,
+    sled_ids: &'a BTreeMap<&'a BaseboardId, SledUuid>,
 }
 
 impl MgsDrivenUpdateStatusBuilder<'_> {
+    fn build(&self) -> MgsDrivenUpdateStatus {
+        let sled_id = self.sled_ids.get(&self.baseboard_id).copied();
+        MgsDrivenUpdateStatus {
+            baseboard_description: self.baseboard_id.to_string(),
+            sled_id,
+            rot_bootloader: (),
+            rot: (),
+            sp: self.sp(),
+            host_os_phase_1: (),
+        }
+    }
+
+    fn sp(&self) -> SpStatus {
+        SpStatus {
+            slot0_version: self.version_for(CabooseWhich::SpSlot0),
+            slot1_version: self.version_for(CabooseWhich::SpSlot1),
+        }
+    }
+
     fn version_for(&self, which: CabooseWhich) -> TufRepoVersion {
         let Some(caboose) = self
             .inventory
@@ -700,41 +740,31 @@ impl UpdateStatus {
             })
             .collect();
 
-        let mut mgs_driven = inventory
+        // Build a map so we can look up the sled ID for a given baseboard (when
+        // collecting the MGS-driven update status below, all we have is the
+        // baseboard).
+        let sled_ids_by_baseboard: BTreeMap<&BaseboardId, SledUuid> = inventory
+            .sled_agents
+            .iter()
+            .filter_map(|sa| {
+                let baseboard_id = sa.baseboard_id.as_deref()?;
+                Some((baseboard_id, sa.sled_id))
+            })
+            .collect();
+
+        let mgs_driven = inventory
             .sps
             .keys()
             .map(|baseboard_id| {
-                let b = MgsDrivenUpdateStatusBuilder {
+                MgsDrivenUpdateStatus::new(
                     inventory,
                     baseboard_id,
                     old,
                     new,
-                };
-                MgsDrivenUpdateStatus {
-                    baseboard_description: baseboard_id.to_string(),
-                    // We'll fill this in below.
-                    sled_id: None,
-                    rot_bootloader: (),
-                    rot: (),
-                    sp: SpStatus {
-                        slot0_version: b.version_for(CabooseWhich::SpSlot0),
-                        slot1_version: b.version_for(CabooseWhich::SpSlot1),
-                    },
-                    host_os_phase_1: (),
-                }
+                    &sled_ids_by_baseboard,
+                )
             })
             .collect::<IdOrdMap<_>>();
-
-        // Fill in the sled_id for the sp if known
-        for sa in inventory.sled_agents.iter() {
-            if let Some(baseboard_id) = &sa.baseboard_id {
-                let baseboard_id = baseboard_id.to_string();
-                if let Some(mut sp) = mgs_driven.get_mut(baseboard_id.as_str())
-                {
-                    sp.sled_id = Some(sa.sled_id);
-                }
-            }
-        }
 
         UpdateStatus { sleds, mgs_driven }
     }
