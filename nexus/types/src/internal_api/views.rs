@@ -41,6 +41,7 @@ use std::time::Duration;
 use std::time::Instant;
 use steno::SagaResultErr;
 use steno::UndoActionError;
+use tufaceous_artifact::ArtifactKind;
 use tufaceous_artifact::KnownArtifactKind;
 use uuid::Uuid;
 
@@ -690,17 +691,37 @@ impl MgsDrivenUpdateStatusBuilder<'_> {
             return TufRepoVersion::Unknown;
         };
 
+        // TODO-cleanup This is really fragile! The RoT and bootloader kinds
+        // here aren't `KnownArtifactKind`s, so if we add more
+        // `ArtifactKind` constants we have to remember to update these
+        // lists. Maybe we fix this as a part of
+        // https://github.com/oxidecomputer/tufaceous/issues/37?
+        let matching_kinds = match which {
+            CabooseWhich::SpSlot0 | CabooseWhich::SpSlot1 => [
+                ArtifactKind::from_known(KnownArtifactKind::GimletSp),
+                ArtifactKind::from_known(KnownArtifactKind::PscSp),
+                ArtifactKind::from_known(KnownArtifactKind::SwitchSp),
+            ],
+            CabooseWhich::RotSlotA => [
+                ArtifactKind::GIMLET_ROT_IMAGE_A,
+                ArtifactKind::PSC_ROT_IMAGE_A,
+                ArtifactKind::SWITCH_ROT_IMAGE_A,
+            ],
+            CabooseWhich::RotSlotB => [
+                ArtifactKind::GIMLET_ROT_IMAGE_B,
+                ArtifactKind::PSC_ROT_IMAGE_B,
+                ArtifactKind::SWITCH_ROT_IMAGE_B,
+            ],
+            CabooseWhich::Stage0 | CabooseWhich::Stage0Next => [
+                ArtifactKind::GIMLET_ROT_STAGE0,
+                ArtifactKind::PSC_ROT_STAGE0,
+                ArtifactKind::SWITCH_ROT_STAGE0,
+            ],
+        };
         let matching_caboose = |a: &TufArtifactMeta| {
-            caboose.board == a.id.name
-                && matches!(
-                    a.id.kind.to_known(),
-                    Some(
-                        KnownArtifactKind::GimletSp
-                            | KnownArtifactKind::PscSp
-                            | KnownArtifactKind::SwitchSp
-                    )
-                )
-                && caboose.version == a.id.version.to_string()
+            Some(&caboose.board) == a.board.as_ref()
+                && caboose.version != a.id.version.to_string()
+                && matching_kinds.contains(&a.id.kind)
         };
         if let Some(new) = self.new.tuf_repo() {
             if new.artifacts.iter().any(matching_caboose) {
