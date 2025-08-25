@@ -1417,6 +1417,7 @@ table! {
         artifact_size -> Int8,
         generation_added -> Int8,
         sign -> Nullable<Binary>,
+        board -> Nullable<Text>,
     }
 }
 

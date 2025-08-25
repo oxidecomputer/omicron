@@ -5,12 +5,12 @@ pub mod icmp;
 use self::ctx::nexus_addr;
 use anyhow::{Result, bail};
 use oxide_client::types::Name;
-use rand::{Rng, thread_rng};
+use rand::Rng;
 use std::env;
 use std::net::{IpAddr, Ipv4Addr};
 
 pub fn generate_name(prefix: &str) -> Result<Name> {
-    format!("{}-{:x}", prefix, thread_rng().gen_range(0..0xfff_ffff_ffffu64))
+    format!("{}-{:x}", prefix, rand::rng().random_range(0..0xfff_ffff_ffffu64))
         .try_into()
         .map_err(anyhow::Error::msg)
 }

@@ -10,7 +10,7 @@ workspace = true
 
 [dependencies]
 digest.workspace = true
-rand09.workspace = true
+rand.workspace = true
 secrecy.workspace = true
 serde.workspace = true
 subtle.workspace = true

@@ -965,7 +965,7 @@ async fn test_multiple_layers_of_snapshots_random_delete_order(
             DeleteObject::Snapshot("layer-3-snapshot".to_string()),
         ];
 
-        let mut rng = StdRng::from_entropy();
+        let mut rng = StdRng::from_os_rng();
         objects.shuffle(&mut rng);
 
         objects

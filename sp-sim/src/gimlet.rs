@@ -296,6 +296,7 @@ impl Gimlet {
             BaseboardKind::Gimlet,
             gimlet.common.no_stage0_caboose,
             phase1_hash_policy,
+            gimlet.common.cabooses.clone(),
         );
         let ereport_state = {
             let mut cfg = gimlet.common.ereport_config.clone();

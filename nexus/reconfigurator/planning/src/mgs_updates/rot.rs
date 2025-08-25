@@ -82,6 +82,7 @@ pub fn mgs_update_status_rot(
     // should not proceed. Once https://github.com/oxidecomputer/hubris/pull/2050
     // is implemented, we should revist this check
     if found_persistent_boot_preference != found_active_slot.slot
+        || expected_persistent_boot_preference != expected_active_slot.slot
         || found_transient_boot_preference.is_some()
         || expected_transient_boot_preference.is_some()
     {
@@ -168,11 +169,11 @@ pub fn try_make_update_rot(
         .filter(|a| {
             // A matching RoT artifact will have:
             //
-            // - "name" matching the board name (found above from caboose)
+            // - "board" matching the board name (found above from caboose)
             // - "kind" matching one of the known RoT kinds
             // - "sign" matching the rkth (found above from caboose)
 
-            if a.id.name != *board {
+            if a.board.as_ref() != Some(board) {
                 return false;
             }
 

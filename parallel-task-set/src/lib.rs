@@ -160,7 +160,7 @@ mod test {
 
                         // The tasks should all execute for a short but variable
                         // amount of time.
-                        let duration_ms = rand::thread_rng().gen_range(0..10);
+                        let duration_ms = rand::rng().random_range(0..10);
                         tokio::time::sleep(tokio::time::Duration::from_millis(
                             duration_ms,
                         ))
