@@ -10,6 +10,7 @@ use chrono::{DateTime, Utc};
 use clap::{ArgAction, ValueEnum};
 use clap::{Args, Parser, Subcommand};
 use daft::Diffable;
+use gateway_types::rot::RotSlot;
 use iddqd::IdOrdMap;
 use indent_write::fmt::IndentWriter;
 use internal_dns_types::diff::DnsDiff;
@@ -553,6 +554,27 @@ struct SledUpdateRotArgs {
     /// sets the version reported for the RoT slot b
     #[clap(long, required_unless_present_any = &["slot_a"])]
     slot_b: Option<ExpectedVersion>,
+
+    /// sets whether we expect the "A" or "B" slot to be active
+    #[clap(long)]
+    active_slot: Option<RotSlot>,
+
+    /// sets the persistent boot preference written into the current
+    /// authoritative CFPA page (ping or pong).
+    #[clap(long)]
+    persistent_boot_preference: Option<RotSlot>,
+
+    /// sets the pending persistent boot preference written into the CFPA
+    /// scratch page that will become the persistent boot preference in the
+    /// authoritative CFPA page upon reboot, unless CFPA update of the
+    /// authoritative page fails for some reason
+    #[clap(long)]
+    pending_persistent_boot_preference: Option<RotSlot>,
+
+    /// sets the transient boot preference, which overrides persistent
+    /// preference selection for a single boot (unimplemented)
+    #[clap(long)]
+    transient_boot_preference: Option<RotSlot>,
 }
 
 #[derive(Debug, Args)]
@@ -1706,6 +1728,32 @@ fn cmd_sled_update_rot(
     if let Some(slot_b) = &args.slot_b {
         labels.push(format!("slot b -> {}", slot_b));
     }
+    if let Some(active_slot) = &args.active_slot {
+        labels.push(format!("active slot -> {}", active_slot));
+    }
+
+    if let Some(persistent_boot_preference) = &args.persistent_boot_preference {
+        labels.push(format!(
+            "persistent boot preference -> {}",
+            persistent_boot_preference
+        ));
+    }
+
+    // TODO-K: Does it set back to none if unset? Should I always show the setting?
+    if let Some(pending_persistent_boot_preference) =
+        &args.pending_persistent_boot_preference
+    {
+        labels.push(format!(
+            "pending persistent boot preference -> {}",
+            pending_persistent_boot_preference
+        ));
+    }
+    if let Some(transient_boot_preference) = &args.transient_boot_preference {
+        labels.push(format!(
+            "transient boot preference -> {}",
+            transient_boot_preference
+        ));
+    }
 
     assert!(
         !labels.is_empty(),
@@ -1717,8 +1765,12 @@ fn cmd_sled_update_rot(
     let sled_id = args.sled_id.to_sled_id(system.description())?;
     system.description_mut().sled_update_rot_versions(
         sled_id,
+        args.active_slot,
         args.slot_a,
         args.slot_b,
+        args.persistent_boot_preference,
+        args.pending_persistent_boot_preference,
+        args.transient_boot_preference,
     )?;
 
     sim.commit_and_bump(

@@ -615,11 +615,22 @@ impl SystemDescription {
     pub fn sled_update_rot_versions(
         &mut self,
         sled_id: SledUuid,
+        active_slot: Option<RotSlot>,
         slot_a_version: Option<ExpectedVersion>,
         slot_b_version: Option<ExpectedVersion>,
+        persistent_boot_preference: Option<RotSlot>,
+        pending_persistent_boot_preference: Option<RotSlot>,
+        transient_boot_preference: Option<RotSlot>,
     ) -> anyhow::Result<&mut Self> {
         let sled = self.get_sled_mut(sled_id)?;
-        sled.set_rot_versions(slot_a_version, slot_b_version);
+        sled.set_rot_versions(
+            active_slot,
+            slot_a_version,
+            slot_b_version,
+            persistent_boot_preference,
+            pending_persistent_boot_preference,
+            transient_boot_preference,
+        );
         Ok(self)
     }
 
@@ -1691,9 +1702,41 @@ impl Sled {
     // Note that this means there's no way to _unset_ the version.
     fn set_rot_versions(
         &mut self,
+        active_slot: Option<RotSlot>,
         slot_a_version: Option<ExpectedVersion>,
         slot_b_version: Option<ExpectedVersion>,
+        persistent_boot_preference_slot: Option<RotSlot>,
+        pending_persistent_boot_preference_slot: Option<RotSlot>,
+        transient_boot_preference_slot: Option<RotSlot>,
     ) {
+        if let Some((_slot, sp_state)) = self.inventory_sp.as_mut() {
+            match &mut sp_state.rot {
+                RotState::V3 {
+                    active,
+                    persistent_boot_preference,
+                    pending_persistent_boot_preference,
+                    transient_boot_preference,
+                    ..
+                } => {
+                    if let Some(new_value) = active_slot {
+                        *active = new_value;
+                    }
+                    if let Some(new_value) = persistent_boot_preference_slot {
+                        *persistent_boot_preference = new_value;
+                    }
+
+                    *pending_persistent_boot_preference =
+                        pending_persistent_boot_preference_slot;
+                    *transient_boot_preference = transient_boot_preference_slot;
+                }
+                // We will only support RotState::V3
+                _ => unreachable!(),
+            };
+        }
+
+        // TODO-K: Remove debugging info
+        // println!("{:#?}", self.inventory_sp);
+
         if let Some(slot_a_version) = slot_a_version {
             match slot_a_version {
                 ExpectedVersion::NoValidVersion => {
