@@ -205,9 +205,9 @@ fn process_entry<C: Parser>(
                         Ok(0) => break,
                         Ok(n) => written_bytes += n,
                         Err(_) => {
-                            // We expect broken pipe errors frequently. And
-                            // there's nothing we can do besides ignore or print
-                            // them out. Ignoring seems to work best.
+                            // Broken pipe is a normal condition reflecting
+                            // that the child process exited early (e.g., as
+                            // `head(1)` does).
                             break;
                         }
                     }
