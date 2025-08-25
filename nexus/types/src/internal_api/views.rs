@@ -5,7 +5,6 @@
 use crate::deployment::PendingMgsUpdate;
 use crate::deployment::TargetReleaseDescription;
 use crate::inventory::BaseboardId;
-use crate::inventory::Caboose;
 use crate::inventory::CabooseWhich;
 use crate::inventory::Collection;
 use chrono::DateTime;
@@ -614,6 +613,54 @@ impl IdOrdItem for MgsDrivenUpdateStatus {
     id_upcast!();
 }
 
+struct MgsDrivenUpdateStatusBuilder<'a> {
+    inventory: &'a Collection,
+    baseboard_id: &'a BaseboardId,
+    old: &'a TargetReleaseDescription,
+    new: &'a TargetReleaseDescription,
+}
+
+impl MgsDrivenUpdateStatusBuilder<'_> {
+    fn version_for(&self, which: CabooseWhich) -> TufRepoVersion {
+        let Some(caboose) = self
+            .inventory
+            .caboose_for(which, self.baseboard_id)
+            .map(|c| &c.caboose)
+        else {
+            return TufRepoVersion::Unknown;
+        };
+
+        let matching_caboose = |a: &TufArtifactMeta| {
+            caboose.board == a.id.name
+                && matches!(
+                    a.id.kind.to_known(),
+                    Some(
+                        KnownArtifactKind::GimletSp
+                            | KnownArtifactKind::PscSp
+                            | KnownArtifactKind::SwitchSp
+                    )
+                )
+                && caboose.version == a.id.version.to_string()
+        };
+        if let Some(new) = self.new.tuf_repo() {
+            if new.artifacts.iter().any(matching_caboose) {
+                return TufRepoVersion::Version(
+                    new.repo.system_version.clone(),
+                );
+            }
+        }
+        if let Some(old) = self.old.tuf_repo() {
+            if old.artifacts.iter().any(matching_caboose) {
+                return TufRepoVersion::Version(
+                    old.repo.system_version.clone(),
+                );
+            }
+        }
+
+        TufRepoVersion::Unknown
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct UpdateStatus {
     pub mgs_driven: IdOrdMap<MgsDrivenUpdateStatus>,
@@ -656,26 +703,25 @@ impl UpdateStatus {
         let mut mgs_driven = inventory
             .sps
             .keys()
-            .map(|baseboard_id| MgsDrivenUpdateStatus {
-                baseboard_description: baseboard_id.to_string(),
-                // We'll fill this in below.
-                sled_id: None,
-                rot_bootloader: (),
-                rot: (),
-                sp: {
-                    let slot0_version = inventory
-                        .caboose_for(CabooseWhich::SpSlot0, &baseboard_id)
-                        .map_or(TufRepoVersion::Unknown, |c| {
-                            Self::caboose_to_version(old, new, &c.caboose)
-                        });
-                    let slot1_version = inventory
-                        .caboose_for(CabooseWhich::SpSlot1, &baseboard_id)
-                        .map_or(TufRepoVersion::Unknown, |c| {
-                            Self::caboose_to_version(old, new, &c.caboose)
-                        });
-                    SpStatus { slot0_version, slot1_version }
-                },
-                host_os_phase_1: (),
+            .map(|baseboard_id| {
+                let b = MgsDrivenUpdateStatusBuilder {
+                    inventory,
+                    baseboard_id,
+                    old,
+                    new,
+                };
+                MgsDrivenUpdateStatus {
+                    baseboard_description: baseboard_id.to_string(),
+                    // We'll fill this in below.
+                    sled_id: None,
+                    rot_bootloader: (),
+                    rot: (),
+                    sp: SpStatus {
+                        slot0_version: b.version_for(CabooseWhich::SpSlot0),
+                        slot1_version: b.version_for(CabooseWhich::SpSlot1),
+                    },
+                    host_os_phase_1: (),
+                }
             })
             .collect::<IdOrdMap<_>>();
 
@@ -683,48 +729,14 @@ impl UpdateStatus {
         for sa in inventory.sled_agents.iter() {
             if let Some(baseboard_id) = &sa.baseboard_id {
                 let baseboard_id = baseboard_id.to_string();
-                if let Some(mut sp) = mgs_driven.get_mut(baseboard_id.as_str()) {
+                if let Some(mut sp) = mgs_driven.get_mut(baseboard_id.as_str())
+                {
                     sp.sled_id = Some(sa.sled_id);
                 }
             }
         }
 
         UpdateStatus { sleds, mgs_driven }
-    }
-
-    fn caboose_to_version(
-        old: &TargetReleaseDescription,
-        new: &TargetReleaseDescription,
-        caboose: &Caboose,
-    ) -> TufRepoVersion {
-        let matching_caboose = |a: &TufArtifactMeta| {
-            caboose.board == a.id.name
-                && matches!(
-                    a.id.kind.to_known(),
-                    Some(
-                        KnownArtifactKind::GimletSp
-                            | KnownArtifactKind::PscSp
-                            | KnownArtifactKind::SwitchSp
-                    )
-                )
-                && caboose.version == a.id.version.to_string()
-        };
-        if let Some(new) = new.tuf_repo() {
-            if new.artifacts.iter().any(matching_caboose) {
-                return TufRepoVersion::Version(
-                    new.repo.system_version.clone(),
-                );
-            }
-        }
-        if let Some(old) = old.tuf_repo() {
-            if old.artifacts.iter().any(matching_caboose) {
-                return TufRepoVersion::Version(
-                    old.repo.system_version.clone(),
-                );
-            }
-        }
-
-        TufRepoVersion::Unknown
     }
 
     fn zone_image_source_to_version(
