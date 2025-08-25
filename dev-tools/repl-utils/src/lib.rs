@@ -150,7 +150,7 @@ fn process_entry<C: Parser>(
         return LoopResult::Continue;
     }
 
-    // Split on the first pipe (`|`) character if it exists. Use the first
+    // Split on the first `!` character if it exists. Use the first
     // element of the iterator as the REPL command to parse via clap. Use the
     // second element, if it exists, as the shell command to pipe the output of
     // the REPL command into.
