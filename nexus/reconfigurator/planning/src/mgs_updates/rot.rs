@@ -82,6 +82,7 @@ pub fn mgs_update_status_rot(
     // should not proceed. Once https://github.com/oxidecomputer/hubris/pull/2050
     // is implemented, we should revist this check
     if found_persistent_boot_preference != found_active_slot.slot
+        || expected_persistent_boot_preference != expected_active_slot.slot
         || found_transient_boot_preference.is_some()
         || expected_transient_boot_preference.is_some()
     {
