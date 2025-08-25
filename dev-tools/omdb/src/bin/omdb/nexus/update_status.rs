@@ -7,7 +7,8 @@
 use anyhow::Context;
 use gateway_types::rot::RotSlot;
 use nexus_types::internal_api::views::{
-    HostPhase1Status, RotBootloaderStatus, RotStatus, SpStatus, ZoneStatus,
+    HostPhase1Status, HostPhase2Status, RotBootloaderStatus, RotStatus,
+    SpStatus, ZoneStatus,
 };
 use omicron_common::disk::M2Slot;
 use omicron_uuid_kinds::SledUuid;
@@ -23,12 +24,6 @@ pub async fn cmd_nexus_update_status(
         .context("retrieving update status")?
         .into_inner();
 
-    print_zones(
-        status
-            .sleds
-            .iter()
-            .map(|s| (s.sled_id, s.zones.iter().cloned().collect())),
-    );
     print_rot_bootloaders(status.mgs_driven.iter().map(|s| {
         (s.baseboard_description.clone(), s.sled_id, &s.rot_bootloader)
     }));
@@ -47,6 +42,15 @@ pub async fn cmd_nexus_update_status(
     print_host_phase_1s(status.mgs_driven.iter().map(|s| {
         (s.baseboard_description.clone(), s.sled_id, &s.host_os_phase_1)
     }));
+    print_host_phase_2s(
+        status.sleds.iter().map(|s| (s.sled_id, &s.host_phase_2)),
+    );
+    print_zones(
+        status
+            .sleds
+            .iter()
+            .map(|s| (s.sled_id, s.zones.iter().cloned().collect())),
+    );
 
     Ok(())
 }
@@ -86,7 +90,9 @@ fn print_zones(zones: impl Iterator<Item = (SledUuid, Vec<ZoneStatus>)>) {
 }
 
 fn print_rot_bootloaders<'a>(
-    sps: impl Iterator<Item = (String, Option<SledUuid>, &'a RotBootloaderStatus)>,
+    bootloaders: impl Iterator<
+        Item = (String, Option<SledUuid>, &'a RotBootloaderStatus),
+    >,
 ) {
     #[derive(Tabled)]
     #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
@@ -98,7 +104,7 @@ fn print_rot_bootloaders<'a>(
     }
 
     let mut rows = Vec::new();
-    for (baseboard_id, sled_id, status) in sps {
+    for (baseboard_id, sled_id, status) in bootloaders {
         let RotBootloaderStatus { stage0_version, stage0_next_version } =
             status;
         rows.push(BootloaderRow {
@@ -119,7 +125,7 @@ fn print_rot_bootloaders<'a>(
 }
 
 fn print_rots<'a>(
-    sps: impl Iterator<Item = (String, Option<SledUuid>, &'a RotStatus)>,
+    rots: impl Iterator<Item = (String, Option<SledUuid>, &'a RotStatus)>,
 ) {
     #[derive(Tabled)]
     #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
@@ -131,7 +137,7 @@ fn print_rots<'a>(
     }
 
     let mut rows = Vec::new();
-    for (baseboard_id, sled_id, status) in sps {
+    for (baseboard_id, sled_id, status) in rots {
         let RotStatus { active_slot, slot_a_version, slot_b_version } = status;
         let (slot_a_suffix, slot_b_suffix) = match active_slot {
             Some(RotSlot::A) => (" (active)", ""),
@@ -189,7 +195,7 @@ fn print_sps<'a>(
 }
 
 fn print_host_phase_1s<'a>(
-    sps: impl Iterator<Item = (String, Option<SledUuid>, &'a HostPhase1Status)>,
+    phase_1s: impl Iterator<Item = (String, Option<SledUuid>, &'a HostPhase1Status)>,
 ) {
     #[derive(Tabled)]
     #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
@@ -201,7 +207,7 @@ fn print_host_phase_1s<'a>(
     }
 
     let mut rows = Vec::new();
-    for (baseboard_id, sled_id, status) in sps {
+    for (baseboard_id, sled_id, status) in phase_1s {
         let HostPhase1Status { active_slot, slot_a_version, slot_b_version } =
             status;
         let (slot_a_suffix, slot_b_suffix) = match active_slot {
@@ -224,5 +230,42 @@ fn print_host_phase_1s<'a>(
         .to_string();
 
     println!("Installed Host Phase 1 Software");
+    println!("{}", table);
+}
+
+fn print_host_phase_2s<'a>(
+    sleds: impl Iterator<Item = (SledUuid, &'a HostPhase2Status)>,
+) {
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct HostPhase2Row {
+        sled_id: String,
+        slot_a_version: String,
+        slot_b_version: String,
+    }
+
+    let mut rows = Vec::new();
+    for (sled_id, status) in sleds {
+        let HostPhase2Status { boot_disk, slot_a_version, slot_b_version } =
+            status;
+        let (slot_a_suffix, slot_b_suffix) = match boot_disk {
+            Ok(M2Slot::A) => (" (boot disk)", "".to_string()),
+            Ok(M2Slot::B) => ("", " (boot disk)".to_string()),
+            // This is not expected! Be louder.
+            Err(err) => ("", format!(" (BOOT DISK UNKNOWN: {err})")),
+        };
+        rows.push(HostPhase2Row {
+            sled_id: sled_id.to_string(),
+            slot_a_version: format!("{slot_a_version}{slot_a_suffix}"),
+            slot_b_version: format!("{slot_b_version}{slot_b_suffix}"),
+        });
+    }
+
+    let table = tabled::Table::new(rows)
+        .with(tabled::settings::Style::empty())
+        .with(tabled::settings::Padding::new(0, 1, 0, 0))
+        .to_string();
+
+    println!("Installed Host Phase 2 Software");
     println!("{}", table);
 }
