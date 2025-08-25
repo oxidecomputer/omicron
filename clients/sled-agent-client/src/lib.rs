@@ -331,6 +331,9 @@ impl From<omicron_common::api::internal::shared::NetworkInterfaceKind>
     }
 }
 
+// TODO-cleanup This is icky; can we move these methods to a separate client so
+// we don't need to add this header by hand?
+// https://github.com/oxidecomputer/omicron/issues/8900
 trait ApiVersionHeader {
     fn api_version_header(self, api_version: &'static str) -> Self;
 }

@@ -1008,10 +1008,10 @@ impl SledAgentApi for SledAgentImpl {
     {
         // This API has been removed, but we still provide an endpoint for
         // backwards compatibility. Only `omdb` ever called this endpoint, so we
-        // could probably just always returning an error, but we can at least
+        // could probably just always return an error, but we can at least
         // attempt to do something reasonable. We've removed this chicken switch
-        // and always attempt to destroy orphans, so we can just claim the chick
-        // switch is always in that state.
+        // and always attempt to destroy orphans, so we can just claim the
+        // chicken switch is always in that state.
         let destroy_orphans = true;
         Ok(HttpResponseOk(ChickenSwitchDestroyOrphanedDatasets {
             destroy_orphans,
@@ -1027,7 +1027,7 @@ impl SledAgentApi for SledAgentImpl {
 
         // This API has been removed, but we still provide an endpoint for
         // backwards compatibility. Only `omdb` ever called this endpoint, so we
-        // could probably just always returning an error, but we can at least
+        // could probably just always return an error, but we can at least
         // attempt to do something reasonable. We've removed this chicken switch
         // and always attempt to destroy orphans, so we can treat requests to
         // destroy orphans as successful and attempts to disable it as an error.
