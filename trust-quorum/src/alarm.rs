@@ -33,4 +33,11 @@ pub enum Alarm {
     /// share digests in the Configuration. However, computation of the share
     /// still failed. This should be impossible.
     ShareComputationFailed { epoch: Epoch, err: gfss::shamir::CombineError },
+
+    /// We started collecting shares for a committed configuration,
+    /// but we no longer have that configuration in our persistent state.
+    CommittedConfigurationLost {
+        latest_committed_epoch: Epoch,
+        collecting_epoch: Epoch,
+    },
 }

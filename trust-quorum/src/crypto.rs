@@ -114,11 +114,16 @@ impl ExposeSecret<[u8; SECRET_LEN]> for ReconstructedRackSecret {
     }
 }
 
-// Only use this in unit tests in this module
-#[cfg(test)]
 impl Clone for ReconstructedRackSecret {
     fn clone(&self) -> Self {
         self.expose_secret().as_slice().try_into().unwrap()
+    }
+}
+
+#[cfg(test)]
+impl PartialEq for ReconstructedRackSecret {
+    fn eq(&self, other: &Self) -> bool {
+        self.expose_secret().ct_eq(other.expose_secret()).into()
     }
 }
 
@@ -361,6 +366,10 @@ impl PlaintextRackSecrets {
 
     pub fn get(&self, epoch: Epoch) -> Option<&ReconstructedRackSecret> {
         self.secrets.get(&epoch)
+    }
+
+    pub fn into_inner(self) -> BTreeMap<Epoch, ReconstructedRackSecret> {
+        self.secrets
     }
 
     /// Consume the plaintext and return an `EncryptedRackSecrets`
