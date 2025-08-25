@@ -267,6 +267,17 @@ impl core::future::Future for YieldIdAfter {
     }
 }
 
+// The operation we want to take on a future in our set, after handling an inbox
+// message.
+enum Operation {
+    // We want to add a new future.
+    Add(YieldIdAfter),
+    // Remove a future with the existing ID.
+    Remove(TargetId),
+    // We want to update an existing future.
+    Update((TargetId, Duration)),
+}
+
 /// An owned type used to keep track of the creation time for each kstat in
 /// which interest has been signaled.
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -358,7 +369,7 @@ fn hostname() -> Option<String> {
 
 /// Stores the number of samples taken, used for testing.
 #[cfg(all(test, target_os = "illumos"))]
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct SampleCounts {
     pub total: usize,
     pub overflow: usize,
@@ -443,8 +454,45 @@ impl KstatSamplerWorker {
                         "received request on inbox";
                         "request" => ?request,
                     );
-                    if let Some(next_timeout) = self.handle_inbox_request(request) {
-                        sample_timeouts.push(next_timeout);
+                    if let Some(next_op) = self.handle_inbox_request(request) {
+                        self.update_sample_timeouts(&mut sample_timeouts, next_op);
+                    }
+                }
+            }
+        }
+    }
+
+    fn update_sample_timeouts(
+        &self,
+        sample_timeouts: &mut FuturesUnordered<YieldIdAfter>,
+        next_op: Operation,
+    ) {
+        match next_op {
+            Operation::Add(fut) => sample_timeouts.push(fut),
+            Operation::Remove(id) => {
+                // Swap out all futures, and then filter out the one we're now
+                // removing.
+                let old = std::mem::take(sample_timeouts);
+                sample_timeouts
+                    .extend(old.into_iter().filter(|fut| fut.id != id));
+            }
+            Operation::Update((new_id, new_interval)) => {
+                // Update just the one future, if it exists, or insert one.
+                //
+                // NOTE: we update the _interval_, not the sleep object itself,
+                // which means this won't take effect until the next tick.
+                match sample_timeouts.iter_mut().find(|fut| fut.id == new_id) {
+                    Some(old) => old.interval = new_interval,
+                    None => {
+                        warn!(
+                            &self.log,
+                            "attempting to update the samping future \
+                            for a target, but no active future found \
+                            in the set, it will be added directly";
+                            "id" => %&new_id,
+                        );
+                        sample_timeouts
+                            .push(YieldIdAfter::new(new_id, new_interval));
                     }
                 }
             }
@@ -452,10 +500,7 @@ impl KstatSamplerWorker {
     }
 
     // Handle a message on the worker's inbox.
-    fn handle_inbox_request(
-        &mut self,
-        request: Request,
-    ) -> Option<YieldIdAfter> {
+    fn handle_inbox_request(&mut self, request: Request) -> Option<Operation> {
         match request {
             Request::AddTarget { target, details, reply_tx } => {
                 match self.add_target(target, details) {
@@ -475,7 +520,10 @@ impl KstatSamplerWorker {
                                 "error" => ?e,
                             ),
                         }
-                        Some(YieldIdAfter::new(id, details.interval))
+                        Some(Operation::Add(YieldIdAfter::new(
+                            id,
+                            details.interval,
+                        )))
                     }
                     Err(e) => {
                         error!(
@@ -513,7 +561,7 @@ impl KstatSamplerWorker {
                                 "error" => ?e,
                             ),
                         }
-                        Some(YieldIdAfter::new(id, details.interval))
+                        Some(Operation::Update((id, details.interval)))
                     }
                     Err(e) => {
                         error!(
@@ -534,7 +582,7 @@ impl KstatSamplerWorker {
                 }
             }
             Request::RemoveTarget { id, reply_tx } => {
-                self.targets.remove(&id);
+                let do_remove = self.targets.remove(&id).is_some();
                 if let Some(remaining_samples) =
                     self.samples.lock().unwrap().remove(&id)
                 {
@@ -555,7 +603,7 @@ impl KstatSamplerWorker {
                         "error" => ?e,
                     ),
                 }
-                None
+                if do_remove { Some(Operation::Remove(id)) } else { None }
             }
             Request::TargetStatus { id, reply_tx } => {
                 trace!(
