@@ -41,6 +41,7 @@ use omicron_common::backoff::{
 };
 use omicron_uuid_kinds::{GenericUuid, OmicronZoneUuid, SledUuid};
 use slog::Logger;
+use slog_error_chain::InlineErrorChain;
 use std::net::Ipv6Addr;
 use std::num::NonZeroU32;
 use std::sync::Arc;
@@ -251,18 +252,29 @@ impl DataStore {
             || async {
                 if let Some(try_for) = try_for {
                     if std::time::Instant::now() > start + try_for {
-                        return Err(BackoffError::permanent("Timeout waiting for database"));
+                        return Err(BackoffError::permanent(
+                            "Timeout waiting for DataStore::new_with_timeout",
+                        ));
                     }
                 }
 
-                let checked_action = datastore.check_schema_and_access(
-                    nexus_id,
-                    EXPECTED_VERSION,
-                    ConsumerPolicy::Update,
-                ).await.map_err(|err| {
-                    warn!(log, "Cannot check schema version / Nexus access"; "error" => #%err);
-                    BackoffError::transient("")
-                })?;
+                let checked_action = datastore
+                    .check_schema_and_access(
+                        nexus_id,
+                        EXPECTED_VERSION,
+                        ConsumerPolicy::Update,
+                    )
+                    .await
+                    .map_err(|err| {
+                        warn!(
+                            log,
+                            "Cannot check schema version / Nexus access";
+                            "error" => InlineErrorChain::new(err.as_ref()),
+                        );
+                        BackoffError::transient(
+                            "Cannot check schema version / Nexus access",
+                        )
+                    })?;
 
                 match checked_action.action() {
                     SchemaAction::Ready => {
@@ -273,33 +285,52 @@ impl DataStore {
                         info!(log, "Datastore is awaiting handoff");
 
                         let Some(nexus_id) = nexus_id else {
-                            return Err(BackoffError::permanent("Nexus ID needed for handoff"));
+                            return Err(BackoffError::permanent(
+                                "Nexus ID needed for handoff",
+                            ));
                         };
 
-                        datastore.attempt_handoff(
-                            nexus_id
-                        ).await.map_err(|err| {
-                            warn!(log, "Could not perform handoff to new nexus"; err);
-                            BackoffError::transient("")
-                        })?;
+                        datastore.attempt_handoff(nexus_id).await.map_err(
+                            |err| {
+                                warn!(
+                                    log,
+                                    "Could not perform handoff to new nexus";
+                                    err
+                                );
+                                BackoffError::transient(
+                                    "Could not perform handoff to new nexus",
+                                )
+                            },
+                        )?;
 
-                        todo!();
+                        todo!(
+                            "Post-handoff, Nexus should self-update. \
+                             This is not yet implemented"
+                        );
                     }
                     SchemaAction::Update => {
                         info!(log, "Datastore should be updated before usage");
-                        datastore.update_schema(
-                            checked_action,
-                            config
-                        ).await.map_err(|err| {
-                            warn!(log, "Failed to update schema version"; "error" => #%err);
-                            BackoffError::transient("")
+                        datastore
+                            .update_schema(checked_action, config)
+                            .await
+                            .map_err(|err| {
+                            warn!(
+                                log,
+                                "Failed to update schema version";
+                                "error" => #%err
+                            );
+                            BackoffError::transient(
+                                "Failed to update schema version",
+                            )
                         })?;
                         return Ok(());
-                    },
+                    }
                     SchemaAction::Refuse => {
                         error!(log, "Datastore should not be used");
-                        return Err(BackoffError::permanent("Datastore should not be used"));
-                    },
+                        return Err(BackoffError::permanent(
+                            "Datastore should not be used",
+                        ));
+                    }
                 }
             },
             |_, _| {},
