@@ -480,12 +480,17 @@ impl ExampleSystemBuilder {
                     for _ in 0..nexus_count
                         .on(discretionary_ix, discretionary_sled_count)
                     {
-                        let must_have_nexus_zones = false;
+                        let external_tls = false;
+                        let external_dns_servers = vec![];
+                        let nexus_generation =
+                            builder.parent_blueprint().nexus_generation;
                         builder
-                            .sled_add_zone_nexus_internal(
+                            .sled_add_zone_nexus_with_config(
                                 sled_id,
+                                external_tls,
+                                external_dns_servers,
                                 image_source.clone(),
-                                must_have_nexus_zones,
+                                nexus_generation,
                             )
                             .unwrap();
                     }
