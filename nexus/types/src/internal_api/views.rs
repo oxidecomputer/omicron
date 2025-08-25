@@ -31,7 +31,6 @@ use schemars::JsonSchema;
 use semver::Version;
 use serde::Deserialize;
 use serde::Serialize;
-use std::collections::BTreeMap;
 use std::collections::VecDeque;
 use std::fmt::Display;
 use std::net::IpAddr;
@@ -560,17 +559,65 @@ pub struct ZoneStatus {
     pub version: TufRepoVersion,
 }
 
+impl IdOrdItem for ZoneStatus {
+    type Key<'a> = OmicronZoneUuid;
+
+    fn key(&self) -> Self::Key<'_> {
+        self.zone_id
+    }
+
+    id_upcast!();
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct SpStatus {
-    pub sled_id: Option<SledUuid>,
     pub slot0_version: TufRepoVersion,
     pub slot1_version: TufRepoVersion,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct SledAgentUpdateStatus {
+    pub sled_id: SledUuid,
+    pub zones: IdOrdMap<ZoneStatus>,
+    pub host_phase_2: (),
+}
+
+impl IdOrdItem for SledAgentUpdateStatus {
+    type Key<'a> = SledUuid;
+
+    fn key(&self) -> Self::Key<'_> {
+        self.sled_id
+    }
+
+    id_upcast!();
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct MgsDrivenUpdateStatus {
+    // This is a stringified [`BaseboardId`]. We can't use `BaseboardId` as a
+    // key in JSON maps, so we squish it into a string.
+    pub baseboard_description: String,
+    pub sled_id: Option<SledUuid>,
+    pub rot_bootloader: (),
+    pub rot: (),
+    pub sp: SpStatus,
+    pub host_os_phase_1: (),
+}
+
+impl IdOrdItem for MgsDrivenUpdateStatus {
+    type Key<'a> = &'a str;
+
+    fn key(&self) -> Self::Key<'_> {
+        &self.baseboard_description
+    }
+
+    id_upcast!();
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct UpdateStatus {
-    pub zones: BTreeMap<SledUuid, Vec<ZoneStatus>>,
-    pub sps: BTreeMap<String, SpStatus>,
+    pub mgs_driven: IdOrdMap<MgsDrivenUpdateStatus>,
+    pub sleds: IdOrdMap<SledAgentUpdateStatus>,
 }
 
 impl UpdateStatus {
@@ -582,14 +629,14 @@ impl UpdateStatus {
         let sleds = inventory
             .sled_agents
             .iter()
-            .map(|agent| (&agent.sled_id, &agent.last_reconciliation));
-        let zones = sleds
-            .map(|(sled_id, inv)| {
-                (
-                    *sled_id,
-                    inv.as_ref().map_or(vec![], |inv| {
-                        inv.reconciled_omicron_zones()
-                            .map(|(conf, res)| ZoneStatus {
+            .map(|sa| SledAgentUpdateStatus {
+                sled_id: sa.sled_id,
+                zones: sa
+                    .last_reconciliation
+                    .iter()
+                    .flat_map(|inv| {
+                        inv.reconciled_omicron_zones().map(|(conf, res)| {
+                            ZoneStatus {
                                 zone_id: conf.id,
                                 zone_type: conf.zone_type.clone(),
                                 version: Self::zone_image_source_to_version(
@@ -598,47 +645,51 @@ impl UpdateStatus {
                                     &conf.image_source,
                                     res,
                                 ),
-                            })
-                            .collect()
-                    }),
-                )
+                            }
+                        })
+                    })
+                    .collect(),
+                host_phase_2: (),
             })
             .collect();
-        let baseboard_ids: Vec<_> = inventory.sps.keys().cloned().collect();
 
-        // Find all SP versions and git commits via cabooses
-        let mut sps: BTreeMap<BaseboardId, SpStatus> = baseboard_ids
-            .into_iter()
-            .map(|baseboard_id| {
-                let slot0_version = inventory
-                    .caboose_for(CabooseWhich::SpSlot0, &baseboard_id)
-                    .map_or(TufRepoVersion::Unknown, |c| {
-                        Self::caboose_to_version(old, new, &c.caboose)
-                    });
-                let slot1_version = inventory
-                    .caboose_for(CabooseWhich::SpSlot1, &baseboard_id)
-                    .map_or(TufRepoVersion::Unknown, |c| {
-                        Self::caboose_to_version(old, new, &c.caboose)
-                    });
-                (
-                    (*baseboard_id).clone(),
-                    SpStatus { sled_id: None, slot0_version, slot1_version },
-                )
+        let mut mgs_driven = inventory
+            .sps
+            .keys()
+            .map(|baseboard_id| MgsDrivenUpdateStatus {
+                baseboard_description: baseboard_id.to_string(),
+                // We'll fill this in below.
+                sled_id: None,
+                rot_bootloader: (),
+                rot: (),
+                sp: {
+                    let slot0_version = inventory
+                        .caboose_for(CabooseWhich::SpSlot0, &baseboard_id)
+                        .map_or(TufRepoVersion::Unknown, |c| {
+                            Self::caboose_to_version(old, new, &c.caboose)
+                        });
+                    let slot1_version = inventory
+                        .caboose_for(CabooseWhich::SpSlot1, &baseboard_id)
+                        .map_or(TufRepoVersion::Unknown, |c| {
+                            Self::caboose_to_version(old, new, &c.caboose)
+                        });
+                    SpStatus { slot0_version, slot1_version }
+                },
+                host_os_phase_1: (),
             })
-            .collect();
+            .collect::<IdOrdMap<_>>();
 
         // Fill in the sled_id for the sp if known
         for sa in inventory.sled_agents.iter() {
             if let Some(baseboard_id) = &sa.baseboard_id {
-                if let Some(sp) = sps.get_mut(baseboard_id) {
+                let baseboard_id = baseboard_id.to_string();
+                if let Some(mut sp) = mgs_driven.get_mut(baseboard_id.as_str()) {
                     sp.sled_id = Some(sa.sled_id);
                 }
             }
         }
 
-        let sps = sps.into_iter().map(|(k, v)| (k.to_string(), v)).collect();
-
-        UpdateStatus { zones, sps }
+        UpdateStatus { sleds, mgs_driven }
     }
 
     fn caboose_to_version(
