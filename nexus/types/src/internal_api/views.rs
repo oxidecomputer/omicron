@@ -12,6 +12,7 @@ use chrono::SecondsFormat;
 use chrono::Utc;
 use futures::future::ready;
 use futures::stream::StreamExt;
+use gateway_types::rot::RotSlot;
 use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
 use iddqd::id_upcast;
@@ -570,6 +571,13 @@ impl IdOrdItem for ZoneStatus {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct RotStatus {
+    pub active_slot: Option<RotSlot>,
+    pub slot_a_version: TufRepoVersion,
+    pub slot_b_version: TufRepoVersion,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct SpStatus {
     pub slot0_version: TufRepoVersion,
     pub slot1_version: TufRepoVersion,
@@ -599,7 +607,7 @@ pub struct MgsDrivenUpdateStatus {
     pub baseboard_description: String,
     pub sled_id: Option<SledUuid>,
     pub rot_bootloader: (),
-    pub rot: (),
+    pub rot: RotStatus,
     pub sp: SpStatus,
     pub host_os_phase_1: (),
 }
@@ -643,21 +651,23 @@ struct MgsDrivenUpdateStatusBuilder<'a> {
 
 impl MgsDrivenUpdateStatusBuilder<'_> {
     fn build(&self) -> MgsDrivenUpdateStatus {
-        let sled_id = self.sled_ids.get(&self.baseboard_id).copied();
         MgsDrivenUpdateStatus {
             baseboard_description: self.baseboard_id.to_string(),
-            sled_id,
+            sled_id: self.sled_ids.get(self.baseboard_id).copied(),
             rot_bootloader: (),
-            rot: (),
-            sp: self.sp(),
+            rot: RotStatus {
+                active_slot: self
+                    .inventory
+                    .rot_state_for(self.baseboard_id)
+                    .map(|state| state.active_slot),
+                slot_a_version: self.version_for(CabooseWhich::RotSlotA),
+                slot_b_version: self.version_for(CabooseWhich::RotSlotB),
+            },
+            sp: SpStatus {
+                slot0_version: self.version_for(CabooseWhich::SpSlot0),
+                slot1_version: self.version_for(CabooseWhich::SpSlot1),
+            },
             host_os_phase_1: (),
-        }
-    }
-
-    fn sp(&self) -> SpStatus {
-        SpStatus {
-            slot0_version: self.version_for(CabooseWhich::SpSlot0),
-            slot1_version: self.version_for(CabooseWhich::SpSlot1),
         }
     }
 
