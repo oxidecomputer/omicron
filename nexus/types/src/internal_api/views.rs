@@ -571,6 +571,12 @@ impl IdOrdItem for ZoneStatus {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct RotBootloaderStatus {
+    pub stage_0_version: TufRepoVersion,
+    pub stage_0_next_version: TufRepoVersion,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RotStatus {
     pub active_slot: Option<RotSlot>,
     pub slot_a_version: TufRepoVersion,
@@ -606,7 +612,7 @@ pub struct MgsDrivenUpdateStatus {
     // key in JSON maps, so we squish it into a string.
     pub baseboard_description: String,
     pub sled_id: Option<SledUuid>,
-    pub rot_bootloader: (),
+    pub rot_bootloader: RotBootloaderStatus,
     pub rot: RotStatus,
     pub sp: SpStatus,
     pub host_os_phase_1: (),
@@ -654,7 +660,11 @@ impl MgsDrivenUpdateStatusBuilder<'_> {
         MgsDrivenUpdateStatus {
             baseboard_description: self.baseboard_id.to_string(),
             sled_id: self.sled_ids.get(self.baseboard_id).copied(),
-            rot_bootloader: (),
+            rot_bootloader: RotBootloaderStatus {
+                stage_0_version: self.version_for(CabooseWhich::Stage0),
+                stage_0_next_version: self
+                    .version_for(CabooseWhich::Stage0Next),
+            },
             rot: RotStatus {
                 active_slot: self
                     .inventory
