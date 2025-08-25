@@ -656,8 +656,8 @@ impl IdOrdItem for SledAgentUpdateStatus {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RotBootloaderStatus {
-    pub stage_0_version: TufRepoVersion,
-    pub stage_0_next_version: TufRepoVersion,
+    pub stage0_version: TufRepoVersion,
+    pub stage0_next_version: TufRepoVersion,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -735,8 +735,8 @@ impl MgsDrivenUpdateStatusBuilder<'_> {
             baseboard_description: self.baseboard_id.to_string(),
             sled_id: self.sled_ids.get(self.baseboard_id).copied(),
             rot_bootloader: RotBootloaderStatus {
-                stage_0_version: self.version_for_caboose(CabooseWhich::Stage0),
-                stage_0_next_version: self
+                stage0_version: self.version_for_caboose(CabooseWhich::Stage0),
+                stage0_next_version: self
                     .version_for_caboose(CabooseWhich::Stage0Next),
             },
             rot: RotStatus {

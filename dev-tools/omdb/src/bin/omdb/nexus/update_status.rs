@@ -5,7 +5,9 @@
 //! omdb commands related to update status
 
 use anyhow::Context;
-use nexus_types::internal_api::views::{SpStatus, ZoneStatus};
+use nexus_types::internal_api::views::{
+    RotBootloaderStatus, SpStatus, ZoneStatus,
+};
 use omicron_uuid_kinds::SledUuid;
 use tabled::Tabled;
 
@@ -25,6 +27,9 @@ pub async fn cmd_nexus_update_status(
             .iter()
             .map(|s| (s.sled_id, s.zones.iter().cloned().collect())),
     );
+    print_rot_bootloaders(status.mgs_driven.iter().map(|s| {
+        (s.baseboard_description.clone(), s.sled_id, &s.rot_bootloader)
+    }));
     print_sps(
         status
             .mgs_driven
@@ -66,6 +71,39 @@ fn print_zones(zones: impl Iterator<Item = (SledUuid, Vec<ZoneStatus>)>) {
         .to_string();
 
     println!("Running Zones");
+    println!("{}", table);
+}
+
+fn print_rot_bootloaders<'a>(
+    sps: impl Iterator<Item = (String, Option<SledUuid>, &'a RotBootloaderStatus)>,
+) {
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct BootloaderRow {
+        baseboard_id: String,
+        sled_id: String,
+        stage0_version: String,
+        stage0_next_version: String,
+    }
+
+    let mut rows = Vec::new();
+    for (baseboard_id, sled_id, status) in sps {
+        let RotBootloaderStatus { stage0_version, stage0_next_version } =
+            status;
+        rows.push(BootloaderRow {
+            baseboard_id,
+            sled_id: sled_id.map_or("".to_string(), |id| id.to_string()),
+            stage0_version: stage0_version.to_string(),
+            stage0_next_version: stage0_next_version.to_string(),
+        });
+    }
+
+    let table = tabled::Table::new(rows)
+        .with(tabled::settings::Style::empty())
+        .with(tabled::settings::Padding::new(0, 1, 0, 0))
+        .to_string();
+
+    println!("Installed RoT Bootloader Software");
     println!("{}", table);
 }
 
