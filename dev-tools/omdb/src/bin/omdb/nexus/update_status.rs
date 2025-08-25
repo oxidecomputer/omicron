@@ -19,8 +19,18 @@ pub async fn cmd_nexus_update_status(
         .context("retrieving update status")?
         .into_inner();
 
-    print_zones(status.zones.into_iter());
-    print_sps(status.sps.into_iter());
+    print_zones(
+        status
+            .sleds
+            .iter()
+            .map(|s| (s.sled_id, s.zones.iter().cloned().collect())),
+    );
+    print_sps(
+        status
+            .mgs_driven
+            .iter()
+            .map(|s| (s.baseboard_description.clone(), s.sled_id, &s.sp)),
+    );
 
     Ok(())
 }
@@ -59,7 +69,9 @@ fn print_zones(zones: impl Iterator<Item = (SledUuid, Vec<ZoneStatus>)>) {
     println!("{}", table);
 }
 
-fn print_sps(sps: impl Iterator<Item = (String, SpStatus)>) {
+fn print_sps<'a>(
+    sps: impl Iterator<Item = (String, Option<SledUuid>, &'a SpStatus)>,
+) {
     #[derive(Tabled)]
     #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
     struct SpRow {
@@ -70,8 +82,8 @@ fn print_sps(sps: impl Iterator<Item = (String, SpStatus)>) {
     }
 
     let mut rows = Vec::new();
-    for (baseboard_id, status) in sps {
-        let SpStatus { sled_id, slot0_version, slot1_version } = status;
+    for (baseboard_id, sled_id, status) in sps {
+        let SpStatus { slot0_version, slot1_version } = status;
         rows.push(SpRow {
             baseboard_id,
             sled_id: sled_id.map_or("".to_string(), |id| id.to_string()),
