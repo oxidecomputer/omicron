@@ -604,7 +604,9 @@ impl IdOrdItem for ZoneStatus {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct HostPhase2Status {
-    pub boot_disk: Option<Result<M2Slot, String>>,
+    #[serde(with = "snake_case_result")]
+    #[schemars(schema_with = "SnakeCaseResult::<M2Slot, String>::json_schema")]
+    pub boot_disk: Result<M2Slot, String>,
     pub slot_a_version: TufRepoVersion,
     pub slot_b_version: TufRepoVersion,
 }
@@ -616,7 +618,7 @@ impl HostPhase2Status {
         new: &TargetReleaseDescription,
     ) -> Self {
         Self {
-            boot_disk: Some(inv.boot_disk.clone()),
+            boot_disk: inv.boot_disk.clone(),
             slot_a_version: Self::slot_version(old, new, &inv.slot_a),
             slot_b_version: Self::slot_version(old, new, &inv.slot_b),
         }
@@ -855,7 +857,7 @@ impl UpdateStatus {
                         sled_id: sa.sled_id,
                         zones: IdOrdMap::new(),
                         host_phase_2: HostPhase2Status {
-                            boot_disk: None,
+                            boot_disk: Err("unknown".to_string()),
                             slot_a_version: TufRepoVersion::Unknown,
                             slot_b_version: TufRepoVersion::Unknown,
                         },

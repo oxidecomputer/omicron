@@ -4814,6 +4814,84 @@
           "id"
         ]
       },
+      "HostPhase1Status": {
+        "type": "object",
+        "properties": {
+          "active_slot": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/M2Slot"
+              }
+            ]
+          },
+          "slot_a_version": {
+            "$ref": "#/components/schemas/TufRepoVersion"
+          },
+          "slot_b_version": {
+            "$ref": "#/components/schemas/TufRepoVersion"
+          }
+        },
+        "required": [
+          "slot_a_version",
+          "slot_b_version"
+        ]
+      },
+      "HostPhase2Status": {
+        "type": "object",
+        "properties": {
+          "boot_disk": {
+            "x-rust-type": {
+              "crate": "std",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/M2Slot"
+                },
+                {
+                  "type": "string"
+                }
+              ],
+              "path": "::std::result::Result",
+              "version": "*"
+            },
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "ok": {
+                    "$ref": "#/components/schemas/M2Slot"
+                  }
+                },
+                "required": [
+                  "ok"
+                ]
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "err": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "err"
+                ]
+              }
+            ]
+          },
+          "slot_a_version": {
+            "$ref": "#/components/schemas/TufRepoVersion"
+          },
+          "slot_b_version": {
+            "$ref": "#/components/schemas/TufRepoVersion"
+          }
+        },
+        "required": [
+          "boot_disk",
+          "slot_a_version",
+          "slot_b_version"
+        ]
+      },
       "IdMapBlueprintDatasetConfig": {
         "type": "object",
         "additionalProperties": {
@@ -5392,6 +5470,41 @@
         "pattern": "^([0-9a-fA-F]{0,2}:){5}[0-9a-fA-F]{0,2}$",
         "minLength": 5,
         "maxLength": 17
+      },
+      "MgsDrivenUpdateStatus": {
+        "type": "object",
+        "properties": {
+          "baseboard_description": {
+            "type": "string"
+          },
+          "host_os_phase_1": {
+            "$ref": "#/components/schemas/HostPhase1Status"
+          },
+          "rot": {
+            "$ref": "#/components/schemas/RotStatus"
+          },
+          "rot_bootloader": {
+            "$ref": "#/components/schemas/RotBootloaderStatus"
+          },
+          "sled_id": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TypedUuidForSledKind"
+              }
+            ]
+          },
+          "sp": {
+            "$ref": "#/components/schemas/SpStatus"
+          }
+        },
+        "required": [
+          "baseboard_description",
+          "host_os_phase_1",
+          "rot",
+          "rot_bootloader",
+          "sp"
+        ]
       },
       "MgsUpdateDriverStatus": {
         "description": "Status of ongoing update attempts, recently completed attempts, and update requests that are waiting for retry.",
@@ -7856,6 +7969,21 @@
           "time"
         ]
       },
+      "RotBootloaderStatus": {
+        "type": "object",
+        "properties": {
+          "stage_0_next_version": {
+            "$ref": "#/components/schemas/TufRepoVersion"
+          },
+          "stage_0_version": {
+            "$ref": "#/components/schemas/TufRepoVersion"
+          }
+        },
+        "required": [
+          "stage_0_next_version",
+          "stage_0_version"
+        ]
+      },
       "RotSlot": {
         "oneOf": [
           {
@@ -7886,6 +8014,29 @@
               "slot"
             ]
           }
+        ]
+      },
+      "RotStatus": {
+        "type": "object",
+        "properties": {
+          "active_slot": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RotSlot"
+              }
+            ]
+          },
+          "slot_a_version": {
+            "$ref": "#/components/schemas/TufRepoVersion"
+          },
+          "slot_b_version": {
+            "$ref": "#/components/schemas/TufRepoVersion"
+          }
+        },
+        "required": [
+          "slot_a_version",
+          "slot_b_version"
         ]
       },
       "RouteConfig": {
@@ -8230,6 +8381,40 @@
           "usable_physical_ram"
         ]
       },
+      "SledAgentUpdateStatus": {
+        "type": "object",
+        "properties": {
+          "host_phase_2": {
+            "$ref": "#/components/schemas/HostPhase2Status"
+          },
+          "sled_id": {
+            "$ref": "#/components/schemas/TypedUuidForSledKind"
+          },
+          "zones": {
+            "title": "IdOrdMap",
+            "x-rust-type": {
+              "crate": "iddqd",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/ZoneStatus"
+                }
+              ],
+              "path": "iddqd::IdOrdMap",
+              "version": "*"
+            },
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ZoneStatus"
+            },
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "host_phase_2",
+          "sled_id",
+          "zones"
+        ]
+      },
       "SledCpuFamily": {
         "description": "Identifies the kind of CPU present on a sled, determined by reading CPUID.\n\nThis is intended to broadly support the control plane answering the question \"can I run this instance on that sled?\" given an instance with either no or some CPU platform requirement. It is not enough information for more precise placement questions - for example, is a CPU a high-frequency part or many-core part? We don't include Genoa here, but in that CPU family there are high frequency parts, many-core parts, and large-cache parts. To support those questions (or satisfactorily answer #8730) we would need to collect additional information and send it along.",
         "oneOf": [
@@ -8454,14 +8639,6 @@
       "SpStatus": {
         "type": "object",
         "properties": {
-          "sled_id": {
-            "nullable": true,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/TypedUuidForSledKind"
-              }
-            ]
-          },
           "slot0_version": {
             "$ref": "#/components/schemas/TufRepoVersion"
           },
@@ -8898,25 +9075,46 @@
       "UpdateStatus": {
         "type": "object",
         "properties": {
-          "sps": {
-            "type": "object",
-            "additionalProperties": {
-              "$ref": "#/components/schemas/SpStatus"
-            }
+          "mgs_driven": {
+            "title": "IdOrdMap",
+            "x-rust-type": {
+              "crate": "iddqd",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/MgsDrivenUpdateStatus"
+                }
+              ],
+              "path": "iddqd::IdOrdMap",
+              "version": "*"
+            },
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MgsDrivenUpdateStatus"
+            },
+            "uniqueItems": true
           },
-          "zones": {
-            "type": "object",
-            "additionalProperties": {
-              "type": "array",
-              "items": {
-                "$ref": "#/components/schemas/ZoneStatus"
-              }
-            }
+          "sleds": {
+            "title": "IdOrdMap",
+            "x-rust-type": {
+              "crate": "iddqd",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/SledAgentUpdateStatus"
+                }
+              ],
+              "path": "iddqd::IdOrdMap",
+              "version": "*"
+            },
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SledAgentUpdateStatus"
+            },
+            "uniqueItems": true
           }
         },
         "required": [
-          "sps",
-          "zones"
+          "mgs_driven",
+          "sleds"
         ]
       },
       "UplinkAddressConfig": {
