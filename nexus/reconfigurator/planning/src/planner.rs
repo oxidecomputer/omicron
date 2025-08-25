@@ -112,24 +112,33 @@ const NUM_CONCURRENT_MGS_UPDATES: usize = 1;
 /// A receipt that `check_input_validity` has been run prior to planning.
 struct InputChecked;
 
+// Details of why a zone has not yet propagated from blueprint to sled inventory
 #[derive(Debug)]
 #[expect(dead_code)]
-struct ZoneCurrentlyUpdating<'a> {
+struct ZonePropagationIncomplete<'a> {
     zone_id: OmicronZoneUuid,
     zone_kind: ZoneKind,
-    reason: UpdatingReason<'a>,
+    reason: ZonePropagationStatus<'a>,
 }
 
 #[derive(Debug)]
 #[expect(dead_code)]
-enum UpdatingReason<'a> {
+enum ZonePropagationStatus<'a> {
+    // The current blueprint and the sled inventory disagree
+    // about the image source for a zone.
+    //
+    // This can mean that the sled inventory is out-of-date, or
+    // that a different blueprint has been applied.
     ImageSourceMismatch {
         bp_image_source: &'a BlueprintZoneImageSource,
         inv_image_source: &'a OmicronZoneImageSource,
     },
+    // Although this zone appears in the blueprint, it does
+    // not exist on the sled's inventory.
     MissingInInventory {
         bp_image_source: &'a BlueprintZoneImageSource,
     },
+    // The last reconciliation attempt for this zone failed
     ReconciliationError {
         bp_image_source: &'a BlueprintZoneImageSource,
         inv_image_source: &'a OmicronZoneImageSource,
@@ -1290,7 +1299,7 @@ impl<'a> Planner<'a> {
 
     fn get_zones_not_yet_propagated_to_inventory(
         &self,
-    ) -> Vec<ZoneCurrentlyUpdating<'_>> {
+    ) -> Vec<ZonePropagationIncomplete<'_>> {
         // We are only interested in non-decommissioned sleds.
         let sleds = self
             .input
@@ -1336,13 +1345,14 @@ impl<'a> Planner<'a> {
                             ConfigReconcilerInventoryResult::Ok,
                         )) => {
                             // The inventory and blueprint image sources differ.
-                            Some(ZoneCurrentlyUpdating {
+                            Some(ZonePropagationIncomplete {
                                 zone_id: zone.id,
                                 zone_kind: zone.kind(),
-                                reason: UpdatingReason::ImageSourceMismatch {
-                                    bp_image_source: &zone.image_source,
-                                    inv_image_source,
-                                },
+                                reason:
+                                    ZonePropagationStatus::ImageSourceMismatch {
+                                        bp_image_source: &zone.image_source,
+                                        inv_image_source,
+                                    },
                             })
                         }
                         Some((
@@ -1352,24 +1362,26 @@ impl<'a> Planner<'a> {
                             // The inventory reports this zone but there was an
                             // error reconciling it (most likely an error
                             // starting the zone).
-                            Some(ZoneCurrentlyUpdating {
+                            Some(ZonePropagationIncomplete {
                                 zone_id: zone.id,
                                 zone_kind: zone.kind(),
-                                reason: UpdatingReason::ReconciliationError {
-                                    bp_image_source: &zone.image_source,
-                                    inv_image_source,
-                                    message,
-                                },
+                                reason:
+                                    ZonePropagationStatus::ReconciliationError {
+                                        bp_image_source: &zone.image_source,
+                                        inv_image_source,
+                                        message,
+                                    },
                             })
                         }
                         None => {
                             // The blueprint has a zone that inventory does not have.
-                            Some(ZoneCurrentlyUpdating {
+                            Some(ZonePropagationIncomplete {
                                 zone_id: zone.id,
                                 zone_kind: zone.kind(),
-                                reason: UpdatingReason::MissingInInventory {
-                                    bp_image_source: &zone.image_source,
-                                },
+                                reason:
+                                    ZonePropagationStatus::MissingInInventory {
+                                        bp_image_source: &zone.image_source,
+                                    },
                             })
                         }
                     }
