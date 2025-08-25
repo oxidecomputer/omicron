@@ -937,6 +937,13 @@ impl<'a> Planner<'a> {
             DiscretionaryOmicronZone::Nexus,
             DiscretionaryOmicronZone::Oximeter,
         ] {
+            // Our goal here is to make sure that if we have less redundancy for
+            // discretionary zones than needed, we deploy additional zones.
+            //
+            // For most zone types, we only care about the total count of that
+            // kind of zone, regardless of image. In contrast, for Nexus, we may
+            // need to reach a minimum redundancy count for multiple zone images
+            // (new and old) during a handoff.
             let image_sources = match zone_kind {
                 DiscretionaryOmicronZone::Nexus => {
                     let old_image = self
