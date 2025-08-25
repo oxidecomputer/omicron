@@ -6565,8 +6565,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.db_metadata_nexus (
     state omicron.public.db_metadata_nexus_state NOT NULL
 );
 
-CREATE INDEX IF NOT EXISTS lookup_db_metadata_nexus_by_state on omicron.public.db_metadata_nexus (
-    state
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_db_metadata_nexus_by_state on omicron.public.db_metadata_nexus (
+    state,
+    nexus_id
 );
 
 -- Keep this at the end of file so that the database does not contain a version
