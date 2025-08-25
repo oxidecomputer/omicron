@@ -2328,7 +2328,7 @@ mod illumos_tests {
         // Inject some ~incompressible ballast to ensure the bundles are, though
         // fake, not also microscopic:
         let mut ballast = vec![0; 64 * 1024];
-        rand::thread_rng().fill_bytes(&mut ballast);
+        rand::rng().fill_bytes(&mut ballast);
         super::insert_data(&mut builder, "ballast.bin", &ballast)?;
 
         let _ = builder.into_inner().context("failed to finish tarball")?;

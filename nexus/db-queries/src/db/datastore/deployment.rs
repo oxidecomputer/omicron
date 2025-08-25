@@ -3011,7 +3011,6 @@ mod tests {
     use oxnet::IpNet;
     use pretty_assertions::assert_eq;
     use rand::Rng;
-    use rand::thread_rng;
     use std::collections::BTreeSet;
     use std::mem;
     use std::net::IpAddr;
@@ -3146,7 +3145,7 @@ mod tests {
                 )
             })
             .collect();
-        let ip = ip.unwrap_or_else(|| thread_rng().gen::<u128>().into());
+        let ip = ip.unwrap_or_else(|| rand::rng().random::<u128>().into());
         let resources = SledResources { zpools, subnet: Ipv6Subnet::new(ip) };
         SledDetails {
             policy: SledPolicy::provisionable(),

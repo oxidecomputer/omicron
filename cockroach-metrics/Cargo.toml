@@ -8,6 +8,7 @@ license = "MPL-2.0"
 anyhow.workspace = true
 chrono.workspace = true
 cockroach-admin-client.workspace = true
+cockroach-admin-types.workspace = true
 futures.workspace = true
 parallel-task-set.workspace = true
 reqwest.workspace = true
