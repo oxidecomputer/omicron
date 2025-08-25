@@ -7,8 +7,9 @@
 use anyhow::Context;
 use gateway_types::rot::RotSlot;
 use nexus_types::internal_api::views::{
-    RotBootloaderStatus, RotStatus, SpStatus, ZoneStatus,
+    HostPhase1Status, RotBootloaderStatus, RotStatus, SpStatus, ZoneStatus,
 };
+use omicron_common::disk::M2Slot;
 use omicron_uuid_kinds::SledUuid;
 use tabled::Tabled;
 
@@ -43,6 +44,9 @@ pub async fn cmd_nexus_update_status(
             .iter()
             .map(|s| (s.baseboard_description.clone(), s.sled_id, &s.sp)),
     );
+    print_host_phase_1s(status.mgs_driven.iter().map(|s| {
+        (s.baseboard_description.clone(), s.sled_id, &s.host_os_phase_1)
+    }));
 
     Ok(())
 }
@@ -181,5 +185,44 @@ fn print_sps<'a>(
         .to_string();
 
     println!("Installed SP Software");
+    println!("{}", table);
+}
+
+fn print_host_phase_1s<'a>(
+    sps: impl Iterator<Item = (String, Option<SledUuid>, &'a HostPhase1Status)>,
+) {
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct HostPhase1Row {
+        baseboard_id: String,
+        sled_id: String,
+        slot_a_version: String,
+        slot_b_version: String,
+    }
+
+    let mut rows = Vec::new();
+    for (baseboard_id, sled_id, status) in sps {
+        let HostPhase1Status { active_slot, slot_a_version, slot_b_version } =
+            status;
+        let (slot_a_suffix, slot_b_suffix) = match active_slot {
+            Some(M2Slot::A) => (" (active)", ""),
+            Some(M2Slot::B) => ("", " (active)"),
+            // This is not expected! Be louder.
+            None => ("", " (ACTIVE SLOT UNKNOWN)"),
+        };
+        rows.push(HostPhase1Row {
+            baseboard_id,
+            sled_id: sled_id.map_or("".to_string(), |id| id.to_string()),
+            slot_a_version: format!("{slot_a_version}{slot_a_suffix}"),
+            slot_b_version: format!("{slot_b_version}{slot_b_suffix}"),
+        });
+    }
+
+    let table = tabled::Table::new(rows)
+        .with(tabled::settings::Style::empty())
+        .with(tabled::settings::Padding::new(0, 1, 0, 0))
+        .to_string();
+
+    println!("Installed Host Phase 1 Software");
     println!("{}", table);
 }
