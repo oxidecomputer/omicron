@@ -2890,7 +2890,8 @@ fn after_171_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
 }
 
 const NEXUS_ID_183_0: &str = "387433f9-1473-4ca2-b156-9670452985e0";
-const OLD_NEXUS_ID_183_0: &str = "287433f9-1473-4ca2-b156-9670452985e0";
+const EXPUNGED_NEXUS_ID_183_0: &str = "287433f9-1473-4ca2-b156-9670452985e0";
+const OLD_NEXUS_ID_183_0: &str = "187433f9-1473-4ca2-b156-9670452985e0";
 
 const BP_ID_183_0: &str = "5a5ff941-3b5a-403b-9fda-db2049f4c736";
 const OLD_BP_ID_183_0: &str = "4a5ff941-3b5a-403b-9fda-db2049f4c736";
@@ -2898,6 +2899,8 @@ const OLD_BP_ID_183_0: &str = "4a5ff941-3b5a-403b-9fda-db2049f4c736";
 fn before_183_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
     Box::pin(async move {
         // Create a blueprint which contains a Nexus - we'll use this for the migration.
+        //
+        // It also contains an exupnged Nexus, which should be ignored.
         ctx.client
             .execute(
                 &format!(
@@ -2929,12 +2932,18 @@ fn before_183_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
                      )
                      VALUES (
                          '{BP_ID_183_0}', gen_random_uuid(), '{NEXUS_ID_183_0}',
-                         'nexus', '192.168.1.10', 8080,
-                         NULL, NULL, NULL, NULL,
-                         NULL, NULL, NULL, NULL, NULL,
-                         false, ARRAY[]::INET[], NULL, NULL, NULL,
-                         NULL, gen_random_uuid(), 'in_service',
-                         NULL, false, 'install_dataset', NULL
+                         'nexus', '192.168.1.10', 8080, NULL, NULL, NULL, NULL,
+                         NULL, NULL, NULL, NULL, NULL, false, ARRAY[]::INET[],
+                         NULL, NULL, NULL, NULL, gen_random_uuid(),
+                         'in_service', NULL, false, 'install_dataset', NULL
+                     ),
+                     (
+                         '{BP_ID_183_0}', gen_random_uuid(),
+                         '{EXPUNGED_NEXUS_ID_183_0}', 'nexus', '192.168.1.11',
+                         8080, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+                         NULL, false, ARRAY[]::INET[], NULL, NULL, NULL, NULL,
+                         gen_random_uuid(), 'expunged', 1, false,
+                         'install_dataset', NULL
                      );"
                 ),
                 &[],

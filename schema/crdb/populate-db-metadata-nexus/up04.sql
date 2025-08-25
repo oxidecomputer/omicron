@@ -11,5 +11,6 @@ SELECT bz.id, NULL, 'active'
 FROM omicron.public.bp_target bt
 JOIN omicron.public.bp_omicron_zone bz ON bt.blueprint_id = bz.blueprint_id
 WHERE bz.zone_type = 'nexus'
+  AND bz.disposition != 'expunged'
   AND bt.version = (SELECT MAX(version) FROM omicron.public.bp_target)
 ON CONFLICT (nexus_id) DO NOTHING;
