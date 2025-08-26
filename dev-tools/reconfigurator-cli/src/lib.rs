@@ -1739,7 +1739,6 @@ fn cmd_sled_update_rot(
         ));
     }
 
-    // TODO-K: Does it set back to none if unset? Should I always show the setting?
     if let Some(pending_persistent_boot_preference) =
         &args.pending_persistent_boot_preference
     {

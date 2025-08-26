@@ -1734,9 +1734,6 @@ impl Sled {
             };
         }
 
-        // TODO-K: Remove debugging info
-        // println!("{:#?}", self.inventory_sp);
-
         if let Some(slot_a_version) = slot_a_version {
             match slot_a_version {
                 ExpectedVersion::NoValidVersion => {

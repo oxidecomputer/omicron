@@ -127,7 +127,7 @@ blueprint-diff latest
 
 # Now simulate the update completing successfully.
 # Like before, we should see a pending SP update for this sled.
-sled-update-rot 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c --slot-a 1.0.0
+sled-update-rot 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c --slot-b 1.0.0 --active-slot b --persistent-boot-preference b
 inventory-generate
 blueprint-plan latest latest
 blueprint-diff latest
@@ -175,9 +175,18 @@ inventory-generate
 blueprint-plan latest latest
 blueprint-diff latest
 
+# Now let's simulate an RoT update that hasn't completed by setting the persistent
+# boot preference to a different slot than the active one. This should cause the
+# planner to mark it as impossible, and replace it.
+set ignore-impossible-mgs-updates-since now
+sled-update-rot d81c6a84-79b8-4958-ae41-ea46c9b19763 --slot-b 1.0.0 --active-slot a --persistent-boot-preference b
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
 # Update the RoT on the last sled.
 # There should be one last pending SP update.
-sled-update-rot d81c6a84-79b8-4958-ae41-ea46c9b19763 --slot-a 1.0.0
+sled-update-rot d81c6a84-79b8-4958-ae41-ea46c9b19763 --slot-b 1.0.0 --active-slot b --persistent-boot-preference b
 inventory-generate
 blueprint-plan latest latest
 blueprint-diff latest
