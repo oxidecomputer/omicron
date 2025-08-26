@@ -110,6 +110,10 @@ impl Align {
                 .iter()
                 .map(|table| align_mean_within(table, query_end, &self.period))
                 .collect(),
+            AlignmentMethod::Rate => tables
+                .iter()
+                .map(|table| align_rate(table, query_end, &self.period))
+                .collect(),
         }
     }
 }
@@ -123,6 +127,10 @@ pub enum AlignmentMethod {
     /// Alignment is done by computing the mean of the output data within the
     /// specified period.
     MeanWithin,
+
+    /// Alignment is done by computing the per second rate of the output data
+    /// within the specified period.
+    Rate
 }
 
 impl fmt::Display for AlignmentMethod {
@@ -130,6 +138,7 @@ impl fmt::Display for AlignmentMethod {
         match self {
             AlignmentMethod::Interpolate => write!(f, "interpolate"),
             AlignmentMethod::MeanWithin => write!(f, "mean_within"),
+            AlignmentMethod::Rate => write!(f, "rate"),
         }
     }
 }
@@ -250,6 +259,137 @@ fn align_mean_within(
                     output_time,
                 )
             };
+            output_values.push(output_value);
+
+            // In any case, we push the window's end time and increment to the
+            // next period.
+            output_timestamps.push(output_time);
+            ix += 1;
+        }
+
+        // We've accumulated our input values into the output arrays, but in
+        // reverse order. Flip them and push onto the existing table, as a gauge
+        // timeseries.
+        let mut new_timeseries = Timeseries::new(
+            timeseries.fields.clone().into_iter(),
+            DataType::Double,
+            MetricType::Gauge,
+        )
+        .unwrap();
+        let values =
+            ValueArray::Double(output_values.into_iter().rev().collect());
+        let timestamps = output_timestamps.into_iter().rev().collect();
+        let values = Values { values, metric_type: MetricType::Gauge };
+        new_timeseries.points = Points::new(None, timestamps, vec![values]);
+        new_timeseries
+            .set_alignment(Alignment { end_time: *query_end, period: *period });
+        output_table.insert(new_timeseries).unwrap();
+    }
+    Ok(output_table)
+}
+
+// Align the timeseries in a table by computing the per second rate within each output
+// period.
+
+fn align_rate(
+    table: &Table,
+    query_end: &DateTime<Utc>,
+    period: &Duration,
+) -> Result<Table, Error> {
+    let mut output_table = Table::new(table.name());
+    for timeseries in table.iter() {
+        let points = &timeseries.points;
+        anyhow::ensure!(
+            points.dimensionality() == 1,
+            "Aligning multidimensional timeseries is not yet supported"
+        );
+        let data_type = points.data_types().next().unwrap();
+        anyhow::ensure!(
+            data_type.is_numeric(),
+            "Alignment by mean requires numeric data type, not {}",
+            data_type
+        );
+        let metric_type = points.metric_type().unwrap();
+        anyhow::ensure!(
+            metric_type == MetricType::Delta,
+            "Alignment by rate requires a delta metric, not {}",
+            metric_type,
+        );
+        verify_max_upsampling_ratio(points.timestamps(), &period)?;
+
+        // Always convert the output to doubles, when computing the mean. The
+        // output is always a gauge, so we do not need the start times of the
+        // input either.
+        //
+        // IMPORTANT: We compute the mean in the loop below from the back of the
+        // array (latest timestamp) to the front (earliest timestamp). They are
+        // appended to these arrays here in that _reversed_ order. These arrays
+        // are flipped before pushing them onto the timeseries at the end of the
+        // loop below.
+        let mut output_values = Vec::with_capacity(points.len());
+        let mut output_timestamps = Vec::with_capacity(points.len());
+
+        // Convert the input to doubles now, so the tight loop below does less
+        // conversion / matching inside.
+        let input_points = match points.values(0).unwrap() {
+            ValueArray::Integer(values) => values
+                .iter()
+                .map(|maybe_int| maybe_int.map(|int| int as f64))
+                .collect(),
+            ValueArray::Double(values) => values.clone(),
+            _ => unreachable!(),
+        };
+
+        // Alignment works as follows:
+        //
+        // - Start at the end of the timestamp array, working our way backwards
+        // in time.
+        // - Create the output timestamp from the current step.
+        // - Find all points in the input array that are within the alignment
+        // period.
+        // - Compute the mean of those.
+        let period_ =
+            TimeDelta::from_std(*period).context("time delta out of range")?;
+        let first_timestamp = points.timestamps()[0];
+        let mut ix: u32 = 0;
+        loop {
+            // Compute the next output timestamp, by shifting the query end time
+            // by the period and the index.
+            let time_offset = TimeDelta::from_std(ix * *period)
+                .context("time delta out of range")?;
+            let output_time = query_end
+                .checked_sub_signed(time_offset)
+                .context("overflow computing next output timestamp")?;
+            let window_start = output_time
+                .checked_sub_signed(period_)
+                .context("overflow computing next output window start")?;
+
+            // The output time is before any of the data in the input array,
+            // we're done. It's OK for the _start time_ to be before any input
+            // timestamps.
+            if output_time < first_timestamp {
+                break;
+            }
+
+            // Aggregate all values within this time window.
+            //
+            // Deltas have a start time, which makes things a bit more
+            // complicated. In that case, a point can overlap _partially_ with
+            // the output time window, and we'd like to take that partial
+            // overlap into account. To do that, we find relevant values which
+            // have either a start time or timestamp within the output window.
+            // We compute the fraction of overlap with the window, which is in
+            // [0.0, 1.0], and multiply the value by that fraction. One can
+            // think of this as a dot-product between the interval-overlap array
+            // and the value array, divided by the 1-norm, or number of nonzero
+            // entries.
+            let output_value = rate_value_in_window(
+                points.start_times().unwrap(),
+                points.timestamps(),
+                &input_points,
+                window_start,
+                output_time,
+            );
             output_values.push(output_value);
 
             // In any case, we push the window's end time and increment to the
@@ -416,6 +556,85 @@ fn mean_gauge_value_in_window(
     } else {
         None
     }
+}
+//
+// For a delta metric, compute the per second rate of points falling within the
+// provided window.
+//
+// This uses both the start and end times when considering each point. Each
+// point's value is weighted by the faction of overlap with the window.
+fn rate_value_in_window(
+    start_times: &[DateTime<Utc>],
+    timestamps: &[DateTime<Utc>],
+    input_points: &[Option<f64>],
+    window_start: DateTime<Utc>,
+    window_end: DateTime<Utc>,
+) -> Option<f64> {
+    // We can find the indices where the timestamp and start times separately
+    // overlap the window of interest. Then any interval is potentially of
+    // interest if _either_ its start time or timestamp is within the window.
+    //
+    // Since the start times are <= the timestamps, we can take the min of those
+    // two to get the first point that overlaps at all, and the max to get the
+    // last.
+    let first_timestamp = timestamps.partition_point(|t| t <= &window_start);
+    let last_timestamp = timestamps.partition_point(|t| t <= &window_end);
+    let first_start_time = start_times.partition_point(|t| t <= &window_start);
+    let last_start_time = start_times.partition_point(|t| t <= &window_end);
+    let first_index = first_timestamp.min(first_start_time);
+    let last_index = last_timestamp.max(last_start_time);
+
+    let window_secs = (window_end - window_start)
+        .to_std()
+        .ok()
+        .map(|d| d.as_secs_f64())
+        .unwrap_or(0.0);
+    if window_secs <= 0.0 {
+        return None;
+    }
+
+    // Detect the possible case where the interval is entirely before or
+    // entirely after the window.
+    if first_index == last_index {
+        let t = *timestamps.get(first_timestamp)?;
+        let s = *start_times.get(first_timestamp)?;
+        if t < window_start || s > window_end {
+            return None;
+        }
+        let Some(val) = input_points[first_timestamp] else {
+            return None;
+        };
+        let fraction = fraction_overlap_with_window(
+            start_times[first_start_time],
+            timestamps[first_timestamp],
+            window_start,
+            window_end,
+        );
+        return Some((fraction * val) / window_secs);
+    }
+
+    // Compute the overlap for all points which have some overlap.
+    let starts = &start_times[first_index..last_index];
+    let times = &timestamps[first_index..last_index];
+    let vals = &input_points[first_index..last_index];
+    let iter = starts
+        .into_iter()
+        .copied()
+        .zip(times.into_iter().copied())
+        .zip(vals.into_iter().copied());
+
+    let mut maybe_sum = None;
+    for it in iter.filter_map(|((start, time), maybe_val)| {
+        let Some(val) = maybe_val else {
+            return None;
+        };
+        let fraction =
+            fraction_overlap_with_window(start, time, window_start, window_end);
+        Some(fraction * val)
+    }) {
+        *maybe_sum.get_or_insert(0.0) += it;
+    }
+    maybe_sum.map(|sum| sum / window_secs)
 }
 
 fn align_interpolate(
@@ -679,6 +898,41 @@ mod tests {
             .is_none(),
             "This window should overlap none of the points"
         );
+    }
+
+    #[test]
+    fn test_rate_value_in_window_steady_state() {
+        // 1000 bytes every 10 seconds -> 100 bytes per second
+        let raw_data = &[
+            ("2025-08-12T19:17:00.0000Z", "2025-08-12T19:17:10.0000Z", 1000f64),
+            ("2025-08-12T19:17:10.0000Z", "2025-08-12T19:17:20.0000Z", 1000f64),
+            ("2025-08-12T19:17:20.0000Z", "2025-08-12T19:17:30.0000Z", 1000f64),
+            ("2025-08-12T19:17:30.0000Z", "2025-08-12T19:17:40.0000Z", 1000f64),
+            ("2025-08-12T19:17:40.0000Z", "2025-08-12T19:17:50.0000Z", 1000f64),
+            ("2025-08-12T19:17:50.0000Z", "2025-08-12T19:18:00.0000Z", 1000f64),
+        ];
+
+        let start_times: Vec<DateTime<Utc>> =
+            raw_data.into_iter().map(|r| r.0.parse().unwrap()).collect();
+        let timestamps: Vec<DateTime<Utc>> =
+            raw_data.into_iter().map(|r| r.1.parse().unwrap()).collect();
+
+        let input_points: Vec<_> =
+            raw_data.into_iter().map(|r| Some(r.2)).collect();
+
+        let window_start = start_times[0];
+        let window_end = timestamps[timestamps.len() - 1];
+
+        let mean = rate_value_in_window(
+            &start_times,
+            &timestamps,
+            &input_points,
+            window_start,
+            window_end,
+        )
+        .unwrap();
+        let expected = 100.0;
+        assert!((mean - expected).abs() < 1e-6, "mean={mean}, expected={expected}");
     }
 
     #[test]

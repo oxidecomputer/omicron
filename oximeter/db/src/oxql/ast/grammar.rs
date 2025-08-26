@@ -541,6 +541,7 @@ peg::parser! {
         pub(super) rule alignment_method() -> AlignmentMethod
             = "interpolate" { AlignmentMethod::Interpolate }
             / "mean_within" { AlignmentMethod::MeanWithin }
+            / "rate" { AlignmentMethod::Rate }
 
         /// Parse an alignment table operation.
         pub rule align() -> Align
@@ -1326,6 +1327,14 @@ mod tests {
 
         assert!(query_parser::align("align whatever(100s)").is_err());
         assert!(query_parser::align("align interpolate('foo')").is_err());
+
+        assert_eq!(
+            query_parser::align("align rate(100s)").unwrap(),
+            Align {
+                method: AlignmentMethod::Rate,
+                period: Duration::from_secs(100)
+            }
+        );
     }
 
     #[test]
