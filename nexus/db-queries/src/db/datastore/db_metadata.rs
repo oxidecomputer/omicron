@@ -152,7 +152,7 @@ fn skippable_version(
 
 /// Describes the state of the database access with respect this Nexus
 #[derive(Debug, Copy, Clone, PartialEq)]
-pub enum NexusAccess {
+enum NexusAccess {
     /// Nexus does not yet have access to the database.
     DoesNotHaveAccessYet { nexus_id: OmicronZoneUuid },
 
@@ -660,8 +660,8 @@ impl DataStore {
         Ok(())
     }
 
-    /// Returns the access this Nexus has to the database
-    pub async fn database_nexus_access(
+    // Returns the access this Nexus has to the database
+    async fn database_nexus_access(
         &self,
         nexus_id: OmicronZoneUuid,
     ) -> Result<Option<DbMetadataNexus>, Error> {
@@ -679,14 +679,15 @@ impl DataStore {
         Ok(nexus_access)
     }
 
-    /// Checks if any db_metadata_nexus records exist in the database
-    pub async fn database_nexus_access_any_exist(&self) -> Result<bool, Error> {
+    // Checks if any db_metadata_nexus records exist in the database
+    async fn database_nexus_access_any_exist(&self) -> Result<bool, Error> {
         let conn = self.pool_connection_unauthorized().await?;
         Self::database_nexus_access_any_exist_on_connection(&conn).await
     }
 
-    /// Checks if any db_metadata_nexus records exist in the database using an existing connection
-    pub async fn database_nexus_access_any_exist_on_connection(
+    // Checks if any db_metadata_nexus records exist in the database using an
+    // existing connection
+    async fn database_nexus_access_any_exist_on_connection(
         conn: &async_bb8_diesel::Connection<DbConnection>,
     ) -> Result<bool, Error> {
         use nexus_db_schema::schema::db_metadata_nexus::dsl;
@@ -701,8 +702,9 @@ impl DataStore {
         Ok(exists)
     }
 
-    /// Registers a Nexus instance as having active access to the database
-    pub async fn database_nexus_access_insert(
+    // Registers a Nexus instance as having active access to the database
+    #[cfg(test)]
+    async fn database_nexus_access_insert(
         &self,
         nexus_id: OmicronZoneUuid,
         state: DbMetadataNexusState,
