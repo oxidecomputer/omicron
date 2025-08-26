@@ -151,7 +151,7 @@ fn skippable_version(
     return false;
 }
 
-/// Describes the state of the schema with respect this Nexus
+/// Describes the state of the database access with respect this Nexus
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub enum NexusAccess {
     /// Nexus does not yet have access to the database.
@@ -214,7 +214,7 @@ pub enum SchemaAction {
     /// Not ready for usage yet
     ///
     /// The database may be ready for usage once handoff has completed.
-    WaitForHandoff,
+    NeedsHandoff,
 
     /// Start a schema update
     Update,
@@ -273,7 +273,7 @@ impl SchemaAction {
                 DoesNotHaveAccessYet,
                 UpToDate | OlderThanDesired | OlderThanDesiredSkipAccessCheck,
                 Update,
-            ) => Self::WaitForHandoff,
+            ) => Self::NeedsHandoff,
 
             // This is the most "normal" case: Nexus should have access to the
             // database, and the schema matches what it wants.
@@ -823,7 +823,7 @@ impl DataStore {
 
     // Implementation function for attempt_handoff that runs within a transaction
     //
-    // This function must be executed from a tranaction context to be safe.
+    // This function must be executed from a transaction context to be safe.
     async fn attempt_handoff_impl(
         conn: async_bb8_diesel::Connection<DbConnection>,
         nexus_id: OmicronZoneUuid,
@@ -1876,7 +1876,7 @@ mod test {
                 )
                 .await
                 .expect("Failed to check schema and access");
-            assert_eq!(action.action(), &SchemaAction::WaitForHandoff);
+            assert_eq!(action.action(), &SchemaAction::NeedsHandoff);
 
             // With FailOnMismatch policy, should refuse
             let action = datastore

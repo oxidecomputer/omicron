@@ -130,7 +130,7 @@ async fn main_impl() -> anyhow::Result<()> {
                         .map_err(|e| anyhow!(e))?;
                     println!("Update to {version} complete");
                 }
-                SchemaAction::WaitForHandoff | SchemaAction::Refuse => {
+                SchemaAction::NeedsHandoff | SchemaAction::Refuse => {
                     println!("Cannot update to version {version}")
                 }
             }

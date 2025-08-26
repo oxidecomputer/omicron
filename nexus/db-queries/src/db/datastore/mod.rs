@@ -273,80 +273,86 @@ impl DataStore {
                     }
                 }
 
-                let checked_action = datastore
-                    .check_schema_and_access(
-                        identity_check,
-                        EXPECTED_VERSION,
-                        ConsumerPolicy::Update,
-                    )
-                    .await
-                    .map_err(|err| {
-                        warn!(
-                            log,
-                            "Cannot check schema version / Nexus access";
-                            "error" => InlineErrorChain::new(err.as_ref()),
-                        );
-                        BackoffError::transient(
-                            "Cannot check schema version / Nexus access",
+                loop {
+                    let checked_action = datastore
+                        .check_schema_and_access(
+                            identity_check,
+                            EXPECTED_VERSION,
+                            ConsumerPolicy::Update,
                         )
-                    })?;
-
-                match checked_action.action() {
-                    SchemaAction::Ready => {
-                        info!(log, "Datastore is ready for usage");
-                        return Ok(());
-                    }
-                    SchemaAction::WaitForHandoff => {
-                        info!(log, "Datastore is awaiting handoff");
-
-                        let IdentityCheckPolicy::CheckAndTakeover { nexus_id } =
-                            identity_check
-                        else {
-                            return Err(BackoffError::permanent(
-                                "Nexus ID needed for handoff",
-                            ));
-                        };
-
-                        datastore.attempt_handoff(nexus_id).await.map_err(
-                            |err| {
-                                warn!(
-                                    log,
-                                    "Could not perform handoff to new nexus";
-                                    err
-                                );
-                                BackoffError::transient(
-                                    "Could not perform handoff to new nexus",
-                                )
-                            },
-                        )?;
-
-                        todo!(
-                            "Post-handoff, Nexus should self-update. \
-                             This is not yet implemented"
-                        );
-                    }
-                    SchemaAction::Update => {
-                        info!(log, "Datastore should be updated before usage");
-                        datastore
-                            .update_schema(checked_action, config)
-                            .await
-                            .map_err(|err| {
+                        .await
+                        .map_err(|err| {
                             warn!(
                                 log,
-                                "Failed to update schema version";
-                                "error" => #%err
+                                "Cannot check schema version / Nexus access";
+                                "error" => InlineErrorChain::new(err.as_ref()),
                             );
                             BackoffError::transient(
-                                "Failed to update schema version",
+                                "Cannot check schema version / Nexus access",
                             )
                         })?;
-                        return Ok(());
-                    }
-                    SchemaAction::Refuse => {
-                        error!(log, "Datastore should not be used");
-                        return Err(BackoffError::permanent(
-                            "Datastore should not be used",
-                        ));
+
+                    match checked_action.action() {
+                        SchemaAction::Ready => {
+                            info!(log, "Datastore is ready for usage");
+                            return Ok(());
+                        }
+                        SchemaAction::NeedsHandoff => {
+                            info!(log, "Datastore is awaiting handoff");
+
+                            let IdentityCheckPolicy::CheckAndTakeover {
+                                nexus_id,
+                            } = identity_check
+                            else {
+                                return Err(BackoffError::permanent(
+                                    "Nexus ID needed for handoff",
+                                ));
+                            };
+
+                            datastore.attempt_handoff(nexus_id).await.map_err(
+                                |err| {
+                                    warn!(
+                                        log,
+                                        "Could not handoff to new nexus";
+                                        err
+                                    );
+                                    BackoffError::transient(
+                                        "Could not handoff to new nexus",
+                                    )
+                                },
+                            )?;
+
+                            // If the handoff was successful, immediately
+                            // re-evaluate the schema and access policies to see
+                            // if we should update or not.
+                            continue;
+                        }
+                        SchemaAction::Update => {
+                            info!(
+                                log,
+                                "Datastore should be updated before usage"
+                            );
+                            datastore
+                                .update_schema(checked_action, config)
+                                .await
+                                .map_err(|err| {
+                                    warn!(
+                                        log,
+                                        "Failed to update schema version";
+                                        "error" => #%err
+                                    );
+                                    BackoffError::transient(
+                                        "Failed to update schema version",
+                                    )
+                                })?;
+                            return Ok(());
+                        }
+                        SchemaAction::Refuse => {
+                            error!(log, "Datastore should not be used");
+                            return Err(BackoffError::permanent(
+                                "Datastore should not be used",
+                            ));
+                        }
                     }
                 }
             },
