@@ -2062,6 +2062,7 @@ mod test {
                             slot: 0,
                             transit_ips: vec![],
                         },
+                        nexus_generation: *Generation::new(),
                     },
                 ),
                 image_source: BlueprintZoneImageSource::InstallDataset,
@@ -2113,6 +2114,7 @@ mod test {
             creator: "test suite".to_string(),
             comment: "test blueprint".to_string(),
             report: PlanningReport::new(blueprint_id),
+            nexus_generation: *Generation::new(),
         };
 
         let rack = datastore
