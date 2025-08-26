@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! omdb commands that query or update specific Nexus instances
+//! om.into_untyped_uuid()db commands that query or update specific Nexus instances
 
 mod chicken_switches;
 mod quiesce;
@@ -4072,7 +4072,7 @@ async fn cmd_nexus_support_bundles_list(
         user_comment: String,
     }
     let rows = support_bundles.into_iter().map(|sb| SupportBundleInfo {
-        id: *sb.id,
+        id: sb.id.into_untyped_uuid(),
         time_created: sb.time_created,
         reason_for_creation: sb.reason_for_creation,
         reason_for_failure: sb

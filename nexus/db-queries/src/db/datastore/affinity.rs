@@ -545,7 +545,7 @@ impl DataStore {
             .into_iter()
             .map(|(id, name, instance_state, migration_id, vmm_state)| {
                 Ok(external::AffinityGroupMember::Instance {
-                    id: InstanceUuid::from_untyped_uuid(id),
+                    id,
                     name: name.into(),
                     run_state: InstanceStateComputer::compute_state_from(
                         &instance_state,
@@ -613,7 +613,7 @@ impl DataStore {
                     ));
                 };
                 Ok(external::AntiAffinityGroupMember::Instance {
-                    id: InstanceUuid::from_untyped_uuid(id),
+                    id,
                     name: name.into(),
                     run_state: InstanceStateComputer::compute_state_from(
                         &instance_state,
@@ -1874,7 +1874,7 @@ mod tests {
             external::AntiAffinityGroupMember::Instance {
                 id,
                 ..
-            } if id == instance,
+            } if id == instance.into_untyped_uuid(),
         ));
 
         // We can delete the member and observe an empty member list
@@ -1952,7 +1952,7 @@ mod tests {
 
             // Add the instance as a member to the group
             let member = external::AffinityGroupMember::Instance {
-                id: instance,
+                id: instance.into_untyped_uuid(),
                 name: name.try_into().unwrap(),
                 run_state: external::InstanceState::Stopped,
             };
@@ -2131,7 +2131,7 @@ mod tests {
 
             // Add the instance as a member to the group
             let member = external::AntiAffinityGroupMember::Instance {
-                id: instance,
+                id: instance.into_untyped_uuid(),
                 name: name.try_into().unwrap(),
                 run_state: external::InstanceState::Stopped,
             };
@@ -2473,7 +2473,7 @@ mod tests {
             external::AntiAffinityGroupMember::Instance {
                 id,
                 ..
-            } if id == instance,
+            } if id == instance.into_untyped_uuid(),
         ));
         // We can delete the member and observe an empty member list -- even
         // though it's running!

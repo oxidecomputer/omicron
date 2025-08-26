@@ -12,7 +12,6 @@ use chrono::DateTime;
 use chrono::Utc;
 use omicron_common::api::external::Name;
 use omicron_common::api::internal::shared::NetworkInterface;
-use omicron_uuid_kinds::SupportBundleUuid;
 use parse_display::FromStr;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -642,7 +641,7 @@ pub enum SupportBundleState {
 
 #[derive(Debug, Clone, JsonSchema, Serialize, Deserialize)]
 pub struct SupportBundleInfo {
-    pub id: SupportBundleUuid,
+    pub id: Uuid,
     pub time_created: DateTime<Utc>,
     pub reason_for_creation: String,
     pub reason_for_failure: Option<String>,

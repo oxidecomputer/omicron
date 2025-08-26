@@ -926,8 +926,8 @@ async fn test_retry_backoff(cptestctx: &ControlPlaneTestContext) {
     );
 
     let delivery = dbg!(&deliveries.all_items[0]);
-    assert_eq!(delivery.receiver_id.into_untyped_uuid(), webhook.identity.id);
-    assert_eq!(delivery.alert_id, id);
+    assert_eq!(delivery.receiver_id, webhook.identity.id);
+    assert_eq!(delivery.alert_id, *id.as_untyped_uuid());
     assert_eq!(delivery.alert_class, "test.foo");
     assert_eq!(delivery.state, views::AlertDeliveryState::Pending);
     expect_delivery_attempts(
@@ -1000,8 +1000,8 @@ async fn test_retry_backoff(cptestctx: &ControlPlaneTestContext) {
     );
 
     let delivery = dbg!(&deliveries.all_items[0]);
-    assert_eq!(delivery.receiver_id.into_untyped_uuid(), webhook.identity.id);
-    assert_eq!(delivery.alert_id, id);
+    assert_eq!(delivery.receiver_id, webhook.identity.id);
+    assert_eq!(delivery.alert_id, *id.as_untyped_uuid());
     assert_eq!(delivery.alert_class, "test.foo");
     assert_eq!(delivery.state, views::AlertDeliveryState::Pending);
     expect_delivery_attempts(
@@ -1069,8 +1069,8 @@ async fn test_retry_backoff(cptestctx: &ControlPlaneTestContext) {
         deliveries.all_items
     );
     let delivery = dbg!(&deliveries.all_items[0]);
-    assert_eq!(delivery.receiver_id.into_untyped_uuid(), webhook.identity.id);
-    assert_eq!(delivery.alert_id, id);
+    assert_eq!(delivery.receiver_id, webhook.identity.id);
+    assert_eq!(delivery.alert_id, *id.as_untyped_uuid());
     assert_eq!(delivery.alert_class, "test.foo");
     assert_eq!(delivery.state, views::AlertDeliveryState::Delivered);
     expect_delivery_attempts(

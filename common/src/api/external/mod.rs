@@ -22,8 +22,6 @@ use dropshot::HttpError;
 pub use dropshot::PaginationOrder;
 pub use error::*;
 use futures::stream::BoxStream;
-use omicron_uuid_kinds::GenericUuid;
-use omicron_uuid_kinds::InstanceUuid;
 use oxnet::IpNet;
 use oxnet::Ipv4Net;
 use parse_display::Display;
@@ -1301,13 +1299,13 @@ pub enum AffinityGroupMember {
     ///
     /// Instances can belong to up to 16 affinity groups.
     // See: INSTANCE_MAX_AFFINITY_GROUPS
-    Instance { id: InstanceUuid, name: Name, run_state: InstanceState },
+    Instance { id: Uuid, name: Name, run_state: InstanceState },
 }
 
 impl SimpleIdentityOrName for AffinityGroupMember {
     fn id(&self) -> Uuid {
         match self {
-            AffinityGroupMember::Instance { id, .. } => *id.as_untyped_uuid(),
+            AffinityGroupMember::Instance { id, .. } => *id,
         }
     }
 
@@ -1332,15 +1330,13 @@ pub enum AntiAffinityGroupMember {
     ///
     /// Instances can belong to up to 16 anti-affinity groups.
     // See: INSTANCE_MAX_ANTI_AFFINITY_GROUPS
-    Instance { id: InstanceUuid, name: Name, run_state: InstanceState },
+    Instance { id: Uuid, name: Name, run_state: InstanceState },
 }
 
 impl SimpleIdentityOrName for AntiAffinityGroupMember {
     fn id(&self) -> Uuid {
         match self {
-            AntiAffinityGroupMember::Instance { id, .. } => {
-                *id.as_untyped_uuid()
-            }
+            AntiAffinityGroupMember::Instance { id, .. } => *id,
         }
     }
 

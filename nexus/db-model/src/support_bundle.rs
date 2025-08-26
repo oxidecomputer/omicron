@@ -11,6 +11,7 @@ use nexus_types::external_api::shared::SupportBundleInfo as SupportBundleView;
 use nexus_types::external_api::shared::SupportBundleState as SupportBundleStateView;
 use omicron_uuid_kinds::DatasetKind;
 use omicron_uuid_kinds::DatasetUuid;
+use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneKind;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SupportBundleKind;
@@ -127,7 +128,7 @@ impl SupportBundle {
 impl From<SupportBundle> for SupportBundleView {
     fn from(bundle: SupportBundle) -> Self {
         Self {
-            id: bundle.id.into(),
+            id: bundle.id.into_untyped_uuid(),
             time_created: bundle.time_created,
             reason_for_creation: bundle.reason_for_creation,
             reason_for_failure: bundle.reason_for_failure,

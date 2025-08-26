@@ -19,7 +19,7 @@ use omicron_common::api::external::{
     Digest, Error, FailureDomain, IdentityMetadata, InstanceState, Name,
     ObjectIdentity, SimpleIdentity, SimpleIdentityOrName,
 };
-use omicron_uuid_kinds::{AlertReceiverUuid, AlertUuid};
+// Use plain `Uuid` in external views to avoid leaking typed UUIDs in OpenAPI
 use oxnet::{Ipv4Net, Ipv6Net};
 use schemars::JsonSchema;
 use semver::Version;
@@ -1308,13 +1308,13 @@ pub struct AlertDelivery {
     pub id: Uuid,
 
     /// The UUID of the alert receiver that this event was delivered to.
-    pub receiver_id: AlertReceiverUuid,
+    pub receiver_id: Uuid,
 
     /// The event class.
     pub alert_class: String,
 
     /// The UUID of the event.
-    pub alert_id: AlertUuid,
+    pub alert_id: Uuid,
 
     /// The state of this delivery.
     pub state: AlertDeliveryState,

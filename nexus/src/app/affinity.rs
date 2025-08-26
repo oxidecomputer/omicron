@@ -319,7 +319,7 @@ impl super::Nexus {
             )
             .await?;
         Ok(external::AffinityGroupMember::Instance {
-            id: member,
+            id: authz_instance.id(),
             name: instance.name().clone(),
             // TODO: This is kinda a lie - the current implementation of
             // "affinity_group_member_instance_add" relies on the instance
@@ -349,7 +349,7 @@ impl super::Nexus {
             )
             .await?;
         Ok(external::AntiAffinityGroupMember::Instance {
-            id: member,
+            id: authz_instance.id(),
             name: instance.name().clone(),
             // TODO: This is kinda a lie - the current implementation of
             // "anti_affinity_group_member_instance_add" relies on the instance
