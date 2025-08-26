@@ -5,10 +5,14 @@
 //! [`DataStore`] methods on Database Metadata.
 
 use super::{DataStore, DbConnection, IdentityCheckPolicy};
+use crate::authz;
+use crate::context::OpContext;
+
 use anyhow::{Context, bail, ensure};
 use async_bb8_diesel::{AsyncRunQueryDsl, AsyncSimpleConnection};
 use chrono::Utc;
 use diesel::prelude::*;
+use futures::FutureExt;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::OptionalError;
 use nexus_db_errors::public_error_from_diesel;
@@ -19,7 +23,9 @@ use nexus_db_model::DbMetadataNexusState;
 use nexus_db_model::EARLIEST_SUPPORTED_VERSION;
 use nexus_db_model::SchemaUpgradeStep;
 use nexus_db_model::SchemaVersion;
+use nexus_types::deployment::BlueprintZoneDisposition;
 use omicron_common::api::external::Error;
+use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use semver::Version;
 use slog::{Logger, error, info, o};
@@ -699,6 +705,80 @@ impl DataStore {
         .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
         Ok(exists)
+    }
+
+    /// Deletes the "db_metadata_nexus" record for a Nexus ID, if it exists.
+    pub async fn database_nexus_access_delete(
+        &self,
+        opctx: &OpContext,
+        nexus_id: OmicronZoneUuid,
+    ) -> Result<(), Error> {
+        use nexus_db_schema::schema::db_metadata_nexus::dsl;
+
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+        let conn = &*self.pool_connection_authorized(&opctx).await?;
+
+        diesel::delete(
+            dsl::db_metadata_nexus
+                .filter(dsl::nexus_id.eq(nexus_id.into_untyped_uuid())),
+        )
+        .execute_async(&*conn)
+        .await
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        Ok(())
+    }
+
+    /// Propagate the nexus records to the database if and only if
+    /// the blueprint is the current target.
+    ///
+    /// If any of these records already exist, they are unmodified.
+    pub async fn database_nexus_access_create(
+        &self,
+        opctx: &OpContext,
+        blueprint: &nexus_types::deployment::Blueprint,
+    ) -> Result<(), Error> {
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+
+        // TODO: Without https://github.com/oxidecomputer/omicron/pull/8863, we
+        // treat all Nexuses as active. Some will become "not_yet", depending on
+        // the Nexus Generation, once it exists.
+        let active_nexus_zones = blueprint
+            .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+            .filter_map(|(_sled, zone_cfg)| {
+                if zone_cfg.zone_type.is_nexus() {
+                    Some(zone_cfg)
+                } else {
+                    None
+                }
+            });
+        let new_nexuses = active_nexus_zones
+            .map(|z| DbMetadataNexus::new(z.id, DbMetadataNexusState::Active))
+            .collect::<Vec<_>>();
+
+        let conn = &*self.pool_connection_authorized(&opctx).await?;
+        self.transaction_if_current_blueprint_is(
+            &conn,
+            "database_nexus_access_create",
+            opctx,
+            blueprint.id,
+            |conn| {
+                let new_nexuses = new_nexuses.clone();
+                async move {
+                    use nexus_db_schema::schema::db_metadata_nexus::dsl;
+
+                    diesel::insert_into(dsl::db_metadata_nexus)
+                        .values(new_nexuses)
+                        .on_conflict(dsl::nexus_id)
+                        .do_nothing()
+                        .execute_async(&*conn)
+                        .await?;
+                    Ok(())
+                }
+                .boxed()
+            },
+        )
+        .await
     }
 
     // Registers a Nexus instance as having active access to the database
