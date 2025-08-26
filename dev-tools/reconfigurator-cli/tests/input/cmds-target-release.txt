@@ -184,6 +184,12 @@ inventory-generate
 blueprint-plan latest latest
 blueprint-diff latest
 
+set ignore-impossible-mgs-updates-since now
+sled-update-rot d81c6a84-79b8-4958-ae41-ea46c9b19763 --slot-b 1.1.0 --active-slot b --persistent-boot-preference b --pending-persistent-boot-preference b
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
 # Update the RoT on the last sled.
 # There should be one last pending SP update.
 sled-update-rot d81c6a84-79b8-4958-ae41-ea46c9b19763 --slot-b 1.0.0 --active-slot b --persistent-boot-preference b
