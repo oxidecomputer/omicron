@@ -10992,6 +10992,32 @@
         }
       }
     },
+    "/v1/system/update/status": {
+      "get": {
+        "tags": [
+          "system/update"
+        ],
+        "operationId": "update_status",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateStatus"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/v1/system/update/target-release": {
       "get": {
         "tags": [
@@ -26096,6 +26122,38 @@
               "rpm"
             ]
           }
+        ]
+      },
+      "UpdateStatus": {
+        "type": "object",
+        "properties": {
+          "components_by_release": {
+            "description": "Count of components running each release version",
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer",
+              "format": "uint",
+              "minimum": 0
+            }
+          },
+          "last_blueprint_time": {
+            "nullable": true,
+            "description": "Time when the last blueprint was created",
+            "type": "string",
+            "format": "date-time"
+          },
+          "target_release": {
+            "nullable": true,
+            "description": "Current target release information",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TargetRelease"
+              }
+            ]
+          }
+        },
+        "required": [
+          "components_by_release"
         ]
       },
       "UpdatesTrustRoot": {

@@ -4513,6 +4513,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.blueprint (
     target_release_minimum_generation INT8 NOT NULL
 );
 
+CREATE INDEX IF NOT EXISTS lookup_blueprint_by_creation ON omicron.public.blueprint (
+    time_created
+);
+
 -- table describing both the current and historical target blueprints of the
 -- system
 CREATE TABLE IF NOT EXISTS omicron.public.bp_target (
@@ -6550,7 +6554,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '181.0.0', NULL)
+    (TRUE, NOW(), NOW(), '182.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
