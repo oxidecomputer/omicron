@@ -136,8 +136,10 @@ async fn main_impl() -> anyhow::Result<()> {
                     // IdentityCheckPolicy::DontCare, so we should not be told
                     // to attempt a takeover by a specific Nexus.
                     println!(
-                        "Refusing to update to version {version} \
-                             (Handoff needed?)"
+                        "Refusing to update to version {version}. \
+                         The schema updater tried to ignore the identity check, \
+                         but got a response indicating handoff is needed. \
+                         This is unexpected, and probably a bug"
                     )
                 }
             }
