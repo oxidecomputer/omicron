@@ -292,7 +292,8 @@ impl DataStore {
                 &self.log,
                 "No db_metadata_nexus records exist - skipping access check";
                 "nexus_id" => ?nexus_id,
-                "explanation" => "This is expected during initial deployment or before migration"
+                "explanation" => "This is expected during initial deployment \
+                                  or before migration"
             );
             return Ok(NexusAccess::HasImplicitAccess);
         }
@@ -301,18 +302,27 @@ impl DataStore {
         let Some(state) =
             self.database_nexus_access(nexus_id).await?.map(|s| s.state())
         else {
-            let msg = "Nexus does not have access to the database (no db_metadata_nexus record)";
+            let msg = "Nexus does not have access to the database (no \
+                       db_metadata_nexus record)";
             warn!(&self.log, "{msg}"; "nexus_id" => ?nexus_id);
             return Ok(NexusAccess::DoesNotHaveAccessYet);
         };
 
         let status = match state {
             DbMetadataNexusState::Active => {
-                info!(&self.log, "Nexus has access to the database"; "nexus_id" => ?nexus_id);
+                info!(
+                    &self.log,
+                    "Nexus has access to the database";
+                    "nexus_id" => ?nexus_id
+                );
                 NexusAccess::HasExplicitAccess
             }
             DbMetadataNexusState::NotYet => {
-                info!(&self.log, "Nexus does not yet have access to the database"; "nexus_id" => ?nexus_id);
+                info!(
+                    &self.log,
+                    "Nexus does not yet have access to the database";
+                    "nexus_id" => ?nexus_id
+                );
                 NexusAccess::DoesNotHaveAccessYet
             }
             DbMetadataNexusState::Quiesced => {
@@ -377,11 +387,12 @@ impl DataStore {
         let nexus_access = match identity_check {
             IdentityCheckPolicy::CheckAndTakeover { nexus_id } => {
                 match schema_status {
-                    // If we don't think the "db_metadata_nexus" tables exist in the
-                    // schema yet, treat them as implicitly having access.
+                    // If we don't think the "db_metadata_nexus" tables exist in
+                    // the schema yet, treat them as implicitly having access.
                     //
-                    // TODO: This may be removed, once we're confident deployed systems
-                    // have upgraded past DB_METADATA_NEXUS_SCHEMA_VERSION.
+                    // TODO: This may be removed, once we're confident deployed
+                    // systems have upgraded past
+                    // DB_METADATA_NEXUS_SCHEMA_VERSION.
                     SchemaStatus::OlderThanDesiredSkipAccessCheck => {
                         NexusAccess::HasImplicitAccess
                     }
@@ -766,7 +777,8 @@ impl DataStore {
         Ok(())
     }
 
-    // Implementation function for attempt_handoff that runs within a transaction
+    // Implementation function for attempt_handoff that runs within a
+    // transaction
     //
     // This function must be executed from a transaction context to be safe.
     async fn attempt_handoff_impl(
@@ -776,10 +788,12 @@ impl DataStore {
     ) -> Result<(), diesel::result::Error> {
         use nexus_db_schema::schema::db_metadata_nexus::dsl;
 
-        // Before proceeding, all records must be in the "quiesced" or "not_yet" states.
+        // Before proceeding, all records must be in the "quiesced" or "not_yet"
+        // states.
         //
-        // We explicitly look for any records violating this, rather than explicitly looking for
-        // "active" records, as to protect ourselves from future states being added over time.
+        // We explicitly look for any records violating this, rather than
+        // explicitly looking for "active" records, as to protect ourselves from
+        // future states being added over time.
         let active_count: nexus_db_model::SqlU32 = dsl::db_metadata_nexus
             .filter(
                 dsl::state
@@ -830,14 +844,16 @@ impl DataStore {
         Ok(())
     }
 
-    /// Attempts to perform a handoff to activate this Nexus for database access.
+    /// Attempts to perform a handoff to activate this Nexus for database
+    /// access.
     ///
     /// This function checks that:
-    /// 1. ALL records in db_metadata_nexus are in "not_yet" or "quiesced" states
+    /// 1. ALL records in db_metadata_nexus are in "not_yet" or "quiesced"
+    ///    states
     /// 2. The specified nexus_id has a record which is "not_yet"
     ///
-    /// If both conditions are met, it updates ALL "not_yet" records to "active".
-    /// These operations are performed transactionally.
+    /// If both conditions are met, it updates ALL "not_yet" records to
+    /// "active". These operations are performed transactionally.
     ///
     /// Returns an error if:
     /// - Any record is in "active" state
