@@ -18,6 +18,7 @@ use nexus_test_utils::resource_helpers;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::{params, shared, views};
 use omicron_common::api::external::IdentityMetadataCreateParams;
+use omicron_common::api::external::IdentityMetadataUpdateParams;
 use omicron_common::api::external::NameOrId;
 use omicron_uuid_kinds::AlertReceiverUuid;
 use omicron_uuid_kinds::AlertUuid;
@@ -379,6 +380,53 @@ async fn test_webhook_receiver_get(cptestctx: &ControlPlaneTestContext) {
     let by_name_url = alert_rx_url(created_webhook.identity.name.clone());
     let webhook_view = alert_rx_get(client, &by_name_url).await;
     assert_eq!(created_webhook, webhook_view);
+}
+
+#[nexus_test]
+async fn test_webhook_receiver_create_update(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    // Create a webhook receiver.
+    let created_webhook = webhook_create(
+        &cptestctx,
+        &params::WebhookCreate {
+            identity: my_great_webhook_identity(),
+            endpoint: "https://example.com/webhooks"
+                .parse()
+                .expect("this should be a valid URL"),
+            secrets: vec![MY_COOL_SECRET.to_string()],
+            subscriptions: vec!["test.foo".parse().unwrap()],
+        },
+    )
+    .await;
+    dbg!(&created_webhook);
+
+    let hook_name = created_webhook.identity.name.clone();
+    let hook_url = format!("{WEBHOOK_RECEIVERS_BASE_PATH}/{hook_name}");
+
+    NexusRequest::new(
+        RequestBuilder::new(&client, http::Method::PUT, &hook_url)
+            .body(Some(&params::WebhookReceiverUpdate {
+                identity: IdentityMetadataUpdateParams {
+                    name: None,
+                    description: Some(String::from("an updated description")),
+                },
+                endpoint: Some(
+                    "https://example.com/webhooks/updated".parse().unwrap(),
+                ),
+            }))
+            .expect_status(Some(http::StatusCode::NO_CONTENT)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+
+    let receiver_url = alert_rx_url(created_webhook.identity.id);
+    let updated_receiver = alert_rx_get(client, &receiver_url).await;
+    assert_eq!(updated_receiver.identity.description, "an updated description");
 }
 
 #[nexus_test]

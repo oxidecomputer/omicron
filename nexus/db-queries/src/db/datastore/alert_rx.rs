@@ -354,11 +354,12 @@ impl DataStore {
             endpoint: params.endpoint.as_ref().map(ToString::to_string),
             time_modified: chrono::Utc::now(),
         };
+
         let updated = diesel::update(rx_dsl::alert_receiver)
             .filter(rx_dsl::id.eq(rx_id))
             .filter(rx_dsl::time_deleted.is_null())
             .set(update)
-            .check_if_exists(rx_id)
+            .check_if_exists::<AlertReceiver>(rx_id)
             .execute_and_check(&conn)
             .await
             .map_err(|e| {
