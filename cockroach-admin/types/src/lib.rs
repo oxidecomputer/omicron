@@ -42,9 +42,97 @@ pub enum DecommissionError {
     ParseRow(#[from] csv::Error),
 }
 
+/// CockroachDB Node ID
+///
+/// This field is stored internally as a String to avoid questions
+/// about size, signedness, etc - it can be treated as an arbitrary
+/// unique identifier.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize)]
+pub struct NodeId(pub String);
+
+impl NodeId {
+    pub fn new(id: String) -> Self {
+        Self(id)
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Display for NodeId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl std::str::FromStr for NodeId {
+    type Err = std::convert::Infallible;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Self(s.to_string()))
+    }
+}
+
+// When parsing the underlying NodeId, we force it to be interpreted
+// as a String. Without this custom Deserialize implementation, we
+// encounter parsing errors when querying endpoints which return the
+// NodeId as an integer.
+impl<'de> serde::Deserialize<'de> for NodeId {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::{Error, Visitor};
+        use std::fmt;
+
+        struct NodeIdVisitor;
+
+        impl<'de> Visitor<'de> for NodeIdVisitor {
+            type Value = NodeId;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter
+                    .write_str("a string or integer representing a node ID")
+            }
+
+            fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+            where
+                E: Error,
+            {
+                Ok(NodeId(value.to_string()))
+            }
+
+            fn visit_string<E>(self, value: String) -> Result<Self::Value, E>
+            where
+                E: Error,
+            {
+                Ok(NodeId(value))
+            }
+
+            fn visit_i64<E>(self, value: i64) -> Result<Self::Value, E>
+            where
+                E: Error,
+            {
+                Ok(NodeId(value.to_string()))
+            }
+
+            fn visit_u64<E>(self, value: u64) -> Result<Self::Value, E>
+            where
+                E: Error,
+            {
+                Ok(NodeId(value.to_string()))
+            }
+        }
+
+        deserializer.deserialize_any(NodeIdVisitor)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub struct NodeStatus {
+    // TODO use NodeId
     pub node_id: String,
     pub address: SocketAddr,
     pub sql_address: SocketAddr,

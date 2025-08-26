@@ -9,6 +9,7 @@ use crate::external_api::shared::IpRange;
 use ipnetwork::IpNetwork;
 use nexus_db_lookup::LookupPath;
 use nexus_db_lookup::lookup;
+use nexus_db_model::IpVersion;
 use nexus_db_queries::authz;
 use nexus_db_queries::authz::ApiResource;
 use nexus_db_queries::context::OpContext;
@@ -71,7 +72,11 @@ impl super::Nexus {
         opctx: &OpContext,
         pool_params: &params::IpPoolCreate,
     ) -> CreateResult<db::model::IpPool> {
-        let pool = db::model::IpPool::new(&pool_params.identity);
+        let pool = db::model::IpPool::new(
+            &pool_params.identity,
+            // https://github.com/oxidecomputer/omicron/issues/8881
+            IpVersion::V4,
+        );
         self.db_datastore.ip_pool_create(opctx, pool).await
     }
 
@@ -302,7 +307,7 @@ impl super::Nexus {
         pool_lookup: &lookup::IpPool<'_>,
         range: &IpRange,
     ) -> UpdateResult<db::model::IpPoolRange> {
-        let (.., authz_pool, _db_pool) =
+        let (.., authz_pool, db_pool) =
             pool_lookup.fetch_for(authz::Action::Modify).await?;
 
         if self.db_datastore.ip_pool_is_internal(opctx, &authz_pool).await? {
@@ -316,13 +321,17 @@ impl super::Nexus {
         // would be nice if we could do it in the datastore layer, but we'd
         // have no way of creating IPv6 ranges for the purpose of testing IP
         // pool utilization.
+        //
+        // See https://github.com/oxidecomputer/omicron/issues/8761.
         if matches!(range, IpRange::V6(_)) {
             return Err(Error::invalid_request(
                 "IPv6 ranges are not allowed yet",
             ));
         }
 
-        self.db_datastore.ip_pool_add_range(opctx, &authz_pool, range).await
+        self.db_datastore
+            .ip_pool_add_range(opctx, &authz_pool, &db_pool, range)
+            .await
     }
 
     pub(crate) async fn ip_pool_delete_range(
@@ -351,8 +360,11 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
     ) -> LookupResult<db::model::IpPool> {
-        let (authz_pool, db_pool) =
-            self.db_datastore.ip_pools_service_lookup(opctx).await?;
+        // TODO: https://github.com/oxidecomputer/omicron/issues/8881
+        let (authz_pool, db_pool) = self
+            .db_datastore
+            .ip_pools_service_lookup(opctx, IpVersion::V4)
+            .await?;
         opctx.authorize(authz::Action::Read, &authz_pool).await?;
         Ok(db_pool)
     }
@@ -362,8 +374,11 @@ impl super::Nexus {
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, IpNetwork>,
     ) -> ListResultVec<db::model::IpPoolRange> {
-        let (authz_pool, ..) =
-            self.db_datastore.ip_pools_service_lookup(opctx).await?;
+        // TODO: https://github.com/oxidecomputer/omicron/issues/8881
+        let (authz_pool, ..) = self
+            .db_datastore
+            .ip_pools_service_lookup(opctx, IpVersion::V4)
+            .await?;
         opctx.authorize(authz::Action::Read, &authz_pool).await?;
         self.db_datastore
             .ip_pool_list_ranges(opctx, &authz_pool, pagparams)
@@ -375,9 +390,6 @@ impl super::Nexus {
         opctx: &OpContext,
         range: &IpRange,
     ) -> UpdateResult<db::model::IpPoolRange> {
-        let (authz_pool, ..) =
-            self.db_datastore.ip_pools_service_lookup(opctx).await?;
-        opctx.authorize(authz::Action::Modify, &authz_pool).await?;
         // Disallow V6 ranges until IPv6 is fully supported by the networking
         // subsystem. Instead of changing the API to reflect that (making this
         // endpoint inconsistent with the rest) and changing it back when we
@@ -385,12 +397,21 @@ impl super::Nexus {
         // would be nice if we could do it in the datastore layer, but we'd
         // have no way of creating IPv6 ranges for the purpose of testing IP
         // pool utilization.
+        //
+        // See https://github.com/oxidecomputer/omicron/issues/8761.
         if matches!(range, IpRange::V6(_)) {
             return Err(Error::invalid_request(
                 "IPv6 ranges are not allowed yet",
             ));
         }
-        self.db_datastore.ip_pool_add_range(opctx, &authz_pool, range).await
+        let (authz_pool, db_pool) = self
+            .db_datastore
+            .ip_pools_service_lookup(opctx, range.version().into())
+            .await?;
+        opctx.authorize(authz::Action::Modify, &authz_pool).await?;
+        self.db_datastore
+            .ip_pool_add_range(opctx, &authz_pool, &db_pool, range)
+            .await
     }
 
     pub(crate) async fn ip_pool_service_delete_range(
@@ -398,8 +419,10 @@ impl super::Nexus {
         opctx: &OpContext,
         range: &IpRange,
     ) -> DeleteResult {
-        let (authz_pool, ..) =
-            self.db_datastore.ip_pools_service_lookup(opctx).await?;
+        let (authz_pool, ..) = self
+            .db_datastore
+            .ip_pools_service_lookup(opctx, range.version().into())
+            .await?;
         opctx.authorize(authz::Action::Modify, &authz_pool).await?;
         self.db_datastore.ip_pool_delete_range(opctx, &authz_pool, range).await
     }

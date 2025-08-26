@@ -124,30 +124,42 @@ blueprint-diff latest
 sled-set serial1 mupdate-override unset
 inventory-generate
 
-# This will attempt to update the first sled's host OS. Walk through that update
-# and the host OS of the two other sleds.
+# This will attempt to update the RoT bootloader on the first sled.
 blueprint-plan latest latest
 blueprint-show latest
 blueprint-diff latest
+
+# Update the RoT bootloader.
+sled-update-rot-bootloader serial0 --stage0 2.0.0
+
+# If were to generate inventory and replan now, we'd want to update the RoT on
+# this sled, then its SP, then its host OS, then repeat all four for the other
+# three sleds. That's not the point of this test, so let's short-circuit that a
+# bit: we'll go ahead and change inventory to reflect all of these MGS-based
+# updates are done on all sleds.
+
+# Finish the MGS-based updates on sled 0.
+sled-update-rot serial0 --slot-a 2.0.0
+sled-update-sp serial0 --active 2.0.0
 sled-update-host-phase2 serial0 --boot-disk B --slot-b 0c0362b640cece5b9a5e86d8fa683bd2eb84c3e7f90731f597197d604ffa76e3
 sled-update-host-phase1 serial0 --active B --slot-b 44714733af7600b30a50bfd2cbaf707ff7ee9724073ff70a6732e55a88864cf6
-inventory-generate
 
-# Second sled host OS
-blueprint-plan latest latest
-blueprint-diff latest
+# All the MGS-based updates on sled 1.
+sled-update-rot-bootloader serial1 --stage0 2.0.0
+sled-update-rot serial1 --slot-a 2.0.0
+sled-update-sp serial1 --active 2.0.0
 sled-update-host-phase2 serial1 --boot-disk B --slot-b 0c0362b640cece5b9a5e86d8fa683bd2eb84c3e7f90731f597197d604ffa76e3
 sled-update-host-phase1 serial1 --active B --slot-b 44714733af7600b30a50bfd2cbaf707ff7ee9724073ff70a6732e55a88864cf6
-inventory-generate
 
-# Third sled host OS
-blueprint-plan latest latest
-blueprint-diff latest
+# All the MGS-based updates on sled 2.
+sled-update-rot-bootloader serial2 --stage0 2.0.0
+sled-update-rot serial2 --slot-a 2.0.0
+sled-update-sp serial2 --active 2.0.0
 sled-update-host-phase2 serial2 --boot-disk B --slot-b 0c0362b640cece5b9a5e86d8fa683bd2eb84c3e7f90731f597197d604ffa76e3
 sled-update-host-phase1 serial2 --active B --slot-b 44714733af7600b30a50bfd2cbaf707ff7ee9724073ff70a6732e55a88864cf6
-inventory-generate
 
-# All host OS updates complete
+# All MGS-based updates complete.
+inventory-generate
 blueprint-plan latest latest
 blueprint-diff latest
 

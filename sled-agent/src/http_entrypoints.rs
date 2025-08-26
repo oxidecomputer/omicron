@@ -1003,24 +1003,42 @@ impl SledAgentApi for SledAgentImpl {
     }
 
     async fn chicken_switch_destroy_orphaned_datasets_get(
-        request_context: RequestContext<Self::Context>,
+        _request_context: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<ChickenSwitchDestroyOrphanedDatasets>, HttpError>
     {
-        let sa = request_context.context();
-        let destroy_orphans = sa.chicken_switch_destroy_orphaned_datasets();
+        // This API has been removed, but we still provide an endpoint for
+        // backwards compatibility. Only `omdb` ever called this endpoint, so we
+        // could probably just always return an error, but we can at least
+        // attempt to do something reasonable. We've removed this chicken switch
+        // and always attempt to destroy orphans, so we can just claim the
+        // chicken switch is always in that state.
+        let destroy_orphans = true;
         Ok(HttpResponseOk(ChickenSwitchDestroyOrphanedDatasets {
             destroy_orphans,
         }))
     }
 
     async fn chicken_switch_destroy_orphaned_datasets_put(
-        request_context: RequestContext<Self::Context>,
+        _request_context: RequestContext<Self::Context>,
         body: TypedBody<ChickenSwitchDestroyOrphanedDatasets>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let ChickenSwitchDestroyOrphanedDatasets { destroy_orphans } =
             body.into_inner();
-        let sa = request_context.context();
-        sa.set_chicken_switch_destroy_orphaned_datasets(destroy_orphans);
-        Ok(HttpResponseUpdatedNoContent())
+
+        // This API has been removed, but we still provide an endpoint for
+        // backwards compatibility. Only `omdb` ever called this endpoint, so we
+        // could probably just always return an error, but we can at least
+        // attempt to do something reasonable. We've removed this chicken switch
+        // and always attempt to destroy orphans, so we can treat requests to
+        // destroy orphans as successful and attempts to disable it as an error.
+        if destroy_orphans {
+            Ok(HttpResponseUpdatedNoContent())
+        } else {
+            Err(HttpError::for_bad_request(
+                None,
+                "orphaned dataset destruction can no longer be disabled"
+                    .to_string(),
+            ))
+        }
     }
 }

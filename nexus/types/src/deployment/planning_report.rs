@@ -210,14 +210,16 @@ impl fmt::Display for PlanningDecommissionStepReport {
     }
 }
 
-/// How many of the total install-dataset zones were noop-converted to use
-/// the artifact store on a particular sled.
+/// How many of the total install-dataset zones and/or host phase 2 slots were
+/// noop-converted to use the artifact store on a particular sled.
 #[derive(
     Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Diffable, JsonSchema,
 )]
-pub struct PlanningNoopImageSourceConvertedZones {
+pub struct PlanningNoopImageSourceConverted {
     pub num_eligible: usize,
     pub num_dataset: usize,
+    pub host_phase_2_slot_a_eligible: bool,
+    pub host_phase_2_slot_b_eligible: bool,
 }
 
 #[derive(
@@ -225,37 +227,48 @@ pub struct PlanningNoopImageSourceConvertedZones {
 )]
 pub struct PlanningNoopImageSourceStepReport {
     pub no_target_release: bool,
-    pub skipped_sleds:
-        BTreeMap<SledUuid, PlanningNoopImageSourceSkipSledReason>,
+    pub skipped_sled_zones:
+        BTreeMap<SledUuid, PlanningNoopImageSourceSkipSledZonesReason>,
+    pub skipped_sled_host_phase_2:
+        BTreeMap<SledUuid, PlanningNoopImageSourceSkipSledHostPhase2Reason>,
     pub skipped_zones:
         BTreeMap<OmicronZoneUuid, PlanningNoopImageSourceSkipZoneReason>,
-    pub converted_zones:
-        BTreeMap<SledUuid, PlanningNoopImageSourceConvertedZones>,
+    pub converted: BTreeMap<SledUuid, PlanningNoopImageSourceConverted>,
 }
 
 impl PlanningNoopImageSourceStepReport {
     pub fn new() -> Self {
         Self {
             no_target_release: false,
-            skipped_sleds: BTreeMap::new(),
+            skipped_sled_zones: BTreeMap::new(),
+            skipped_sled_host_phase_2: BTreeMap::new(),
             skipped_zones: BTreeMap::new(),
-            converted_zones: BTreeMap::new(),
+            converted: BTreeMap::new(),
         }
     }
 
     pub fn is_empty(&self) -> bool {
         !self.no_target_release
-            && self.skipped_sleds.is_empty()
+            && self.skipped_sled_zones.is_empty()
+            && self.skipped_sled_host_phase_2.is_empty()
             && self.skipped_zones.is_empty()
-            && self.converted_zones.is_empty()
+            && self.converted.is_empty()
     }
 
-    pub fn skip_sled(
+    pub fn skip_sled_zones(
         &mut self,
         sled_id: SledUuid,
-        reason: PlanningNoopImageSourceSkipSledReason,
+        reason: PlanningNoopImageSourceSkipSledZonesReason,
     ) {
-        self.skipped_sleds.insert(sled_id, reason);
+        self.skipped_sled_zones.insert(sled_id, reason);
+    }
+
+    pub fn skip_sled_host_phase_2(
+        &mut self,
+        sled_id: SledUuid,
+        reason: PlanningNoopImageSourceSkipSledHostPhase2Reason,
+    ) {
+        self.skipped_sled_host_phase_2.insert(sled_id, reason);
     }
 
     pub fn skip_zone(
@@ -266,15 +279,22 @@ impl PlanningNoopImageSourceStepReport {
         self.skipped_zones.insert(zone_id, reason);
     }
 
-    pub fn converted_zones(
+    pub fn converted(
         &mut self,
         sled_id: SledUuid,
         num_eligible: usize,
         num_dataset: usize,
+        host_phase_2_slot_a_eligible: bool,
+        host_phase_2_slot_b_eligible: bool,
     ) {
-        self.converted_zones.insert(
+        self.converted.insert(
             sled_id,
-            PlanningNoopImageSourceConvertedZones { num_eligible, num_dataset },
+            PlanningNoopImageSourceConverted {
+                num_eligible,
+                num_dataset,
+                host_phase_2_slot_a_eligible,
+                host_phase_2_slot_b_eligible,
+            },
         );
     }
 }
@@ -283,9 +303,10 @@ impl fmt::Display for PlanningNoopImageSourceStepReport {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let Self {
             no_target_release,
-            skipped_sleds,
+            skipped_sled_zones,
+            skipped_sled_host_phase_2,
             skipped_zones: _,
-            converted_zones,
+            converted,
         } = self;
 
         if *no_target_release {
@@ -295,23 +316,46 @@ impl fmt::Display for PlanningNoopImageSourceStepReport {
             );
         }
 
-        for (sled_id, reason) in skipped_sleds.iter() {
+        for (sled_id, reason) in skipped_sled_zones.iter() {
             writeln!(
                 f,
-                "* skipping noop image source check on sled {sled_id}: {reason}"
+                "* skipping noop zone image source check on sled {sled_id}: {reason}"
+            )?;
+        }
+        for (sled_id, reason) in skipped_sled_host_phase_2.iter() {
+            writeln!(
+                f,
+                "* skipping noop host phase 2 desired contents check on sled {sled_id}: {reason}"
             )?;
         }
 
         for (
             sled_id,
-            PlanningNoopImageSourceConvertedZones { num_eligible, num_dataset },
-        ) in converted_zones.iter()
+            PlanningNoopImageSourceConverted {
+                num_eligible,
+                num_dataset,
+                host_phase_2_slot_a_eligible,
+                host_phase_2_slot_b_eligible,
+            },
+        ) in converted.iter()
         {
             if *num_eligible > 0 && *num_dataset > 0 {
                 writeln!(
                     f,
                     "* noop converting {num_eligible}/{num_dataset} install-dataset zones \
                        to artifact store on sled {sled_id}",
+                )?;
+            }
+            if *host_phase_2_slot_a_eligible {
+                writeln!(
+                    f,
+                    "* noop converting host phase 2 slot A to Artifact on sled {sled_id}"
+                )?;
+            }
+            if *host_phase_2_slot_b_eligible {
+                writeln!(
+                    f,
+                    "* noop converting host phase 2 slot B to Artifact on sled {sled_id}"
                 )?;
             }
         }
@@ -324,14 +368,14 @@ impl fmt::Display for PlanningNoopImageSourceStepReport {
     Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Diffable, JsonSchema,
 )]
 #[serde(rename_all = "snake_case", tag = "type")]
-pub enum PlanningNoopImageSourceSkipSledReason {
+pub enum PlanningNoopImageSourceSkipSledZonesReason {
     AllZonesAlreadyArtifact { num_total: usize },
     SledNotInInventory,
     ErrorRetrievingZoneManifest { error: String },
     RemoveMupdateOverride { id: MupdateOverrideUuid },
 }
 
-impl fmt::Display for PlanningNoopImageSourceSkipSledReason {
+impl fmt::Display for PlanningNoopImageSourceSkipSledZonesReason {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::AllZonesAlreadyArtifact { num_total } => {
@@ -352,6 +396,28 @@ impl fmt::Display for PlanningNoopImageSourceSkipSledReason {
                     f,
                     "blueprint has get_remove_mupdate_override set for sled: {id}",
                 )
+            }
+        }
+    }
+}
+
+#[derive(
+    Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Diffable, JsonSchema,
+)]
+#[serde(rename_all = "snake_case", tag = "type")]
+pub enum PlanningNoopImageSourceSkipSledHostPhase2Reason {
+    BothSlotsAlreadyArtifact,
+    SledNotInInventory,
+}
+
+impl fmt::Display for PlanningNoopImageSourceSkipSledHostPhase2Reason {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::BothSlotsAlreadyArtifact => {
+                write!(f, "both host phase 2 slots are already from artifacts")
+            }
+            Self::SledNotInInventory => {
+                write!(f, "sled not present in latest inventory collection")
             }
         }
     }

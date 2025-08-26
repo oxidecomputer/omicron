@@ -27,7 +27,7 @@ fn generate_session_token() -> String {
     // TODO: "If getrandom is unable to provide secure entropy this method will panic."
     // Should we explicitly handle that?
     // TODO: store generator somewhere so we don't reseed every time
-    let mut rng = StdRng::from_entropy();
+    let mut rng = StdRng::from_os_rng();
     // OWASP recommends at least 64 bits of entropy, OAuth 2 spec 128 minimum, 160 recommended
     // 20 bytes = 160 bits of entropy
     // TODO: the size should be a constant somewhere, maybe even in config?

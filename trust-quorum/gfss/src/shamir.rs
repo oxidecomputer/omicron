@@ -5,8 +5,8 @@
 //! Shamir secret sharing over GF(2^8)
 
 use digest::Digest;
-use rand09::TryRngCore;
-use rand09::{Rng, rngs::OsRng};
+use rand::TryRngCore;
+use rand::{Rng, rngs::OsRng};
 use secrecy::SecretBox;
 use serde::{Deserialize, Serialize};
 use subtle::ConstantTimeEq;

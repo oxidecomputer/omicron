@@ -1377,6 +1377,30 @@ mod test {
         DnsDiff::new(left_zone, right_zone).unwrap()
     }
 
+    async fn fetch_all_service_ip_pool_ranges(
+        datastore: &DataStore,
+        opctx: &OpContext,
+    ) -> Vec<nexus_db_model::IpPoolRange> {
+        let service_pools = datastore
+            .ip_pools_service_lookup_both_versions(&opctx)
+            .await
+            .expect("success looking up both versions of the service IP Pools");
+        let mut ranges = datastore
+            .ip_pool_list_ranges_batched(&opctx, &service_pools.ipv4.authz_pool)
+            .await
+            .expect("success listing IPv4 pool ranges");
+        ranges.append(
+            &mut datastore
+                .ip_pool_list_ranges_batched(
+                    &opctx,
+                    &service_pools.ipv6.authz_pool,
+                )
+                .await
+                .expect("success listing IPv6 pool ranges"),
+        );
+        ranges
+    }
+
     // Tests end-to-end DNS behavior:
     //
     // - If we create a blueprint matching the current system, and then apply
@@ -1476,14 +1500,8 @@ mod test {
             .unwrap();
         let zpool_rows =
             datastore.zpool_list_all_external_batched(&opctx).await.unwrap();
-        let ip_pool_range_rows = {
-            let (authz_service_ip_pool, _) =
-                datastore.ip_pools_service_lookup(&opctx).await.unwrap();
-            datastore
-                .ip_pool_list_ranges_batched(&opctx, &authz_service_ip_pool)
-                .await
-                .unwrap()
-        };
+        let ip_pool_range_rows =
+            fetch_all_service_ip_pool_ranges(&datastore, &opctx).await;
         let planning_input = {
             let mut builder = PlanningInputFromDb {
                 sled_rows: &sled_rows,

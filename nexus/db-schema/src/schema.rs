@@ -626,6 +626,7 @@ table! {
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
+        ip_version -> crate::enums::IpVersionEnum,
         rcgen -> Int8,
     }
 }
@@ -1417,6 +1418,7 @@ table! {
         artifact_size -> Int8,
         generation_added -> Int8,
         sign -> Nullable<Binary>,
+        board -> Nullable<Text>,
     }
 }
 
