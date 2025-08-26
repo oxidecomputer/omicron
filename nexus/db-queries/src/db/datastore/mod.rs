@@ -294,19 +294,10 @@ impl DataStore {
                             info!(log, "Datastore is ready for usage");
                             return Ok(());
                         }
-                        DatastoreSetupAction::NeedsHandoff => {
+                        DatastoreSetupAction::NeedsHandoff { nexus_id } => {
                             info!(log, "Datastore is awaiting handoff");
 
-                            let IdentityCheckPolicy::CheckAndTakeover {
-                                nexus_id,
-                            } = identity_check
-                            else {
-                                return Err(BackoffError::permanent(
-                                    "Nexus ID needed for handoff",
-                                ));
-                            };
-
-                            datastore.attempt_handoff(nexus_id).await.map_err(
+                            datastore.attempt_handoff(*nexus_id).await.map_err(
                                 |err| {
                                     warn!(
                                         log,

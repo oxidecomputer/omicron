@@ -128,9 +128,17 @@ async fn main_impl() -> anyhow::Result<()> {
                         .map_err(|e| anyhow!(e))?;
                     println!("Update to {version} complete");
                 }
-                DatastoreSetupAction::NeedsHandoff
-                | DatastoreSetupAction::Refuse => {
-                    println!("Cannot update to version {version}")
+                DatastoreSetupAction::Refuse => {
+                    println!("Refusing to update to version {version}")
+                }
+                DatastoreSetupAction::NeedsHandoff { .. } => {
+                    // This case should not happen - we supplied
+                    // IdentityCheckPolicy::DontCare, so we should not be told
+                    // to attempt a takeover by a specific Nexus.
+                    println!(
+                        "Refusing to update to version {version} \
+                             (Handoff needed?)"
+                    )
                 }
             }
         }

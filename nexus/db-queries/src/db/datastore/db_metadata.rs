@@ -154,7 +154,7 @@ fn skippable_version(
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub enum NexusAccess {
     /// Nexus does not yet have access to the database.
-    DoesNotHaveAccessYet,
+    DoesNotHaveAccessYet { nexus_id: OmicronZoneUuid },
 
     /// Nexus has been explicitly locked out of the database.
     LockedOut,
@@ -203,7 +203,10 @@ pub enum DatastoreSetupAction {
     /// Not ready for usage yet
     ///
     /// The database may be ready for usage once handoff has completed.
-    NeedsHandoff,
+    /// The `nexus_id` here may attempt to takeover the database if it has
+    /// a `db_metadata_nexus` record of "not_yet", and all other records
+    /// are either "not_yet" or "quiesced".
+    NeedsHandoff { nexus_id: OmicronZoneUuid },
 
     /// Start a schema update
     Update,
@@ -249,9 +252,9 @@ impl DatastoreSetupAction {
             // If we don't have access yet, but could do something once handoff
             // occurs, then handoff is needed
             (
-                DoesNotHaveAccessYet,
+                DoesNotHaveAccessYet { nexus_id },
                 UpToDate | OlderThanDesired | OlderThanDesiredSkipAccessCheck,
-            ) => Self::NeedsHandoff,
+            ) => Self::NeedsHandoff { nexus_id },
 
             // This is the most "normal" case: Nexus should have access to the
             // database, and the schema matches what it wants.
@@ -304,7 +307,7 @@ impl DataStore {
             let msg = "Nexus does not have access to the database (no \
                        db_metadata_nexus record)";
             warn!(&self.log, "{msg}"; "nexus_id" => ?nexus_id);
-            return Ok(NexusAccess::DoesNotHaveAccessYet);
+            return Ok(NexusAccess::DoesNotHaveAccessYet { nexus_id });
         };
 
         let status = match state {
@@ -322,7 +325,7 @@ impl DataStore {
                     "Nexus does not yet have access to the database";
                     "nexus_id" => ?nexus_id
                 );
-                NexusAccess::DoesNotHaveAccessYet
+                NexusAccess::DoesNotHaveAccessYet { nexus_id }
             }
             DbMetadataNexusState::Quiesced => {
                 let msg = "Nexus locked out of database access (quiesced)";
@@ -399,8 +402,8 @@ impl DataStore {
                 }
             }
             IdentityCheckPolicy::DontCare => {
-                // If a "nexus_id" was not supplied, skip the check, and treat it
-                // as having access.
+                // If a "nexus_id" was not supplied, skip the check, and treat
+                // it as having access.
                 //
                 // This is necessary for tools which access the schema without a
                 // running Nexus, such as the schema-updater binary.
@@ -1510,7 +1513,8 @@ mod test {
         let datastore =
             DataStore::new_unchecked(logctx.log.clone(), db.pool().clone());
 
-        // Set up test data: create multiple nexus records in not_yet and quiesced states
+        // Set up test data: create multiple nexus records in not_yet and
+        // quiesced states
         let nexus1_id = OmicronZoneUuid::new_v4();
         let nexus2_id = OmicronZoneUuid::new_v4();
         let nexus3_id = OmicronZoneUuid::new_v4();
@@ -1565,7 +1569,8 @@ mod test {
         }
         assert!(result.is_ok());
 
-        // Verify final state: all not_yet records should now be active, quiesced should remain quiesced
+        // Verify final state: all not_yet records should now be active,
+        // quiesced should remain quiesced
         let nexus1_after = datastore
             .database_nexus_access(nexus1_id)
             .await
@@ -1584,7 +1589,8 @@ mod test {
 
         assert_eq!(nexus1_after.state(), DbMetadataNexusState::Active);
         assert_eq!(nexus2_after.state(), DbMetadataNexusState::Active);
-        assert_eq!(nexus3_after.state(), DbMetadataNexusState::Quiesced); // Should remain unchanged
+        // Should remain unchanged
+        assert_eq!(nexus3_after.state(), DbMetadataNexusState::Quiesced);
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -1592,12 +1598,13 @@ mod test {
 
     // This test covers two cases:
     //
-    // 1. New systems: We use RSS to initialize Nexus, but no db_metadata_nexus entries
-    //    exist.
+    // 1. New systems: We use RSS to initialize Nexus, but no db_metadata_nexus
+    //    entries exist.
     // 2. Deployed systems: We have a deployed system which updates to have this
     //    "db_metadata_nexus"-handling code, but has no rows in that table.
     //
-    // Both of these cases must be granted database access to self-populate later.
+    // Both of these cases must be granted database access to self-populate
+    // later.
     #[tokio::test]
     async fn test_check_schema_and_access_empty_table_permits_access() {
         let logctx = dev::test_setup_log(
@@ -1619,7 +1626,8 @@ mod test {
             .expect("Failed to check schema and access");
         assert_eq!(action.action(), &DatastoreSetupAction::Ready);
 
-        // Add a record to the table, now explicit nexus ID should NOT get access
+        // Add a record to the table, now explicit nexus ID should NOT get
+        // access
         datastore
             .database_nexus_access_insert(
                 OmicronZoneUuid::new_v4(), // Different nexus
@@ -1635,7 +1643,10 @@ mod test {
             )
             .await
             .expect("Failed to check schema and access");
-        assert_eq!(action.action(), &DatastoreSetupAction::NeedsHandoff);
+        assert_eq!(
+            action.action(),
+            &DatastoreSetupAction::NeedsHandoff { nexus_id }
+        );
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -1681,7 +1692,10 @@ mod test {
             )
             .await
             .expect("Failed to check schema and access");
-        assert_eq!(action.action(), &DatastoreSetupAction::NeedsHandoff);
+        assert_eq!(
+            action.action(),
+            &DatastoreSetupAction::NeedsHandoff { nexus_id },
+        );
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -1814,7 +1828,10 @@ mod test {
                 )
                 .await
                 .expect("Failed to check schema and access");
-            assert_eq!(action.action(), &DatastoreSetupAction::NeedsHandoff);
+            assert_eq!(
+                action.action(),
+                &DatastoreSetupAction::NeedsHandoff { nexus_id },
+            );
         }
 
         db.terminate().await;
