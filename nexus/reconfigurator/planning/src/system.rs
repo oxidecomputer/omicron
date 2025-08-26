@@ -615,22 +615,10 @@ impl SystemDescription {
     pub fn sled_update_rot_versions(
         &mut self,
         sled_id: SledUuid,
-        active_slot: Option<RotSlot>,
-        slot_a_version: Option<ExpectedVersion>,
-        slot_b_version: Option<ExpectedVersion>,
-        persistent_boot_preference: Option<RotSlot>,
-        pending_persistent_boot_preference: Option<RotSlot>,
-        transient_boot_preference: Option<RotSlot>,
+        overrides: RotStateOverrides,
     ) -> anyhow::Result<&mut Self> {
         let sled = self.get_sled_mut(sled_id)?;
-        sled.set_rot_versions(RotStateOverrides {
-            active_slot,
-            slot_a_version,
-            slot_b_version,
-            persistent_boot_preference,
-            pending_persistent_boot_preference,
-            transient_boot_preference,
-        });
+        sled.set_rot_versions(overrides);
         Ok(self)
     }
 
@@ -1895,12 +1883,12 @@ impl Sled {
 /// Settings that can be overriden in a simulated sled's RotState
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RotStateOverrides {
-    active_slot: Option<RotSlot>,
-    slot_a_version: Option<ExpectedVersion>,
-    slot_b_version: Option<ExpectedVersion>,
-    persistent_boot_preference: Option<RotSlot>,
-    pending_persistent_boot_preference: Option<RotSlot>,
-    transient_boot_preference: Option<RotSlot>,
+    pub active_slot: Option<RotSlot>,
+    pub slot_a_version: Option<ExpectedVersion>,
+    pub slot_b_version: Option<ExpectedVersion>,
+    pub persistent_boot_preference: Option<RotSlot>,
+    pub pending_persistent_boot_preference: Option<RotSlot>,
+    pub transient_boot_preference: Option<RotSlot>,
 }
 
 /// The visibility of a sled in the inventory.

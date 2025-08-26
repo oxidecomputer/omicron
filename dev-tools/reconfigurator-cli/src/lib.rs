@@ -23,7 +23,7 @@ use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
 use nexus_reconfigurator_planning::example::ExampleSystemBuilder;
 use nexus_reconfigurator_planning::planner::Planner;
 use nexus_reconfigurator_planning::system::{
-    SledBuilder, SledInventoryVisibility, SystemDescription,
+    RotStateOverrides, SledBuilder, SledInventoryVisibility, SystemDescription,
 };
 use nexus_reconfigurator_simulation::{BlueprintId, CollectionId, SimState};
 use nexus_reconfigurator_simulation::{SimStateBuilder, SimTufRepoSource};
@@ -1764,12 +1764,15 @@ fn cmd_sled_update_rot(
     let sled_id = args.sled_id.to_sled_id(system.description())?;
     system.description_mut().sled_update_rot_versions(
         sled_id,
-        args.active_slot,
-        args.slot_a,
-        args.slot_b,
-        args.persistent_boot_preference,
-        args.pending_persistent_boot_preference,
-        args.transient_boot_preference,
+        RotStateOverrides {
+            active_slot: args.active_slot,
+            slot_a_version: args.slot_a,
+            slot_b_version: args.slot_b,
+            persistent_boot_preference: args.persistent_boot_preference,
+            pending_persistent_boot_preference: args
+                .pending_persistent_boot_preference,
+            transient_boot_preference: args.transient_boot_preference,
+        },
     )?;
 
     sim.commit_and_bump(
