@@ -1686,9 +1686,8 @@ impl Sled {
 
     /// Update the reported RoT versions
     ///
-    /// If any of the overrides are `None`, that field is _unchanged_,
-    /// with the exception of `pending_persistent_boot_preference` and
-    /// transient_boot_preference which are `Option` in the RotState.
+    /// If any of the overrides are `None`, that field is _unchanged_.
+    // Note that this means there's no way to _unset_ the version.
     fn set_rot_versions(&mut self, overrides: RotStateOverrides) {
         let RotStateOverrides {
             active_slot_override,
@@ -1718,10 +1717,19 @@ impl Sled {
                             persistent_boot_preference_override;
                     }
 
-                    *pending_persistent_boot_preference =
-                        pending_persistent_boot_preference_override;
-                    *transient_boot_preference =
-                        transient_boot_preference_override;
+                    if let Some(pending_persistent_boot_preference_override) =
+                        pending_persistent_boot_preference_override
+                    {
+                        *pending_persistent_boot_preference =
+                            pending_persistent_boot_preference_override;
+                    }
+
+                    if let Some(transient_boot_preference_override) =
+                        transient_boot_preference_override
+                    {
+                        *transient_boot_preference =
+                            transient_boot_preference_override;
+                    }
                 }
                 // We will only support RotState::V3
                 _ => unreachable!(),
@@ -1897,8 +1905,8 @@ pub struct RotStateOverrides {
     pub slot_a_version_override: Option<ExpectedVersion>,
     pub slot_b_version_override: Option<ExpectedVersion>,
     pub persistent_boot_preference_override: Option<RotSlot>,
-    pub pending_persistent_boot_preference_override: Option<RotSlot>,
-    pub transient_boot_preference_override: Option<RotSlot>,
+    pub pending_persistent_boot_preference_override: Option<Option<RotSlot>>,
+    pub transient_boot_preference_override: Option<Option<RotSlot>>,
 }
 
 /// The visibility of a sled in the inventory.

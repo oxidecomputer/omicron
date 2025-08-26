@@ -357,7 +357,7 @@ zpools (10):
 
 
 > sled-update-rot dde1c0e2-b10d-4621-b420-f179f7a7a00a --slot-b 6.0.0 --active-slot a --persistent-boot-preference a --pending-persistent-boot-preference b --transient-boot-preference a
-set sled dde1c0e2-b10d-4621-b420-f179f7a7a00a RoT settings: slot b -> 6.0.0, active slot -> A, persistent boot preference -> A, pending persistent boot preference -> B, transient boot preference -> A
+set sled dde1c0e2-b10d-4621-b420-f179f7a7a00a RoT settings: slot b -> 6.0.0, active slot -> A, persistent boot preference -> A, pending persistent boot preference -> Some(B), transient boot preference -> Some(A)
 
 > sled-show dde1c0e2-b10d-4621-b420-f179f7a7a00a
 sled dde1c0e2-b10d-4621-b420-f179f7a7a00a (in service, active)
@@ -396,8 +396,8 @@ zpools (10):
     SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-e0f5c287-3296-4a35-b597-7452283ff329" }, disk_id: 0f13d3dd-1830-4a06-b664-e6f0473ba704 (physical_disk), policy: InService, state: Active }
 
 
-> sled-update-rot dde1c0e2-b10d-4621-b420-f179f7a7a00a --slot-a 7.0.0
-set sled dde1c0e2-b10d-4621-b420-f179f7a7a00a RoT settings: slot a -> 7.0.0
+> sled-update-rot dde1c0e2-b10d-4621-b420-f179f7a7a00a --slot-a 7.0.0 --pending-persistent-boot-preference --transient-boot-preference
+set sled dde1c0e2-b10d-4621-b420-f179f7a7a00a RoT settings: slot a -> 7.0.0, pending persistent boot preference -> None, transient boot preference -> None
 
 > sled-show dde1c0e2-b10d-4621-b420-f179f7a7a00a
 sled dde1c0e2-b10d-4621-b420-f179f7a7a00a (in service, active)

@@ -4041,7 +4041,7 @@ external DNS:
 ignoring impossible MGS updates since <REDACTED_TIMESTAMP>
 
 > sled-update-rot d81c6a84-79b8-4958-ae41-ea46c9b19763 --slot-b 1.1.0 --active-slot b --persistent-boot-preference b --pending-persistent-boot-preference b
-set sled d81c6a84-79b8-4958-ae41-ea46c9b19763 RoT settings: slot b -> 1.1.0, active slot -> B, persistent boot preference -> B, pending persistent boot preference -> B
+set sled d81c6a84-79b8-4958-ae41-ea46c9b19763 RoT settings: slot b -> 1.1.0, active slot -> B, persistent boot preference -> B, pending persistent boot preference -> Some(B)
 
 > inventory-generate
 generated inventory collection 5e106b73-6a14-4955-b8a8-a4f8afed6405 from configured sleds
@@ -4233,12 +4233,13 @@ external DNS:
 
 
 
-> # We do the same for transient boot preference.
+> # We do the same for transient boot preference. Note that we need to set the
+> # pending-persistent-boot-preference back to None
 > set ignore-impossible-mgs-updates-since now
 ignoring impossible MGS updates since <REDACTED_TIMESTAMP>
 
-> sled-update-rot d81c6a84-79b8-4958-ae41-ea46c9b19763 --slot-b 1.1.0 --active-slot b --persistent-boot-preference b --transient-boot-preference b
-set sled d81c6a84-79b8-4958-ae41-ea46c9b19763 RoT settings: slot b -> 1.1.0, active slot -> B, persistent boot preference -> B, transient boot preference -> B
+> sled-update-rot d81c6a84-79b8-4958-ae41-ea46c9b19763 --slot-b 1.1.0 --active-slot b --persistent-boot-preference b --transient-boot-preference b --pending-persistent-boot-preference
+set sled d81c6a84-79b8-4958-ae41-ea46c9b19763 RoT settings: slot b -> 1.1.0, active slot -> B, persistent boot preference -> B, pending persistent boot preference -> None, transient boot preference -> Some(B)
 
 > inventory-generate
 generated inventory collection 36ef425f-a672-4bf4-8d29-14815a84ccad from configured sleds
@@ -4430,10 +4431,11 @@ external DNS:
 
 
 
-> # Update the RoT on the last sled.
+> # Update the RoT on the last sled. Note that we need to set the
+> # transient-boot-preference back to None
 > # There should be one last pending SP update.
-> sled-update-rot d81c6a84-79b8-4958-ae41-ea46c9b19763 --slot-b 1.0.0 --active-slot b --persistent-boot-preference b
-set sled d81c6a84-79b8-4958-ae41-ea46c9b19763 RoT settings: slot b -> 1.0.0, active slot -> B, persistent boot preference -> B
+> sled-update-rot d81c6a84-79b8-4958-ae41-ea46c9b19763 --slot-b 1.0.0 --active-slot b --persistent-boot-preference b --transient-boot-preference
+set sled d81c6a84-79b8-4958-ae41-ea46c9b19763 RoT settings: slot b -> 1.0.0, active slot -> B, persistent boot preference -> B, transient boot preference -> None
 
 > inventory-generate
 generated inventory collection 70bea701-e212-4877-8e6c-925f1f73ddd2 from configured sleds

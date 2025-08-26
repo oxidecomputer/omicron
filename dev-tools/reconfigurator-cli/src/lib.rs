@@ -568,13 +568,13 @@ struct SledUpdateRotArgs {
     /// scratch page that will become the persistent boot preference in the
     /// authoritative CFPA page upon reboot, unless CFPA update of the
     /// authoritative page fails for some reason
-    #[clap(long)]
-    pending_persistent_boot_preference: Option<RotSlot>,
+    #[clap(long, num_args(0..=1))]
+    pending_persistent_boot_preference: Option<Option<RotSlot>>,
 
     /// sets the transient boot preference, which overrides persistent
     /// preference selection for a single boot (unimplemented)
-    #[clap(long)]
-    transient_boot_preference: Option<RotSlot>,
+    #[clap(long, num_args(0..=1),)]
+    transient_boot_preference: Option<Option<RotSlot>>,
 }
 
 #[derive(Debug, Args)]
@@ -1743,13 +1743,13 @@ fn cmd_sled_update_rot(
         &args.pending_persistent_boot_preference
     {
         labels.push(format!(
-            "pending persistent boot preference -> {}",
+            "pending persistent boot preference -> {:?}",
             pending_persistent_boot_preference
         ));
     }
     if let Some(transient_boot_preference) = &args.transient_boot_preference {
         labels.push(format!(
-            "transient boot preference -> {}",
+            "transient boot preference -> {:?}",
             transient_boot_preference
         ));
     }

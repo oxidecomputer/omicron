@@ -30,7 +30,7 @@ sled-update-rot dde1c0e2-b10d-4621-b420-f179f7a7a00a --slot-b 6.0.0 --active-slo
 sled-show dde1c0e2-b10d-4621-b420-f179f7a7a00a
 sled-update-rot dde1c0e2-b10d-4621-b420-f179f7a7a00a --slot-b 6.0.0 --active-slot a --persistent-boot-preference a --pending-persistent-boot-preference b --transient-boot-preference a
 sled-show dde1c0e2-b10d-4621-b420-f179f7a7a00a
-sled-update-rot dde1c0e2-b10d-4621-b420-f179f7a7a00a --slot-a 7.0.0
+sled-update-rot dde1c0e2-b10d-4621-b420-f179f7a7a00a --slot-a 7.0.0 --pending-persistent-boot-preference --transient-boot-preference
 sled-show dde1c0e2-b10d-4621-b420-f179f7a7a00a
 
 sled-update-sp dde1c0e2-b10d-4621-b420-f179f7a7a00a
