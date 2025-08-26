@@ -231,17 +231,34 @@ impl DatasetTaskHandle {
             .await
     }
 
-    pub async fn datasets_report_orphans(
+    /// Destroy any orphaned Omicron datasets.
+    ///
+    /// This method will _not_ destroy arbitrary datasets. For each dataset
+    /// present on a zpool in `currently_managed_zpools`, it will look at its
+    /// name and perform the following checks:
+    ///
+    /// * Can we parse the name as a [`DatasetName`]? If not, ignore the
+    ///   dataset; we don't know what it is and it won't conflict with any
+    ///   datasets we want to create or use.
+    /// * Is the dataset still present in the config specified by `datasets`? If
+    ///   so, don't destroy it: it's not an orphan.
+    /// * Is the [`DatasetKind`] (which we've inferred from the parsed name) a
+    ///   kind that we ought to destroy? See
+    ///   `reason_to_skip_orphaned_dataset_destruction` for kinds we refuse to
+    ///   destroy.
+    ///
+    /// The returned map lists includes the orphaned datasets we found but did
+    /// not destroy, either because of one of the checks above or because we
+    /// attempted destruction but it failed.
+    pub async fn datasets_destroy_orphans(
         &self,
         datasets: IdMap<DatasetConfig>,
         currently_managed_zpools: Arc<CurrentlyManagedZpools>,
-        destroy_orphans: bool,
     ) -> Result<anyhow::Result<IdOrdMap<OrphanedDataset>>, DatasetTaskError>
     {
-        self.try_send_request(|tx| DatasetTaskRequest::DatasetsReportOrphans {
+        self.try_send_request(|tx| DatasetTaskRequest::DatasetsDestroyOrphans {
             datasets,
             currently_managed_zpools,
-            destroy_orphans,
             tx,
         })
         .await
@@ -359,17 +376,15 @@ impl DatasetTask {
             DatasetTaskRequest::Inventory { zpools, tx } => {
                 _ = tx.0.send(self.inventory(zpools, zfs).await);
             }
-            DatasetTaskRequest::DatasetsReportOrphans {
+            DatasetTaskRequest::DatasetsDestroyOrphans {
                 datasets,
                 currently_managed_zpools,
-                destroy_orphans,
                 tx,
             } => {
                 _ = tx.0.send(
-                    self.datasets_report_orphans(
+                    self.datasets_destroy_orphans(
                         datasets,
                         currently_managed_zpools,
-                        destroy_orphans,
                         zfs,
                     )
                     .await,
@@ -438,11 +453,10 @@ impl DatasetTask {
         Ok(props.into_iter().map(From::from).collect())
     }
 
-    async fn datasets_report_orphans<T: ZfsImpl>(
+    async fn datasets_destroy_orphans<T: ZfsImpl>(
         &mut self,
         datasets: IdMap<DatasetConfig>,
         currently_managed_zpools: Arc<CurrentlyManagedZpools>,
-        destroy_orphans: bool,
         zfs: &T,
     ) -> anyhow::Result<IdOrdMap<OrphanedDataset>> {
         let mut orphaned_datasets = IdOrdMap::new();
@@ -535,10 +549,9 @@ impl DatasetTask {
                 continue;
             }
 
-            // Try to destroy this dataset, if destruction was requested. If
-            // destruction is disabled or enabled but we fail, record the reason
-            // this dataset is left orphaned.
-            let maybe_reason = if destroy_orphans {
+            // Try to destroy this dataset. If we fail, record the reason this
+            // dataset is left orphaned.
+            let maybe_reason =
                 match zfs.destroy_dataset(&dataset_full_name).await {
                     Ok(()) => {
                         info!(
@@ -557,14 +570,7 @@ impl DatasetTask {
                         );
                         Some(InlineErrorChain::new(&err).to_string())
                     }
-                }
-            } else {
-                Some(
-                    "`destroy_orphans` chicken switch is off \
-                    (full dataset destruction is tracked by omicron#6177)"
-                        .to_string(),
-                )
-            };
+                };
 
             if let Some(reason) = maybe_reason {
                 orphaned_datasets.insert_overwrite(OrphanedDataset {
@@ -1102,10 +1108,9 @@ enum DatasetTaskRequest {
             oneshot::Sender<Result<Vec<InventoryDataset>, InventoryError>>,
         >,
     },
-    DatasetsReportOrphans {
+    DatasetsDestroyOrphans {
         datasets: IdMap<DatasetConfig>,
         currently_managed_zpools: Arc<CurrentlyManagedZpools>,
-        destroy_orphans: bool,
         tx: DebugIgnore<
             oneshot::Sender<anyhow::Result<IdOrdMap<OrphanedDataset>>>,
         >,
@@ -2039,62 +2044,9 @@ mod tests {
             zfs.clone(),
         );
 
-        // Check for orphans without destroying them.
+        // Destroy all orphans.
         let orphans = task_handle
-            .datasets_report_orphans(
-                dataset_configs.clone(),
-                currently_managed_zpools.clone(),
-                false, // destroy_orphans
-            )
-            .await
-            .expect("no task error")
-            .expect("no zfs error");
-
-        // We should report no orphans that were present in the config.
-        for dataset in &datasets_in_config {
-            assert!(
-                !orphans.contains_key(&dataset),
-                "found unexpected orphan {}",
-                dataset.full_name()
-            );
-        }
-
-        // All the datasets in `datasets_not_in_config` should be orphans, but
-        // they should all still exist (we passed destroy_orphans=false).
-        {
-            let zfs = zfs.inner.lock().unwrap();
-            for dataset in &datasets_not_in_config {
-                let name = dataset.full_name();
-                assert!(
-                    zfs.datasets.contains_key(&name),
-                    "dataset should not have been destroyed (destruction \
-                    not requested): {name}"
-                );
-
-                // We shouldn't find transient zone roots at all (they're
-                // grandchildren of the datasets we search for).
-                if matches!(dataset.kind(), DatasetKind::TransientZone { .. }) {
-                    let orphan = orphans.get(dataset);
-                    assert!(
-                        orphan.is_none(),
-                        "found unexpected orphan {orphan:?}"
-                    );
-                } else {
-                    assert!(
-                        orphans.contains_key(dataset),
-                        "didn't find expected orphan {name}",
-                    );
-                }
-            }
-        }
-
-        // Check for orphans and destroy them.
-        let orphans = task_handle
-            .datasets_report_orphans(
-                dataset_configs,
-                currently_managed_zpools,
-                true, // destroy_orphans
-            )
+            .datasets_destroy_orphans(dataset_configs, currently_managed_zpools)
             .await
             .expect("no task error")
             .expect("no zfs error");
