@@ -9,7 +9,6 @@ use anyhow::{Context, bail, ensure};
 use async_bb8_diesel::{AsyncRunQueryDsl, AsyncSimpleConnection};
 use chrono::Utc;
 use diesel::prelude::*;
-use diesel::upsert::excluded;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::OptionalError;
 use nexus_db_errors::public_error_from_diesel;
@@ -717,7 +716,7 @@ impl DataStore {
             .values(new_nexus)
             .on_conflict(dsl::nexus_id)
             .do_update()
-            .set(dsl::state.eq(excluded(dsl::state)))
+            .set(dsl::state.eq(diesel::upsert::excluded(dsl::state)))
             .execute_async(&*self.pool_connection_unauthorized().await?)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
