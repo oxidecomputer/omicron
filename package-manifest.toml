@@ -653,10 +653,10 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "fa5f15cdcd5864161a929e2ec01534f70dfba216"
+source.commit = "9bfba40be4a71ce135585668a8727570f4f9ef99"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mg-ddm-gz.sha256.txt
-source.sha256 = "9700900c62394b0858dbd4c12ac23039bed24cae8782e5153f8dfe707589c182"
+source.sha256 = "2e2312a8b014a4fbc8ff95a528e009ee591fcb5ecef2265bb7f915428135b3d4"
 output.type = "tarball"
 
 [package.mg-ddm]
@@ -669,10 +669,10 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "fa5f15cdcd5864161a929e2ec01534f70dfba216"
+source.commit = "9bfba40be4a71ce135585668a8727570f4f9ef99"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mg-ddm.sha256.txt
-source.sha256 = "2a2b15b22b0c7604c4e5692af24515511084f2dbb17e27af4328bb4e0a8a441e"
+source.sha256 = "13f02bf0a495f4ebcfaa761e08ef2227f81ba0039f46beac8f844210d4d8e5fe"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -684,10 +684,10 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "fa5f15cdcd5864161a929e2ec01534f70dfba216"
+source.commit = "9bfba40be4a71ce135585668a8727570f4f9ef99"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mgd.sha256.txt
-source.sha256 = "b18be967a805bf4c0bf872d152ae2f58972c4f3c173a7c0f33c2475a011f1dd1"
+source.sha256 = "db47a09ec04b6dc26f6ed6f02c4b80cfe86338f8a884e9cac7eb1687803172ea"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -695,8 +695,8 @@ output.intermediate_only = true
 service_name = "lldp"
 source.type = "prebuilt"
 source.repo = "lldp"
-source.commit = "82fbc8c9747eb9f74dde0f92ae77ec67f65652c4"
-source.sha256 = "59050782fa238bcf3c1234ac8262300db9eb98823c76a2188bff2994f3779857"
+source.commit = "9fd7eac81308212dd76a4a72f381c7d90023597f"
+source.sha256 = "b28ad8e329e12822e4dac81de65c225cd93ec2f12a82ee006ecc74826b840b7d"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -735,8 +735,8 @@ only_for_targets.image = "standard"
 # the other `source.*` keys.
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "6e666520620e26432333d9060bc7d249ba9fa92e"
-source.sha256 = "040541810a5a172fcf6dc7fae256b5c29075feb60f818e6da0c103fcb8ba20e0"
+source.commit = "05bd01bb8724f7d9bf6e4d0391be333e07537088"
+source.sha256 = "94ca52801c01b222d561e09da2cca8c1a19e8b73f4693ea6f933389e385f0f5b"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -762,8 +762,8 @@ only_for_targets.image = "standard"
 # the other `source.*` keys.
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "6e666520620e26432333d9060bc7d249ba9fa92e"
-source.sha256 = "9e355d76b26138ec7114f151bdee00dbc05a29602716d66ddbf34c97d0fb2f0e"
+source.commit = "05bd01bb8724f7d9bf6e4d0391be333e07537088"
+source.sha256 = "6cddaced17cecd5061e6852e0279c8a2f3386872929ef3a1976d9757553408bb"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -782,8 +782,8 @@ only_for_targets.image = "standard"
 # the other `source.*` keys.
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "6e666520620e26432333d9060bc7d249ba9fa92e"
-source.sha256 = "99d76fd5186aedda7cb5bca3b12b28b1ee468b0d68b70e8b4f591671ba2f799f"
+source.commit = "05bd01bb8724f7d9bf6e4d0391be333e07537088"
+source.sha256 = "02bb20cabf3084957948aeb081a733a8d9fced7ddb724e8db160585607e42a8f"
 output.type = "zone"
 output.intermediate_only = true
 
