@@ -1765,13 +1765,14 @@ fn cmd_sled_update_rot(
     system.description_mut().sled_update_rot_versions(
         sled_id,
         RotStateOverrides {
-            active_slot: args.active_slot,
-            slot_a_version: args.slot_a,
-            slot_b_version: args.slot_b,
-            persistent_boot_preference: args.persistent_boot_preference,
-            pending_persistent_boot_preference: args
+            active_slot_override: args.active_slot,
+            slot_a_version_override: args.slot_a,
+            slot_b_version_override: args.slot_b,
+            persistent_boot_preference_override: args
+                .persistent_boot_preference,
+            pending_persistent_boot_preference_override: args
                 .pending_persistent_boot_preference,
-            transient_boot_preference: args.transient_boot_preference,
+            transient_boot_preference_override: args.transient_boot_preference,
         },
     )?;
 
