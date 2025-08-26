@@ -363,9 +363,8 @@ impl DataStore {
     /// Compares the state of the schema with the expectations of the
     /// currently running Nexus.
     ///
-    /// - `nexus_id`: An optional UUID of the currently-running Nexus.
-    /// If used, the db_metadata_nexus table will be checked to confirm
-    /// this Nexus has access to the database.
+    /// - `identity_check`: Describes whether or not the identity of the
+    /// calling Nexus should be validated before returning database access
     /// - `desired_version`: The version of the database schema this
     /// Nexus wants.
     pub async fn check_schema_and_access(
@@ -709,31 +708,6 @@ impl DataStore {
         Ok(())
     }
 
-    /// Registers multiple Nexus instances as having active access to the database
-    pub async fn database_nexus_access_insert_multiple(
-        &self,
-        nexus_ids: &[OmicronZoneUuid],
-        state: DbMetadataNexusState,
-    ) -> Result<(), Error> {
-        use nexus_db_schema::schema::db_metadata_nexus::dsl;
-
-        let new_nexuses: Vec<DbMetadataNexus> = nexus_ids
-            .iter()
-            .map(|&nexus_id| DbMetadataNexus::new(nexus_id, state))
-            .collect();
-
-        diesel::insert_into(dsl::db_metadata_nexus)
-            .values(new_nexuses)
-            .on_conflict(dsl::nexus_id)
-            .do_update()
-            .set(dsl::state.eq(excluded(dsl::state)))
-            .execute_async(&*self.pool_connection_unauthorized().await?)
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
-
-        Ok(())
-    }
-
     /// Initializes Nexus database access records from a blueprint using an
     /// existing connection
     ///
@@ -756,9 +730,10 @@ impl DataStore {
         let any_records_exist =
             Self::database_nexus_access_any_exist_on_connection(conn).await?;
         if any_records_exist {
-            return Err(Error::internal_error(
-                "Cannot initialize Nexus access from blueprint: db_metadata_nexus records already exist. \
-                This function should only be called during initial rack setup.",
+            return Err(Error::conflict(
+                "Cannot initialize Nexus access from blueprint: \
+                db_metadata_nexus records already exist. This function should \
+                only be called during initial rack setup.",
             ));
         }
 
