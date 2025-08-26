@@ -14,7 +14,7 @@ use http::StatusCode;
 use http::method::Method;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
-use nexus_db_queries::db::datastore::SERVICE_IP_POOL_NAME;
+use nexus_db_queries::db::datastore::SERVICE_IPV4_POOL_NAME;
 use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
@@ -57,7 +57,6 @@ use nexus_types::silo::INTERNAL_SILO_ID;
 use omicron_common::address::Ipv6Range;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
 use omicron_common::api::external::InstanceState;
-use omicron_common::api::external::LookupType;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::SimpleIdentityOrName;
 use omicron_common::api::external::{IdentityMetadataCreateParams, Name};
@@ -326,7 +325,7 @@ async fn test_ip_pool_service_no_cud(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
     let internal_pool_name_url =
-        format!("/v1/system/ip-pools/{}", SERVICE_IP_POOL_NAME);
+        format!("/v1/system/ip-pools/{}", SERVICE_IPV4_POOL_NAME);
 
     // we can fetch the service pool by name or ID
     let pool = NexusRequest::object_get(client, &internal_pool_name_url)
@@ -354,7 +353,8 @@ async fn test_ip_pool_service_no_cud(cptestctx: &ControlPlaneTestContext) {
         StatusCode::NOT_FOUND,
     )
     .await;
-    let not_found_name = "not found: ip-pool with name \"oxide-service-pool\"";
+    let not_found_name =
+        "not found: ip-pool with name \"oxide-service-pool-v4\"";
     assert_eq!(error.message, not_found_name);
 
     let not_found_id =
@@ -823,10 +823,12 @@ async fn create_pool(client: &ClientTestContext, name: &str) -> IpPool {
 // testing allocated is done in a bunch of other places. look for
 // assert_ip_pool_utilization calls
 #[nexus_test]
-async fn test_ip_pool_utilization_total(cptestctx: &ControlPlaneTestContext) {
+async fn test_ipv4_ip_pool_utilization_total(
+    cptestctx: &ControlPlaneTestContext,
+) {
     let client = &cptestctx.external_client;
 
-    let pool = create_pool(client, "p0").await;
+    let _pool = create_pool(client, "p0").await;
 
     assert_ip_pool_utilization(client, "p0", 0, 0, 0, 0).await;
 
@@ -843,22 +845,51 @@ async fn test_ip_pool_utilization_total(cptestctx: &ControlPlaneTestContext) {
     object_create::<IpRange, IpPoolRange>(client, &add_url, &range).await;
 
     assert_ip_pool_utilization(client, "p0", 0, 5, 0, 0).await;
+}
 
-    // Now let's add a gigantic range. This requires direct datastore
-    // shenanigans because adding IPv6 ranges through the API is currently not
-    // allowed. It's worth doing because we want this code to correctly handle
-    // IPv6 ranges when they are allowed again.
+// We're going to test adding an IPv6 pool and collecting its utilization, even
+// though that requires operating directly on the datastore. When we resolve
+// https://github.com/oxidecomputer/omicron/issues/8881, we can switch this to
+// use the API to create the IPv6 pool and ranges instead.
+#[nexus_test]
+async fn test_ipv6_ip_pool_utilization_total(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
 
     let nexus = &cptestctx.server.server_context().nexus;
     let datastore = nexus.datastore();
     let log = cptestctx.logctx.log.new(o!());
     let opctx = OpContext::for_tests(log, datastore.clone());
-    let authz_pool = authz::IpPool::new(
-        authz::FLEET,
-        pool.identity.id,
-        LookupType::ByName("p0".to_string()),
-    );
+    let identity = IdentityMetadataCreateParams {
+        name: "p0".parse().unwrap(),
+        description: String::new(),
+    };
+    let pool = datastore
+        .ip_pool_create(
+            &opctx,
+            nexus_db_model::IpPool::new(
+                &identity,
+                nexus_db_model::IpVersion::V6,
+            ),
+        )
+        .await
+        .expect("should be able to create IPv6 pool");
 
+    // Check the utilization is zero.
+    assert_ip_pool_utilization(client, "p0", 0, 0, 0, 0).await;
+
+    // Now let's add a gigantic range. This requires direct datastore
+    // shenanigans because adding IPv6 ranges through the API is currently not
+    // allowed. It's worth doing because we want this code to correctly handle
+    // IPv6 ranges when they are allowed again.
+    let by_id = NameOrId::Id(pool.id());
+    let (authz_pool, db_pool) = nexus
+        .ip_pool_lookup(&opctx, &by_id)
+        .expect("should be able to lookup pool we just created")
+        .fetch_for(authz::Action::CreateChild)
+        .await
+        .expect("should be able to fetch pool we just created");
     let big_range = IpRange::V6(
         Ipv6Range::new(
             std::net::Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 0),
@@ -869,11 +900,11 @@ async fn test_ip_pool_utilization_total(cptestctx: &ControlPlaneTestContext) {
         .unwrap(),
     );
     datastore
-        .ip_pool_add_range(&opctx, &authz_pool, &big_range)
+        .ip_pool_add_range(&opctx, &authz_pool, &db_pool, &big_range)
         .await
         .expect("could not add range");
 
-    assert_ip_pool_utilization(client, "p0", 0, 5, 0, 2u128.pow(80)).await;
+    assert_ip_pool_utilization(client, "p0", 0, 0, 0, 2u128.pow(80)).await;
 }
 
 // Data for testing overlapping IP ranges
@@ -1392,9 +1423,12 @@ async fn test_ip_pool_service(cptestctx: &ControlPlaneTestContext) {
         .unwrap();
     assert_eq!(
         fetched_pool.identity.name,
-        nexus_db_queries::db::datastore::SERVICE_IP_POOL_NAME
+        nexus_db_queries::db::datastore::SERVICE_IPV4_POOL_NAME
     );
-    assert_eq!(fetched_pool.identity.description, "IP Pool for Oxide Services");
+    assert_eq!(
+        fetched_pool.identity.description,
+        "IPv4 IP Pool for Oxide Services"
+    );
 
     // Fetch any ranges already present.
     let existing_ranges =

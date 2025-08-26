@@ -10906,7 +10906,7 @@
     "/v1/system/update/repository": {
       "put": {
         "tags": [
-          "experimental"
+          "system/update"
         ],
         "summary": "Upload system release repository",
         "description": "System release repositories are verified by the updates trust store.",
@@ -10956,7 +10956,7 @@
     "/v1/system/update/repository/{system_version}": {
       "get": {
         "tags": [
-          "experimental"
+          "system/update"
         ],
         "summary": "Fetch system release repository description by version",
         "operationId": "system_update_get_repository",
@@ -10995,7 +10995,7 @@
     "/v1/system/update/target-release": {
       "get": {
         "tags": [
-          "experimental"
+          "system/update"
         ],
         "summary": "Get the current target release of the rack's system software",
         "description": "This may not correspond to the actual software running on the rack at the time of request; it is instead the release that the rack reconfigurator should be moving towards as a goal state. After some number of planning and execution phases, the software running on the rack should eventually correspond to the release described here.",
@@ -11021,7 +11021,7 @@
       },
       "put": {
         "tags": [
-          "experimental"
+          "system/update"
         ],
         "summary": "Set the current target release of the rack's system software",
         "description": "The rack reconfigurator will treat the software specified here as a goal state for the rack's software, and attempt to asynchronously update to that release.",
@@ -11059,7 +11059,7 @@
     "/v1/system/update/trust-roots": {
       "get": {
         "tags": [
-          "experimental"
+          "system/update"
         ],
         "summary": "List root roles in the updates trust store",
         "description": "A root role is a JSON document describing the cryptographic keys that are trusted to sign system release repositories, as described by The Update Framework. Uploading a repository requires its metadata to be signed by keys trusted by the trust store.",
@@ -11117,7 +11117,7 @@
       },
       "post": {
         "tags": [
-          "experimental"
+          "system/update"
         ],
         "summary": "Add trusted root role to updates trust store",
         "operationId": "system_update_trust_root_create",
@@ -11152,7 +11152,7 @@
     "/v1/system/update/trust-roots/{trust_root_id}": {
       "get": {
         "tags": [
-          "experimental"
+          "system/update"
         ],
         "summary": "Fetch trusted root role",
         "operationId": "system_update_trust_root_view",
@@ -11189,7 +11189,7 @@
       },
       "delete": {
         "tags": [
-          "experimental"
+          "system/update"
         ],
         "summary": "Delete trusted root role",
         "description": "Note that this method does not currently check for any uploaded system release repositories that would become untrusted after deleting the root role.",
@@ -28053,6 +28053,13 @@
       "description": "Endpoints related to system health",
       "externalDocs": {
         "url": "http://docs.oxide.computer/api/system-status"
+      }
+    },
+    {
+      "name": "system/update",
+      "description": "Upload and manage system updates",
+      "externalDocs": {
+        "url": "http://docs.oxide.computer/api/system-update"
       }
     },
     {
