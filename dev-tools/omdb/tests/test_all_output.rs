@@ -196,18 +196,37 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
         // actually being flaky yet, though.
         &["nexus", "background-tasks", "show", "--no-executing-info"],
         // background tasks: test picking out specific names
-        &["nexus", "background-tasks", "show", "saga_recovery"],
+        &[
+            "nexus",
+            "background-tasks",
+            "show",
+            "saga_recovery",
+            "--no-executing-info",
+        ],
         &[
             "nexus",
             "background-tasks",
             "show",
             "blueprint_loader",
             "blueprint_executor",
+            "--no-executing-info",
         ],
         // background tasks: test recognized group names
-        &["nexus", "background-tasks", "show", "dns_internal"],
-        &["nexus", "background-tasks", "show", "dns_external"],
-        &["nexus", "background-tasks", "show", "all"],
+        &[
+            "nexus",
+            "background-tasks",
+            "show",
+            "dns_internal",
+            "--no-executing-info",
+        ],
+        &[
+            "nexus",
+            "background-tasks",
+            "show",
+            "dns_external",
+            "--no-executing-info",
+        ],
+        &["nexus", "background-tasks", "show", "all", "--no-executing-info"],
         // chicken switches: show and set
         &["nexus", "chicken-switches", "show", "current"],
         &[
