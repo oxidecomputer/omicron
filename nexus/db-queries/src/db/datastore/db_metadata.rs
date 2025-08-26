@@ -794,6 +794,9 @@ impl DataStore {
         // We explicitly look for any records violating this, rather than
         // explicitly looking for "active" records, as to protect ourselves from
         // future states being added over time.
+        //
+        // There is no concern of time-of-check-to-time-of-use bugs because
+        // this function must be executed within a transaction.
         let active_count: nexus_db_model::SqlU32 = dsl::db_metadata_nexus
             .filter(
                 dsl::state
