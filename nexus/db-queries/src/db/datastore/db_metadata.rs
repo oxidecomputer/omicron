@@ -58,7 +58,18 @@ pub enum HandoffError {
 
 impl From<HandoffError> for Error {
     fn from(err: HandoffError) -> Self {
-        Error::internal_error(&err.to_string())
+        use HandoffError::*;
+        match err {
+            // These conditions are all errors that may occur transiently, with
+            // handoff from old -> new Nexus, or with multiple Nexuses
+            // concurrently attempting to perform the handoff operation.
+            //
+            // As a result, each returns a "503" error indicating that a retry
+            // should be attempted.
+            ActiveNexusInstancesExist { .. }
+            | NexusNotRegistered { .. }
+            | NexusInWrongState { .. } => Error::unavail(&err.to_string()),
+        }
     }
 }
 
