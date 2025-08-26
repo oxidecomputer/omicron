@@ -122,7 +122,6 @@ pub mod webhook_delivery;
 mod zpool;
 
 pub use address_lot::AddressLotCreateResult;
-pub use db_metadata::ConsumerPolicy;
 pub use db_metadata::SchemaAction;
 pub use db_metadata::ValidatedSchemaAction;
 pub use dns::DataStoreDnsTest;
@@ -252,7 +251,6 @@ impl DataStore {
         try_for: Option<std::time::Duration>,
         identity_check: IdentityCheckPolicy,
     ) -> Result<Self, String> {
-        use db_metadata::ConsumerPolicy;
         use db_metadata::SchemaAction;
         use nexus_db_model::SCHEMA_VERSION as EXPECTED_VERSION;
 
@@ -278,7 +276,6 @@ impl DataStore {
                         .check_schema_and_access(
                             identity_check,
                             EXPECTED_VERSION,
-                            ConsumerPolicy::Update,
                         )
                         .await
                         .map_err(|err| {
@@ -339,7 +336,7 @@ impl DataStore {
                                     warn!(
                                         log,
                                         "Failed to update schema version";
-                                        "error" => #%err
+                                        "error" => InlineErrorChain::new(err.as_ref())
                                     );
                                     BackoffError::transient(
                                         "Failed to update schema version",

@@ -14,7 +14,6 @@ use nexus_db_model::AllSchemaVersions;
 use nexus_db_model::SCHEMA_VERSION;
 use nexus_db_queries::db;
 use nexus_db_queries::db::DataStore;
-use nexus_db_queries::db::datastore::ConsumerPolicy;
 use nexus_db_queries::db::datastore::IdentityCheckPolicy;
 use nexus_db_queries::db::datastore::SchemaAction;
 use semver::Version;
@@ -115,7 +114,6 @@ async fn main_impl() -> anyhow::Result<()> {
                 .check_schema_and_access(
                     IdentityCheckPolicy::DontCare,
                     version.clone(),
-                    ConsumerPolicy::Update,
                 )
                 .await?;
 
