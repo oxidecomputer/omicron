@@ -1106,6 +1106,9 @@ pub enum Unimpl {
     ProtectedLookup(Error),
 }
 
+/// Returns a mapping of clients for the Dendrite daemons of reachable switch zones.
+/// If we are unable to communicate with the switch zone and determine the mapping
+/// of SwitchLocation -> Zone Underlay Address, we omit an entry for that client.
 pub(crate) async fn dpd_clients(
     resolver: &internal_dns_resolver::Resolver,
     log: &slog::Logger,
@@ -1137,6 +1140,10 @@ pub(crate) async fn dpd_clients(
 // switch_zone_address_mappings function doesn't allow filtering on the rack ID.
 // Since we only have a single rack, this is OK for now.
 // TODO: https://github.com/oxidecomputer/omicron/issues/1276
+//
+/// Returns a mapping of clients for the LLDP daemons of reachable switch zones.
+/// If we are unable to communicate with the switch zone and determine the mapping
+/// of SwitchLocation -> Zone Underlay Address, we omit an entry for that client.
 pub(crate) async fn lldpd_clients(
     resolver: &internal_dns_resolver::Resolver,
     _rack_id: Uuid,
@@ -1158,35 +1165,29 @@ pub(crate) async fn lldpd_clients(
     Ok(clients)
 }
 
-// Look up Dendrite addresses in DNS then determine the switch location for
-// each address DNS returns.  If we fail to lookup ServiceName::Dendrite, we
-// return error, otherwise we keep looping until we can determine the switch
-// location of all addresses returned to us from the lookup.
+/// Look up Dendrite addresses in DNS then determine the switch location of
+/// any addresses we're able to resolve the SwitchLocation for. If a switch
+/// zone is down, the resolution process will fail and the entry will be
+/// missing from the result.
+///
+/// # Errors
+/// If we fail to resolve the ipv6 addresses of the Dendrite service we
+/// return an error
 async fn switch_zone_address_mappings(
     resolver: &internal_dns_resolver::Resolver,
     log: &slog::Logger,
 ) -> Result<HashMap<SwitchLocation, Ipv6Addr>, String> {
-    loop {
-        let switch_zone_addresses = match resolver
-            .lookup_all_ipv6(ServiceName::Dendrite)
-            .await
-        {
-            Ok(addrs) => addrs,
-            Err(e) => {
-                error!(log, "failed to resolve addresses for Dendrite services"; "error" => %e);
-                return Err(e.to_string());
-            }
-        };
-        match map_switch_zone_addrs(&log, switch_zone_addresses).await {
-            Ok(mappings) => {
-                return Ok(mappings);
-            }
-            Err(e) => {
-                warn!(log, "Failed to map switch zone addr: {e}, retrying");
-                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-            }
+    let switch_zone_addresses = match resolver
+        .lookup_all_ipv6(ServiceName::Dendrite)
+        .await
+    {
+        Ok(addrs) => addrs,
+        Err(e) => {
+            error!(log, "failed to resolve addresses for Dendrite services"; "error" => %e);
+            return Err(e.to_string());
         }
-    }
+    };
+    Ok(map_switch_zone_addrs(&log, switch_zone_addresses).await)
 }
 
 // TODO: #3596 Allow updating of Nexus from `handoff_to_nexus()`
@@ -1197,10 +1198,20 @@ async fn switch_zone_address_mappings(
 // via an API call. We probably will need to rethink how we're looking
 // up switch addresses as a whole, since how DNS is currently setup for
 // Dendrite is insufficient for what we need.
+//
+/// Query MGS in each switch zone to learn which switch slot is being managed by
+/// the services located on a given ipv6 address. This information can be used
+/// along with the well known port numbers to target a specific switch + service
+/// combination.
+///
+/// We return whatever we're able to successfully resolve. In the event of a
+/// a communication timeout or other failure with MGS, the SwitchLocation -> Ipv6Addr
+/// mapping will be missing from the returned HashMap. Callers will need to inspect
+/// the contents to be ensure what they expect to be there is actually there.
 async fn map_switch_zone_addrs(
     log: &Logger,
     switch_zone_addresses: Vec<Ipv6Addr>,
-) -> Result<HashMap<SwitchLocation, Ipv6Addr>, String> {
+) -> HashMap<SwitchLocation, Ipv6Addr> {
     use gateway_client::Client as MgsClient;
     info!(log, "Determining switch slots managed by switch zones");
     let mut switch_zone_addrs = HashMap::new();
@@ -1210,25 +1221,25 @@ async fn map_switch_zone_addrs(
             log.new(o!("component" => "MgsClient")),
         );
 
-        info!(log, "determining switch slot managed by dendrite zone"; "zone_address" => #?addr);
+        info!(log, "determining switch slot managed by switch zone"; "zone_address" => #?addr);
         let switch_slot = match mgs_client.sp_local_switch_id().await {
             Ok(switch) => {
                 info!(
                     log,
-                    "identified switch slot for dendrite zone";
+                    "identified switch slot for switch zone";
                     "slot" => #?switch,
                     "zone_address" => #?addr
                 );
                 switch.slot
             }
             Err(e) => {
-                warn!(
+                error!(
                     log,
-                    "failed to identify switch slot for dendrite";
+                    "failed to identify switch slot for switch zone";
                     "zone_address" => #?addr,
                     "reason" => #?e
                 );
-                return Err(e.to_string());
+                continue;
             }
         };
 
@@ -1247,12 +1258,14 @@ async fn map_switch_zone_addrs(
             }
         };
     }
+
     info!(
         log,
-        "completed mapping dendrite zones to switch slots";
+        "completed mapping switch zones to switch slots";
         "mappings" => #?switch_zone_addrs
     );
-    Ok(switch_zone_addrs)
+
+    switch_zone_addrs
 }
 
 /// Begin configuring an external HTTP client, returning a
