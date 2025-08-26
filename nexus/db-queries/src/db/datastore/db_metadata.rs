@@ -722,7 +722,7 @@ impl DataStore {
             dsl::db_metadata_nexus
                 .filter(dsl::nexus_id.eq(nexus_id.into_untyped_uuid())),
         )
-        .execute_async(&*conn)
+        .execute_async(conn)
         .await
         .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
@@ -771,7 +771,7 @@ impl DataStore {
                         .values(new_nexuses)
                         .on_conflict(dsl::nexus_id)
                         .do_nothing()
-                        .execute_async(&*conn)
+                        .execute_async(conn)
                         .await?;
                     Ok(())
                 }
@@ -1115,8 +1115,35 @@ mod test {
     use crate::db::pub_test_utils::TestDatabase;
     use camino::Utf8Path;
     use camino_tempfile::Utf8TempDir;
+    use id_map::IdMap;
     use nexus_db_model::SCHEMA_VERSION;
+    use nexus_inventory::now_db_precision;
+    use nexus_types::deployment::Blueprint;
+    use nexus_types::deployment::BlueprintHostPhase2DesiredSlots;
+    use nexus_types::deployment::BlueprintSledConfig;
+    use nexus_types::deployment::BlueprintTarget;
+    use nexus_types::deployment::BlueprintZoneConfig;
+    use nexus_types::deployment::BlueprintZoneDisposition;
+    use nexus_types::deployment::BlueprintZoneImageSource;
+    use nexus_types::deployment::BlueprintZoneType;
+    use nexus_types::deployment::CockroachDbPreserveDowngrade;
+    use nexus_types::deployment::OximeterReadMode;
+    use nexus_types::deployment::PendingMgsUpdates;
+    use nexus_types::deployment::PlanningReport;
+    use nexus_types::deployment::blueprint_zone_type;
+    use nexus_types::external_api::views::SledState;
+    use nexus_types::inventory::NetworkInterface;
+    use nexus_types::inventory::NetworkInterfaceKind;
+    use omicron_common::api::external::Generation;
+    use omicron_common::api::external::MacAddr;
+    use omicron_common::api::external::Vni;
+    use omicron_common::zpool_name::ZpoolName;
     use omicron_test_utils::dev;
+    use omicron_uuid_kinds::BlueprintUuid;
+    use omicron_uuid_kinds::ExternalIpUuid;
+    use omicron_uuid_kinds::SledUuid;
+    use omicron_uuid_kinds::ZpoolUuid;
+    use std::collections::BTreeMap;
 
     // Confirms that calling the internal "ensure_schema" function can succeed
     // when the database is already at that version.
@@ -1989,6 +2016,427 @@ mod test {
 
         assert_eq!(action.action(), &DatastoreSetupAction::Update);
         assert_eq!(action.desired_version(), &newer_version);
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    fn create_test_blueprint(
+        nexus_zones: Vec<(OmicronZoneUuid, BlueprintZoneDisposition)>,
+    ) -> Blueprint {
+        let blueprint_id = BlueprintUuid::new_v4();
+        let sled_id = SledUuid::new_v4();
+
+        let zones: IdMap<BlueprintZoneConfig> = nexus_zones
+            .into_iter()
+            .map(|(zone_id, disposition)| BlueprintZoneConfig {
+                disposition,
+                id: zone_id,
+                filesystem_pool: ZpoolName::new_external(ZpoolUuid::new_v4()),
+                zone_type: BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
+                    internal_address: "[::1]:0".parse().unwrap(),
+                    external_dns_servers: Vec::new(),
+                    external_ip: nexus_types::deployment::OmicronZoneExternalFloatingIp {
+                        id: ExternalIpUuid::new_v4(),
+                        ip: std::net::IpAddr::V6(std::net::Ipv6Addr::LOCALHOST),
+                    },
+                    external_tls: true,
+                    nic: NetworkInterface {
+                        id: uuid::Uuid::new_v4(),
+                        kind: NetworkInterfaceKind::Service {
+                            id: zone_id.into_untyped_uuid(),
+                        },
+                        name: "test-nic".parse().unwrap(),
+                        ip: "192.168.1.1".parse().unwrap(),
+                        mac: MacAddr::random_system(),
+                        subnet: ipnetwork::IpNetwork::V4(
+                            "192.168.1.0/24".parse().unwrap()
+                        ).into(),
+                        vni: Vni::try_from(100).unwrap(),
+                        primary: true,
+                        slot: 0,
+                        transit_ips: Vec::new(),
+                    },
+                }),
+                image_source: BlueprintZoneImageSource::InstallDataset,
+            })
+            .collect();
+
+        let mut sleds = BTreeMap::new();
+        sleds.insert(
+            sled_id,
+            BlueprintSledConfig {
+                state: SledState::Active,
+                sled_agent_generation: Generation::new(),
+                zones,
+                disks: IdMap::new(),
+                datasets: IdMap::new(),
+                remove_mupdate_override: None,
+                host_phase_2: BlueprintHostPhase2DesiredSlots::current_contents(
+                ),
+            },
+        );
+
+        Blueprint {
+            id: blueprint_id,
+            sleds,
+            pending_mgs_updates: PendingMgsUpdates::new(),
+            parent_blueprint_id: None,
+            internal_dns_version: Generation::new(),
+            external_dns_version: Generation::new(),
+            target_release_minimum_generation: Generation::new(),
+            cockroachdb_fingerprint: String::new(),
+            cockroachdb_setting_preserve_downgrade:
+                CockroachDbPreserveDowngrade::DoNotModify,
+            clickhouse_cluster_config: None,
+            oximeter_read_mode: OximeterReadMode::SingleNode,
+            oximeter_read_version: Generation::new(),
+            time_created: now_db_precision(),
+            creator: "test suite".to_string(),
+            comment: "test blueprint".to_string(),
+            report: PlanningReport::new(blueprint_id),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_database_nexus_access_create() {
+        let logctx = dev::test_setup_log("test_database_nexus_access_create");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let datastore = db.datastore();
+        let opctx = db.opctx();
+
+        // Create a blueprint with two in-service Nexus zones,
+        // and one expunged Nexus.
+        let nexus1_id = OmicronZoneUuid::new_v4();
+        let nexus2_id = OmicronZoneUuid::new_v4();
+        let expunged_nexus = OmicronZoneUuid::new_v4();
+        let blueprint = create_test_blueprint(vec![
+            (nexus1_id, BlueprintZoneDisposition::InService),
+            (nexus2_id, BlueprintZoneDisposition::InService),
+            (
+                expunged_nexus,
+                BlueprintZoneDisposition::Expunged {
+                    as_of_generation: Generation::new(),
+                    ready_for_cleanup: true,
+                },
+            ),
+        ]);
+
+        // Insert the blueprint and make it the target
+        datastore
+            .blueprint_insert(&opctx, &blueprint)
+            .await
+            .expect("Failed to insert blueprint");
+        datastore
+            .blueprint_target_set_current(
+                &opctx,
+                BlueprintTarget {
+                    target_id: blueprint.id,
+                    enabled: false,
+                    time_made_target: chrono::Utc::now(),
+                },
+            )
+            .await
+            .expect("Failed to set blueprint target");
+
+        // Create nexus access records
+        datastore
+            .database_nexus_access_create(&opctx, &blueprint)
+            .await
+            .expect("Failed to create nexus access");
+
+        // Verify records were created with Active state
+        let nexus1_access = datastore
+            .database_nexus_access(nexus1_id)
+            .await
+            .expect("Failed to get nexus1 access");
+        let nexus2_access = datastore
+            .database_nexus_access(nexus2_id)
+            .await
+            .expect("Failed to get nexus2 access");
+        let expunged_access = datastore
+            .database_nexus_access(expunged_nexus)
+            .await
+            .expect("Failed to get expunged access");
+
+        assert!(nexus1_access.is_some(), "nexus1 should have access record");
+        assert!(nexus2_access.is_some(), "nexus2 should have access record");
+        assert!(
+            expunged_access.is_none(),
+            "expunged nexus should not have access record"
+        );
+
+        let nexus1_record = nexus1_access.unwrap();
+        let nexus2_record = nexus2_access.unwrap();
+        assert_eq!(nexus1_record.state(), DbMetadataNexusState::Active);
+        assert_eq!(nexus2_record.state(), DbMetadataNexusState::Active);
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_database_nexus_access_create_idempotent() {
+        let logctx =
+            dev::test_setup_log("test_database_nexus_access_create_idempotent");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let datastore = db.datastore();
+        let opctx = db.opctx();
+
+        // Create a blueprint with one Nexus zone
+        let nexus_id = OmicronZoneUuid::new_v4();
+        let blueprint = create_test_blueprint(vec![(
+            nexus_id,
+            BlueprintZoneDisposition::InService,
+        )]);
+
+        // Insert the blueprint and make it the target
+        datastore
+            .blueprint_insert(&opctx, &blueprint)
+            .await
+            .expect("Failed to insert blueprint");
+        datastore
+            .blueprint_target_set_current(
+                &opctx,
+                BlueprintTarget {
+                    target_id: blueprint.id,
+                    enabled: false,
+                    time_made_target: chrono::Utc::now(),
+                },
+            )
+            .await
+            .expect("Failed to set blueprint target");
+
+        // Create nexus access records (first time)
+        datastore
+            .database_nexus_access_create(&opctx, &blueprint)
+            .await
+            .expect("Failed to create nexus access (first time)");
+
+        // Verify record was created
+        async fn confirm_state(
+            datastore: &DataStore,
+            nexus_id: OmicronZoneUuid,
+            expected_state: DbMetadataNexusState,
+        ) {
+            let state = datastore
+                .database_nexus_access(nexus_id)
+                .await
+                .expect("Failed to get nexus access after first create")
+                .expect("Entry for Nexus should have been inserted");
+            assert_eq!(state.state(), expected_state);
+        }
+
+        confirm_state(datastore, nexus_id, DbMetadataNexusState::Active).await;
+
+        // Creating the record again: not an error.
+        datastore
+            .database_nexus_access_create(&opctx, &blueprint)
+            .await
+            .expect("Failed to create nexus access (first time)");
+        confirm_state(datastore, nexus_id, DbMetadataNexusState::Active).await;
+
+        // Manually make the record "Quiesced".
+        use nexus_db_schema::schema::db_metadata_nexus::dsl;
+        diesel::update(dsl::db_metadata_nexus)
+            .filter(dsl::nexus_id.eq(nexus_id.into_untyped_uuid()))
+            .set(dsl::state.eq(DbMetadataNexusState::Quiesced))
+            .execute_async(
+                &*datastore.pool_connection_unauthorized().await.unwrap(),
+            )
+            .await
+            .expect("Failed to update record");
+        confirm_state(datastore, nexus_id, DbMetadataNexusState::Quiesced)
+            .await;
+
+        // Create nexus access records another time - should be idempotent,
+        // but should be "on-conflict, ignore".
+        datastore
+            .database_nexus_access_create(&opctx, &blueprint)
+            .await
+            .expect("Failed to create nexus access (second time)");
+        confirm_state(datastore, nexus_id, DbMetadataNexusState::Quiesced)
+            .await;
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_database_nexus_access_create_fails_wrong_target_blueprint() {
+        let logctx = dev::test_setup_log(
+            "test_database_nexus_access_create_fails_wrong_target_blueprint",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let datastore = db.datastore();
+        let opctx = db.opctx();
+
+        // Create two different blueprints
+        let nexus_id = OmicronZoneUuid::new_v4();
+        let target_blueprint = create_test_blueprint(vec![(
+            nexus_id,
+            BlueprintZoneDisposition::InService,
+        )]);
+        let non_target_blueprint = create_test_blueprint(vec![(
+            nexus_id,
+            BlueprintZoneDisposition::InService,
+        )]);
+
+        // Insert both blueprints
+        datastore
+            .blueprint_insert(&opctx, &target_blueprint)
+            .await
+            .expect("Failed to insert target blueprint");
+        datastore
+            .blueprint_insert(&opctx, &non_target_blueprint)
+            .await
+            .expect("Failed to insert non-target blueprint");
+
+        // Set the first blueprint as the target
+        datastore
+            .blueprint_target_set_current(
+                &opctx,
+                BlueprintTarget {
+                    target_id: target_blueprint.id,
+                    enabled: false,
+                    time_made_target: chrono::Utc::now(),
+                },
+            )
+            .await
+            .expect("Failed to set target blueprint");
+
+        // Try to create nexus access records using the non-target blueprint.
+        // This should fail because the transaction should check if the
+        // blueprint is the current target
+        let result = datastore
+            .database_nexus_access_create(&opctx, &non_target_blueprint)
+            .await;
+        assert!(
+            result.is_err(),
+            "Creating nexus access with wrong target blueprint should fail"
+        );
+
+        // Verify no records were created for the nexus
+        let access = datastore
+            .database_nexus_access(nexus_id)
+            .await
+            .expect("Failed to get nexus access");
+        assert!(
+            access.is_none(),
+            "No access record should exist when wrong blueprint is used"
+        );
+
+        // Verify that using the correct target blueprint works
+        datastore
+            .database_nexus_access_create(&opctx, &target_blueprint)
+            .await
+            .expect(
+                "Creating nexus access with correct blueprint should succeed",
+            );
+
+        let access_after_correct = datastore
+            .database_nexus_access(nexus_id)
+            .await
+            .expect("Failed to get nexus access after correct blueprint");
+        assert!(
+            access_after_correct.is_some(),
+            "Access record should exist after using correct target blueprint"
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_database_nexus_access_delete() {
+        let logctx = dev::test_setup_log("test_database_nexus_access_delete");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let datastore = db.datastore();
+        let opctx = db.opctx();
+
+        // Create test nexus IDs
+        let nexus1_id = OmicronZoneUuid::new_v4();
+        let nexus2_id = OmicronZoneUuid::new_v4();
+
+        // Insert records directly using the test method
+        datastore
+            .database_nexus_access_insert(
+                nexus1_id,
+                DbMetadataNexusState::Active,
+            )
+            .await
+            .expect("Failed to insert nexus1 access");
+        datastore
+            .database_nexus_access_insert(
+                nexus2_id,
+                DbMetadataNexusState::NotYet,
+            )
+            .await
+            .expect("Failed to insert nexus2 access");
+
+        // Verify records were created
+        let nexus1_before = datastore
+            .database_nexus_access(nexus1_id)
+            .await
+            .expect("Failed to get nexus1 access");
+        let nexus2_before = datastore
+            .database_nexus_access(nexus2_id)
+            .await
+            .expect("Failed to get nexus2 access");
+        assert!(nexus1_before.is_some(), "nexus1 should have access record");
+        assert!(nexus2_before.is_some(), "nexus2 should have access record");
+
+        // Delete nexus1 record
+        datastore
+            .database_nexus_access_delete(&opctx, nexus1_id)
+            .await
+            .expect("Failed to delete nexus1 access");
+
+        // Verify nexus1 record was deleted, nexus2 record remains
+        let nexus1_after = datastore
+            .database_nexus_access(nexus1_id)
+            .await
+            .expect("Failed to get nexus1 access after delete");
+        let nexus2_after = datastore
+            .database_nexus_access(nexus2_id)
+            .await
+            .expect("Failed to get nexus2 access after delete");
+        assert!(
+            nexus1_after.is_none(),
+            "nexus1 should not have access record after delete"
+        );
+        assert!(
+            nexus2_after.is_some(),
+            "nexus2 should still have access record"
+        );
+
+        // Delete nexus2 record
+        datastore
+            .database_nexus_access_delete(&opctx, nexus2_id)
+            .await
+            .expect("Failed to delete nexus2 access");
+
+        // Verify nexus2 record was also deleted
+        let nexus2_final = datastore
+            .database_nexus_access(nexus2_id)
+            .await
+            .expect("Failed to get nexus2 access after final delete");
+        assert!(
+            nexus2_final.is_none(),
+            "nexus2 should not have access record after delete"
+        );
+
+        // Confirm deletion is idempotent
+        datastore
+            .database_nexus_access_delete(&opctx, nexus1_id)
+            .await
+            .expect("Failed to delete nexus1 access idempotently");
+
+        // This also means deleting non-existent records should be fine
+        datastore
+            .database_nexus_access_delete(&opctx, OmicronZoneUuid::new_v4())
+            .await
+            .expect("Failed to delete non-existent record");
 
         db.terminate().await;
         logctx.cleanup_successful();
