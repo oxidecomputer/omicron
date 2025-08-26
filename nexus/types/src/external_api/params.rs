@@ -13,7 +13,7 @@ use omicron_common::api::external::{
     AddressLotKind, AffinityPolicy, AllowedSourceIps, BfdMode, BgpPeer,
     ByteCount, FailureDomain, Hostname, IdentityMetadataCreateParams,
     IdentityMetadataUpdateParams, InstanceAutoRestartPolicy, InstanceCpuCount,
-    LinkFec, LinkSpeed, Name, NameOrId, Nullable, PaginationOrder,
+    IpVersion, LinkFec, LinkSpeed, Name, NameOrId, Nullable, PaginationOrder,
     RouteDestination, RouteTarget, UserId,
 };
 use omicron_common::disk::DiskVariant;
@@ -1002,6 +1002,11 @@ impl std::fmt::Debug for CertificateCreate {
 pub struct IpPoolCreate {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
+    /// The IP version of the pool.
+    ///
+    /// The default is IPv4.
+    #[serde(default = "IpVersion::v4")]
+    pub ip_version: IpVersion,
 }
 
 /// Parameters for updating an IP Pool

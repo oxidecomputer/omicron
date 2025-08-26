@@ -258,6 +258,9 @@ pub async fn create_ip_pool(
                 name: pool_name.parse().unwrap(),
                 description: String::from("an ip pool"),
             },
+            ip_version: ip_range
+                .map(|r| r.version())
+                .unwrap_or_else(views::IpVersion::v4),
         },
     )
     .await;

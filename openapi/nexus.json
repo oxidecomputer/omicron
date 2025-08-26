@@ -21187,6 +21187,14 @@
             "type": "string",
             "format": "uuid"
           },
+          "ip_version": {
+            "description": "The IP version for the pool.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/IpVersion"
+              }
+            ]
+          },
           "name": {
             "description": "unique, mutable, user-controlled identifier for each resource",
             "allOf": [
@@ -21209,6 +21217,7 @@
         "required": [
           "description",
           "id",
+          "ip_version",
           "name",
           "time_created",
           "time_modified"
@@ -21220,6 +21229,15 @@
         "properties": {
           "description": {
             "type": "string"
+          },
+          "ip_version": {
+            "description": "The IP version of the pool.\n\nThe default is IPv4.",
+            "default": "v4",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/IpVersion"
+              }
+            ]
           },
           "name": {
             "$ref": "#/components/schemas/Name"
@@ -21431,6 +21449,14 @@
               }
             ]
           }
+        ]
+      },
+      "IpVersion": {
+        "description": "The IP address version.",
+        "type": "string",
+        "enum": [
+          "v4",
+          "v6"
         ]
       },
       "Ipv4Net": {
