@@ -623,14 +623,14 @@ impl SystemDescription {
         transient_boot_preference: Option<RotSlot>,
     ) -> anyhow::Result<&mut Self> {
         let sled = self.get_sled_mut(sled_id)?;
-        sled.set_rot_versions(
+        sled.set_rot_versions(RotStateOverrides {
             active_slot,
             slot_a_version,
             slot_b_version,
             persistent_boot_preference,
             pending_persistent_boot_preference,
             transient_boot_preference,
-        );
+        });
         Ok(self)
     }
 
@@ -1698,17 +1698,10 @@ impl Sled {
 
     /// Update the reported RoT versions
     ///
-    /// If either field is `None`, that field is _unchanged_.
-    // Note that this means there's no way to _unset_ the version.
-    fn set_rot_versions(
-        &mut self,
-        active_slot: Option<RotSlot>,
-        slot_a_version: Option<ExpectedVersion>,
-        slot_b_version: Option<ExpectedVersion>,
-        persistent_boot_preference_slot: Option<RotSlot>,
-        pending_persistent_boot_preference_slot: Option<RotSlot>,
-        transient_boot_preference_slot: Option<RotSlot>,
-    ) {
+    /// If any of the overrides are `None`, that field is _unchanged_,
+    /// with the exception of `pending_persistent_boot_preference` and
+    /// transient_boot_preference which are `Option` in the RotState.
+    fn set_rot_versions(&mut self, overrides: RotStateOverrides) {
         if let Some((_slot, sp_state)) = self.inventory_sp.as_mut() {
             match &mut sp_state.rot {
                 RotState::V3 {
@@ -1718,23 +1711,26 @@ impl Sled {
                     transient_boot_preference,
                     ..
                 } => {
-                    if let Some(new_value) = active_slot {
+                    if let Some(new_value) = overrides.active_slot {
                         *active = new_value;
                     }
-                    if let Some(new_value) = persistent_boot_preference_slot {
+                    if let Some(new_value) =
+                        overrides.persistent_boot_preference
+                    {
                         *persistent_boot_preference = new_value;
                     }
 
                     *pending_persistent_boot_preference =
-                        pending_persistent_boot_preference_slot;
-                    *transient_boot_preference = transient_boot_preference_slot;
+                        overrides.pending_persistent_boot_preference;
+                    *transient_boot_preference =
+                        overrides.transient_boot_preference;
                 }
                 // We will only support RotState::V3
                 _ => unreachable!(),
             };
         }
 
-        if let Some(slot_a_version) = slot_a_version {
+        if let Some(slot_a_version) = overrides.slot_a_version {
             match slot_a_version {
                 ExpectedVersion::NoValidVersion => {
                     self.rot_slot_a_caboose = None;
@@ -1754,7 +1750,7 @@ impl Sled {
             }
         }
 
-        if let Some(slot_b_version) = slot_b_version {
+        if let Some(slot_b_version) = overrides.slot_b_version {
             match slot_b_version {
                 ExpectedVersion::NoValidVersion => {
                     self.rot_slot_b_caboose = None;
@@ -1894,6 +1890,17 @@ impl Sled {
         );
         prev.map(|prev| prev.map(|prev| prev.mupdate_override_id))
     }
+}
+
+/// Settings that can be overriden in a simulated sled's RotState
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RotStateOverrides {
+    active_slot: Option<RotSlot>,
+    slot_a_version: Option<ExpectedVersion>,
+    slot_b_version: Option<ExpectedVersion>,
+    persistent_boot_preference: Option<RotSlot>,
+    pending_persistent_boot_preference: Option<RotSlot>,
+    transient_boot_preference: Option<RotSlot>,
 }
 
 /// The visibility of a sled in the inventory.
