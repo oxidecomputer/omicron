@@ -229,7 +229,7 @@ const PUT_UPDATE_REPOSITORY_MAX_BYTES: usize = 4 * GIB;
                 }
             },
             "system/update" = {
-                description = "Endpoints for uploading and managing system updates",
+                description = "Upload and manage system updates",
                 external_docs = {
                     url = "http://docs.oxide.computer/api/system-update"
                 }

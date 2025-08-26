@@ -28052,7 +28052,7 @@
     },
     {
       "name": "system/update",
-      "description": "Endpoints for uploading and managing system updates",
+      "description": "Upload and manage system updates",
       "externalDocs": {
         "url": "http://docs.oxide.computer/api/system-update"
       }
