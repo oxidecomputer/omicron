@@ -39,6 +39,7 @@ use nexus_db_lookup::LookupPath;
 use nexus_db_model::FloatingIpUpdate;
 use nexus_db_model::Instance;
 use nexus_db_model::IpAttachState;
+use nexus_db_model::IpVersion;
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::OmicronZoneExternalIp;
 use nexus_types::identity::Resource;
@@ -318,7 +319,9 @@ impl DataStore {
         zone_kind: ZoneKind,
         external_ip: OmicronZoneExternalIp,
     ) -> CreateResult<ExternalIp> {
-        let (authz_pool, pool) = self.ip_pools_service_lookup(opctx).await?;
+        let version = IpVersion::from(external_ip.ip_version());
+        let (authz_pool, pool) =
+            self.ip_pools_service_lookup(opctx, version).await?;
         opctx.authorize(authz::Action::CreateChild, &authz_pool).await?;
         let data = IncompleteExternalIp::for_omicron_zone(
             pool.id(),
@@ -356,7 +359,12 @@ impl DataStore {
     ) -> ListResultVec<ExternalIp> {
         use nexus_db_schema::schema::external_ip::dsl;
 
-        let (authz_pool, _pool) = self.ip_pools_service_lookup(opctx).await?;
+        // Note the IP version used here isn't important. It's just for the
+        // authz check to list children, and not used for the actual database
+        // query below, which filters on is_service to get external IPs from
+        // either pool.
+        let (authz_pool, _pool) =
+            self.ip_pools_service_lookup(opctx, IpVersion::V4).await?;
         opctx.authorize(authz::Action::ListChildren, &authz_pool).await?;
 
         paginated(dsl::external_ip, dsl::id, pagparams)
@@ -1183,12 +1191,12 @@ mod tests {
             Ipv4Addr::new(10, 0, 0, 10),
         ))
         .unwrap();
-        let (service_ip_pool, _) = datastore
-            .ip_pools_service_lookup(opctx)
+        let (service_ip_pool, db_pool) = datastore
+            .ip_pools_service_lookup(opctx, IpVersion::V4)
             .await
             .expect("lookup service ip pool");
         datastore
-            .ip_pool_add_range(opctx, &service_ip_pool, &ip_range)
+            .ip_pool_add_range(opctx, &service_ip_pool, &db_pool, &ip_range)
             .await
             .expect("add range to service ip pool");
 

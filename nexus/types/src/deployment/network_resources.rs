@@ -7,6 +7,7 @@ use daft::Diffable;
 use iddqd::TriHashItem;
 use iddqd::TriHashMap;
 use iddqd::tri_upcast;
+use omicron_common::api::external::IpVersion;
 use omicron_common::api::external::MacAddr;
 use omicron_common::api::internal::shared::SourceNatConfig;
 use omicron_uuid_kinds::ExternalIpUuid;
@@ -191,6 +192,14 @@ impl OmicronZoneExternalIp {
             OmicronZoneExternalIp::Snat(snat) => {
                 OmicronZoneExternalIpKey::Snat(snat.snat_cfg)
             }
+        }
+    }
+
+    /// Return the IP version of the contained address.
+    pub fn ip_version(&self) -> IpVersion {
+        match self.ip() {
+            IpAddr::V4(_) => IpVersion::V4,
+            IpAddr::V6(_) => IpVersion::V6,
         }
     }
 }
