@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! om.into_untyped_uuid()db commands that query or update specific Nexus instances
+//! omdb commands that query or update specific Nexus instances
 
 mod chicken_switches;
 mod quiesce;
