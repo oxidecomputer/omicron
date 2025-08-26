@@ -12,6 +12,7 @@ use chrono::SecondsFormat;
 use chrono::Utc;
 use futures::future::ready;
 use futures::stream::StreamExt;
+use gateway_client::types::SpType;
 use gateway_types::rot::RotSlot;
 use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
@@ -674,10 +675,17 @@ pub struct SpStatus {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct HostPhase1Status {
-    pub active_slot: Option<M2Slot>,
-    pub slot_a_version: TufRepoVersion,
-    pub slot_b_version: TufRepoVersion,
+#[serde(rename_all = "snake_case", tag = "kind")]
+pub enum HostPhase1Status {
+    /// This device has no host phase 1 status because it is not a sled (e.g.,
+    /// it's a PSC or switch).
+    NotASled,
+    Sled {
+        sled_id: Option<SledUuid>,
+        active_slot: Option<M2Slot>,
+        slot_a_version: TufRepoVersion,
+        slot_b_version: TufRepoVersion,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -685,7 +693,6 @@ pub struct MgsDrivenUpdateStatus {
     // This is a stringified [`BaseboardId`]. We can't use `BaseboardId` as a
     // key in JSON maps, so we squish it into a string.
     pub baseboard_description: String,
-    pub sled_id: Option<SledUuid>,
     pub rot_bootloader: RotBootloaderStatus,
     pub rot: RotStatus,
     pub sp: SpStatus,
@@ -696,6 +703,7 @@ impl MgsDrivenUpdateStatus {
     fn new(
         inventory: &Collection,
         baseboard_id: &BaseboardId,
+        sp_type: SpType,
         old: &TargetReleaseDescription,
         new: &TargetReleaseDescription,
         sled_ids: &BTreeMap<&BaseboardId, SledUuid>,
@@ -703,6 +711,7 @@ impl MgsDrivenUpdateStatus {
         MgsDrivenUpdateStatusBuilder {
             inventory,
             baseboard_id,
+            sp_type,
             old,
             new,
             sled_ids,
@@ -724,6 +733,7 @@ impl IdOrdItem for MgsDrivenUpdateStatus {
 struct MgsDrivenUpdateStatusBuilder<'a> {
     inventory: &'a Collection,
     baseboard_id: &'a BaseboardId,
+    sp_type: SpType,
     old: &'a TargetReleaseDescription,
     new: &'a TargetReleaseDescription,
     sled_ids: &'a BTreeMap<&'a BaseboardId, SledUuid>,
@@ -731,9 +741,21 @@ struct MgsDrivenUpdateStatusBuilder<'a> {
 
 impl MgsDrivenUpdateStatusBuilder<'_> {
     fn build(&self) -> MgsDrivenUpdateStatus {
+        let host_os_phase_1 = match self.sp_type {
+            SpType::Power | SpType::Switch => HostPhase1Status::NotASled,
+            SpType::Sled => HostPhase1Status::Sled {
+                sled_id: self.sled_ids.get(self.baseboard_id).copied(),
+                active_slot: self
+                    .inventory
+                    .host_phase_1_active_slot_for(self.baseboard_id)
+                    .map(|s| s.slot),
+                slot_a_version: self.version_for_host_phase_1(M2Slot::A),
+                slot_b_version: self.version_for_host_phase_1(M2Slot::B),
+            },
+        };
+
         MgsDrivenUpdateStatus {
             baseboard_description: self.baseboard_id.to_string(),
-            sled_id: self.sled_ids.get(self.baseboard_id).copied(),
             rot_bootloader: RotBootloaderStatus {
                 stage0_version: self.version_for_caboose(CabooseWhich::Stage0),
                 stage0_next_version: self
@@ -753,14 +775,7 @@ impl MgsDrivenUpdateStatusBuilder<'_> {
                 slot0_version: self.version_for_caboose(CabooseWhich::SpSlot0),
                 slot1_version: self.version_for_caboose(CabooseWhich::SpSlot1),
             },
-            host_os_phase_1: HostPhase1Status {
-                active_slot: self
-                    .inventory
-                    .host_phase_1_active_slot_for(self.baseboard_id)
-                    .map(|s| s.slot),
-                slot_a_version: self.version_for_host_phase_1(M2Slot::A),
-                slot_b_version: self.version_for_host_phase_1(M2Slot::B),
-            },
+            host_os_phase_1,
         }
     }
 
@@ -902,11 +917,12 @@ impl UpdateStatus {
 
         let mgs_driven = inventory
             .sps
-            .keys()
-            .map(|baseboard_id| {
+            .iter()
+            .map(|(baseboard_id, sp)| {
                 MgsDrivenUpdateStatus::new(
                     inventory,
                     baseboard_id,
+                    sp.sp_type,
                     old,
                     new,
                     &sled_ids_by_baseboard,

@@ -24,24 +24,30 @@ pub async fn cmd_nexus_update_status(
         .context("retrieving update status")?
         .into_inner();
 
-    print_rot_bootloaders(status.mgs_driven.iter().map(|s| {
-        (s.baseboard_description.clone(), s.sled_id, &s.rot_bootloader)
-    }));
+    print_rot_bootloaders(
+        status
+            .mgs_driven
+            .iter()
+            .map(|s| (s.baseboard_description.clone(), &s.rot_bootloader)),
+    );
     print_rots(
         status
             .mgs_driven
             .iter()
-            .map(|s| (s.baseboard_description.clone(), s.sled_id, &s.rot)),
+            .map(|s| (s.baseboard_description.clone(), &s.rot)),
     );
     print_sps(
         status
             .mgs_driven
             .iter()
-            .map(|s| (s.baseboard_description.clone(), s.sled_id, &s.sp)),
+            .map(|s| (s.baseboard_description.clone(), &s.sp)),
     );
-    print_host_phase_1s(status.mgs_driven.iter().map(|s| {
-        (s.baseboard_description.clone(), s.sled_id, &s.host_os_phase_1)
-    }));
+    print_host_phase_1s(
+        status
+            .mgs_driven
+            .iter()
+            .map(|s| (s.baseboard_description.clone(), &s.host_os_phase_1)),
+    );
     print_host_phase_2s(
         status.sleds.iter().map(|s| (s.sled_id, &s.host_phase_2)),
     );
@@ -90,26 +96,22 @@ fn print_zones(zones: impl Iterator<Item = (SledUuid, Vec<ZoneStatus>)>) {
 }
 
 fn print_rot_bootloaders<'a>(
-    bootloaders: impl Iterator<
-        Item = (String, Option<SledUuid>, &'a RotBootloaderStatus),
-    >,
+    bootloaders: impl Iterator<Item = (String, &'a RotBootloaderStatus)>,
 ) {
     #[derive(Tabled)]
     #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
     struct BootloaderRow {
         baseboard_id: String,
-        sled_id: String,
         stage0_version: String,
         stage0_next_version: String,
     }
 
     let mut rows = Vec::new();
-    for (baseboard_id, sled_id, status) in bootloaders {
+    for (baseboard_id, status) in bootloaders {
         let RotBootloaderStatus { stage0_version, stage0_next_version } =
             status;
         rows.push(BootloaderRow {
             baseboard_id,
-            sled_id: sled_id.map_or("".to_string(), |id| id.to_string()),
             stage0_version: stage0_version.to_string(),
             stage0_next_version: stage0_next_version.to_string(),
         });
@@ -124,20 +126,17 @@ fn print_rot_bootloaders<'a>(
     println!("{}", table);
 }
 
-fn print_rots<'a>(
-    rots: impl Iterator<Item = (String, Option<SledUuid>, &'a RotStatus)>,
-) {
+fn print_rots<'a>(rots: impl Iterator<Item = (String, &'a RotStatus)>) {
     #[derive(Tabled)]
     #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
     struct RotRow {
         baseboard_id: String,
-        sled_id: String,
         slot_a_version: String,
         slot_b_version: String,
     }
 
     let mut rows = Vec::new();
-    for (baseboard_id, sled_id, status) in rots {
+    for (baseboard_id, status) in rots {
         let RotStatus { active_slot, slot_a_version, slot_b_version } = status;
         let (slot_a_suffix, slot_b_suffix) = match active_slot {
             Some(RotSlot::A) => (" (active)", ""),
@@ -147,7 +146,6 @@ fn print_rots<'a>(
         };
         rows.push(RotRow {
             baseboard_id,
-            sled_id: sled_id.map_or("".to_string(), |id| id.to_string()),
             slot_a_version: format!("{slot_a_version}{slot_a_suffix}"),
             slot_b_version: format!("{slot_b_version}{slot_b_suffix}"),
         });
@@ -162,24 +160,20 @@ fn print_rots<'a>(
     println!("{}", table);
 }
 
-fn print_sps<'a>(
-    sps: impl Iterator<Item = (String, Option<SledUuid>, &'a SpStatus)>,
-) {
+fn print_sps<'a>(sps: impl Iterator<Item = (String, &'a SpStatus)>) {
     #[derive(Tabled)]
     #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
     struct SpRow {
         baseboard_id: String,
-        sled_id: String,
         slot0_version: String,
         slot1_version: String,
     }
 
     let mut rows = Vec::new();
-    for (baseboard_id, sled_id, status) in sps {
+    for (baseboard_id, status) in sps {
         let SpStatus { slot0_version, slot1_version } = status;
         rows.push(SpRow {
             baseboard_id,
-            sled_id: sled_id.map_or("".to_string(), |id| id.to_string()),
             slot0_version: slot0_version.to_string(),
             slot1_version: slot1_version.to_string(),
         });
@@ -195,7 +189,7 @@ fn print_sps<'a>(
 }
 
 fn print_host_phase_1s<'a>(
-    phase_1s: impl Iterator<Item = (String, Option<SledUuid>, &'a HostPhase1Status)>,
+    phase_1s: impl Iterator<Item = (String, &'a HostPhase1Status)>,
 ) {
     #[derive(Tabled)]
     #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
@@ -207,21 +201,30 @@ fn print_host_phase_1s<'a>(
     }
 
     let mut rows = Vec::new();
-    for (baseboard_id, sled_id, status) in phase_1s {
-        let HostPhase1Status { active_slot, slot_a_version, slot_b_version } =
-            status;
-        let (slot_a_suffix, slot_b_suffix) = match active_slot {
-            Some(M2Slot::A) => (" (active)", ""),
-            Some(M2Slot::B) => ("", " (active)"),
-            // This is not expected! Be louder.
-            None => ("", " (ACTIVE SLOT UNKNOWN)"),
-        };
-        rows.push(HostPhase1Row {
-            baseboard_id,
-            sled_id: sled_id.map_or("".to_string(), |id| id.to_string()),
-            slot_a_version: format!("{slot_a_version}{slot_a_suffix}"),
-            slot_b_version: format!("{slot_b_version}{slot_b_suffix}"),
-        });
+    for (baseboard_id, status) in phase_1s {
+        match status {
+            HostPhase1Status::NotASled => continue,
+            HostPhase1Status::Sled {
+                sled_id,
+                active_slot,
+                slot_a_version,
+                slot_b_version,
+            } => {
+                let (slot_a_suffix, slot_b_suffix) = match active_slot {
+                    Some(M2Slot::A) => (" (active)", ""),
+                    Some(M2Slot::B) => ("", " (active)"),
+                    // This is not expected! Be louder.
+                    None => ("", " (ACTIVE SLOT UNKNOWN)"),
+                };
+                rows.push(HostPhase1Row {
+                    baseboard_id,
+                    sled_id: sled_id
+                        .map_or("".to_string(), |id| id.to_string()),
+                    slot_a_version: format!("{slot_a_version}{slot_a_suffix}"),
+                    slot_b_version: format!("{slot_b_version}{slot_b_suffix}"),
+                });
+            }
+        }
     }
 
     let table = tabled::Table::new(rows)
