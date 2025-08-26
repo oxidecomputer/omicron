@@ -23,7 +23,6 @@ use omicron_uuid_kinds::AffinityGroupKind;
 use omicron_uuid_kinds::AffinityGroupUuid;
 use omicron_uuid_kinds::AntiAffinityGroupKind;
 use omicron_uuid_kinds::AntiAffinityGroupUuid;
-use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceKind;
 use omicron_uuid_kinds::InstanceUuid;
 use uuid::Uuid;
@@ -230,7 +229,7 @@ impl AffinityGroupInstanceMembership {
         run_state: external::InstanceState,
     ) -> external::AffinityGroupMember {
         external::AffinityGroupMember::Instance {
-            id: self.instance_id.into_untyped_uuid(),
+            id: self.instance_id.into(),
             name: member_name,
             run_state,
         }
@@ -258,7 +257,7 @@ impl AntiAffinityGroupInstanceMembership {
         run_state: external::InstanceState,
     ) -> external::AntiAffinityGroupMember {
         external::AntiAffinityGroupMember::Instance {
-            id: self.instance_id.into_untyped_uuid(),
+            id: self.instance_id.into(),
             name: member_name,
             run_state,
         }

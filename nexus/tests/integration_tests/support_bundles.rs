@@ -20,11 +20,9 @@ use nexus_types::external_api::shared::SupportBundleState;
 use nexus_types::internal_api::background::SupportBundleCleanupReport;
 use nexus_types::internal_api::background::SupportBundleCollectionReport;
 use nexus_types::internal_api::background::SupportBundleEreportStatus;
-use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
 use serde::Deserialize;
 use std::io::Cursor;
-use uuid::Uuid;
 use zip::read::ZipArchive;
 
 type ControlPlaneTestContext =
@@ -43,7 +41,7 @@ const BUNDLES_URL: &str = "/experimental/v1/system/support-bundles";
 
 async fn expect_not_found(
     client: &ClientTestContext,
-    bundle_id: Uuid,
+    bundle_id: SupportBundleUuid,
     bundle_url: &str,
     method: Method,
 ) -> Result<()> {
@@ -89,7 +87,7 @@ async fn bundles_list(
 
 async fn bundle_get(
     client: &ClientTestContext,
-    id: Uuid,
+    id: SupportBundleUuid,
 ) -> Result<SupportBundleInfo> {
     let url = format!("{BUNDLES_URL}/{id}");
     NexusRequest::object_get(client, &url)
@@ -102,7 +100,7 @@ async fn bundle_get(
 
 async fn bundle_get_expect_fail(
     client: &ClientTestContext,
-    id: Uuid,
+    id: SupportBundleUuid,
     expected_status: StatusCode,
     expected_message: &str,
 ) -> Result<()> {
@@ -128,7 +126,10 @@ async fn bundle_get_expect_fail(
     Ok(())
 }
 
-async fn bundle_delete(client: &ClientTestContext, id: Uuid) -> Result<()> {
+async fn bundle_delete(
+    client: &ClientTestContext,
+    id: SupportBundleUuid,
+) -> Result<()> {
     let url = format!("{BUNDLES_URL}/{id}");
     NexusRequest::object_delete(client, &url)
         .authn_as(AuthnMode::PrivilegedUser)
@@ -199,7 +200,7 @@ async fn bundle_create_expect_fail(
 
 async fn bundle_download(
     client: &ClientTestContext,
-    id: Uuid,
+    id: SupportBundleUuid,
 ) -> Result<bytes::Bytes> {
     let url = format!("{BUNDLES_URL}/{id}/download");
     let body = NexusRequest::new(
@@ -218,7 +219,7 @@ async fn bundle_download(
 
 async fn bundle_download_head(
     client: &ClientTestContext,
-    id: Uuid,
+    id: SupportBundleUuid,
 ) -> Result<usize> {
     let url = format!("{BUNDLES_URL}/{id}/download");
     let len = NexusRequest::new(
@@ -243,7 +244,7 @@ async fn bundle_download_head(
 
 async fn bundle_download_range(
     client: &ClientTestContext,
-    id: Uuid,
+    id: SupportBundleUuid,
     value: &str,
     expected_content_range: &str,
 ) -> Result<bytes::Bytes> {
@@ -269,7 +270,7 @@ async fn bundle_download_range(
 
 async fn bundle_download_expect_fail(
     client: &ClientTestContext,
-    id: Uuid,
+    id: SupportBundleUuid,
     expected_status: StatusCode,
     expected_message: &str,
 ) -> Result<()> {
@@ -297,7 +298,7 @@ async fn bundle_download_expect_fail(
 
 async fn bundle_update_comment(
     client: &ClientTestContext,
-    id: Uuid,
+    id: SupportBundleUuid,
     comment: Option<String>,
 ) -> Result<SupportBundleInfo> {
     use nexus_types::external_api::params::SupportBundleUpdate;
@@ -356,7 +357,7 @@ async fn activate_bundle_collection_background_task(
 async fn test_support_bundle_not_found(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
-    let id = Uuid::new_v4();
+    let id = SupportBundleUuid::new_v4();
 
     expect_not_found(
         &client,
@@ -488,7 +489,7 @@ async fn test_support_bundle_lifecycle(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(
         output.collection_report,
         Some(SupportBundleCollectionReport {
-            bundle: SupportBundleUuid::from_untyped_uuid(bundle.id),
+            bundle: bundle.id,
             listed_in_service_sleds: true,
             listed_sps: true,
             activated_in_db_ok: true,
@@ -591,7 +592,7 @@ async fn test_support_bundle_range_requests(
     assert_eq!(
         output.collection_report,
         Some(SupportBundleCollectionReport {
-            bundle: SupportBundleUuid::from_untyped_uuid(bundle.id),
+            bundle: bundle.id,
             listed_in_service_sleds: true,
             listed_sps: true,
             activated_in_db_ok: true,
