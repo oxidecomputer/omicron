@@ -308,7 +308,14 @@ async fn wait_for_stage0_next_image_check(
             // This is unreachable because wait_for_boot_info loops for some
             // time if it encounters `CommunicationFailed`, and if it hits the
             // timeout, it will return an error.
-            RotState::CommunicationFailed { .. } => unreachable!(),
+            RotState::CommunicationFailed { message } => {
+                error!(
+                    log,
+                    "failed to get RoT boot info";
+                    "error" => %message
+                );
+                return Err(PostUpdateError::FatalError { error: message });
+            }
         },
         Err(error) => return Err(error),
     }
