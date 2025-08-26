@@ -4815,26 +4815,60 @@
         ]
       },
       "HostPhase1Status": {
-        "type": "object",
-        "properties": {
-          "active_slot": {
-            "nullable": true,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/M2Slot"
+        "oneOf": [
+          {
+            "description": "This device has no host phase 1 status because it is not a sled (e.g., it's a PSC or switch).",
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "not_a_sled"
+                ]
               }
+            },
+            "required": [
+              "kind"
             ]
           },
-          "slot_a_version": {
-            "$ref": "#/components/schemas/TufRepoVersion"
-          },
-          "slot_b_version": {
-            "$ref": "#/components/schemas/TufRepoVersion"
+          {
+            "type": "object",
+            "properties": {
+              "active_slot": {
+                "nullable": true,
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/M2Slot"
+                  }
+                ]
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "sled"
+                ]
+              },
+              "sled_id": {
+                "nullable": true,
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/TypedUuidForSledKind"
+                  }
+                ]
+              },
+              "slot_a_version": {
+                "$ref": "#/components/schemas/TufRepoVersion"
+              },
+              "slot_b_version": {
+                "$ref": "#/components/schemas/TufRepoVersion"
+              }
+            },
+            "required": [
+              "kind",
+              "slot_a_version",
+              "slot_b_version"
+            ]
           }
-        },
-        "required": [
-          "slot_a_version",
-          "slot_b_version"
         ]
       },
       "HostPhase2Status": {
@@ -5485,14 +5519,6 @@
           },
           "rot_bootloader": {
             "$ref": "#/components/schemas/RotBootloaderStatus"
-          },
-          "sled_id": {
-            "nullable": true,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/TypedUuidForSledKind"
-              }
-            ]
           },
           "sp": {
             "$ref": "#/components/schemas/SpStatus"
