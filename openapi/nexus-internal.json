@@ -8019,16 +8019,16 @@
       "RotBootloaderStatus": {
         "type": "object",
         "properties": {
-          "stage_0_next_version": {
+          "stage0_next_version": {
             "$ref": "#/components/schemas/TufRepoVersion"
           },
-          "stage_0_version": {
+          "stage0_version": {
             "$ref": "#/components/schemas/TufRepoVersion"
           }
         },
         "required": [
-          "stage_0_next_version",
-          "stage_0_version"
+          "stage0_next_version",
+          "stage0_version"
         ]
       },
       "RotSlot": {
