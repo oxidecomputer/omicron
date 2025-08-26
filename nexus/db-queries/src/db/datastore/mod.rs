@@ -122,8 +122,8 @@ pub mod webhook_delivery;
 mod zpool;
 
 pub use address_lot::AddressLotCreateResult;
-pub use db_metadata::SchemaAction;
-pub use db_metadata::ValidatedSchemaAction;
+pub use db_metadata::DatastoreSetupAction;
+pub use db_metadata::ValidatedDatastoreSetupAction;
 pub use dns::DataStoreDnsTest;
 pub use dns::DnsVersionUpdateBuilder;
 pub use ereport::EreportFilters;
@@ -251,7 +251,7 @@ impl DataStore {
         try_for: Option<std::time::Duration>,
         identity_check: IdentityCheckPolicy,
     ) -> Result<Self, String> {
-        use db_metadata::SchemaAction;
+        use db_metadata::DatastoreSetupAction;
         use nexus_db_model::SCHEMA_VERSION as EXPECTED_VERSION;
 
         let datastore =
@@ -290,11 +290,11 @@ impl DataStore {
                         })?;
 
                     match checked_action.action() {
-                        SchemaAction::Ready => {
+                        DatastoreSetupAction::Ready => {
                             info!(log, "Datastore is ready for usage");
                             return Ok(());
                         }
-                        SchemaAction::NeedsHandoff => {
+                        DatastoreSetupAction::NeedsHandoff => {
                             info!(log, "Datastore is awaiting handoff");
 
                             let IdentityCheckPolicy::CheckAndTakeover {
@@ -324,7 +324,7 @@ impl DataStore {
                             // if we should update or not.
                             continue;
                         }
-                        SchemaAction::Update => {
+                        DatastoreSetupAction::Update => {
                             info!(
                                 log,
                                 "Datastore should be updated before usage"
@@ -344,7 +344,7 @@ impl DataStore {
                                 })?;
                             return Ok(());
                         }
-                        SchemaAction::Refuse => {
+                        DatastoreSetupAction::Refuse => {
                             error!(log, "Datastore should not be used");
                             return Err(BackoffError::permanent(
                                 "Datastore should not be used",

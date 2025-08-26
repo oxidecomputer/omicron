@@ -194,9 +194,9 @@ enum SchemaStatus {
     OlderThanDesiredSkipAccessCheck,
 }
 
-/// Describes what should be done with a schema
+/// Describes what setup is necessary for DataStore creation
 #[derive(Debug, Copy, Clone, PartialEq)]
-pub enum SchemaAction {
+pub enum DatastoreSetupAction {
     /// Normal operation: The database is ready for usage
     Ready,
 
@@ -212,18 +212,18 @@ pub enum SchemaAction {
     Refuse,
 }
 
-/// Committment that the database is willing to perform a [SchemaAction]
+/// Committment that the database is willing to perform a [DatastoreSetupAction]
 /// to a desired schema [Version].
 ///
 /// Can be created through [DataStore::check_schema_and_access]
 #[derive(Clone)]
-pub struct ValidatedSchemaAction {
-    action: SchemaAction,
+pub struct ValidatedDatastoreSetupAction {
+    action: DatastoreSetupAction,
     desired: Version,
 }
 
-impl ValidatedSchemaAction {
-    pub fn action(&self) -> &SchemaAction {
+impl ValidatedDatastoreSetupAction {
+    pub fn action(&self) -> &DatastoreSetupAction {
         &self.action
     }
 
@@ -232,7 +232,7 @@ impl ValidatedSchemaAction {
     }
 }
 
-impl SchemaAction {
+impl DatastoreSetupAction {
     // Interprets the combination of access and status to decide what action
     // should be taken.
     fn new(access: NexusAccess, status: SchemaStatus) -> Self {
@@ -380,7 +380,7 @@ impl DataStore {
         &self,
         identity_check: IdentityCheckPolicy,
         desired_version: Version,
-    ) -> Result<ValidatedSchemaAction, anyhow::Error> {
+    ) -> Result<ValidatedDatastoreSetupAction, anyhow::Error> {
         let schema_status = self.check_schema(desired_version.clone()).await?;
 
         let nexus_access = match identity_check {
@@ -408,29 +408,31 @@ impl DataStore {
             }
         };
 
-        Ok(ValidatedSchemaAction {
-            action: SchemaAction::new(nexus_access, schema_status),
+        Ok(ValidatedDatastoreSetupAction {
+            action: DatastoreSetupAction::new(nexus_access, schema_status),
             desired: desired_version,
         })
     }
 
     /// Ensures that the database schema matches `desired_version`.
     ///
-    /// - `validated_action`: A [ValidatedSchemaAction], indicating that
+    /// - `validated_action`: A [ValidatedDatastoreSetupAction], indicating that
     /// [Self::check_schema_and_access] has already been called.
     /// - `all_versions`: A description of all schema versions between
     /// "whatever is in the DB" and `desired_version`, instructing
     /// how to perform an update.
     pub async fn update_schema(
         &self,
-        validated_action: ValidatedSchemaAction,
+        validated_action: ValidatedDatastoreSetupAction,
         all_versions: Option<&AllSchemaVersions>,
     ) -> Result<(), anyhow::Error> {
         let action = validated_action.action();
 
         match action {
-            SchemaAction::Ready => bail!("No schema update is necessary"),
-            SchemaAction::Update => (),
+            DatastoreSetupAction::Ready => {
+                bail!("No schema update is necessary")
+            }
+            DatastoreSetupAction::Update => (),
             _ => bail!("Not ready for schema update"),
         }
 
@@ -1049,7 +1051,7 @@ mod test {
             .expect("Failed to check schema and access");
 
         assert!(
-            matches!(checked_action.action(), SchemaAction::Ready),
+            matches!(checked_action.action(), DatastoreSetupAction::Ready),
             "Unexpected action: {:?}",
             checked_action.action(),
         );
@@ -1615,7 +1617,7 @@ mod test {
             )
             .await
             .expect("Failed to check schema and access");
-        assert_eq!(action.action(), &SchemaAction::Ready);
+        assert_eq!(action.action(), &DatastoreSetupAction::Ready);
 
         // Add a record to the table, now explicit nexus ID should NOT get access
         datastore
@@ -1633,7 +1635,7 @@ mod test {
             )
             .await
             .expect("Failed to check schema and access");
-        assert_eq!(action.action(), &SchemaAction::NeedsHandoff);
+        assert_eq!(action.action(), &DatastoreSetupAction::NeedsHandoff);
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -1667,7 +1669,7 @@ mod test {
             )
             .await
             .expect("Failed to check schema and access");
-        assert_eq!(action.action(), &SchemaAction::Ready);
+        assert_eq!(action.action(), &DatastoreSetupAction::Ready);
 
         // Explicit CheckAndTakeover with a Nexus ID that doesn't exist should
         // not get access
@@ -1679,7 +1681,7 @@ mod test {
             )
             .await
             .expect("Failed to check schema and access");
-        assert_eq!(action.action(), &SchemaAction::NeedsHandoff);
+        assert_eq!(action.action(), &DatastoreSetupAction::NeedsHandoff);
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -1715,7 +1717,7 @@ mod test {
             )
             .await
             .expect("Failed to check schema and access");
-        assert_eq!(action.action(), &SchemaAction::Refuse);
+        assert_eq!(action.action(), &DatastoreSetupAction::Refuse);
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -1759,7 +1761,7 @@ mod test {
             )
             .await
             .expect("Failed to check schema and access");
-        assert_eq!(action.action(), &SchemaAction::Refuse);
+        assert_eq!(action.action(), &DatastoreSetupAction::Refuse);
 
         // Implicit Access: Rejected
         let action = datastore
@@ -1769,7 +1771,7 @@ mod test {
             )
             .await
             .expect("Failed to check schema and access");
-        assert_eq!(action.action(), &SchemaAction::Refuse);
+        assert_eq!(action.action(), &DatastoreSetupAction::Refuse);
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -1812,7 +1814,7 @@ mod test {
                 )
                 .await
                 .expect("Failed to check schema and access");
-            assert_eq!(action.action(), &SchemaAction::NeedsHandoff);
+            assert_eq!(action.action(), &DatastoreSetupAction::NeedsHandoff);
         }
 
         db.terminate().await;
@@ -1848,7 +1850,7 @@ mod test {
             .await
             .expect("Failed to check schema and access");
 
-        assert_eq!(action.action(), &SchemaAction::Ready);
+        assert_eq!(action.action(), &DatastoreSetupAction::Ready);
         assert_eq!(action.desired_version(), &SCHEMA_VERSION);
 
         db.terminate().await;
@@ -1887,7 +1889,7 @@ mod test {
             .await
             .expect("Failed to check schema and access");
 
-        assert_eq!(action.action(), &SchemaAction::Update);
+        assert_eq!(action.action(), &DatastoreSetupAction::Update);
         assert_eq!(action.desired_version(), &newer_version);
 
         db.terminate().await;
