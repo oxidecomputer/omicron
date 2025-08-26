@@ -791,7 +791,14 @@ impl DataStore {
                     // Insert Nexus database access records
                     self.initialize_nexus_access_from_blueprint_on_connection(
                         &conn,
-                        *blueprint.id.as_untyped_uuid()
+                        blueprint.all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+                            .filter_map(|(_sled, zone_cfg)| {
+                                if zone_cfg.zone_type.is_nexus() {
+                                    Some(zone_cfg.id)
+                                } else {
+                                    None
+                                }
+                            }).collect(),
                     ).await.map_err(|e| {
                         err.set(RackInitError::BlueprintTargetSet(e)).unwrap();
                         DieselError::RollbackTransaction

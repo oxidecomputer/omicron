@@ -21,12 +21,11 @@ use nexus_db_model::EARLIEST_SUPPORTED_VERSION;
 use nexus_db_model::SchemaUpgradeStep;
 use nexus_db_model::SchemaVersion;
 use omicron_common::api::external::Error;
-use omicron_uuid_kinds::{GenericUuid, OmicronZoneUuid};
+use omicron_uuid_kinds::OmicronZoneUuid;
 use semver::Version;
 use slog::{Logger, error, info, o};
 use std::ops::Bound;
 use std::str::FromStr;
-use uuid::Uuid;
 
 /// Errors that can occur during handoff operations
 #[derive(Debug, thiserror::Error)]
@@ -731,10 +730,8 @@ impl DataStore {
     pub async fn initialize_nexus_access_from_blueprint_on_connection(
         &self,
         conn: &async_bb8_diesel::Connection<DbConnection>,
-        blueprint_id: Uuid,
+        nexus_zone_ids: Vec<OmicronZoneUuid>,
     ) -> Result<(), Error> {
-        use nexus_db_model::ZoneType;
-        use nexus_db_schema::schema::bp_omicron_zone::dsl as zone_dsl;
         use nexus_db_schema::schema::db_metadata_nexus::dsl;
 
         // Ensure no db_metadata_nexus records already exist
@@ -748,23 +745,11 @@ impl DataStore {
             ));
         }
 
-        // Query all Nexus zones from the blueprint
-        let nexus_zone_ids: Vec<Uuid> = zone_dsl::bp_omicron_zone
-            .filter(zone_dsl::blueprint_id.eq(blueprint_id))
-            .filter(zone_dsl::zone_type.eq(ZoneType::Nexus))
-            .select(zone_dsl::id)
-            .load_async(conn)
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
-
         // Create db_metadata_nexus records for all Nexus zones
         let new_nexuses: Vec<DbMetadataNexus> = nexus_zone_ids
             .iter()
             .map(|&nexus_id| {
-                DbMetadataNexus::new(
-                    OmicronZoneUuid::from_untyped_uuid(nexus_id),
-                    DbMetadataNexusState::Active,
-                )
+                DbMetadataNexus::new(nexus_id, DbMetadataNexusState::Active)
             })
             .collect();
 
