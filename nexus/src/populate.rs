@@ -339,6 +339,7 @@ mod test {
     use nexus_db_queries::authz;
     use nexus_db_queries::context::OpContext;
     use nexus_db_queries::db;
+    use nexus_db_queries::db::datastore::IdentityCheckPolicy;
     use nexus_db_queries::db::pub_test_utils::TestDatabase;
     use omicron_common::api::external::Error;
     use omicron_test_utils::dev;
@@ -364,7 +365,14 @@ mod test {
         let cfg = db::Config { url: db.crdb().pg_config().clone() };
         let pool = Arc::new(db::Pool::new_single_host(&logctx.log, &cfg));
         let datastore = Arc::new(
-            db::DataStore::new(&logctx.log, pool, None, None).await.unwrap(),
+            db::DataStore::new(
+                &logctx.log,
+                pool,
+                None,
+                IdentityCheckPolicy::DontCare,
+            )
+            .await
+            .unwrap(),
         );
         let opctx = OpContext::for_background(
             logctx.log.clone(),
@@ -415,7 +423,14 @@ mod test {
         // We need to create the datastore before tearing down the database, as
         // it verifies the schema version of the DB while booting.
         let datastore = Arc::new(
-            db::DataStore::new(&logctx.log, pool, None, None).await.unwrap(),
+            db::DataStore::new(
+                &logctx.log,
+                pool,
+                None,
+                IdentityCheckPolicy::DontCare,
+            )
+            .await
+            .unwrap(),
         );
         let opctx = OpContext::for_background(
             logctx.log.clone(),

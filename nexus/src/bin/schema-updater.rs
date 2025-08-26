@@ -14,6 +14,9 @@ use nexus_db_model::AllSchemaVersions;
 use nexus_db_model::SCHEMA_VERSION;
 use nexus_db_queries::db;
 use nexus_db_queries::db::DataStore;
+use nexus_db_queries::db::datastore::ConsumerPolicy;
+use nexus_db_queries::db::datastore::IdentityCheckPolicy;
+use nexus_db_queries::db::datastore::SchemaAction;
 use semver::Version;
 use slog::Drain;
 use slog::Level;
@@ -110,24 +113,26 @@ async fn main_impl() -> anyhow::Result<()> {
             println!("Upgrading to {version}");
             let checked_action = datastore
                 .check_schema_and_access(
-                    None,
+                    IdentityCheckPolicy::DontCare,
                     version.clone(),
-                    db::datastore::ConsumerPolicy::Update,
+                    ConsumerPolicy::Update,
                 )
                 .await?;
 
             match checked_action.action() {
-                db::datastore::SchemaAction::Ready => {
+                SchemaAction::Ready => {
                     println!("Already at version {version}")
                 }
-                db::datastore::SchemaAction::Update => {
+                SchemaAction::Update => {
                     datastore
                         .update_schema(checked_action, Some(&all_versions))
                         .await
                         .map_err(|e| anyhow!(e))?;
                     println!("Update to {version} complete");
                 }
-                _ => println!("Cannot update to version {version}"),
+                SchemaAction::WaitForHandoff | SchemaAction::Refuse => {
+                    println!("Cannot update to version {version}")
+                }
             }
         }
     }

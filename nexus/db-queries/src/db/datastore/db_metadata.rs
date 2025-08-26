@@ -4,7 +4,7 @@
 
 //! [`DataStore`] methods on Database Metadata.
 
-use super::{DataStore, DbConnection};
+use super::{DataStore, DbConnection, IdentityCheckPolicy};
 use anyhow::{Context, bail, ensure};
 use async_bb8_diesel::{AsyncRunQueryDsl, AsyncSimpleConnection};
 use chrono::Utc;
@@ -388,31 +388,34 @@ impl DataStore {
     /// on a schema mismatch
     pub async fn check_schema_and_access(
         &self,
-        nexus_id: Option<OmicronZoneUuid>,
+        identity_check: IdentityCheckPolicy,
         desired_version: Version,
         policy: ConsumerPolicy,
     ) -> Result<ValidatedSchemaAction, anyhow::Error> {
         let schema_status = self.check_schema(desired_version.clone()).await?;
 
-        let nexus_access = if let Some(nexus_id) = nexus_id {
-            match schema_status {
-                // If we don't think the "db_metadata_nexus" tables exist in the
-                // schema yet, treat them as implicitly having access.
-                //
-                // TODO: This may be removed, once we're confident deployed systems
-                // have upgraded past DB_METADATA_NEXUS_SCHEMA_VERSION.
-                SchemaStatus::OlderThanDesiredSkipAccessCheck => {
-                    NexusAccess::HasImplicitAccess
+        let nexus_access = match identity_check {
+            IdentityCheckPolicy::CheckAndTakeover { nexus_id } => {
+                match schema_status {
+                    // If we don't think the "db_metadata_nexus" tables exist in the
+                    // schema yet, treat them as implicitly having access.
+                    //
+                    // TODO: This may be removed, once we're confident deployed systems
+                    // have upgraded past DB_METADATA_NEXUS_SCHEMA_VERSION.
+                    SchemaStatus::OlderThanDesiredSkipAccessCheck => {
+                        NexusAccess::HasImplicitAccess
+                    }
+                    _ => self.check_nexus_access(nexus_id).await?,
                 }
-                _ => self.check_nexus_access(nexus_id).await?,
             }
-        } else {
-            // If a "nexus_id" was not supplied, skip the check, and treat it
-            // as having access.
-            //
-            // This is necessary for tools which access the schema without a
-            // running Nexus, such as the schema-updater binary.
-            NexusAccess::HasImplicitAccess
+            IdentityCheckPolicy::DontCare => {
+                // If a "nexus_id" was not supplied, skip the check, and treat it
+                // as having access.
+                //
+                // This is necessary for tools which access the schema without a
+                // running Nexus, such as the schema-updater binary.
+                NexusAccess::HasImplicitAccess
+            }
         };
 
         Ok(ValidatedSchemaAction {
@@ -1062,6 +1065,7 @@ impl DataStore {
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::db::datastore::IdentityCheckPolicy;
     use crate::db::pub_test_utils::TestDatabase;
     use camino::Utf8Path;
     use camino_tempfile::Utf8TempDir;
@@ -1078,7 +1082,7 @@ mod test {
 
         let checked_action = datastore
             .check_schema_and_access(
-                None,
+                IdentityCheckPolicy::DontCare,
                 SCHEMA_VERSION,
                 ConsumerPolicy::FailOnMismatch,
             )
@@ -1202,9 +1206,13 @@ mod test {
             let log = log.clone();
             let pool = pool.clone();
             tokio::task::spawn(async move {
-                let datastore =
-                    DataStore::new(&log, pool, Some(&all_versions), None)
-                        .await?;
+                let datastore = DataStore::new(
+                    &log,
+                    pool,
+                    Some(&all_versions),
+                    IdentityCheckPolicy::DontCare,
+                )
+                .await?;
 
                 // This is the crux of this test: confirm that, as each
                 // migration completes, it's not possible to see any artifacts
@@ -1335,7 +1343,7 @@ mod test {
         let datastore = DataStore::new_unchecked(log.clone(), pool.clone());
         let checked_action = datastore
             .check_schema_and_access(
-                None,
+                IdentityCheckPolicy::DontCare,
                 SCHEMA_VERSION,
                 ConsumerPolicy::Update,
             )
@@ -1644,7 +1652,7 @@ mod test {
         // With an empty table, even explicit nexus ID should get access
         let action = datastore
             .check_schema_and_access(
-                Some(nexus_id),
+                IdentityCheckPolicy::CheckAndTakeover { nexus_id },
                 SCHEMA_VERSION,
                 ConsumerPolicy::FailOnMismatch,
             )
@@ -1663,7 +1671,7 @@ mod test {
 
         let action = datastore
             .check_schema_and_access(
-                Some(nexus_id),
+                IdentityCheckPolicy::CheckAndTakeover { nexus_id },
                 SCHEMA_VERSION,
                 ConsumerPolicy::FailOnMismatch,
             )
@@ -1698,7 +1706,7 @@ mod test {
         // Using 'None' as a nexus ID should get access (schema updater case)
         let action = datastore
             .check_schema_and_access(
-                None,
+                IdentityCheckPolicy::DontCare,
                 SCHEMA_VERSION,
                 ConsumerPolicy::FailOnMismatch,
             )
@@ -1710,7 +1718,7 @@ mod test {
         let nexus_id = OmicronZoneUuid::new_v4();
         let action = datastore
             .check_schema_and_access(
-                Some(nexus_id),
+                IdentityCheckPolicy::CheckAndTakeover { nexus_id },
                 SCHEMA_VERSION,
                 ConsumerPolicy::FailOnMismatch,
             )
@@ -1747,7 +1755,11 @@ mod test {
         // Should refuse access regardless of policy
         for policy in [ConsumerPolicy::FailOnMismatch, ConsumerPolicy::Update] {
             let action = datastore
-                .check_schema_and_access(Some(nexus_id), SCHEMA_VERSION, policy)
+                .check_schema_and_access(
+                    IdentityCheckPolicy::CheckAndTakeover { nexus_id },
+                    SCHEMA_VERSION,
+                    policy,
+                )
                 .await
                 .expect("Failed to check schema and access");
             assert_eq!(action.action(), &SchemaAction::Refuse);
@@ -1791,7 +1803,7 @@ mod test {
             // Explicit Nexus ID: Rejected
             let action = datastore
                 .check_schema_and_access(
-                    Some(nexus_id),
+                    IdentityCheckPolicy::CheckAndTakeover { nexus_id },
                     older_version.clone(),
                     policy,
                 )
@@ -1801,7 +1813,11 @@ mod test {
 
             // Implicit Access: Rejected
             let action = datastore
-                .check_schema_and_access(None, older_version.clone(), policy)
+                .check_schema_and_access(
+                    IdentityCheckPolicy::DontCare,
+                    older_version.clone(),
+                    policy,
+                )
                 .await
                 .expect("Failed to check schema and access");
             assert_eq!(action.action(), &SchemaAction::Refuse);
@@ -1843,7 +1859,7 @@ mod test {
             // With Update policy, should wait for handoff when schema is up-to-date
             let action = datastore
                 .check_schema_and_access(
-                    Some(nexus_id),
+                    IdentityCheckPolicy::CheckAndTakeover { nexus_id },
                     version.clone(),
                     ConsumerPolicy::Update,
                 )
@@ -1854,7 +1870,7 @@ mod test {
             // With FailOnMismatch policy, should refuse
             let action = datastore
                 .check_schema_and_access(
-                    Some(nexus_id),
+                    IdentityCheckPolicy::CheckAndTakeover { nexus_id },
                     version.clone(),
                     ConsumerPolicy::FailOnMismatch,
                 )
@@ -1890,7 +1906,11 @@ mod test {
         // With current schema version, should be ready for normal use
         for policy in [ConsumerPolicy::FailOnMismatch, ConsumerPolicy::Update] {
             let action = datastore
-                .check_schema_and_access(Some(nexus_id), SCHEMA_VERSION, policy)
+                .check_schema_and_access(
+                    IdentityCheckPolicy::CheckAndTakeover { nexus_id },
+                    SCHEMA_VERSION,
+                    policy,
+                )
                 .await
                 .expect("Failed to check schema and access");
 
@@ -1928,7 +1948,7 @@ mod test {
         // With newer desired version and Update policy, should request update
         let action = datastore
             .check_schema_and_access(
-                Some(nexus_id),
+                IdentityCheckPolicy::CheckAndTakeover { nexus_id },
                 newer_version.clone(),
                 ConsumerPolicy::Update,
             )
@@ -1941,7 +1961,7 @@ mod test {
         // With FailOnMismatch policy, should refuse
         let action = datastore
             .check_schema_and_access(
-                Some(nexus_id),
+                IdentityCheckPolicy::CheckAndTakeover { nexus_id },
                 newer_version,
                 ConsumerPolicy::FailOnMismatch,
             )

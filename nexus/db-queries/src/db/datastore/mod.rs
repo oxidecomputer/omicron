@@ -190,6 +190,21 @@ impl<U, T> RunnableQuery<U> for T where
 {
 }
 
+/// Specifies whether the consumer wants to check whether they're allowed to
+/// access the database based on the `db_metadata_nexus` table.
+#[derive(Debug, Clone, Copy)]
+pub enum IdentityCheckPolicy {
+    /// The consumer wants full access to the database regardless of the current
+    /// upgrade / handoff state.  This would be used by almost all tools and
+    /// tests.
+    DontCare,
+
+    /// The consumer only wants to access the database if it's in the current
+    /// set of Nexus instances that's supposed to be able to access it.  If
+    /// possible and legal, take over access from the existing set.
+    CheckAndTakeover { nexus_id: OmicronZoneUuid },
+}
+
 pub struct DataStore {
     log: Logger,
     pool: Arc<Pool>,
@@ -225,9 +240,9 @@ impl DataStore {
         log: &Logger,
         pool: Arc<Pool>,
         config: Option<&AllSchemaVersions>,
-        nexus_id: Option<OmicronZoneUuid>,
+        identity_check: IdentityCheckPolicy,
     ) -> Result<Self, String> {
-        Self::new_with_timeout(log, pool, config, None, nexus_id).await
+        Self::new_with_timeout(log, pool, config, None, identity_check).await
     }
 
     pub async fn new_with_timeout(
@@ -235,7 +250,7 @@ impl DataStore {
         pool: Arc<Pool>,
         config: Option<&AllSchemaVersions>,
         try_for: Option<std::time::Duration>,
-        nexus_id: Option<OmicronZoneUuid>,
+        identity_check: IdentityCheckPolicy,
     ) -> Result<Self, String> {
         use db_metadata::ConsumerPolicy;
         use db_metadata::SchemaAction;
@@ -260,7 +275,7 @@ impl DataStore {
 
                 let checked_action = datastore
                     .check_schema_and_access(
-                        nexus_id,
+                        identity_check,
                         EXPECTED_VERSION,
                         ConsumerPolicy::Update,
                     )
@@ -284,7 +299,9 @@ impl DataStore {
                     SchemaAction::WaitForHandoff => {
                         info!(log, "Datastore is awaiting handoff");
 
-                        let Some(nexus_id) = nexus_id else {
+                        let IdentityCheckPolicy::CheckAndTakeover { nexus_id } =
+                            identity_check
+                        else {
                             return Err(BackoffError::permanent(
                                 "Nexus ID needed for handoff",
                             ));
