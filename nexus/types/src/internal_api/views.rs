@@ -829,7 +829,7 @@ impl MgsDrivenUpdateStatusBuilder<'_> {
         };
         let matching_caboose = |a: &TufArtifactMeta| {
             Some(&caboose.board) == a.board.as_ref()
-                && caboose.version != a.id.version.to_string()
+                && caboose.version == a.id.version.to_string()
                 && matching_kinds.contains(&a.id.kind)
         };
         if let Some(new) = self.new.tuf_repo() {
