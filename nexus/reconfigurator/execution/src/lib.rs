@@ -32,8 +32,10 @@ use tokio::sync::watch;
 use update_engine::StepSuccess;
 use update_engine::StepWarning;
 use update_engine::merge_anyhow_list;
+
 mod clickhouse;
 mod cockroachdb;
+mod database;
 mod dns;
 mod omicron_physical_disks;
 mod omicron_sled_config;
@@ -195,6 +197,13 @@ pub async fn realize_blueprint(
         datastore,
     )
     .into_shared();
+
+    register_deploy_db_metadata_nexus_records_step(
+        &engine.for_component(ExecutionComponent::DeployNexusRecords),
+        &opctx,
+        datastore,
+        blueprint,
+    );
 
     register_deploy_sled_configs_step(
         &engine.for_component(ExecutionComponent::SledAgent),
@@ -388,6 +397,28 @@ fn register_sled_list_step<'a>(
             StepSuccess::new(Arc::new(sleds_by_id)).into()
         })
         .register()
+}
+
+fn register_deploy_db_metadata_nexus_records_step<'a>(
+    registrar: &ComponentRegistrar<'_, 'a>,
+    opctx: &'a OpContext,
+    datastore: &'a DataStore,
+    blueprint: &'a Blueprint,
+) {
+    registrar
+        .new_step(
+            ExecutionStepId::Ensure,
+            "Ensure db_metadata_nexus_state records exist",
+            async move |_cx| {
+                database::deploy_db_metadata_nexus_records(
+                    opctx, &datastore, &blueprint,
+                )
+                .await
+                .context("ensuring db_metadata_nexus_state")?;
+                StepSuccess::new(()).into()
+            },
+        )
+        .register();
 }
 
 fn register_deploy_sled_configs_step<'a>(

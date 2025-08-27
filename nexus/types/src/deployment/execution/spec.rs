@@ -31,6 +31,7 @@ pub enum ExecutionComponent {
     SupportBundles,
     SledList,
     SledAgent,
+    DeployNexusRecords,
     PhysicalDisks,
     OmicronZones,
     FirewallRules,
