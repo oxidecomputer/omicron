@@ -846,7 +846,7 @@ chicken switches:
     add zones with mupdate override:   false
 
 * discretionary zones placed:
-  * 1 zone on sled 711ac7f8-d19e-4572-bdb9-e9b50f6e362a: external_dns
+  * external_dns zone on sled 711ac7f8-d19e-4572-bdb9-e9b50f6e362a from source install dataset
 * zone updates waiting on discretionary zones
 
 
@@ -1346,7 +1346,7 @@ chicken switches:
     add zones with mupdate override:   false
 
 * discretionary zones placed:
-  * 1 zone on sled 711ac7f8-d19e-4572-bdb9-e9b50f6e362a: external_dns
+  * external_dns zone on sled 711ac7f8-d19e-4572-bdb9-e9b50f6e362a from source install dataset
 * zone updates waiting on discretionary zones
 
 

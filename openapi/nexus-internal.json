@@ -4219,6 +4219,21 @@
           "saga_id"
         ]
       },
+      "DiscretionaryZonePlacement": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "source"
+        ]
+      },
       "DiskIdentity": {
         "description": "Uniquely identifies a disk.",
         "type": "object",
@@ -6756,7 +6771,7 @@
             "additionalProperties": {
               "type": "array",
               "items": {
-                "type": "string"
+                "$ref": "#/components/schemas/DiscretionaryZonePlacement"
               }
             }
           },
