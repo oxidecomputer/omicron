@@ -11,6 +11,7 @@ use futures::future::BoxFuture;
 use iddqd::IdOrdMap;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::Generation;
+use omicron_uuid_kinds::BlueprintUuid;
 use slog::Logger;
 use slog::error;
 use slog::info;
@@ -46,6 +47,13 @@ impl From<NoSagasAllowedError> for Error {
     fn from(value: NoSagasAllowedError) -> Self {
         Error::unavail(&value.to_string())
     }
+}
+
+/// Describes the result of a saga re-assignment
+#[derive(Debug)]
+pub enum SagaReassignmentDone {
+    Indeterminate,
+    ReassignedAllAsOf(BlueprintUuid, bool),
 }
 
 /// Describes both the configuration (whether sagas are allowed to be created)
@@ -124,6 +132,13 @@ struct SagaQuiesceInner {
     /// we've recovered all sagas that could be assigned to us.
     reassignment_generation: Generation,
 
+    /// blueprint id associated with last successful saga reassignment
+    ///
+    /// Similar to the generation number, this is used to track whether we've
+    /// accounted for all sagas for all expungements up through this target
+    /// blueprint.
+    reassignment_blueprint_id: Option<BlueprintUuid>,
+
     /// whether there is a saga reassignment operation happening
     ///
     /// These operatinos may assign new sagas to Nexus that must be recovered
@@ -138,9 +153,37 @@ struct SagaQuiesceInner {
     /// given reassignment pass.  See `reassignment_done()` for details.
     recovered_reassignment_generation: Generation,
 
-    /// whether a saga recovery operation is ongoing, and if one is, what
-    /// `reassignment_generation` was when it started
-    recovery_pending: Option<Generation>,
+    /// blueprint id that saga recovery has "caught up to"
+    ///
+    /// This means that we have finished recovering any sagas that were
+    /// re-assigned to us due to expungements of other Nexus zones up through
+    /// this blueprint.  Put differently: we know that we will never be assigned
+    /// more sagas due to expungement unless the target blueprint changes past
+    /// this one.
+    ///
+    /// This does not mean that we've fully drained all sagas up through this
+    /// blueprint.  There may still be sagas running.
+    recovered_blueprint_id: Option<BlueprintUuid>,
+
+    /// blueprint id that we're "fully drained up to"
+    ///
+    /// If this value is non-`None`, that means that:
+    ///
+    /// - saga creation is disallowed
+    /// - no sagas are running
+    /// - we have re-assigned sagas from other Nexus instances expunged in this
+    ///   blueprint or earlier
+    /// - we have finished recovery for all those sagas (that had been assigned
+    ///   to us as of the re-assignment pass for this blueprint id)
+    ///
+    /// This means that the only way we can wind up running another saga is if
+    /// there's a new blueprint that expunges a different Nexus zone.
+    drained_blueprint_id: Option<BlueprintUuid>,
+
+    /// whether a saga recovery operation is ongoing, and if one is:
+    /// - what `reassignment_generation` was when it started
+    /// - which blueprint id we'll be fully caught up to upon completion
+    recovery_pending: Option<(Generation, Option<BlueprintUuid>)>,
 }
 
 impl SagaQuiesceHandle {
@@ -153,6 +196,9 @@ impl SagaQuiesceHandle {
             reassignment_pending: false,
             recovered_reassignment_generation: Generation::new(),
             recovery_pending: None,
+            reassignment_blueprint_id: None,
+            recovered_blueprint_id: None,
+            drained_blueprint_id: None,
         });
         SagaQuiesceHandle { log, inner }
     }
@@ -163,7 +209,7 @@ impl SagaQuiesceHandle {
     /// cannot then re-enable sagas.
     pub fn set_quiescing(&self, quiescing: bool) {
         self.inner.send_if_modified(|q| {
-            match q.new_sagas_allowed {
+            let changed = match q.new_sagas_allowed {
                 SagasAllowed::DisallowedUnknown => {
                     let new_state = if quiescing {
                         SagasAllowed::DisallowedQuiesce
@@ -199,8 +245,16 @@ impl SagaQuiesceHandle {
                     // Either way, we're not changing anything.
                     false
                 }
-            }
+            };
+
+            q.latch_drained_blueprint_id();
+            changed
         });
+    }
+
+    /// Returns the blueprint id as of which sagas are fully drained
+    pub fn fully_drained_blueprint(&self) -> Option<BlueprintUuid> {
+        self.inner.borrow().drained_blueprint_id
     }
 
     /// Returns whether sagas are fully drained
@@ -261,7 +315,7 @@ impl SagaQuiesceHandle {
     // those.
     pub async fn reassign_sagas<F, T>(&self, f: F) -> T
     where
-        F: AsyncFnOnce() -> (T, bool),
+        F: AsyncFnOnce() -> (T, SagaReassignmentDone),
     {
         let in_progress = self.reassignment_start();
         let (result, maybe_reassigned) = f().await;
@@ -291,24 +345,62 @@ impl SagaQuiesceHandle {
 
     /// Record that we've finished an operation that might assign new sagas to
     /// ourselves.
-    fn reassignment_done(&self, maybe_reassigned: bool) {
+    fn reassignment_done(&self, result: SagaReassignmentDone) {
         info!(
             &self.log,
             "saga re-assignment pass finished";
-            "maybe_reassigned" => maybe_reassigned
+            "result" => ?result
         );
         self.inner.send_modify(|q| {
             assert!(q.reassignment_pending);
             q.reassignment_pending = false;
 
-            // If we may have assigned new sagas to ourselves, bump the
-            // generation number.  We won't report being drained until a
-            // recovery pass has finished that *started* with this generation
-            // number.  So this ensures that we won't report being drained until
-            // any sagas that may have been assigned to us have been recovered.
-            if maybe_reassigned {
-                q.reassignment_generation = q.reassignment_generation.next();
+            match result {
+                SagaReassignmentDone::ReassignedAllAsOf(
+                    blueprint_id,
+                    reassigned_any,
+                ) => {
+                    if reassigned_any {
+                        // If we assigned new sagas to ourselves, bump the
+                        // generation number.  We won't report being drained
+                        // until a recovery pass has finished that *started*
+                        // with this generation number.  This ensures that we
+                        // won't report being drained until any sagas that may
+                        // have been assigned to us have been recovered.
+                        q.reassignment_generation =
+                            q.reassignment_generation.next();
+                    }
+
+                    // Record that we've completed assignments of all sagas from
+                    // all Nexus instances expunged as of this blueprint.  The
+                    // only way we could re-assign ourselves more sagas is if
+                    // the target blueprint changes.
+                    q.reassignment_blueprint_id = Some(blueprint_id);
+                }
+                SagaReassignmentDone::Indeterminate => {
+                    // This means the caller doesn't know for sure whether they
+                    // re-assigned us any sagas.  (This can happen if there's a
+                    // network error talking to the database.  We don't know if
+                    // that happened before or after the database transaction
+                    // committed.)
+                    //
+                    // The comment above about the reassignment_generation
+                    // applies in this case.  We must assume in this case that
+                    // there may be sagas that we need to recover before we
+                    // consider ourselves drained.  That means we need another
+                    // recovery pass, which means bumping this generation
+                    // number.
+                    //
+                    // However, once we *do* finish that, we won't know that
+                    // we've finished recovering all sagas associated with Nexus
+                    // instances expunged in this blueprint.  So we *don't*
+                    // update `reassignment_blueprint_id`.
+                    q.reassignment_generation =
+                        q.reassignment_generation.next();
+                }
             }
+
+            q.latch_drained_blueprint_id();
         });
     }
 
@@ -353,7 +445,8 @@ impl SagaQuiesceHandle {
                 "recovery_start() called twice without intervening \
                  recovery_done() (concurrent calls to recover()?)",
             );
-            q.recovery_pending = Some(q.reassignment_generation);
+            q.recovery_pending =
+                Some((q.reassignment_generation, q.reassignment_blueprint_id));
         });
 
         info!(&self.log, "saga recovery pass starting");
@@ -364,7 +457,8 @@ impl SagaQuiesceHandle {
     fn recovery_done(&self, success: bool) {
         let log = self.log.clone();
         self.inner.send_modify(|q| {
-            let Some(generation) = q.recovery_pending.take() else {
+            let Some((generation, blueprint_id)) = q.recovery_pending.take()
+            else {
                 panic!("cannot finish saga recovery when it was not running");
             };
 
@@ -372,10 +466,13 @@ impl SagaQuiesceHandle {
                 info!(
                     &log,
                     "saga recovery pass finished";
-                    "generation" => generation.to_string()
+                    "generation" => generation.to_string(),
+                    "blueprint_id" => ?blueprint_id,
                 );
+                q.recovered_blueprint_id = blueprint_id;
                 q.recovered_reassignment_generation = generation;
                 q.first_recovery_complete = true;
+                q.latch_drained_blueprint_id();
             } else {
                 info!(&log, "saga recovery pass failed");
             }
@@ -492,7 +589,7 @@ impl SagaQuiesceInner {
     ///
     /// This condition is not permanent.  New sagas can be re-assigned to this
     /// Nexus.
-    pub fn is_fully_drained(&self) -> bool {
+    fn is_fully_drained(&self) -> bool {
         // No new sagas may be created
         self.new_sagas_allowed == SagasAllowed::DisallowedQuiesce
             // and there are none currently running
@@ -506,6 +603,23 @@ impl SagaQuiesceInner {
                 <= self.recovered_reassignment_generation
             // and blueprint execution is not currently re-assigning stuff to us
             && !self.reassignment_pending
+    }
+
+    /// Invoked whenever the quiesce state changes to determine if we are
+    /// currently fully drained up to a given blueprint id
+    ///
+    /// We want to keep track of this even if the target blueprint moves beyond
+    /// this blueprint and we start re-assigning new sagas to ourselves as a
+    /// result of that blueprint.  The rest of our bookkeeping would reflect
+    /// that we're not fully drained, which is true, but we still want to be
+    /// able to report that we were fully drained _as of this blueprint_.
+    fn latch_drained_blueprint_id(&mut self) {
+        if self.is_fully_drained() {
+            // If we've recovered up through a given blueprint id and are now
+            // fully drained, then we have definitely fully drained up through
+            // that blueprint id.
+            self.drained_blueprint_id = self.recovered_blueprint_id;
+        }
     }
 }
 
@@ -568,6 +682,7 @@ impl NewlyPendingSagaRef {
                 q.sagas_pending
                     .remove(&saga_id)
                     .expect("saga should have been running");
+                q.latch_drained_blueprint_id();
             });
             rv
         });
@@ -651,21 +766,25 @@ struct SagaReassignmentInProgress {
 }
 
 impl SagaReassignmentInProgress {
-    fn reassignment_done(self, maybe_reassigned: bool) {
-        self.q.reassignment_done(maybe_reassigned)
+    fn reassignment_done(self, result: SagaReassignmentDone) {
+        self.q.reassignment_done(result);
     }
 }
 
 #[cfg(test)]
 mod test {
     use crate::quiesce::SagaQuiesceHandle;
+    use crate::quiesce::SagaReassignmentDone;
     use futures::FutureExt;
     use omicron_test_utils::dev::test_setup_log;
+    use omicron_uuid_kinds::BlueprintUuid;
     use std::sync::LazyLock;
     use uuid::Uuid;
 
     static SAGA_ID: LazyLock<steno::SagaId> =
         LazyLock::new(|| steno::SagaId(Uuid::new_v4()));
+    static BLUEPRINT_ID: LazyLock<BlueprintUuid> =
+        LazyLock::new(|| BlueprintUuid::new_v4());
     static SAGA_NAME: LazyLock<steno::SagaName> =
         LazyLock::new(|| steno::SagaName::new("test-saga"));
 
@@ -861,7 +980,9 @@ mod test {
 
         // When re-assignment finishes *without* having re-assigned anything,
         // then we're immediately all set.
-        reassignment.reassignment_done(false);
+        reassignment.reassignment_done(
+            SagaReassignmentDone::ReassignedAllAsOf(*BLUEPRINT_ID, false),
+        );
         assert!(qq.is_fully_drained());
         qq.wait_for_drained().await;
         assert!(qq.is_fully_drained());
@@ -895,7 +1016,9 @@ mod test {
 
         // When re-assignment finishes and re-assigned sagas, we're still
         // blocked.
-        reassignment.reassignment_done(true);
+        reassignment.reassignment_done(
+            SagaReassignmentDone::ReassignedAllAsOf(*BLUEPRINT_ID, true),
+        );
         assert!(!qq.is_fully_drained());
 
         // If the next recovery pass fails, we're still blocked.
@@ -946,7 +1069,9 @@ mod test {
 
         // When re-assignment finishes and re-assigned sagas, we're still
         // blocked.
-        reassignment.reassignment_done(true);
+        reassignment.reassignment_done(
+            SagaReassignmentDone::ReassignedAllAsOf(*BLUEPRINT_ID, true),
+        );
         assert!(!qq.is_fully_drained());
 
         // Even if this recovery pass succeeds, we're still blocked, because it
@@ -999,7 +1124,9 @@ mod test {
 
         // When re-assignment finishes and re-assigned sagas, we're still
         // blocked because we haven't run recovery.
-        reassignment.reassignment_done(true);
+        reassignment.reassignment_done(
+            SagaReassignmentDone::ReassignedAllAsOf(*BLUEPRINT_ID, true),
+        );
         assert!(!qq.is_fully_drained());
 
         // Start a recovery pass.  Pretend like we found something.
@@ -1087,7 +1214,9 @@ mod test {
         // from being drained.
         let reassignment = qq.reassignment_start();
         assert!(!qq.is_fully_drained());
-        reassignment.reassignment_done(false);
+        reassignment.reassignment_done(
+            SagaReassignmentDone::ReassignedAllAsOf(*BLUEPRINT_ID, false),
+        );
         // We're fully drained as soon as this one is done, since we know we
         // didn't assign any sagas.
         assert!(qq.is_fully_drained());
@@ -1095,7 +1224,9 @@ mod test {
         // Try again.  This time, we'll act like we did reassign sagas.
         let reassignment = qq.reassignment_start();
         assert!(!qq.is_fully_drained());
-        reassignment.reassignment_done(true);
+        reassignment.reassignment_done(
+            SagaReassignmentDone::ReassignedAllAsOf(*BLUEPRINT_ID, true),
+        );
         assert!(!qq.is_fully_drained());
         // Do a failed recovery pass.  We still won't be fully drained.
         let recovery = qq.recovery_start();
