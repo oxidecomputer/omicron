@@ -187,6 +187,7 @@ chicken switches:
 * zone adds and updates are blocked:
   - sleds have remove mupdate override set in blueprint: d81c6a84-79b8-4958-ae41-ea46c9b19763
 * zone updates waiting on zone add blockers
+* waiting to update top-level nexus_generation: pending non-nexus zone updates
 
 
 
@@ -428,6 +429,7 @@ chicken switches:
 * zone adds and updates are blocked:
   - sleds have remove mupdate override set in blueprint: d81c6a84-79b8-4958-ae41-ea46c9b19763
 * zone updates waiting on zone add blockers
+* waiting to update top-level nexus_generation: pending non-nexus zone updates
 
 
 
