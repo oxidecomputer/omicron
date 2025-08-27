@@ -30,27 +30,32 @@ pub async fn cmd_nexus_update_status(
             .iter()
             .map(|s| (s.baseboard_description.clone(), &s.rot_bootloader)),
     );
+    println!();
     print_rots(
         status
             .mgs_driven
             .iter()
             .map(|s| (s.baseboard_description.clone(), &s.rot)),
     );
+    println!();
     print_sps(
         status
             .mgs_driven
             .iter()
             .map(|s| (s.baseboard_description.clone(), &s.sp)),
     );
+    println!();
     print_host_phase_1s(
         status
             .mgs_driven
             .iter()
             .map(|s| (s.baseboard_description.clone(), &s.host_os_phase_1)),
     );
+    println!();
     print_host_phase_2s(
         status.sleds.iter().map(|s| (s.sled_id, &s.host_phase_2)),
     );
+    println!();
     print_zones(
         status
             .sleds
