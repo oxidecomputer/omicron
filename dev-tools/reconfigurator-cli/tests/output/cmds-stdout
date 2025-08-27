@@ -276,6 +276,166 @@ zpools (10):
     SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-e0f5c287-3296-4a35-b597-7452283ff329" }, disk_id: 0f13d3dd-1830-4a06-b664-e6f0473ba704 (physical_disk), policy: InService, state: Active }
 
 
+> sled-update-rot dde1c0e2-b10d-4621-b420-f179f7a7a00a --slot-b 6.0.0 --active-slot b
+set sled dde1c0e2-b10d-4621-b420-f179f7a7a00a RoT settings: slot b -> 6.0.0, active slot -> B
+
+> sled-show dde1c0e2-b10d-4621-b420-f179f7a7a00a
+sled dde1c0e2-b10d-4621-b420-f179f7a7a00a (in service, active)
+serial serial0
+subnet fd00:1122:3344:101::/64
+SP active version: Some("0.0.1")
+SP inactive version: None
+RoT bootloader stage 0 version: Some("0.0.1")
+RoT bootloader stage 0 next version: None
+RoT active slot: B
+RoT slot A version: Some("4.0.0")
+RoT slot B version: Some("6.0.0")
+RoT persistent boot preference: A
+RoT pending persistent boot preference: None
+RoT transient boot preference: None
+zpools (10):
+    674c6591-11be-44f2-9df1-db3bb663ec01 (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-674c6591-11be-44f2-9df1-db3bb663ec01" }, disk_id: a52a7c57-7fd0-4139-8293-bda299523c53 (physical_disk), policy: InService, state: Active }
+    677dd944-6761-4a89-8606-4d7fe485a63c (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-677dd944-6761-4a89-8606-4d7fe485a63c" }, disk_id: fcf54220-3ff4-463e-b4a2-58447f51b68c (physical_disk), policy: InService, state: Active }
+    70e81eac-6ed4-4c2d-b16a-fabe2aec56fc (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-70e81eac-6ed4-4c2d-b16a-fabe2aec56fc" }, disk_id: 42643377-e4d1-41a0-ac32-38d6e56cb22a (physical_disk), policy: InService, state: Active }
+    7b26c659-bf8f-4c60-ab75-fd2dd8ef5866 (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-7b26c659-bf8f-4c60-ab75-fd2dd8ef5866" }, disk_id: 5b2df08c-ea6a-4771-8363-80031249c97b (physical_disk), policy: InService, state: Active }
+    8e0008d0-9313-4caf-bc20-305ccce29846 (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-8e0008d0-9313-4caf-bc20-305ccce29846" }, disk_id: 0f5e7fc1-8d87-45f8-a00e-f5127b7a3905 (physical_disk), policy: InService, state: Active }
+    929e328a-dd25-447d-9af7-6e2216adf4aa (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-929e328a-dd25-447d-9af7-6e2216adf4aa" }, disk_id: f62e3201-e89b-4667-9707-e49f86b9df07 (physical_disk), policy: InService, state: Active }
+    9a25ff89-5446-4233-bf58-20a24c80aa58 (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-9a25ff89-5446-4233-bf58-20a24c80aa58" }, disk_id: 49b87668-e08b-4939-91f7-a82612e2ebff (physical_disk), policy: InService, state: Active }
+    a9cd1fe6-f1ba-4227-bff7-978992c3d6ad (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-a9cd1fe6-f1ba-4227-bff7-978992c3d6ad" }, disk_id: dcde393a-3ac6-4e98-8833-012787e73e15 (physical_disk), policy: InService, state: Active }
+    b3ede1e1-3264-4b21-8c7d-9ea5d3715210 (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-b3ede1e1-3264-4b21-8c7d-9ea5d3715210" }, disk_id: 4863117c-b77d-4dbc-996d-d18ddf0f5ff7 (physical_disk), policy: InService, state: Active }
+    e0f5c287-3296-4a35-b597-7452283ff329 (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-e0f5c287-3296-4a35-b597-7452283ff329" }, disk_id: 0f13d3dd-1830-4a06-b664-e6f0473ba704 (physical_disk), policy: InService, state: Active }
+
+
+> sled-update-rot dde1c0e2-b10d-4621-b420-f179f7a7a00a --slot-b 6.0.0 --active-slot b --persistent-boot-preference b
+set sled dde1c0e2-b10d-4621-b420-f179f7a7a00a RoT settings: slot b -> 6.0.0, active slot -> B, persistent boot preference -> B
+
+> sled-show dde1c0e2-b10d-4621-b420-f179f7a7a00a
+sled dde1c0e2-b10d-4621-b420-f179f7a7a00a (in service, active)
+serial serial0
+subnet fd00:1122:3344:101::/64
+SP active version: Some("0.0.1")
+SP inactive version: None
+RoT bootloader stage 0 version: Some("0.0.1")
+RoT bootloader stage 0 next version: None
+RoT active slot: B
+RoT slot A version: Some("4.0.0")
+RoT slot B version: Some("6.0.0")
+RoT persistent boot preference: B
+RoT pending persistent boot preference: None
+RoT transient boot preference: None
+zpools (10):
+    674c6591-11be-44f2-9df1-db3bb663ec01 (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-674c6591-11be-44f2-9df1-db3bb663ec01" }, disk_id: a52a7c57-7fd0-4139-8293-bda299523c53 (physical_disk), policy: InService, state: Active }
+    677dd944-6761-4a89-8606-4d7fe485a63c (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-677dd944-6761-4a89-8606-4d7fe485a63c" }, disk_id: fcf54220-3ff4-463e-b4a2-58447f51b68c (physical_disk), policy: InService, state: Active }
+    70e81eac-6ed4-4c2d-b16a-fabe2aec56fc (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-70e81eac-6ed4-4c2d-b16a-fabe2aec56fc" }, disk_id: 42643377-e4d1-41a0-ac32-38d6e56cb22a (physical_disk), policy: InService, state: Active }
+    7b26c659-bf8f-4c60-ab75-fd2dd8ef5866 (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-7b26c659-bf8f-4c60-ab75-fd2dd8ef5866" }, disk_id: 5b2df08c-ea6a-4771-8363-80031249c97b (physical_disk), policy: InService, state: Active }
+    8e0008d0-9313-4caf-bc20-305ccce29846 (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-8e0008d0-9313-4caf-bc20-305ccce29846" }, disk_id: 0f5e7fc1-8d87-45f8-a00e-f5127b7a3905 (physical_disk), policy: InService, state: Active }
+    929e328a-dd25-447d-9af7-6e2216adf4aa (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-929e328a-dd25-447d-9af7-6e2216adf4aa" }, disk_id: f62e3201-e89b-4667-9707-e49f86b9df07 (physical_disk), policy: InService, state: Active }
+    9a25ff89-5446-4233-bf58-20a24c80aa58 (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-9a25ff89-5446-4233-bf58-20a24c80aa58" }, disk_id: 49b87668-e08b-4939-91f7-a82612e2ebff (physical_disk), policy: InService, state: Active }
+    a9cd1fe6-f1ba-4227-bff7-978992c3d6ad (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-a9cd1fe6-f1ba-4227-bff7-978992c3d6ad" }, disk_id: dcde393a-3ac6-4e98-8833-012787e73e15 (physical_disk), policy: InService, state: Active }
+    b3ede1e1-3264-4b21-8c7d-9ea5d3715210 (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-b3ede1e1-3264-4b21-8c7d-9ea5d3715210" }, disk_id: 4863117c-b77d-4dbc-996d-d18ddf0f5ff7 (physical_disk), policy: InService, state: Active }
+    e0f5c287-3296-4a35-b597-7452283ff329 (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-e0f5c287-3296-4a35-b597-7452283ff329" }, disk_id: 0f13d3dd-1830-4a06-b664-e6f0473ba704 (physical_disk), policy: InService, state: Active }
+
+
+> sled-update-rot dde1c0e2-b10d-4621-b420-f179f7a7a00a --slot-b 6.0.0 --active-slot a --persistent-boot-preference a --pending-persistent-boot-preference b --transient-boot-preference a
+set sled dde1c0e2-b10d-4621-b420-f179f7a7a00a RoT settings: slot b -> 6.0.0, active slot -> A, persistent boot preference -> A, pending persistent boot preference -> Some(B), transient boot preference -> Some(A)
+
+> sled-show dde1c0e2-b10d-4621-b420-f179f7a7a00a
+sled dde1c0e2-b10d-4621-b420-f179f7a7a00a (in service, active)
+serial serial0
+subnet fd00:1122:3344:101::/64
+SP active version: Some("0.0.1")
+SP inactive version: None
+RoT bootloader stage 0 version: Some("0.0.1")
+RoT bootloader stage 0 next version: None
+RoT active slot: A
+RoT slot A version: Some("4.0.0")
+RoT slot B version: Some("6.0.0")
+RoT persistent boot preference: A
+RoT pending persistent boot preference: Some(B)
+RoT transient boot preference: Some(A)
+zpools (10):
+    674c6591-11be-44f2-9df1-db3bb663ec01 (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-674c6591-11be-44f2-9df1-db3bb663ec01" }, disk_id: a52a7c57-7fd0-4139-8293-bda299523c53 (physical_disk), policy: InService, state: Active }
+    677dd944-6761-4a89-8606-4d7fe485a63c (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-677dd944-6761-4a89-8606-4d7fe485a63c" }, disk_id: fcf54220-3ff4-463e-b4a2-58447f51b68c (physical_disk), policy: InService, state: Active }
+    70e81eac-6ed4-4c2d-b16a-fabe2aec56fc (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-70e81eac-6ed4-4c2d-b16a-fabe2aec56fc" }, disk_id: 42643377-e4d1-41a0-ac32-38d6e56cb22a (physical_disk), policy: InService, state: Active }
+    7b26c659-bf8f-4c60-ab75-fd2dd8ef5866 (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-7b26c659-bf8f-4c60-ab75-fd2dd8ef5866" }, disk_id: 5b2df08c-ea6a-4771-8363-80031249c97b (physical_disk), policy: InService, state: Active }
+    8e0008d0-9313-4caf-bc20-305ccce29846 (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-8e0008d0-9313-4caf-bc20-305ccce29846" }, disk_id: 0f5e7fc1-8d87-45f8-a00e-f5127b7a3905 (physical_disk), policy: InService, state: Active }
+    929e328a-dd25-447d-9af7-6e2216adf4aa (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-929e328a-dd25-447d-9af7-6e2216adf4aa" }, disk_id: f62e3201-e89b-4667-9707-e49f86b9df07 (physical_disk), policy: InService, state: Active }
+    9a25ff89-5446-4233-bf58-20a24c80aa58 (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-9a25ff89-5446-4233-bf58-20a24c80aa58" }, disk_id: 49b87668-e08b-4939-91f7-a82612e2ebff (physical_disk), policy: InService, state: Active }
+    a9cd1fe6-f1ba-4227-bff7-978992c3d6ad (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-a9cd1fe6-f1ba-4227-bff7-978992c3d6ad" }, disk_id: dcde393a-3ac6-4e98-8833-012787e73e15 (physical_disk), policy: InService, state: Active }
+    b3ede1e1-3264-4b21-8c7d-9ea5d3715210 (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-b3ede1e1-3264-4b21-8c7d-9ea5d3715210" }, disk_id: 4863117c-b77d-4dbc-996d-d18ddf0f5ff7 (physical_disk), policy: InService, state: Active }
+    e0f5c287-3296-4a35-b597-7452283ff329 (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-e0f5c287-3296-4a35-b597-7452283ff329" }, disk_id: 0f13d3dd-1830-4a06-b664-e6f0473ba704 (physical_disk), policy: InService, state: Active }
+
+
+> sled-update-rot dde1c0e2-b10d-4621-b420-f179f7a7a00a --slot-a 7.0.0 --pending-persistent-boot-preference --transient-boot-preference
+set sled dde1c0e2-b10d-4621-b420-f179f7a7a00a RoT settings: slot a -> 7.0.0, pending persistent boot preference -> None, transient boot preference -> None
+
+> sled-show dde1c0e2-b10d-4621-b420-f179f7a7a00a
+sled dde1c0e2-b10d-4621-b420-f179f7a7a00a (in service, active)
+serial serial0
+subnet fd00:1122:3344:101::/64
+SP active version: Some("0.0.1")
+SP inactive version: None
+RoT bootloader stage 0 version: Some("0.0.1")
+RoT bootloader stage 0 next version: None
+RoT active slot: A
+RoT slot A version: Some("7.0.0")
+RoT slot B version: Some("6.0.0")
+RoT persistent boot preference: A
+RoT pending persistent boot preference: None
+RoT transient boot preference: None
+zpools (10):
+    674c6591-11be-44f2-9df1-db3bb663ec01 (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-674c6591-11be-44f2-9df1-db3bb663ec01" }, disk_id: a52a7c57-7fd0-4139-8293-bda299523c53 (physical_disk), policy: InService, state: Active }
+    677dd944-6761-4a89-8606-4d7fe485a63c (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-677dd944-6761-4a89-8606-4d7fe485a63c" }, disk_id: fcf54220-3ff4-463e-b4a2-58447f51b68c (physical_disk), policy: InService, state: Active }
+    70e81eac-6ed4-4c2d-b16a-fabe2aec56fc (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-70e81eac-6ed4-4c2d-b16a-fabe2aec56fc" }, disk_id: 42643377-e4d1-41a0-ac32-38d6e56cb22a (physical_disk), policy: InService, state: Active }
+    7b26c659-bf8f-4c60-ab75-fd2dd8ef5866 (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-7b26c659-bf8f-4c60-ab75-fd2dd8ef5866" }, disk_id: 5b2df08c-ea6a-4771-8363-80031249c97b (physical_disk), policy: InService, state: Active }
+    8e0008d0-9313-4caf-bc20-305ccce29846 (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-8e0008d0-9313-4caf-bc20-305ccce29846" }, disk_id: 0f5e7fc1-8d87-45f8-a00e-f5127b7a3905 (physical_disk), policy: InService, state: Active }
+    929e328a-dd25-447d-9af7-6e2216adf4aa (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-929e328a-dd25-447d-9af7-6e2216adf4aa" }, disk_id: f62e3201-e89b-4667-9707-e49f86b9df07 (physical_disk), policy: InService, state: Active }
+    9a25ff89-5446-4233-bf58-20a24c80aa58 (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-9a25ff89-5446-4233-bf58-20a24c80aa58" }, disk_id: 49b87668-e08b-4939-91f7-a82612e2ebff (physical_disk), policy: InService, state: Active }
+    a9cd1fe6-f1ba-4227-bff7-978992c3d6ad (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-a9cd1fe6-f1ba-4227-bff7-978992c3d6ad" }, disk_id: dcde393a-3ac6-4e98-8833-012787e73e15 (physical_disk), policy: InService, state: Active }
+    b3ede1e1-3264-4b21-8c7d-9ea5d3715210 (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-b3ede1e1-3264-4b21-8c7d-9ea5d3715210" }, disk_id: 4863117c-b77d-4dbc-996d-d18ddf0f5ff7 (physical_disk), policy: InService, state: Active }
+    e0f5c287-3296-4a35-b597-7452283ff329 (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-e0f5c287-3296-4a35-b597-7452283ff329" }, disk_id: 0f13d3dd-1830-4a06-b664-e6f0473ba704 (physical_disk), policy: InService, state: Active }
+
+
 
 > sled-update-sp dde1c0e2-b10d-4621-b420-f179f7a7a00a
 
@@ -291,8 +451,8 @@ SP inactive version: None
 RoT bootloader stage 0 version: Some("0.0.1")
 RoT bootloader stage 0 next version: None
 RoT active slot: A
-RoT slot A version: Some("4.0.0")
-RoT slot B version: Some("5.0.0")
+RoT slot A version: Some("7.0.0")
+RoT slot B version: Some("6.0.0")
 RoT persistent boot preference: A
 RoT pending persistent boot preference: None
 RoT transient boot preference: None
@@ -331,8 +491,8 @@ SP inactive version: Some("2.0.0")
 RoT bootloader stage 0 version: Some("0.0.1")
 RoT bootloader stage 0 next version: None
 RoT active slot: A
-RoT slot A version: Some("4.0.0")
-RoT slot B version: Some("5.0.0")
+RoT slot A version: Some("7.0.0")
+RoT slot B version: Some("6.0.0")
 RoT persistent boot preference: A
 RoT pending persistent boot preference: None
 RoT transient boot preference: None
@@ -371,8 +531,8 @@ SP inactive version: Some("2.0.0")
 RoT bootloader stage 0 version: Some("0.0.1")
 RoT bootloader stage 0 next version: None
 RoT active slot: A
-RoT slot A version: Some("4.0.0")
-RoT slot B version: Some("5.0.0")
+RoT slot A version: Some("7.0.0")
+RoT slot B version: Some("6.0.0")
 RoT persistent boot preference: A
 RoT pending persistent boot preference: None
 RoT transient boot preference: None
@@ -411,8 +571,8 @@ SP inactive version: None
 RoT bootloader stage 0 version: Some("0.0.1")
 RoT bootloader stage 0 next version: None
 RoT active slot: A
-RoT slot A version: Some("4.0.0")
-RoT slot B version: Some("5.0.0")
+RoT slot A version: Some("7.0.0")
+RoT slot B version: Some("6.0.0")
 RoT persistent boot preference: A
 RoT pending persistent boot preference: None
 RoT transient boot preference: None
@@ -451,8 +611,8 @@ SP inactive version: Some("5.0.0")
 RoT bootloader stage 0 version: Some("0.0.1")
 RoT bootloader stage 0 next version: None
 RoT active slot: A
-RoT slot A version: Some("4.0.0")
-RoT slot B version: Some("5.0.0")
+RoT slot A version: Some("7.0.0")
+RoT slot B version: Some("6.0.0")
 RoT persistent boot preference: A
 RoT pending persistent boot preference: None
 RoT transient boot preference: None
@@ -494,8 +654,8 @@ SP inactive version: Some("5.0.0")
 RoT bootloader stage 0 version: Some("1.0.0")
 RoT bootloader stage 0 next version: None
 RoT active slot: A
-RoT slot A version: Some("4.0.0")
-RoT slot B version: Some("5.0.0")
+RoT slot A version: Some("7.0.0")
+RoT slot B version: Some("6.0.0")
 RoT persistent boot preference: A
 RoT pending persistent boot preference: None
 RoT transient boot preference: None
@@ -534,8 +694,8 @@ SP inactive version: Some("5.0.0")
 RoT bootloader stage 0 version: Some("1.0.0")
 RoT bootloader stage 0 next version: Some("2.0.0")
 RoT active slot: A
-RoT slot A version: Some("4.0.0")
-RoT slot B version: Some("5.0.0")
+RoT slot A version: Some("7.0.0")
+RoT slot B version: Some("6.0.0")
 RoT persistent boot preference: A
 RoT pending persistent boot preference: None
 RoT transient boot preference: None
@@ -574,8 +734,8 @@ SP inactive version: Some("5.0.0")
 RoT bootloader stage 0 version: Some("3.0.0")
 RoT bootloader stage 0 next version: Some("2.0.0")
 RoT active slot: A
-RoT slot A version: Some("4.0.0")
-RoT slot B version: Some("5.0.0")
+RoT slot A version: Some("7.0.0")
+RoT slot B version: Some("6.0.0")
 RoT persistent boot preference: A
 RoT pending persistent boot preference: None
 RoT transient boot preference: None
@@ -614,8 +774,8 @@ SP inactive version: Some("5.0.0")
 RoT bootloader stage 0 version: Some("4.0.0")
 RoT bootloader stage 0 next version: None
 RoT active slot: A
-RoT slot A version: Some("4.0.0")
-RoT slot B version: Some("5.0.0")
+RoT slot A version: Some("7.0.0")
+RoT slot B version: Some("6.0.0")
 RoT persistent boot preference: A
 RoT pending persistent boot preference: None
 RoT transient boot preference: None
@@ -654,8 +814,8 @@ SP inactive version: Some("5.0.0")
 RoT bootloader stage 0 version: Some("4.0.0")
 RoT bootloader stage 0 next version: Some("5.0.0")
 RoT active slot: A
-RoT slot A version: Some("4.0.0")
-RoT slot B version: Some("5.0.0")
+RoT slot A version: Some("7.0.0")
+RoT slot B version: Some("6.0.0")
 RoT persistent boot preference: A
 RoT pending persistent boot preference: None
 RoT transient boot preference: None
@@ -726,8 +886,8 @@ SP inactive version: Some("5.0.0")
 RoT bootloader stage 0 version: Some("4.0.0")
 RoT bootloader stage 0 next version: Some("5.0.0")
 RoT active slot: A
-RoT slot A version: Some("4.0.0")
-RoT slot B version: Some("5.0.0")
+RoT slot A version: Some("7.0.0")
+RoT slot B version: Some("6.0.0")
 RoT persistent boot preference: A
 RoT pending persistent boot preference: None
 RoT transient boot preference: None
