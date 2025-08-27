@@ -100,8 +100,8 @@ impl RunAllArgs {
         println!("omicron-dev: services are running.");
 
         // Print out basic information about what was started.
-        // NOTE: The stdout strings here are not intended to be stable, but they are
-        // used by the test suite.
+        // NOTE: The stdout strings here are not intended to be stable, but they
+        // are used by the test suite.
         let addr = cptestctx.external_client.bind_address;
         println!("omicron-dev: nexus external API:    {:?}", addr);
         println!(
