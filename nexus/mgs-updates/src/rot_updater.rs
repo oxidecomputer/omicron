@@ -250,7 +250,7 @@ impl SpComponentUpdateHelperImpl for ReconfiguratorRotUpdater {
                 })
                 .await?;
 
-            debug!(log, "waiting for boot info to confirm a successful reset");
+            // We wait for boot info to ensure a successful reset
             wait_for_boot_info(
                 log,
                 mgs_clients,
@@ -276,6 +276,7 @@ pub async fn wait_for_boot_info(
 ) -> Result<RotState, PostUpdateError> {
     let before = Instant::now();
     loop {
+        debug!(log, "waiting for boot info to confirm a successful reset");
         match mgs_clients
             .try_all_serially(log, |mgs_client| async move {
                 mgs_client
@@ -296,6 +297,7 @@ pub async fn wait_for_boot_info(
                 // Additionally, V2 does not report image errors, so we cannot
                 // know with certainty if a signature check came back with errors
                 RotState::V2 { .. } | RotState::V3 { .. } => {
+                    debug!(log, "successfuly retrieved boot info");
                     return Ok(state.into_inner());
                 }
                 // The RoT is probably still booting

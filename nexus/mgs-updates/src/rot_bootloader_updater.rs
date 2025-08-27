@@ -188,10 +188,6 @@ impl SpComponentUpdateHelperImpl for ReconfiguratorRotBootloaderUpdater {
 
             // We now retrieve boot info from the RoT to verify the reset
             // has completed and signature checks done.
-            debug!(
-                log,
-                "attempting to retrieve boot info to verify image validity"
-            );
             let stage0next_error = wait_for_stage0_next_image_check(
                 log,
                 mgs_clients,
@@ -263,7 +259,7 @@ impl SpComponentUpdateHelperImpl for ReconfiguratorRotBootloaderUpdater {
                 })
                 .await?;
 
-            debug!(log, "waiting for boot info to confirm a successful reset");
+            // We wait for boot info to ensure a successful reset
             wait_for_boot_info(
                 log,
                 mgs_clients,
@@ -287,6 +283,10 @@ async fn wait_for_stage0_next_image_check(
     sp_slot: u16,
     timeout: Duration,
 ) -> Result<Option<RotImageError>, PostUpdateError> {
+    debug!(
+        log,
+        "attempting to verify image validity"
+    );
     match wait_for_boot_info(log, mgs_clients, sp_type, sp_slot, timeout).await
     {
         Ok(state) => match state {
@@ -303,6 +303,10 @@ async fn wait_for_stage0_next_image_check(
                 return Err(PostUpdateError::FatalError { error });
             }
             RotState::V3 { stage0next_error, .. } => {
+                debug!(
+                    log,
+                    "successfully completed an image signature check"
+                );
                 return Ok(stage0next_error);
             }
             // This is unreachable because wait_for_boot_info loops for some
