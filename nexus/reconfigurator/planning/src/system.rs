@@ -67,6 +67,7 @@ use omicron_common::policy::CRUCIBLE_PANTRY_REDUNDANCY;
 use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
 use omicron_common::policy::NEXUS_REDUNDANCY;
 use omicron_uuid_kinds::MupdateOverrideUuid;
+use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use std::collections::BTreeMap;
@@ -125,6 +126,8 @@ pub struct SystemDescription {
     old_repo: TufRepoPolicy,
     chicken_switches: PlannerChickenSwitches,
     ignore_impossible_mgs_updates_since: DateTime<Utc>,
+    active_nexus_zones: BTreeSet<OmicronZoneUuid>,
+    not_yet_nexus_zones: BTreeSet<OmicronZoneUuid>,
 }
 
 impl SystemDescription {
@@ -209,6 +212,8 @@ impl SystemDescription {
             chicken_switches:
                 PlannerChickenSwitches::default_for_system_description(),
             ignore_impossible_mgs_updates_since: Utc::now(),
+            active_nexus_zones: BTreeSet::new(),
+            not_yet_nexus_zones: BTreeSet::new(),
         }
     }
 
@@ -808,6 +813,22 @@ impl SystemDescription {
         self
     }
 
+    pub fn set_active_nexus_zones(
+        &mut self,
+        active_nexus_zones: BTreeSet<OmicronZoneUuid>,
+    ) -> &mut Self {
+        self.active_nexus_zones = active_nexus_zones;
+        self
+    }
+
+    pub fn set_not_yet_nexus_zones(
+        &mut self,
+        not_yet_nexus_zones: BTreeSet<OmicronZoneUuid>,
+    ) -> &mut Self {
+        self.not_yet_nexus_zones = not_yet_nexus_zones;
+        self
+    }
+
     pub fn target_release(&self) -> &TufRepoPolicy {
         &self.tuf_repo
     }
@@ -1030,6 +1051,8 @@ impl SystemDescription {
             self.external_dns_version,
             CockroachDbSettings::empty(),
         );
+        builder.set_active_nexus_zones(self.active_nexus_zones.clone());
+        builder.set_not_yet_nexus_zones(self.not_yet_nexus_zones.clone());
         builder.set_ignore_impossible_mgs_updates_since(
             self.ignore_impossible_mgs_updates_since,
         );

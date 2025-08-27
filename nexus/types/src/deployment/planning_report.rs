@@ -13,6 +13,7 @@ use super::PlannerChickenSwitches;
 
 use daft::Diffable;
 use indent_write::fmt::IndentWriter;
+use omicron_common::api::external::Generation;
 use omicron_common::policy::COCKROACHDB_REDUNDANCY;
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::MupdateOverrideUuid;
@@ -63,6 +64,7 @@ pub struct PlanningReport {
     pub mgs_updates: PlanningMgsUpdatesStepReport,
     pub add: PlanningAddStepReport,
     pub zone_updates: PlanningZoneUpdatesStepReport,
+    pub nexus_generation_bump: PlanningNexusGenerationBumpReport,
     pub cockroachdb_settings: PlanningCockroachdbSettingsStepReport,
 }
 
@@ -79,6 +81,7 @@ impl PlanningReport {
             ),
             add: PlanningAddStepReport::new(),
             zone_updates: PlanningZoneUpdatesStepReport::new(),
+            nexus_generation_bump: PlanningNexusGenerationBumpReport::new(),
             cockroachdb_settings: PlanningCockroachdbSettingsStepReport::new(),
         }
     }
@@ -90,6 +93,7 @@ impl PlanningReport {
             && self.mgs_updates.is_empty()
             && self.add.is_empty()
             && self.zone_updates.is_empty()
+            && self.nexus_generation_bump.is_empty()
             && self.cockroachdb_settings.is_empty()
     }
 }
@@ -112,6 +116,7 @@ impl fmt::Display for PlanningReport {
                 mgs_updates,
                 add,
                 zone_updates,
+                nexus_generation_bump,
                 cockroachdb_settings,
             } = self;
             writeln!(f, "planning report for blueprint {blueprint_id}:")?;
@@ -128,6 +133,7 @@ impl fmt::Display for PlanningReport {
             mgs_updates.fmt(f)?;
             add.fmt(f)?;
             zone_updates.fmt(f)?;
+            nexus_generation_bump.fmt(f)?;
             cockroachdb_settings.fmt(f)?;
         }
         Ok(())
@@ -1017,9 +1023,21 @@ impl ZoneUpdatesWaitingOn {
 )]
 #[serde(rename_all = "snake_case", tag = "type")]
 pub enum ZoneUnsafeToShutdown {
-    Cockroachdb { reason: CockroachdbUnsafeToShutdown },
-    BoundaryNtp { total_boundary_ntp_zones: usize, synchronized_count: usize },
-    InternalDns { total_internal_dns_zones: usize, synchronized_count: usize },
+    Cockroachdb {
+        reason: CockroachdbUnsafeToShutdown,
+    },
+    BoundaryNtp {
+        total_boundary_ntp_zones: usize,
+        synchronized_count: usize,
+    },
+    InternalDns {
+        total_internal_dns_zones: usize,
+        synchronized_count: usize,
+    },
+    Nexus {
+        zone_generation: Generation,
+        current_nexus_generation: Option<Generation>,
+    },
 }
 
 impl fmt::Display for ZoneUnsafeToShutdown {
@@ -1034,6 +1052,100 @@ impl fmt::Display for ZoneUnsafeToShutdown {
                 total_internal_dns_zones: t,
                 synchronized_count: s,
             } => write!(f, "only {s}/{t} internal DNS zones are synchronized"),
+            Self::Nexus { zone_generation, current_nexus_generation } => {
+                match current_nexus_generation {
+                    Some(current) => write!(
+                        f,
+                        "zone gen ({zone_generation}) >= currently-running \
+                         Nexus gen ({current})"
+                    ),
+                    None => write!(
+                        f,
+                        "zone gen is {zone_generation}, but currently-running \
+                         Nexus generation is unknown"
+                    ),
+                }
+            }
+        }
+    }
+}
+
+#[derive(
+    Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Diffable, JsonSchema,
+)]
+pub struct PlanningNexusGenerationBumpReport {
+    /// What are we waiting on to increase the generation number?
+    pub waiting_on: Option<NexusGenerationBumpWaitingOn>,
+
+    pub next_generation: Option<Generation>,
+}
+
+impl PlanningNexusGenerationBumpReport {
+    pub fn new() -> Self {
+        Self { waiting_on: None, next_generation: None }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.waiting_on.is_none() && self.next_generation.is_none()
+    }
+
+    pub fn set_waiting_on(&mut self, why: NexusGenerationBumpWaitingOn) {
+        self.waiting_on = Some(why);
+    }
+
+    pub fn set_next_generation(&mut self, next_generation: Generation) {
+        self.next_generation = Some(next_generation);
+    }
+}
+
+impl fmt::Display for PlanningNexusGenerationBumpReport {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let PlanningNexusGenerationBumpReport { waiting_on, next_generation } =
+            self;
+
+        match (waiting_on, next_generation) {
+            (Some(why), _) => {
+                writeln!(
+                    f,
+                    "* waiting to update top-level nexus_generation: {}",
+                    why.as_str()
+                )?;
+            }
+            (None, Some(gen)) => {
+                writeln!(f, "* updating top-level nexus_generation to: {gen}")?;
+            }
+            // Nothing to report
+            (None, None) => (),
+        }
+        Ok(())
+    }
+}
+
+#[derive(
+    Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Diffable, JsonSchema,
+)]
+#[serde(rename_all = "snake_case", tag = "type")]
+pub enum NexusGenerationBumpWaitingOn {
+    /// Waiting for non-Nexus zones to finish updating
+    NonNexusZoneUpdate,
+
+    /// Waiting for enough new Nexus zones to appear
+    NewNexusBringup,
+
+    /// Waiting for Nexus database records to get populated
+    NexusDatabasePropagation,
+
+    /// Waiting for zones to propagate to inventory
+    ZonePropagation,
+}
+
+impl NexusGenerationBumpWaitingOn {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::NonNexusZoneUpdate => "pending non-nexus zone updates",
+            Self::NewNexusBringup => "waiting for new nexus zones",
+            Self::NexusDatabasePropagation => "pending database records",
+            Self::ZonePropagation => "pending zone reconciliation",
         }
     }
 }

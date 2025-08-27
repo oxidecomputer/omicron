@@ -300,6 +300,38 @@ impl DatastoreSetupAction {
 }
 
 impl DataStore {
+    // Returns the active Nexuses
+    pub async fn get_active_db_metadata_nexus(
+        &self,
+        opctx: &OpContext,
+    ) -> Result<Vec<DbMetadataNexus>, Error> {
+        use nexus_db_schema::schema::db_metadata_nexus::dsl;
+
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+
+        dsl::db_metadata_nexus
+            .filter(dsl::state.eq(DbMetadataNexusState::Active))
+            .load_async(&*self.pool_connection_authorized(&opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    // Returns the 'not yet' Nexuses
+    pub async fn get_not_yet_db_metadata_nexus(
+        &self,
+        opctx: &OpContext,
+    ) -> Result<Vec<DbMetadataNexus>, Error> {
+        use nexus_db_schema::schema::db_metadata_nexus::dsl;
+
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+
+        dsl::db_metadata_nexus
+            .filter(dsl::state.eq(DbMetadataNexusState::NotYet))
+            .load_async(&*self.pool_connection_authorized(&opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
     // Checks if the specified Nexus has access to the database.
     async fn check_nexus_access(
         &self,

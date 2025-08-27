@@ -553,7 +553,7 @@ T ENA ID                                   PARENT                               
 > blueprint-plan ade5749d-bdf3-4fab-a8ae-00bea01b3a5a
 INFO skipping noop image source check for all sleds, reason: no target release is currently set
 WARN cannot issue more MGS-driven updates (no current artifacts)
-INFO some zones not yet up-to-date, sled_id: 89d02b1b-478c-401a-8e28-7a26f74fa41b, zones_currently_updating: [ZoneCurrentlyUpdating { zone_id: b3c9c041-d2f0-4767-bdaf-0e52e9d7a013 (service), zone_kind: InternalNtp, reason: MissingInInventory { bp_image_source: InstallDataset } }]
+INFO some zones not yet up-to-date, zones_currently_updating: [ZonePropagationIncomplete { zone_id: b3c9c041-d2f0-4767-bdaf-0e52e9d7a013 (service), zone_kind: InternalNtp, reason: MissingInInventory { bp_image_source: InstallDataset } }]
 generated blueprint 86db3308-f817-4626-8838-4085949a6a41 based on parent blueprint ade5749d-bdf3-4fab-a8ae-00bea01b3a5a
 planning report for blueprint 86db3308-f817-4626-8838-4085949a6a41:
 chicken switches:
