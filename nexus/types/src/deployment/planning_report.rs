@@ -531,6 +531,14 @@ pub struct PlanningAddSufficientZonesExist {
 #[derive(
     Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Diffable, JsonSchema,
 )]
+pub struct DiscretionaryZonePlacement {
+    kind: String,
+    source: String,
+}
+
+#[derive(
+    Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Diffable, JsonSchema,
+)]
 #[serde(rename_all = "snake_case", tag = "type")]
 pub enum ZoneAddWaitingOn {
     /// Waiting on one or more blockers (typically MUPdate-related reasons) to
@@ -580,7 +588,8 @@ pub struct PlanningAddStepReport {
     /// Sled ID → kinds of discretionary zones placed there
     // TODO: make `sled_add_zone_*` methods return the added zone config
     // so that we can report it here.
-    pub discretionary_zones_placed: BTreeMap<SledUuid, Vec<String>>,
+    pub discretionary_zones_placed:
+        BTreeMap<SledUuid, Vec<DiscretionaryZonePlacement>>,
 }
 
 impl PlanningAddStepReport {
@@ -663,11 +672,22 @@ impl PlanningAddStepReport {
         &mut self,
         sled_id: SledUuid,
         zone_kind: &str,
+        image_source: &BlueprintZoneImageSource,
     ) {
         self.discretionary_zones_placed
             .entry(sled_id)
-            .and_modify(|kinds| kinds.push(zone_kind.to_owned()))
-            .or_insert_with(|| vec![zone_kind.to_owned()]);
+            .and_modify(|kinds| {
+                kinds.push(DiscretionaryZonePlacement {
+                    kind: zone_kind.to_owned(),
+                    source: image_source.to_string(),
+                })
+            })
+            .or_insert_with(|| {
+                vec![DiscretionaryZonePlacement {
+                    kind: zone_kind.to_owned(),
+                    source: image_source.to_string(),
+                }]
+            });
     }
 }
 
@@ -788,13 +808,13 @@ impl fmt::Display for PlanningAddStepReport {
 
         if !discretionary_zones_placed.is_empty() {
             writeln!(f, "* discretionary zones placed:")?;
-            for (sled_id, kinds) in discretionary_zones_placed.iter() {
-                let (n, s) = plural_vec(kinds);
-                writeln!(
-                    f,
-                    "  * {n} zone{s} on sled {sled_id}: {}",
-                    kinds.join(", ")
-                )?;
+            for (sled_id, placements) in discretionary_zones_placed.iter() {
+                for DiscretionaryZonePlacement { kind, source } in placements {
+                    writeln!(
+                        f,
+                        "  * {kind} zone on sled {sled_id} from source {source}",
+                    )?;
+                }
             }
         }
 

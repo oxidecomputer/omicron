@@ -331,7 +331,9 @@ chicken switches:
     add zones with mupdate override:   false
 
 * discretionary zones placed:
-  * 2 zones on sled d67ce8f0-a691-4010-b414-420d82e80527: crucible_pantry, nexus
-  * 2 zones on sled fefcf4cf-f7e7-46b3-b629-058526ce440e: clickhouse, internal_dns
+  * crucible_pantry zone on sled d67ce8f0-a691-4010-b414-420d82e80527 from source install dataset
+  * nexus zone on sled d67ce8f0-a691-4010-b414-420d82e80527 from source install dataset
+  * clickhouse zone on sled fefcf4cf-f7e7-46b3-b629-058526ce440e from source install dataset
+  * internal_dns zone on sled fefcf4cf-f7e7-46b3-b629-058526ce440e from source install dataset
 * zone updates waiting on discretionary zones
 

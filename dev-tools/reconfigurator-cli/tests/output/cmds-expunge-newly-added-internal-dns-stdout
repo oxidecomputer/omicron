@@ -654,7 +654,7 @@ chicken switches:
     add zones with mupdate override:   false
 
 * discretionary zones placed:
-  * 1 zone on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: internal_dns
+  * internal_dns zone on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c from source install dataset
 * zone updates waiting on discretionary zones
 
 
