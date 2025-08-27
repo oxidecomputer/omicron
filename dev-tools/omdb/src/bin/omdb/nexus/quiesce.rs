@@ -162,9 +162,10 @@ async fn quiesce_show(
         recovered_reassignment_generation,
     } = sagas;
 
-    println!("saga quiesce: {:?}", new_sagas_allowed);
+    println!("saga quiesce:");
+    println!("    new sagas: {:?}", new_sagas_allowed);
     println!(
-        "drained as of blueprint: {}",
+        "    drained as of blueprint: {}",
         drained_blueprint_id
             .map(|s| s.to_string())
             .as_deref()
@@ -187,7 +188,7 @@ async fn quiesce_show(
     println!(
         "    reassignment generation: {} (pass running: {})",
         reassignment_generation,
-        if reassignment_pending { "yes" } else { "no " }
+        if reassignment_pending { "yes" } else { "no" }
     );
     println!("    recovered generation: {}", recovered_reassignment_generation);
     println!(
