@@ -1020,6 +1020,7 @@ mod test {
                         slot: 0,
                         transit_ips: Vec::new(),
                     },
+                    nexus_generation: Generation::new(),
                 }),
                 image_source: BlueprintZoneImageSource::InstallDataset,
             })
@@ -1048,6 +1049,7 @@ mod test {
             internal_dns_version: Generation::new(),
             external_dns_version: Generation::new(),
             target_release_minimum_generation: Generation::new(),
+            nexus_generation: Generation::new(),
             cockroachdb_fingerprint: String::new(),
             cockroachdb_setting_preserve_downgrade:
                 CockroachDbPreserveDowngrade::DoNotModify,

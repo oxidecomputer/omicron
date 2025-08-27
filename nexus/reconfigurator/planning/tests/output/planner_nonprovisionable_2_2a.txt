@@ -349,6 +349,9 @@ mismatched zone type: after: Nexus(
         },
         external_tls: false,
         external_dns_servers: [],
+        nexus_generation: Generation(
+            1,
+        ),
     },
 )
 
@@ -368,6 +371,7 @@ mismatched zone type: after: InternalNtp(
     internal DNS version:::   1 (unchanged)
 *   external DNS version:::   1 -> 2
     target release min gen:   1 (unchanged)
+    nexus gen::::::::::::::   1 (unchanged)
 
  OXIMETER SETTINGS:
     generation:   1 (unchanged)
