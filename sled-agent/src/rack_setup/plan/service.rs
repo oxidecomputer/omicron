@@ -48,7 +48,7 @@ use omicron_uuid_kinds::{
     DatasetUuid, ExternalIpUuid, GenericUuid, OmicronZoneUuid,
     PhysicalDiskUuid, SledUuid, ZpoolUuid,
 };
-use rand::prelude::SliceRandom;
+use rand::seq::IndexedRandom;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sled_agent_client::{
@@ -875,7 +875,7 @@ impl SledInfo {
 
     fn alloc_zpool_from_u2s(&self) -> Result<ZpoolName, PlanError> {
         self.u2_zpools
-            .choose(&mut rand::thread_rng())
+            .choose(&mut rand::rng())
             .map(|z| *z)
             .ok_or_else(|| PlanError::NotEnoughSleds)
     }

@@ -8,6 +8,7 @@
 use anyhow::Context;
 use anyhow::Result;
 use camino::Utf8Path;
+use camino::Utf8PathBuf;
 use chrono::Utc;
 use dropshot::ConfigLogging;
 use dropshot::ConfigLoggingLevel;
@@ -16,6 +17,7 @@ use dropshot::test_util::ClientTestContext;
 use dropshot::test_util::LogContext;
 use futures::FutureExt;
 use futures::future::BoxFuture;
+use gateway_test_utils::setup::DEFAULT_SP_SIM_CONFIG;
 use gateway_test_utils::setup::GatewayTestContext;
 use hickory_resolver::TokioResolver;
 use hickory_resolver::config::NameServerConfig;
@@ -325,6 +327,7 @@ pub async fn test_setup<N: NexusServer>(
         sim::SimMode::Explicit,
         None,
         extra_sled_agents,
+        DEFAULT_SP_SIM_CONFIG.into(),
     )
     .await
 }
@@ -671,10 +674,12 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         &mut self,
         switch_location: SwitchLocation,
         port: Option<u16>,
+        sp_sim_config_file: Utf8PathBuf,
     ) {
         debug!(&self.logctx.log, "Starting Management Gateway");
         let (mgs_config, sp_sim_config) =
-            gateway_test_utils::setup::load_test_config();
+            gateway_test_utils::setup::load_test_config(sp_sim_config_file);
+
         let mgs_addr =
             port.map(|port| SocketAddrV6::new(Ipv6Addr::LOCALHOST, port, 0, 0));
         let gateway = gateway_test_utils::setup::test_setup_with_config(
@@ -1634,6 +1639,7 @@ enum PopulateCrdb {
 pub async fn omicron_dev_setup_with_config<N: NexusServer>(
     config: &mut NexusConfig,
     extra_sled_agents: u16,
+    gateway_config_file: Utf8PathBuf,
 ) -> Result<ControlPlaneTestContext<N>> {
     let builder =
         ControlPlaneTestContextBuilder::<N>::new("omicron-dev", config);
@@ -1661,6 +1667,7 @@ pub async fn omicron_dev_setup_with_config<N: NexusServer>(
         None,
         extra_sled_agents,
         true,
+        gateway_config_file,
     )
     .await)
 }
@@ -1672,6 +1679,7 @@ pub async fn test_setup_with_config<N: NexusServer>(
     sim_mode: sim::SimMode,
     initial_cert: Option<Certificate>,
     extra_sled_agents: u16,
+    gateway_config_file: Utf8PathBuf,
 ) -> ControlPlaneTestContext<N> {
     let builder = ControlPlaneTestContextBuilder::<N>::new(test_name, config);
     setup_with_config_impl(
@@ -1681,6 +1689,7 @@ pub async fn test_setup_with_config<N: NexusServer>(
         initial_cert,
         extra_sled_agents,
         false,
+        gateway_config_file,
     )
     .await
 }
@@ -1692,6 +1701,7 @@ async fn setup_with_config_impl<N: NexusServer>(
     initial_cert: Option<Certificate>,
     extra_sled_agents: u16,
     second_nexus: bool,
+    gateway_config_file: Utf8PathBuf,
 ) -> ControlPlaneTestContext<N> {
     const STEP_TIMEOUT: Duration = Duration::from_secs(60);
 
@@ -1718,6 +1728,7 @@ async fn setup_with_config_impl<N: NexusServer>(
     // be configured. If extra sled agents are requested, then the second sled
     // agent will be for switch1.
 
+    let mgs_config = gateway_config_file.clone();
     builder
         .init_with_steps(
             vec![
@@ -1725,7 +1736,11 @@ async fn setup_with_config_impl<N: NexusServer>(
                     "start_gateway_switch0",
                     Box::new(|builder| {
                         builder
-                            .start_gateway(SwitchLocation::Switch0, None)
+                            .start_gateway(
+                                SwitchLocation::Switch0,
+                                None,
+                                mgs_config,
+                            )
                             .boxed()
                     }),
                 ),
@@ -1765,7 +1780,11 @@ async fn setup_with_config_impl<N: NexusServer>(
                         "start_gateway_switch1",
                         Box::new(|builder| {
                             builder
-                                .start_gateway(SwitchLocation::Switch1, None)
+                                .start_gateway(
+                                    SwitchLocation::Switch1,
+                                    None,
+                                    gateway_config_file,
+                                )
                                 .boxed()
                         }),
                     ),

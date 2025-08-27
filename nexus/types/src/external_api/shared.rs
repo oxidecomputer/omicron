@@ -23,7 +23,7 @@ use slog_error_chain::InlineErrorChain;
 use strum::EnumIter;
 use uuid::Uuid;
 
-pub use omicron_common::address::{IpRange, Ipv4Range, Ipv6Range};
+pub use omicron_common::address::{IpRange, IpVersion, Ipv4Range, Ipv6Range};
 pub use omicron_common::api::external::BfdMode;
 
 /// Maximum number of role assignments allowed on any one resource

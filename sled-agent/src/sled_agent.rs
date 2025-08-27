@@ -824,19 +824,6 @@ impl SledAgent {
         self.inner.config_reconciler.set_sled_config(config).await
     }
 
-    /// Get the status of the "destroy orphaned datasets" chicken switch.
-    pub(crate) fn chicken_switch_destroy_orphaned_datasets(&self) -> bool {
-        self.inner.config_reconciler.will_destroy_orphans()
-    }
-
-    /// Set the status of the "destroy orphaned datasets" chicken switch.
-    pub(crate) fn set_chicken_switch_destroy_orphaned_datasets(
-        &self,
-        destroy_orphans: bool,
-    ) {
-        self.inner.config_reconciler.set_destroy_orphans(destroy_orphans);
-    }
-
     /// Returns whether or not the sled believes itself to be a scrimlet
     pub fn get_role(&self) -> SledRole {
         if self.inner.hardware.is_scrimlet() {

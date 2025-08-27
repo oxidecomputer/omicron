@@ -301,6 +301,7 @@ impl TestBoards {
             name: &str,
             kind: ArtifactKind,
             hash: ArtifactHash,
+            board: Option<&str>,
             sign: Option<Vec<u8>>,
         ) -> TufArtifactMeta {
             TufArtifactMeta {
@@ -311,6 +312,7 @@ impl TestBoards {
                 },
                 hash,
                 size: 0, // unused here
+                board: board.map(|s| s.to_string()),
                 sign,
             }
         }
@@ -323,11 +325,13 @@ impl TestBoards {
                 KnownArtifactKind::ControlPlane.into(),
                 ARTIFACT_HASH_CONTROL_PLANE,
                 None,
+                None,
             ),
             make_artifact(
                 "nexus",
                 KnownArtifactKind::Zone.into(),
                 ARTIFACT_HASH_NEXUS,
+                None,
                 None,
             ),
             make_artifact(
@@ -335,113 +339,130 @@ impl TestBoards {
                 ArtifactKind::HOST_PHASE_1,
                 ARTIFACT_HASH_HOST_PHASE_1,
                 None,
+                None,
             ),
             make_artifact(
                 "host-os-phase-2",
                 ArtifactKind::HOST_PHASE_2,
                 ARTIFACT_HASH_HOST_PHASE_2,
                 None,
+                None,
             ),
             make_artifact(
                 "gimlet-d",
                 KnownArtifactKind::GimletSp.into(),
                 test_artifact_for_board("gimlet-d"),
+                Some("gimlet-d"),
                 None,
             ),
             make_artifact(
                 "gimlet-e",
                 KnownArtifactKind::GimletSp.into(),
                 test_artifact_for_board("gimlet-e"),
+                Some("gimlet-e"),
                 None,
             ),
             make_artifact(
                 "sidecar-b",
                 KnownArtifactKind::SwitchSp.into(),
                 test_artifact_for_board("sidecar-b"),
+                Some("sidecar-b"),
                 None,
             ),
             make_artifact(
                 "sidecar-c",
                 KnownArtifactKind::SwitchSp.into(),
                 test_artifact_for_board("sidecar-c"),
+                Some("sidecar-c"),
                 None,
             ),
             make_artifact(
                 "psc-b",
                 KnownArtifactKind::PscSp.into(),
                 test_artifact_for_board("psc-b"),
+                Some("psc-b"),
                 None,
             ),
             make_artifact(
                 "psc-c",
                 KnownArtifactKind::PscSp.into(),
                 test_artifact_for_board("psc-c"),
+                Some("psc-c"),
                 None,
             ),
             make_artifact(
-                "oxide-rot-1",
+                "oxide-rot-1-fake-key",
                 ArtifactKind::GIMLET_ROT_IMAGE_A,
                 test_artifact_for_artifact_kind(
                     ArtifactKind::GIMLET_ROT_IMAGE_A,
                 ),
+                Some("oxide-rot-1"),
                 Some(ROT_SIGN_GIMLET.into()),
             ),
             make_artifact(
-                "oxide-rot-1",
+                "oxide-rot-1-fake-key",
                 ArtifactKind::GIMLET_ROT_IMAGE_B,
                 test_artifact_for_artifact_kind(
                     ArtifactKind::GIMLET_ROT_IMAGE_B,
                 ),
+                Some("oxide-rot-1"),
                 Some(ROT_SIGN_GIMLET.into()),
             ),
             make_artifact(
-                "oxide-rot-1",
+                "oxide-rot-1-fake-key",
                 ArtifactKind::PSC_ROT_IMAGE_A,
                 test_artifact_for_artifact_kind(ArtifactKind::PSC_ROT_IMAGE_A),
+                Some("oxide-rot-1"),
                 Some(ROT_SIGN_PSC.into()),
             ),
             make_artifact(
-                "oxide-rot-1",
+                "oxide-rot-1-fake-key",
                 ArtifactKind::PSC_ROT_IMAGE_B,
                 test_artifact_for_artifact_kind(ArtifactKind::PSC_ROT_IMAGE_B),
+                Some("oxide-rot-1"),
                 Some(ROT_SIGN_PSC.into()),
             ),
             make_artifact(
-                "oxide-rot-1",
+                "oxide-rot-1-fake-key",
                 ArtifactKind::SWITCH_ROT_IMAGE_A,
                 test_artifact_for_artifact_kind(
                     ArtifactKind::SWITCH_ROT_IMAGE_A,
                 ),
+                Some("oxide-rot-1"),
                 Some(ROT_SIGN_SWITCH.into()),
             ),
             make_artifact(
-                "oxide-rot-1",
+                "oxide-rot-1-fake-key",
                 ArtifactKind::SWITCH_ROT_IMAGE_B,
                 test_artifact_for_artifact_kind(
                     ArtifactKind::SWITCH_ROT_IMAGE_B,
                 ),
+                Some("oxide-rot-1"),
                 Some(ROT_SIGN_SWITCH.into()),
             ),
             make_artifact(
-                "oxide-rot-1",
+                "bootloader-fake-key",
                 ArtifactKind::GIMLET_ROT_STAGE0,
                 test_artifact_for_artifact_kind(
                     ArtifactKind::GIMLET_ROT_STAGE0,
                 ),
+                Some("oxide-rot-1"),
                 Some(ROT_SIGN_GIMLET.into()),
             ),
             make_artifact(
-                "oxide-rot-1",
+                "bootloader-fake-key",
                 ArtifactKind::PSC_ROT_STAGE0,
                 test_artifact_for_artifact_kind(ArtifactKind::PSC_ROT_STAGE0),
+                Some("oxide-rot-1"),
                 Some(ROT_SIGN_PSC.into()),
             ),
             make_artifact(
-                "oxide-rot-1",
+                "bootloader-fake-key",
                 ArtifactKind::SWITCH_ROT_STAGE0,
                 test_artifact_for_artifact_kind(
                     ArtifactKind::SWITCH_ROT_STAGE0,
                 ),
+                Some("oxide-rot-1"),
                 Some(ROT_SIGN_SWITCH.into()),
             ),
         ];
@@ -723,6 +744,8 @@ pub(super) struct TestBoardCollectionBuilder<'a> {
     sp_active_version_exceptions: BTreeMap<SpIdentifier, ArtifactVersion>,
     rot_active_version_exceptions: BTreeMap<SpIdentifier, ArtifactVersion>,
     stage0_version_exceptions: BTreeMap<SpIdentifier, ArtifactVersion>,
+    rot_active_slot_exceptions: BTreeMap<SpIdentifier, RotSlot>,
+    rot_persistent_boot_preference_exceptions: BTreeMap<SpIdentifier, RotSlot>,
 
     // host exceptions are keyed only by slot; they only apply to sleds.
     host_exceptions: BTreeMap<u16, HostOsException>,
@@ -753,6 +776,8 @@ impl<'a> TestBoardCollectionBuilder<'a> {
             sp_active_version_exceptions: BTreeMap::new(),
             rot_active_version_exceptions: BTreeMap::new(),
             stage0_version_exceptions: BTreeMap::new(),
+            rot_active_slot_exceptions: BTreeMap::new(),
+            rot_persistent_boot_preference_exceptions: BTreeMap::new(),
             host_exceptions: BTreeMap::new(),
         }
     }
@@ -805,6 +830,28 @@ impl<'a> TestBoardCollectionBuilder<'a> {
     ) -> Self {
         self.rot_active_version_exceptions
             .insert(SpIdentifier { type_, slot }, v);
+        self
+    }
+
+    pub fn rot_active_slot_exception(
+        mut self,
+        type_: SpType,
+        sp_slot: u16,
+        s: RotSlot,
+    ) -> Self {
+        self.rot_active_slot_exceptions
+            .insert(SpIdentifier { type_, slot: sp_slot }, s);
+        self
+    }
+
+    pub fn rot_persistent_boot_preference_exception(
+        mut self,
+        type_: SpType,
+        sp_slot: u16,
+        s: RotSlot,
+    ) -> Self {
+        self.rot_persistent_boot_preference_exceptions
+            .insert(SpIdentifier { type_, slot: sp_slot }, s);
         self
     }
 
@@ -885,29 +932,6 @@ impl<'a> TestBoardCollectionBuilder<'a> {
         let mut builder =
             nexus_inventory::CollectionBuilder::new(self.boards.test_name);
 
-        let dummy_sp_state = SpState {
-            base_mac_address: [0; 6],
-            hubris_archive_id: String::from("unused"),
-            model: String::from("unused"),
-            power_state: PowerState::A0,
-            revision: 0,
-            rot: RotState::V3 {
-                active: RotSlot::A,
-                pending_persistent_boot_preference: None,
-                persistent_boot_preference: RotSlot::A,
-                slot_a_error: None,
-                slot_a_fwid: Default::default(),
-                slot_b_error: None,
-                slot_b_fwid: Default::default(),
-                stage0_error: None,
-                stage0_fwid: Default::default(),
-                stage0next_error: None,
-                stage0next_fwid: Default::default(),
-                transient_boot_preference: None,
-            },
-            serial_number: String::from("unused"),
-        };
-
         for board in &self.boards.boards {
             let &TestBoard {
                 id: sp_id,
@@ -917,6 +941,40 @@ impl<'a> TestBoardCollectionBuilder<'a> {
                 rot_board: caboose_rot_board,
                 rot_sign: rkth,
             } = board;
+
+            let rot_active_slot = self
+                .rot_active_slot_exceptions
+                .get(&sp_id)
+                .cloned()
+                .unwrap_or(RotSlot::A);
+            let rot_persistent_boot_preference = self
+                .rot_persistent_boot_preference_exceptions
+                .get(&sp_id)
+                .cloned()
+                .unwrap_or(RotSlot::A);
+
+            let dummy_sp_state = SpState {
+                base_mac_address: [0; 6],
+                hubris_archive_id: String::from("unused"),
+                model: String::from("unused"),
+                power_state: PowerState::A0,
+                revision: 0,
+                rot: RotState::V3 {
+                    active: rot_active_slot,
+                    pending_persistent_boot_preference: None,
+                    persistent_boot_preference: rot_persistent_boot_preference,
+                    slot_a_error: None,
+                    slot_a_fwid: Default::default(),
+                    slot_b_error: None,
+                    slot_b_fwid: Default::default(),
+                    stage0_error: None,
+                    stage0_fwid: Default::default(),
+                    stage0next_error: None,
+                    stage0next_fwid: Default::default(),
+                    transient_boot_preference: None,
+                },
+                serial_number: String::from("unused"),
+            };
 
             let sp_state = SpState {
                 model: format!("dummy_{}", sp_id.type_),
@@ -964,7 +1022,7 @@ impl<'a> TestBoardCollectionBuilder<'a> {
             builder
                 .found_caboose(
                     &baseboard_id,
-                    CabooseWhich::RotSlotA,
+                    CabooseWhich::from_rot_slot(rot_active_slot),
                     "test",
                     SpComponentCaboose {
                         board: caboose_rot_board.to_string(),
@@ -1019,7 +1077,7 @@ impl<'a> TestBoardCollectionBuilder<'a> {
                 builder
                     .found_caboose(
                         &baseboard_id,
-                        CabooseWhich::RotSlotB,
+                        CabooseWhich::from_rot_slot(rot_active_slot.toggled()),
                         "test",
                         SpComponentCaboose {
                             board: caboose_rot_board.to_string(),

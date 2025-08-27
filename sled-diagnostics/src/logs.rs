@@ -18,7 +18,7 @@ use illumos_utils::zfs::{
 };
 use oxlog::LogFile;
 use oxlog::SvcLogs;
-use rand::{Rng, distributions::Alphanumeric, thread_rng};
+use rand::{Rng, distr::Alphanumeric};
 use regex::Regex;
 use slog::Logger;
 use std::collections::BTreeMap;
@@ -91,7 +91,7 @@ impl DiagnosticsSnapshot {
     ) -> Result<Self, LogError> {
         let snap_name = format!(
             "{SLED_DIAGNOSTICS_SNAPSHOT_PREFIX}{}",
-            thread_rng()
+            rand::rng()
                 .sample_iter(Alphanumeric)
                 .take(12)
                 .map(char::from)

@@ -186,7 +186,7 @@ mod tests {
     use kstat_rs::Ctl;
     use oximeter::Producer;
     use rand::Rng;
-    use rand::distributions::Uniform;
+    use rand::distr::Uniform;
     use slog::Drain;
     use slog::Logger;
     use slog::info;
@@ -228,8 +228,10 @@ mod tests {
         fn new() -> Self {
             let name = format!(
                 "kstest{}0",
-                rand::thread_rng()
-                    .sample_iter(Uniform::new('a', 'z'))
+                rand::rng()
+                    .sample_iter(
+                        Uniform::new('a', 'z').expect("a < z so this is valid")
+                    )
                     .take(5)
                     .collect::<String>(),
             );

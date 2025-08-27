@@ -20,7 +20,8 @@ derive_more.workspace = true
 hex.workspace = true
 hkdf.workspace = true
 omicron-common.workspace = true
-rand = { workspace = true, features = ["getrandom"] }
+# vsss-rs requires rand 0.8
+rand08 = { workspace = true, features = ["getrandom"] }
 secrecy.workspace = true
 serde.workspace = true
 serde_with.workspace = true

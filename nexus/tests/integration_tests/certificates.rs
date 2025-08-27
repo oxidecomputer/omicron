@@ -8,6 +8,7 @@ use display_error_chain::ErrorChainExt;
 use dropshot::HttpErrorResponseBody;
 use dropshot::test_util::ClientTestContext;
 use futures::TryStreamExt;
+use gateway_test_utils::setup::DEFAULT_SP_SIM_CONFIG;
 use http::StatusCode;
 use http::method::Method;
 use internal_dns_types::names::DNS_ZONE_EXTERNAL_TESTING;
@@ -351,6 +352,7 @@ async fn test_silo_certificates() {
             omicron_sled_agent::sim::SimMode::Explicit,
             Some(silo1.cert.clone()),
             0,
+            DEFAULT_SP_SIM_CONFIG.into(),
         )
         .await
     };
