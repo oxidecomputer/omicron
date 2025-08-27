@@ -642,6 +642,7 @@ pub enum SupportBundleState {
 
 #[derive(Debug, Clone, JsonSchema, Serialize, Deserialize)]
 pub struct SupportBundleInfo {
+    #[schemars(with = "Uuid")]
     pub id: SupportBundleUuid,
     pub time_created: DateTime<Utc>,
     pub reason_for_creation: String,

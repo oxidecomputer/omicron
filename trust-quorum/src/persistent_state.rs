@@ -22,6 +22,8 @@ pub struct PersistentState {
     // data it read from disk. This allows us to upgrade from LRTQ.
     pub lrtq: Option<LrtqShareData>,
     pub configs: IdOrdMap<Configuration>,
+
+    // Our own key shares per configuration
     pub shares: BTreeMap<Epoch, Share>,
     pub commits: BTreeSet<Epoch>,
 
@@ -45,7 +47,7 @@ impl PersistentState {
     }
 
     pub fn rack_id(&self) -> Option<RackUuid> {
-        self.latest_committed_configuration().map(|c| c.rack_id).or_else(|| {
+        self.latest_config().map(|c| c.rack_id).or_else(|| {
             self.lrtq
                 .as_ref()
                 .map(|pkg| RackUuid::from_untyped_uuid(pkg.rack_uuid))
@@ -83,9 +85,26 @@ impl PersistentState {
         })
     }
 
+    pub fn latest_committed_config_and_share(
+        &self,
+    ) -> Option<(&Configuration, &Share)> {
+        self.latest_committed_epoch().map(|epoch| {
+            // There *must* be a configuration and share if we have a commit
+            (
+                self.configs.get(&epoch).expect("latest config exists"),
+                self.shares.get(&epoch).expect("latest share exists"),
+            )
+        })
+    }
+
     /// Return the key share for lrtq if one exists
     pub fn lrtq_key_share(&self) -> Option<LrtqShare> {
         self.lrtq.as_ref().map(|p| p.share.clone().into())
+    }
+
+    // Do we have a configuration and share for this epoch?
+    pub fn has_prepared(&self, epoch: Epoch) -> bool {
+        self.configs.contains_key(&epoch) && self.shares.contains_key(&epoch)
     }
 }
 

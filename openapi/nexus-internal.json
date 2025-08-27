@@ -6573,8 +6573,15 @@
       "PlanningAddStepReport": {
         "type": "object",
         "properties": {
+          "add_update_blocked_reasons": {
+            "description": "Reasons why zone adds and any updates are blocked.\n\nThis is typically a list of MUPdate-related reasons.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
           "add_zones_with_mupdate_override": {
-            "description": "The value of the homonymous chicken switch.",
+            "description": "The value of the homonymous chicken switch. (What this really means is that zone adds happen despite being blocked by one or more MUPdate-related reasons.)",
             "type": "boolean"
           },
           "discretionary_zones_placed": {
@@ -6586,10 +6593,6 @@
                 "type": "string"
               }
             }
-          },
-          "has_mupdate_override": {
-            "description": "Are there any outstanding MUPdate overrides?",
-            "type": "boolean"
           },
           "out_of_eligible_sleds": {
             "description": "Discretionary zone kind → (placed, wanted to place)",
@@ -6660,9 +6663,9 @@
           }
         },
         "required": [
+          "add_update_blocked_reasons",
           "add_zones_with_mupdate_override",
           "discretionary_zones_placed",
-          "has_mupdate_override",
           "out_of_eligible_sleds",
           "sleds_getting_ntp_and_discretionary_zones",
           "sleds_missing_crucible_zone",
@@ -8573,7 +8576,8 @@
         "type": "object",
         "properties": {
           "id": {
-            "$ref": "#/components/schemas/TypedUuidForSupportBundleKind"
+            "type": "string",
+            "format": "uuid"
           },
           "reason_for_creation": {
             "type": "string"
@@ -8840,10 +8844,6 @@
         "format": "uuid"
       },
       "TypedUuidForSledKind": {
-        "type": "string",
-        "format": "uuid"
-      },
-      "TypedUuidForSupportBundleKind": {
         "type": "string",
         "format": "uuid"
       },
@@ -9125,13 +9125,13 @@
       "ZoneAddWaitingOn": {
         "oneOf": [
           {
-            "description": "Waiting on one or more MUPdate overrides to clear.",
+            "description": "Waiting on one or more blockers (typically MUPdate-related reasons) to clear.",
             "type": "object",
             "properties": {
               "type": {
                 "type": "string",
                 "enum": [
-                  "mupdate_overrides"
+                  "blockers"
                 ]
               }
             },
@@ -9267,13 +9267,13 @@
             ]
           },
           {
-            "description": "Waiting on one or more MUPdate overrides to clear.",
+            "description": "Waiting on the same set of blockers zone adds are waiting on.",
             "type": "object",
             "properties": {
               "type": {
                 "type": "string",
                 "enum": [
-                  "mupdate_overrides"
+                  "zone_add_blockers"
                 ]
               }
             },

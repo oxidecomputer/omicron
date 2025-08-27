@@ -1308,12 +1308,14 @@ pub struct AlertDelivery {
     pub id: Uuid,
 
     /// The UUID of the alert receiver that this event was delivered to.
+    #[schemars(with = "Uuid")]
     pub receiver_id: AlertReceiverUuid,
 
     /// The event class.
     pub alert_class: String,
 
     /// The UUID of the event.
+    #[schemars(with = "Uuid")]
     pub alert_id: AlertUuid,
 
     /// The state of this delivery.

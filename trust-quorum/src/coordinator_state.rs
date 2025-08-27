@@ -5,14 +5,15 @@
 //! State of a reconfiguration coordinator inside a [`crate::Node`]
 
 use crate::NodeHandlerCtx;
-use crate::crypto::{LrtqShare, Sha3_256Digest, ShareDigestLrtq};
-use crate::messages::PeerMsg;
+use crate::crypto::{
+    LrtqShare, PlaintextRackSecrets, Sha3_256Digest, ShareDigestLrtq,
+};
 use crate::validators::{ReconfigurationError, ValidatedReconfigureMsg};
-use crate::{Configuration, Epoch, PeerMsgKind, PlatformId};
+use crate::{Configuration, Epoch, PeerMsgKind, PlatformId, RackSecret};
 use gfss::shamir::Share;
-use slog::{Logger, o, warn};
+use slog::{Logger, error, info, o, warn};
 use std::collections::{BTreeMap, BTreeSet};
-use std::time::Instant;
+use std::mem;
 
 /// The state of a reconfiguration coordinator.
 ///
@@ -29,10 +30,6 @@ use std::time::Instant;
 pub struct CoordinatorState {
     log: Logger,
 
-    /// When the reconfiguration started
-    #[expect(unused)]
-    start_time: Instant,
-
     /// A copy of the message used to start this reconfiguration
     reconfigure_msg: ValidatedReconfigureMsg,
 
@@ -42,9 +39,6 @@ pub struct CoordinatorState {
 
     /// What is the coordinator currently doing
     op: CoordinatorOperation,
-
-    /// When to resend prepare messages next
-    retry_deadline: Instant,
 }
 
 impl CoordinatorState {
@@ -54,7 +48,6 @@ impl CoordinatorState {
     /// `PrepareMsg` so that it can be persisted.
     pub fn new_uninitialized(
         log: Logger,
-        now: Instant,
         msg: ValidatedReconfigureMsg,
     ) -> Result<(CoordinatorState, Configuration, Share), ReconfigurationError>
     {
@@ -78,10 +71,17 @@ impl CoordinatorState {
         }
         let op = CoordinatorOperation::Prepare {
             prepares,
-            prepare_acks: BTreeSet::new(),
+            // Always include ourself
+            prepare_acks: BTreeSet::from([msg.coordinator_id().clone()]),
         };
 
-        let state = CoordinatorState::new(log, now, msg, config.clone(), op);
+        info!(
+            log,
+            "Starting coordination on uninitialized node";
+            "epoch" => %config.epoch
+        );
+
+        let state = CoordinatorState::new(log, msg, config.clone(), op);
 
         // Safety: Construction of a `ValidatedReconfigureMsg` ensures that
         // `my_platform_id` is part of the new configuration and has a share.
@@ -92,22 +92,33 @@ impl CoordinatorState {
     /// A reconfiguration from one group to another
     pub fn new_reconfiguration(
         log: Logger,
-        now: Instant,
         msg: ValidatedReconfigureMsg,
-        last_committed_config: &Configuration,
+        latest_committed_config: &Configuration,
+        our_latest_committed_share: Share,
     ) -> Result<CoordinatorState, ReconfigurationError> {
         let (config, new_shares) = Configuration::new(&msg)?;
 
-        // We must collect shares from the last configuration
-        // so we can recompute the old rack secret.
+        info!(
+            log,
+            "Starting coordination on existing node";
+            "epoch" => %config.epoch,
+            "last_committed_epoch" => %latest_committed_config.epoch
+        );
+
+        // We must collect shares from the last committed configuration so we
+        // can recompute the old rack secret.
         let op = CoordinatorOperation::CollectShares {
-            epoch: last_committed_config.epoch,
-            members: last_committed_config.members.clone(),
-            collected_shares: BTreeMap::new(),
+            // We save this so we can grab the old configuration
+            old_epoch: latest_committed_config.epoch,
+            // Always include ourself
+            old_collected_shares: BTreeMap::from([(
+                msg.coordinator_id().clone(),
+                our_latest_committed_share,
+            )]),
             new_shares,
         };
 
-        Ok(CoordinatorState::new(log, now, msg, config, op))
+        Ok(CoordinatorState::new(log, msg, config, op))
     }
 
     // Intentionally private!
@@ -116,62 +127,95 @@ impl CoordinatorState {
     // more specific, and perform validation of arguments.
     fn new(
         log: Logger,
-        now: Instant,
         reconfigure_msg: ValidatedReconfigureMsg,
         configuration: Configuration,
         op: CoordinatorOperation,
     ) -> CoordinatorState {
-        // We want to send any pending messages immediately
-        let retry_deadline = now;
         CoordinatorState {
             log: log.new(o!("component" => "tq-coordinator-state")),
-            start_time: now,
             reconfigure_msg,
             configuration,
             op,
-            retry_deadline,
         }
     }
 
-    // Return the `ValidatedReconfigureMsg` that started this reconfiguration
+    /// Return the `ValidatedReconfigureMsg` that started this reconfiguration
     pub fn reconfigure_msg(&self) -> &ValidatedReconfigureMsg {
         &self.reconfigure_msg
     }
 
-    // Send any required messages as a reconfiguration coordinator
-    //
-    // This varies depending upon the current `CoordinatorState`.
-    //
-    // In some cases a `PrepareMsg` will be added locally to the
-    // `PersistentState`, requiring persistence from the caller. In this case we
-    // will return a copy of it.
-    //
-    // This method is "in progress" - allow unused parameters for now
-    #[expect(unused)]
+    pub fn op(&self) -> &CoordinatorOperation {
+        &self.op
+    }
+
+    /// Send any required messages as a reconfiguration coordinator
+    ///
+    /// This varies depending upon the current `CoordinatorState`.
     pub fn send_msgs(&mut self, ctx: &mut impl NodeHandlerCtx) {
-        let now = ctx.now();
-        if now < self.retry_deadline {
-            return;
-        }
-        self.retry_deadline = now + self.reconfigure_msg.retry_timeout();
         match &self.op {
             CoordinatorOperation::CollectShares {
-                epoch,
-                members,
-                collected_shares,
+                old_epoch,
+                old_collected_shares,
+                ..
+            } => {
+                // Send to all connected members in the last committed
+                // configuration that we haven't yet collected shares from.
+                let destinations: Vec<_> = ctx
+                    .persistent_state()
+                    .configuration(*old_epoch)
+                    .expect("config exists")
+                    .members
+                    .keys()
+                    .filter(|&m| {
+                        !old_collected_shares.contains_key(m)
+                            && ctx.connected().contains(m)
+                    })
+                    .cloned()
+                    .collect();
+                for to in destinations {
+                    ctx.send(to, PeerMsgKind::GetShare(*old_epoch));
+                }
+            }
+            #[expect(unused)]
+            CoordinatorOperation::CollectLrtqShares { members, shares } => {}
+            CoordinatorOperation::Prepare { prepares, .. } => {
+                for (platform_id, (config, share)) in
+                    prepares.clone().into_iter()
+                {
+                    if ctx.connected().contains(&platform_id) {
+                        ctx.send(
+                            platform_id,
+                            PeerMsgKind::Prepare { config, share },
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    // Send any required messages to a newly connected node
+    // This method is "in progress" - allow unused parameters for now
+    #[expect(unused)]
+    pub fn send_msgs_to(
+        &mut self,
+        ctx: &mut impl NodeHandlerCtx,
+        to: PlatformId,
+    ) {
+        match &self.op {
+            CoordinatorOperation::CollectShares {
+                old_epoch,
+                old_collected_shares,
                 ..
             } => {}
             CoordinatorOperation::CollectLrtqShares { members, shares } => {}
             CoordinatorOperation::Prepare { prepares, prepare_acks } => {
                 let rack_id = self.reconfigure_msg.rack_id();
-                for (platform_id, (config, share)) in
-                    prepares.clone().into_iter()
-                {
+                if let Some((config, share)) = prepares.get(&to) {
                     ctx.send(
-                        platform_id,
-                        PeerMsg {
-                            rack_id,
-                            kind: PeerMsgKind::Prepare { config, share },
+                        to,
+                        PeerMsgKind::Prepare {
+                            config: config.clone(),
+                            share: share.clone(),
                         },
                     );
                 }
@@ -212,21 +256,228 @@ impl CoordinatorState {
             }
         }
     }
+
+    pub fn handle_share(
+        &mut self,
+        ctx: &mut impl NodeHandlerCtx,
+        from: PlatformId,
+        epoch: Epoch,
+        share: Share,
+    ) {
+        match &mut self.op {
+            CoordinatorOperation::CollectShares {
+                old_epoch,
+                old_collected_shares,
+                new_shares,
+            } => {
+                // SAFETY: We started coordinating by looking up the last
+                // committed configuration, which gave us `old_epoch`. Therefore
+                // the configuration must exist.
+                let old_config = ctx
+                    .persistent_state()
+                    .configuration(*old_epoch)
+                    .expect("config exists");
+
+                let new_epoch = self.configuration.epoch;
+
+                let log = self.log.new(o!(
+                    "last_committed_epoch" => old_epoch.to_string(),
+                    "new_epoch" => new_epoch.to_string()
+                ));
+
+                // Are we trying to retrieve shares for `epoch`?
+                if *old_epoch != epoch {
+                    warn!(
+                        log,
+                        "Received Share from node with wrong epoch";
+                        "received_epoch" => %epoch,
+                        "from" => %from
+                    );
+                    return;
+                }
+
+                // Was the sender a member of the configuration at `old_epoch`?
+                let Some(expected_digest) = old_config.members.get(&from)
+                else {
+                    warn!(
+                        log,
+                        "Received Share from unexpected node";
+                        "received_epoch" => %epoch,
+                        "from" => %from
+                    );
+                    return;
+                };
+
+                // Does the share hash match what we expect?
+                let mut digest = Sha3_256Digest::default();
+                share.digest::<sha3::Sha3_256>(&mut digest.0);
+                if digest != *expected_digest {
+                    error!(
+                        log,
+                        "Received share with invalid digest";
+                        "received_epoch" => %epoch,
+                        "from" => %from
+                    );
+                }
+
+                // A valid share was received. Is it new?
+                if old_collected_shares.insert(from, share).is_some() {
+                    return;
+                }
+
+                // Do we have enough shares to recompute the old rack secret?
+                if old_collected_shares.len() < old_config.threshold.0 as usize
+                {
+                    return;
+                }
+
+                // Reconstruct the old rack secret from the shares we collected.
+                let shares: Vec<_> =
+                    old_collected_shares.values().cloned().collect();
+                let old_rack_secret = match RackSecret::reconstruct(&shares) {
+                    Ok(secret) => {
+                        info!(
+                            log,
+                            "Successfully reconstructed old rack secret"
+                        );
+                        secret
+                    }
+                    Err(err) => {
+                        error!(
+                            log,
+                            "Failed to reconstruct old rack secret";
+                            &err
+                        );
+                        return;
+                    }
+                };
+
+                // Reconstruct the new rack secret from the shares we created
+                // at coordination start time.
+                let shares: Vec<_> = new_shares.values().cloned().collect();
+                let new_rack_secret = match RackSecret::reconstruct(&shares) {
+                    Ok(secret) => {
+                        info!(
+                            log,
+                            "Successfully reconstructed new rack secret"
+                        );
+                        secret
+                    }
+                    Err(err) => {
+                        error!(
+                            log,
+                            "Failed to reconstruct new rack secret";
+                            &err
+                        );
+                        return;
+                    }
+                };
+
+                // Decrypt the encrypted rack secrets from the old config so
+                // that we can add `old_rack_secret` to that set for use in the
+                // new configuration.
+                let mut plaintext_secrets = if let Some(encrypted_secrets) =
+                    &old_config.encrypted_rack_secrets
+                {
+                    match encrypted_secrets.decrypt(
+                        old_config.rack_id,
+                        old_config.epoch,
+                        &old_rack_secret,
+                    ) {
+                        Ok(plaintext) => plaintext,
+                        Err(err) => {
+                            error!(log, "Rack secrets decryption error"; &err);
+                            return;
+                        }
+                    }
+                } else {
+                    PlaintextRackSecrets::new()
+                };
+                plaintext_secrets.insert(*old_epoch, old_rack_secret);
+
+                // Now encrypt the set of old rack secrets with the new rack
+                // secret.
+                let new_encrypted_rack_secrets = match plaintext_secrets
+                    .encrypt(
+                        self.configuration.rack_id,
+                        new_epoch,
+                        &new_rack_secret,
+                    ) {
+                    Ok(ciphertext) => ciphertext,
+                    Err(_) => {
+                        error!(log, "Failed to encrypt plaintext rack secrets");
+                        return;
+                    }
+                };
+
+                // Save the encrypted rack secrets in the current configuration
+                assert!(self.configuration.encrypted_rack_secrets.is_none());
+                self.configuration.encrypted_rack_secrets =
+                    Some(new_encrypted_rack_secrets);
+
+                // Take `new_shares` out of `self.op` so we can include them in
+                // `Prepare` messages;
+                let mut new_shares = mem::take(new_shares);
+
+                // Update our persistent state
+                //
+                // We remove ourself because we don't send a `Prepare` message
+                // to ourself.
+                //
+                // SAFETY: our share already exists at this point and has been
+                // validated as part of the `Configuration` construction.
+                let share = new_shares
+                    .remove(ctx.platform_id())
+                    .expect("my share exists");
+                ctx.update_persistent_state(|ps| {
+                    ps.shares.insert(new_epoch, share);
+                    ps.configs
+                        .insert_unique(self.configuration.clone())
+                        .expect("no existing configuration");
+                    true
+                });
+
+                // Now transition to `CoordinatorOperation::Prepare`
+                let prepares: BTreeMap<_, _> = new_shares
+                    .into_iter()
+                    .map(|(id, share)| {
+                        (id, (self.configuration.clone(), share))
+                    })
+                    .collect();
+                self.op = CoordinatorOperation::Prepare {
+                    prepares,
+                    // Always include ourself
+                    prepare_acks: BTreeSet::from([ctx.platform_id().clone()]),
+                };
+
+                info!(log, "Starting to prepare after collecting shares");
+                self.send_msgs(ctx);
+            }
+            op => {
+                warn!(
+                    self.log,
+                    "Share received when coordinator is not expecting it";
+                    "op" => op.name(),
+                    "epoch" => %epoch,
+                    "from" => %from
+                );
+            }
+        }
+    }
 }
 
 /// What should the coordinator be doing?
 pub enum CoordinatorOperation {
-    // We haven't started implementing this yet
-    #[expect(unused)]
     CollectShares {
-        epoch: Epoch,
-        members: BTreeMap<PlatformId, Sha3_256Digest>,
-        collected_shares: BTreeMap<PlatformId, Share>,
+        old_epoch: Epoch,
+        old_collected_shares: BTreeMap<PlatformId, Share>,
+
+        // These are new shares that the coordinator created that we carry along
+        // until we get to `CoordinatorOperation::Prepare`
         new_shares: BTreeMap<PlatformId, Share>,
     },
     // We haven't started implementing this yet
     // Epoch is always 0
-    #[allow(unused)]
     CollectLrtqShares {
         members: BTreeMap<PlatformId, ShareDigestLrtq>,
         shares: BTreeMap<PlatformId, LrtqShare>,
@@ -248,6 +499,16 @@ impl CoordinatorOperation {
                 "collect lrtq shares"
             }
             CoordinatorOperation::Prepare { .. } => "prepare",
+        }
+    }
+
+    /// Return the members that have acked prepares, if the current operation
+    /// is `Prepare`. Otherwise return an empty set.
+    pub fn acked_prepares(&self) -> BTreeSet<PlatformId> {
+        if let CoordinatorOperation::Prepare { prepare_acks, .. } = self {
+            prepare_acks.clone()
+        } else {
+            BTreeSet::new()
         }
     }
 }

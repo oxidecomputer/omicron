@@ -10,7 +10,6 @@ use crate::{Epoch, PersistentStateSummary, PlatformId, Threshold};
 use omicron_uuid_kinds::RackUuid;
 use slog::{Logger, error, info, warn};
 use std::collections::BTreeSet;
-use std::time::Duration;
 
 /// Rack IDs must remain the same over the lifetime of a trust quorum instance
 pub fn check_rack_id(
@@ -133,9 +132,6 @@ pub struct ValidatedReconfigureMsg {
     members: BTreeSet<PlatformId>,
     threshold: Threshold,
 
-    // The timeout before we send a follow up request to a peer
-    retry_timeout: Duration,
-
     // This is not included in the original `ReconfigureMsg`. It's implicit
     // in the node that Nexus sends the request to.
     coordinator_id: PlatformId,
@@ -149,7 +145,6 @@ impl PartialEq<ValidatedReconfigureMsg> for ReconfigureMsg {
             last_committed_epoch,
             members,
             threshold,
-            retry_timeout,
         } = self;
 
         let ValidatedReconfigureMsg {
@@ -158,7 +153,6 @@ impl PartialEq<ValidatedReconfigureMsg> for ReconfigureMsg {
             last_committed_epoch: other_last_committed_epoch,
             members: other_members,
             threshold: other_threshold,
-            retry_timeout: other_retry_timeout,
             // This field doesn't exist in `ReconfigureMsg` and is not relevant
             // for comparisons.
             coordinator_id: _,
@@ -169,7 +163,6 @@ impl PartialEq<ValidatedReconfigureMsg> for ReconfigureMsg {
             && last_committed_epoch == other_last_committed_epoch
             && members == other_members
             && threshold == other_threshold
-            && retry_timeout == other_retry_timeout
     }
 }
 
@@ -219,7 +212,6 @@ impl ValidatedReconfigureMsg {
             last_committed_epoch,
             members,
             threshold,
-            retry_timeout,
         } = msg;
 
         Ok(Some(ValidatedReconfigureMsg {
@@ -228,7 +220,6 @@ impl ValidatedReconfigureMsg {
             last_committed_epoch,
             members,
             threshold,
-            retry_timeout,
             coordinator_id: coordinator_id.clone(),
         }))
     }
@@ -251,10 +242,6 @@ impl ValidatedReconfigureMsg {
 
     pub fn threshold(&self) -> Threshold {
         self.threshold
-    }
-
-    pub fn retry_timeout(&self) -> Duration {
-        self.retry_timeout
     }
 
     pub fn coordinator_id(&self) -> &PlatformId {
@@ -301,12 +288,11 @@ impl ValidatedReconfigureMsg {
             });
         }
 
-        // Ensure that we haven't seen a prepare message for a newer
-        // configuration.
-        if let Some(last_prepared_epoch) = persistent_state.latest_config {
-            if msg.epoch <= last_prepared_epoch {
+        // Ensure that we haven't seen a newer configuration
+        if let Some(latest_epoch) = persistent_state.latest_config {
+            if msg.epoch <= latest_epoch {
                 return Err(ReconfigurationError::PreparedEpochMismatch {
-                    existing: last_prepared_epoch,
+                    existing: latest_epoch,
                     new: msg.epoch,
                 });
             }
@@ -435,7 +421,6 @@ mod tests {
             last_committed_epoch,
             members: input.members.clone(),
             threshold: Threshold(input.members.len() as u8 - 1),
-            retry_timeout: Duration::from_millis(100),
         };
 
         let platform_id = input.members.first().unwrap().clone();
@@ -469,7 +454,6 @@ mod tests {
                 last_committed_epoch: None,
                 members,
                 threshold: msg.threshold,
-                retry_timeout: msg.retry_timeout,
                 coordinator_id: platform_id.clone(),
             };
 
@@ -506,7 +490,6 @@ mod tests {
             last_committed_epoch,
             members: input.members.clone(),
             threshold: Threshold(input.members.len() as u8 - 1),
-            retry_timeout: Duration::from_millis(100),
         };
 
         let platform_id = input.members.first().unwrap().clone();
@@ -541,7 +524,6 @@ mod tests {
                 last_committed_epoch: None,
                 members,
                 threshold: msg.threshold,
-                retry_timeout: msg.retry_timeout,
                 coordinator_id: platform_id.clone(),
             };
 
