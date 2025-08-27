@@ -21,6 +21,7 @@ use crate::planner::image_source::NoopConvertHostPhase2Contents;
 use crate::planner::image_source::NoopConvertZoneStatus;
 use crate::planner::omicron_zone_placement::PlacementError;
 use gateway_client::types::SpType;
+use iddqd::IdOrdMap;
 use itertools::Itertools;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryResult;
 use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
@@ -65,6 +66,8 @@ use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::str::FromStr;
+use swrite::SWrite;
+use swrite::swriteln;
 
 pub(crate) use self::image_source::NoopConvertGlobalIneligibleReason;
 pub(crate) use self::image_source::NoopConvertInfo;
@@ -174,8 +177,7 @@ impl<'a> Planner<'a> {
 
         let mut noop_info =
             NoopConvertInfo::new(self.input, self.inventory, &self.blueprint)?;
-        let plan_mupdate_override_res =
-            self.do_plan_mupdate_override(&mut noop_info)?;
+        let actions_by_sled = self.do_plan_mupdate_override(&mut noop_info)?;
 
         // Log noop-convert results after do_plan_mupdate_override, because this
         // step might alter noop_info.
@@ -183,31 +185,32 @@ impl<'a> Planner<'a> {
 
         // Within `do_plan_noop_image_source`, we plan noop image sources on
         // sleds other than those currently affected by mupdate overrides. This
-        // means that we don't have to wait for the `plan_mupdate_override_res`
-        // result for that step.
+        // means that we don't have to consider anything
+        // `do_plan_mupdate_override` does for this step.
         let noop_image_source = self.do_plan_noop_image_source(noop_info)?;
+
+        let add_update_blocked_reasons =
+            self.should_plan_add_or_update(&actions_by_sled)?;
 
         // Only plan MGS-based updates updates if there are no outstanding
         // MUPdate overrides.
-        let mgs_updates = if plan_mupdate_override_res.is_empty() {
+        let mgs_updates = if add_update_blocked_reasons.is_empty() {
             self.do_plan_mgs_updates()?
         } else {
             PlanningMgsUpdatesStepReport::new(PendingMgsUpdates::new())
         };
 
         // Likewise for zone additions, unless overridden with the chicken switch.
-        let has_mupdate_override = !plan_mupdate_override_res.is_empty();
         let add_zones_with_mupdate_override =
             self.input.chicken_switches().add_zones_with_mupdate_override;
-        let mut add =
-            if !has_mupdate_override || add_zones_with_mupdate_override {
-                self.do_plan_add(&mgs_updates)?
-            } else {
-                PlanningAddStepReport::waiting_on(
-                    ZoneAddWaitingOn::MupdateOverrides,
-                )
-            };
-        add.has_mupdate_override = has_mupdate_override;
+        let mut add = if add_update_blocked_reasons.is_empty()
+            || add_zones_with_mupdate_override
+        {
+            self.do_plan_add(&mgs_updates)?
+        } else {
+            PlanningAddStepReport::waiting_on(ZoneAddWaitingOn::Blockers)
+        };
+        add.add_update_blocked_reasons = add_update_blocked_reasons;
         add.add_zones_with_mupdate_override = add_zones_with_mupdate_override;
 
         let zone_updates = if add.any_discretionary_zones_placed() {
@@ -223,10 +226,10 @@ impl<'a> Planner<'a> {
             PlanningZoneUpdatesStepReport::waiting_on(
                 ZoneUpdatesWaitingOn::PendingMgsUpdates,
             )
-        } else if !plan_mupdate_override_res.is_empty() {
-            // ... or if there are pending MUPdate overrides.
+        } else if !add.add_update_blocked_reasons.is_empty() {
+            // ... or if there are pending zone add blockers.
             PlanningZoneUpdatesStepReport::waiting_on(
-                ZoneUpdatesWaitingOn::MupdateOverrides,
+                ZoneUpdatesWaitingOn::ZoneAddBlockers,
             )
         } else {
             self.do_plan_zone_updates(&mgs_updates)?
@@ -1528,10 +1531,12 @@ impl<'a> Planner<'a> {
         Ok(report)
     }
 
+    /// Perform planning for mupdate overrides, returning a map of sleds to
+    /// actions taken.
     fn do_plan_mupdate_override(
         &mut self,
         noop_info: &mut NoopConvertInfo,
-    ) -> Result<Vec<String>, Error> {
+    ) -> Result<BTreeMap<SledUuid, EnsureMupdateOverrideAction>, Error> {
         // For each sled, compare what's in the inventory to what's in the
         // blueprint.
         let mut actions_by_sled = BTreeMap::new();
@@ -1638,7 +1643,14 @@ impl<'a> Planner<'a> {
             }
         }
 
-        // Now we need to determine whether to also perform other actions like
+        Ok(actions_by_sled)
+    }
+
+    fn should_plan_add_or_update(
+        &self,
+        actions_by_sled: &BTreeMap<SledUuid, EnsureMupdateOverrideAction>,
+    ) -> Result<Vec<String>, Error> {
+        // We need to determine whether to also perform other actions like
         // updating or adding zones. We have to be careful here:
         //
         // * We may have moved existing zones with an Artifact source to using
@@ -1672,12 +1684,10 @@ impl<'a> Planner<'a> {
         //    system is in a corrupt state. The planner will not take any
         //    actions until the error is resolved.
         //
-        // 4. (TODO: https://github.com/oxidecomputer/omicron/issues/8726)
-        //    If any sleds' deployment units aren't at known versions after
-        //    noop image source changes have been considered, then we shouldn't
-        //    proceed with adding or updating zones. Again, this is driven
-        //    primarily by the desire to minimize the number of versions of
-        //    system software running at any time.
+        // 4. If any sleds' deployment units aren't at known versions, then we
+        //    shouldn't proceed with adding zones or updating deployment units.
+        //    Again, this is driven primarily by the desire to minimize the
+        //    number of versions of system software running at any time.
         //
         // What does "any sleds" mean in this context? We don't need to care
         // about decommissioned or expunged sleds, so we consider in-service
@@ -1747,7 +1757,71 @@ impl<'a> Planner<'a> {
             }
         }
 
-        // TODO: implement condition 4 above.
+        // Condition 4 above.
+        {
+            let mut sleds_with_non_artifact = BTreeMap::new();
+            for sled_id in self.input.all_sled_ids(SledFilter::InService) {
+                let mut zones_with_non_artifact = IdOrdMap::new();
+                // Are all zone image sources set to Artifact?
+                for z in self.blueprint.current_sled_zones(
+                    sled_id,
+                    BlueprintZoneDisposition::is_in_service,
+                ) {
+                    match &z.image_source {
+                        BlueprintZoneImageSource::InstallDataset => {
+                            zones_with_non_artifact.insert_overwrite(z);
+                        }
+                        BlueprintZoneImageSource::Artifact { .. } => {}
+                    }
+                }
+
+                // TODO: (https://github.com/oxidecomputer/omicron/issues/8918)
+                // We should also check that the boot disk's host phase 2
+                // image is a known version.
+                //
+                // Currently, the blueprint doesn't currently cache information
+                // about which disk is the boot disk.
+                //
+                // * Inventory does have this information, but if a sled isn't
+                //   in inventory (due to, say, a transient network error), we
+                //   won't be able to make that determination.
+                //
+                // * So we skip this check under the assumption that if all zone
+                //   image sources are at known versions, the host phase 2 image
+                //   is also most likely at a known version.
+                //
+                // We really should explicitly check that the host phase 2 image
+                // is known, though!
+
+                if !zones_with_non_artifact.is_empty() {
+                    sleds_with_non_artifact
+                        .insert(sled_id, zones_with_non_artifact);
+                }
+            }
+
+            if !sleds_with_non_artifact.is_empty() {
+                let mut reason =
+                    "sleds have deployment units with image sources \
+                     not set to Artifact:\n"
+                        .to_owned();
+                for (sled_id, zones_with_non_artifact) in
+                    &sleds_with_non_artifact
+                {
+                    swriteln!(
+                        reason,
+                        "- sled {sled_id}: {} {}",
+                        zones_with_non_artifact.len(),
+                        if zones_with_non_artifact.len() == 1 {
+                            "zone"
+                        } else {
+                            "zones"
+                        }
+                    );
+                }
+
+                reasons.push(reason);
+            }
+        }
 
         Ok(reasons)
     }

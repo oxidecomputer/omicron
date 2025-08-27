@@ -401,6 +401,8 @@ struct SledSetArgs {
 enum SledSetCommand {
     /// set the policy for this sled
     Policy(SledSetPolicyArgs),
+    /// set the Omicron config for this sled from a blueprint
+    OmicronConfig(SledSetOmicronConfigArgs),
     #[clap(flatten)]
     Visibility(SledSetVisibilityCommand),
     /// set the mupdate override for this sled
@@ -412,6 +414,12 @@ struct SledSetPolicyArgs {
     /// the policy to set
     #[clap(value_enum)]
     policy: SledPolicyOpt,
+}
+
+#[derive(Debug, Args)]
+struct SledSetOmicronConfigArgs {
+    /// the blueprint to derive the Omicron config from
+    blueprint: BlueprintIdOpt,
 }
 
 #[derive(Debug, Subcommand)]
@@ -1515,6 +1523,30 @@ fn cmd_sled_set(
                 state,
             );
             Ok(Some(format!("set sled {sled_id} policy to {policy}")))
+        }
+        SledSetCommand::OmicronConfig(command) => {
+            let resolved_id =
+                system.resolve_blueprint_id(command.blueprint.into())?;
+            let blueprint = system.get_blueprint(&resolved_id)?;
+            let sled_cfg =
+                blueprint.sleds.get(&sled_id).with_context(|| {
+                    format!("sled id {sled_id} not found in blueprint")
+                })?;
+            let omicron_sled_cfg =
+                sled_cfg.clone().into_in_service_sled_config();
+            system
+                .description_mut()
+                .sled_set_omicron_config(sled_id, omicron_sled_cfg)?;
+            sim.commit_and_bump(
+                format!(
+                    "reconfigurator-cli sled-set omicron-config: \
+                     {sled_id} from {resolved_id}",
+                ),
+                state,
+            );
+            Ok(Some(format!(
+                "set sled {sled_id} omicron config from {resolved_id}"
+            )))
         }
         SledSetCommand::Visibility(command) => {
             let new = command.to_visibility();

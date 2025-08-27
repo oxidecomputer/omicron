@@ -7,6 +7,42 @@ show
 # Create a TUF repository from a fake manifest. (The output TUF repo is
 # written to a temporary directory that this invocation of `reconfigurator-cli`
 # is running out of as its working directory.)
+#
+# This is used to simulate the initial version of the system.
+tuf-assemble ../../update-common/manifests/fake-0.0.1.toml
+
+# Load the target release from the assembled TUF repository.
+set target-release repo-0.0.1.zip
+
+# Print the default target release.
+show
+
+# Update the install dataset on all sleds to the target release.
+# This will cause zones to be noop converted over to Artifact,
+# unblocking upgrades.
+sled-update-install-dataset serial0 --to-target-release
+sled-update-install-dataset serial1 --to-target-release
+sled-update-install-dataset serial2 --to-target-release
+
+# Generate inventory, then do a planning run to ensure that all zones
+# are set to Artifact.
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+# The above run would have triggered an SP update, which we should delete (we want to start
+# from a fresh state).
+blueprint-edit latest delete-sp-update serial0
+# Also set the Omicron config for all sleds to reflect the
+# corresponding image sources.
+sled-set serial0 omicron-config latest
+sled-set serial1 omicron-config latest
+sled-set serial2 omicron-config latest
+# Generate inventory once more to reflect the omicron config changes.
+inventory-generate
+inventory-show latest
+
+# Setup is now done -- create another TUF repository which will act as the
+# target release being updated to.
 tuf-assemble ../../update-common/manifests/fake.toml
 
 # Load the target release from the assembled TUF repository.
@@ -17,13 +53,12 @@ show
 
 # Test that this state survives a save/load operation.
 save saved.out
-wipe all
+wipe system
 # This should NOT show the target release.
 show
-load saved.out
+load saved.out 61f451b3-2121-4ed6-91c7-a550054f6c21
 # This should show the target release.
 show
-
 
 # Great.  Now, let's run through an upgrade!
 # First, print out what we've got.

@@ -1029,15 +1029,27 @@ empty planning report for blueprint 366b0b68-d80e-4bc1-abd3-dc69837847e0.
 
 
 
+
+> # Set the add_zones_with_mupdate_override chicken switch to ensure that zone
+> # adds happen despite zone image sources not being Artifact.
+> set chicken-switches --add-zones-with-mupdate-override true
+chicken switches updated:
+*   add zones with mupdate override:   false -> true
+
+
+
 > # blueprint-plan will place a new external DNS zone, diff DNS to see the new zone has `ns<N>` and NS records.
 > blueprint-plan 366b0b68-d80e-4bc1-abd3-dc69837847e0
 INFO skipping noop image source check for all sleds, reason: no target release is currently set
-WARN cannot issue more MGS-driven updates (no current artifacts)
 generated blueprint 9c998c1d-1a7b-440a-ae0c-40f781dea6e2 based on parent blueprint 366b0b68-d80e-4bc1-abd3-dc69837847e0
 planning report for blueprint 9c998c1d-1a7b-440a-ae0c-40f781dea6e2:
-chicken switches:
-    add zones with mupdate override:   false
+* zone adds and updates are blocked:
+  - sleds have deployment units with image sources not set to Artifact:
+    - sled 711ac7f8-d19e-4572-bdb9-e9b50f6e362a: 15 zones
+    - sled 9dc50690-f9bf-4520-bf80-051d0f465c2c: 15 zones
+    - sled a88790de-5962-4871-8686-61c1fd5b7094: 15 zones
 
+* adding zones despite being blocked, as specified by the `add_zones_with_mupdate_override` chicken switch
 * discretionary zones placed:
   * 1 zone on sled 711ac7f8-d19e-4572-bdb9-e9b50f6e362a: external_dns
 * zone updates waiting on discretionary zones
@@ -1729,9 +1741,13 @@ parent:    366b0b68-d80e-4bc1-abd3-dc69837847e0
  PENDING MGS-MANAGED UPDATES: 0
 
 planning report for blueprint 9c998c1d-1a7b-440a-ae0c-40f781dea6e2:
-chicken switches:
-    add zones with mupdate override:   false
+* zone adds and updates are blocked:
+  - sleds have deployment units with image sources not set to Artifact:
+    - sled 711ac7f8-d19e-4572-bdb9-e9b50f6e362a: 15 zones
+    - sled 9dc50690-f9bf-4520-bf80-051d0f465c2c: 15 zones
+    - sled a88790de-5962-4871-8686-61c1fd5b7094: 15 zones
 
+* adding zones despite being blocked, as specified by the `add_zones_with_mupdate_override` chicken switch
 * discretionary zones placed:
   * 1 zone on sled 711ac7f8-d19e-4572-bdb9-e9b50f6e362a: external_dns
 * zone updates waiting on discretionary zones
