@@ -261,7 +261,8 @@ impl SagaQuiesceHandle {
     ///
     /// Note that this state can change later if new sagas get assigned to this
     /// Nexus.
-    pub fn is_fully_drained(&self) -> bool {
+    #[cfg(test)]
+    fn is_fully_drained(&self) -> bool {
         self.inner.borrow().is_fully_drained()
     }
 
