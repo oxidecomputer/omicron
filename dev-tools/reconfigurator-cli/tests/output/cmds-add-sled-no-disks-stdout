@@ -274,6 +274,7 @@ parent:    dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21
     internal DNS version:::   1
     external DNS version:::   1
     target release min gen:   1
+    nexus gen::::::::::::::   1
 
  PENDING MGS-MANAGED UPDATES: 0
 

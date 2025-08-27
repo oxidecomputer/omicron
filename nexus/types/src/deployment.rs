@@ -227,6 +227,12 @@ pub struct Blueprint {
     /// driving the system to the target release.
     pub target_release_minimum_generation: Generation,
 
+    /// The generation of the active group of Nexuses
+    ///
+    /// If a Nexus instance notices it has a nexus_generation less than
+    /// this value, it will start to quiesce (see: RFD 588).
+    pub nexus_generation: Generation,
+
     /// CockroachDB state fingerprint when this blueprint was created
     // See `nexus/db-queries/src/db/datastore/cockroachdb_settings.rs` for more
     // on this.
@@ -275,6 +281,7 @@ impl Blueprint {
             external_dns_version: self.external_dns_version,
             target_release_minimum_generation: self
                 .target_release_minimum_generation,
+            nexus_generation: self.nexus_generation,
             cockroachdb_fingerprint: self.cockroachdb_fingerprint.clone(),
             cockroachdb_setting_preserve_downgrade: Some(
                 self.cockroachdb_setting_preserve_downgrade,
@@ -609,6 +616,7 @@ impl BlueprintDisplay<'_> {
                         .target_release_minimum_generation
                         .to_string(),
                 ),
+                (NEXUS_GENERATION, self.blueprint.nexus_generation.to_string()),
             ],
         )
     }
@@ -651,6 +659,7 @@ impl fmt::Display for BlueprintDisplay<'_> {
             // These six fields are handled by `make_metadata_table()`, called
             // below.
             target_release_minimum_generation: _,
+            nexus_generation: _,
             internal_dns_version: _,
             external_dns_version: _,
             time_created: _,
@@ -2073,6 +2082,10 @@ pub struct BlueprintMetadata {
     ///
     /// See [`Blueprint::target_release_minimum_generation`].
     pub target_release_minimum_generation: Generation,
+    /// The Nexus generation number
+    ///
+    /// See [`Blueprint::nexus_generation`].
+    pub nexus_generation: Generation,
     /// CockroachDB state fingerprint when this blueprint was created
     pub cockroachdb_fingerprint: String,
     /// Whether to set `cluster.preserve_downgrade_option` and what to set it to
