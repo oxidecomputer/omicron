@@ -13826,7 +13826,8 @@
                 "type": "object",
                 "properties": {
                   "id": {
-                    "$ref": "#/components/schemas/TypedUuidForInstanceKind"
+                    "type": "string",
+                    "format": "uuid"
                   },
                   "name": {
                     "$ref": "#/components/schemas/Name"
@@ -13993,11 +13994,8 @@
           },
           "alert_id": {
             "description": "The UUID of the event.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/TypedUuidForAlertKind"
-              }
-            ]
+            "type": "string",
+            "format": "uuid"
           },
           "attempts": {
             "description": "Individual attempts to deliver this webhook event, and their outcomes.",
@@ -14014,11 +14012,8 @@
           },
           "receiver_id": {
             "description": "The UUID of the alert receiver that this event was delivered to.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/TypedUuidForAlertReceiverKind"
-              }
-            ]
+            "type": "string",
+            "format": "uuid"
           },
           "state": {
             "description": "The state of this delivery.",
@@ -14514,7 +14509,8 @@
                 "type": "object",
                 "properties": {
                   "id": {
-                    "$ref": "#/components/schemas/TypedUuidForInstanceKind"
+                    "type": "string",
+                    "format": "uuid"
                   },
                   "name": {
                     "$ref": "#/components/schemas/Name"
@@ -24585,7 +24581,8 @@
         "type": "object",
         "properties": {
           "id": {
-            "$ref": "#/components/schemas/TypedUuidForSupportBundleKind"
+            "type": "string",
+            "format": "uuid"
           },
           "reason_for_creation": {
             "type": "string"
@@ -25994,22 +25991,6 @@
             "format": "int32"
           }
         }
-      },
-      "TypedUuidForAlertKind": {
-        "type": "string",
-        "format": "uuid"
-      },
-      "TypedUuidForAlertReceiverKind": {
-        "type": "string",
-        "format": "uuid"
-      },
-      "TypedUuidForInstanceKind": {
-        "type": "string",
-        "format": "uuid"
-      },
-      "TypedUuidForSupportBundleKind": {
-        "type": "string",
-        "format": "uuid"
       },
       "UninitializedSled": {
         "description": "A sled that has not been added to an initialized rack yet",

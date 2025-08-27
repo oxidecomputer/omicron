@@ -8690,7 +8690,8 @@
         "type": "object",
         "properties": {
           "id": {
-            "$ref": "#/components/schemas/TypedUuidForSupportBundleKind"
+            "type": "string",
+            "format": "uuid"
           },
           "reason_for_creation": {
             "type": "string"
@@ -8957,10 +8958,6 @@
         "format": "uuid"
       },
       "TypedUuidForSledKind": {
-        "type": "string",
-        "format": "uuid"
-      },
-      "TypedUuidForSupportBundleKind": {
         "type": "string",
         "format": "uuid"
       },

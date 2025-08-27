@@ -4072,7 +4072,7 @@ async fn cmd_nexus_support_bundles_list(
         user_comment: String,
     }
     let rows = support_bundles.into_iter().map(|sb| SupportBundleInfo {
-        id: *sb.id,
+        id: sb.id,
         time_created: sb.time_created,
         reason_for_creation: sb.reason_for_creation,
         reason_for_failure: sb

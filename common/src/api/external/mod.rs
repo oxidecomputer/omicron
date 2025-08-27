@@ -1301,7 +1301,12 @@ pub enum AffinityGroupMember {
     ///
     /// Instances can belong to up to 16 affinity groups.
     // See: INSTANCE_MAX_AFFINITY_GROUPS
-    Instance { id: InstanceUuid, name: Name, run_state: InstanceState },
+    Instance {
+        #[schemars(with = "Uuid")]
+        id: InstanceUuid,
+        name: Name,
+        run_state: InstanceState,
+    },
 }
 
 impl SimpleIdentityOrName for AffinityGroupMember {
@@ -1332,7 +1337,12 @@ pub enum AntiAffinityGroupMember {
     ///
     /// Instances can belong to up to 16 anti-affinity groups.
     // See: INSTANCE_MAX_ANTI_AFFINITY_GROUPS
-    Instance { id: InstanceUuid, name: Name, run_state: InstanceState },
+    Instance {
+        #[schemars(with = "Uuid")]
+        id: InstanceUuid,
+        name: Name,
+        run_state: InstanceState,
+    },
 }
 
 impl SimpleIdentityOrName for AntiAffinityGroupMember {
