@@ -298,6 +298,7 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
     redactor
         .field("put config ok:", r"\d+")
         .field("list ok:", r"\d+")
+        .field("triggered by", r"[\w ]+")
         .section(&["task: \"tuf_artifact_replication\"", "request ringbuf:"]);
 
     for args in invocations {
