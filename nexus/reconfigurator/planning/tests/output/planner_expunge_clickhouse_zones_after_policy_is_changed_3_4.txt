@@ -338,6 +338,7 @@ to:   blueprint d895ef50-9978-454c-bdfb-b8dbe2c9a918
     internal DNS version:::   1 (unchanged)
     external DNS version:::   1 (unchanged)
     target release min gen:   1 (unchanged)
+    nexus gen::::::::::::::   1 (unchanged)
 
  OXIMETER SETTINGS:
     generation:   1 (unchanged)

@@ -53,10 +53,14 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
         .map_or_else(PlannerChickenSwitches::default, |cs| {
             cs.switches.planner_switches
         });
-    let planning_input =
-        PlanningInputFromDb::assemble(&opctx, &datastore, chicken_switches)
-            .await
-            .expect("planning input");
+    let planning_input = PlanningInputFromDb::assemble(
+        &opctx,
+        &datastore,
+        chicken_switches,
+        None,
+    )
+    .await
+    .expect("planning input");
     let collection = datastore
         .inventory_get_latest_collection(opctx)
         .await
@@ -271,10 +275,14 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
 
     // Now run through the planner.
     info!(log, "running through planner");
-    let planning_input =
-        PlanningInputFromDb::assemble(&opctx, &datastore, chicken_switches)
-            .await
-            .expect("planning input");
+    let planning_input = PlanningInputFromDb::assemble(
+        &opctx,
+        &datastore,
+        chicken_switches,
+        None,
+    )
+    .await
+    .expect("planning input");
     let (_, parent_blueprint) = datastore
         .blueprint_target_get_current_full(opctx)
         .await

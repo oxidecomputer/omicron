@@ -329,6 +329,7 @@ parent:    184f10b3-61cb-41ef-9b93-3489b2bac559
     internal DNS version:::   1
     external DNS version:::   1
     target release min gen:   1
+    nexus gen::::::::::::::   1
 
  PENDING MGS-MANAGED UPDATES: 0
 
@@ -461,6 +462,7 @@ to:   blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
     internal DNS version:::   1 (unchanged)
     external DNS version:::   1 (unchanged)
     target release min gen:   1 (unchanged)
+    nexus gen::::::::::::::   1 (unchanged)
 
  OXIMETER SETTINGS:
     generation:   1 (unchanged)
@@ -820,6 +822,7 @@ to:   blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4
     internal DNS version:::   1 (unchanged)
     external DNS version:::   1 (unchanged)
     target release min gen:   1 (unchanged)
+    nexus gen::::::::::::::   1 (unchanged)
 
  OXIMETER SETTINGS:
     generation:   1 (unchanged)
@@ -1053,7 +1056,7 @@ chicken switches:
     add zones with mupdate override:   false
 
 * discretionary zones placed:
-  * 1 zone on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: internal_dns
+  * internal_dns zone on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c from source install dataset
 * zone updates waiting on discretionary zones
 
 
@@ -1177,6 +1180,7 @@ to:   blueprint af934083-59b5-4bf6-8966-6fb5292c29e1
     internal DNS version:::   1 (unchanged)
     external DNS version:::   1 (unchanged)
     target release min gen:   1 (unchanged)
+    nexus gen::::::::::::::   1 (unchanged)
 
  OXIMETER SETTINGS:
     generation:   1 (unchanged)

@@ -44,6 +44,7 @@ pub mod constants {
     pub const EXTERNAL_DNS_VERSION: &str = "external DNS version";
     // Keep this a bit short to not make the key column too wide.
     pub const TARGET_RELEASE_MIN_GEN: &str = "target release min gen";
+    pub const NEXUS_GENERATION: &str = "nexus gen";
     pub const COMMENT: &str = "comment";
 
     pub const UNCHANGED_PARENS: &str = "(unchanged)";

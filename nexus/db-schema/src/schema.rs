@@ -1968,6 +1968,8 @@ table! {
         cockroachdb_setting_preserve_downgrade -> Nullable<Text>,
 
         target_release_minimum_generation -> Int8,
+
+        nexus_generation -> Int8,
     }
 }
 
@@ -2068,6 +2070,7 @@ table! {
         filesystem_pool -> Uuid,
         image_source -> crate::enums::BpZoneImageSourceEnum,
         image_artifact_sha256 -> Nullable<Text>,
+        nexus_generation -> Nullable<Int8>,
     }
 }
 

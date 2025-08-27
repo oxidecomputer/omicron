@@ -123,6 +123,12 @@ pub struct PlanningInput {
     /// mark under the assumption that they may appear to be impossible because
     /// they're currently in progress.
     ignore_impossible_mgs_updates_since: DateTime<Utc>,
+
+    /// ID of the currently running Nexus zone
+    ///
+    /// This is used to identify which Nexus is currently executing the planning
+    /// operation, which is needed for safe shutdown decisions during handoff.
+    current_nexus_zone_id: Option<OmicronZoneUuid>,
 }
 
 impl PlanningInput {
@@ -240,6 +246,15 @@ impl PlanningInput {
         self.policy.oximeter_read_policy.mode.single_node_enabled()
     }
 
+    /// ID of the currently running Nexus zone
+    pub fn current_nexus_zone_id(&self) -> Option<OmicronZoneUuid> {
+        self.current_nexus_zone_id
+    }
+
+    pub fn set_current_nexus_zone_id(&mut self, id: OmicronZoneUuid) {
+        self.current_nexus_zone_id = Some(id);
+    }
+
     pub fn all_sleds(
         &self,
         filter: SledFilter,
@@ -318,6 +333,7 @@ impl PlanningInput {
             network_resources: self.network_resources,
             ignore_impossible_mgs_updates_since: self
                 .ignore_impossible_mgs_updates_since,
+            current_nexus_zone_id: self.current_nexus_zone_id,
         }
     }
 }
@@ -1260,6 +1276,7 @@ pub struct PlanningInputBuilder {
     sleds: BTreeMap<SledUuid, SledDetails>,
     network_resources: OmicronZoneNetworkResources,
     ignore_impossible_mgs_updates_since: DateTime<Utc>,
+    current_nexus_zone_id: Option<OmicronZoneUuid>,
 }
 
 impl PlanningInputBuilder {
@@ -1288,6 +1305,7 @@ impl PlanningInputBuilder {
             sleds: BTreeMap::new(),
             network_resources: OmicronZoneNetworkResources::new(),
             ignore_impossible_mgs_updates_since: Utc::now(),
+            current_nexus_zone_id: None,
         }
     }
 
@@ -1296,6 +1314,7 @@ impl PlanningInputBuilder {
         internal_dns_version: Generation,
         external_dns_version: Generation,
         cockroachdb_settings: CockroachDbSettings,
+        current_nexus_zone_id: Option<OmicronZoneUuid>,
     ) -> Self {
         Self {
             policy,
@@ -1306,6 +1325,7 @@ impl PlanningInputBuilder {
             network_resources: OmicronZoneNetworkResources::new(),
             ignore_impossible_mgs_updates_since: Utc::now()
                 - MGS_UPDATE_SETTLE_TIMEOUT,
+            current_nexus_zone_id,
         }
     }
 
@@ -1401,6 +1421,13 @@ impl PlanningInputBuilder {
         self.cockroachdb_settings = cockroachdb_settings;
     }
 
+    pub fn set_current_nexus_zone_id(
+        &mut self,
+        current_nexus_zone_id: Option<OmicronZoneUuid>,
+    ) {
+        self.current_nexus_zone_id = current_nexus_zone_id;
+    }
+
     pub fn build(self) -> PlanningInput {
         PlanningInput {
             policy: self.policy,
@@ -1411,6 +1438,7 @@ impl PlanningInputBuilder {
             network_resources: self.network_resources,
             ignore_impossible_mgs_updates_since: self
                 .ignore_impossible_mgs_updates_since,
+            current_nexus_zone_id: self.current_nexus_zone_id,
         }
     }
 }

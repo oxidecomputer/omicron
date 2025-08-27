@@ -1020,6 +1020,7 @@ impl SystemDescription {
             self.internal_dns_version,
             self.external_dns_version,
             CockroachDbSettings::empty(),
+            None,
         );
         builder.set_ignore_impossible_mgs_updates_since(
             self.ignore_impossible_mgs_updates_since,
