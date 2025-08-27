@@ -743,7 +743,7 @@ mod tests {
 
     // Regression for https://github.com/oxidecomputer/omicron/issues/8889
     #[tokio::test]
-    async fn updating_target_does_not_duplicate_samples() {
+    async fn updating_target_changes_existing_sampling_interval() {
         let log = test_logger();
         let sampler = KstatSampler::new(&log).unwrap();
         let link = TestEtherstub::new();
@@ -761,46 +761,28 @@ mod tests {
         let dl = SledDataLink::new(target.clone(), true);
         let collection_interval = Duration::from_millis(10);
         let details = CollectionDetails::never(collection_interval);
-        let _id = sampler.add_target(dl.clone(), details).await.unwrap();
+        let id = sampler.add_target(dl.clone(), details).await.unwrap();
 
         // Update the target.
+        let new_duration = Duration::from_millis(15);
         sampler
-            .update_target(
-                dl,
-                CollectionDetails::never(Duration::from_millis(15)),
-            )
+            .update_target(dl, CollectionDetails::never(new_duration))
             .await
             .unwrap();
 
-        // We'll wait for 150ms. That would be 15 collections at the original
-        // interval, but 10 at the new one. So we can assert that we've actually
-        // updated things, and certainly don't have 25!.
-        tokio::time::pause();
-        const MAX_DURATION: Duration = Duration::from_millis(150);
-        const STEP_DURATION: Duration = Duration::from_millis(1);
-        let now = Instant::now();
-        while now.elapsed() < MAX_DURATION {
-            tokio::time::advance(STEP_DURATION).await;
-        }
-
-        // The assertion here is pretty weak, but we want to make sure that we
-        // don't have double the expected number of collections.
-        let mut n_collections = 0;
-        while let Some(_) = sampler.sample_counts() {
-            n_collections += 1;
-        }
-        assert!(
-            n_collections >= 8,
-            "wrong number of collections: {n_collections}"
-        );
-        assert!(
-            n_collections <= 11,
-            "wrong number of collections: {n_collections}"
+        // Get the futures that the sampler knows about and ensure the value has
+        // been updated.
+        let futs = sampler.future_details().await;
+        assert_eq!(futs.len(), 1, "should have updated the only target");
+        assert_eq!(
+            futs[0],
+            (id, new_duration),
+            "failed to correctly update target"
         );
     }
 
     #[tokio::test]
-    async fn removed_target_is_never_polled() {
+    async fn no_futures_to_await_after_removing_target() {
         let log = test_logger();
         let sampler = KstatSampler::new(&log).unwrap();
         let link = TestEtherstub::new();
@@ -823,14 +805,11 @@ mod tests {
         // And remove right away.
         sampler.remove_target(id).await.unwrap();
 
-        // Ensure we never poll it.
-        tokio::time::pause();
-        const MAX_DURATION: Duration = Duration::from_secs(1);
-        const STEP_DURATION: Duration = Duration::from_millis(1);
-        let now = Instant::now();
-        while now.elapsed() < MAX_DURATION {
-            tokio::time::advance(STEP_DURATION).await;
-        }
-        assert!(sampler.sample_counts().is_none());
+        // And ensure there are zero actual futures
+        let futs = sampler.future_details().await;
+        assert!(
+            futs.is_empty(),
+            "should have zero futures to poll after removing target"
+        );
     }
 }

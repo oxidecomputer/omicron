@@ -187,6 +187,10 @@ enum Request {
     CreationTimes {
         reply_tx: oneshot::Sender<BTreeMap<KstatPath, DateTime<Utc>>>,
     },
+    /// Return the list of IDs and intervals in the set of futures the sampler
+    /// is tracking.
+    #[cfg(all(test, target_os = "illumos"))]
+    FutureDetails { reply_tx: oneshot::Sender<Vec<(TargetId, Duration)>> },
 }
 
 /// Data about a single kstat target.
@@ -356,6 +360,9 @@ struct KstatSamplerWorker {
     /// at construction time. In that case, we'll try again the next time we
     /// need it.
     self_stats: Option<self_stats::SelfStats>,
+
+    /// The futures that resolve when it's time to sample the next target.
+    sample_timeouts: FuturesUnordered<YieldIdAfter>,
 }
 
 fn hostname() -> Option<String> {
@@ -404,6 +411,7 @@ impl KstatSamplerWorker {
             sample_limit,
             self_stat_queue,
             self_stats,
+            sample_timeouts: FuturesUnordered::new(),
         })
     }
 
@@ -416,7 +424,6 @@ impl KstatSamplerWorker {
         #[cfg(all(test, target_os = "illumos"))]
         sample_count_tx: mpsc::UnboundedSender<SampleCounts>,
     ) {
-        let mut sample_timeouts = FuturesUnordered::new();
         let mut creation_prune_interval =
             interval(CREATION_TIME_PRUNE_INTERVAL);
         creation_prune_interval.tick().await; // Completes immediately.
@@ -431,7 +438,7 @@ impl KstatSamplerWorker {
                         );
                     }
                 }
-                maybe_id = sample_timeouts.next(), if !sample_timeouts.is_empty() => {
+                maybe_id = self.sample_timeouts.next(), if !self.sample_timeouts.is_empty() => {
                     let Some((id, interval)) = maybe_id else {
                         unreachable!();
                     };
@@ -441,7 +448,7 @@ impl KstatSamplerWorker {
                         #[cfg(all(test, target_os = "illumos"))]
                         &sample_count_tx,
                     ) {
-                        sample_timeouts.push(next_timeout);
+                        self.sample_timeouts.push(next_timeout);
                     }
                 }
                 maybe_request = self.inbox.recv() => {
@@ -455,25 +462,21 @@ impl KstatSamplerWorker {
                         "request" => ?request,
                     );
                     if let Some(next_op) = self.handle_inbox_request(request) {
-                        self.update_sample_timeouts(&mut sample_timeouts, next_op);
+                        self.update_sample_timeouts(next_op);
                     }
                 }
             }
         }
     }
 
-    fn update_sample_timeouts(
-        &self,
-        sample_timeouts: &mut FuturesUnordered<YieldIdAfter>,
-        next_op: Operation,
-    ) {
+    fn update_sample_timeouts(&mut self, next_op: Operation) {
         match next_op {
-            Operation::Add(fut) => sample_timeouts.push(fut),
+            Operation::Add(fut) => self.sample_timeouts.push(fut),
             Operation::Remove(id) => {
                 // Swap out all futures, and then filter out the one we're now
                 // removing.
-                let old = std::mem::take(sample_timeouts);
-                sample_timeouts
+                let old = std::mem::take(&mut self.sample_timeouts);
+                self.sample_timeouts
                     .extend(old.into_iter().filter(|fut| fut.id != id));
             }
             Operation::Update((new_id, new_interval)) => {
@@ -481,7 +484,11 @@ impl KstatSamplerWorker {
                 //
                 // NOTE: we update the _interval_, not the sleep object itself,
                 // which means this won't take effect until the next tick.
-                match sample_timeouts.iter_mut().find(|fut| fut.id == new_id) {
+                match self
+                    .sample_timeouts
+                    .iter_mut()
+                    .find(|fut| fut.id == new_id)
+                {
                     Some(old) => old.interval = new_interval,
                     None => {
                         warn!(
@@ -491,7 +498,7 @@ impl KstatSamplerWorker {
                             in the set, it will be added directly";
                             "id" => %&new_id,
                         );
-                        sample_timeouts
+                        self.sample_timeouts
                             .push(YieldIdAfter::new(new_id, new_interval));
                     }
                 }
@@ -640,6 +647,18 @@ impl KstatSamplerWorker {
                 debug!(self.log, "request for creation times");
                 reply_tx.send(self.creation_times.clone()).unwrap();
                 debug!(self.log, "sent reply for creation times");
+                None
+            }
+            #[cfg(all(test, target_os = "illumos"))]
+            Request::FutureDetails { reply_tx } => {
+                debug!(self.log, "request for future details");
+                let details = self
+                    .sample_timeouts
+                    .iter()
+                    .map(|fut| (fut.id, fut.interval))
+                    .collect();
+                reply_tx.send(details).unwrap();
+                debug!(self.log, "sent reply for future details");
                 None
             }
         }
@@ -1341,6 +1360,15 @@ impl KstatSampler {
     ) -> BTreeMap<KstatPath, DateTime<Utc>> {
         let (reply_tx, reply_rx) = oneshot::channel();
         let request = Request::CreationTimes { reply_tx };
+        self.outbox.send(request).await.map_err(|_| Error::SendError).unwrap();
+        reply_rx.await.map_err(|_| Error::RecvError).unwrap()
+    }
+
+    /// Return the IDs and sampling intervals for all futures in the sampler.
+    #[cfg(all(test, target_os = "illumos"))]
+    pub(crate) async fn future_details(&self) -> Vec<(TargetId, Duration)> {
+        let (reply_tx, reply_rx) = oneshot::channel();
+        let request = Request::FutureDetails { reply_tx };
         self.outbox.send(request).await.map_err(|_| Error::SendError).unwrap();
         reply_rx.await.map_err(|_| Error::RecvError).unwrap()
     }
