@@ -1060,32 +1060,20 @@ pub async fn detach_ip_address_from_igw(
 pub async fn assert_ip_pool_utilization(
     client: &ClientTestContext,
     pool_name: &str,
-    ipv4_allocated: u32,
-    ipv4_capacity: u32,
-    ipv6_allocated: u128,
-    ipv6_capacity: u128,
+    remaining: f64,
+    capacity: f64,
 ) {
     let url = format!("/v1/system/ip-pools/{}/utilization", pool_name);
     let utilization: views::IpPoolUtilization = object_get(client, &url).await;
     assert_eq!(
-        utilization.ipv4.allocated, ipv4_allocated,
-        "IP pool '{}': expected {} IPv4 allocated, got {:?}",
-        pool_name, ipv4_allocated, utilization.ipv4.allocated
+        remaining, utilization.remaining,
+        "IP pool '{}': expected {} remaining, got {}",
+        pool_name, remaining, utilization.remaining,
     );
     assert_eq!(
-        utilization.ipv4.capacity, ipv4_capacity,
-        "IP pool '{}': expected {} IPv4 capacity, got {:?}",
-        pool_name, ipv4_capacity, utilization.ipv4.capacity
-    );
-    assert_eq!(
-        utilization.ipv6.allocated, ipv6_allocated,
-        "IP pool '{}': expected {} IPv6 allocated, got {:?}",
-        pool_name, ipv6_allocated, utilization.ipv6.allocated
-    );
-    assert_eq!(
-        utilization.ipv6.capacity, ipv6_capacity,
-        "IP pool '{}': expected {} IPv6 capacity, got {:?}",
-        pool_name, ipv6_capacity, utilization.ipv6.capacity
+        capacity, utilization.capacity,
+        "IP pool '{}': expected {} capacity, got {:?}",
+        pool_name, capacity, utilization.capacity,
     );
 }
 
