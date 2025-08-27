@@ -116,7 +116,7 @@ async fn test_blueprint_edit(cptestctx: &ControlPlaneTestContext) {
 
     // Assemble state that we can load into reconfigurator-cli.
     let state1 = nexus_reconfigurator_preparation::reconfigurator_state_load(
-        &opctx, datastore,
+        &opctx, datastore, None,
     )
     .await
     .expect("failed to assemble reconfigurator state");

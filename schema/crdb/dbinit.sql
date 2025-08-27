@@ -4522,7 +4522,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.blueprint (
     -- driving the system to the target release.
     --
     -- This is set to 1 by default in application code.
-    target_release_minimum_generation INT8 NOT NULL
+    target_release_minimum_generation INT8 NOT NULL,
+
+    -- The generation of the active group of Nexus instances
+    nexus_generation INT8 NOT NULL
 );
 
 -- table describing both the current and historical target blueprints of the
@@ -4731,6 +4734,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_omicron_zone (
     -- Blueprint zone image source
     image_source omicron.public.bp_zone_image_source NOT NULL,
     image_artifact_sha256 STRING(64),
+
+    -- Generation for Nexus zones
+    nexus_generation INT8,
 
     PRIMARY KEY (blueprint_id, id),
 
@@ -6562,7 +6568,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '183.0.0', NULL)
+    (TRUE, NOW(), NOW(), '184.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

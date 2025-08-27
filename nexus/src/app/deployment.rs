@@ -139,9 +139,13 @@ impl super::Nexus {
                 switches.switches.planner_switches
             });
 
-        let planning_input =
-            PlanningInputFromDb::assemble(opctx, datastore, chicken_switches)
-                .await?;
+        let planning_input = PlanningInputFromDb::assemble(
+            opctx,
+            datastore,
+            chicken_switches,
+            Some(self.id),
+        )
+        .await?;
 
         // The choice of which inventory collection to use here is not
         // necessarily trivial.  Inventory collections may be incomplete due to

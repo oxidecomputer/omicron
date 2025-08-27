@@ -499,6 +499,7 @@ impl BackgroundTasksInitializer {
         // target blueprint.
         let blueprint_planner = blueprint_planner::BlueprintPlanner::new(
             datastore.clone(),
+            args.nexus_id,
             chicken_switches_watcher.clone(),
             inventory_watcher.clone(),
             rx_blueprint.clone(),

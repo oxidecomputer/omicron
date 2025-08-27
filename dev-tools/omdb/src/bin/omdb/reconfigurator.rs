@@ -148,7 +148,7 @@ async fn cmd_reconfigurator_export(
     // See Nexus::blueprint_planning_context().
     eprint!("assembling reconfigurator state ... ");
     let state = nexus_reconfigurator_preparation::reconfigurator_state_load(
-        opctx, datastore,
+        opctx, datastore, None,
     )
     .await?;
     eprintln!("done");

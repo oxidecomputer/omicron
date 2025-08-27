@@ -3330,12 +3330,16 @@ mod tests {
                     )
                     .expect("ensured disks");
             }
+            let external_tls = false;
+            let external_dns_servers = vec![];
+            let nexus_generation = builder.parent_blueprint().nexus_generation;
             builder
                 .sled_add_zone_nexus_with_config(
                     sled_ids[2],
-                    false,
-                    Vec::new(),
+                    external_tls,
+                    external_dns_servers,
                     BlueprintZoneImageSource::InstallDataset,
+                    nexus_generation,
                 )
                 .expect("added nexus to third sled");
             builder.build()
@@ -3405,12 +3409,17 @@ mod tests {
             )
             .expect("created blueprint builder");
             for &sled_id in &sled_ids {
+                let external_tls = false;
+                let external_dns_servers = vec![];
+                let nexus_generation =
+                    builder.parent_blueprint().nexus_generation;
                 builder
                     .sled_add_zone_nexus_with_config(
                         sled_id,
-                        false,
-                        Vec::new(),
+                        external_tls,
+                        external_dns_servers,
                         BlueprintZoneImageSource::InstallDataset,
+                        nexus_generation,
                     )
                     .expect("added nexus to third sled");
             }
