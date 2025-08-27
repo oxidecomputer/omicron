@@ -12,6 +12,7 @@ use super::PendingMgsUpdates;
 use super::PlannerChickenSwitches;
 
 use daft::Diffable;
+use indent_write::fmt::IndentWriter;
 use omicron_common::policy::COCKROACHDB_REDUNDANCY;
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::MupdateOverrideUuid;
@@ -26,6 +27,7 @@ use serde::Serialize;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::fmt;
+use std::fmt::Write;
 
 /// A full blueprint planning report. Other than the blueprint ID, each
 /// field corresponds to a step in the update planner, i.e., a subroutine
@@ -531,14 +533,15 @@ pub struct PlanningAddSufficientZonesExist {
 )]
 #[serde(rename_all = "snake_case", tag = "type")]
 pub enum ZoneAddWaitingOn {
-    /// Waiting on one or more MUPdate overrides to clear.
-    MupdateOverrides,
+    /// Waiting on one or more blockers (typically MUPdate-related reasons) to
+    /// clear.
+    Blockers,
 }
 
 impl ZoneAddWaitingOn {
     pub fn as_str(&self) -> &'static str {
         match self {
-            Self::MupdateOverrides => "MUPdate overrides",
+            Self::Blockers => "blockers",
         }
     }
 }
@@ -550,10 +553,14 @@ pub struct PlanningAddStepReport {
     /// What are we waiting on to start zone additions?
     pub waiting_on: Option<ZoneAddWaitingOn>,
 
-    /// Are there any outstanding MUPdate overrides?
-    pub has_mupdate_override: bool,
+    /// Reasons why zone adds and any updates are blocked.
+    ///
+    /// This is typically a list of MUPdate-related reasons.
+    pub add_update_blocked_reasons: Vec<String>,
 
-    /// The value of the homonymous chicken switch.
+    /// The value of the homonymous chicken switch. (What this really means is
+    /// that zone adds happen despite being blocked by one or more
+    /// MUPdate-related reasons.)
     pub add_zones_with_mupdate_override: bool,
 
     pub sleds_without_ntp_zones_in_inventory: BTreeSet<SledUuid>,
@@ -580,7 +587,7 @@ impl PlanningAddStepReport {
     pub fn new() -> Self {
         Self {
             waiting_on: None,
-            has_mupdate_override: true,
+            add_update_blocked_reasons: Vec::new(),
             add_zones_with_mupdate_override: false,
             sleds_without_ntp_zones_in_inventory: BTreeSet::new(),
             sleds_without_zpools_for_ntp_zones: BTreeSet::new(),
@@ -602,6 +609,7 @@ impl PlanningAddStepReport {
 
     pub fn is_empty(&self) -> bool {
         self.waiting_on.is_none()
+            && self.add_update_blocked_reasons.is_empty()
             && self.sleds_without_ntp_zones_in_inventory.is_empty()
             && self.sleds_without_zpools_for_ntp_zones.is_empty()
             && self.sleds_waiting_for_ntp_zone.is_empty()
@@ -664,10 +672,10 @@ impl PlanningAddStepReport {
 }
 
 impl fmt::Display for PlanningAddStepReport {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, mut f: &mut fmt::Formatter) -> fmt::Result {
         let Self {
             waiting_on,
-            has_mupdate_override,
+            add_update_blocked_reasons,
             add_zones_with_mupdate_override,
             sleds_without_ntp_zones_in_inventory,
             sleds_without_zpools_for_ntp_zones,
@@ -681,17 +689,27 @@ impl fmt::Display for PlanningAddStepReport {
         } = self;
 
         if let Some(waiting_on) = waiting_on {
-            writeln!(f, "* waiting on {}", waiting_on.as_str())?;
+            writeln!(f, "* zone adds waiting on {}", waiting_on.as_str())?;
         }
 
-        if *has_mupdate_override {
-            writeln!(f, "* MUPdate overrides exist")?;
+        if !add_update_blocked_reasons.is_empty() {
+            // If zone adds are blocked on a set of reasons, zone updates are
+            // blocked on the same reason. Make that clear by saying "zone adds
+            // and updates are blocked" rather than just "zone adds are
+            // blocked".
+            writeln!(f, "* zone adds and updates are blocked:")?;
+            for reason in add_update_blocked_reasons {
+                let mut indent_writer =
+                    IndentWriter::new_skip_initial("    ", f);
+                writeln!(indent_writer, "  - {}", reason)?;
+                f = indent_writer.into_inner();
+            }
         }
 
         if *add_zones_with_mupdate_override {
             writeln!(
                 f,
-                "* adding zones despite MUPdate override, \
+                "* adding zones despite being blocked, \
                    as specified by the `add_zones_with_mupdate_override` \
                    chicken switch"
             )?;
@@ -958,8 +976,8 @@ pub enum ZoneUpdatesWaitingOn {
     /// Waiting on updates to RoT / SP / Host OS / etc.
     PendingMgsUpdates,
 
-    /// Waiting on one or more MUPdate overrides to clear.
-    MupdateOverrides,
+    /// Waiting on the same set of blockers zone adds are waiting on.
+    ZoneAddBlockers,
 }
 
 impl ZoneUpdatesWaitingOn {
@@ -969,7 +987,7 @@ impl ZoneUpdatesWaitingOn {
             Self::PendingMgsUpdates => {
                 "pending MGS updates (RoT / SP / Host OS / etc.)"
             }
-            Self::MupdateOverrides => "MUPdate overrides",
+            Self::ZoneAddBlockers => "zone add blockers",
         }
     }
 }
