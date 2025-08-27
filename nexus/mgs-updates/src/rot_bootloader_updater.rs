@@ -283,10 +283,7 @@ async fn wait_for_stage0_next_image_check(
     sp_slot: u16,
     timeout: Duration,
 ) -> Result<Option<RotImageError>, PostUpdateError> {
-    debug!(
-        log,
-        "attempting to verify image validity"
-    );
+    debug!(log, "attempting to verify image validity");
     match wait_for_boot_info(log, mgs_clients, sp_type, sp_slot, timeout).await
     {
         Ok(state) => match state {
@@ -303,10 +300,7 @@ async fn wait_for_stage0_next_image_check(
                 return Err(PostUpdateError::FatalError { error });
             }
             RotState::V3 { stage0next_error, .. } => {
-                debug!(
-                    log,
-                    "successfully completed an image signature check"
-                );
+                debug!(log, "successfully completed an image signature check");
                 return Ok(stage0next_error);
             }
             // This is unreachable because wait_for_boot_info loops for some
