@@ -14,6 +14,7 @@ use chrono::Utc;
 use diesel::prelude::*;
 use futures::FutureExt;
 use nexus_db_errors::ErrorHandler;
+use nexus_db_errors::OptionalError;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_model::AllSchemaVersions;
 use nexus_db_model::DB_METADATA_NEXUS_SCHEMA_VERSION;
@@ -30,6 +31,51 @@ use semver::Version;
 use slog::{Logger, error, info, o};
 use std::ops::Bound;
 use std::str::FromStr;
+
+/// Errors that can occur during handoff operations
+#[derive(Debug, thiserror::Error)]
+pub enum HandoffError {
+    #[error(
+        "Cannot perform handoff: \
+         {active_count} Nexus instance(s) are still active. \
+         All instances must be quiesced or not_yet before handoff can proceed."
+    )]
+    ActiveNexusInstancesExist { active_count: u32 },
+
+    #[error(
+        "Cannot perform handoff: \
+         Nexus {nexus_id} does not have a record in db_metadata_nexus table. \
+         This Nexus must be registered before it can become active."
+    )]
+    NexusNotRegistered { nexus_id: OmicronZoneUuid },
+
+    #[error(
+        "Cannot perform handoff: \
+         Nexus {nexus_id} is in state {current_state:?}. \
+         Must be in 'not_yet' state to become active."
+    )]
+    NexusInWrongState {
+        nexus_id: OmicronZoneUuid,
+        current_state: DbMetadataNexusState,
+    },
+}
+
+impl From<HandoffError> for Error {
+    fn from(err: HandoffError) -> Self {
+        use HandoffError::*;
+        match err {
+            // These conditions are all errors that may occur transiently, with
+            // handoff from old -> new Nexus, or with multiple Nexuses
+            // concurrently attempting to perform the handoff operation.
+            //
+            // As a result, each returns a "503" error indicating that a retry
+            // should be attempted.
+            ActiveNexusInstancesExist { .. }
+            | NexusNotRegistered { .. }
+            | NexusInWrongState { .. } => Error::unavail(&err.to_string()),
+        }
+    }
+}
 
 // A SchemaVersion which uses a pre-release value to indicate
 // "incremental progress".
@@ -819,6 +865,116 @@ impl DataStore {
 
         Ok(())
     }
+
+    // Implementation function for attempt_handoff that runs within a
+    // transaction
+    //
+    // This function must be executed from a transaction context to be safe.
+    async fn attempt_handoff_impl(
+        conn: async_bb8_diesel::Connection<DbConnection>,
+        nexus_id: OmicronZoneUuid,
+        err: OptionalError<HandoffError>,
+    ) -> Result<(), diesel::result::Error> {
+        use nexus_db_schema::schema::db_metadata_nexus::dsl;
+
+        // Before proceeding, all records must be in the "quiesced" or "not_yet"
+        // states.
+        //
+        // We explicitly look for any records violating this, rather than
+        // explicitly looking for "active" records, as to protect ourselves from
+        // future states being added over time.
+        //
+        // There is no concern of time-of-check-to-time-of-use bugs because
+        // this function must be executed within a transaction.
+        let active_count: nexus_db_model::SqlU32 = dsl::db_metadata_nexus
+            .filter(
+                dsl::state
+                    .ne(DbMetadataNexusState::Quiesced)
+                    .and(dsl::state.ne(DbMetadataNexusState::NotYet)),
+            )
+            .count()
+            .get_result_async(&conn)
+            .await?;
+        let active_count: u32 = active_count.0;
+        if active_count > 0 {
+            return Err(err.bail(HandoffError::ActiveNexusInstancesExist {
+                active_count,
+            }));
+        }
+
+        // Check that our nexus has a "not_yet" record
+        //
+        // Only read the "state" field to avoid reading the rest of the struct,
+        // in case additional columns are added over time.
+        let our_nexus_state: Option<DbMetadataNexusState> =
+            dsl::db_metadata_nexus
+                .filter(
+                    dsl::nexus_id
+                        .eq(nexus_db_model::to_db_typed_uuid(nexus_id)),
+                )
+                .select(dsl::state)
+                .get_result_async(&conn)
+                .await
+                .optional()?;
+        let Some(our_state) = our_nexus_state else {
+            return Err(err.bail(HandoffError::NexusNotRegistered { nexus_id }));
+        };
+        if our_state != DbMetadataNexusState::NotYet {
+            return Err(err.bail(HandoffError::NexusInWrongState {
+                nexus_id,
+                current_state: our_state,
+            }));
+        }
+
+        // Update all "not_yet" records to "active"
+        diesel::update(dsl::db_metadata_nexus)
+            .filter(dsl::state.eq(DbMetadataNexusState::NotYet))
+            .set(dsl::state.eq(DbMetadataNexusState::Active))
+            .execute_async(&conn)
+            .await?;
+
+        Ok(())
+    }
+
+    /// Attempts to perform a handoff to activate this Nexus for database
+    /// access.
+    ///
+    /// This function checks that:
+    /// 1. ALL records in db_metadata_nexus are in "not_yet" or "quiesced"
+    ///    states
+    /// 2. The specified nexus_id has a record which is "not_yet"
+    ///
+    /// If both conditions are met, it updates ALL "not_yet" records to
+    /// "active". These operations are performed transactionally.
+    ///
+    /// Returns an error if:
+    /// - Any record is in "active" state
+    /// - The specified nexus_id doesn't have a "not_yet" record
+    /// - Database transaction fails
+    pub async fn attempt_handoff(
+        &self,
+        nexus_id: OmicronZoneUuid,
+    ) -> Result<(), Error> {
+        let err = OptionalError::new();
+        let conn = self.pool_connection_unauthorized().await?;
+
+        self.transaction_retry_wrapper("attempt_handoff")
+            .transaction(&conn, |conn| {
+                let err = err.clone();
+                async move {
+                    Self::attempt_handoff_impl(conn, nexus_id, err).await
+                }
+            })
+            .await
+            .map_err(|e| {
+                if let Some(err) = err.take() {
+                    err.into()
+                } else {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                }
+            })
+    }
+
     pub async fn database_schema_version(
         &self,
     ) -> Result<(Version, Option<Version>), Error> {
@@ -973,6 +1129,7 @@ impl DataStore {
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::db::datastore::IdentityCheckPolicy;
     use crate::db::pub_test_utils::TestDatabase;
     use camino::Utf8Path;
     use camino_tempfile::Utf8TempDir;
@@ -1273,6 +1430,255 @@ mod test {
             .await
             .expect("Failed to get data");
         assert_eq!(data, "abcd");
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_attempt_handoff_with_active_records() {
+        let logctx =
+            dev::test_setup_log("test_attempt_handoff_with_active_records");
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let datastore =
+            DataStore::new_unchecked(logctx.log.clone(), db.pool().clone());
+
+        // Set up test data: create some nexus records, including one active
+        let nexus1_id = OmicronZoneUuid::new_v4();
+        let nexus2_id = OmicronZoneUuid::new_v4();
+        let nexus3_id = OmicronZoneUuid::new_v4();
+
+        // Insert records: one active, one not_yet, one quiesced
+        datastore
+            .database_nexus_access_insert(
+                nexus1_id,
+                DbMetadataNexusState::Active,
+            )
+            .await
+            .expect("Failed to insert active nexus");
+        datastore
+            .database_nexus_access_insert(
+                nexus2_id,
+                DbMetadataNexusState::NotYet,
+            )
+            .await
+            .expect("Failed to insert not_yet nexus");
+        datastore
+            .database_nexus_access_insert(
+                nexus3_id,
+                DbMetadataNexusState::Quiesced,
+            )
+            .await
+            .expect("Failed to insert quiesced nexus");
+
+        // Attempt handoff with nexus2 - should fail because nexus1 is active
+        let result = datastore.attempt_handoff(nexus2_id).await;
+        assert!(result.is_err());
+        let error_msg = format!("{}", result.unwrap_err());
+        assert!(
+            error_msg.contains("1 Nexus instance(s) are still active"),
+            "Expected error about active instances, got: {}",
+            error_msg
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_attempt_handoff_nexus_not_registered() {
+        let logctx =
+            dev::test_setup_log("test_attempt_handoff_nexus_not_registered");
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let datastore =
+            DataStore::new_unchecked(logctx.log.clone(), db.pool().clone());
+
+        // Set up test data: create some other nexus records but not the one we're trying to handoff
+        let nexus1_id = OmicronZoneUuid::new_v4();
+        let nexus2_id = OmicronZoneUuid::new_v4();
+        let unregistered_nexus_id = OmicronZoneUuid::new_v4();
+
+        datastore
+            .database_nexus_access_insert(
+                nexus1_id,
+                DbMetadataNexusState::NotYet,
+            )
+            .await
+            .expect("Failed to insert nexus1");
+        datastore
+            .database_nexus_access_insert(
+                nexus2_id,
+                DbMetadataNexusState::Quiesced,
+            )
+            .await
+            .expect("Failed to insert nexus2");
+
+        // Attempt handoff with unregistered nexus - should fail
+        let result = datastore.attempt_handoff(unregistered_nexus_id).await;
+        assert!(result.is_err());
+        let error_msg = format!("{}", result.unwrap_err());
+        assert!(
+            error_msg
+                .contains("does not have a record in db_metadata_nexus table"),
+            "Expected error about unregistered nexus, got: {}",
+            error_msg
+        );
+        assert!(
+            error_msg.contains(&unregistered_nexus_id.to_string()),
+            "Expected error to contain nexus ID {}, got: {}",
+            unregistered_nexus_id,
+            error_msg
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_attempt_handoff_nexus_wrong_state() {
+        let logctx =
+            dev::test_setup_log("test_attempt_handoff_nexus_wrong_state");
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let datastore =
+            DataStore::new_unchecked(logctx.log.clone(), db.pool().clone());
+
+        // Set up test data: create nexus records where our target is in wrong state
+        let nexus1_id = OmicronZoneUuid::new_v4();
+        let nexus2_id = OmicronZoneUuid::new_v4();
+        let quiesced_nexus_id = OmicronZoneUuid::new_v4();
+
+        datastore
+            .database_nexus_access_insert(
+                nexus1_id,
+                DbMetadataNexusState::NotYet,
+            )
+            .await
+            .expect("Failed to insert nexus1");
+        datastore
+            .database_nexus_access_insert(
+                nexus2_id,
+                DbMetadataNexusState::NotYet,
+            )
+            .await
+            .expect("Failed to insert nexus2");
+        datastore
+            .database_nexus_access_insert(
+                quiesced_nexus_id,
+                DbMetadataNexusState::Quiesced,
+            )
+            .await
+            .expect("Failed to insert quiesced nexus");
+
+        // Attempt handoff with quiesced nexus - should fail
+        let result = datastore.attempt_handoff(quiesced_nexus_id).await;
+        assert!(result.is_err());
+        let error_msg = format!("{}", result.unwrap_err());
+        assert!(
+            error_msg.contains("is in state Quiesced"),
+            "Expected error about wrong state, got: {}",
+            error_msg
+        );
+        assert!(
+            error_msg.contains("Must be in 'not_yet' state to become active"),
+            "Expected error to mention required state, got: {}",
+            error_msg
+        );
+        assert!(
+            error_msg.contains(&quiesced_nexus_id.to_string()),
+            "Expected error to contain nexus ID {}, got: {}",
+            quiesced_nexus_id,
+            error_msg
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_attempt_handoff_success() {
+        let logctx = dev::test_setup_log("test_attempt_handoff_success");
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let datastore =
+            DataStore::new_unchecked(logctx.log.clone(), db.pool().clone());
+
+        // Set up test data: create multiple nexus records in not_yet and
+        // quiesced states
+        let nexus1_id = OmicronZoneUuid::new_v4();
+        let nexus2_id = OmicronZoneUuid::new_v4();
+        let nexus3_id = OmicronZoneUuid::new_v4();
+
+        datastore
+            .database_nexus_access_insert(
+                nexus1_id,
+                DbMetadataNexusState::NotYet,
+            )
+            .await
+            .expect("Failed to insert nexus1");
+        datastore
+            .database_nexus_access_insert(
+                nexus2_id,
+                DbMetadataNexusState::NotYet,
+            )
+            .await
+            .expect("Failed to insert nexus2");
+        datastore
+            .database_nexus_access_insert(
+                nexus3_id,
+                DbMetadataNexusState::Quiesced,
+            )
+            .await
+            .expect("Failed to insert nexus3");
+
+        // Verify initial state: all not_yet or quiesced
+        let nexus1_before = datastore
+            .database_nexus_access(nexus1_id)
+            .await
+            .expect("Failed to get nexus1")
+            .expect("nexus1 should exist");
+        let nexus2_before = datastore
+            .database_nexus_access(nexus2_id)
+            .await
+            .expect("Failed to get nexus2")
+            .expect("nexus2 should exist");
+        let nexus3_before = datastore
+            .database_nexus_access(nexus3_id)
+            .await
+            .expect("Failed to get nexus3")
+            .expect("nexus3 should exist");
+
+        assert_eq!(nexus1_before.state(), DbMetadataNexusState::NotYet);
+        assert_eq!(nexus2_before.state(), DbMetadataNexusState::NotYet);
+        assert_eq!(nexus3_before.state(), DbMetadataNexusState::Quiesced);
+
+        // Attempt handoff with nexus2 - should succeed
+        let result = datastore.attempt_handoff(nexus2_id).await;
+        if let Err(ref e) = result {
+            panic!("Handoff should succeed but got error: {}", e);
+        }
+        assert!(result.is_ok());
+
+        // Verify final state: all not_yet records should now be active,
+        // quiesced should remain quiesced
+        let nexus1_after = datastore
+            .database_nexus_access(nexus1_id)
+            .await
+            .expect("Failed to get nexus1")
+            .expect("nexus1 should exist");
+        let nexus2_after = datastore
+            .database_nexus_access(nexus2_id)
+            .await
+            .expect("Failed to get nexus2")
+            .expect("nexus2 should exist");
+        let nexus3_after = datastore
+            .database_nexus_access(nexus3_id)
+            .await
+            .expect("Failed to get nexus3")
+            .expect("nexus3 should exist");
+
+        assert_eq!(nexus1_after.state(), DbMetadataNexusState::Active);
+        assert_eq!(nexus2_after.state(), DbMetadataNexusState::Active);
+        // Should remain unchanged
+        assert_eq!(nexus3_after.state(), DbMetadataNexusState::Quiesced);
 
         db.terminate().await;
         logctx.cleanup_successful();
