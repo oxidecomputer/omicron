@@ -9,7 +9,9 @@
 //! other nodes so  that it can compute its own key share.
 
 use crate::crypto::Sha3_256Digest;
-use crate::{Configuration, Epoch, NodeHandlerCtx, PeerMsgKind, PlatformId};
+use crate::{
+    Alarm, Configuration, Epoch, NodeHandlerCtx, PeerMsgKind, PlatformId,
+};
 use gfss::gf256::Gf256;
 use gfss::shamir::{self, Share};
 use slog::{Logger, error, o, warn};
@@ -101,6 +103,7 @@ impl KeyShareComputer {
                 "epoch" => %epoch,
                 "from" => %from
             );
+            return false;
         }
 
         // A valid share was received. Is it new?
@@ -116,12 +119,23 @@ impl KeyShareComputer {
         // What index are we in the configuration? This is our "x-coordinate"
         // for our key share calculation. We always start indexing from 1, since
         // 0 is the rack secret.
-        let index = self
-            .config
-            .members
-            .keys()
-            .position(|id| id == ctx.platform_id())
-            .expect("node exists");
+        let index =
+            self.config.members.keys().position(|id| id == ctx.platform_id());
+
+        let Some(index) = index else {
+            let msg = concat!(
+                "Failed to get index for ourselves in current configuration. ",
+                "We are not a member, and must have been expunged."
+            );
+            error!(
+                self.log,
+                "{msg}";
+                "platform_id" => %ctx.platform_id(),
+                "config" => ?self.config
+            );
+            return false;
+        };
+
         let x_coordinate =
             Gf256::new(u8::try_from(index + 1).expect("index fits in u8"));
 
@@ -137,11 +151,9 @@ impl KeyShareComputer {
                 });
                 true
             }
-            Err(e) => {
-                // TODO: put the node into into an `Alarm` state similar to
-                // https://github.com/oxidecomputer/omicron/pull/8062 once we
-                // have alarms?
-                error!(self.log, "Failed to compute share: {}", e);
+            Err(err) => {
+                error!(self.log, "Failed to compute share: {}", err);
+                ctx.raise_alarm(Alarm::ShareComputationFailed { epoch, err });
                 false
             }
         }

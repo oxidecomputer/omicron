@@ -20,7 +20,7 @@ use crate::validators::{
     MismatchedRackIdError, ReconfigurationError, ValidatedReconfigureMsg,
 };
 use crate::{
-    Configuration, CoordinatorState, Epoch, NodeHandlerCtx, PlatformId,
+    Alarm, Configuration, CoordinatorState, Epoch, NodeHandlerCtx, PlatformId,
     messages::*,
 };
 use gfss::shamir::Share;
@@ -308,28 +308,33 @@ impl Node {
                 "epoch" => %config.epoch
             );
             ctx.update_persistent_state(|ps| ps.commits.insert(config.epoch));
+            return;
         }
 
         // Do we have the configuration in our persistent state? If not save it.
-        ctx.update_persistent_state(|ps| {
-            if let Err(e) = ps.configs.insert_unique(config.clone()) {
-                let existing =
-                    e.duplicates().first().expect("duplicate exists");
-                if *existing != &config {
-                    error!(
-                        self.log,
-                        "Received a configuration mismatch";
-                        "from" => %from,
-                        "existing_config" => #?existing,
-                        "received_config" => #?config
-                    );
-                    // TODO: Alarm
-                }
-                false
-            } else {
-                true
+        if let Some(existing) =
+            ctx.persistent_state().configuration(config.epoch)
+        {
+            if existing != &config {
+                error!(
+                    self.log,
+                    "Received a configuration mismatch";
+                    "from" => %from,
+                    "existing_config" => #?existing,
+                    "received_config" => #?config
+                );
+                ctx.raise_alarm(Alarm::MismatchedConfigurations {
+                    config1: (*existing).clone(),
+                    config2: config.clone(),
+                    from: from.clone(),
+                });
             }
-        });
+        } else {
+            ctx.update_persistent_state(|ps| {
+                ps.configs.insert_unique(config.clone()).expect("new config");
+                true
+            });
+        }
 
         // Are we coordinating for an older epoch? If so, cancel.
         if let Some(cs) = &self.coordinator_state {
@@ -343,14 +348,14 @@ impl Node {
                     "received_epoch" => %config.epoch
                 );
                 self.coordinator_state = None;
+                // Intentionally fall through
             } else if coordinating_epoch == config.epoch {
-                error!(
+                info!(
                     self.log,
                     "Received CommitAdvance while coordinating for same epoch!";
                     "from" => %from,
                     "epoch" => %config.epoch
                 );
-                // TODO: Alarm
                 return;
             } else {
                 info!(
@@ -399,7 +404,8 @@ impl Node {
             }
         }
 
-        // We either were collectiong shares for an old epoch or haven't started yet.
+        // We either were collectiong shares for an old epoch or haven't started
+        // yet.
         self.key_share_computer =
             Some(KeyShareComputer::new(&self.log, ctx, config));
     }
@@ -414,6 +420,18 @@ impl Node {
             ctx.persistent_state().latest_committed_configuration()
         {
             if latest_committed_config.epoch > epoch {
+                if !latest_committed_config.members.contains_key(&from) {
+                    info!(
+                        self.log,
+                        "Received a GetShare message from expunged node";
+                        "from" => %from,
+                        "latest_committed_epoch" =>
+                            %latest_committed_config.epoch,
+                        "requested_epoch" => %epoch
+                    );
+                    // TODO: Send an expunged message
+                    return;
+                }
                 info!(
                     self.log,
                     concat!(
@@ -428,6 +446,20 @@ impl Node {
                     from,
                     PeerMsgKind::CommitAdvance(latest_committed_config.clone()),
                 );
+                return;
+            }
+        }
+
+        // Do we have the configuration? Is the requesting peer a member?
+        if let Some(config) = ctx.persistent_state().configuration(epoch) {
+            if !config.members.contains_key(&from) {
+                info!(
+                    self.log,
+                    "Received a GetShare message from expunged node";
+                    "from" => %from,
+                    "epoch" => %epoch
+                );
+                // TODO: Send an expunged message
                 return;
             }
         }

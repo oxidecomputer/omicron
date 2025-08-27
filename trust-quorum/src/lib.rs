@@ -23,7 +23,9 @@ mod persistent_state;
 mod validators;
 pub use configuration::Configuration;
 pub use coordinator_state::{CoordinatorOperation, CoordinatorState};
+mod alarm;
 
+pub use alarm::Alarm;
 pub use crypto::RackSecret;
 pub use messages::*;
 pub use node::Node;
