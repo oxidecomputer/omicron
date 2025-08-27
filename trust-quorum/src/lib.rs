@@ -21,7 +21,8 @@ mod node_ctx;
 mod persistent_state;
 mod validators;
 pub use configuration::Configuration;
-pub(crate) use coordinator_state::CoordinatorState;
+pub use coordinator_state::{CoordinatorOperation, CoordinatorState};
+
 pub use crypto::RackSecret;
 pub use messages::*;
 pub use node::Node;
@@ -38,6 +39,7 @@ pub use persistent_state::{PersistentState, PersistentStateSummary};
     Eq,
     PartialOrd,
     Ord,
+    Hash,
     Serialize,
     Deserialize,
     Display,
