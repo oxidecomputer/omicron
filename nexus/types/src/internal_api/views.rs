@@ -8,6 +8,7 @@ use crate::inventory::BaseboardId;
 use crate::inventory::Caboose;
 use crate::inventory::CabooseWhich;
 use crate::inventory::Collection;
+use crate::quiesce::SagaQuiesceStatus;
 use chrono::DateTime;
 use chrono::SecondsFormat;
 use chrono::Utc;
@@ -721,12 +722,8 @@ pub struct QuiesceStatus {
     /// what stage of quiescing is Nexus at
     pub state: QuiesceState,
 
-    /// what sagas are currently running or known needing to be recovered
-    ///
-    /// This should only be non-empty when state is `Running` or
-    /// `WaitingForSagas`.  Entries here prevent transitioning from
-    /// `WaitingForSagas` to `WaitingForDb`.
-    pub sagas_pending: IdOrdMap<PendingSagaInfo>,
+    /// information about saga quiescing
+    pub sagas: SagaQuiesceStatus,
 
     /// what database claims are currently held (by any part of Nexus)
     ///

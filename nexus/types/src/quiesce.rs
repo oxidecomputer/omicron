@@ -12,6 +12,8 @@ use iddqd::IdOrdMap;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::Generation;
 use omicron_uuid_kinds::BlueprintUuid;
+use schemars::JsonSchema;
+use serde::Serialize;
 use slog::Logger;
 use slog::error;
 use slog::info;
@@ -25,7 +27,8 @@ use tokio::sync::watch;
 ///
 /// This is used by Nexus quiesce to disallow creation of new sagas when we're
 /// trying to quiesce Nexus.
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq, JsonSchema, Serialize)]
+#[serde(rename_all = "snake_case")]
 enum SagasAllowed {
     /// New sagas may be started (normal condition)
     Allowed,
@@ -101,11 +104,11 @@ pub struct SagaQuiesceHandle {
     //     cancellation behavior is abysmal), but we don't want to block on a
     //     std `Condvar` in an async thread.  There are options here (e.g.,
     //     `block_on`), but they're not pleasant.
-    inner: watch::Sender<SagaQuiesceInner>,
+    inner: watch::Sender<SagaQuiesceStatus>,
 }
 
-#[derive(Debug, Clone)]
-struct SagaQuiesceInner {
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct SagaQuiesceStatus {
     /// current policy: are we allowed to *create* new sagas?
     ///
     /// This also affects re-assigning sagas from expunged Nexus instances to
@@ -183,12 +186,13 @@ struct SagaQuiesceInner {
     /// whether a saga recovery operation is ongoing, and if one is:
     /// - what `reassignment_generation` was when it started
     /// - which blueprint id we'll be fully caught up to upon completion
+    #[serde(skip)] // XXX-dap
     recovery_pending: Option<(Generation, Option<BlueprintUuid>)>,
 }
 
 impl SagaQuiesceHandle {
     pub fn new(log: Logger) -> SagaQuiesceHandle {
-        let (inner, _) = watch::channel(SagaQuiesceInner {
+        let (inner, _) = watch::channel(SagaQuiesceStatus {
             new_sagas_allowed: SagasAllowed::DisallowedUnknown,
             sagas_pending: IdOrdMap::new(),
             first_recovery_complete: false,
@@ -253,6 +257,10 @@ impl SagaQuiesceHandle {
     }
 
     /// Returns the blueprint id as of which sagas are fully drained
+    ///
+    /// We may become un-drained if another re-assignment pass starts for a
+    /// subsequent blueprint, but this fact will still be true that we *were*
+    /// fully drained as of expungements included up through this blueprint.
     pub fn fully_drained_blueprint(&self) -> Option<BlueprintUuid> {
         self.inner.borrow().drained_blueprint_id
     }
@@ -286,8 +294,14 @@ impl SagaQuiesceHandle {
             .await;
     }
 
+    /// Returns a summary of internal state for debugging (involves a clone)
+    pub fn status(&self) -> SagaQuiesceStatus {
+        self.inner.borrow().clone()
+    }
+
     /// Returns information about running sagas (involves a clone)
-    pub fn sagas_pending(&self) -> IdOrdMap<PendingSagaInfo> {
+    #[cfg(test)]
+    fn sagas_pending(&self) -> IdOrdMap<PendingSagaInfo> {
         self.inner.borrow().sagas_pending.clone()
     }
 
@@ -593,7 +607,7 @@ impl SagaQuiesceHandle {
     }
 }
 
-impl SagaQuiesceInner {
+impl SagaQuiesceStatus {
     /// Returns whether sagas are fully drained
     ///
     /// This condition is not permanent.  New sagas can be re-assigned to this
@@ -647,7 +661,7 @@ impl SagaQuiesceInner {
 #[must_use = "must record the saga completion future once the saga is running"]
 pub struct NewlyPendingSagaRef {
     log: Logger,
-    quiesce: watch::Sender<SagaQuiesceInner>,
+    quiesce: watch::Sender<SagaQuiesceStatus>,
     saga_id: steno::SagaId,
     init_finished: bool,
 }
