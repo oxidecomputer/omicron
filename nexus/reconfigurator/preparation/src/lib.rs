@@ -117,16 +117,8 @@ impl PlanningInputFromDb<'_> {
             .zpool_list_all_external_batched(opctx)
             .await
             .internal_context("fetching all external zpool rows")?;
-        let ip_pool_range_rows = {
-            let (authz_service_ip_pool, _) = datastore
-                .ip_pools_service_lookup(opctx)
-                .await
-                .internal_context("fetching IP services pool")?;
-            datastore
-                .ip_pool_list_ranges_batched(opctx, &authz_service_ip_pool)
-                .await
-                .internal_context("listing services IP pool ranges")?
-        };
+        let ip_pool_range_rows =
+            fetch_all_service_ip_pool_ranges(opctx, datastore).await?;
         let external_ip_rows = datastore
             .external_ip_list_service_all_batched(opctx)
             .await
@@ -365,6 +357,26 @@ impl PlanningInputFromDb<'_> {
 
         Ok(builder.build())
     }
+}
+
+async fn fetch_all_service_ip_pool_ranges(
+    opctx: &OpContext,
+    datastore: &DataStore,
+) -> Result<Vec<nexus_db_model::IpPoolRange>, Error> {
+    let service_pools = datastore
+        .ip_pools_service_lookup_both_versions(opctx)
+        .await
+        .internal_context("fetching IP services pools")?;
+    let mut ranges = datastore
+        .ip_pool_list_ranges_batched(opctx, &service_pools.ipv4.authz_pool)
+        .await
+        .internal_context("listing services IPv4 pool ranges")?;
+    let mut v6_ranges = datastore
+        .ip_pool_list_ranges_batched(opctx, &service_pools.ipv6.authz_pool)
+        .await
+        .internal_context("listing services IPv6 pool ranges")?;
+    ranges.append(&mut v6_ranges);
+    Ok(ranges)
 }
 
 /// Loads state for import into `reconfigurator-cli`

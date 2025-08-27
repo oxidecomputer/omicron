@@ -23,7 +23,7 @@ use slog_error_chain::InlineErrorChain;
 use strum::EnumIter;
 use uuid::Uuid;
 
-pub use omicron_common::address::{IpRange, Ipv4Range, Ipv6Range};
+pub use omicron_common::address::{IpRange, IpVersion, Ipv4Range, Ipv6Range};
 pub use omicron_common::api::external::BfdMode;
 
 /// Maximum number of role assignments allowed on any one resource
@@ -642,6 +642,7 @@ pub enum SupportBundleState {
 
 #[derive(Debug, Clone, JsonSchema, Serialize, Deserialize)]
 pub struct SupportBundleInfo {
+    #[schemars(with = "Uuid")]
     pub id: SupportBundleUuid,
     pub time_created: DateTime<Utc>,
     pub reason_for_creation: String,
