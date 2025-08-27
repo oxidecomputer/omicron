@@ -360,6 +360,12 @@ impl SagaQuiesceHandle {
                     blueprint_id,
                     reassigned_any,
                 ) => {
+                    // Record that we've completed assignments of all sagas from
+                    // all Nexus instances expunged as of this blueprint.  The
+                    // only way we could re-assign ourselves more sagas is if
+                    // the target blueprint changes.
+                    q.reassignment_blueprint_id = Some(blueprint_id);
+
                     if reassigned_any {
                         // If we assigned new sagas to ourselves, bump the
                         // generation number.  We won't report being drained
@@ -369,13 +375,15 @@ impl SagaQuiesceHandle {
                         // have been assigned to us have been recovered.
                         q.reassignment_generation =
                             q.reassignment_generation.next();
+                    } else if q.reassignment_generation
+                        <= q.recovered_reassignment_generation
+                        && q.first_recovery_complete
+                    {
+                        // If recovery has caught up to the current reassignment
+                        // generation, then we can also say that we're recovered
+                        // up to this blueprint.
+                        q.recovered_blueprint_id = q.reassignment_blueprint_id;
                     }
-
-                    // Record that we've completed assignments of all sagas from
-                    // all Nexus instances expunged as of this blueprint.  The
-                    // only way we could re-assign ourselves more sagas is if
-                    // the target blueprint changes.
-                    q.reassignment_blueprint_id = Some(blueprint_id);
                 }
                 SagaReassignmentDone::Indeterminate => {
                     // This means the caller doesn't know for sure whether they
@@ -1237,6 +1245,145 @@ mod test {
         let recovery = qq.recovery_start();
         assert!(!qq.is_fully_drained());
         recovery.recovery_done(true);
+        assert!(qq.is_fully_drained());
+
+        logctx.cleanup_successful();
+    }
+
+    /// Tests tracking of the drained blueprint id
+    #[tokio::test]
+    async fn test_drained_blueprint() {
+        let logctx = test_setup_log("test_drained_blueprint");
+        let log = &logctx.log;
+
+        let qq = SagaQuiesceHandle::new(log.clone());
+        assert!(qq.fully_drained_blueprint().is_none());
+
+        // Basic tests where we're *not* fully drained
+
+        // Recovery by itself does not mean we're fully drained.
+        qq.recovery_start().recovery_done(true);
+        assert!(qq.fully_drained_blueprint().is_none());
+
+        // Even if we're quiescing now, we're not fully drained.
+        qq.set_quiescing(true);
+        assert!(qq.fully_drained_blueprint().is_none());
+
+        // Recovery still isn't enough.  We haven't done a re-assignment pass.
+        // We are currently drained, though.
+        qq.recovery_start().recovery_done(true);
+        assert!(qq.fully_drained_blueprint().is_none());
+        assert!(qq.is_fully_drained());
+
+        // No change after an indeterminate re-assignment.
+        let reassignment = qq.reassignment_start();
+        reassignment.reassignment_done(SagaReassignmentDone::Indeterminate);
+        assert!(qq.fully_drained_blueprint().is_none());
+        assert!(!qq.is_fully_drained());
+
+        // Fully drained case 1: saga re-assignment causes us to become fully
+        // drained.
+        //
+        // First, recover whatever we may have just assigned ourselves.
+        qq.recovery_start().recovery_done(true);
+
+        // Now if we do a re-assignment pass that assigns no sagas, then we
+        // finally are fully drained up through this blueprint.  This does not
+        // require recovery since no sagas were re-assigned.
+        let blueprint1_id = BlueprintUuid::new_v4();
+        let reassignment = qq.reassignment_start();
+        reassignment.reassignment_done(
+            SagaReassignmentDone::ReassignedAllAsOf(blueprint1_id, false),
+        );
+        assert!(qq.is_fully_drained());
+        assert_eq!(qq.fully_drained_blueprint(), Some(blueprint1_id));
+
+        // Next, test that even if we become no-longer-drained because we do
+        // another reassignment, we still record that we're fully drained as of
+        // the older blueprint.
+
+        // Start another re-assignment pass.
+        let blueprint2_id = BlueprintUuid::new_v4();
+        let reassignment = qq.reassignment_start();
+        assert_eq!(qq.fully_drained_blueprint(), Some(blueprint1_id));
+        // Act like we assigned some sagas.
+        reassignment.reassignment_done(
+            SagaReassignmentDone::ReassignedAllAsOf(blueprint2_id, true),
+        );
+        // We're not fully drained because we haven't recovered those sagas.
+        assert!(!qq.is_fully_drained());
+        // So the fully drained blueprint is the one from before.
+        assert_eq!(qq.fully_drained_blueprint(), Some(blueprint1_id));
+
+        // Start a recovery pass.  Pretend like we found a saga.
+        // We'll use a oneshot channel to emulate the saga completion future.
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let recovery = qq.recovery_start();
+        let pending = recovery.record_saga_recovery(*SAGA_ID, &SAGA_NAME);
+        let consumer_completion = pending.saga_completion_future(
+            async { rx.await.expect("cannot drop this before dropping tx") }
+                .boxed(),
+        );
+        recovery.recovery_done(true);
+
+        // We're still not fully drained because we haven't finished that saga.
+        assert!(!qq.is_fully_drained());
+        // So the fully drained blueprint is the one from before.
+        assert_eq!(qq.fully_drained_blueprint(), Some(blueprint1_id));
+
+        // Fully drained case 2: saga completion causes us to become fully
+        // drained.
+        //
+        // Complete the saga.
+        tx.send(saga_result()).unwrap();
+        let _ = consumer_completion.await;
+        // Now, we should be fully drained up to the new blueprint.
+        assert!(qq.is_fully_drained());
+        assert_eq!(qq.fully_drained_blueprint(), Some(blueprint2_id));
+
+        // Fully drained case 3: saga recovery causes us to become fully
+        // drained.
+        //
+        // For this case, imagine that we think we may have re-assigned
+        // ourselves some sagas, but recovery completes with no sagas
+        // outstanding.
+        let blueprint3_id = BlueprintUuid::new_v4();
+        let reassignment = qq.reassignment_start();
+        assert_eq!(qq.fully_drained_blueprint(), Some(blueprint2_id));
+        // Act like we assigned some sagas.
+        reassignment.reassignment_done(
+            SagaReassignmentDone::ReassignedAllAsOf(blueprint3_id, true),
+        );
+        assert!(!qq.is_fully_drained());
+        assert_eq!(qq.fully_drained_blueprint(), Some(blueprint2_id));
+
+        // Quick check: failed recovery changes nothing.
+        qq.recovery_start().recovery_done(false);
+        assert!(!qq.is_fully_drained());
+        assert_eq!(qq.fully_drained_blueprint(), Some(blueprint2_id));
+
+        // Successful recovery with no sagas running means we're fully drained
+        // as of the new blueprint.
+        qq.recovery_start().recovery_done(true);
+        assert_eq!(qq.fully_drained_blueprint(), Some(blueprint3_id));
+        assert!(qq.is_fully_drained());
+
+        // Fully drained case 3: quiescing itself causes us to immediately
+        // become fully drained.
+        //
+        // This case requires a fresh handle, since the current one is already
+        // quiesced.
+        let blueprint4_id = BlueprintUuid::new_v4();
+        let qq = SagaQuiesceHandle::new(log.clone());
+        qq.reassignment_start().reassignment_done(
+            SagaReassignmentDone::ReassignedAllAsOf(blueprint4_id, true),
+        );
+        qq.recovery_start().recovery_done(true);
+        assert!(qq.fully_drained_blueprint().is_none());
+        assert!(!qq.is_fully_drained());
+
+        qq.set_quiescing(true);
+        assert_eq!(qq.fully_drained_blueprint(), Some(blueprint4_id));
         assert!(qq.is_fully_drained());
 
         logctx.cleanup_successful();
