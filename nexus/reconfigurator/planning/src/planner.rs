@@ -17,6 +17,7 @@ use crate::blueprint_editor::SledEditError;
 use crate::mgs_updates::ImpossibleUpdatePolicy;
 use crate::mgs_updates::PlannedMgsUpdates;
 use crate::mgs_updates::plan_mgs_updates;
+use crate::planner::image_source::NoopConvertHostPhase2Contents;
 use crate::planner::image_source::NoopConvertZoneStatus;
 use crate::planner::omicron_zone_placement::PlacementError;
 use gateway_client::types::SpType;
@@ -55,6 +56,7 @@ use nexus_types::external_api::views::SledPolicy;
 use nexus_types::external_api::views::SledState;
 use nexus_types::inventory::Collection;
 use omicron_common::api::external::Generation;
+use omicron_common::disk::M2Slot;
 use omicron_common::policy::BOUNDARY_NTP_REDUNDANCY;
 use omicron_common::policy::COCKROACHDB_REDUNDANCY;
 use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
@@ -112,24 +114,33 @@ const NUM_CONCURRENT_MGS_UPDATES: usize = 1;
 /// A receipt that `check_input_validity` has been run prior to planning.
 struct InputChecked;
 
+// Details of why a zone has not yet propagated from blueprint to sled inventory
 #[derive(Debug)]
 #[expect(dead_code)]
-struct ZoneCurrentlyUpdating<'a> {
+struct ZonePropagationIncomplete<'a> {
     zone_id: OmicronZoneUuid,
     zone_kind: ZoneKind,
-    reason: UpdatingReason<'a>,
+    reason: ZonePropagationStatus<'a>,
 }
 
 #[derive(Debug)]
 #[expect(dead_code)]
-enum UpdatingReason<'a> {
+enum ZonePropagationStatus<'a> {
+    // The current blueprint and the sled inventory disagree
+    // about the image source for a zone.
+    //
+    // This can mean that the sled inventory is out-of-date, or
+    // that a different blueprint has been applied.
     ImageSourceMismatch {
         bp_image_source: &'a BlueprintZoneImageSource,
         inv_image_source: &'a OmicronZoneImageSource,
     },
+    // Although this zone appears in the blueprint, it does
+    // not exist on the sled's inventory.
     MissingInInventory {
         bp_image_source: &'a BlueprintZoneImageSource,
     },
+    // The last reconciliation attempt for this zone failed
     ReconciliationError {
         bp_image_source: &'a BlueprintZoneImageSource,
         inv_image_source: &'a OmicronZoneImageSource,
@@ -620,7 +631,9 @@ impl<'a> Planner<'a> {
         &mut self,
         noop_info: NoopConvertInfo,
     ) -> Result<PlanningNoopImageSourceStepReport, Error> {
-        use nexus_types::deployment::PlanningNoopImageSourceSkipSledReason as SkipSledReason;
+        use nexus_types::deployment::PlanningNoopImageSourceSkipSledHostPhase2Reason as SkipSledHostPhase2Reason;
+        use nexus_types::deployment::PlanningNoopImageSourceSkipSledZonesReason as SkipSledZonesReason;
+
         let mut report = PlanningNoopImageSourceStepReport::new();
 
         let sleds = match noop_info {
@@ -634,20 +647,44 @@ impl<'a> Planner<'a> {
             };
 
             let zone_counts = eligible.zone_counts();
-            if zone_counts.num_install_dataset() == 0 {
-                report.skip_sled(
+            let skipped_zones = if zone_counts.num_install_dataset() == 0 {
+                report.skip_sled_zones(
                     sled.sled_id,
-                    SkipSledReason::AllZonesAlreadyArtifact {
+                    SkipSledZonesReason::AllZonesAlreadyArtifact {
                         num_total: zone_counts.num_total,
                     },
                 );
+                true
+            } else {
+                false
+            };
+
+            let skipped_host_phase_2 =
+                if eligible.host_phase_2.both_already_artifact() {
+                    report.skip_sled_host_phase_2(
+                        sled.sled_id,
+                        SkipSledHostPhase2Reason::BothSlotsAlreadyArtifact,
+                    );
+                    true
+                } else {
+                    false
+                };
+
+            if skipped_zones && skipped_host_phase_2 {
+                // Nothing to do, continue to the next sled.
                 continue;
             }
-            if zone_counts.num_eligible > 0 {
-                report.converted_zones(
+
+            if zone_counts.num_eligible > 0
+                || eligible.host_phase_2.slot_a.is_eligible()
+                || eligible.host_phase_2.slot_b.is_eligible()
+            {
+                report.converted(
                     sled.sled_id,
                     zone_counts.num_eligible,
                     zone_counts.num_install_dataset(),
+                    eligible.host_phase_2.slot_a.is_eligible(),
+                    eligible.host_phase_2.slot_b.is_eligible(),
                 );
             }
 
@@ -670,6 +707,49 @@ impl<'a> Planner<'a> {
                     Operation::SledNoopZoneImageSourcesUpdated {
                         sled_id: sled.sled_id,
                         count: zone_counts.num_eligible,
+                    },
+                );
+            }
+
+            // Now convert over host phase 2 contents.
+            match &eligible.host_phase_2.slot_a {
+                NoopConvertHostPhase2Contents::Eligible(new_contents) => {
+                    self.blueprint.sled_set_host_phase_2_slot(
+                        sled.sled_id,
+                        M2Slot::A,
+                        new_contents.clone(),
+                    )?;
+                }
+                NoopConvertHostPhase2Contents::AlreadyArtifact { .. }
+                | NoopConvertHostPhase2Contents::Ineligible(_) => {}
+            }
+
+            match &eligible.host_phase_2.slot_b {
+                NoopConvertHostPhase2Contents::Eligible(new_contents) => {
+                    self.blueprint.sled_set_host_phase_2_slot(
+                        sled.sled_id,
+                        M2Slot::B,
+                        new_contents.clone(),
+                    )?;
+                }
+                NoopConvertHostPhase2Contents::AlreadyArtifact { .. }
+                | NoopConvertHostPhase2Contents::Ineligible(_) => {}
+            }
+
+            if eligible.host_phase_2.slot_a.is_eligible()
+                || eligible.host_phase_2.slot_b.is_eligible()
+            {
+                self.blueprint.record_operation(
+                    Operation::SledNoopHostPhase2Updated {
+                        sled_id: sled.sled_id,
+                        slot_a_updated: eligible
+                            .host_phase_2
+                            .slot_a
+                            .is_eligible(),
+                        slot_b_updated: eligible
+                            .host_phase_2
+                            .slot_b
+                            .is_eligible(),
                     },
                 );
             }
@@ -937,6 +1017,13 @@ impl<'a> Planner<'a> {
             DiscretionaryOmicronZone::Nexus,
             DiscretionaryOmicronZone::Oximeter,
         ] {
+            // Our goal here is to make sure that if we have less redundancy for
+            // discretionary zones than needed, we deploy additional zones.
+            //
+            // For most zone types, we only care about the total count of that
+            // kind of zone, regardless of image. In contrast, for Nexus, we may
+            // need to reach a minimum redundancy count for multiple zone images
+            // (new and old) during a handoff.
             let image_sources = match zone_kind {
                 DiscretionaryOmicronZone::Nexus => {
                     let old_image = self
@@ -1283,7 +1370,7 @@ impl<'a> Planner<'a> {
 
     fn get_zones_not_yet_propagated_to_inventory(
         &self,
-    ) -> Vec<ZoneCurrentlyUpdating<'_>> {
+    ) -> Vec<ZonePropagationIncomplete<'_>> {
         // We are only interested in non-decommissioned sleds.
         let sleds = self
             .input
@@ -1329,13 +1416,14 @@ impl<'a> Planner<'a> {
                             ConfigReconcilerInventoryResult::Ok,
                         )) => {
                             // The inventory and blueprint image sources differ.
-                            Some(ZoneCurrentlyUpdating {
+                            Some(ZonePropagationIncomplete {
                                 zone_id: zone.id,
                                 zone_kind: zone.kind(),
-                                reason: UpdatingReason::ImageSourceMismatch {
-                                    bp_image_source: &zone.image_source,
-                                    inv_image_source,
-                                },
+                                reason:
+                                    ZonePropagationStatus::ImageSourceMismatch {
+                                        bp_image_source: &zone.image_source,
+                                        inv_image_source,
+                                    },
                             })
                         }
                         Some((
@@ -1345,24 +1433,26 @@ impl<'a> Planner<'a> {
                             // The inventory reports this zone but there was an
                             // error reconciling it (most likely an error
                             // starting the zone).
-                            Some(ZoneCurrentlyUpdating {
+                            Some(ZonePropagationIncomplete {
                                 zone_id: zone.id,
                                 zone_kind: zone.kind(),
-                                reason: UpdatingReason::ReconciliationError {
-                                    bp_image_source: &zone.image_source,
-                                    inv_image_source,
-                                    message,
-                                },
+                                reason:
+                                    ZonePropagationStatus::ReconciliationError {
+                                        bp_image_source: &zone.image_source,
+                                        inv_image_source,
+                                        message,
+                                    },
                             })
                         }
                         None => {
                             // The blueprint has a zone that inventory does not have.
-                            Some(ZoneCurrentlyUpdating {
+                            Some(ZonePropagationIncomplete {
                                 zone_id: zone.id,
                                 zone_kind: zone.kind(),
-                                reason: UpdatingReason::MissingInInventory {
-                                    bp_image_source: &zone.image_source,
-                                },
+                                reason:
+                                    ZonePropagationStatus::MissingInInventory {
+                                        bp_image_source: &zone.image_source,
+                                    },
                             })
                         }
                     }
@@ -5760,6 +5850,7 @@ pub(crate) mod test {
                 },
                 hash: ArtifactHash([0; 32]),
                 size: 0,
+                board: None,
                 sign: None,
             }
         };
@@ -6257,7 +6348,7 @@ pub(crate) mod test {
             let mut result = BTreeMap::new();
             for i in 1..=COCKROACHDB_REDUNDANCY {
                 result.insert(
-                    omicron_cockroach_metrics::NodeId(i.to_string()),
+                    cockroach_admin_types::NodeId(i.to_string()),
                     CockroachStatus {
                         ranges_underreplicated: Some(0),
                         liveness_live_nodes: Some(GOAL_REDUNDANCY),
@@ -6298,7 +6389,7 @@ pub(crate) mod test {
         *example
             .collection
             .cockroach_status
-            .get_mut(&omicron_cockroach_metrics::NodeId("1".to_string()))
+            .get_mut(&cockroach_admin_types::NodeId("1".to_string()))
             .unwrap() = CockroachStatus {
             ranges_underreplicated: Some(1),
             liveness_live_nodes: Some(GOAL_REDUNDANCY),
@@ -6316,7 +6407,7 @@ pub(crate) mod test {
         *example
             .collection
             .cockroach_status
-            .get_mut(&omicron_cockroach_metrics::NodeId("1".to_string()))
+            .get_mut(&cockroach_admin_types::NodeId("1".to_string()))
             .unwrap() = CockroachStatus {
             ranges_underreplicated: Some(0),
             liveness_live_nodes: Some(GOAL_REDUNDANCY - 1),

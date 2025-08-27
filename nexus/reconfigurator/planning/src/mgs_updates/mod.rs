@@ -338,25 +338,21 @@ fn mgs_update_status(
             expected_pending_persistent_boot_preference,
             expected_transient_boot_preference,
         }) => {
-            let active_caboose_which = match &expected_active_slot.slot {
-                RotSlot::A => CabooseWhich::RotSlotA,
-                RotSlot::B => CabooseWhich::RotSlotB,
-            };
-
-            let Some(active_caboose) =
-                inventory.caboose_for(active_caboose_which, baseboard_id)
-            else {
-                return Err(MgsUpdateStatusError::MissingActiveCaboose);
-            };
-
-            let found_inactive_version = inventory
-                .caboose_for(active_caboose_which.toggled_slot(), baseboard_id)
-                .map(|c| c.caboose.version.as_ref());
-
             let rot_state = inventory
                 .rots
                 .get(baseboard_id)
                 .ok_or(MgsUpdateStatusError::MissingRotState)?;
+
+            let active_slot = rot_state.active_slot;
+
+            let active_caboose_which = match &active_slot {
+                RotSlot::A => CabooseWhich::RotSlotA,
+                RotSlot::B => CabooseWhich::RotSlotB,
+            };
+
+            let active_caboose = inventory
+                .caboose_for(active_caboose_which, baseboard_id)
+                .ok_or(MgsUpdateStatusError::MissingActiveCaboose)?;
 
             let found_active_version =
                 ArtifactVersion::new(active_caboose.caboose.version.clone())
@@ -365,8 +361,21 @@ fn mgs_update_status(
                     })?;
 
             let found_active_slot = ExpectedActiveRotSlot {
-                slot: rot_state.active_slot,
+                slot: active_slot,
                 version: found_active_version,
+            };
+
+            let found_inactive_version = inventory
+                .caboose_for(active_caboose_which.toggled_slot(), baseboard_id)
+                .map(|c| c.caboose.version.as_ref());
+
+            let found = RotUpdateState {
+                active_slot: found_active_slot,
+                persistent_boot_preference: rot_state
+                    .persistent_boot_preference,
+                pending_persistent_boot_preference: rot_state
+                    .pending_persistent_boot_preference,
+                transient_boot_preference: rot_state.transient_boot_preference,
             };
 
             let expected = RotUpdateState {
@@ -376,15 +385,6 @@ fn mgs_update_status(
                 pending_persistent_boot_preference:
                     *expected_pending_persistent_boot_preference,
                 transient_boot_preference: *expected_transient_boot_preference,
-            };
-
-            let found = RotUpdateState {
-                active_slot: found_active_slot,
-                persistent_boot_preference: rot_state
-                    .persistent_boot_preference,
-                pending_persistent_boot_preference: rot_state
-                    .pending_persistent_boot_preference,
-                transient_boot_preference: rot_state.transient_boot_preference,
             };
 
             mgs_update_status_rot(
@@ -549,6 +549,7 @@ mod test {
     use dropshot::ConfigLogging;
     use dropshot::ConfigLoggingLevel;
     use gateway_client::types::SpType;
+    use gateway_types::rot::RotSlot;
     use nexus_types::deployment::ExpectedVersion;
     use nexus_types::deployment::PendingMgsUpdateDetails;
     use nexus_types::deployment::PendingMgsUpdateRotBootloaderDetails;
@@ -916,15 +917,22 @@ mod test {
         assert_eq!(updates, later_updates);
 
         // At this point, we're ready to test that when the first SpType update
-        // completes, then the second one *is* started.  This tests three
+        // completes, then the second one *is* started.  This tests four
         // different things: first that we noticed the first one completed,
-        // second that we noticed another thing needed an update, and third that
-        // the planner schedules the updates in the correct order: first RoT,
-        // and second SP.
+        // second that we noticed another thing needed an update, third that
+        // an update is correctly configured after the active slot has changed
+        // from the previous component update, and fourth that the planner
+        // schedules the updates in the correct order: first RoT, and second SP.
         let later_collection = test_boards
             .collection_builder()
             .sp_active_version_exception(SpType::Switch, 1, ARTIFACT_VERSION_1)
             .rot_active_version_exception(SpType::Switch, 1, ARTIFACT_VERSION_1)
+            .rot_active_slot_exception(SpType::Sled, 0, RotSlot::B)
+            .rot_persistent_boot_preference_exception(
+                SpType::Sled,
+                0,
+                RotSlot::B,
+            )
             .build();
         let PlannedMgsUpdates { pending_updates: later_updates, .. } =
             plan_mgs_updates(

@@ -33,7 +33,6 @@ use slog::warn;
 use std::collections::BTreeMap;
 use std::collections::HashSet;
 use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 use std::time::Instant;
 use tokio::sync::watch;
@@ -72,7 +71,6 @@ pub(crate) fn spawn<T: SledAgentFacilities, U: SledAgentArtifactStore>(
     internal_disks_rx: InternalDisksReceiver,
     external_disks_tx: watch::Sender<HashSet<Disk>>,
     raw_disks_rx: RawDisksReceiver,
-    destroy_orphans: Arc<AtomicBool>,
     sled_agent_facilities: T,
     sled_agent_artifact_store: U,
     log: Logger,
@@ -82,7 +80,7 @@ pub(crate) fn spawn<T: SledAgentFacilities, U: SledAgentArtifactStore>(
         currently_managed_zpools_tx,
         external_disks_tx,
     );
-    let datasets = OmicronDatasets::new(dataset_task, destroy_orphans);
+    let datasets = OmicronDatasets::new(dataset_task);
     let zones = OmicronZones::new(mount_config, time_sync_config);
     let boot_partitions = BootPartitionReconciler::default();
 

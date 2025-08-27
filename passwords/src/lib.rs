@@ -9,6 +9,7 @@ use argon2::Argon2;
 use argon2::PasswordHasher;
 use argon2::PasswordVerifier;
 use argon2::password_hash;
+use argon2::password_hash::Salt;
 pub use password_hash::PasswordHashString;
 use password_hash::SaltString;
 use password_hash::errors::Error as PasswordHashError;
@@ -207,7 +208,7 @@ pub struct Hasher<R: CryptoRng + RngCore> {
 
 impl Default for Hasher<ThreadRng> {
     fn default() -> Self {
-        Hasher::new(external_password_argon(), rand::thread_rng())
+        Hasher::new(external_password_argon(), rand::rng())
     }
 }
 
@@ -220,7 +221,8 @@ impl<R: CryptoRng + RngCore> Hasher<R> {
         &mut self,
         password: &Password,
     ) -> Result<PasswordHashString, PasswordSetError> {
-        let salt = SaltString::generate(&mut self.rng);
+        let salt = generate_salt_string(&mut self.rng);
+
         Ok(self
             .argon2
             .hash_password(password.0.expose_secret().as_bytes(), &salt)?
@@ -242,6 +244,17 @@ impl<R: CryptoRng + RngCore> Hasher<R> {
             Err(error) => Err(PasswordVerifyError(error)),
         }
     }
+}
+
+fn generate_salt_string<R>(rng: &mut R) -> SaltString
+where
+    R: RngCore + CryptoRng,
+{
+    // Hand-write the code to fill the salt bytes because we're on rand 0.9
+    // while password-hash 0.5.0 is on an older version of rand.
+    let mut bytes = [0u8; Salt::RECOMMENDED_LENGTH];
+    rng.fill_bytes(&mut bytes);
+    SaltString::encode_b64(&bytes).expect("salt string invariant violated")
 }
 
 /// Parses the given PHC-format password hash string and returns it only if it
@@ -326,10 +339,10 @@ mod test {
     use super::PasswordTooLongError;
     use super::external_password_argon;
     use crate::MIN_EXPECTED_PASSWORD_VERIFY_TIME;
+    use crate::generate_salt_string;
     use crate::parse_phc_hash;
     use crate::verify_strength;
     use argon2::password_hash::PasswordHashString;
-    use argon2::password_hash::SaltString;
     use rand::SeedableRng;
 
     // A well-known password.
@@ -371,7 +384,7 @@ mod test {
 
         // Verify that salt strings are at least as long as we think they are
         // (16 bytes).
-        assert!(SaltString::generate(rand::thread_rng()).len() >= 16);
+        assert!(generate_salt_string(&mut rand::rng()).len() >= 16);
 
         // Verify that the output length produced by this crate hasn't changed
         // unexpectedly.  It may not be a big deal if this does change, but we

@@ -6858,10 +6858,16 @@
           }
         }
       },
-      "PlanningNoopImageSourceConvertedZones": {
-        "description": "How many of the total install-dataset zones were noop-converted to use the artifact store on a particular sled.",
+      "PlanningNoopImageSourceConverted": {
+        "description": "How many of the total install-dataset zones and/or host phase 2 slots were noop-converted to use the artifact store on a particular sled.",
         "type": "object",
         "properties": {
+          "host_phase_2_slot_a_eligible": {
+            "type": "boolean"
+          },
+          "host_phase_2_slot_b_eligible": {
+            "type": "boolean"
+          },
           "num_dataset": {
             "type": "integer",
             "format": "uint",
@@ -6874,11 +6880,45 @@
           }
         },
         "required": [
+          "host_phase_2_slot_a_eligible",
+          "host_phase_2_slot_b_eligible",
           "num_dataset",
           "num_eligible"
         ]
       },
-      "PlanningNoopImageSourceSkipSledReason": {
+      "PlanningNoopImageSourceSkipSledHostPhase2Reason": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "both_slots_already_artifact"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "sled_not_in_inventory"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          }
+        ]
+      },
+      "PlanningNoopImageSourceSkipSledZonesReason": {
         "oneOf": [
           {
             "type": "object",
@@ -7034,19 +7074,25 @@
       "PlanningNoopImageSourceStepReport": {
         "type": "object",
         "properties": {
-          "converted_zones": {
+          "converted": {
             "type": "object",
             "additionalProperties": {
-              "$ref": "#/components/schemas/PlanningNoopImageSourceConvertedZones"
+              "$ref": "#/components/schemas/PlanningNoopImageSourceConverted"
             }
           },
           "no_target_release": {
             "type": "boolean"
           },
-          "skipped_sleds": {
+          "skipped_sled_host_phase_2": {
             "type": "object",
             "additionalProperties": {
-              "$ref": "#/components/schemas/PlanningNoopImageSourceSkipSledReason"
+              "$ref": "#/components/schemas/PlanningNoopImageSourceSkipSledHostPhase2Reason"
+            }
+          },
+          "skipped_sled_zones": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/PlanningNoopImageSourceSkipSledZonesReason"
             }
           },
           "skipped_zones": {
@@ -7057,9 +7103,10 @@
           }
         },
         "required": [
-          "converted_zones",
+          "converted",
           "no_target_release",
-          "skipped_sleds",
+          "skipped_sled_host_phase_2",
+          "skipped_sled_zones",
           "skipped_zones"
         ]
       },

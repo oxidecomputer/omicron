@@ -150,7 +150,6 @@ impl super::Nexus {
             })
             .collect();
 
-        let service_ip_pool_ranges = request.internal_services_ip_pool_ranges;
         let tls_certificates: Vec<_> = request
             .certs
             .into_iter()
@@ -708,6 +707,7 @@ impl super::Nexus {
         } // TODO - https://github.com/oxidecomputer/omicron/issues/3277
         // record port speed
 
+        let service_ip_pool_ranges = request.internal_services_ip_pool_ranges;
         self.db_datastore
             .rack_set_initialized(
                 opctx,

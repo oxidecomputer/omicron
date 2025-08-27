@@ -66,6 +66,7 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
+    (2, REMOVE_DESTROY_ORPHANED_DATASETS_CHICKEN_SWITCH),
     (1, INITIAL),
 ]);
 
@@ -707,6 +708,7 @@ pub trait SledAgentApi {
     #[endpoint {
         method = GET,
         path = "/chicken-switch/destroy-orphaned-datasets",
+        versions = ..VERSION_REMOVE_DESTROY_ORPHANED_DATASETS_CHICKEN_SWITCH,
     }]
     async fn chicken_switch_destroy_orphaned_datasets_get(
         request_context: RequestContext<Self::Context>,

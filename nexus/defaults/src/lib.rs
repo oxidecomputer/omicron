@@ -19,6 +19,7 @@ use omicron_common::api::external::VpcFirewallRuleUpdate;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use oxnet::Ipv4Net;
 use oxnet::Ipv6Net;
+use rand::TryRngCore;
 use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
 use std::sync::LazyLock;
@@ -93,10 +94,9 @@ pub static DEFAULT_FIREWALL_RULES: LazyLock<VpcFirewallRuleUpdateParams> =
 
 /// Generate a random VPC IPv6 prefix, in the range `fd00::/48`.
 pub fn random_vpc_ipv6_prefix() -> Result<Ipv6Net, external::Error> {
-    use rand::Rng;
     let mut bytes = [0u8; 16];
     bytes[0] = 0xfd;
-    rand::thread_rng().try_fill(&mut bytes[1..6]).map_err(|_| {
+    rand::rng().try_fill_bytes(&mut bytes[1..6]).map_err(|_| {
         external::Error::internal_error(
             "Unable to allocate random IPv6 address range",
         )

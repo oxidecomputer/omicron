@@ -6,6 +6,7 @@ use anyhow::Context;
 use camino::Utf8PathBuf;
 use dropshot::ResultsPage;
 use dropshot::test_util::ClientTestContext;
+use gateway_test_utils::setup::DEFAULT_SP_SIM_CONFIG;
 use http::{StatusCode, header, method::Method};
 use nexus_auth::context::OpContext;
 use std::env::current_dir;
@@ -395,6 +396,7 @@ async fn test_absolute_static_dir() {
         sim::SimMode::Explicit,
         None,
         0,
+        DEFAULT_SP_SIM_CONFIG.into(),
     )
     .await;
     let testctx = &cptestctx.external_client;
@@ -943,6 +945,7 @@ async fn test_session_idle_timeout_deletes_session() {
         sim::SimMode::Explicit,
         None,
         0,
+        DEFAULT_SP_SIM_CONFIG.into(),
     )
     .await;
     let testctx = &cptestctx.external_client;

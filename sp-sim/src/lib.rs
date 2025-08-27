@@ -31,7 +31,6 @@ pub use update::HostFlashHashCompletionSender;
 pub use update::HostFlashHashPolicy;
 
 pub const SIM_ROT_BOARD: &str = "SimRot";
-pub const SIM_ROT_STAGE0_BOARD: &str = "SimRotStage0";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Responsiveness {

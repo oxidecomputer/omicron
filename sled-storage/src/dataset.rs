@@ -18,7 +18,7 @@ use omicron_common::api::internal::shared::DatasetKind;
 use omicron_common::disk::{
     CompressionAlgorithm, DatasetName, DiskIdentity, DiskVariant, GzipLevel,
 };
-use rand::distributions::{Alphanumeric, DistString};
+use rand::distr::{Alphanumeric, SampleString};
 use slog::{Logger, debug, info, warn};
 use slog_error_chain::InlineErrorChain;
 use std::process::Stdio;
@@ -303,9 +303,8 @@ pub(crate) async fn ensure_zpool_has_datasets(
         // If this value comes from a prior iteration of the sled agent,
         // we opt to remove the corresponding dataset.
         static AGENT_LOCAL_VALUE: OnceLock<String> = OnceLock::new();
-        let agent_local_value = AGENT_LOCAL_VALUE.get_or_init(|| {
-            Alphanumeric.sample_string(&mut rand::thread_rng(), 20)
-        });
+        let agent_local_value = AGENT_LOCAL_VALUE
+            .get_or_init(|| Alphanumeric.sample_string(&mut rand::rng(), 20));
 
         if dataset.wipe {
             match Zfs::get_oxide_value(name, "agent").await {

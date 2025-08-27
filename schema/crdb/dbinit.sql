@@ -2057,6 +2057,11 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_internet_gateway_ip_address_by_igw_id O
 ) WHERE
     time_deleted IS NULL;
 
+/* The IP version of an IP address. */
+CREATE TYPE IF NOT EXISTS omicron.public.ip_version AS ENUM (
+    'v4',
+    'v6'
+);
 
 /*
  * An IP Pool, a collection of zero or more IP ranges for external IPs.
@@ -2071,7 +2076,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.ip_pool (
     time_deleted TIMESTAMPTZ,
 
     /* The collection's child-resource generation number */
-    rcgen INT8 NOT NULL
+    rcgen INT8 NOT NULL,
+
+    /* The IP version of the ranges contained in this pool. */
+    ip_version omicron.public.ip_version NOT NULL
 );
 
 /*
@@ -2130,6 +2138,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.ip_pool_range (
     first_address INET NOT NULL,
     /* The range is inclusive of the last address. */
     last_address INET NOT NULL,
+    /* FK into the `ip_pool` table. */
     ip_pool_id UUID NOT NULL,
     /* Tracks child resources, IP addresses allocated out of this range. */
     rcgen INT8 NOT NULL
@@ -2536,6 +2545,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.tuf_artifact (
 
     -- Sign (root key hash table) hash of a signed RoT or RoT bootloader image.
     sign BYTES, -- nullable
+
+    -- Board (caboose BORD) for artifacts that are Hubris archives.
+    board TEXT, -- nullable (null for non-Hubris artifacts)
 
     CONSTRAINT unique_name_version_kind UNIQUE (name, version, kind)
 );
@@ -6556,7 +6568,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '182.0.0', NULL)
+    (TRUE, NOW(), NOW(), '184.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

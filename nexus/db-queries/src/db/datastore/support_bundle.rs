@@ -608,7 +608,7 @@ mod test {
                 SledBaseboard {
                     serial_number: format!(
                         "test-{}",
-                        rand::thread_rng().gen::<u64>()
+                        rand::rng().random::<u64>()
                     ),
                     part_number: "test-pn".to_string(),
                     revision: 0,

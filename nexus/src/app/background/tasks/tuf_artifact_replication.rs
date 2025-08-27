@@ -79,7 +79,7 @@ use nexus_types::internal_api::background::{
 };
 use omicron_common::api::external::Generation;
 use omicron_uuid_kinds::{GenericUuid, SledUuid};
-use rand::seq::SliceRandom;
+use rand::seq::{IndexedRandom, SliceRandom};
 use serde_json::json;
 use sled_agent_client::types::ArtifactConfig;
 use slog_error_chain::InlineErrorChain;
@@ -509,7 +509,7 @@ impl BackgroundTask for ArtifactReplication {
                 );
                 let requests = inventory.into_requests(
                     &sleds,
-                    &mut rand::thread_rng(),
+                    &mut rand::rng(),
                     self.min_sled_replication,
                 );
                 requests
@@ -797,7 +797,7 @@ mod tests {
         (0..n)
             .map(|_| Sled {
                 id: SledUuid::from_untyped_uuid(
-                    uuid::Builder::from_random_bytes(rng.gen()).into_uuid(),
+                    uuid::Builder::from_random_bytes(rng.random()).into_uuid(),
                 ),
                 client: sled_agent_client::Client::new(
                     "http://invalid.test",
@@ -895,7 +895,7 @@ mod tests {
         let mut inventory = BTreeMap::new();
         for _ in 0..2 {
             inventory.insert(
-                ArtifactHash(rng.gen()),
+                ArtifactHash(rng.random()),
                 ArtifactPresence {
                     sleds: BTreeMap::new(),
                     local: Some(ArtifactHandle::Fake),
@@ -931,7 +931,7 @@ mod tests {
         let mut inventory = BTreeMap::new();
         for _ in 0..10 {
             inventory.insert(
-                ArtifactHash(rng.gen()),
+                ArtifactHash(rng.random()),
                 ArtifactPresence { sleds: sled_presence.clone(), local: None },
             );
         }
@@ -958,7 +958,7 @@ mod tests {
         let sleds = fake_sleds(4, &mut rng);
         let mut inventory = BTreeMap::new();
         inventory.insert(
-            ArtifactHash(rng.gen()),
+            ArtifactHash(rng.random()),
             ArtifactPresence {
                 sleds: sleds
                     .iter()
@@ -991,7 +991,7 @@ mod tests {
         let sleds = fake_sleds(4, &mut rng);
         let mut inventory = BTreeMap::new();
         inventory.insert(
-            ArtifactHash(rng.gen()),
+            ArtifactHash(rng.random()),
             ArtifactPresence {
                 sleds: sleds.iter().map(|sled| (sled.id, 2)).collect(),
                 local: None,

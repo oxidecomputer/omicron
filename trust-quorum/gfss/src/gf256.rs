@@ -24,8 +24,8 @@
 
 use core::fmt::{self, Binary, Display, Formatter, LowerHex, UpperHex};
 use core::ops::{Add, AddAssign, Div, Mul, MulAssign, Sub};
-use rand09::Rng;
-use rand09::distr::{Distribution, StandardUniform};
+use rand::Rng;
+use rand::distr::{Distribution, StandardUniform};
 use serde::{Deserialize, Serialize};
 use subtle::ConstantTimeEq;
 use zeroize::Zeroize;

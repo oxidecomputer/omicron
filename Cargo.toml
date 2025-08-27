@@ -430,7 +430,7 @@ dns-server-api = { path = "dns-server-api" }
 dns-service-client = { path = "clients/dns-service-client" }
 dpd-client = { git = "https://github.com/oxidecomputer/dendrite", rev = "6e666520620e26432333d9060bc7d249ba9fa92e" }
 dropshot = { version = "0.16.3", features = [ "usdt-probes" ] }
-dyn-clone = "1.0.19"
+dyn-clone = "1.0.20"
 either = "1.15.0"
 ereport-types = { path = "ereport/types" }
 expectorate = "1.2.0"
@@ -639,12 +639,12 @@ propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev 
 proptest = "1.7.0"
 qorb = "0.4.1"
 quote = "1.0"
-rand = "0.8.5"
-# We're still in the middle of migrating to rand 0.9.
-rand09 = { package = "rand", version = "0.9.1" }
-rand_core = "0.6.4"
-rand_distr = "0.4.3"
-rand_seeder = "0.3.0"
+# Some dependencies still require rand 0.8.x.
+rand08 = { package = "rand", version = "0.8.5" }
+rand = "0.9.2"
+rand_core = "0.9.3"
+rand_distr = "0.5.1"
+rand_seeder = "0.4.0"
 range-requests = { path = "range-requests" }
 ratatui = "0.29.0"
 rayon = "1.10"
