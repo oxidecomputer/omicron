@@ -199,11 +199,13 @@ impl std::fmt::Display for DnsDiff<'_> {
                 }
             }
         }
-        writeln!(
-            f,
-            "    unchanged names: {num_names_unchanged} \
-                  (records: {num_records_unchanged})"
-        )?;
+        if num_names_unchanged > 0 {
+            writeln!(
+                f,
+                "    unchanged names: {num_names_unchanged} \
+                     (records: {num_records_unchanged})"
+            )?;
+        }
 
         Ok(())
     }
