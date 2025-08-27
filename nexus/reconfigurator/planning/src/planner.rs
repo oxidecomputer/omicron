@@ -174,8 +174,7 @@ impl<'a> Planner<'a> {
 
         let mut noop_info =
             NoopConvertInfo::new(self.input, self.inventory, &self.blueprint)?;
-        let plan_mupdate_override_res =
-            self.do_plan_mupdate_override(&mut noop_info)?;
+        let actions_by_sled = self.do_plan_mupdate_override(&mut noop_info)?;
 
         // Log noop-convert results after do_plan_mupdate_override, because this
         // step might alter noop_info.
@@ -183,31 +182,32 @@ impl<'a> Planner<'a> {
 
         // Within `do_plan_noop_image_source`, we plan noop image sources on
         // sleds other than those currently affected by mupdate overrides. This
-        // means that we don't have to wait for the `plan_mupdate_override_res`
-        // result for that step.
+        // means that we don't have to consider anything
+        // `do_plan_mupdate_override` does for this step.
         let noop_image_source = self.do_plan_noop_image_source(noop_info)?;
+
+        let add_update_blocked_reasons =
+            self.should_plan_add_or_update(&actions_by_sled)?;
 
         // Only plan MGS-based updates updates if there are no outstanding
         // MUPdate overrides.
-        let mgs_updates = if plan_mupdate_override_res.is_empty() {
+        let mgs_updates = if add_update_blocked_reasons.is_empty() {
             self.do_plan_mgs_updates()?
         } else {
             PlanningMgsUpdatesStepReport::new(PendingMgsUpdates::new())
         };
 
         // Likewise for zone additions, unless overridden with the chicken switch.
-        let has_mupdate_override = !plan_mupdate_override_res.is_empty();
         let add_zones_with_mupdate_override =
             self.input.chicken_switches().add_zones_with_mupdate_override;
-        let mut add =
-            if !has_mupdate_override || add_zones_with_mupdate_override {
-                self.do_plan_add(&mgs_updates)?
-            } else {
-                PlanningAddStepReport::waiting_on(
-                    ZoneAddWaitingOn::MupdateOverrides,
-                )
-            };
-        add.has_mupdate_override = has_mupdate_override;
+        let mut add = if add_update_blocked_reasons.is_empty()
+            || add_zones_with_mupdate_override
+        {
+            self.do_plan_add(&mgs_updates)?
+        } else {
+            PlanningAddStepReport::waiting_on(ZoneAddWaitingOn::Blockers)
+        };
+        add.add_update_blocked_reasons = add_update_blocked_reasons;
         add.add_zones_with_mupdate_override = add_zones_with_mupdate_override;
 
         let zone_updates = if add.any_discretionary_zones_placed() {
@@ -223,10 +223,10 @@ impl<'a> Planner<'a> {
             PlanningZoneUpdatesStepReport::waiting_on(
                 ZoneUpdatesWaitingOn::PendingMgsUpdates,
             )
-        } else if !plan_mupdate_override_res.is_empty() {
-            // ... or if there are pending MUPdate overrides.
+        } else if !add.add_update_blocked_reasons.is_empty() {
+            // ... or if there are pending zone add blockers.
             PlanningZoneUpdatesStepReport::waiting_on(
-                ZoneUpdatesWaitingOn::MupdateOverrides,
+                ZoneUpdatesWaitingOn::ZoneAddBlockers,
             )
         } else {
             self.do_plan_zone_updates(&mgs_updates)?
@@ -1528,10 +1528,12 @@ impl<'a> Planner<'a> {
         Ok(report)
     }
 
+    /// Perform planning for mupdate overrides, returning a map of sleds to
+    /// actions taken.
     fn do_plan_mupdate_override(
         &mut self,
         noop_info: &mut NoopConvertInfo,
-    ) -> Result<Vec<String>, Error> {
+    ) -> Result<BTreeMap<SledUuid, EnsureMupdateOverrideAction>, Error> {
         // For each sled, compare what's in the inventory to what's in the
         // blueprint.
         let mut actions_by_sled = BTreeMap::new();
@@ -1638,7 +1640,14 @@ impl<'a> Planner<'a> {
             }
         }
 
-        // Now we need to determine whether to also perform other actions like
+        Ok(actions_by_sled)
+    }
+
+    fn should_plan_add_or_update(
+        &self,
+        actions_by_sled: &BTreeMap<SledUuid, EnsureMupdateOverrideAction>,
+    ) -> Result<Vec<String>, Error> {
+        // We need to determine whether to also perform other actions like
         // updating or adding zones. We have to be careful here:
         //
         // * We may have moved existing zones with an Artifact source to using
