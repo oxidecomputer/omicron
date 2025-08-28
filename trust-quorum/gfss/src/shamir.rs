@@ -23,7 +23,17 @@ pub enum SplitError {
     TooFewTotalShares { n: u8, k: u8 },
 }
 
-#[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]
+#[derive(
+    Debug,
+    Clone,
+    thiserror::Error,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Serialize,
+    Deserialize,
+)]
 pub enum CombineError {
     #[error("must be at least 2 shares to combine")]
     TooFewShares,
@@ -126,6 +136,16 @@ impl Share {
         ys.zeroize();
     }
 }
+
+#[cfg(feature = "danger_partial_eq_ct_wrapper")]
+impl PartialEq for Share {
+    fn eq(&self, other: &Self) -> bool {
+        self.x_coordinate == other.x_coordinate
+            && self.y_coordinates == other.y_coordinates
+    }
+}
+#[cfg(feature = "danger_partial_eq_ct_wrapper")]
+impl Eq for Share {}
 
 impl std::fmt::Debug for Share {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

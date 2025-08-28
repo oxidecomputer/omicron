@@ -5,24 +5,27 @@
 //! developer REPL for driving blueprint planning
 
 use anyhow::{Context, anyhow, bail};
-use camino::{Utf8Path, Utf8PathBuf};
+use camino::Utf8PathBuf;
 use chrono::{DateTime, Utc};
 use clap::{ArgAction, ValueEnum};
 use clap::{Args, Parser, Subcommand};
 use daft::Diffable;
+use gateway_types::rot::RotSlot;
 use iddqd::IdOrdMap;
 use indent_write::fmt::IndentWriter;
 use internal_dns_types::diff::DnsDiff;
 use itertools::Itertools;
-use log_capture::LogCapture;
+pub use log_capture::LogCapture;
 use nexus_inventory::CollectionBuilder;
 use nexus_reconfigurator_blippy::Blippy;
 use nexus_reconfigurator_blippy::BlippyReportSortKey;
 use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
-use nexus_reconfigurator_planning::example::ExampleSystemBuilder;
+use nexus_reconfigurator_planning::example::{
+    ExampleSystemBuilder, extract_tuf_repo_description, tuf_assemble,
+};
 use nexus_reconfigurator_planning::planner::Planner;
 use nexus_reconfigurator_planning::system::{
-    SledBuilder, SledInventoryVisibility, SystemDescription,
+    RotStateOverrides, SledBuilder, SledInventoryVisibility, SystemDescription,
 };
 use nexus_reconfigurator_simulation::{BlueprintId, CollectionId, SimState};
 use nexus_reconfigurator_simulation::{SimStateBuilder, SimTufRepoSource};
@@ -47,8 +50,8 @@ use nexus_types::external_api::views::SledPolicy;
 use nexus_types::external_api::views::SledProvisionPolicy;
 use nexus_types::inventory::CollectionDisplayCliFilter;
 use omicron_common::address::REPO_DEPOT_PORT;
+use omicron_common::api::external::Generation;
 use omicron_common::api::external::Name;
-use omicron_common::api::external::{Generation, TufRepoDescription};
 use omicron_common::disk::M2Slot;
 use omicron_common::policy::NEXUS_REDUNDANCY;
 use omicron_common::update::OmicronZoneManifestSource;
@@ -73,9 +76,6 @@ use tufaceous_artifact::ArtifactHash;
 use tufaceous_artifact::ArtifactVersion;
 use tufaceous_artifact::ArtifactVersionError;
 use tufaceous_lib::assemble::ArtifactManifest;
-use update_common::artifacts::{
-    ArtifactsWithPlan, ControlPlaneZonesMode, VerificationMode,
-};
 
 mod log_capture;
 
@@ -561,6 +561,27 @@ struct SledUpdateRotArgs {
     /// sets the version reported for the RoT slot b
     #[clap(long, required_unless_present_any = &["slot_a"])]
     slot_b: Option<ExpectedVersion>,
+
+    /// sets whether we expect the "A" or "B" slot to be active
+    #[clap(long)]
+    active_slot: Option<RotSlot>,
+
+    /// sets the persistent boot preference written into the current
+    /// authoritative CFPA page (ping or pong).
+    #[clap(long)]
+    persistent_boot_preference: Option<RotSlot>,
+
+    /// sets the pending persistent boot preference written into the CFPA
+    /// scratch page that will become the persistent boot preference in the
+    /// authoritative CFPA page upon reboot, unless CFPA update of the
+    /// authoritative page fails for some reason
+    #[clap(long, num_args(0..=1))]
+    pending_persistent_boot_preference: Option<Option<RotSlot>>,
+
+    /// sets the transient boot preference, which overrides persistent
+    /// preference selection for a single boot (unimplemented)
+    #[clap(long, num_args(0..=1),)]
+    transient_boot_preference: Option<Option<RotSlot>>,
 }
 
 #[derive(Debug, Args)]
@@ -1738,6 +1759,31 @@ fn cmd_sled_update_rot(
     if let Some(slot_b) = &args.slot_b {
         labels.push(format!("slot b -> {}", slot_b));
     }
+    if let Some(active_slot) = &args.active_slot {
+        labels.push(format!("active slot -> {}", active_slot));
+    }
+
+    if let Some(persistent_boot_preference) = &args.persistent_boot_preference {
+        labels.push(format!(
+            "persistent boot preference -> {}",
+            persistent_boot_preference
+        ));
+    }
+
+    if let Some(pending_persistent_boot_preference) =
+        &args.pending_persistent_boot_preference
+    {
+        labels.push(format!(
+            "pending persistent boot preference -> {:?}",
+            pending_persistent_boot_preference
+        ));
+    }
+    if let Some(transient_boot_preference) = &args.transient_boot_preference {
+        labels.push(format!(
+            "transient boot preference -> {:?}",
+            transient_boot_preference
+        ));
+    }
 
     assert!(
         !labels.is_empty(),
@@ -1749,8 +1795,16 @@ fn cmd_sled_update_rot(
     let sled_id = args.sled_id.to_sled_id(system.description())?;
     system.description_mut().sled_update_rot_versions(
         sled_id,
-        args.slot_a,
-        args.slot_b,
+        RotStateOverrides {
+            active_slot_override: args.active_slot,
+            slot_a_version_override: args.slot_a,
+            slot_b_version_override: args.slot_b,
+            persistent_boot_preference_override: args
+                .persistent_boot_preference,
+            pending_persistent_boot_preference_override: args
+                .pending_persistent_boot_preference,
+            transient_boot_preference_override: args.transient_boot_preference,
+        },
     )?;
 
     sim.commit_and_bump(
@@ -2729,32 +2783,6 @@ fn mupdate_source_to_description(
     }
 }
 
-fn extract_tuf_repo_description(
-    log: &slog::Logger,
-    filename: &Utf8Path,
-) -> anyhow::Result<TufRepoDescription> {
-    let file = std::fs::File::open(filename)
-        .with_context(|| format!("open {:?}", filename))?;
-    let buf = std::io::BufReader::new(file);
-    let rt =
-        tokio::runtime::Runtime::new().context("creating tokio runtime")?;
-    let repo_hash = ArtifactHash([0; 32]);
-    let artifacts_with_plan = rt.block_on(async {
-        ArtifactsWithPlan::from_zip(
-            buf,
-            None,
-            repo_hash,
-            ControlPlaneZonesMode::Split,
-            VerificationMode::BlindlyTrustAnything,
-            log,
-        )
-        .await
-        .with_context(|| format!("unpacking {:?}", filename))
-    })?;
-    let description = artifacts_with_plan.description().clone();
-    Ok(description)
-}
-
 fn cmd_tuf_assemble(
     sim: &ReconfiguratorSim,
     args: TufAssembleArgs,
@@ -2785,30 +2813,12 @@ fn cmd_tuf_assemble(
         Utf8PathBuf::from(format!("repo-{}.zip", manifest.system_version))
     };
 
-    if output_path.exists() {
-        bail!("output path `{output_path}` already exists");
-    }
-
-    // Just use a fixed key for now.
-    //
-    // In the future we may want to test changing the TUF key.
-    let mut tufaceous_args = vec![
-        "tufaceous",
-        "--key",
-        DEFAULT_TUFACEOUS_KEY,
-        "assemble",
-        manifest_path.as_str(),
-        output_path.as_str(),
-    ];
-    if args.allow_non_semver {
-        tufaceous_args.push("--allow-non-semver");
-    }
-    let args = tufaceous::Args::try_parse_from(tufaceous_args)
-        .expect("args are valid so this shouldn't fail");
-    let rt =
-        tokio::runtime::Runtime::new().context("creating tokio runtime")?;
-    rt.block_on(async move { args.exec(&sim.log).await })
-        .context("error executing tufaceous assemble")?;
+    tuf_assemble(
+        &sim.log,
+        &manifest_path,
+        &output_path,
+        args.allow_non_semver,
+    )?;
 
     let rv = format!(
         "created {} for system version {}",
