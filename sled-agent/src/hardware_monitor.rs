@@ -23,7 +23,7 @@ use tokio::sync::{broadcast, oneshot, watch};
 /// leaves the rack inoperable! We are only adding this as a workaround and test
 /// tool for handling sidecar resets; see
 /// https://github.com/oxidecomputer/omicron/issues/8480 for background.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OperatorSwitchZonePolicy {
     /// Start the switch zone if a switch is present.
     ///
@@ -38,6 +38,19 @@ pub enum OperatorSwitchZonePolicy {
 #[derive(Debug, Clone)]
 pub struct HardwareMonitorHandle {
     switch_zone_policy_tx: watch::Sender<OperatorSwitchZonePolicy>,
+}
+
+impl HardwareMonitorHandle {
+    pub fn set_switch_zone_policy(&self, policy: OperatorSwitchZonePolicy) {
+        self.switch_zone_policy_tx.send_if_modified(|p| {
+            if *p != policy {
+                *p = policy;
+                true
+            } else {
+                false
+            }
+        });
+    }
 }
 
 /// A monitor for hardware events
@@ -148,6 +161,10 @@ impl HardwareMonitor {
                         "update" => ?update,
                     );
                     self.handle_hardware_update(update).await;
+                }
+                Ok(()) = self.switch_zone_policy_rx.changed() => {
+                    info!(self.log, "Switch zone policy changed; reevaluating");
+                    self.ensure_switch_zone_activated_or_deactivated().await;
                 }
             }
         }
