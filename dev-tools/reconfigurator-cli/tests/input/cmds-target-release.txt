@@ -52,7 +52,7 @@ blueprint-diff latest
 # reflect that update has completed as well. Like before, collect inventory from
 # it and use that collection for the next step. This should report that the
 # update completed, remove that update, and add one for another sled.
-sled-update-rot 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 --slot-a 1.0.0
+sled-update-rot 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 --slot-b 1.0.0 --active-slot b --persistent-boot-preference b
 inventory-generate
 blueprint-plan latest latest
 blueprint-diff latest
@@ -127,7 +127,7 @@ blueprint-diff latest
 
 # Now simulate the update completing successfully.
 # Like before, we should see a pending SP update for this sled.
-sled-update-rot 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c --slot-a 1.0.0
+sled-update-rot 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c --slot-b 1.0.0 --active-slot b --persistent-boot-preference b
 inventory-generate
 blueprint-plan latest latest
 blueprint-diff latest
@@ -175,9 +175,38 @@ inventory-generate
 blueprint-plan latest latest
 blueprint-diff latest
 
-# Update the RoT on the last sled.
+# Now let's simulate an RoT update that hasn't completed by setting the persistent
+# boot preference to a different slot than the active one. This should cause the
+# planner to mark it as impossible, and replace it.
+set ignore-impossible-mgs-updates-since now
+sled-update-rot d81c6a84-79b8-4958-ae41-ea46c9b19763 --slot-b 1.0.0 --active-slot a --persistent-boot-preference b
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+# An RoT update cannot continue if pending persistent boot preference is set.
+# The slot B is set to a different version so it does not appear to be active
+# and on the correct version, and the corresponding checks are triggered.
+# Like before, this should cause the planner to mark it as impossible, and
+# replace it.
+set ignore-impossible-mgs-updates-since now
+sled-update-rot d81c6a84-79b8-4958-ae41-ea46c9b19763 --slot-b 1.1.0 --active-slot b --persistent-boot-preference b --pending-persistent-boot-preference b
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+# We do the same for transient boot preference. Note that we need to set the
+# pending-persistent-boot-preference back to None
+set ignore-impossible-mgs-updates-since now
+sled-update-rot d81c6a84-79b8-4958-ae41-ea46c9b19763 --slot-b 1.1.0 --active-slot b --persistent-boot-preference b --transient-boot-preference b --pending-persistent-boot-preference
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+# Update the RoT on the last sled. Note that we need to set the
+# transient-boot-preference back to None
 # There should be one last pending SP update.
-sled-update-rot d81c6a84-79b8-4958-ae41-ea46c9b19763 --slot-a 1.0.0
+sled-update-rot d81c6a84-79b8-4958-ae41-ea46c9b19763 --slot-b 1.0.0 --active-slot b --persistent-boot-preference b --transient-boot-preference
 inventory-generate
 blueprint-plan latest latest
 blueprint-diff latest
