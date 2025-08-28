@@ -16,6 +16,7 @@ use crate::db::model::SiloUserPasswordHash;
 use crate::db::model::SiloUserPasswordUpdate;
 use crate::db::model::UserBuiltin;
 use crate::db::model::UserProvisionType;
+use crate::db::model::to_db_typed_uuid;
 use crate::db::pagination::paginated;
 use crate::db::update_and_check::UpdateAndCheck;
 use async_bb8_diesel::AsyncRunQueryDsl;
@@ -36,6 +37,7 @@ use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::bail_unless;
+use omicron_uuid_kinds::GenericUuid;
 use uuid::Uuid;
 
 impl DataStore {
@@ -71,7 +73,7 @@ impl DataStore {
                 let authz_silo_user = authz::SiloUser::new(
                     authz_silo.clone(),
                     silo_user_id,
-                    LookupType::ById(silo_user_id),
+                    LookupType::by_id(silo_user_id),
                 );
                 (authz_silo_user, db_silo_user)
             })
@@ -98,10 +100,14 @@ impl DataStore {
                 {
                     use nexus_db_schema::schema::silo_user::dsl;
                     diesel::update(dsl::silo_user)
-                        .filter(dsl::id.eq(authz_silo_user_id))
+                        .filter(
+                            dsl::id.eq(to_db_typed_uuid(authz_silo_user_id)),
+                        )
                         .filter(dsl::time_deleted.is_null())
                         .set(dsl::time_deleted.eq(Utc::now()))
-                        .check_if_exists::<SiloUser>(authz_silo_user_id)
+                        .check_if_exists::<SiloUser>(
+                            authz_silo_user_id.into_untyped_uuid(),
+                        )
                         .execute_and_check(&conn)
                         .await?;
                 }
@@ -110,7 +116,10 @@ impl DataStore {
                 {
                     use nexus_db_schema::schema::console_session::dsl;
                     diesel::delete(dsl::console_session)
-                        .filter(dsl::silo_user_id.eq(authz_silo_user_id))
+                        .filter(
+                            dsl::silo_user_id
+                                .eq(to_db_typed_uuid(authz_silo_user_id)),
+                        )
                         .execute_async(&conn)
                         .await?;
                 }
@@ -119,7 +128,10 @@ impl DataStore {
                 {
                     use nexus_db_schema::schema::device_access_token::dsl;
                     diesel::delete(dsl::device_access_token)
-                        .filter(dsl::silo_user_id.eq(authz_silo_user_id))
+                        .filter(
+                            dsl::silo_user_id
+                                .eq(to_db_typed_uuid(authz_silo_user_id)),
+                        )
                         .execute_async(&conn)
                         .await?;
                 }
@@ -128,7 +140,10 @@ impl DataStore {
                 {
                     use nexus_db_schema::schema::silo_group_membership::dsl;
                     diesel::delete(dsl::silo_group_membership)
-                        .filter(dsl::silo_user_id.eq(authz_silo_user_id))
+                        .filter(
+                            dsl::silo_user_id
+                                .eq(to_db_typed_uuid(authz_silo_user_id)),
+                        )
                         .execute_async(&conn)
                         .await?;
                 }
@@ -137,7 +152,10 @@ impl DataStore {
                 {
                     use nexus_db_schema::schema::ssh_key::dsl;
                     diesel::update(dsl::ssh_key)
-                        .filter(dsl::silo_user_id.eq(authz_silo_user_id))
+                        .filter(
+                            dsl::silo_user_id
+                                .eq(to_db_typed_uuid(authz_silo_user_id)),
+                        )
                         .filter(dsl::time_deleted.is_null())
                         .set(dsl::time_deleted.eq(Utc::now()))
                         .execute_async(&conn)
@@ -233,11 +251,14 @@ impl DataStore {
         paginated(user::table, user::id, pagparams)
             .filter(user::silo_id.eq(authz_silo_user_list.silo().id()))
             .filter(user::time_deleted.is_null())
-            .inner_join(user_to_group::table.on(
-                user_to_group::silo_user_id.eq(user::id).and(
-                    user_to_group::silo_group_id.eq(authz_silo_group.id()),
-                ),
-            ))
+            .inner_join(
+                user_to_group::table.on(user_to_group::silo_user_id
+                    .eq(user::id)
+                    .and(
+                        user_to_group::silo_group_id
+                            .eq(to_db_typed_uuid(authz_silo_group.id())),
+                    )),
+            )
             .select(SiloUser::as_select())
             .load_async::<SiloUser>(
                 &*self.pool_connection_authorized(opctx).await?,
@@ -267,7 +288,7 @@ impl DataStore {
         bail_unless!(db_silo_user.id() == authz_silo_user.id());
         if let Some(db_silo_user_password_hash) = &db_silo_user_password_hash {
             bail_unless!(
-                db_silo_user_password_hash.silo_user_id == db_silo_user.id()
+                db_silo_user_password_hash.silo_user_id() == db_silo_user.id()
             );
         }
 
@@ -291,7 +312,10 @@ impl DataStore {
                 })?;
         } else {
             diesel::delete(dsl::silo_user_password_hash)
-                .filter(dsl::silo_user_id.eq(authz_silo_user.id()))
+                .filter(
+                    dsl::silo_user_id
+                        .eq(to_db_typed_uuid(authz_silo_user.id())),
+                )
                 .execute_async(&*self.pool_connection_authorized(opctx).await?)
                 .await
                 .map_err(|e| {
@@ -324,7 +348,9 @@ impl DataStore {
 
         use nexus_db_schema::schema::silo_user_password_hash::dsl;
         Ok(dsl::silo_user_password_hash
-            .filter(dsl::silo_user_id.eq(authz_silo_user.id()))
+            .filter(
+                dsl::silo_user_id.eq(to_db_typed_uuid(authz_silo_user.id())),
+            )
             .select(SiloUserPasswordHash::as_select())
             .load_async::<SiloUserPasswordHash>(
                 &*self.pool_connection_authorized(opctx).await?,
