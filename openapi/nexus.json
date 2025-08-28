@@ -23566,6 +23566,11 @@
         "description": "View of a Silo\n\nA Silo is the highest level unit of isolation.",
         "type": "object",
         "properties": {
+          "admin_group_name": {
+            "nullable": true,
+            "description": "Optionally, silos can have a group name that is automatically granted the silo admin role.",
+            "type": "string"
+          },
           "description": {
             "description": "human-readable free-form text about a resource",
             "type": "string"
