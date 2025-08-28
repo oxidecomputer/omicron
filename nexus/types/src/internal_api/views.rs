@@ -5,7 +5,6 @@
 use crate::deployment::PendingMgsUpdate;
 use crate::deployment::TargetReleaseDescription;
 use crate::inventory::BaseboardId;
-use crate::inventory::Caboose;
 use crate::inventory::CabooseWhich;
 use crate::inventory::Collection;
 use chrono::DateTime;
@@ -13,9 +12,13 @@ use chrono::SecondsFormat;
 use chrono::Utc;
 use futures::future::ready;
 use futures::stream::StreamExt;
+use gateway_client::types::SpType;
+use gateway_types::rot::RotSlot;
 use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
 use iddqd::id_upcast;
+use nexus_sled_agent_shared::inventory::BootPartitionContents;
+use nexus_sled_agent_shared::inventory::BootPartitionDetails;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryResult;
 use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
 use nexus_sled_agent_shared::inventory::OmicronZoneType;
@@ -23,6 +26,7 @@ use omicron_common::api::external::MacAddr;
 use omicron_common::api::external::ObjectStream;
 use omicron_common::api::external::TufArtifactMeta;
 use omicron_common::api::external::Vni;
+use omicron_common::disk::M2Slot;
 use omicron_common::snake_case_result;
 use omicron_common::snake_case_result::SnakeCaseResult;
 use omicron_uuid_kinds::DemoSagaUuid;
@@ -41,6 +45,8 @@ use std::time::Duration;
 use std::time::Instant;
 use steno::SagaResultErr;
 use steno::UndoActionError;
+use tufaceous_artifact::ArtifactHash;
+use tufaceous_artifact::ArtifactKind;
 use tufaceous_artifact::KnownArtifactKind;
 use uuid::Uuid;
 
@@ -536,6 +542,33 @@ pub enum TufRepoVersion {
     Error(String),
 }
 
+impl TufRepoVersion {
+    fn for_artifact(
+        old: &TargetReleaseDescription,
+        new: &TargetReleaseDescription,
+        artifact_hash: ArtifactHash,
+    ) -> TufRepoVersion {
+        let matching_artifact = |a: &TufArtifactMeta| a.hash == artifact_hash;
+
+        if let Some(new) = new.tuf_repo() {
+            if new.artifacts.iter().any(matching_artifact) {
+                return TufRepoVersion::Version(
+                    new.repo.system_version.clone(),
+                );
+            }
+        }
+        if let Some(old) = old.tuf_repo() {
+            if old.artifacts.iter().any(matching_artifact) {
+                return TufRepoVersion::Version(
+                    old.repo.system_version.clone(),
+                );
+            }
+        }
+
+        TufRepoVersion::Unknown
+    }
+}
+
 impl Display for TufRepoVersion {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -560,17 +593,268 @@ pub struct ZoneStatus {
     pub version: TufRepoVersion,
 }
 
+impl IdOrdItem for ZoneStatus {
+    type Key<'a> = OmicronZoneUuid;
+
+    fn key(&self) -> Self::Key<'_> {
+        self.zone_id
+    }
+
+    id_upcast!();
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct HostPhase2Status {
+    #[serde(with = "snake_case_result")]
+    #[schemars(schema_with = "SnakeCaseResult::<M2Slot, String>::json_schema")]
+    pub boot_disk: Result<M2Slot, String>,
+    pub slot_a_version: TufRepoVersion,
+    pub slot_b_version: TufRepoVersion,
+}
+
+impl HostPhase2Status {
+    fn new(
+        inv: &BootPartitionContents,
+        old: &TargetReleaseDescription,
+        new: &TargetReleaseDescription,
+    ) -> Self {
+        Self {
+            boot_disk: inv.boot_disk.clone(),
+            slot_a_version: Self::slot_version(old, new, &inv.slot_a),
+            slot_b_version: Self::slot_version(old, new, &inv.slot_b),
+        }
+    }
+
+    fn slot_version(
+        old: &TargetReleaseDescription,
+        new: &TargetReleaseDescription,
+        details: &Result<BootPartitionDetails, String>,
+    ) -> TufRepoVersion {
+        let artifact_hash = match details.as_ref() {
+            Ok(details) => details.artifact_hash,
+            Err(err) => return TufRepoVersion::Error(err.clone()),
+        };
+        TufRepoVersion::for_artifact(old, new, artifact_hash)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct SledAgentUpdateStatus {
+    pub sled_id: SledUuid,
+    pub zones: IdOrdMap<ZoneStatus>,
+    pub host_phase_2: HostPhase2Status,
+}
+
+impl IdOrdItem for SledAgentUpdateStatus {
+    type Key<'a> = SledUuid;
+
+    fn key(&self) -> Self::Key<'_> {
+        self.sled_id
+    }
+
+    id_upcast!();
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct RotBootloaderStatus {
+    pub stage0_version: TufRepoVersion,
+    pub stage0_next_version: TufRepoVersion,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct RotStatus {
+    pub active_slot: Option<RotSlot>,
+    pub slot_a_version: TufRepoVersion,
+    pub slot_b_version: TufRepoVersion,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct SpStatus {
-    pub sled_id: Option<SledUuid>,
     pub slot0_version: TufRepoVersion,
     pub slot1_version: TufRepoVersion,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case", tag = "kind")]
+pub enum HostPhase1Status {
+    /// This device has no host phase 1 status because it is not a sled (e.g.,
+    /// it's a PSC or switch).
+    NotASled,
+    Sled {
+        sled_id: Option<SledUuid>,
+        active_slot: Option<M2Slot>,
+        slot_a_version: TufRepoVersion,
+        slot_b_version: TufRepoVersion,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct MgsDrivenUpdateStatus {
+    // This is a stringified [`BaseboardId`]. We can't use `BaseboardId` as a
+    // key in JSON maps, so we squish it into a string.
+    pub baseboard_description: String,
+    pub rot_bootloader: RotBootloaderStatus,
+    pub rot: RotStatus,
+    pub sp: SpStatus,
+    pub host_os_phase_1: HostPhase1Status,
+}
+
+impl MgsDrivenUpdateStatus {
+    fn new(
+        inventory: &Collection,
+        baseboard_id: &BaseboardId,
+        sp_type: SpType,
+        old: &TargetReleaseDescription,
+        new: &TargetReleaseDescription,
+        sled_ids: &BTreeMap<&BaseboardId, SledUuid>,
+    ) -> Self {
+        MgsDrivenUpdateStatusBuilder {
+            inventory,
+            baseboard_id,
+            sp_type,
+            old,
+            new,
+            sled_ids,
+        }
+        .build()
+    }
+}
+
+impl IdOrdItem for MgsDrivenUpdateStatus {
+    type Key<'a> = &'a str;
+
+    fn key(&self) -> Self::Key<'_> {
+        &self.baseboard_description
+    }
+
+    id_upcast!();
+}
+
+struct MgsDrivenUpdateStatusBuilder<'a> {
+    inventory: &'a Collection,
+    baseboard_id: &'a BaseboardId,
+    sp_type: SpType,
+    old: &'a TargetReleaseDescription,
+    new: &'a TargetReleaseDescription,
+    sled_ids: &'a BTreeMap<&'a BaseboardId, SledUuid>,
+}
+
+impl MgsDrivenUpdateStatusBuilder<'_> {
+    fn build(&self) -> MgsDrivenUpdateStatus {
+        let host_os_phase_1 = match self.sp_type {
+            SpType::Power | SpType::Switch => HostPhase1Status::NotASled,
+            SpType::Sled => HostPhase1Status::Sled {
+                sled_id: self.sled_ids.get(self.baseboard_id).copied(),
+                active_slot: self
+                    .inventory
+                    .host_phase_1_active_slot_for(self.baseboard_id)
+                    .map(|s| s.slot),
+                slot_a_version: self.version_for_host_phase_1(M2Slot::A),
+                slot_b_version: self.version_for_host_phase_1(M2Slot::B),
+            },
+        };
+
+        MgsDrivenUpdateStatus {
+            baseboard_description: self.baseboard_id.to_string(),
+            rot_bootloader: RotBootloaderStatus {
+                stage0_version: self.version_for_caboose(CabooseWhich::Stage0),
+                stage0_next_version: self
+                    .version_for_caboose(CabooseWhich::Stage0Next),
+            },
+            rot: RotStatus {
+                active_slot: self
+                    .inventory
+                    .rot_state_for(self.baseboard_id)
+                    .map(|state| state.active_slot),
+                slot_a_version: self
+                    .version_for_caboose(CabooseWhich::RotSlotA),
+                slot_b_version: self
+                    .version_for_caboose(CabooseWhich::RotSlotB),
+            },
+            sp: SpStatus {
+                slot0_version: self.version_for_caboose(CabooseWhich::SpSlot0),
+                slot1_version: self.version_for_caboose(CabooseWhich::SpSlot1),
+            },
+            host_os_phase_1,
+        }
+    }
+
+    fn version_for_host_phase_1(&self, slot: M2Slot) -> TufRepoVersion {
+        let Some(artifact_hash) = self
+            .inventory
+            .host_phase_1_flash_hash_for(slot, self.baseboard_id)
+            .map(|h| h.hash)
+        else {
+            return TufRepoVersion::Unknown;
+        };
+
+        TufRepoVersion::for_artifact(self.old, self.new, artifact_hash)
+    }
+
+    fn version_for_caboose(&self, which: CabooseWhich) -> TufRepoVersion {
+        let Some(caboose) = self
+            .inventory
+            .caboose_for(which, self.baseboard_id)
+            .map(|c| &c.caboose)
+        else {
+            return TufRepoVersion::Unknown;
+        };
+
+        // TODO-cleanup This is really fragile! The RoT and bootloader kinds
+        // here aren't `KnownArtifactKind`s, so if we add more
+        // `ArtifactKind` constants we have to remember to update these
+        // lists. Maybe we fix this as a part of
+        // https://github.com/oxidecomputer/tufaceous/issues/37?
+        let matching_kinds = match which {
+            CabooseWhich::SpSlot0 | CabooseWhich::SpSlot1 => [
+                ArtifactKind::from_known(KnownArtifactKind::GimletSp),
+                ArtifactKind::from_known(KnownArtifactKind::PscSp),
+                ArtifactKind::from_known(KnownArtifactKind::SwitchSp),
+            ],
+            CabooseWhich::RotSlotA => [
+                ArtifactKind::GIMLET_ROT_IMAGE_A,
+                ArtifactKind::PSC_ROT_IMAGE_A,
+                ArtifactKind::SWITCH_ROT_IMAGE_A,
+            ],
+            CabooseWhich::RotSlotB => [
+                ArtifactKind::GIMLET_ROT_IMAGE_B,
+                ArtifactKind::PSC_ROT_IMAGE_B,
+                ArtifactKind::SWITCH_ROT_IMAGE_B,
+            ],
+            CabooseWhich::Stage0 | CabooseWhich::Stage0Next => [
+                ArtifactKind::GIMLET_ROT_STAGE0,
+                ArtifactKind::PSC_ROT_STAGE0,
+                ArtifactKind::SWITCH_ROT_STAGE0,
+            ],
+        };
+        let matching_caboose = |a: &TufArtifactMeta| {
+            Some(&caboose.board) == a.board.as_ref()
+                && caboose.version == a.id.version.to_string()
+                && matching_kinds.contains(&a.id.kind)
+        };
+        if let Some(new) = self.new.tuf_repo() {
+            if new.artifacts.iter().any(matching_caboose) {
+                return TufRepoVersion::Version(
+                    new.repo.system_version.clone(),
+                );
+            }
+        }
+        if let Some(old) = self.old.tuf_repo() {
+            if old.artifacts.iter().any(matching_caboose) {
+                return TufRepoVersion::Version(
+                    old.repo.system_version.clone(),
+                );
+            }
+        }
+
+        TufRepoVersion::Unknown
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct UpdateStatus {
-    pub zones: BTreeMap<SledUuid, Vec<ZoneStatus>>,
-    pub sps: BTreeMap<String, SpStatus>,
+    pub mgs_driven: IdOrdMap<MgsDrivenUpdateStatus>,
+    pub sleds: IdOrdMap<SledAgentUpdateStatus>,
 }
 
 impl UpdateStatus {
@@ -582,98 +866,71 @@ impl UpdateStatus {
         let sleds = inventory
             .sled_agents
             .iter()
-            .map(|agent| (&agent.sled_id, &agent.last_reconciliation));
-        let zones = sleds
-            .map(|(sled_id, inv)| {
-                (
-                    *sled_id,
-                    inv.as_ref().map_or(vec![], |inv| {
-                        inv.reconciled_omicron_zones()
-                            .map(|(conf, res)| ZoneStatus {
-                                zone_id: conf.id,
-                                zone_type: conf.zone_type.clone(),
-                                version: Self::zone_image_source_to_version(
-                                    old,
-                                    new,
-                                    &conf.image_source,
-                                    res,
-                                ),
-                            })
-                            .collect()
-                    }),
-                )
-            })
-            .collect();
-        let baseboard_ids: Vec<_> = inventory.sps.keys().cloned().collect();
+            .map(|sa| {
+                let Some(inv) = sa.last_reconciliation.as_ref() else {
+                    return SledAgentUpdateStatus {
+                        sled_id: sa.sled_id,
+                        zones: IdOrdMap::new(),
+                        host_phase_2: HostPhase2Status {
+                            boot_disk: Err("unknown".to_string()),
+                            slot_a_version: TufRepoVersion::Unknown,
+                            slot_b_version: TufRepoVersion::Unknown,
+                        },
+                    };
+                };
 
-        // Find all SP versions and git commits via cabooses
-        let mut sps: BTreeMap<BaseboardId, SpStatus> = baseboard_ids
-            .into_iter()
-            .map(|baseboard_id| {
-                let slot0_version = inventory
-                    .caboose_for(CabooseWhich::SpSlot0, &baseboard_id)
-                    .map_or(TufRepoVersion::Unknown, |c| {
-                        Self::caboose_to_version(old, new, &c.caboose)
-                    });
-                let slot1_version = inventory
-                    .caboose_for(CabooseWhich::SpSlot1, &baseboard_id)
-                    .map_or(TufRepoVersion::Unknown, |c| {
-                        Self::caboose_to_version(old, new, &c.caboose)
-                    });
-                (
-                    (*baseboard_id).clone(),
-                    SpStatus { sled_id: None, slot0_version, slot1_version },
-                )
-            })
-            .collect();
-
-        // Fill in the sled_id for the sp if known
-        for sa in inventory.sled_agents.iter() {
-            if let Some(baseboard_id) = &sa.baseboard_id {
-                if let Some(sp) = sps.get_mut(baseboard_id) {
-                    sp.sled_id = Some(sa.sled_id);
+                SledAgentUpdateStatus {
+                    sled_id: sa.sled_id,
+                    zones: inv
+                        .reconciled_omicron_zones()
+                        .map(|(conf, res)| ZoneStatus {
+                            zone_id: conf.id,
+                            zone_type: conf.zone_type.clone(),
+                            version: Self::zone_image_source_to_version(
+                                old,
+                                new,
+                                &conf.image_source,
+                                res,
+                            ),
+                        })
+                        .collect(),
+                    host_phase_2: HostPhase2Status::new(
+                        &inv.boot_partitions,
+                        old,
+                        new,
+                    ),
                 }
-            }
-        }
+            })
+            .collect();
 
-        let sps = sps.into_iter().map(|(k, v)| (k.to_string(), v)).collect();
+        // Build a map so we can look up the sled ID for a given baseboard (when
+        // collecting the MGS-driven update status below, all we have is the
+        // baseboard).
+        let sled_ids_by_baseboard: BTreeMap<&BaseboardId, SledUuid> = inventory
+            .sled_agents
+            .iter()
+            .filter_map(|sa| {
+                let baseboard_id = sa.baseboard_id.as_deref()?;
+                Some((baseboard_id, sa.sled_id))
+            })
+            .collect();
 
-        UpdateStatus { zones, sps }
-    }
-
-    fn caboose_to_version(
-        old: &TargetReleaseDescription,
-        new: &TargetReleaseDescription,
-        caboose: &Caboose,
-    ) -> TufRepoVersion {
-        let matching_caboose = |a: &TufArtifactMeta| {
-            caboose.board == a.id.name
-                && matches!(
-                    a.id.kind.to_known(),
-                    Some(
-                        KnownArtifactKind::GimletSp
-                            | KnownArtifactKind::PscSp
-                            | KnownArtifactKind::SwitchSp
-                    )
+        let mgs_driven = inventory
+            .sps
+            .iter()
+            .map(|(baseboard_id, sp)| {
+                MgsDrivenUpdateStatus::new(
+                    inventory,
+                    baseboard_id,
+                    sp.sp_type,
+                    old,
+                    new,
+                    &sled_ids_by_baseboard,
                 )
-                && caboose.version == a.id.version.to_string()
-        };
-        if let Some(new) = new.tuf_repo() {
-            if new.artifacts.iter().any(matching_caboose) {
-                return TufRepoVersion::Version(
-                    new.repo.system_version.clone(),
-                );
-            }
-        }
-        if let Some(old) = old.tuf_repo() {
-            if old.artifacts.iter().any(matching_caboose) {
-                return TufRepoVersion::Version(
-                    old.repo.system_version.clone(),
-                );
-            }
-        }
+            })
+            .collect::<IdOrdMap<_>>();
 
-        TufRepoVersion::Unknown
+        UpdateStatus { sleds, mgs_driven }
     }
 
     fn zone_image_source_to_version(
