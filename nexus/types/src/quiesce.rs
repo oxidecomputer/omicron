@@ -183,11 +183,18 @@ pub struct SagaQuiesceStatus {
     /// there's a new blueprint that expunges a different Nexus zone.
     drained_blueprint_id: Option<BlueprintUuid>,
 
-    /// whether a saga recovery operation is ongoing, and if one is:
-    /// - what `reassignment_generation` was when it started
-    /// - which blueprint id we'll be fully caught up to upon completion
-    #[serde(skip)] // XXX-dap
-    recovery_pending: Option<(Generation, Option<BlueprintUuid>)>,
+    /// If a recovery pass is ongoing, a snapshot of reassignment state when it
+    /// started (which reflects what we'll be caught up to when it finishes)
+    recovery_pending: Option<PendingRecovery>,
+}
+
+/// Snapshot of reassignment state when a recovery pass started
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+struct PendingRecovery {
+    /// what `reassignment_generation` was when this recovery started
+    generation: Generation,
+    /// which blueprint id we'd be fully caught up to upon completion
+    blueprint_id: Option<BlueprintUuid>,
 }
 
 impl SagaQuiesceHandle {
@@ -251,7 +258,7 @@ impl SagaQuiesceHandle {
                 }
             };
 
-            q.latch_drained_blueprint_id();
+            q.latch_blueprint_if_drained();
             changed
         });
     }
@@ -423,7 +430,7 @@ impl SagaQuiesceHandle {
                 }
             }
 
-            q.latch_drained_blueprint_id();
+            q.latch_blueprint_if_drained();
         });
     }
 
@@ -468,8 +475,10 @@ impl SagaQuiesceHandle {
                 "recovery_start() called twice without intervening \
                  recovery_done() (concurrent calls to recover()?)",
             );
-            q.recovery_pending =
-                Some((q.reassignment_generation, q.reassignment_blueprint_id));
+            q.recovery_pending = Some(PendingRecovery {
+                generation: q.reassignment_generation,
+                blueprint_id: q.reassignment_blueprint_id,
+            });
         });
 
         info!(&self.log, "saga recovery pass starting");
@@ -480,7 +489,8 @@ impl SagaQuiesceHandle {
     fn recovery_done(&self, success: bool) {
         let log = self.log.clone();
         self.inner.send_modify(|q| {
-            let Some((generation, blueprint_id)) = q.recovery_pending.take()
+            let Some(PendingRecovery { generation, blueprint_id }) =
+                q.recovery_pending.take()
             else {
                 panic!("cannot finish saga recovery when it was not running");
             };
@@ -495,7 +505,7 @@ impl SagaQuiesceHandle {
                 q.recovered_blueprint_id = blueprint_id;
                 q.recovered_reassignment_generation = generation;
                 q.first_recovery_complete = true;
-                q.latch_drained_blueprint_id();
+                q.latch_blueprint_if_drained();
             } else {
                 info!(&log, "saga recovery pass failed");
             }
@@ -636,7 +646,7 @@ impl SagaQuiesceStatus {
     /// result of that blueprint.  The rest of our bookkeeping would reflect
     /// that we're not fully drained, which is true, but we still want to be
     /// able to report that we were fully drained _as of this blueprint_.
-    fn latch_drained_blueprint_id(&mut self) {
+    fn latch_blueprint_if_drained(&mut self) {
         if self.is_fully_drained() {
             // If we've recovered up through a given blueprint id and are now
             // fully drained, then we have definitely fully drained up through
@@ -705,7 +715,7 @@ impl NewlyPendingSagaRef {
                 q.sagas_pending
                     .remove(&saga_id)
                     .expect("saga should have been running");
-                q.latch_drained_blueprint_id();
+                q.latch_blueprint_if_drained();
             });
             rv
         });

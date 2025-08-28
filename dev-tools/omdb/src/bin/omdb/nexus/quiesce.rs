@@ -11,6 +11,7 @@ use chrono::TimeDelta;
 use chrono::Utc;
 use clap::Args;
 use clap::Subcommand;
+use nexus_client::types::PendingRecovery;
 use nexus_client::types::QuiesceState;
 use nexus_client::types::QuiesceStatus;
 use nexus_client::types::SagaQuiesceStatus;
@@ -160,6 +161,7 @@ async fn quiesce_show(
         reassignment_pending,
         recovered_blueprint_id,
         recovered_reassignment_generation,
+        recovery_pending,
     } = sagas;
 
     println!("saga quiesce:");
@@ -172,7 +174,7 @@ async fn quiesce_show(
             .unwrap_or("none")
     );
     println!(
-        "    blueprint for last recovery pass: {}",
+        "    blueprint for last completed recovery pass: {}",
         recovered_blueprint_id
             .map(|s| s.to_string())
             .as_deref()
@@ -195,6 +197,17 @@ async fn quiesce_show(
         "    recovered at least once successfully: {}",
         if first_recovery_complete { "yes" } else { "no" },
     );
+    print!("    recovery pending: ");
+    if let Some(PendingRecovery { generation, blueprint_id }) = recovery_pending
+    {
+        println!(
+            "yes (generation {}, blueprint id {})",
+            generation,
+            blueprint_id.map(|s| s.to_string()).as_deref().unwrap_or("none")
+        );
+    } else {
+        println!("no");
+    }
 
     println!("    sagas running: {}", sagas_pending.len());
     for saga in &sagas_pending {
