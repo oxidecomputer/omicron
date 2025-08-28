@@ -14,6 +14,7 @@ use crate::blueprint_editor::ExternalSnatNetworkingChoice;
 use crate::blueprint_editor::NoAvailableDnsSubnets;
 use crate::blueprint_editor::SledEditError;
 use crate::blueprint_editor::SledEditor;
+use crate::mgs_updates::PendingHostPhase2Changes;
 use crate::planner::NoopConvertGlobalIneligibleReason;
 use crate::planner::NoopConvertInfo;
 use crate::planner::NoopConvertSledIneligibleReason;
@@ -360,6 +361,11 @@ pub(crate) enum Operation {
         sled_id: SledUuid,
         count: usize,
     },
+    SledNoopHostPhase2Updated {
+        sled_id: SledUuid,
+        slot_a_updated: bool,
+        slot_b_updated: bool,
+    },
 }
 
 impl fmt::Display for Operation {
@@ -429,6 +435,24 @@ impl fmt::Display for Operation {
                     f,
                     "sled {sled_id}: performed {count} noop \
                      zone image source updates"
+                )
+            }
+            Self::SledNoopHostPhase2Updated {
+                sled_id,
+                slot_a_updated,
+                slot_b_updated,
+            } => {
+                let slots_updated_str = match (*slot_a_updated, *slot_b_updated)
+                {
+                    (true, true) => "both slot A and slot B",
+                    (true, false) => "slot A",
+                    (false, true) => "slot B",
+                    (false, false) => "none (this shouldn't happen)",
+                };
+                write!(
+                    f,
+                    "sled {sled_id}: noop updated host phase 2 to Artifact: \
+                     {slots_updated_str}"
                 )
             }
             Self::SetTargetReleaseMinimumGeneration {
@@ -714,6 +738,18 @@ impl<'a> BlueprintBuilder<'a> {
             return Either::Left(iter::empty());
         };
         Either::Right(editor.disks(filter))
+    }
+
+    pub fn current_sled_host_phase_2(
+        &self,
+        sled_id: SledUuid,
+    ) -> Result<BlueprintHostPhase2DesiredSlots, Error> {
+        let editor = self.sled_editors.get(&sled_id).ok_or_else(|| {
+            Error::Planner(anyhow!(
+                "tried to get host phase 2 for unknown sled {sled_id}"
+            ))
+        })?;
+        Ok(editor.host_phase_2())
     }
 
     /// Assemble a final [`Blueprint`] based on the contents of the builder
@@ -1943,6 +1979,16 @@ impl<'a> BlueprintBuilder<'a> {
             .map_err(|err| Error::SledEditError { sled_id, err })?;
         let final_counts = editor.edit_counts();
         Ok(final_counts.difference_since(initial_counts))
+    }
+
+    pub(crate) fn apply_pending_host_phase_2_changes(
+        &mut self,
+        changes: PendingHostPhase2Changes,
+    ) -> Result<(), Error> {
+        for (sled_id, slot, contents) in changes.into_iter() {
+            self.sled_set_host_phase_2_slot(sled_id, slot, contents)?;
+        }
+        Ok(())
     }
 
     pub fn sled_set_host_phase_2(

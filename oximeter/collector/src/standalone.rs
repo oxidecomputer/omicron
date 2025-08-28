@@ -57,7 +57,7 @@ impl Inner {
     fn random_collector(&self) -> Option<(Uuid, OximeterInfo)> {
         self.collectors
             .iter()
-            .choose(&mut rand::thread_rng())
+            .choose(&mut rand::rng())
             .map(|(id, info)| (*id, *info))
     }
 }

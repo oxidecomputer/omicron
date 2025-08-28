@@ -10903,7 +10903,7 @@
     "/v1/system/update/repository": {
       "put": {
         "tags": [
-          "experimental"
+          "system/update"
         ],
         "summary": "Upload system release repository",
         "description": "System release repositories are verified by the updates trust store.",
@@ -10953,7 +10953,7 @@
     "/v1/system/update/repository/{system_version}": {
       "get": {
         "tags": [
-          "experimental"
+          "system/update"
         ],
         "summary": "Fetch system release repository description by version",
         "operationId": "system_update_get_repository",
@@ -10992,7 +10992,7 @@
     "/v1/system/update/target-release": {
       "get": {
         "tags": [
-          "experimental"
+          "system/update"
         ],
         "summary": "Get the current target release of the rack's system software",
         "description": "This may not correspond to the actual software running on the rack at the time of request; it is instead the release that the rack reconfigurator should be moving towards as a goal state. After some number of planning and execution phases, the software running on the rack should eventually correspond to the release described here.",
@@ -11018,7 +11018,7 @@
       },
       "put": {
         "tags": [
-          "experimental"
+          "system/update"
         ],
         "summary": "Set the current target release of the rack's system software",
         "description": "The rack reconfigurator will treat the software specified here as a goal state for the rack's software, and attempt to asynchronously update to that release.",
@@ -11056,7 +11056,7 @@
     "/v1/system/update/trust-roots": {
       "get": {
         "tags": [
-          "experimental"
+          "system/update"
         ],
         "summary": "List root roles in the updates trust store",
         "description": "A root role is a JSON document describing the cryptographic keys that are trusted to sign system release repositories, as described by The Update Framework. Uploading a repository requires its metadata to be signed by keys trusted by the trust store.",
@@ -11114,7 +11114,7 @@
       },
       "post": {
         "tags": [
-          "experimental"
+          "system/update"
         ],
         "summary": "Add trusted root role to updates trust store",
         "operationId": "system_update_trust_root_create",
@@ -11149,7 +11149,7 @@
     "/v1/system/update/trust-roots/{trust_root_id}": {
       "get": {
         "tags": [
-          "experimental"
+          "system/update"
         ],
         "summary": "Fetch trusted root role",
         "operationId": "system_update_trust_root_view",
@@ -11186,7 +11186,7 @@
       },
       "delete": {
         "tags": [
-          "experimental"
+          "system/update"
         ],
         "summary": "Delete trusted root role",
         "description": "Note that this method does not currently check for any uploaded system release repositories that would become untrusted after deleting the root role.",
@@ -13816,7 +13816,8 @@
                 "type": "object",
                 "properties": {
                   "id": {
-                    "$ref": "#/components/schemas/TypedUuidForInstanceKind"
+                    "type": "string",
+                    "format": "uuid"
                   },
                   "name": {
                     "$ref": "#/components/schemas/Name"
@@ -13983,11 +13984,8 @@
           },
           "alert_id": {
             "description": "The UUID of the event.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/TypedUuidForAlertKind"
-              }
-            ]
+            "type": "string",
+            "format": "uuid"
           },
           "attempts": {
             "description": "Individual attempts to deliver this webhook event, and their outcomes.",
@@ -14004,11 +14002,8 @@
           },
           "receiver_id": {
             "description": "The UUID of the alert receiver that this event was delivered to.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/TypedUuidForAlertReceiverKind"
-              }
-            ]
+            "type": "string",
+            "format": "uuid"
           },
           "state": {
             "description": "The state of this delivery.",
@@ -14504,7 +14499,8 @@
                 "type": "object",
                 "properties": {
                   "id": {
-                    "$ref": "#/components/schemas/TypedUuidForInstanceKind"
+                    "type": "string",
+                    "format": "uuid"
                   },
                   "name": {
                     "$ref": "#/components/schemas/Name"
@@ -16807,8 +16803,16 @@
             "description": "Human-readable name that can identify the user",
             "type": "string"
           },
+          "fleet_viewer": {
+            "description": "Whether this user has the viewer role on the fleet. Used by the web console to determine whether to show system-level UI.",
+            "type": "boolean"
+          },
           "id": {
             "$ref": "#/components/schemas/TypedUuidForSiloUserKind"
+          },
+          "silo_admin": {
+            "description": "Whether this user has the admin role on their silo. Used by the web console to determine whether to show admin-only UI elements.",
+            "type": "boolean"
           },
           "silo_id": {
             "description": "Uuid of the silo to which this user belongs",
@@ -16826,7 +16830,9 @@
         },
         "required": [
           "display_name",
+          "fleet_viewer",
           "id",
+          "silo_admin",
           "silo_id",
           "silo_name"
         ]
@@ -20572,6 +20578,14 @@
               }
             ]
           },
+          "transit_ips": {
+            "description": "A set of additional networks that this interface may send and receive traffic on.",
+            "default": [],
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IpNet"
+            }
+          },
           "vpc_name": {
             "description": "The VPC in which to create the interface.",
             "allOf": [
@@ -22261,12 +22275,33 @@
             "description": "Tables resulting from the query, each containing timeseries.",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/Table"
+              "$ref": "#/components/schemas/OxqlTable"
             }
           }
         },
         "required": [
           "tables"
+        ]
+      },
+      "OxqlTable": {
+        "description": "A table represents one or more timeseries with the same schema.\n\nA table is the result of an OxQL query. It contains a name, usually the name of the timeseries schema from which the data is derived, and any number of timeseries, which contain the actual data.",
+        "type": "object",
+        "properties": {
+          "name": {
+            "description": "The name of the table.",
+            "type": "string"
+          },
+          "timeseries": {
+            "description": "The set of timeseries in the table, ordered by key.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Timeseries"
+            }
+          }
+        },
+        "required": [
+          "name",
+          "timeseries"
         ]
       },
       "Password": {
@@ -24535,7 +24570,8 @@
         "type": "object",
         "properties": {
           "id": {
-            "$ref": "#/components/schemas/TypedUuidForSupportBundleKind"
+            "type": "string",
+            "format": "uuid"
           },
           "reason_for_creation": {
             "type": "string"
@@ -25512,25 +25548,6 @@
           "vlan_id"
         ]
       },
-      "Table": {
-        "description": "A table represents one or more timeseries with the same schema.\n\nA table is the result of an OxQL query. It contains a name, usually the name of the timeseries schema from which the data is derived, and any number of timeseries, which contain the actual data.",
-        "type": "object",
-        "properties": {
-          "name": {
-            "type": "string"
-          },
-          "timeseries": {
-            "type": "object",
-            "additionalProperties": {
-              "$ref": "#/components/schemas/Timeseries"
-            }
-          }
-        },
-        "required": [
-          "name",
-          "timeseries"
-        ]
-      },
       "TargetRelease": {
         "description": "View of a system software target release.",
         "type": "object",
@@ -25726,6 +25743,11 @@
         "description": "Metadata about an individual TUF artifact.\n\nFound within a `TufRepoDescription`.",
         "type": "object",
         "properties": {
+          "board": {
+            "nullable": true,
+            "description": "Contents of the `BORD` field of a Hubris archive caboose. Only applicable to artifacts that are Hubris archives.\n\nThis field should always be `Some(_)` if `sign` is `Some(_)`, but the opposite is not true (SP images will have a `board` but not a `sign`).",
+            "type": "string"
+          },
           "hash": {
             "description": "The hash of the artifact.",
             "type": "string",
@@ -25959,19 +25981,7 @@
           }
         }
       },
-      "TypedUuidForAlertKind": {
-        "type": "string",
-        "format": "uuid"
-      },
-      "TypedUuidForAlertReceiverKind": {
-        "type": "string",
-        "format": "uuid"
-      },
       "TypedUuidForBuiltInUserKind": {
-        "type": "string",
-        "format": "uuid"
-      },
-      "TypedUuidForInstanceKind": {
         "type": "string",
         "format": "uuid"
       },
@@ -25980,10 +25990,6 @@
         "format": "uuid"
       },
       "TypedUuidForSiloUserKind": {
-        "type": "string",
-        "format": "uuid"
-      },
-      "TypedUuidForSupportBundleKind": {
         "type": "string",
         "format": "uuid"
       },
@@ -28028,6 +28034,13 @@
       "description": "Endpoints related to system health",
       "externalDocs": {
         "url": "http://docs.oxide.computer/api/system-status"
+      }
+    },
+    {
+      "name": "system/update",
+      "description": "Upload and manage system updates",
+      "externalDocs": {
+        "url": "http://docs.oxide.computer/api/system-update"
       }
     },
     {

@@ -8,7 +8,7 @@ use crate::Sha3_256Digest;
 use crate::trust_quorum::{RackSecret, TrustQuorumError};
 use chacha20poly1305::{ChaCha20Poly1305, Key, KeyInit, aead::Aead};
 use hkdf::Hkdf;
-use rand::{RngCore, rngs::OsRng};
+use rand08::{RngCore, rngs::OsRng};
 use secrecy::{ExposeSecret, SecretBox};
 use serde::{Deserialize, Serialize};
 use sha3::{Digest, Sha3_256};
@@ -129,7 +129,7 @@ pub fn create_pkgs(
     let shares = rack_secret.split(threshold, total_shares)?;
     let share_digests = share_digests(&shares);
     let mut salt = [0u8; 32];
-    OsRng.fill_bytes(&mut salt);
+    OsRng.try_fill_bytes(&mut salt).expect("fetched random bytes");
     let cipher = derive_encryption_key(&rack_uuid, &rack_secret, &salt);
     let mut pkgs = Vec::with_capacity(n as usize);
     for i in 0..n {
@@ -181,7 +181,7 @@ pub fn create_pkgs(
 // a counter.
 fn new_nonce(i: u8) -> [u8; 12] {
     let mut nonce = [0u8; 12];
-    OsRng.fill_bytes(&mut nonce[..11]);
+    OsRng.try_fill_bytes(&mut nonce[..11]).expect("fetched random bytes");
     nonce[11] = i;
     nonce
 }
@@ -266,8 +266,7 @@ impl fmt::Debug for SharePkg {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rand::seq::SliceRandom;
-    use rand::thread_rng;
+    use rand08::seq::SliceRandom;
     use secrecy::ExposeSecret;
 
     #[test]
@@ -335,7 +334,7 @@ mod tests {
 
         // Grab a threshold of random shares and ensure that we can recompute
         // the rack secret
-        let mut rng = &mut thread_rng();
+        let mut rng = &mut rand08::thread_rng();
         let random_shares: Vec<_> =
             decrypted_shares.choose_multiple(&mut rng, 3).cloned().collect();
         let rack_secret2 = RackSecret::combine_shares(&random_shares).unwrap();

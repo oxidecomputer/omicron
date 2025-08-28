@@ -6,6 +6,7 @@ use anyhow::Context;
 use camino::Utf8PathBuf;
 use dropshot::ResultsPage;
 use dropshot::test_util::ClientTestContext;
+use gateway_test_utils::setup::DEFAULT_SP_SIM_CONFIG;
 use http::{StatusCode, header, method::Method};
 use nexus_auth::context::OpContext;
 use std::env::current_dir;
@@ -24,7 +25,9 @@ use nexus_test_utils::resource_helpers::{
 use nexus_test_utils::{load_test_config, test_setup_with_config};
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params::{self, ProjectCreate};
-use nexus_types::external_api::shared::{SiloIdentityMode, SiloRole};
+use nexus_types::external_api::shared::{
+    FleetRole, SiloIdentityMode, SiloRole,
+};
 use nexus_types::external_api::{shared, views};
 use omicron_common::api::external::{Error, IdentityMetadataCreateParams};
 use omicron_sled_agent::sim;
@@ -393,6 +396,7 @@ async fn test_absolute_static_dir() {
         sim::SimMode::Explicit,
         None,
         0,
+        DEFAULT_SP_SIM_CONFIG.into(),
     )
     .await;
     let testctx = &cptestctx.external_client;
@@ -437,7 +441,9 @@ async fn test_session_me(cptestctx: &ControlPlaneTestContext) {
                 display_name: USER_TEST_PRIVILEGED.external_id.clone(),
                 silo_id: DEFAULT_SILO.id(),
             },
-            silo_name: DEFAULT_SILO.name().clone()
+            silo_name: DEFAULT_SILO.name().clone(),
+            fleet_viewer: true,
+            silo_admin: true,
         }
     );
 
@@ -454,9 +460,45 @@ async fn test_session_me(cptestctx: &ControlPlaneTestContext) {
                 display_name: USER_TEST_UNPRIVILEGED.external_id.clone(),
                 silo_id: DEFAULT_SILO.id(),
             },
-            silo_name: DEFAULT_SILO.name().clone()
+            silo_name: DEFAULT_SILO.name().clone(),
+            fleet_viewer: false,
+            silo_admin: false,
         }
     );
+
+    // now make unpriv user silo admin and see it change
+    grant_iam(
+        testctx,
+        &format!("/v1/system/silos/{}", DEFAULT_SILO.identity().name),
+        SiloRole::Admin,
+        USER_TEST_UNPRIVILEGED.id(),
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
+
+    let unpriv_user = NexusRequest::object_get(testctx, "/v1/me")
+        .authn_as(AuthnMode::UnprivilegedUser)
+        .execute_and_parse_unwrap::<views::CurrentUser>()
+        .await;
+    assert!(!unpriv_user.fleet_viewer);
+    assert!(unpriv_user.silo_admin);
+
+    // now grant fleet viewer and see that one change
+    grant_iam(
+        testctx,
+        "/v1/system",
+        FleetRole::Admin,
+        USER_TEST_UNPRIVILEGED.id(),
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
+
+    let unpriv_user = NexusRequest::object_get(testctx, "/v1/me")
+        .authn_as(AuthnMode::UnprivilegedUser)
+        .execute_and_parse_unwrap::<views::CurrentUser>()
+        .await;
+    assert!(unpriv_user.fleet_viewer);
+    assert!(unpriv_user.silo_admin);
 }
 
 #[nexus_test]
@@ -903,6 +945,7 @@ async fn test_session_idle_timeout_deletes_session() {
         sim::SimMode::Explicit,
         None,
         0,
+        DEFAULT_SP_SIM_CONFIG.into(),
     )
     .await;
     let testctx = &cptestctx.external_client;

@@ -24,15 +24,15 @@
 
 use core::fmt::{self, Binary, Display, Formatter, LowerHex, UpperHex};
 use core::ops::{Add, AddAssign, Div, Mul, MulAssign, Sub};
-use rand09::Rng;
-use rand09::distr::{Distribution, StandardUniform};
+use rand::Rng;
+use rand::distr::{Distribution, StandardUniform};
 use serde::{Deserialize, Serialize};
 use subtle::ConstantTimeEq;
 use zeroize::Zeroize;
 
 /// An element in a finite field of prime power 2^8
 ///
-/// We explicitly don't enable the equality operators to prevent ourselves from
+/// We explicitly don't derive the equality operators to prevent ourselves from
 /// accidentally using those instead of the constant time ones.
 #[repr(transparent)]
 #[derive(Debug, Clone, Copy, Zeroize, Serialize, Deserialize)]
@@ -119,6 +119,15 @@ impl ConstantTimeEq for Gf256 {
         self.0.ct_eq(&other.0)
     }
 }
+
+#[cfg(feature = "danger_partial_eq_ct_wrapper")]
+impl PartialEq for Gf256 {
+    fn eq(&self, other: &Self) -> bool {
+        self.ct_eq(&other).into()
+    }
+}
+#[cfg(feature = "danger_partial_eq_ct_wrapper")]
+impl Eq for Gf256 {}
 
 impl Add for Gf256 {
     type Output = Self;

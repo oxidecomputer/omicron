@@ -1471,10 +1471,10 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "title": "Array_of_Ipv4NatEntryView",
+                  "title": "Array_of_NatEntryView",
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/Ipv4NatEntryView"
+                    "$ref": "#/components/schemas/NatEntryView"
                   }
                 }
               }
@@ -4814,6 +4814,118 @@
           "id"
         ]
       },
+      "HostPhase1Status": {
+        "oneOf": [
+          {
+            "description": "This device has no host phase 1 status because it is not a sled (e.g., it's a PSC or switch).",
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "not_a_sled"
+                ]
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "active_slot": {
+                "nullable": true,
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/M2Slot"
+                  }
+                ]
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "sled"
+                ]
+              },
+              "sled_id": {
+                "nullable": true,
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/TypedUuidForSledKind"
+                  }
+                ]
+              },
+              "slot_a_version": {
+                "$ref": "#/components/schemas/TufRepoVersion"
+              },
+              "slot_b_version": {
+                "$ref": "#/components/schemas/TufRepoVersion"
+              }
+            },
+            "required": [
+              "kind",
+              "slot_a_version",
+              "slot_b_version"
+            ]
+          }
+        ]
+      },
+      "HostPhase2Status": {
+        "type": "object",
+        "properties": {
+          "boot_disk": {
+            "x-rust-type": {
+              "crate": "std",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/M2Slot"
+                },
+                {
+                  "type": "string"
+                }
+              ],
+              "path": "::std::result::Result",
+              "version": "*"
+            },
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "ok": {
+                    "$ref": "#/components/schemas/M2Slot"
+                  }
+                },
+                "required": [
+                  "ok"
+                ]
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "err": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "err"
+                ]
+              }
+            ]
+          },
+          "slot_a_version": {
+            "$ref": "#/components/schemas/TufRepoVersion"
+          },
+          "slot_b_version": {
+            "$ref": "#/components/schemas/TufRepoVersion"
+          }
+        },
+        "required": [
+          "boot_disk",
+          "slot_a_version",
+          "slot_b_version"
+        ]
+      },
       "IdMapBlueprintDatasetConfig": {
         "type": "object",
         "additionalProperties": {
@@ -5169,53 +5281,6 @@
           }
         ]
       },
-      "Ipv4NatEntryView": {
-        "description": "NAT Record",
-        "type": "object",
-        "properties": {
-          "deleted": {
-            "type": "boolean"
-          },
-          "external_address": {
-            "type": "string",
-            "format": "ipv4"
-          },
-          "first_port": {
-            "type": "integer",
-            "format": "uint16",
-            "minimum": 0
-          },
-          "gen": {
-            "type": "integer",
-            "format": "int64"
-          },
-          "last_port": {
-            "type": "integer",
-            "format": "uint16",
-            "minimum": 0
-          },
-          "mac": {
-            "$ref": "#/components/schemas/MacAddr"
-          },
-          "sled_address": {
-            "type": "string",
-            "format": "ipv6"
-          },
-          "vni": {
-            "$ref": "#/components/schemas/Vni"
-          }
-        },
-        "required": [
-          "deleted",
-          "external_address",
-          "first_port",
-          "gen",
-          "last_port",
-          "mac",
-          "sled_address",
-          "vni"
-        ]
-      },
       "Ipv4Net": {
         "example": "192.168.1.0/24",
         "title": "An IPv4 subnet",
@@ -5440,6 +5505,33 @@
         "minLength": 5,
         "maxLength": 17
       },
+      "MgsDrivenUpdateStatus": {
+        "type": "object",
+        "properties": {
+          "baseboard_description": {
+            "type": "string"
+          },
+          "host_os_phase_1": {
+            "$ref": "#/components/schemas/HostPhase1Status"
+          },
+          "rot": {
+            "$ref": "#/components/schemas/RotStatus"
+          },
+          "rot_bootloader": {
+            "$ref": "#/components/schemas/RotBootloaderStatus"
+          },
+          "sp": {
+            "$ref": "#/components/schemas/SpStatus"
+          }
+        },
+        "required": [
+          "baseboard_description",
+          "host_os_phase_1",
+          "rot",
+          "rot_bootloader",
+          "sp"
+        ]
+      },
       "MgsUpdateDriverStatus": {
         "description": "Status of ongoing update attempts, recently completed attempts, and update requests that are waiting for retry.",
         "type": "object",
@@ -5560,6 +5652,53 @@
         "pattern": "^(?![0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$)^[a-z]([a-zA-Z0-9-]*[a-zA-Z0-9]+)?$",
         "minLength": 1,
         "maxLength": 63
+      },
+      "NatEntryView": {
+        "description": "NAT Record\n\nA NAT record maps an external IP address, used by an instance or externally-facing service like Nexus, to the hosting sled.",
+        "type": "object",
+        "properties": {
+          "deleted": {
+            "type": "boolean"
+          },
+          "external_address": {
+            "type": "string",
+            "format": "ip"
+          },
+          "first_port": {
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          },
+          "gen": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "last_port": {
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          },
+          "mac": {
+            "$ref": "#/components/schemas/MacAddr"
+          },
+          "sled_address": {
+            "type": "string",
+            "format": "ipv6"
+          },
+          "vni": {
+            "$ref": "#/components/schemas/Vni"
+          }
+        },
+        "required": [
+          "deleted",
+          "external_address",
+          "first_port",
+          "gen",
+          "last_port",
+          "mac",
+          "sled_address",
+          "vni"
+        ]
       },
       "NetworkInterface": {
         "description": "Information required to construct a virtual network interface",
@@ -6573,8 +6712,15 @@
       "PlanningAddStepReport": {
         "type": "object",
         "properties": {
+          "add_update_blocked_reasons": {
+            "description": "Reasons why zone adds and any updates are blocked.\n\nThis is typically a list of MUPdate-related reasons.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
           "add_zones_with_mupdate_override": {
-            "description": "The value of the homonymous chicken switch.",
+            "description": "The value of the homonymous chicken switch. (What this really means is that zone adds happen despite being blocked by one or more MUPdate-related reasons.)",
             "type": "boolean"
           },
           "discretionary_zones_placed": {
@@ -6586,10 +6732,6 @@
                 "type": "string"
               }
             }
-          },
-          "has_mupdate_override": {
-            "description": "Are there any outstanding MUPdate overrides?",
-            "type": "boolean"
           },
           "out_of_eligible_sleds": {
             "description": "Discretionary zone kind → (placed, wanted to place)",
@@ -6660,9 +6802,9 @@
           }
         },
         "required": [
+          "add_update_blocked_reasons",
           "add_zones_with_mupdate_override",
           "discretionary_zones_placed",
-          "has_mupdate_override",
           "out_of_eligible_sleds",
           "sleds_getting_ntp_and_discretionary_zones",
           "sleds_missing_crucible_zone",
@@ -6745,10 +6887,16 @@
           "pending_mgs_updates"
         ]
       },
-      "PlanningNoopImageSourceConvertedZones": {
-        "description": "How many of the total install-dataset zones were noop-converted to use the artifact store on a particular sled.",
+      "PlanningNoopImageSourceConverted": {
+        "description": "How many of the total install-dataset zones and/or host phase 2 slots were noop-converted to use the artifact store on a particular sled.",
         "type": "object",
         "properties": {
+          "host_phase_2_slot_a_eligible": {
+            "type": "boolean"
+          },
+          "host_phase_2_slot_b_eligible": {
+            "type": "boolean"
+          },
           "num_dataset": {
             "type": "integer",
             "format": "uint",
@@ -6761,11 +6909,45 @@
           }
         },
         "required": [
+          "host_phase_2_slot_a_eligible",
+          "host_phase_2_slot_b_eligible",
           "num_dataset",
           "num_eligible"
         ]
       },
-      "PlanningNoopImageSourceSkipSledReason": {
+      "PlanningNoopImageSourceSkipSledHostPhase2Reason": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "both_slots_already_artifact"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "sled_not_in_inventory"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          }
+        ]
+      },
+      "PlanningNoopImageSourceSkipSledZonesReason": {
         "oneOf": [
           {
             "type": "object",
@@ -6921,19 +7103,25 @@
       "PlanningNoopImageSourceStepReport": {
         "type": "object",
         "properties": {
-          "converted_zones": {
+          "converted": {
             "type": "object",
             "additionalProperties": {
-              "$ref": "#/components/schemas/PlanningNoopImageSourceConvertedZones"
+              "$ref": "#/components/schemas/PlanningNoopImageSourceConverted"
             }
           },
           "no_target_release": {
             "type": "boolean"
           },
-          "skipped_sleds": {
+          "skipped_sled_host_phase_2": {
             "type": "object",
             "additionalProperties": {
-              "$ref": "#/components/schemas/PlanningNoopImageSourceSkipSledReason"
+              "$ref": "#/components/schemas/PlanningNoopImageSourceSkipSledHostPhase2Reason"
+            }
+          },
+          "skipped_sled_zones": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/PlanningNoopImageSourceSkipSledZonesReason"
             }
           },
           "skipped_zones": {
@@ -6944,9 +7132,10 @@
           }
         },
         "required": [
-          "converted_zones",
+          "converted",
           "no_target_release",
-          "skipped_sleds",
+          "skipped_sled_host_phase_2",
+          "skipped_sled_zones",
           "skipped_zones"
         ]
       },
@@ -7856,6 +8045,21 @@
           "time"
         ]
       },
+      "RotBootloaderStatus": {
+        "type": "object",
+        "properties": {
+          "stage0_next_version": {
+            "$ref": "#/components/schemas/TufRepoVersion"
+          },
+          "stage0_version": {
+            "$ref": "#/components/schemas/TufRepoVersion"
+          }
+        },
+        "required": [
+          "stage0_next_version",
+          "stage0_version"
+        ]
+      },
       "RotSlot": {
         "oneOf": [
           {
@@ -7886,6 +8090,29 @@
               "slot"
             ]
           }
+        ]
+      },
+      "RotStatus": {
+        "type": "object",
+        "properties": {
+          "active_slot": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RotSlot"
+              }
+            ]
+          },
+          "slot_a_version": {
+            "$ref": "#/components/schemas/TufRepoVersion"
+          },
+          "slot_b_version": {
+            "$ref": "#/components/schemas/TufRepoVersion"
+          }
+        },
+        "required": [
+          "slot_a_version",
+          "slot_b_version"
         ]
       },
       "RouteConfig": {
@@ -8230,6 +8457,40 @@
           "usable_physical_ram"
         ]
       },
+      "SledAgentUpdateStatus": {
+        "type": "object",
+        "properties": {
+          "host_phase_2": {
+            "$ref": "#/components/schemas/HostPhase2Status"
+          },
+          "sled_id": {
+            "$ref": "#/components/schemas/TypedUuidForSledKind"
+          },
+          "zones": {
+            "title": "IdOrdMap",
+            "x-rust-type": {
+              "crate": "iddqd",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/ZoneStatus"
+                }
+              ],
+              "path": "iddqd::IdOrdMap",
+              "version": "*"
+            },
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ZoneStatus"
+            },
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "host_phase_2",
+          "sled_id",
+          "zones"
+        ]
+      },
       "SledCpuFamily": {
         "description": "Identifies the kind of CPU present on a sled, determined by reading CPUID.\n\nThis is intended to broadly support the control plane answering the question \"can I run this instance on that sled?\" given an instance with either no or some CPU platform requirement. It is not enough information for more precise placement questions - for example, is a CPU a high-frequency part or many-core part? We don't include Genoa here, but in that CPU family there are high frequency parts, many-core parts, and large-cache parts. To support those questions (or satisfactorily answer #8730) we would need to collect additional information and send it along.",
         "oneOf": [
@@ -8454,14 +8715,6 @@
       "SpStatus": {
         "type": "object",
         "properties": {
-          "sled_id": {
-            "nullable": true,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/TypedUuidForSledKind"
-              }
-            ]
-          },
           "slot0_version": {
             "$ref": "#/components/schemas/TufRepoVersion"
           },
@@ -8526,7 +8779,8 @@
         "type": "object",
         "properties": {
           "id": {
-            "$ref": "#/components/schemas/TypedUuidForSupportBundleKind"
+            "type": "string",
+            "format": "uuid"
           },
           "reason_for_creation": {
             "type": "string"
@@ -8796,10 +9050,6 @@
         "type": "string",
         "format": "uuid"
       },
-      "TypedUuidForSupportBundleKind": {
-        "type": "string",
-        "format": "uuid"
-      },
       "TypedUuidForUpstairsRepairKind": {
         "type": "string",
         "format": "uuid"
@@ -8898,25 +9148,46 @@
       "UpdateStatus": {
         "type": "object",
         "properties": {
-          "sps": {
-            "type": "object",
-            "additionalProperties": {
-              "$ref": "#/components/schemas/SpStatus"
-            }
+          "mgs_driven": {
+            "title": "IdOrdMap",
+            "x-rust-type": {
+              "crate": "iddqd",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/MgsDrivenUpdateStatus"
+                }
+              ],
+              "path": "iddqd::IdOrdMap",
+              "version": "*"
+            },
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MgsDrivenUpdateStatus"
+            },
+            "uniqueItems": true
           },
-          "zones": {
-            "type": "object",
-            "additionalProperties": {
-              "type": "array",
-              "items": {
-                "$ref": "#/components/schemas/ZoneStatus"
-              }
-            }
+          "sleds": {
+            "title": "IdOrdMap",
+            "x-rust-type": {
+              "crate": "iddqd",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/SledAgentUpdateStatus"
+                }
+              ],
+              "path": "iddqd::IdOrdMap",
+              "version": "*"
+            },
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SledAgentUpdateStatus"
+            },
+            "uniqueItems": true
           }
         },
         "required": [
-          "sps",
-          "zones"
+          "mgs_driven",
+          "sleds"
         ]
       },
       "UplinkAddressConfig": {
@@ -9078,13 +9349,13 @@
       "ZoneAddWaitingOn": {
         "oneOf": [
           {
-            "description": "Waiting on one or more MUPdate overrides to clear.",
+            "description": "Waiting on one or more blockers (typically MUPdate-related reasons) to clear.",
             "type": "object",
             "properties": {
               "type": {
                 "type": "string",
                 "enum": [
-                  "mupdate_overrides"
+                  "blockers"
                 ]
               }
             },
@@ -9220,13 +9491,13 @@
             ]
           },
           {
-            "description": "Waiting on one or more MUPdate overrides to clear.",
+            "description": "Waiting on the same set of blockers zone adds are waiting on.",
             "type": "object",
             "properties": {
               "type": {
                 "type": "string",
                 "enum": [
-                  "mupdate_overrides"
+                  "zone_add_blockers"
                 ]
               }
             },

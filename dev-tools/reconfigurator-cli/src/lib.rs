@@ -10,11 +10,12 @@ use chrono::{DateTime, Utc};
 use clap::{ArgAction, ValueEnum};
 use clap::{Args, Parser, Subcommand};
 use daft::Diffable;
+use gateway_types::rot::RotSlot;
 use iddqd::IdOrdMap;
 use indent_write::fmt::IndentWriter;
 use internal_dns_types::diff::DnsDiff;
 use itertools::Itertools;
-use log_capture::LogCapture;
+pub use log_capture::LogCapture;
 use nexus_inventory::CollectionBuilder;
 use nexus_reconfigurator_blippy::Blippy;
 use nexus_reconfigurator_blippy::BlippyReportSortKey;
@@ -22,7 +23,7 @@ use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
 use nexus_reconfigurator_planning::example::ExampleSystemBuilder;
 use nexus_reconfigurator_planning::planner::Planner;
 use nexus_reconfigurator_planning::system::{
-    SledBuilder, SledInventoryVisibility, SystemDescription,
+    RotStateOverrides, SledBuilder, SledInventoryVisibility, SystemDescription,
 };
 use nexus_reconfigurator_simulation::{BlueprintId, CollectionId, SimState};
 use nexus_reconfigurator_simulation::{SimStateBuilder, SimTufRepoSource};
@@ -237,6 +238,12 @@ fn process_command(
         }
         Commands::SledUpdateRot(args) => cmd_sled_update_rot(sim, args),
         Commands::SledUpdateSp(args) => cmd_sled_update_sp(sim, args),
+        Commands::SledUpdateHostPhase1(args) => {
+            cmd_sled_update_host_phase_1(sim, args)
+        }
+        Commands::SledUpdateHostPhase2(args) => {
+            cmd_sled_update_host_phase_2(sim, args)
+        }
         Commands::SledUpdateRotBootloader(args) => {
             cmd_sled_update_rot_bootlaoder(sim, args)
         }
@@ -300,6 +307,10 @@ enum Commands {
     SledUpdateRotBootloader(SledUpdateRotBootloaderArgs),
     /// simulate updating the sled's SP versions
     SledUpdateSp(SledUpdateSpArgs),
+    /// simulate updating the sled's host OS phase 1 artifacts
+    SledUpdateHostPhase1(SledUpdateHostPhase1Args),
+    /// simulate updating the sled's host OS phase 2 artifacts
+    SledUpdateHostPhase2(SledUpdateHostPhase2Args),
 
     /// list silos
     SiloList,
@@ -534,7 +545,7 @@ struct SledUpdateSpArgs {
 #[derive(Debug, Args)]
 struct SledUpdateRotArgs {
     /// id of the sled
-    sled_id: SledUuid,
+    sled_id: SledOpt,
 
     /// sets the version reported for the RoT slot a
     #[clap(long, required_unless_present_any = &["slot_b"])]
@@ -543,6 +554,63 @@ struct SledUpdateRotArgs {
     /// sets the version reported for the RoT slot b
     #[clap(long, required_unless_present_any = &["slot_a"])]
     slot_b: Option<ExpectedVersion>,
+
+    /// sets whether we expect the "A" or "B" slot to be active
+    #[clap(long)]
+    active_slot: Option<RotSlot>,
+
+    /// sets the persistent boot preference written into the current
+    /// authoritative CFPA page (ping or pong).
+    #[clap(long)]
+    persistent_boot_preference: Option<RotSlot>,
+
+    /// sets the pending persistent boot preference written into the CFPA
+    /// scratch page that will become the persistent boot preference in the
+    /// authoritative CFPA page upon reboot, unless CFPA update of the
+    /// authoritative page fails for some reason
+    #[clap(long, num_args(0..=1))]
+    pending_persistent_boot_preference: Option<Option<RotSlot>>,
+
+    /// sets the transient boot preference, which overrides persistent
+    /// preference selection for a single boot (unimplemented)
+    #[clap(long, num_args(0..=1),)]
+    transient_boot_preference: Option<Option<RotSlot>>,
+}
+
+#[derive(Debug, Args)]
+struct SledUpdateHostPhase1Args {
+    /// id of the sled
+    sled_id: SledOpt,
+
+    /// sets which phase 1 slot is active
+    #[clap(long, value_parser = parse_m2_slot)]
+    active: Option<M2Slot>,
+
+    /// sets the artifact hash reported for host OS phase 1 slot A
+    #[clap(long)]
+    slot_a: Option<ArtifactHash>,
+
+    /// sets the artifact hash reported for host OS phase 1 slot B
+    #[clap(long)]
+    slot_b: Option<ArtifactHash>,
+}
+
+#[derive(Debug, Args)]
+struct SledUpdateHostPhase2Args {
+    /// id of the sled
+    sled_id: SledOpt,
+
+    /// sets which phase 2 slot is the boot disk
+    #[clap(long, value_parser = parse_m2_slot)]
+    boot_disk: Option<M2Slot>,
+
+    /// sets the artifact hash reported for host OS phase 2 slot A
+    #[clap(long)]
+    slot_a: Option<ArtifactHash>,
+
+    /// sets the artifact hash reported for host OS phase 2 slot B
+    #[clap(long)]
+    slot_b: Option<ArtifactHash>,
 }
 
 #[derive(Debug, Args)]
@@ -1660,6 +1728,31 @@ fn cmd_sled_update_rot(
     if let Some(slot_b) = &args.slot_b {
         labels.push(format!("slot b -> {}", slot_b));
     }
+    if let Some(active_slot) = &args.active_slot {
+        labels.push(format!("active slot -> {}", active_slot));
+    }
+
+    if let Some(persistent_boot_preference) = &args.persistent_boot_preference {
+        labels.push(format!(
+            "persistent boot preference -> {}",
+            persistent_boot_preference
+        ));
+    }
+
+    if let Some(pending_persistent_boot_preference) =
+        &args.pending_persistent_boot_preference
+    {
+        labels.push(format!(
+            "pending persistent boot preference -> {:?}",
+            pending_persistent_boot_preference
+        ));
+    }
+    if let Some(transient_boot_preference) = &args.transient_boot_preference {
+        labels.push(format!(
+            "transient boot preference -> {:?}",
+            transient_boot_preference
+        ));
+    }
 
     assert!(
         !labels.is_empty(),
@@ -1667,24 +1760,113 @@ fn cmd_sled_update_rot(
     );
 
     let mut state = sim.current_state().to_mut();
-    state.system_mut().description_mut().sled_update_rot_versions(
-        args.sled_id,
-        args.slot_a,
-        args.slot_b,
+    let system = state.system_mut();
+    let sled_id = args.sled_id.to_sled_id(system.description())?;
+    system.description_mut().sled_update_rot_versions(
+        sled_id,
+        RotStateOverrides {
+            active_slot_override: args.active_slot,
+            slot_a_version_override: args.slot_a,
+            slot_b_version_override: args.slot_b,
+            persistent_boot_preference_override: args
+                .persistent_boot_preference,
+            pending_persistent_boot_preference_override: args
+                .pending_persistent_boot_preference,
+            transient_boot_preference_override: args.transient_boot_preference,
+        },
     )?;
 
     sim.commit_and_bump(
         format!(
-            "reconfigurator-cli sled-update-rot: {}: {}",
-            args.sled_id,
+            "reconfigurator-cli sled-update-rot: {sled_id}: {}",
+            labels.join(", "),
+        ),
+        state,
+    );
+
+    Ok(Some(format!("set sled {sled_id} RoT settings: {}", labels.join(", "))))
+}
+
+fn cmd_sled_update_host_phase_1(
+    sim: &mut ReconfiguratorSim,
+    args: SledUpdateHostPhase1Args,
+) -> anyhow::Result<Option<String>> {
+    let SledUpdateHostPhase1Args { sled_id, active, slot_a, slot_b } = args;
+
+    let mut labels = Vec::new();
+    if let Some(active) = active {
+        labels.push(format!("active -> {active:?}"));
+    }
+    if let Some(slot_a) = slot_a {
+        labels.push(format!("A -> {slot_a}"));
+    }
+    if let Some(slot_b) = slot_b {
+        labels.push(format!("B -> {slot_b}"));
+    }
+    if labels.is_empty() {
+        bail!("sled-update-host-phase1 called with no changes");
+    }
+
+    let mut state = sim.current_state().to_mut();
+    let system = state.system_mut();
+    let sled_id = sled_id.to_sled_id(system.description())?;
+    system
+        .description_mut()
+        .sled_update_host_phase_1_artifacts(sled_id, active, slot_a, slot_b)?;
+
+    sim.commit_and_bump(
+        format!(
+            "reconfigurator-cli sled-update-host-phase1: {sled_id}: {}",
             labels.join(", "),
         ),
         state,
     );
 
     Ok(Some(format!(
-        "set sled {} RoT settings: {}",
-        args.sled_id,
+        "set sled {} host phase 1 details: {}",
+        sled_id,
+        labels.join(", ")
+    )))
+}
+
+fn cmd_sled_update_host_phase_2(
+    sim: &mut ReconfiguratorSim,
+    args: SledUpdateHostPhase2Args,
+) -> anyhow::Result<Option<String>> {
+    let SledUpdateHostPhase2Args { sled_id, boot_disk, slot_a, slot_b } = args;
+
+    let mut labels = Vec::new();
+    if let Some(boot_disk) = boot_disk {
+        labels.push(format!("boot_disk -> {boot_disk:?}"));
+    }
+    if let Some(slot_a) = slot_a {
+        labels.push(format!("A -> {slot_a}"));
+    }
+    if let Some(slot_b) = slot_b {
+        labels.push(format!("B -> {slot_b}"));
+    }
+    if labels.is_empty() {
+        bail!("sled-update-host-phase2 called with no changes");
+    }
+
+    let mut state = sim.current_state().to_mut();
+    let system = state.system_mut();
+    let sled_id = sled_id.to_sled_id(system.description())?;
+    system.description_mut().sled_update_host_phase_2_artifacts(
+        sled_id, boot_disk, slot_a, slot_b,
+    )?;
+
+    sim.commit_and_bump(
+        format!(
+            "reconfigurator-cli sled-update-host-phase2: {sled_id}: {}",
+            labels.join(", "),
+        ),
+        state,
+    );
+
+    Ok(Some(format!(
+        "set sled {} host phase 2 details: {}",
+        sled_id,
         labels.join(", ")
     )))
 }

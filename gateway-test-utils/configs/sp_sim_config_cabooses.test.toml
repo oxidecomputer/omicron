@@ -1,0 +1,476 @@
+#
+# SP simulator: example config file with customised cabosses
+#
+
+#
+# This file contains a configuration that is different from the default
+# simulated SP configuration file by setting the values for the contents of the
+# cabooses for "SimSidecar0" and "SimGimlet00". This type of configuration file
+# is useful for cases when testing requires specific values for the cabooses.
+#
+
+#
+# NOTE: for the test suite, all ports MUST be 0 (in order to bind to any
+# available port) because the test suite will be running many servers
+# concurrently.
+#
+[[simulated_sps.sidecar]]
+serial_number = "SimSidecar0"
+manufacturing_root_cert_seed = "01de01de01de01de01de01de01de01de01de01de01de01de01de01de01de01de"
+device_id_cert_seed = "01de000000000000000000000000000000000000000000000000000000000000"
+
+[simulated_sps.sidecar.cabooses.sp_slot_0]
+board = "sidecar-b"
+git_commit = "437c053649220611cdffc8a8d8d4033c0ef4b89c"
+name = "sidecar-b"
+version = "1.0.44"
+
+[simulated_sps.sidecar.cabooses.sp_slot_1]
+board = "sidecar-b"
+git_commit = "437c053649220611cdffc8a8d8d4033c0ef4b89c"
+name = "sidecar-b"
+version = "1.0.44"
+
+[simulated_sps.sidecar.cabooses.rot_slot_a]
+board = "oxide-rot-1"
+git_commit = "6edf9b5e6aa5c928a5462bda1f7a4c6f3caa40ab"
+name = "oxide-rot-1"
+version = "1.0.35"
+sign = "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+
+[simulated_sps.sidecar.cabooses.rot_slot_b]
+board = "oxide-rot-1"
+git_commit = "6edf9b5e6aa5c928a5462bda1f7a4c6f3caa40ab"
+name = "oxide-rot-1"
+version = "1.0.35"
+sign = "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+
+[simulated_sps.sidecar.cabooses.stage0]
+board = "oxide-rot-1"
+git_commit = "bdf56dd950b934360df596ed5b2d8b8813c92168"
+name = "oxide-rot-1"
+version = "1.4.0"
+sign = "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+
+[simulated_sps.sidecar.cabooses.stage0_next]
+board = "oxide-rot-1"
+git_commit = "bdf56dd950b934360df596ed5b2d8b8813c92168"
+name = "oxide-rot-1"
+version = "1.4.0"
+sign = "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+
+[[simulated_sps.sidecar.network_config]]
+[simulated_sps.sidecar.network_config.simulated]
+bind_addr = "[::1]:0"
+
+[[simulated_sps.sidecar.network_config]]
+[simulated_sps.sidecar.network_config.simulated]
+bind_addr = "[::1]:0"
+
+[[simulated_sps.sidecar.ereport_network_config]]
+[simulated_sps.sidecar.ereport_network_config.simulated]
+bind_addr = "[::1]:0"
+
+[[simulated_sps.sidecar.ereport_network_config]]
+[simulated_sps.sidecar.ereport_network_config.simulated]
+bind_addr = "[::1]:0"
+
+[[simulated_sps.sidecar.components]]
+id = "dev-0"
+device = "fake-tmp-sensor"
+description = "FAKE temperature sensor 1"
+capabilities = 0x2
+presence = "Present"
+sensors = [
+    {name = "Southwest", kind = "Temperature", last_data.value = 41.7890625, last_data.timestamp = 1234 },
+]
+
+[[simulated_sps.sidecar.components]]
+id = "dev-1"
+device = "fake-tmp-sensor"
+description = "FAKE temperature sensor 2"
+capabilities = 0x2
+presence = "Failed"
+sensors = [
+    { name = "South", kind = "Temperature", last_error.value = "DeviceError", last_error.timestamp = 1234 },
+]
+
+[simulated_sps.sidecar.ereport_config]
+restart_id = "0d3e464a-666e-4687-976f-90e31238be8b"
+
+[[simulated_sps.sidecar.ereport_config.ereports]]
+task_name = "task_thermal_server"
+task_gen = 1
+uptime = 1235
+class = "oxide.sidecar.thermal.sensor_read_error"
+sensor = { id = "dev-1", device = "fake-tmp-sensor", location = "South", presence = "Failed" }
+error = "DeviceError"
+
+[[simulated_sps.sidecar]]
+serial_number = "SimSidecar1"
+manufacturing_root_cert_seed = "01de01de01de01de01de01de01de01de01de01de01de01de01de01de01de01de"
+device_id_cert_seed = "01de000000000000000000000000000000000000000000000000000000000001"
+
+[[simulated_sps.sidecar.network_config]]
+[simulated_sps.sidecar.network_config.simulated]
+bind_addr = "[::1]:0"
+
+[[simulated_sps.sidecar.network_config]]
+[simulated_sps.sidecar.network_config.simulated]
+bind_addr = "[::1]:0"
+
+[[simulated_sps.sidecar.ereport_network_config]]
+[simulated_sps.sidecar.ereport_network_config.simulated]
+bind_addr = "[::1]:0"
+
+[[simulated_sps.sidecar.ereport_network_config]]
+[simulated_sps.sidecar.ereport_network_config.simulated]
+bind_addr = "[::1]:0"
+
+[[simulated_sps.gimlet]]
+serial_number = "SimGimlet00"
+manufacturing_root_cert_seed = "01de01de01de01de01de01de01de01de01de01de01de01de01de01de01de01de"
+device_id_cert_seed = "01de000000000000000000000000000000000000000000000000000000000002"
+
+[simulated_sps.gimlet.cabooses.sp_slot_0]
+board = "gimlet-e"
+git_commit = "437c053649220611cdffc8a8d8d4033c0ef4b89c"
+name = "gimlet-e"
+version = "1.0.44"
+
+[simulated_sps.gimlet.cabooses.sp_slot_1]
+board = "gimlet-e"
+git_commit = "437c053649220611cdffc8a8d8d4033c0ef4b89c"
+name = "gimlet-e"
+version = "1.0.44"
+
+[simulated_sps.gimlet.cabooses.rot_slot_a]
+board = "oxide-rot-1"
+git_commit = "6edf9b5e6aa5c928a5462bda1f7a4c6f3caa40ab"
+name = "oxide-rot-1"
+version = "1.0.35"
+sign = "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+
+[simulated_sps.gimlet.cabooses.rot_slot_b]
+board = "oxide-rot-1"
+git_commit = "6edf9b5e6aa5c928a5462bda1f7a4c6f3caa40ab"
+name = "oxide-rot-1"
+version = "1.0.35"
+sign = "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+
+[simulated_sps.gimlet.cabooses.stage0]
+board = "oxide-rot-1"
+git_commit = "bdf56dd950b934360df596ed5b2d8b8813c92168"
+name = "oxide-rot-1"
+version = "1.4.0"
+sign = "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+
+[simulated_sps.gimlet.cabooses.stage0_next]
+board = "oxide-rot-1"
+git_commit = "bdf56dd950b934360df596ed5b2d8b8813c92168"
+name = "oxide-rot-1"
+version = "1.4.0"
+sign = "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+
+[[simulated_sps.gimlet.network_config]]
+[simulated_sps.gimlet.network_config.simulated]
+bind_addr = "[::1]:0"
+
+[[simulated_sps.gimlet.network_config]]
+[simulated_sps.gimlet.network_config.simulated]
+bind_addr = "[::1]:0"
+
+[[simulated_sps.gimlet.ereport_network_config]]
+[simulated_sps.gimlet.ereport_network_config.simulated]
+bind_addr = "[::1]:0"
+
+[[simulated_sps.gimlet.ereport_network_config]]
+[simulated_sps.gimlet.ereport_network_config.simulated]
+bind_addr = "[::1]:0"
+
+[[simulated_sps.gimlet.components]]
+id = "sp3-host-cpu"
+device = "sp3-host-cpu"
+description = "FAKE host cpu"
+capabilities = 0
+presence = "Present"
+serial_console = "[::1]:0"
+
+[[simulated_sps.gimlet.components]]
+id = "dev-0"
+device = "fake-tmp-sensor"
+description = "FAKE temperature sensor"
+capabilities = 0x2
+presence = "Failed"
+sensors = [
+    { name = "Southwest", kind = "Temperature", last_error.value = "DeviceError", last_error.timestamp = 1234 },
+]
+[[simulated_sps.gimlet.components]]
+id = "dev-1"
+device = "tmp117"
+description = "FAKE temperature sensor"
+capabilities = 0x2
+presence = "Present"
+sensors = [
+    { name = "South", kind = "Temperature", last_data.value = 42.5625, last_data.timestamp = 1234 },
+]
+
+[[simulated_sps.gimlet.components]]
+id = "dev-2"
+device = "tmp117"
+description = "FAKE Southeast temperature sensor"
+capabilities = 0x2
+presence = "Present"
+sensors = [
+    { name = "Southeast", kind = "Temperature", last_data.value = 41.570313, last_data.timestamp = 1234 },
+]
+
+[[simulated_sps.gimlet.components]]
+id = "dev-6"
+device = "at24csw080"
+description = "FAKE U.2 Sharkfin A VPD"
+capabilities = 0x0
+presence = "Present"
+
+[[simulated_sps.gimlet.components]]
+id = "dev-7"
+device = "max5970"
+description = "FAKE U.2 Sharkfin A hot swap controller"
+capabilities = 0x2
+presence = "Present"
+sensors = [
+    { name = "V12_U2A_A0", kind = "Current", last_data.value = 0.45898438, last_data.timestamp = 1234 },
+    { name = "V3P3_U2A_A0", kind = "Current", last_data.value = 0.024414063, last_data.timestamp = 1234 },
+    { name = "V12_U2A_A0", kind = "Voltage", last_data.value = 12.03125, last_data.timestamp = 1234 },
+    { name = "V3P3_U2A_A0", kind = "Voltage", last_data.value = 3.328125, last_data.timestamp = 1234 },
+]
+
+[[simulated_sps.gimlet.components]]
+id = "dev-8"
+device = "nvme_bmc"
+description = "FAKE U.2 A NVMe Basic Management Command"
+capabilities = 0x2
+presence = "Present"
+sensors = [
+    { name = "U2_N0", kind = "Temperature", last_data.value = 56.0, last_data.timestamp = 1234 },
+]
+[[simulated_sps.gimlet.components]]
+id = "dev-39"
+device = "tmp451"
+description = "FAKE T6 temperature sensor"
+capabilities = 0x2
+presence = "Present"
+sensors = [
+    { name = "t6", kind = "Temperature", last_data.value = 70.625, last_data.timestamp = 1234 },
+]
+
+[[simulated_sps.gimlet.components]]
+id = "dev-46"
+device = "sbtsi"
+description = "CPU temperature sensor"
+capabilities = 2
+presence = "Present"
+sensors = [
+    { name = "CPU", kind = "Temperature", last_data.value = 64.5, last_data.timestamp = 1234 },
+]
+
+[[simulated_sps.gimlet.components]]
+id = "dev-53"
+device = "max31790"
+description = "FAKE Fan controller"
+capabilities = 0x2
+presence = "Present"
+sensors = [
+    { name = "Southeast", kind = "Speed", last_data.value = 2607.0, last_data.timestamp = 1234 },
+    { name = "Northeast", kind = "Speed", last_data.value = 2476.0, last_data.timestamp = 1234 },
+    { name = "South", kind = "Speed", last_data.value = 2553.0, last_data.timestamp = 1234 },
+    { name = "North", kind = "Speed", last_data.value = 2265.0, last_data.timestamp = 1234 },
+    { name = "Southwest", kind = "Speed", last_data.value = 2649.0, last_data.timestamp = 1234 },
+    { name = "Northwest", kind = "Speed", last_data.value = 2275.0, last_data.timestamp = 1234 },
+]
+
+[simulated_sps.gimlet.ereport_config]
+restart_id = "af1ebf85-36ba-4c31-bbec-b9825d6d9d8b"
+
+[[simulated_sps.gimlet.ereport_config.ereports]]
+task_name = "task_apollo_server"
+task_gen = 13
+uptime = 1233
+class = "gov.nasa.apollo.o2_tanks.stir.begin"
+message = "stirring the tanks"
+
+[[simulated_sps.gimlet.ereport_config.ereports]]
+task_name = "drv_ae35_server"
+task_gen = 1
+uptime = 1234
+class = "io.discovery.ae35.fault"
+message = "i've just picked up a fault in the AE-35 unit"
+de = { scheme = "fmd", authority = { product-id = "HAL-9000-series computer", server-id = "HAL 9000"}, mod-name = "ae35-diagnosis" }
+hours_to_failure = 72
+
+[[simulated_sps.gimlet.ereport_config.ereports]]
+task_name = "task_apollo_server"
+task_gen = 13
+uptime = 1237
+class = "gov.nasa.apollo.fault"
+message = "houston, we have a problem"
+crew = ["Lovell", "Swigert", "Haise"]
+
+[[simulated_sps.gimlet.ereport_config.ereports]]
+task_name = "drv_thingy_server"
+task_gen = 2
+uptime = 1240
+class = "flagrant_error"
+computer = false
+
+[[simulated_sps.gimlet.ereport_config.ereports]]
+task_name = "task_latex_server"
+task_gen = 1
+uptime = 1245
+class = "overfull_hbox"
+badness  = 10000
+
+[[simulated_sps.gimlet]]
+serial_number = "SimGimlet01"
+manufacturing_root_cert_seed = "01de01de01de01de01de01de01de01de01de01de01de01de01de01de01de01de"
+device_id_cert_seed = "01de000000000000000000000000000000000000000000000000000000000003"
+
+[[simulated_sps.gimlet.network_config]]
+[simulated_sps.gimlet.network_config.simulated]
+bind_addr = "[::1]:0"
+
+[[simulated_sps.gimlet.network_config]]
+[simulated_sps.gimlet.network_config.simulated]
+bind_addr = "[::1]:0"
+
+[[simulated_sps.gimlet.ereport_network_config]]
+[simulated_sps.gimlet.ereport_network_config.simulated]
+bind_addr = "[::1]:0"
+
+[[simulated_sps.gimlet.ereport_network_config]]
+[simulated_sps.gimlet.ereport_network_config.simulated]
+bind_addr = "[::1]:0"
+
+[[simulated_sps.gimlet.components]]
+id = "sp3-host-cpu"
+device = "sp3-host-cpu"
+description = "FAKE host cpu"
+capabilities = 0
+presence = "Present"
+serial_console = "[::1]:0"
+
+
+[[simulated_sps.gimlet.components]]
+id = "dev-0"
+device = "tmp117"
+description = "FAKE temperature sensor"
+capabilities = 0x2
+presence = "Present"
+sensors = [
+    { name = "Southwest", kind = "Temperature", last_data.value = 41.3629, last_data.timestamp = 1234 },
+]
+[[simulated_sps.gimlet.components]]
+id = "dev-1"
+device = "tmp117"
+description = "FAKE temperature sensor"
+capabilities = 0x2
+presence = "Present"
+sensors = [
+    { name = "South", kind = "Temperature", last_data.value = 42.5625, last_data.timestamp = 1234 },
+]
+
+[[simulated_sps.gimlet.components]]
+id = "dev-2"
+device = "tmp117"
+description = "FAKE Southeast temperature sensor"
+capabilities = 0x2
+presence = "Present"
+sensors = [
+    { name = "Southeast", kind = "Temperature", last_data.value = 41.570313, last_data.timestamp = 1234 },
+]
+
+[[simulated_sps.gimlet.components]]
+id = "dev-6"
+device = "at24csw080"
+description = "FAKE U.2 Sharkfin A VPD"
+capabilities = 0x0
+presence = "Present"
+
+[[simulated_sps.gimlet.components]]
+id = "dev-7"
+device = "max5970"
+description = "FAKE U.2 Sharkfin A hot swap controller"
+capabilities = 0x2
+presence = "Present"
+sensors = [
+    { name = "V12_U2A_A0", kind = "Current", last_data.value = 0.41893438, last_data.timestamp = 1234 },
+    { name = "V3P3_U2A_A0", kind = "Current", last_data.value = 0.025614603, last_data.timestamp = 1234 },
+    { name = "V12_U2A_A0", kind = "Voltage", last_data.value = 12.02914, last_data.timestamp = 1234 },
+    { name = "V3P3_U2A_A0", kind = "Voltage", last_data.value = 3.2618, last_data.timestamp = 1234 },
+]
+
+[[simulated_sps.gimlet.components]]
+id = "dev-8"
+device = "nvme_bmc"
+description = "FAKE U.2 A NVMe Basic Management Command"
+capabilities = 0x2
+presence = "Present"
+sensors = [
+    { name = "U2_N0", kind = "Temperature", last_data.value = 56.0, last_data.timestamp = 1234 },
+]
+[[simulated_sps.gimlet.components]]
+id = "dev-39"
+device = "tmp451"
+description = "FAKE T6 temperature sensor"
+capabilities = 0x2
+presence = "Present"
+sensors = [
+    { name = "t6", kind = "Temperature", last_data.value = 70.625, last_data.timestamp = 1234 },
+]
+
+[[simulated_sps.gimlet.components]]
+id = "dev-46"
+device = "sbtsi"
+description = "CPU temperature sensor"
+capabilities = 2
+presence = "Present"
+sensors = [
+    { name = "CPU", kind = "Temperature", last_data.value = 62.6, last_data.timestamp = 1234 },
+]
+
+[[simulated_sps.gimlet.components]]
+id = "dev-53"
+device = "max31790"
+description = "FAKE Fan controller"
+capabilities = 0x2
+presence = "Present"
+sensors = [
+    { name = "Southeast", kind = "Speed", last_data.value = 2510.0, last_data.timestamp = 1234 },
+    { name = "Northeast", kind = "Speed", last_data.value = 2390.0, last_data.timestamp = 1234 },
+    { name = "South", kind = "Speed", last_data.value = 2467.0, last_data.timestamp = 1234 },
+    { name = "North", kind = "Speed", last_data.value = 2195.0, last_data.timestamp = 1234 },
+    { name = "Southwest", kind = "Speed", last_data.value = 2680.0, last_data.timestamp = 1234 },
+    { name = "Northwest", kind = "Speed", last_data.value = 2212.0, last_data.timestamp = 1234 },
+]
+
+[simulated_sps.gimlet.ereport_config]
+restart_id = "55e30cc7-a109-492f-aca9-735ed725df3c"
+
+[[simulated_sps.gimlet.ereport_config.ereports]]
+task_name = "task_thermal_server"
+task_gen = 1
+uptime = 1233
+class = "computer.oxide.gimlet.chassis_integrity.fault"
+nosub_class = "chassis_integrity.cat_hair_detected"
+message = "cat hair detected inside gimlet"
+de = { scheme = "fmd", mod-name = "hubris-thermal-diagnosis", mod-version = "1.0", authority = { "product-id" = "oxide", server-id = "SimGimlet1" }}
+certainty = 0x64
+cat_hair_amount = 10000
+
+#
+# NOTE: for the test suite, the [log] section is ignored; sp-sim logs are rolled
+# into the gateway logfile.
+#
+[log]
+level = "debug"
+mode = "stderr-terminal"

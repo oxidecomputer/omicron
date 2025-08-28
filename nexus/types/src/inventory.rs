@@ -175,7 +175,7 @@ pub struct Collection {
 
     /// The status of our cockroachdb cluster, keyed by node identifier
     pub cockroach_status:
-        BTreeMap<omicron_cockroach_metrics::NodeId, CockroachStatus>,
+        BTreeMap<cockroach_admin_types::NodeId, CockroachStatus>,
 
     /// The status of time synchronization
     pub ntp_timesync: IdOrdMap<TimeSync>,
@@ -209,6 +209,13 @@ impl Collection {
         self.cabooses_found
             .get(&which)
             .and_then(|by_bb| by_bb.get(baseboard_id))
+    }
+
+    pub fn rot_state_for(
+        &self,
+        baseboard_id: &BaseboardId,
+    ) -> Option<&RotState> {
+        self.rots.get(baseboard_id)
     }
 
     pub fn rot_page_for(

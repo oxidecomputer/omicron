@@ -7,6 +7,7 @@
 use crate::crypto::{EncryptedRackSecrets, RackSecret, Sha3_256Digest};
 use crate::validators::ValidatedReconfigureMsg;
 use crate::{Epoch, PlatformId, Threshold};
+use daft::Diffable;
 use gfss::shamir::{Share, SplitError};
 use iddqd::{IdOrdItem, id_upcast};
 use omicron_uuid_kinds::RackUuid;
@@ -30,7 +31,17 @@ pub enum ConfigurationError {
 /// The configuration for a given epoch.
 ///
 /// Only valid for non-lrtq configurations
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Serialize,
+    Deserialize,
+    Diffable,
+)]
 pub struct Configuration {
     /// Unique Id of the rack
     pub rack_id: RackUuid,

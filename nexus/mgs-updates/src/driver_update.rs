@@ -667,13 +667,14 @@ fn post_update_timeout(update: &PendingMgsUpdate) -> Duration {
             }
         }
         PendingMgsUpdateDetails::Rot { .. } => {
-            // Resetting the RoT should be quick (a few seconds).
-            Duration::from_secs(60)
+            // Resetting the RoT should be quick (a few seconds), but we wait
+            // for boot info after the reset.
+            Duration::from_secs(90)
         }
         PendingMgsUpdateDetails::RotBootloader { .. } => {
             // Resetting the bootloader requires multiple RoT resets; give this
             // a longer timeout.
-            Duration::from_secs(180)
+            Duration::from_secs(210)
         }
         PendingMgsUpdateDetails::HostPhase1(..) => {
             // Resetting a sled takes several minutes (mostly DRAM training);

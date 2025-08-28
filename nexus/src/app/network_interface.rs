@@ -93,6 +93,7 @@ impl super::Nexus {
             db_subnet,
             params.identity.clone(),
             params.ip,
+            params.transit_ips.iter().map(|ip| (*ip).into()).collect(),
         )?;
         self.db_datastore
             .instance_create_network_interface(

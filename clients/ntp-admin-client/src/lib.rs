@@ -5,7 +5,7 @@
 //! Interface for making API requests to an Omicron NTP admin server
 
 progenitor::generate_api!(
-    spec = "../../openapi/ntp-admin.json",
+    spec = "../../openapi/ntp-admin/ntp-admin-latest.json",
     interface = Positional,
     inner_type = slog::Logger,
     pre_hook = (|log: &slog::Logger, request: &reqwest::Request| {

@@ -9,6 +9,7 @@
 use crate::crypto::LrtqShare;
 use crate::{Configuration, Epoch, PlatformId};
 use bootstore::schemes::v0::SharePkgCommon as LrtqShareData;
+use daft::Diffable;
 use gfss::shamir::Share;
 use iddqd::IdOrdMap;
 use omicron_uuid_kinds::{GenericUuid, RackUuid};
@@ -16,18 +17,21 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
 /// All the persistent state for this protocol
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, Diffable)]
+#[cfg_attr(feature = "danger_partial_eq_ct_wrapper", derive(PartialEq, Eq))]
 pub struct PersistentState {
     // If this node was an LRTQ node, sled-agent will start it with the ledger
     // data it read from disk. This allows us to upgrade from LRTQ.
     pub lrtq: Option<LrtqShareData>,
     pub configs: IdOrdMap<Configuration>,
+
+    // Our own key shares per configuration
     pub shares: BTreeMap<Epoch, Share>,
     pub commits: BTreeSet<Epoch>,
 
     // Has the node been informed that it is no longer part of the trust quorum?
     //
-    // If at any time this gets set, than the it remains true for the lifetime
+    // If at any time this gets set, then the it remains true for the lifetime
     // of the node. The sled corresponding to the node must be factory reset by
     // wiping its storage.
     pub expunged: Option<ExpungedMetadata>,
@@ -45,7 +49,7 @@ impl PersistentState {
     }
 
     pub fn rack_id(&self) -> Option<RackUuid> {
-        self.latest_committed_configuration().map(|c| c.rack_id).or_else(|| {
+        self.latest_config().map(|c| c.rack_id).or_else(|| {
             self.lrtq
                 .as_ref()
                 .map(|pkg| RackUuid::from_untyped_uuid(pkg.rack_uuid))
@@ -58,11 +62,13 @@ impl PersistentState {
         self.lrtq.is_some() && self.latest_committed_epoch().is_none()
     }
 
-    // Are there any committed configurations or lrtq data?
+    /// Are there any committed configurations or lrtq data?
     pub fn is_uninitialized(&self) -> bool {
         self.lrtq.is_none() && self.latest_committed_epoch().is_none()
     }
 
+    /// The latest configuration that we know about, regardless of whether it
+    /// has been committed.
     pub fn latest_config(&self) -> Option<&Configuration> {
         self.configs.iter().last()
     }
@@ -83,9 +89,31 @@ impl PersistentState {
         })
     }
 
+    pub fn latest_committed_config_and_share(
+        &self,
+    ) -> Option<(&Configuration, &Share)> {
+        self.latest_committed_epoch().map(|epoch| {
+            // There *must* be a configuration and share if we have a commit
+            (
+                self.configs.get(&epoch).expect("latest config exists"),
+                self.shares.get(&epoch).expect("latest share exists"),
+            )
+        })
+    }
+
     /// Return the key share for lrtq if one exists
     pub fn lrtq_key_share(&self) -> Option<LrtqShare> {
         self.lrtq.as_ref().map(|p| p.share.clone().into())
+    }
+
+    // Do we have a configuration and share for this epoch?
+    pub fn has_prepared(&self, epoch: Epoch) -> bool {
+        self.configs.contains_key(&epoch) && self.shares.contains_key(&epoch)
+    }
+
+    /// Has this node been expunged?
+    pub fn is_expunged(&self) -> bool {
+        self.expunged.is_some()
     }
 }
 
