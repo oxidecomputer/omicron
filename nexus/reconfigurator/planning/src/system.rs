@@ -249,6 +249,18 @@ impl SystemDescription {
         self.target_nexus_zone_count
     }
 
+    pub fn target_boundary_ntp_zone_count(
+        &mut self,
+        count: usize,
+    ) -> &mut Self {
+        self.target_boundary_ntp_zone_count = count;
+        self
+    }
+
+    pub fn get_target_boundary_ntp_zone_count(&self) -> usize {
+        self.target_boundary_ntp_zone_count
+    }
+
     pub fn target_crucible_pantry_zone_count(
         &mut self,
         count: usize,
@@ -461,8 +473,17 @@ impl SystemDescription {
                 completed_at: Utc::now(),
                 ran_for: Duration::from_secs(5),
             };
-        sled.inventory_sled_agent.last_reconciliation =
-            Some(ConfigReconcilerInventory::debug_assume_success(sled_config));
+        match sled.inventory_sled_agent.last_reconciliation.as_mut() {
+            Some(last_reconciliation) => {
+                last_reconciliation.debug_update_assume_success(sled_config);
+            }
+            None => {
+                sled.inventory_sled_agent.last_reconciliation =
+                    Some(ConfigReconcilerInventory::debug_assume_success(
+                        sled_config,
+                    ));
+            }
+        };
 
         Ok(self)
     }
@@ -777,7 +798,7 @@ impl SystemDescription {
             description,
         };
 
-        self.tuf_repo = new_repo;
+        let _old_repo = self.set_tuf_repo_inner(new_repo);
 
         // It's tempting to consider setting old_repo to the current tuf_repo,
         // but that requires the invariant that old_repo is always the current
@@ -785,9 +806,32 @@ impl SystemDescription {
         // https://github.com/oxidecomputer/omicron/issues/8056 for some
         // discussion.
         //
-        // We may want a more explicit operation to set the old repo, though.
+        // We provide a method to set the old repo explicitly with these
+        // assumptions in mind: `set_target_release_and_old_repo`.
 
         self
+    }
+
+    pub fn set_target_release_and_old_repo(
+        &mut self,
+        description: TargetReleaseDescription,
+    ) -> &mut Self {
+        let new_repo = TufRepoPolicy {
+            target_release_generation: self
+                .tuf_repo
+                .target_release_generation
+                .next(),
+            description,
+        };
+
+        let old_repo = self.set_tuf_repo_inner(new_repo);
+        self.old_repo = old_repo;
+
+        self
+    }
+
+    fn set_tuf_repo_inner(&mut self, new_repo: TufRepoPolicy) -> TufRepoPolicy {
+        mem::replace(&mut self.tuf_repo, new_repo)
     }
 
     pub fn set_ignore_impossible_mgs_updates_since(
