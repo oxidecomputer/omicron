@@ -24,12 +24,14 @@ pub struct ReconfigureMsg {
 
 /// Messages sent between trust quorum members over a sprockets channel
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "danger_partial_eq_ct_wrapper", derive(PartialEq, Eq))]
 pub struct PeerMsg {
     pub rack_id: RackUuid,
     pub kind: PeerMsgKind,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "danger_partial_eq_ct_wrapper", derive(PartialEq, Eq))]
 pub enum PeerMsgKind {
     /// Sent from a coordinator node to inform a peer about a new configuration
     Prepare {
