@@ -191,13 +191,16 @@ impl ConfigReconcilerInventory {
     /// [`Inventory`].
     pub fn debug_assume_success(config: OmicronSledConfig) -> Self {
         let mut ret = Self {
+            // These fields will be filled in by `debug_update_assume_success`.
             last_reconciled_config: OmicronSledConfig::default(),
             external_disks: BTreeMap::new(),
             datasets: BTreeMap::new(),
             orphaned_datasets: IdOrdMap::new(),
             zones: BTreeMap::new(),
-            boot_partitions: BootPartitionContents::debug_assume_success(),
             remove_mupdate_override: None,
+
+            // These fields will not.
+            boot_partitions: BootPartitionContents::debug_assume_success(),
         };
 
         ret.debug_update_assume_success(config);
