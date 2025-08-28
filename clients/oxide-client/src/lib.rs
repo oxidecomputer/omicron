@@ -20,12 +20,6 @@ progenitor::generate_api!(
     spec = "../../openapi/nexus.json",
     interface = Builder,
     tags = Separate,
-    replace = {
-        TypedUuidForAlertReceiverKind = omicron_uuid_kinds::AlertReceiverUuid,
-        TypedUuidForAlertKind = omicron_uuid_kinds::AlertUuid,
-        TypedUuidForSiloUserKind = omicron_uuid_kinds::SiloUserUuid,
-        TypedUuidForSiloGroupKind = omicron_uuid_kinds::SiloGroupUuid,
-    },
 );
 
 /// Custom reqwest DNS resolver intended for use with the Oxide client

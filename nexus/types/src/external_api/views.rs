@@ -944,6 +944,7 @@ impl fmt::Display for PhysicalDiskState {
 /// View of a User
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 pub struct User {
+    #[schemars(with = "Uuid")]
     pub id: SiloUserUuid,
 
     /** Human-readable name that can identify the user */
@@ -980,6 +981,7 @@ pub struct CurrentUser {
 /// View of a Group
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 pub struct Group {
+    #[schemars(with = "Uuid")]
     pub id: SiloGroupUuid,
 
     /// Human-readable name that can identify the group
@@ -1014,6 +1016,7 @@ pub struct SshKey {
     pub identity: IdentityMetadata,
 
     /// The user to whom this key belongs
+    #[schemars(with = "Uuid")]
     pub silo_user_id: SiloUserUuid,
 
     /// SSH public key, e.g., `"ssh-ed25519 AAAAC3NzaC..."`
@@ -1644,8 +1647,18 @@ mod test {
 #[derive(Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum AuditLogEntryActor {
-    UserBuiltin { user_builtin_id: BuiltInUserUuid },
-    SiloUser { silo_user_id: SiloUserUuid, silo_id: Uuid },
+    UserBuiltin {
+        #[schemars(with = "Uuid")]
+        user_builtin_id: BuiltInUserUuid,
+    },
+
+    SiloUser {
+        #[schemars(with = "Uuid")]
+        silo_user_id: SiloUserUuid,
+
+        silo_id: Uuid,
+    },
+
     Unauthenticated,
 }
 

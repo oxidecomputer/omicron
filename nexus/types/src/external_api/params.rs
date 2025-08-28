@@ -55,6 +55,7 @@ macro_rules! id_path_param {
         pub struct $struct {
             #[doc = "ID of the "]
             #[doc = $name]
+            #[schemars(with = "Uuid")]
             pub $param: $uuid_type,
         }
     };
@@ -187,6 +188,7 @@ pub struct OptionalSiloSelector {
 #[derive(Deserialize, JsonSchema)]
 pub struct UserParam {
     /// The user's internal ID
+    #[schemars(with = "Uuid")]
     pub user_id: SiloUserUuid,
 }
 
@@ -204,6 +206,7 @@ pub struct SamlIdentityProviderSelector {
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct SshKeySelector {
     /// ID of the silo user
+    #[schemars(with = "Uuid")]
     pub silo_user_id: SiloUserUuid,
     /// Name or ID of the SSH key
     pub ssh_key: NameOrId,
@@ -2301,6 +2304,7 @@ pub struct SnapshotCreate {
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct OptionalGroupSelector {
+    #[schemars(with = "Option<Uuid>")]
     pub group: Option<SiloGroupUuid>,
 }
 
