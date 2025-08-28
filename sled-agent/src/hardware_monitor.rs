@@ -55,6 +55,9 @@ pub struct HardwareMonitor {
     // Receive messages from the [`HardwareManager`]
     hardware_rx: broadcast::Receiver<HardwareUpdate>,
 
+    // Receive the operator's policy controlling the switch zone
+    switch_zone_policy_rx: watch::Receiver<OperatorSwitchZonePolicy>,
+
     // A reference to the hardware manager
     hardware_manager: HardwareManager,
 
@@ -102,6 +105,7 @@ impl HardwareMonitor {
             sled_agent_started_rx,
             service_manager_ready_rx,
             hardware_rx,
+            switch_zone_policy_rx,
             hardware_manager: hardware_manager.clone(),
             raw_disks_tx,
             sled_agent: None,
@@ -204,8 +208,23 @@ impl HardwareMonitor {
             return;
         };
 
-        if self.tofino_loaded {
-            // Tofino is loaded; activate the switch zone.
+        // Decide whether to activate or deactivate based on the combination of
+        // `tofino_loaded` and the operator policy.
+        let tofino_loaded = self.tofino_loaded;
+        let policy = *self.switch_zone_policy_rx.borrow_and_update();
+        let should_activate = match (tofino_loaded, policy) {
+            // We have a tofino and policy says to start the switch zone
+            (true, OperatorSwitchZonePolicy::StartIfSwitchPresent) => true,
+            // We have a tofino but policy says to stop the switch zone
+            (true, OperatorSwitchZonePolicy::StopDespiteSwitchPresence) => {
+                false
+            }
+            // If we don't have a tofino, stop the switch zone regardless of
+            // policy.
+            (false, _) => false,
+        };
+
+        if should_activate {
             if let Err(e) = service_manager
                 .activate_switch(
                     self.sled_agent
@@ -218,7 +237,6 @@ impl HardwareMonitor {
                 error!(self.log, "Failed to activate switch"; e);
             }
         } else {
-            // Tofino is not loaded; deactivate the switch zone.
             if let Err(e) = service_manager.deactivate_switch().await {
                 warn!(self.log, "Failed to deactivate switch: {e}");
             }
