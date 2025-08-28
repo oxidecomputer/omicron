@@ -408,15 +408,25 @@ pub(crate) async fn instance_ensure_dpd_config(
         return Err(e);
     }
 
-    notify_dendrite_nat_state(
+    // We should not bail out if there is an error while notifying dendrite.
+    // If there is an error communicating with one dendrite instance but the
+    // other is operational and we bail here, it will prevent users from starting
+    // an instance.
+    if let Err(e) = notify_dendrite_nat_state(
         datastore,
         log,
         resolver,
         opctx_alloc,
         Some(instance_id),
-        true,
     )
-    .await?;
+    .await
+    {
+        warn!(
+            log,
+            "error encountered when notifying dendrite, NAT entry creation may be delayed";
+            "error" => %e
+        )
+    };
 
     Ok(nat_entries)
 }
@@ -559,7 +569,6 @@ pub(crate) async fn instance_delete_dpd_config(
         resolver,
         opctx_alloc,
         Some(instance_id),
-        false,
     )
     .await
 }
@@ -684,15 +693,7 @@ pub(crate) async fn delete_dpd_config_by_entry(
         },
     }
 
-    notify_dendrite_nat_state(
-        datastore,
-        log,
-        resolver,
-        opctx_alloc,
-        None,
-        false,
-    )
-    .await
+    notify_dendrite_nat_state(datastore, log, resolver, opctx_alloc, None).await
 }
 
 /// Soft-delete an individual external IP from the NAT RPW, without
@@ -724,16 +725,14 @@ async fn external_ip_delete_dpd_config_inner(
 /// Informs all available boundary switches that the set of NAT entries
 /// has changed.
 ///
-/// When `fail_fast` is set, this function will return on any error when
-/// acquiring a handle to a DPD client. Otherwise, it will attempt to notify
-/// all clients and then finally return the first error.
+/// It will attempt to notify all dpd daemons and then finally return the first error,
+/// if any errors were encountered.
 async fn notify_dendrite_nat_state(
     datastore: &DataStore,
     log: &slog::Logger,
     resolver: &internal_dns_resolver::Resolver,
     opctx_alloc: &OpContext,
     instance_id: Option<InstanceUuid>,
-    fail_fast: bool,
 ) -> Result<(), Error> {
     // Querying boundary switches also requires fleet access and the use of the
     // instance allocator context.
@@ -758,11 +757,7 @@ async fn notify_dendrite_nat_state(
             Ok(client) => client,
             Err(new_error) => {
                 errors.push(new_error);
-                if fail_fast {
-                    break;
-                } else {
-                    continue;
-                }
+                continue;
             }
         };
 
