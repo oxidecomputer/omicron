@@ -257,15 +257,14 @@ impl<'a> LookupPath<'a> {
         self,
         actor: &'a authn::Actor,
     ) -> Result<SiloUser<'a>, Error> {
-        match actor.silo_user_id() {
-            Some(silo_user_id) => Ok(SiloUser::PrimaryKey(
-                Root { lookup_root: self },
-                silo_user_id,
-            )),
+        match actor {
+            authn::Actor::SiloUser { silo_user_id, .. } => Ok(
+                SiloUser::PrimaryKey(Root { lookup_root: self }, *silo_user_id),
+            ),
 
-            None => Err(Error::non_resourcetype_not_found(
-                "could not find silo user",
-            )),
+            authn::Actor::UserBuiltin { .. } => Err(
+                Error::non_resourcetype_not_found("could not find silo user"),
+            ),
         }
     }
 
