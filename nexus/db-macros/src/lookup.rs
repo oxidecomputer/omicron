@@ -195,14 +195,13 @@ struct Resource {
 
 impl Resource {
     fn for_name(name: &str) -> Resource {
-        let (name, primary_key_is_typed_uuid) =
-            if name.chars().last() == Some('*') {
-                let name = &name[0..(name.len() - 1)];
-                (name, true)
-            } else {
-                (name, false)
-            };
-        assert!(!name.contains("*"));
+        // In order to simply the lookup_resource macro invocation, match on the
+        // resource name here to determine if the associated database column is
+        // a typed id or not
+        let primary_key_is_typed_uuid = match name {
+            "SiloUser" => true,
+            _ => false,
+        };
 
         let name_as_snake = heck::AsSnakeCase(&name).to_string();
         let name = format_ident!("{}", name);

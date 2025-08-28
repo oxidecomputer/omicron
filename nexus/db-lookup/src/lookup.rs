@@ -591,7 +591,7 @@ lookup_resource! {
 
 lookup_resource! {
     name = "SshKey",
-    ancestors = [ "Silo", "SiloUser*" ],
+    ancestors = [ "Silo", "SiloUser" ],
     lookup_by_name = true,
     soft_deletes = true,
     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
