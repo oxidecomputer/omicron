@@ -222,15 +222,11 @@ impl Ingester {
 
         // Continue requesting ereports from this SP in a loop until we have
         // received all its ereports.
-        while let Some(gateway_client::types::Ereports {
-            restart_id,
-            items,
-            next_page: _,
-        }) = self
+        while let Some(ereport_types::Ereports { restart_id, reports }) = self
             .mgs_requests(&opctx, clients, &params, sp_type, slot, &mut status)
             .await
         {
-            if items.is_empty() {
+            if reports.items.is_empty() {
                 if let Some(ref mut status) = status {
                     status.requests += 1;
                 }
@@ -251,7 +247,8 @@ impl Ingester {
             } else {
                 status.get_or_insert_default().requests += 1;
             }
-            let db_ereports = items
+            let db_ereports = reports
+                .items
                 .into_iter()
                 .map(|ereport| {
                     const MISSING_VPD: &str =
@@ -379,7 +376,7 @@ impl Ingester {
         sp_type: nexus_types::inventory::SpType,
         slot: u16,
         status: &mut Option<EreporterStatus>,
-    ) -> Option<gateway_client::types::Ereports> {
+    ) -> Option<ereport_types::Ereports> {
         // If an attempt to collect ereports from one gateway fails, we will try
         // any other discovered gateways.
         for GatewayClient { addr, client } in clients.iter() {

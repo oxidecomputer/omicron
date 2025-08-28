@@ -99,13 +99,7 @@ pub fn overridables_for_test(
     for (id_str, switch_location) in scrimlets {
         let sled_id = id_str.parse().unwrap();
         let ip = Ipv6Addr::LOCALHOST;
-        let mgs_port = cptestctx
-            .gateway
-            .get(&switch_location)
-            .unwrap()
-            .client
-            .bind_address
-            .port();
+        let mgs_port = cptestctx.gateway.get(&switch_location).unwrap().port;
         let dendrite_port =
             cptestctx.dendrite.get(&switch_location).unwrap().port;
         let mgd_port = cptestctx.mgd.get(&switch_location).unwrap().port;

@@ -4,10 +4,8 @@
 
 // Copyright 2022 Oxide Computer Company
 
-use dropshot::test_util;
 use gateway_messages::SpPort;
 use gateway_test_utils::setup;
-use gateway_types::component::SpState;
 use gateway_types::component::SpType;
 use omicron_gateway::SpIdentifier;
 
@@ -36,10 +34,11 @@ async fn discovery_both_locations() {
     // switch 1, and it should match the expected values from the config
     for (switch, expected_serial) in [(0, "SimSidecar0"), (1, "SimSidecar1")] {
         for client in [client0, client1] {
-            let url =
-                format!("{}", client0.url(&format!("/sp/switch/{}", switch)));
-
-            let state: SpState = test_util::object_get(client, &url).await;
+            let state = client
+                .sp_get(gateway_client::types::SpType::Switch, switch)
+                .await
+                .unwrap()
+                .into_inner();
             assert_eq!(state.serial_number, expected_serial);
         }
     }

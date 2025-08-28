@@ -149,8 +149,9 @@ impl RunAllArgs {
         );
         for (location, gateway) in &cptestctx.gateway {
             println!(
-                "omicron-dev: management gateway:    http://{} ({})",
-                gateway.client.bind_address, location,
+                "omicron-dev: management gateway:    {} ({})",
+                gateway.client.baseurl(),
+                location,
             );
         }
         println!("omicron-dev: silo name:             {}", cptestctx.silo_name,);
