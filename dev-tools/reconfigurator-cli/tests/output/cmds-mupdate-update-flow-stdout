@@ -505,9 +505,12 @@ planning report for blueprint a5a8f242-ffa5-473c-8efd-2acf2dc0b736:
 chicken switches:
     add zones with mupdate override:   false
 
-* waiting on MUPdate overrides
-* MUPdate overrides exist
-* zone updates waiting on MUPdate overrides
+* zone adds waiting on blockers
+* zone adds and updates are blocked:
+  - current target release generation (2) is lower than minimum required by blueprint (3)
+  - sleds have remove mupdate override set in blueprint: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, d81c6a84-79b8-4958-ae41-ea46c9b19763
+  - sleds have mupdate override errors: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
+* zone updates waiting on zone add blockers
 
 
 
@@ -776,9 +779,11 @@ planning report for blueprint 626487fa-7139-45ec-8416-902271fc730b:
 chicken switches:
     add zones with mupdate override:   false
 
-* waiting on MUPdate overrides
-* MUPdate overrides exist
-* zone updates waiting on MUPdate overrides
+* zone adds waiting on blockers
+* zone adds and updates are blocked:
+  - sleds have remove mupdate override set in blueprint: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, d81c6a84-79b8-4958-ae41-ea46c9b19763
+  - sleds have mupdate override errors: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
+* zone updates waiting on zone add blockers
 
 
 > blueprint-diff latest
@@ -899,9 +904,12 @@ chicken switches:
     add zones with mupdate override:   false
 
 * noop converting 6/6 install-dataset zones to artifact store on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
-* waiting on MUPdate overrides
-* MUPdate overrides exist
-* zone updates waiting on MUPdate overrides
+* zone adds waiting on blockers
+* zone adds and updates are blocked:
+  - current target release generation (3) is lower than minimum required by blueprint (4)
+  - sleds have remove mupdate override set in blueprint: d81c6a84-79b8-4958-ae41-ea46c9b19763
+  - sleds have mupdate override errors: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
+* zone updates waiting on zone add blockers
 
 
 
@@ -1084,9 +1092,11 @@ chicken switches:
     add zones with mupdate override:   false
 
 * skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 6 zones are already from artifacts
-* waiting on MUPdate overrides
-* MUPdate overrides exist
-* zone updates waiting on MUPdate overrides
+* zone adds waiting on blockers
+* zone adds and updates are blocked:
+  - current target release generation (3) is lower than minimum required by blueprint (4)
+  - sleds have mupdate override errors: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
+* zone updates waiting on zone add blockers
 
 
 > blueprint-show latest
@@ -1259,9 +1269,11 @@ chicken switches:
     add zones with mupdate override:   false
 
 * skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 6 zones are already from artifacts
-* waiting on MUPdate overrides
-* MUPdate overrides exist
-* zone updates waiting on MUPdate overrides
+* zone adds waiting on blockers
+* zone adds and updates are blocked:
+  - current target release generation (3) is lower than minimum required by blueprint (4)
+  - sleds have mupdate override errors: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
+* zone updates waiting on zone add blockers
 
 
 
@@ -1398,9 +1410,10 @@ chicken switches:
 
 * skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 6 zones are already from artifacts
 * noop converting 6/6 install-dataset zones to artifact store on sled d81c6a84-79b8-4958-ae41-ea46c9b19763
-* waiting on MUPdate overrides
-* MUPdate overrides exist
-* zone updates waiting on MUPdate overrides
+* zone adds waiting on blockers
+* zone adds and updates are blocked:
+  - sleds have mupdate override errors: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
+* zone updates waiting on zone add blockers
 
 
 > blueprint-show latest
@@ -1574,9 +1587,10 @@ chicken switches:
 
 * skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 6 zones are already from artifacts
 * noop converting 6/6 install-dataset zones to artifact store on sled d81c6a84-79b8-4958-ae41-ea46c9b19763
-* waiting on MUPdate overrides
-* MUPdate overrides exist
-* zone updates waiting on MUPdate overrides
+* zone adds waiting on blockers
+* zone adds and updates are blocked:
+  - sleds have mupdate override errors: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
+* zone updates waiting on zone add blockers
 
 
 
@@ -2237,9 +2251,11 @@ chicken switches:
 
 * skipping noop zone image source check on sled c3bc4c6d-fdde-4fc4-8493-89d2a1e5ee6b: all 0 zones are already from artifacts
 * skipping noop zone image source check on sled d81c6a84-79b8-4958-ae41-ea46c9b19763: all 6 zones are already from artifacts
-* waiting on MUPdate overrides
-* MUPdate overrides exist
-* zone updates waiting on MUPdate overrides
+* zone adds waiting on blockers
+* zone adds and updates are blocked:
+  - current target release generation (4) is lower than minimum required by blueprint (5)
+  - sleds have remove mupdate override set in blueprint: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
+* zone updates waiting on zone add blockers
 
 
 > blueprint-diff latest
@@ -2359,11 +2375,13 @@ generated blueprint 27e755bc-dc10-4647-853c-f89bb3a15a2c based on parent bluepri
 planning report for blueprint 27e755bc-dc10-4647-853c-f89bb3a15a2c:
 * skipping noop zone image source check on sled c3bc4c6d-fdde-4fc4-8493-89d2a1e5ee6b: all 0 zones are already from artifacts
 * skipping noop zone image source check on sled d81c6a84-79b8-4958-ae41-ea46c9b19763: all 6 zones are already from artifacts
-* MUPdate overrides exist
-* adding zones despite MUPdate override, as specified by the `add_zones_with_mupdate_override` chicken switch
+* zone adds and updates are blocked:
+  - current target release generation (4) is lower than minimum required by blueprint (5)
+  - sleds have remove mupdate override set in blueprint: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
+* adding zones despite being blocked, as specified by the `add_zones_with_mupdate_override` chicken switch
 * discretionary zone placement waiting for NTP zones on sleds: c3bc4c6d-fdde-4fc4-8493-89d2a1e5ee6b
 * missing NTP zone on sled c3bc4c6d-fdde-4fc4-8493-89d2a1e5ee6b
-* zone updates waiting on MUPdate overrides
+* zone updates waiting on zone add blockers
 
 
 > blueprint-diff latest

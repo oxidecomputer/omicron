@@ -14,11 +14,22 @@ use crate::common_sp_update::error_means_caboose_is_invalid;
 use futures::FutureExt;
 use futures::future::BoxFuture;
 use gateway_client::SpComponent;
+use gateway_client::types::GetRotBootInfoParams;
 use gateway_client::types::RotState;
 use gateway_client::types::SpComponentFirmwareSlot;
+use gateway_client::types::SpType;
+use gateway_messages::RotBootInfo;
 use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdateRotDetails;
-use slog::{debug, info};
+use slog::Logger;
+use slog::{debug, error, info};
+use slog_error_chain::InlineErrorChain;
+use std::time::Duration;
+use std::time::Instant;
+
+pub const WAIT_FOR_BOOT_INFO_TIMEOUT: Duration = Duration::from_secs(120);
+
+const WAIT_FOR_BOOT_INFO_INTERVAL: Duration = Duration::from_secs(10);
 
 type GatewayClientError = gateway_client::Error<gateway_client::types::Error>;
 
@@ -223,7 +234,10 @@ impl SpComponentUpdateHelperImpl for ReconfiguratorRotUpdater {
                 })
                 .await?;
 
-            debug!(log, "attempting to reset device");
+            debug!(
+                log,
+                "attempting to reset the device to set a new RoT version"
+            );
             mgs_clients
                 .try_all_serially(log, move |mgs_client| async move {
                     mgs_client
@@ -235,8 +249,99 @@ impl SpComponentUpdateHelperImpl for ReconfiguratorRotUpdater {
                         .await
                 })
                 .await?;
+
+            // We wait for boot info to ensure a successful reset
+            wait_for_boot_info(
+                log,
+                mgs_clients,
+                update.sp_type,
+                update.slot_id,
+                WAIT_FOR_BOOT_INFO_TIMEOUT,
+            )
+            .await?;
             Ok(())
         }
         .boxed()
+    }
+}
+
+/// Poll the RoT asking for its boot information. This confirms that the RoT has
+/// been succesfully reset
+pub async fn wait_for_boot_info(
+    log: &Logger,
+    mgs_clients: &mut MgsClients,
+    sp_type: SpType,
+    sp_slot: u16,
+    timeout: Duration,
+) -> Result<RotState, PostUpdateError> {
+    let before = Instant::now();
+    loop {
+        debug!(log, "waiting for boot info to confirm a successful reset");
+        match mgs_clients
+            .try_all_serially(log, |mgs_client| async move {
+                mgs_client
+                    .sp_rot_boot_info(
+                        sp_type,
+                        sp_slot,
+                        SpComponent::ROT.const_as_str(),
+                        &GetRotBootInfoParams {
+                            version: RotBootInfo::HIGHEST_KNOWN_VERSION,
+                        },
+                    )
+                    .await
+            })
+            .await
+        {
+            Ok(state) => match state.clone() {
+                // The minimum we will ever return is v3.
+                // Additionally, V2 does not report image errors, so we cannot
+                // know with certainty if a signature check came back with errors
+                RotState::V2 { .. } | RotState::V3 { .. } => {
+                    debug!(log, "successfuly retrieved boot info");
+                    return Ok(state.into_inner());
+                }
+                // The RoT is probably still booting
+                RotState::CommunicationFailed { message } => {
+                    if before.elapsed() >= timeout {
+                        error!(
+                            log,
+                            "failed to get RoT boot info";
+                            "error" => %message
+                        );
+                        return Err(PostUpdateError::FatalError {
+                            error: message,
+                        });
+                    }
+
+                    info!(
+                        log,
+                        "failed getting RoT boot info (will retry)";
+                        "error" => %message,
+                    );
+                    tokio::time::sleep(WAIT_FOR_BOOT_INFO_INTERVAL).await;
+                }
+            },
+            // The RoT might still be booting
+            Err(error) => {
+                let e = InlineErrorChain::new(&error);
+                if before.elapsed() >= timeout {
+                    error!(
+                        log,
+                        "failed to get RoT boot info";
+                        &e,
+                    );
+                    return Err(PostUpdateError::FatalError {
+                        error: e.to_string(),
+                    });
+                }
+
+                info!(
+                    log,
+                    "failed getting RoT boot info (will retry)";
+                    e,
+                );
+                tokio::time::sleep(WAIT_FOR_BOOT_INFO_INTERVAL).await;
+            }
+        }
     }
 }

@@ -1,0 +1,21 @@
+[package]
+name = "trust-quorum-test-utils"
+version = "0.1.0"
+edition = "2024"
+
+[lints]
+workspace = true
+
+[dependencies]
+camino.workspace = true
+daft.workspace = true
+dropshot.workspace = true
+gfss = { workspace = true, features = ["danger_partial_eq_ct_wrapper"] }
+iddqd.workspace = true
+omicron-uuid-kinds.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+slog.workspace = true
+trust-quorum = { workspace = true, features = ["danger_partial_eq_ct_wrapper"] }
+
+omicron-workspace-hack.workspace = true

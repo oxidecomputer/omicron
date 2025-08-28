@@ -740,4 +740,76 @@ mod tests {
         // kept the final samples.
         assert!(count.value() > 4096);
     }
+
+    // Regression for https://github.com/oxidecomputer/omicron/issues/8889
+    #[tokio::test]
+    async fn updating_target_changes_existing_sampling_interval() {
+        let log = test_logger();
+        let sampler = KstatSampler::new(&log).unwrap();
+        let link = TestEtherstub::new();
+        info!(log, "created test etherstub"; "name" => &link.name);
+        let target = SledDataLinkTarget {
+            rack_id: RACK_ID,
+            sled_id: SLED_ID,
+            sled_serial: SLED_SERIAL.into(),
+            link_name: link.name.clone().into(),
+            kind: KIND.into(),
+            sled_model: SLED_MODEL.into(),
+            sled_revision: SLED_REVISION,
+            zone_name: ZONE_NAME.into(),
+        };
+        let dl = SledDataLink::new(target.clone(), true);
+        let collection_interval = Duration::from_millis(10);
+        let details = CollectionDetails::never(collection_interval);
+        let id = sampler.add_target(dl.clone(), details).await.unwrap();
+
+        // Update the target.
+        let new_duration = Duration::from_millis(15);
+        sampler
+            .update_target(dl, CollectionDetails::never(new_duration))
+            .await
+            .unwrap();
+
+        // Get the futures that the sampler knows about and ensure the value has
+        // been updated.
+        let futs = sampler.future_details().await;
+        assert_eq!(futs.len(), 1, "should have updated the only target");
+        assert_eq!(
+            futs[0],
+            (id, new_duration),
+            "failed to correctly update target"
+        );
+    }
+
+    #[tokio::test]
+    async fn no_futures_to_await_after_removing_target() {
+        let log = test_logger();
+        let sampler = KstatSampler::new(&log).unwrap();
+        let link = TestEtherstub::new();
+        info!(log, "created test etherstub"; "name" => &link.name);
+        let target = SledDataLinkTarget {
+            rack_id: RACK_ID,
+            sled_id: SLED_ID,
+            sled_serial: SLED_SERIAL.into(),
+            link_name: link.name.clone().into(),
+            kind: KIND.into(),
+            sled_model: SLED_MODEL.into(),
+            sled_revision: SLED_REVISION,
+            zone_name: ZONE_NAME.into(),
+        };
+        let dl = SledDataLink::new(target.clone(), true);
+        let collection_interval = Duration::from_millis(100);
+        let details = CollectionDetails::never(collection_interval);
+        let id = sampler.add_target(dl.clone(), details).await.unwrap();
+
+        // And remove right away.
+        sampler.remove_target(id).await.unwrap();
+
+        // And ensure there are zero actual futures
+        let futs = sampler.future_details().await;
+        assert!(
+            futs.is_empty(),
+            "should have zero futures to poll after removing target"
+        );
+    }
 }
