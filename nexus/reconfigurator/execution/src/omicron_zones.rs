@@ -72,10 +72,13 @@ async fn clean_up_expunged_zones_impl<R: CleanupResolver>(
             ));
 
             let result = match &config.zone_type {
-                // Zones which need no cleanup work after expungement.
-                BlueprintZoneType::Nexus(_) => None,
-
                 // Zones which need cleanup after expungement.
+                BlueprintZoneType::Nexus(_) => Some(
+                    datastore
+                        .database_nexus_access_delete(&opctx, config.id)
+                        .await
+                        .map_err(|err| anyhow::anyhow!(err)),
+                ),
                 BlueprintZoneType::CockroachDb(_) => {
                     if decommission_cockroach {
                         Some(

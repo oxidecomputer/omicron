@@ -39,8 +39,9 @@ use omicron_common::api::external::ResourceType;
 use omicron_common::backoff::{
     BackoffError, retry_notify, retry_policy_internal_service,
 };
-use omicron_uuid_kinds::{GenericUuid, SledUuid};
+use omicron_uuid_kinds::{GenericUuid, OmicronZoneUuid, SledUuid};
 use slog::Logger;
+use slog_error_chain::InlineErrorChain;
 use std::net::Ipv6Addr;
 use std::num::NonZeroU32;
 use std::sync::Arc;
@@ -121,6 +122,8 @@ pub mod webhook_delivery;
 mod zpool;
 
 pub use address_lot::AddressLotCreateResult;
+pub use db_metadata::DatastoreSetupAction;
+pub use db_metadata::ValidatedDatastoreSetupAction;
 pub use dns::DataStoreDnsTest;
 pub use dns::DnsVersionUpdateBuilder;
 pub use ereport::EreportFilters;
@@ -189,6 +192,21 @@ impl<U, T> RunnableQuery<U> for T where
 {
 }
 
+/// Specifies whether the consumer wants to check whether they're allowed to
+/// access the database based on the `db_metadata_nexus` table.
+#[derive(Debug, Clone, Copy)]
+pub enum IdentityCheckPolicy {
+    /// The consumer wants full access to the database regardless of the current
+    /// upgrade / handoff state.  This would be used by almost all tools and
+    /// tests.
+    DontCare,
+
+    /// The consumer only wants to access the database if it's in the current
+    /// set of Nexus instances that's supposed to be able to access it.  If
+    /// possible and legal, take over access from the existing set.
+    CheckAndTakeover { nexus_id: OmicronZoneUuid },
+}
+
 pub struct DataStore {
     log: Logger,
     pool: Arc<Pool>,
@@ -224,8 +242,9 @@ impl DataStore {
         log: &Logger,
         pool: Arc<Pool>,
         config: Option<&AllSchemaVersions>,
+        identity_check: IdentityCheckPolicy,
     ) -> Result<Self, String> {
-        Self::new_with_timeout(log, pool, config, None).await
+        Self::new_with_timeout(log, pool, config, None, identity_check).await
     }
 
     pub async fn new_with_timeout(
@@ -233,7 +252,9 @@ impl DataStore {
         pool: Arc<Pool>,
         config: Option<&AllSchemaVersions>,
         try_for: Option<std::time::Duration>,
+        identity_check: IdentityCheckPolicy,
     ) -> Result<Self, String> {
+        use db_metadata::DatastoreSetupAction;
         use nexus_db_model::SCHEMA_VERSION as EXPECTED_VERSION;
 
         let datastore =
@@ -247,25 +268,89 @@ impl DataStore {
             || async {
                 if let Some(try_for) = try_for {
                     if std::time::Instant::now() > start + try_for {
-                        return Err(BackoffError::permanent(()));
+                        return Err(BackoffError::permanent(
+                            "Timeout waiting for DataStore::new_with_timeout",
+                        ));
                     }
                 }
 
-                match datastore
-                    .ensure_schema(&log, EXPECTED_VERSION, config)
-                    .await
-                {
-                    Ok(()) => return Ok(()),
-                    Err(e) => {
-                        warn!(log, "Failed to ensure schema version"; "error" => #%e);
+                loop {
+                    let checked_action = datastore
+                        .check_schema_and_access(
+                            identity_check,
+                            EXPECTED_VERSION,
+                        )
+                        .await
+                        .map_err(|err| {
+                            warn!(
+                                log,
+                                "Cannot check schema version / Nexus access";
+                                "error" => InlineErrorChain::new(err.as_ref()),
+                            );
+                            BackoffError::transient(
+                                "Cannot check schema version / Nexus access",
+                            )
+                        })?;
+
+                    match checked_action.action() {
+                        DatastoreSetupAction::Ready => {
+                            info!(log, "Datastore is ready for usage");
+                            return Ok(());
+                        }
+                        DatastoreSetupAction::NeedsHandoff { nexus_id } => {
+                            info!(log, "Datastore is awaiting handoff");
+
+                            datastore.attempt_handoff(*nexus_id).await.map_err(
+                                |err| {
+                                    warn!(
+                                        log,
+                                        "Could not handoff to new nexus";
+                                        err
+                                    );
+                                    BackoffError::transient(
+                                        "Could not handoff to new nexus",
+                                    )
+                                },
+                            )?;
+
+                            // If the handoff was successful, immediately
+                            // re-evaluate the schema and access policies to see
+                            // if we should update or not.
+                            continue;
+                        }
+                        DatastoreSetupAction::Update => {
+                            info!(
+                                log,
+                                "Datastore should be updated before usage"
+                            );
+                            datastore
+                                .update_schema(checked_action, config)
+                                .await
+                                .map_err(|err| {
+                                    warn!(
+                                        log,
+                                        "Failed to update schema version";
+                                        "error" => InlineErrorChain::new(err.as_ref())
+                                    );
+                                    BackoffError::transient(
+                                        "Failed to update schema version",
+                                    )
+                                })?;
+                            return Ok(());
+                        }
+                        DatastoreSetupAction::Refuse => {
+                            error!(log, "Datastore should not be used");
+                            return Err(BackoffError::permanent(
+                                "Datastore should not be used",
+                            ));
+                        }
                     }
-                };
-                return Err(BackoffError::transient(()));
+                }
             },
             |_, _| {},
         )
         .await
-        .map_err(|_| "Failed to read valid DB schema".to_string())?;
+        .map_err(|err| err.to_string())?;
 
         Ok(datastore)
     }
