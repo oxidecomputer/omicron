@@ -234,7 +234,7 @@ impl ConfigReconcilerInventory {
                         RemoveMupdateOverrideBootSuccessInventory::Removed,
                     ),
                     non_boot_message: "mupdate override successfully removed \
-                                   on non-boot disks"
+                                       on non-boot disks"
                         .to_owned(),
                 }
             });
