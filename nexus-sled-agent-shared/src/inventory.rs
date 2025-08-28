@@ -190,42 +190,19 @@ impl ConfigReconcilerInventory {
     /// look at the actual `last_reconciliation` value from the parent
     /// [`Inventory`].
     pub fn debug_assume_success(config: OmicronSledConfig) -> Self {
-        let external_disks = config
-            .disks
-            .iter()
-            .map(|d| (d.id, ConfigReconcilerInventoryResult::Ok))
-            .collect();
-        let datasets = config
-            .datasets
-            .iter()
-            .map(|d| (d.id, ConfigReconcilerInventoryResult::Ok))
-            .collect();
-        let zones = config
-            .zones
-            .iter()
-            .map(|z| (z.id, ConfigReconcilerInventoryResult::Ok))
-            .collect();
-        let remove_mupdate_override =
-            config.remove_mupdate_override.map(|_| {
-                RemoveMupdateOverrideInventory {
-                    boot_disk_result: Ok(
-                        RemoveMupdateOverrideBootSuccessInventory::Removed,
-                    ),
-                    non_boot_message: "mupdate override successfully removed \
-                                   on non-boot disks"
-                        .to_owned(),
-                }
-            });
-
-        Self {
-            last_reconciled_config: config,
-            external_disks,
-            datasets,
+        let mut ret = Self {
+            last_reconciled_config: OmicronSledConfig::default(),
+            external_disks: BTreeMap::new(),
+            datasets: BTreeMap::new(),
             orphaned_datasets: IdOrdMap::new(),
-            zones,
+            zones: BTreeMap::new(),
             boot_partitions: BootPartitionContents::debug_assume_success(),
-            remove_mupdate_override,
-        }
+            remove_mupdate_override: None,
+        };
+
+        ret.debug_update_assume_success(config);
+
+        ret
     }
 
     /// Given a sled config, update an existing reconciler result to simulate an

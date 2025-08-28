@@ -211,6 +211,13 @@ impl Collection {
             .and_then(|by_bb| by_bb.get(baseboard_id))
     }
 
+    pub fn rot_state_for(
+        &self,
+        baseboard_id: &BaseboardId,
+    ) -> Option<&RotState> {
+        self.rots.get(baseboard_id)
+    }
+
     pub fn rot_page_for(
         &self,
         which: RotPageWhich,
