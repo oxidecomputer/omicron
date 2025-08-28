@@ -14,7 +14,7 @@ use sled_hardware_types::Baseboard;
 use sled_storage::disk::RawDisk;
 use slog::Logger;
 use tokio::sync::broadcast::error::RecvError;
-use tokio::sync::{broadcast, oneshot};
+use tokio::sync::{broadcast, oneshot, watch};
 
 // A thin wrapper around the the [`ServiceManager`] that caches the state
 // whether or not the tofino is loaded if the [`ServiceManager`] doesn't exist
@@ -50,7 +50,31 @@ impl TofinoManager {
     }
 }
 
-// A monitor for hardware events
+/// Policy allowing an operator (via `omdb`) to control whether the switch zone
+/// is started or stopped.
+///
+/// This is an _extremely_ dicey operation in general; a stopped switch zone
+/// leaves the rack inoperable! We are only adding this as a workaround and test
+/// tool for handling sidecar resets; see
+/// https://github.com/oxidecomputer/omicron/issues/8480 for background.
+#[derive(Debug, Clone, Copy)]
+pub enum OperatorSwitchZonePolicy {
+    /// Start the switch zone if a switch is present.
+    ///
+    /// This is the default policy.
+    StartIfSwitchPresent,
+
+    /// Stop the switch zone despite a switch being present.
+    StopDespiteSwitchPresence,
+}
+
+/// A handle controlling the behavior of a [`HardwareMonitor`]
+#[derive(Debug, Clone)]
+pub struct HardwareMonitorHandle {
+    switch_zone_policy_tx: watch::Sender<OperatorSwitchZonePolicy>,
+}
+
+/// A monitor for hardware events
 pub struct HardwareMonitor {
     log: Logger,
 
@@ -88,12 +112,12 @@ pub struct HardwareMonitor {
 }
 
 impl HardwareMonitor {
-    pub fn new(
+    pub fn spawn(
         log: &Logger,
         hardware_manager: &HardwareManager,
         raw_disks_tx: RawDisksSender,
     ) -> (
-        HardwareMonitor,
+        HardwareMonitorHandle,
         oneshot::Sender<SledAgent>,
         oneshot::Sender<ServiceManager>,
     ) {
@@ -104,7 +128,9 @@ impl HardwareMonitor {
         let hardware_rx = hardware_manager.monitor();
         let log = log.new(o!("component" => "HardwareMonitor"));
         let tofino_manager = TofinoManager::new();
-        (
+        let (switch_zone_policy_tx, switch_zone_policy_rx) =
+            watch::channel(OperatorSwitchZonePolicy::StartIfSwitchPresent);
+        let monitor =
             HardwareMonitor {
                 log,
                 baseboard,
@@ -115,7 +141,11 @@ impl HardwareMonitor {
                 raw_disks_tx,
                 sled_agent: None,
                 tofino_manager,
-            },
+            };
+        tokio::spawn(monitor.run());
+        let handle = HardwareMonitorHandle { switch_zone_policy_tx };
+        (
+            handle,
             sled_agent_started_tx,
             service_manager_ready_tx,
         )
@@ -124,7 +154,7 @@ impl HardwareMonitor {
     /// Run the main receive loop of the `HardwareMonitor`
     ///
     /// This should be spawned into a tokio task
-    pub async fn run(&mut self) {
+    pub async fn run(mut self) {
         // Check the latest hardware snapshot; we could have missed events
         // between the creation of the hardware manager and our subscription of
         // its monitor.
