@@ -31,6 +31,7 @@ use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::OptionalError;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_lookup::DbConnection;
+use nexus_db_model::IpVersion;
 use nexus_db_model::ServiceNetworkInterface;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::DataPageParams;
@@ -190,7 +191,11 @@ impl DataStore {
         // instance network interfaces, which require ListChildren on the
         // instance to list). As a logical proxy, we check for listing children
         // of the service IP pool.
-        let (authz_pool, _pool) = self.ip_pools_service_lookup(opctx).await?;
+        //
+        // Note that the IP version doesn't matter here, both pools have the
+        // same permissions.
+        let (authz_pool, _pool) =
+            self.ip_pools_service_lookup(opctx, IpVersion::V4).await?;
         opctx.authorize(authz::Action::ListChildren, &authz_pool).await?;
 
         paginated(dsl::service_network_interface, dsl::id, pagparams)
@@ -250,8 +255,11 @@ impl DataStore {
         // pool) and a network interface (in the relevant VpcSubnet). Putting
         // this check here ensures that the caller can't proceed if they also
         // couldn't proceed with creating the corresponding external IP.
+        //
+        // Note that the IP version here doesn't matter, both IPv4 and IPv6
+        // service pools have the same permissions.
         let (authz_service_ip_pool, _) = self
-            .ip_pools_service_lookup(opctx)
+            .ip_pools_service_lookup(opctx, IpVersion::V4)
             .await
             .map_err(network_interface::InsertError::External)?;
         opctx
@@ -431,8 +439,11 @@ impl DataStore {
         // instance network interfaces, which require permissions on the
         // instance). As a logical proxy, we check for listing children of the
         // service IP pool.
+        //
+        // Note that the IP version here doesn't matter, both pools have the
+        // same permissions.
         let (authz_service_ip_pool, _) = self
-            .ip_pools_service_lookup(opctx)
+            .ip_pools_service_lookup(opctx, IpVersion::V4)
             .await
             .map_err(network_interface::DeleteError::External)?;
         opctx
@@ -890,7 +901,16 @@ impl DataStore {
         // instance network interfaces, which require ListChildren on the
         // instance to list). As a logical proxy, we check for listing children
         // of the service IP pool.
-        let (authz_pool, _pool) = self.ip_pools_service_lookup(opctx).await?;
+        //
+        // TODO-cleanup: https://github.com/oxidecomputer/omicron/issues/8873.
+        // This authz check looks at the builtin services IP Pool, but we're
+        // listing _instance_ NICs. That seems to be authorizing against the
+        // wrong resource.
+        //
+        // But assuming this check is correct, both service pools have the same
+        // permissions, so the actual IP version here doesn't matter.
+        let (authz_pool, _pool) =
+            self.ip_pools_service_lookup(opctx, IpVersion::V4).await?;
         opctx.authorize(authz::Action::ListChildren, &authz_pool).await?;
 
         paginated(dsl::instance_network_interface, dsl::id, pagparams)

@@ -42,26 +42,60 @@ blueprint-diff latest
 # Now, update the simulated RoT bootloader to reflect that the update completed.
 # Collect inventory from it and use that collection for another planning step.
 # This should report that the update completed, remove that update, and add one
-# for an SP on the same sled.
+# for an RoT on the same sled.
 sled-update-rot-bootloader 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 --stage0 1.0.0
 inventory-generate
 blueprint-plan latest latest
 blueprint-diff latest
 
 # After the RoT bootloader update has completed, we update the simulated RoT to
-# reflect that update has completed as well.
-# Like before, collect inventory from it and use that collection for the next
-# step.
-# This should report that the update completed, remove that update, and add one
-# for another sled.
-sled-update-rot 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 --slot-a 1.0.0
+# reflect that update has completed as well. Like before, collect inventory from
+# it and use that collection for the next step. This should report that the
+# update completed, remove that update, and add one for another sled.
+sled-update-rot 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 --slot-b 1.0.0 --active-slot b --persistent-boot-preference b
 inventory-generate
 blueprint-plan latest latest
 blueprint-diff latest
 
 # We repeat the same procedure with the SP
 sled-update-sp 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 --active 1.0.0
+
+# Collect inventory from it and use that collection for another planning step.
+# This should report that the update completed, remove that update, and add a
+# host OS update for this same sled.
 inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+# If we generate another plan, there should be no change.
+blueprint-plan latest latest
+blueprint-diff latest
+
+# Update only the simulated host phase 2; this is a prerequisite for updating
+# the phase 1, and must be done first.
+sled-update-host-phase2 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 --slot-b f3dd0c7a1bd4500ea0d8bcf67581f576d47752b2f1998a4cb0f0c3155c483008
+inventory-generate
+
+# Planning after only phase 2 has changed should make no changes. We're still
+# waiting on phase 1 to change.
+blueprint-plan latest latest
+blueprint-diff latest
+
+# Now update the simulated SP to reflect that the phase 1 update is done.
+sled-update-host-phase1 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 --active B --slot-b 2053f8594971bbf0a7326c833e2ffc12b065b9d823b9c0b967d275fa595e4e89
+inventory-generate
+
+# Planning _still_ shouldn't make any new changes; the OS update as a whole
+# isn't done until sled-agent reports it has booted from the new image.
+blueprint-plan latest latest
+blueprint-diff latest
+
+# Update the sled's boot disk; this finishes the host OS update.
+sled-update-host-phase2 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 --boot-disk B
+inventory-generate
+
+# Planning should now remove the host OS update and plan the next RoT bootloader
+# update.
 blueprint-plan latest latest
 blueprint-diff latest
 
@@ -93,7 +127,7 @@ blueprint-diff latest
 
 # Now simulate the update completing successfully.
 # Like before, we should see a pending SP update for this sled.
-sled-update-rot 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c --slot-a 1.0.0
+sled-update-rot 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c --slot-b 1.0.0 --active-slot b --persistent-boot-preference b
 inventory-generate
 blueprint-plan latest latest
 blueprint-diff latest
@@ -107,9 +141,30 @@ blueprint-plan latest latest
 blueprint-diff latest
 
 # Let's simulate the successful SP update as well.
-# A few more planning steps should try to update the last sled.
 sled-update-sp 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c --active 1.0.0
 inventory-generate
+
+# Planning should remove this update and add an OS update for this sled.
+blueprint-plan latest latest
+blueprint-diff latest
+
+# Try a host OS impossible update replacement: write an unknown artifact to the
+# sled's phase 1. The planner should realize the update is impossible and
+# replace it. As with the impossible SP update test above, we have to bump the
+# "ignore impossible MGS updates" timestamp.)
+set ignore-impossible-mgs-updates-since now
+sled-update-host-phase1 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c --slot-b ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+# Now simulate the update completing successfully.
+sled-update-host-phase2 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c --boot-disk B --slot-b f3dd0c7a1bd4500ea0d8bcf67581f576d47752b2f1998a4cb0f0c3155c483008
+sled-update-host-phase1 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c --active B --slot-b 2053f8594971bbf0a7326c833e2ffc12b065b9d823b9c0b967d275fa595e4e89
+inventory-generate
+
+# Another planning step should try to update the last sled, starting with the
+# RoT bootloader.
 blueprint-plan latest latest
 blueprint-diff latest
 
@@ -120,17 +175,55 @@ inventory-generate
 blueprint-plan latest latest
 blueprint-diff latest
 
-# Update the RoT on the last sled.
-# There should be one last pending SP update.
-sled-update-rot d81c6a84-79b8-4958-ae41-ea46c9b19763 --slot-a 1.0.0
+# Now let's simulate an RoT update that hasn't completed by setting the persistent
+# boot preference to a different slot than the active one. This should cause the
+# planner to mark it as impossible, and replace it.
+set ignore-impossible-mgs-updates-since now
+sled-update-rot d81c6a84-79b8-4958-ae41-ea46c9b19763 --slot-b 1.0.0 --active-slot a --persistent-boot-preference b
 inventory-generate
 blueprint-plan latest latest
 blueprint-diff latest
 
-# Finish updating the last sled and do one more planning run.
-# This should update one control plane zone.
+# An RoT update cannot continue if pending persistent boot preference is set.
+# The slot B is set to a different version so it does not appear to be active
+# and on the correct version, and the corresponding checks are triggered.
+# Like before, this should cause the planner to mark it as impossible, and
+# replace it.
+set ignore-impossible-mgs-updates-since now
+sled-update-rot d81c6a84-79b8-4958-ae41-ea46c9b19763 --slot-b 1.1.0 --active-slot b --persistent-boot-preference b --pending-persistent-boot-preference b
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+# We do the same for transient boot preference. Note that we need to set the
+# pending-persistent-boot-preference back to None
+set ignore-impossible-mgs-updates-since now
+sled-update-rot d81c6a84-79b8-4958-ae41-ea46c9b19763 --slot-b 1.1.0 --active-slot b --persistent-boot-preference b --transient-boot-preference b --pending-persistent-boot-preference
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+# Update the RoT on the last sled. Note that we need to set the
+# transient-boot-preference back to None
+# There should be one last pending SP update.
+sled-update-rot d81c6a84-79b8-4958-ae41-ea46c9b19763 --slot-b 1.0.0 --active-slot b --persistent-boot-preference b --transient-boot-preference
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+# Finish updating the last sled's SP.
+# There should be a pending host phase 1 update.
 sled-update-sp d81c6a84-79b8-4958-ae41-ea46c9b19763 --active 1.0.0
 inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+# Finish updating the last sled's host OS.
+sled-update-host-phase2 d81c6a84-79b8-4958-ae41-ea46c9b19763 --boot-disk B --slot-b f3dd0c7a1bd4500ea0d8bcf67581f576d47752b2f1998a4cb0f0c3155c483008
+sled-update-host-phase1 d81c6a84-79b8-4958-ae41-ea46c9b19763 --active B --slot-b 2053f8594971bbf0a7326c833e2ffc12b065b9d823b9c0b967d275fa595e4e89
+inventory-generate
+
+# Do one more planning run. This should update one control plane zone.
 blueprint-plan latest latest
 blueprint-diff latest
 

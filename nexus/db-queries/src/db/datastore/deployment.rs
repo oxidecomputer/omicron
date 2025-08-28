@@ -85,6 +85,9 @@ use nexus_types::deployment::OximeterReadMode;
 use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdateDetails;
 use nexus_types::deployment::PendingMgsUpdateHostPhase1Details;
+use nexus_types::deployment::PendingMgsUpdateRotBootloaderDetails;
+use nexus_types::deployment::PendingMgsUpdateRotDetails;
+use nexus_types::deployment::PendingMgsUpdateSpDetails;
 use nexus_types::deployment::PendingMgsUpdates;
 use nexus_types::deployment::PlanningReport;
 use nexus_types::inventory::BaseboardId;
@@ -2055,10 +2058,10 @@ async fn insert_pending_mgs_update(
     log: &Logger,
 ) -> Result<(), InsertTxnError> {
     match &update.details {
-        PendingMgsUpdateDetails::Sp {
+        PendingMgsUpdateDetails::Sp(PendingMgsUpdateSpDetails {
             expected_active_version,
             expected_inactive_version,
-        } => {
+        }) => {
             let db_blueprint_id = DbTypedUuid::from(blueprint_id)
                 .into_sql::<diesel::sql_types::Uuid>();
             let db_sp_type =
@@ -2168,13 +2171,13 @@ async fn insert_pending_mgs_update(
                 _expected_inactive_version,
             ) = update_dsl::bp_pending_mgs_update_sp::all_columns();
         }
-        PendingMgsUpdateDetails::Rot {
+        PendingMgsUpdateDetails::Rot(PendingMgsUpdateRotDetails {
             expected_active_slot,
             expected_inactive_version,
             expected_persistent_boot_preference,
             expected_pending_persistent_boot_preference,
             expected_transient_boot_preference,
-        } => {
+        }) => {
             let db_blueprint_id = DbTypedUuid::from(blueprint_id)
                 .into_sql::<diesel::sql_types::Uuid>();
             let db_sp_type =
@@ -2298,10 +2301,12 @@ async fn insert_pending_mgs_update(
                 _expected_transient_boot_preference,
             ) = update_dsl::bp_pending_mgs_update_rot::all_columns();
         }
-        PendingMgsUpdateDetails::RotBootloader {
-            expected_stage0_version,
-            expected_stage0_next_version,
-        } => {
+        PendingMgsUpdateDetails::RotBootloader(
+            PendingMgsUpdateRotBootloaderDetails {
+                expected_stage0_version,
+                expected_stage0_next_version,
+            },
+        ) => {
             let db_blueprint_id = DbTypedUuid::from(blueprint_id)
                 .into_sql::<diesel::sql_types::Uuid>();
             let db_sp_type =
@@ -2949,6 +2954,7 @@ mod tests {
     use crate::db::pub_test_utils::TestDatabase;
     use crate::db::raw_query_builder::QueryBuilder;
     use gateway_types::rot::RotSlot;
+    use nexus_db_model::IpVersion;
     use nexus_inventory::CollectionBuilder;
     use nexus_inventory::now_db_precision;
     use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
@@ -3006,7 +3012,6 @@ mod tests {
     use oxnet::IpNet;
     use pretty_assertions::assert_eq;
     use rand::Rng;
-    use rand::thread_rng;
     use std::collections::BTreeSet;
     use std::mem;
     use std::net::IpAddr;
@@ -3141,7 +3146,7 @@ mod tests {
                 )
             })
             .collect();
-        let ip = ip.unwrap_or_else(|| thread_rng().gen::<u128>().into());
+        let ip = ip.unwrap_or_else(|| rand::rng().random::<u128>().into());
         let resources = SledResources { zpools, subnet: Ipv6Subnet::new(ip) };
         SledDetails {
             policy: SledPolicy::provisionable(),
@@ -3437,6 +3442,7 @@ mod tests {
                                 },
                                 hash: ZONE_ARTIFACT_HASH_1,
                                 size: 0,
+                                board: None,
                                 sign: None,
                             },
                             TufArtifactMeta {
@@ -3447,6 +3453,7 @@ mod tests {
                                 },
                                 hash: HOST_ARTIFACT_HASH_1,
                                 size: 0,
+                                board: None,
                                 sign: None,
                             },
                             TufArtifactMeta {
@@ -3457,6 +3464,7 @@ mod tests {
                                 },
                                 hash: HOST_ARTIFACT_HASH_2,
                                 size: 0,
+                                board: None,
                                 sign: None,
                             },
                         ],
@@ -3578,10 +3586,10 @@ mod tests {
             baseboard_id: baseboard_id.clone(),
             sp_type: sp.sp_type,
             slot_id: sp.sp_slot,
-            details: PendingMgsUpdateDetails::Sp {
+            details: PendingMgsUpdateDetails::Sp(PendingMgsUpdateSpDetails {
                 expected_active_version: "1.0.0".parse().unwrap(),
                 expected_inactive_version: ExpectedVersion::NoValidVersion,
-            },
+            }),
             artifact_hash: ArtifactHash([72; 32]),
             artifact_version: "2.0.0".parse().unwrap(),
         });
@@ -3705,7 +3713,7 @@ mod tests {
             baseboard_id: baseboard_id.clone(),
             sp_type: sp.sp_type,
             slot_id: sp.sp_slot,
-            details: PendingMgsUpdateDetails::Rot {
+            details: PendingMgsUpdateDetails::Rot(PendingMgsUpdateRotDetails {
                 expected_active_slot: ExpectedActiveRotSlot {
                     slot: RotSlot::A,
                     version: "1.0.0".parse().unwrap(),
@@ -3714,7 +3722,7 @@ mod tests {
                 expected_persistent_boot_preference: RotSlot::A,
                 expected_pending_persistent_boot_preference: None,
                 expected_transient_boot_preference: None,
-            },
+            }),
             artifact_hash: ArtifactHash([72; 32]),
             artifact_version: "2.0.0".parse().unwrap(),
         });
@@ -3762,10 +3770,13 @@ mod tests {
             baseboard_id: baseboard_id.clone(),
             sp_type: sp.sp_type,
             slot_id: sp.sp_slot,
-            details: PendingMgsUpdateDetails::RotBootloader {
-                expected_stage0_version: "1.0.0".parse().unwrap(),
-                expected_stage0_next_version: ExpectedVersion::NoValidVersion,
-            },
+            details: PendingMgsUpdateDetails::RotBootloader(
+                PendingMgsUpdateRotBootloaderDetails {
+                    expected_stage0_version: "1.0.0".parse().unwrap(),
+                    expected_stage0_next_version:
+                        ExpectedVersion::NoValidVersion,
+                },
+            ),
             artifact_hash: ArtifactHash([72; 32]),
             artifact_version: "2.0.0".parse().unwrap(),
         });
@@ -4211,12 +4222,17 @@ mod tests {
             Ipv4Addr::new(10, 0, 0, 10),
         ))
         .unwrap();
-        let (service_ip_pool, _) = datastore
-            .ip_pools_service_lookup(&opctx)
+        let (service_authz_ip_pool, service_ip_pool) = datastore
+            .ip_pools_service_lookup(&opctx, IpVersion::V4)
             .await
             .expect("lookup service ip pool");
         datastore
-            .ip_pool_add_range(&opctx, &service_ip_pool, &ip_range)
+            .ip_pool_add_range(
+                &opctx,
+                &service_authz_ip_pool,
+                &service_ip_pool,
+                &ip_range,
+            )
             .await
             .expect("add range to service ip pool");
         let zone_id = OmicronZoneUuid::new_v4();
@@ -4343,13 +4359,14 @@ mod tests {
                     .map(|(ip, _nic)| ip.ip())
             })
             .expect("found external IP");
-        let (service_ip_pool, _) = datastore
-            .ip_pools_service_lookup(&opctx)
+        let (service_authz_ip_pool, service_ip_pool) = datastore
+            .ip_pools_service_lookup(&opctx, IpVersion::V4)
             .await
             .expect("lookup service ip pool");
         datastore
             .ip_pool_add_range(
                 &opctx,
+                &service_authz_ip_pool,
                 &service_ip_pool,
                 &IpRange::try_from((nexus_ip, nexus_ip))
                     .expect("valid IP range"),

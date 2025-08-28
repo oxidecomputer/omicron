@@ -22,6 +22,9 @@ use nexus_types::deployment::ExpectedVersion;
 use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdateDetails;
 use nexus_types::deployment::PendingMgsUpdateHostPhase1Details;
+use nexus_types::deployment::PendingMgsUpdateRotBootloaderDetails;
+use nexus_types::deployment::PendingMgsUpdateRotDetails;
+use nexus_types::deployment::PendingMgsUpdateSpDetails;
 use nexus_types::deployment::PendingMgsUpdates;
 use nexus_types::internal_api::views::MgsUpdateDriverStatus;
 use nexus_types::inventory::BaseboardId;
@@ -320,10 +323,10 @@ fn cmd_config(
             update.artifact_version,
         );
         match &update.details {
-            PendingMgsUpdateDetails::Sp {
+            PendingMgsUpdateDetails::Sp(PendingMgsUpdateSpDetails {
                 expected_active_version,
                 expected_inactive_version,
-            } => {
+            }) => {
                 swriteln!(
                     s,
                     "        preconditions: active slot {:?}, inactive slot {:?}",
@@ -331,13 +334,13 @@ fn cmd_config(
                     expected_inactive_version,
                 );
             }
-            PendingMgsUpdateDetails::Rot {
+            PendingMgsUpdateDetails::Rot(PendingMgsUpdateRotDetails {
                 expected_active_slot,
                 expected_inactive_version,
                 expected_persistent_boot_preference,
                 expected_pending_persistent_boot_preference,
                 expected_transient_boot_preference,
-            } => {
+            }) => {
                 swriteln!(
                     s,
                     "        preconditions: expected active slot {:?}
@@ -352,10 +355,12 @@ fn cmd_config(
                     expected_transient_boot_preference,
                 );
             }
-            PendingMgsUpdateDetails::RotBootloader {
-                expected_stage0_version,
-                expected_stage0_next_version,
-            } => {
+            PendingMgsUpdateDetails::RotBootloader(
+                PendingMgsUpdateRotBootloaderDetails {
+                    expected_stage0_version,
+                    expected_stage0_next_version,
+                },
+            ) => {
                 swriteln!(
                     s,
                     "        preconditions: stage 0 {:?}, stage 0 next {:?}",
@@ -488,10 +493,10 @@ fn cmd_set(
             Component::Sp {
                 expected_active_version,
                 expected_inactive_version,
-            } => PendingMgsUpdateDetails::Sp {
+            } => PendingMgsUpdateDetails::Sp(PendingMgsUpdateSpDetails {
                 expected_active_version,
                 expected_inactive_version,
-            },
+            }),
             Component::Rot {
                 expected_active_slot,
                 expected_slot_a_version,
@@ -519,7 +524,7 @@ fn cmd_set(
                     }
                 };
 
-                PendingMgsUpdateDetails::Rot {
+                PendingMgsUpdateDetails::Rot(PendingMgsUpdateRotDetails {
                     expected_active_slot: ExpectedActiveRotSlot {
                         slot: expected_active_slot,
                         version: expected_active_version,
@@ -530,15 +535,17 @@ fn cmd_set(
                             .unwrap_or(expected_active_slot),
                     expected_pending_persistent_boot_preference,
                     expected_transient_boot_preference,
-                }
+                })
             }
             Component::RotBootloader {
                 expected_stage0_version,
                 expected_stage0_next_version,
-            } => PendingMgsUpdateDetails::RotBootloader {
-                expected_stage0_version,
-                expected_stage0_next_version,
-            },
+            } => PendingMgsUpdateDetails::RotBootloader(
+                PendingMgsUpdateRotBootloaderDetails {
+                    expected_stage0_version,
+                    expected_stage0_next_version,
+                },
+            ),
             Component::HostPhase1 {
                 expected_active_phase_1_slot,
                 expected_boot_disk,

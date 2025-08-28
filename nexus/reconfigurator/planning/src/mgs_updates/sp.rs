@@ -10,6 +10,7 @@ use super::mgs_update_status_inactive_versions;
 use nexus_types::deployment::ExpectedVersion;
 use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdateDetails;
+use nexus_types::deployment::PendingMgsUpdateSpDetails;
 use nexus_types::inventory::BaseboardId;
 use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::Collection;
@@ -100,10 +101,10 @@ pub fn try_make_update_sp(
         .filter(|a| {
             // A matching SP artifact will have:
             //
-            // - "name" matching the board name (found above from caboose)
+            // - "board" matching the board name (found above from caboose)
             // - "kind" matching one of the known SP kinds
 
-            if a.id.name != *board {
+            if a.board.as_ref() != Some(board) {
                 return false;
             }
 
@@ -178,10 +179,10 @@ pub fn try_make_update_sp(
         baseboard_id: baseboard_id.clone(),
         sp_type: sp_info.sp_type,
         slot_id: sp_info.sp_slot,
-        details: PendingMgsUpdateDetails::Sp {
+        details: PendingMgsUpdateDetails::Sp(PendingMgsUpdateSpDetails {
             expected_active_version,
             expected_inactive_version,
-        },
+        }),
         artifact_hash: artifact.hash,
         artifact_version: artifact.id.version.clone(),
     })

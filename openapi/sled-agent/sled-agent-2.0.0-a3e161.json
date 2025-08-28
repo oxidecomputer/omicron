@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "0.0.1"
+    "version": "2.0.0"
   },
   "paths": {
     "/artifacts": {
@@ -210,29 +210,6 @@
       }
     },
     "/chicken-switch/destroy-orphaned-datasets": {
-      "get": {
-        "summary": "This endpoint reports the status of the `destroy_orphaned_datasets`",
-        "description": "chicken switch. It will be removed with omicron#6177.",
-        "operationId": "chicken_switch_destroy_orphaned_datasets_get",
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ChickenSwitchDestroyOrphanedDatasets"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      },
       "put": {
         "summary": "This endpoint sets the `destroy_orphaned_datasets` chicken switch",
         "description": "(allowing sled-agent to delete datasets it believes are orphaned). It will be removed with omicron#6177.",

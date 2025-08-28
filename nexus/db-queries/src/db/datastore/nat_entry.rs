@@ -1,6 +1,15 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+//! Queries for manipulating the NAT entry tables.
+//!
+//! See [`nexus_db_model::nat_entry`] for a discussion of the use of this
+//! data.
+
 use super::DataStore;
 use crate::context::OpContext;
-use crate::db::model::{Ipv4NatEntry, Ipv4NatValues};
+use crate::db::model::{NatEntry, NatEntryValues};
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::{DateTime, Utc};
 use diesel::prelude::*;
@@ -8,8 +17,8 @@ use diesel::sql_types::BigInt;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_model::ExternalIp;
-use nexus_db_model::Ipv4NatChange;
-use nexus_types::internal_api::views::Ipv4NatEntryView;
+use nexus_db_model::NatChange;
+use nexus_types::internal_api::views::NatEntryView;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
@@ -23,19 +32,19 @@ impl DataStore {
     /// Currently used to ensure that a NAT entry exists for an Instance.
     /// This SHOULD NOT be directly used to create service zone nat entries,
     /// as they are updated via a background task.
-    pub async fn ensure_ipv4_nat_entry(
+    pub async fn ensure_nat_entry(
         &self,
         opctx: &OpContext,
-        nat_entry: Ipv4NatValues,
-    ) -> CreateResult<Ipv4NatEntry> {
+        nat_entry: NatEntryValues,
+    ) -> CreateResult<NatEntry> {
         use diesel::sql_types;
-        use nexus_db_schema::schema::ipv4_nat_entry::dsl;
+        use nexus_db_schema::schema::nat_entry::dsl;
 
         // Look up any NAT entries that already have the exact parameters
         // we're trying to INSERT.
         // We want to return any existing entry, but not to mask the UniqueViolation
         // when trying to use an existing IP + port range with a different target.
-        let matching_entry_subquery = dsl::ipv4_nat_entry
+        let matching_entry_subquery = dsl::nat_entry
             .filter(dsl::external_address.eq(nat_entry.external_address))
             .filter(dsl::first_port.eq(nat_entry.first_port))
             .filter(dsl::last_port.eq(nat_entry.last_port))
@@ -64,7 +73,7 @@ impl DataStore {
         ))
         .filter(diesel::dsl::not(diesel::dsl::exists(matching_entry_subquery)));
 
-        let out = diesel::insert_into(dsl::ipv4_nat_entry)
+        let out = diesel::insert_into(dsl::nat_entry)
             .values(new_entry_subquery)
             .into_columns((
                 dsl::external_address,
@@ -74,7 +83,7 @@ impl DataStore {
                 dsl::vni,
                 dsl::mac,
             ))
-            .returning(Ipv4NatEntry::as_returning())
+            .returning(NatEntry::as_returning())
             .get_result_async(&*self.pool_connection_authorized(opctx).await?)
             .await;
 
@@ -88,7 +97,7 @@ impl DataStore {
                 // - Can't ON CONFLICT with a partial constraint, so we can't
                 //   do a no-op write and return the row that way either.
                 // So, we do another lookup.
-                self.ipv4_nat_find_by_values(opctx, nat_entry).await
+                self.nat_find_by_values(opctx, nat_entry).await
             }
             Err(e) => Err(public_error_from_diesel(e, ErrorHandler::Server)),
         }
@@ -101,20 +110,20 @@ impl DataStore {
     /// Creates missing entries idempotently.
     ///
     /// returns the number of records added
-    pub async fn ipv4_nat_sync_service_zones(
+    pub async fn nat_sync_service_zones(
         &self,
         opctx: &OpContext,
-        nat_entries: &[Ipv4NatValues],
+        nat_entries: &[NatEntryValues],
     ) -> CreateResult<usize> {
-        use nexus_db_schema::schema::ipv4_nat_entry::dsl;
+        use nexus_db_schema::schema::nat_entry::dsl;
 
         let vni = nexus_db_model::Vni(Vni::SERVICES_VNI);
 
         // find all active nat entries with the services vni
-        let result: Vec<Ipv4NatEntry> = dsl::ipv4_nat_entry
+        let result: Vec<NatEntry> = dsl::nat_entry
             .filter(dsl::vni.eq(vni))
             .filter(dsl::version_removed.is_null())
-            .select(Ipv4NatEntry::as_select())
+            .select(NatEntry::as_select())
             .load_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
@@ -124,7 +133,7 @@ impl DataStore {
         let mut delete: Vec<_> = vec![];
 
         for db_entry in result.iter() {
-            let values = Ipv4NatValues {
+            let values = NatEntryValues {
                 external_address: db_entry.external_address,
                 first_port: db_entry.first_port,
                 last_port: db_entry.last_port,
@@ -142,7 +151,7 @@ impl DataStore {
 
         // delete entries that are not present in requested entries
         for entry in delete {
-            if let Err(e) = self.ipv4_nat_delete(opctx, entry).await {
+            if let Err(e) = self.nat_delete(opctx, entry).await {
                 error!(
                     opctx.log,
                     "failed to delete service zone nat entry";
@@ -159,9 +168,7 @@ impl DataStore {
 
         // insert nat_entries
         for entry in add {
-            if let Err(e) =
-                self.ensure_ipv4_nat_entry(opctx, entry.clone()).await
-            {
+            if let Err(e) = self.ensure_nat_entry(opctx, entry.clone()).await {
                 error!(
                     opctx.log,
                     "failed to ensure service zone nat entry";
@@ -176,16 +183,21 @@ impl DataStore {
         Ok(count)
     }
 
-    pub async fn ipv4_nat_delete(
+    /// Mark the provided NAT entry as removed in the database.
+    ///
+    /// This soft-deletes the entry and sets the `version_removed` column. The
+    /// garbage collection background task is responsible for hard-deleting
+    /// stale entries.
+    pub async fn nat_delete(
         &self,
         opctx: &OpContext,
-        nat_entry: &Ipv4NatEntry,
+        nat_entry: &NatEntry,
     ) -> DeleteResult {
-        use nexus_db_schema::schema::ipv4_nat_entry::dsl;
+        use nexus_db_schema::schema::nat_entry::dsl;
 
-        let updated_rows = diesel::update(dsl::ipv4_nat_entry)
+        let updated_rows = diesel::update(dsl::nat_entry)
             .set((
-                dsl::version_removed.eq(ipv4_nat_next_version().nullable()),
+                dsl::version_removed.eq(nat_next_version().nullable()),
                 dsl::time_deleted.eq(Utc::now()),
             ))
             .filter(dsl::time_deleted.is_null())
@@ -198,7 +210,7 @@ impl DataStore {
 
         if updated_rows == 0 {
             return Err(Error::ObjectNotFound {
-                type_name: ResourceType::Ipv4NatEntry,
+                type_name: ResourceType::NatEntry,
                 lookup_type: LookupType::ByCompositeId(
                     "id, version_added".to_string(),
                 ),
@@ -207,38 +219,22 @@ impl DataStore {
         Ok(())
     }
 
-    pub async fn ipv4_nat_find_by_id(
-        &self,
-        opctx: &OpContext,
-        id: uuid::Uuid,
-    ) -> LookupResult<Ipv4NatEntry> {
-        use nexus_db_schema::schema::ipv4_nat_entry::dsl;
-
-        let result = dsl::ipv4_nat_entry
-            .filter(dsl::id.eq(id))
-            .select(Ipv4NatEntry::as_select())
-            .limit(1)
-            .load_async(&*self.pool_connection_authorized(opctx).await?)
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
-
-        if let Some(nat_entry) = result.first() {
-            Ok(nat_entry.clone())
-        } else {
-            Err(Error::invalid_request("no matching records"))
-        }
-    }
-
-    pub async fn ipv4_nat_delete_by_external_ip(
+    /// Mark the NAT entry for the provided external IP address as removed in
+    /// the databaase.
+    ///
+    /// This soft-deletes the entry and sets the `version_removed` column. The
+    /// garbage collection background task is responsible for hard-deleting
+    /// stale entries.
+    pub async fn nat_delete_by_external_ip(
         &self,
         opctx: &OpContext,
         external_ip: &ExternalIp,
     ) -> DeleteResult {
-        use nexus_db_schema::schema::ipv4_nat_entry::dsl;
+        use nexus_db_schema::schema::nat_entry::dsl;
 
-        let updated_rows = diesel::update(dsl::ipv4_nat_entry)
+        let updated_rows = diesel::update(dsl::nat_entry)
             .set((
-                dsl::version_removed.eq(ipv4_nat_next_version().nullable()),
+                dsl::version_removed.eq(nat_next_version().nullable()),
                 dsl::time_deleted.eq(Utc::now()),
             ))
             .filter(dsl::time_deleted.is_null())
@@ -252,7 +248,7 @@ impl DataStore {
 
         if updated_rows == 0 {
             return Err(Error::ObjectNotFound {
-                type_name: ResourceType::Ipv4NatEntry,
+                type_name: ResourceType::NatEntry,
                 lookup_type: LookupType::ByCompositeId(
                     "external_ip, first_port, last_port".to_string(),
                 ),
@@ -261,13 +257,14 @@ impl DataStore {
         Ok(())
     }
 
-    pub async fn ipv4_nat_find_by_values(
+    /// Lookup a NAT entry by its associated data.
+    pub async fn nat_find_by_values(
         &self,
         opctx: &OpContext,
-        values: Ipv4NatValues,
-    ) -> LookupResult<Ipv4NatEntry> {
-        use nexus_db_schema::schema::ipv4_nat_entry::dsl;
-        let result = dsl::ipv4_nat_entry
+        values: NatEntryValues,
+    ) -> LookupResult<NatEntry> {
+        use nexus_db_schema::schema::nat_entry::dsl;
+        let result = dsl::nat_entry
             .filter(dsl::external_address.eq(values.external_address))
             .filter(dsl::first_port.eq(values.first_port))
             .filter(dsl::last_port.eq(values.last_port))
@@ -275,7 +272,7 @@ impl DataStore {
             .filter(dsl::sled_address.eq(values.sled_address))
             .filter(dsl::vni.eq(values.vni))
             .filter(dsl::time_deleted.is_null())
-            .select(Ipv4NatEntry::as_select())
+            .select(NatEntry::as_select())
             .limit(1)
             .load_async(&*self.pool_connection_authorized(opctx).await?)
             .await
@@ -288,22 +285,24 @@ impl DataStore {
         }
     }
 
-    pub async fn ipv4_nat_list_since_version(
+    /// List all NAT entries with a `version_added` strictly greater than
+    /// `version`.
+    pub async fn nat_list_since_version(
         &self,
         opctx: &OpContext,
         version: i64,
         limit: u32,
-    ) -> ListResultVec<Ipv4NatEntry> {
-        use nexus_db_schema::schema::ipv4_nat_entry::dsl;
+    ) -> ListResultVec<NatEntry> {
+        use nexus_db_schema::schema::nat_entry::dsl;
 
-        let list = dsl::ipv4_nat_entry
+        let list = dsl::nat_entry
             .filter(
                 dsl::version_added
                     .gt(version)
                     .or(dsl::version_removed.gt(version)),
             )
             .limit(i64::from(limit))
-            .select(Ipv4NatEntry::as_select())
+            .select(NatEntry::as_select())
             .load_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
@@ -311,35 +310,38 @@ impl DataStore {
         Ok(list)
     }
 
-    pub async fn ipv4_nat_changeset(
+    /// Return a page of NAT entries with `version_added` strictly greater than
+    /// `version`.
+    pub async fn nat_changeset(
         &self,
         opctx: &OpContext,
         version: i64,
         limit: u32,
-    ) -> ListResultVec<Ipv4NatEntryView> {
-        use nexus_db_schema::schema::ipv4_nat_changes::dsl;
+    ) -> ListResultVec<NatEntryView> {
+        use nexus_db_schema::schema::nat_changes::dsl;
 
-        let nat_changes = dsl::ipv4_nat_changes
+        let nat_changes = dsl::nat_changes
             .filter(dsl::version.gt(version))
             .limit(i64::from(limit))
             .order_by(dsl::version)
-            .select(Ipv4NatChange::as_select())
+            .select(NatChange::as_select())
             .load_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
-        let nat_entries: Vec<Ipv4NatEntryView> =
+        let nat_entries: Vec<NatEntryView> =
             nat_changes.iter().map(|e| e.clone().into()).collect();
         Ok(nat_entries)
     }
 
-    pub async fn ipv4_nat_current_version(
+    /// Return the _latest_ version of the any entries in the NAT table.
+    pub async fn nat_current_version(
         &self,
         opctx: &OpContext,
     ) -> LookupResult<i64> {
-        use nexus_db_schema::schema::ipv4_nat_version::dsl;
+        use nexus_db_schema::schema::nat_version::dsl;
 
-        let latest: Option<i64> = dsl::ipv4_nat_version
+        let latest: Option<i64> = dsl::nat_version
             .select(diesel::dsl::max(dsl::last_value))
             .first_async(&*self.pool_connection_authorized(opctx).await?)
             .await
@@ -351,15 +353,18 @@ impl DataStore {
         }
     }
 
-    pub async fn ipv4_nat_cleanup(
+    /// Hard-delete NAT table entries whose `version_removed` is strictly less
+    /// than `version` and `time_deleted` is strictly earlier than
+    /// `before_timestamp`.
+    pub async fn nat_cleanup(
         &self,
         opctx: &OpContext,
         version: i64,
         before_timestamp: DateTime<Utc>,
     ) -> DeleteResult {
-        use nexus_db_schema::schema::ipv4_nat_entry::dsl;
+        use nexus_db_schema::schema::nat_entry::dsl;
 
-        diesel::delete(dsl::ipv4_nat_entry)
+        diesel::delete(dsl::nat_entry)
             .filter(dsl::version_removed.lt(version))
             .filter(dsl::time_deleted.lt(before_timestamp))
             .execute_async(&*self.pool_connection_authorized(opctx).await?)
@@ -370,8 +375,9 @@ impl DataStore {
     }
 }
 
-fn ipv4_nat_next_version() -> diesel::expression::SqlLiteral<BigInt> {
-    diesel::dsl::sql::<BigInt>("nextval('omicron.public.ipv4_nat_version')")
+/// Return the next version for the NAT table state.
+fn nat_next_version() -> diesel::expression::SqlLiteral<BigInt> {
+    diesel::dsl::sql::<BigInt>("nextval('omicron.public.nat_version')")
 }
 
 #[cfg(test)]
@@ -380,7 +386,7 @@ mod test {
 
     use crate::db::pub_test_utils::TestDatabase;
     use chrono::Utc;
-    use nexus_db_model::{Ipv4NatEntry, Ipv4NatValues, MacAddr, Vni};
+    use nexus_db_model::{MacAddr, NatEntry, NatEntryValues, Vni};
     use omicron_common::api::external;
     use omicron_test_utils::dev;
     use rand::seq::IteratorRandom;
@@ -388,31 +394,28 @@ mod test {
     // Test our ability to track additions and deletions since a given version number
     #[tokio::test]
     async fn nat_version_tracking() {
-        let logctx = dev::test_setup_log("test_nat_version_tracking");
+        let logctx = dev::test_setup_log("nat_version_tracking");
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
         // We should not have any NAT entries at this moment
         let initial_state =
-            datastore.ipv4_nat_list_since_version(&opctx, 0, 10).await.unwrap();
+            datastore.nat_list_since_version(&opctx, 0, 10).await.unwrap();
 
         assert!(initial_state.is_empty());
-        assert_eq!(
-            datastore.ipv4_nat_current_version(&opctx).await.unwrap(),
-            0
-        );
+        assert_eq!(datastore.nat_current_version(&opctx).await.unwrap(), 0);
 
         // Each change (creation / deletion) to the NAT table should increment the
         // version number of the row in the NAT table
-        let external_address =
+        let external_address1 =
             oxnet::Ipv4Net::host_net("10.0.0.100".parse().unwrap());
 
         let sled_address =
             oxnet::Ipv6Net::host_net("fd00:1122:3344:104::1".parse().unwrap());
 
         // Add a nat entry.
-        let nat1 = Ipv4NatValues {
-            external_address: external_address.into(),
+        let nat1 = NatEntryValues {
+            external_address: external_address1.into(),
             first_port: 0.into(),
             last_port: 999.into(),
             sled_address: sled_address.into(),
@@ -422,25 +425,24 @@ mod test {
             ),
         };
 
-        datastore.ensure_ipv4_nat_entry(&opctx, nat1.clone()).await.unwrap();
+        datastore.ensure_nat_entry(&opctx, nat1.clone()).await.unwrap();
         let first_entry =
-            datastore.ipv4_nat_find_by_values(&opctx, nat1).await.unwrap();
+            datastore.nat_find_by_values(&opctx, nat1).await.unwrap();
 
         let nat_entries =
-            datastore.ipv4_nat_list_since_version(&opctx, 0, 10).await.unwrap();
+            datastore.nat_list_since_version(&opctx, 0, 10).await.unwrap();
 
         // The NAT table has undergone one change. One entry has been added,
         // none deleted, so we should be at version 1.
         assert_eq!(nat_entries.len(), 1);
         assert_eq!(nat_entries.last().unwrap().version_added, 1);
-        assert_eq!(
-            datastore.ipv4_nat_current_version(&opctx).await.unwrap(),
-            1
-        );
+        assert_eq!(datastore.nat_current_version(&opctx).await.unwrap(), 1);
 
         // Add another nat entry.
-        let nat2 = Ipv4NatValues {
-            external_address: external_address.into(),
+        let external_address2 =
+            oxnet::Ipv6Net::host_net("2001:db8::1".parse().unwrap());
+        let nat2 = NatEntryValues {
+            external_address: external_address2.into(),
             first_port: 1000.into(),
             last_port: 1999.into(),
             sled_address: sled_address.into(),
@@ -450,10 +452,10 @@ mod test {
             ),
         };
 
-        datastore.ensure_ipv4_nat_entry(&opctx, nat2).await.unwrap();
+        datastore.ensure_nat_entry(&opctx, nat2).await.unwrap();
 
         let nat_entries =
-            datastore.ipv4_nat_list_since_version(&opctx, 0, 10).await.unwrap();
+            datastore.nat_list_since_version(&opctx, 0, 10).await.unwrap();
 
         // The NAT table has undergone two changes. Two entries have been
         // added, none deleted, so we should be at version 2.
@@ -461,32 +463,26 @@ mod test {
             nat_entries.iter().find(|e| e.version_added == 2).unwrap();
         assert_eq!(nat_entries.len(), 2);
         assert_eq!(nat_entry.version_added, 2);
-        assert_eq!(
-            datastore.ipv4_nat_current_version(&opctx).await.unwrap(),
-            2
-        );
+        assert_eq!(datastore.nat_current_version(&opctx).await.unwrap(), 2);
 
         // Test Cleanup logic
         // Cleanup should only perma-delete entries that are older than a
         // specified version number and whose `time_deleted` field is
         // older than a specified age.
         let time_cutoff = Utc::now();
-        datastore.ipv4_nat_cleanup(&opctx, 2, time_cutoff).await.unwrap();
+        datastore.nat_cleanup(&opctx, 2, time_cutoff).await.unwrap();
 
         // Nothing should have changed (no records currently marked for deletion)
         let nat_entries =
-            datastore.ipv4_nat_list_since_version(&opctx, 0, 10).await.unwrap();
+            datastore.nat_list_since_version(&opctx, 0, 10).await.unwrap();
 
         assert_eq!(nat_entries.len(), 2);
-        assert_eq!(
-            datastore.ipv4_nat_current_version(&opctx).await.unwrap(),
-            2
-        );
+        assert_eq!(datastore.nat_current_version(&opctx).await.unwrap(), 2);
 
         // Delete the first nat entry. It should show up as a later version number.
-        datastore.ipv4_nat_delete(&opctx, &first_entry).await.unwrap();
+        datastore.nat_delete(&opctx, &first_entry).await.unwrap();
         let nat_entries =
-            datastore.ipv4_nat_list_since_version(&opctx, 0, 10).await.unwrap();
+            datastore.nat_list_since_version(&opctx, 0, 10).await.unwrap();
 
         // The NAT table has undergone three changes. Two entries have been
         // added, one deleted, so we should be at version 3. Since the
@@ -497,44 +493,35 @@ mod test {
         assert_eq!(nat_entries.len(), 2);
         assert_eq!(nat_entry.version_removed, Some(3));
         assert_eq!(nat_entry.id, first_entry.id);
-        assert_eq!(
-            datastore.ipv4_nat_current_version(&opctx).await.unwrap(),
-            3
-        );
+        assert_eq!(datastore.nat_current_version(&opctx).await.unwrap(), 3);
 
         // Try cleaning up with the old version and time cutoff values
-        datastore.ipv4_nat_cleanup(&opctx, 2, time_cutoff).await.unwrap();
+        datastore.nat_cleanup(&opctx, 2, time_cutoff).await.unwrap();
 
         // Try cleaning up with a greater version and old time cutoff values
-        datastore.ipv4_nat_cleanup(&opctx, 6, time_cutoff).await.unwrap();
+        datastore.nat_cleanup(&opctx, 6, time_cutoff).await.unwrap();
 
         // Try cleaning up with a older version and newer time cutoff values
-        datastore.ipv4_nat_cleanup(&opctx, 2, Utc::now()).await.unwrap();
+        datastore.nat_cleanup(&opctx, 2, Utc::now()).await.unwrap();
 
         // Both records should still exist (soft deleted record is newer than cutoff
         // values )
         let nat_entries =
-            datastore.ipv4_nat_list_since_version(&opctx, 0, 10).await.unwrap();
+            datastore.nat_list_since_version(&opctx, 0, 10).await.unwrap();
 
         assert_eq!(nat_entries.len(), 2);
-        assert_eq!(
-            datastore.ipv4_nat_current_version(&opctx).await.unwrap(),
-            3
-        );
+        assert_eq!(datastore.nat_current_version(&opctx).await.unwrap(), 3);
 
         // Try cleaning up with a both cutoff values increased
-        datastore.ipv4_nat_cleanup(&opctx, 4, Utc::now()).await.unwrap();
+        datastore.nat_cleanup(&opctx, 4, Utc::now()).await.unwrap();
 
         // Soft deleted NAT entry should be removed from the table
         let nat_entries =
-            datastore.ipv4_nat_list_since_version(&opctx, 0, 10).await.unwrap();
+            datastore.nat_list_since_version(&opctx, 0, 10).await.unwrap();
 
         assert_eq!(nat_entries.len(), 1);
         // version should be unchanged
-        assert_eq!(
-            datastore.ipv4_nat_current_version(&opctx).await.unwrap(),
-            3
-        );
+        assert_eq!(datastore.nat_current_version(&opctx).await.unwrap(), 3);
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -545,19 +532,17 @@ mod test {
     /// set of properties, but allow multiple deleted nat entries for the same set
     /// of properties.
     async fn table_allows_unique_active_multiple_deleted() {
-        let logctx = dev::test_setup_log("test_nat_version_tracking");
+        let logctx =
+            dev::test_setup_log("table_allows_unique_active_multiple_deleted");
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
         // We should not have any NAT entries at this moment
         let initial_state =
-            datastore.ipv4_nat_list_since_version(&opctx, 0, 10).await.unwrap();
+            datastore.nat_list_since_version(&opctx, 0, 10).await.unwrap();
 
         assert!(initial_state.is_empty());
-        assert_eq!(
-            datastore.ipv4_nat_current_version(&opctx).await.unwrap(),
-            0
-        );
+        assert_eq!(datastore.nat_current_version(&opctx).await.unwrap(), 0);
 
         // Each change (creation / deletion) to the NAT table should increment the
         // version number of the row in the NAT table
@@ -568,7 +553,7 @@ mod test {
             oxnet::Ipv6Net::host_net("fd00:1122:3344:104::1".parse().unwrap());
 
         // Add a nat entry.
-        let nat1 = Ipv4NatValues {
+        let nat1 = NatEntryValues {
             external_address: external_address.into(),
             first_port: 0.into(),
             last_port: 999.into(),
@@ -579,106 +564,92 @@ mod test {
             ),
         };
 
-        datastore.ensure_ipv4_nat_entry(&opctx, nat1.clone()).await.unwrap();
+        datastore.ensure_nat_entry(&opctx, nat1.clone()).await.unwrap();
 
         // Try to add it again. It should still only result in a single entry.
-        datastore.ensure_ipv4_nat_entry(&opctx, nat1.clone()).await.unwrap();
-        let first_entry = datastore
-            .ipv4_nat_find_by_values(&opctx, nat1.clone())
-            .await
-            .unwrap();
+        datastore.ensure_nat_entry(&opctx, nat1.clone()).await.unwrap();
+        let first_entry =
+            datastore.nat_find_by_values(&opctx, nat1.clone()).await.unwrap();
 
         let nat_entries =
-            datastore.ipv4_nat_list_since_version(&opctx, 0, 10).await.unwrap();
+            datastore.nat_list_since_version(&opctx, 0, 10).await.unwrap();
 
         // The NAT table has undergone one change. One entry has been added,
         // none deleted, so we should be at version 1.
         assert_eq!(nat_entries.len(), 1);
         assert_eq!(nat_entries.last().unwrap().version_added, 1);
-        assert_eq!(
-            datastore.ipv4_nat_current_version(&opctx).await.unwrap(),
-            1
-        );
+        assert_eq!(datastore.nat_current_version(&opctx).await.unwrap(), 1);
 
-        datastore.ipv4_nat_delete(&opctx, &first_entry).await.unwrap();
+        datastore.nat_delete(&opctx, &first_entry).await.unwrap();
 
         // The NAT table has undergone two changes. One entry has been added,
         // then deleted, so we should be at version 2.
         let nat_entries = datastore
-            .ipv4_nat_list_since_version(&opctx, 0, 10)
+            .nat_list_since_version(&opctx, 0, 10)
             .await
             .unwrap()
             .into_iter();
 
-        let active: Vec<Ipv4NatEntry> = nat_entries
+        let active: Vec<NatEntry> = nat_entries
             .clone()
             .filter(|entry| entry.version_removed.is_none())
             .collect();
 
-        let inactive: Vec<Ipv4NatEntry> = nat_entries
+        let inactive: Vec<NatEntry> = nat_entries
             .filter(|entry| entry.version_removed.is_some())
             .collect();
 
         assert!(active.is_empty());
         assert_eq!(inactive.len(), 1);
-        assert_eq!(
-            datastore.ipv4_nat_current_version(&opctx).await.unwrap(),
-            2
-        );
+        assert_eq!(datastore.nat_current_version(&opctx).await.unwrap(), 2);
 
         // Add the same entry back. This simulates the behavior we will see
         // when stopping and then restarting an instance.
-        datastore.ensure_ipv4_nat_entry(&opctx, nat1.clone()).await.unwrap();
+        datastore.ensure_nat_entry(&opctx, nat1.clone()).await.unwrap();
 
         // The NAT table has undergone three changes.
         let nat_entries = datastore
-            .ipv4_nat_list_since_version(&opctx, 0, 10)
+            .nat_list_since_version(&opctx, 0, 10)
             .await
             .unwrap()
             .into_iter();
 
-        let active: Vec<Ipv4NatEntry> = nat_entries
+        let active: Vec<NatEntry> = nat_entries
             .clone()
             .filter(|entry| entry.version_removed.is_none())
             .collect();
 
-        let inactive: Vec<Ipv4NatEntry> = nat_entries
+        let inactive: Vec<NatEntry> = nat_entries
             .filter(|entry| entry.version_removed.is_some())
             .collect();
 
         assert_eq!(active.len(), 1);
         assert_eq!(inactive.len(), 1);
-        assert_eq!(
-            datastore.ipv4_nat_current_version(&opctx).await.unwrap(),
-            3
-        );
+        assert_eq!(datastore.nat_current_version(&opctx).await.unwrap(), 3);
 
         let second_entry =
-            datastore.ipv4_nat_find_by_values(&opctx, nat1).await.unwrap();
-        datastore.ipv4_nat_delete(&opctx, &second_entry).await.unwrap();
+            datastore.nat_find_by_values(&opctx, nat1).await.unwrap();
+        datastore.nat_delete(&opctx, &second_entry).await.unwrap();
 
         // The NAT table has undergone four changes
         let nat_entries = datastore
-            .ipv4_nat_list_since_version(&opctx, 0, 10)
+            .nat_list_since_version(&opctx, 0, 10)
             .await
             .unwrap()
             .into_iter();
 
-        let active: Vec<Ipv4NatEntry> = nat_entries
+        let active: Vec<NatEntry> = nat_entries
             .clone()
             .filter(|entry| entry.version_removed.is_none())
             .collect();
 
-        let inactive: Vec<Ipv4NatEntry> = nat_entries
+        let inactive: Vec<NatEntry> = nat_entries
             .filter(|entry| entry.version_removed.is_some())
             .collect();
 
         assert_eq!(active.len(), 0);
         assert_eq!(inactive.len(), 2);
-        assert_eq!(
-            datastore.ipv4_nat_current_version(&opctx).await.unwrap(),
-            4
-        );
+        assert_eq!(datastore.nat_current_version(&opctx).await.unwrap(), 4);
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -686,20 +657,17 @@ mod test {
 
     // Test our ability to reconcile a set of service zone nat entries
     #[tokio::test]
-    async fn ipv4_nat_sync_service_zones() {
-        let logctx = dev::test_setup_log("ipv4_nat_sync_service_zones");
+    async fn nat_sync_service_zones() {
+        let logctx = dev::test_setup_log("nat_sync_service_zones");
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
         // We should not have any NAT entries at this moment
         let initial_state =
-            datastore.ipv4_nat_list_since_version(&opctx, 0, 10).await.unwrap();
+            datastore.nat_list_since_version(&opctx, 0, 10).await.unwrap();
 
         assert!(initial_state.is_empty());
-        assert_eq!(
-            datastore.ipv4_nat_current_version(&opctx).await.unwrap(),
-            0
-        );
+        assert_eq!(datastore.nat_current_version(&opctx).await.unwrap(), 0);
 
         // create two nat entries:
         // 1. an entry should be deleted during the next sync
@@ -712,7 +680,7 @@ mod test {
             oxnet::Ipv6Net::host_net("fd00:1122:3344:104::1".parse().unwrap());
 
         // Add a nat entry.
-        let nat1 = Ipv4NatValues {
+        let nat1 = NatEntryValues {
             external_address: external_address.into(),
             first_port: 0.into(),
             last_port: 999.into(),
@@ -723,17 +691,17 @@ mod test {
             ),
         };
 
-        let nat2 = Ipv4NatValues {
+        let nat2 = NatEntryValues {
             first_port: 1000.into(),
             last_port: 1999.into(),
             ..nat1
         };
 
-        datastore.ensure_ipv4_nat_entry(&opctx, nat1.clone()).await.unwrap();
-        datastore.ensure_ipv4_nat_entry(&opctx, nat2.clone()).await.unwrap();
+        datastore.ensure_nat_entry(&opctx, nat1.clone()).await.unwrap();
+        datastore.ensure_nat_entry(&opctx, nat2.clone()).await.unwrap();
 
         let db_entries =
-            datastore.ipv4_nat_list_since_version(&opctx, 0, 10).await.unwrap();
+            datastore.nat_list_since_version(&opctx, 0, 10).await.unwrap();
 
         assert_eq!(db_entries.len(), 2);
 
@@ -741,14 +709,14 @@ mod test {
         // 1. a nat entry that already exists
         // 2. a nat entry that does not already exist
 
-        let nat3 = Ipv4NatValues {
+        let nat3 = NatEntryValues {
             first_port: 2000.into(),
             last_port: 2999.into(),
             ..nat2
         };
 
         datastore
-            .ipv4_nat_sync_service_zones(&opctx, &[nat2.clone(), nat3.clone()])
+            .nat_sync_service_zones(&opctx, &[nat2.clone(), nat3.clone()])
             .await
             .unwrap();
 
@@ -757,7 +725,7 @@ mod test {
         // 2. the old one that "survived" the last sync
         // 3. a new one that was added during the last sync
         let db_entries =
-            datastore.ipv4_nat_list_since_version(&opctx, 0, 10).await.unwrap();
+            datastore.nat_list_since_version(&opctx, 0, 10).await.unwrap();
 
         assert_eq!(db_entries.len(), 3);
 
@@ -781,7 +749,7 @@ mod test {
         // add nat1 back
         // this simulates a zone leaving and then returning, i.e. when a sled gets restarted
         datastore
-            .ipv4_nat_sync_service_zones(
+            .nat_sync_service_zones(
                 &opctx,
                 &[nat1.clone(), nat2.clone(), nat3.clone()],
             )
@@ -790,7 +758,7 @@ mod test {
 
         // we should have four nat entries in the db
         let db_entries =
-            datastore.ipv4_nat_list_since_version(&opctx, 0, 10).await.unwrap();
+            datastore.nat_list_since_version(&opctx, 0, 10).await.unwrap();
 
         assert_eq!(db_entries.len(), 4);
 
@@ -808,24 +776,21 @@ mod test {
 
     // Test our ability to return all changes interleaved in the correct order
     #[tokio::test]
-    async fn ipv4_nat_changeset() {
-        let logctx = dev::test_setup_log("test_nat_version_tracking");
+    async fn nat_changeset() {
+        let logctx = dev::test_setup_log("nat_changeset");
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
         // We should not have any NAT entries at this moment
         let initial_state =
-            datastore.ipv4_nat_list_since_version(&opctx, 0, 10).await.unwrap();
+            datastore.nat_list_since_version(&opctx, 0, 10).await.unwrap();
 
         assert!(initial_state.is_empty());
-        assert_eq!(
-            datastore.ipv4_nat_current_version(&opctx).await.unwrap(),
-            0
-        );
+        assert_eq!(datastore.nat_current_version(&opctx).await.unwrap(), 0);
 
         let addresses = (0..=255).map(|i| {
             let addr = Ipv4Addr::new(10, 0, 0, i);
-            let net = oxnet::Ipv4Net::new(addr, 32).unwrap();
+            let net = oxnet::Ipv4Net::host_net(addr);
             net
         });
 
@@ -834,7 +799,7 @@ mod test {
 
         let nat_entries = addresses.map(|external_address| {
             // build a bunch of nat entries
-            Ipv4NatValues {
+            NatEntryValues {
                 external_address: external_address.into(),
                 first_port: u16::MIN.into(),
                 last_port: u16::MAX.into(),
@@ -849,7 +814,7 @@ mod test {
         // create the nat entries
         for entry in nat_entries {
             let result = datastore
-                .ensure_ipv4_nat_entry(&opctx, entry.clone())
+                .ensure_nat_entry(&opctx, entry.clone())
                 .await
                 .unwrap();
 
@@ -857,18 +822,14 @@ mod test {
         }
 
         // delete a subset of the entries
-        for entry in
-            db_records.iter().choose_multiple(&mut rand::thread_rng(), 50)
-        {
-            datastore.ipv4_nat_delete(&opctx, entry).await.unwrap();
+        for entry in db_records.iter().choose_multiple(&mut rand::rng(), 50) {
+            datastore.nat_delete(&opctx, entry).await.unwrap();
         }
 
         // get the new state of all nat entries
         // note that this is not the method under test
-        let db_records = datastore
-            .ipv4_nat_list_since_version(&opctx, 0, 300)
-            .await
-            .unwrap();
+        let db_records =
+            datastore.nat_list_since_version(&opctx, 0, 300).await.unwrap();
 
         // Count the actual number of changes seen.
         // This check is required because we _were_ getting changes in ascending order,
@@ -881,7 +842,7 @@ mod test {
         let mut version = 0;
         let limit = 100;
         let mut changes =
-            datastore.ipv4_nat_changeset(&opctx, version, limit).await.unwrap();
+            datastore.nat_changeset(&opctx, version, limit).await.unwrap();
 
         while !changes.is_empty() {
             // check ordering
@@ -901,7 +862,7 @@ mod test {
                         .expect("did not find a deleted nat entry with a matching version number");
 
                     assert_eq!(
-                        deleted_nat.external_address.addr(),
+                        std::net::IpAddr::from(deleted_nat.external_address),
                         change.external_address
                     );
                     assert_eq!(
@@ -926,7 +887,7 @@ mod test {
                     assert!(added_nat.version_removed.is_none());
 
                     assert_eq!(
-                        added_nat.external_address.addr(),
+                        std::net::IpAddr::from(added_nat.external_address),
                         change.external_address
                     );
                     assert_eq!(added_nat.first_port, change.first_port.into());
@@ -944,10 +905,8 @@ mod test {
             total_changes += changes.len();
 
             version = changes.last().unwrap().gen;
-            changes = datastore
-                .ipv4_nat_changeset(&opctx, version, limit)
-                .await
-                .unwrap();
+            changes =
+                datastore.nat_changeset(&opctx, version, limit).await.unwrap();
         }
 
         // did we see everything?

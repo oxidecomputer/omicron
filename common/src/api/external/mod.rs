@@ -9,6 +9,7 @@
 
 mod error;
 pub mod http_pagination;
+pub use crate::address::IpVersion;
 pub use crate::api::internal::shared::AllowedSourceIps;
 pub use crate::api::internal::shared::SwitchLocation;
 use crate::update::ArtifactId;
@@ -28,7 +29,6 @@ use oxnet::Ipv4Net;
 use parse_display::Display;
 use parse_display::FromStr;
 use rand::Rng;
-use rand::thread_rng;
 use schemars::JsonSchema;
 use semver::Version;
 use serde::Deserialize;
@@ -901,6 +901,7 @@ impl JsonSchema for Hostname {
 // General types used to implement API resources
 
 /// Identifies a type of API resource
+// NOTE: Please keep this enum in alphabetical order.
 #[derive(
     Clone,
     Copy,
@@ -920,77 +921,77 @@ pub enum ResourceType {
     AddressLotBlock,
     AffinityGroup,
     AffinityGroupMember,
-    AntiAffinityGroup,
-    AntiAffinityGroupMember,
     Alert,
     AlertReceiver,
     AllowList,
+    AntiAffinityGroup,
+    AntiAffinityGroupMember,
     AuditLogEntry,
     BackgroundTask,
-    BgpConfig,
     BgpAnnounceSet,
+    BgpConfig,
     Blueprint,
-    Fleet,
-    Silo,
-    SiloUser,
-    SiloGroup,
-    SiloQuotas,
-    IdentityProvider,
-    SamlIdentityProvider,
-    SshKey,
     Certificate,
     ConsoleSession,
-    DeviceAuthRequest,
-    DeviceAccessToken,
-    Project,
     Dataset,
+    DeviceAccessToken,
+    DeviceAuthRequest,
     Disk,
+    Fleet,
+    FloatingIp,
+    IdentityProvider,
     Image,
-    SiloImage,
-    ProjectImage,
     Instance,
-    LoopbackAddress,
-    SiloAuthSettings,
-    SwitchPortSettings,
-    SupportBundle,
-    IpPool,
-    IpPoolResource,
     InstanceNetworkInterface,
     InternetGateway,
-    InternetGatewayIpPool,
     InternetGatewayIpAddress,
+    InternetGatewayIpPool,
+    IpPool,
+    IpPoolResource,
+    LldpLinkConfig,
+    LoopbackAddress,
+    MetricProducer,
+    NatEntry,
+    Oximeter,
     PhysicalDisk,
+    Probe,
+    ProbeNetworkInterface,
+    Project,
+    ProjectImage,
     Rack,
+    RoleBuiltin,
+    RouterRoute,
+    SagaDbg,
+    SamlIdentityProvider,
     Service,
     ServiceNetworkInterface,
+    Silo,
+    SiloAuthSettings,
+    SiloGroup,
+    SiloImage,
+    SiloQuotas,
+    SiloUser,
     Sled,
     SledInstance,
     SledLedger,
-    Switch,
-    SagaDbg,
     Snapshot,
+    SshKey,
+    SupportBundle,
+    Switch,
+    SwitchPort,
+    SwitchPortSettings,
+    TufArtifact,
+    TufRepo,
+    TufTrustRoot,
+    UserBuiltin,
+    Vmm,
     Volume,
     Vpc,
     VpcFirewallRule,
-    VpcSubnet,
     VpcRouter,
-    RouterRoute,
-    Oximeter,
-    MetricProducer,
-    RoleBuiltin,
-    TufRepo,
-    TufArtifact,
-    TufTrustRoot,
-    SwitchPort,
-    UserBuiltin,
-    Zpool,
-    Vmm,
-    Ipv4NatEntry,
-    FloatingIp,
-    Probe,
-    ProbeNetworkInterface,
-    LldpLinkConfig,
+    VpcSubnet,
     WebhookSecret,
+    Zpool,
 }
 
 // IDENTITY METADATA
@@ -1300,7 +1301,12 @@ pub enum AffinityGroupMember {
     ///
     /// Instances can belong to up to 16 affinity groups.
     // See: INSTANCE_MAX_AFFINITY_GROUPS
-    Instance { id: InstanceUuid, name: Name, run_state: InstanceState },
+    Instance {
+        #[schemars(with = "Uuid")]
+        id: InstanceUuid,
+        name: Name,
+        run_state: InstanceState,
+    },
 }
 
 impl SimpleIdentityOrName for AffinityGroupMember {
@@ -1331,7 +1337,12 @@ pub enum AntiAffinityGroupMember {
     ///
     /// Instances can belong to up to 16 anti-affinity groups.
     // See: INSTANCE_MAX_ANTI_AFFINITY_GROUPS
-    Instance { id: InstanceUuid, name: Name, run_state: InstanceState },
+    Instance {
+        #[schemars(with = "Uuid")]
+        id: InstanceUuid,
+        name: Name,
+        run_state: InstanceState,
+    },
 }
 
 impl SimpleIdentityOrName for AntiAffinityGroupMember {
@@ -2302,15 +2313,15 @@ impl MacAddr {
 
     /// Generate a random MAC address for a guest network interface
     pub fn random_guest() -> Self {
-        let value =
-            thread_rng().gen_range(Self::MIN_GUEST_ADDR..=Self::MAX_GUEST_ADDR);
+        let value = rand::rng()
+            .random_range(Self::MIN_GUEST_ADDR..=Self::MAX_GUEST_ADDR);
         Self::from_i64(value)
     }
 
     /// Generate a random MAC address in the system address range
     pub fn random_system() -> Self {
-        let value = thread_rng()
-            .gen_range((Self::MAX_SYSTEM_RESV + 1)..=Self::MAX_SYSTEM_ADDR);
+        let value = rand::rng()
+            .random_range((Self::MAX_SYSTEM_RESV + 1)..=Self::MAX_SYSTEM_ADDR);
         Self::from_i64(value)
     }
 
@@ -2454,12 +2465,12 @@ impl Vni {
 
     /// Create a new random VNI.
     pub fn random() -> Self {
-        Self(rand::thread_rng().gen_range(Self::MIN_GUEST_VNI..=Self::MAX_VNI))
+        Self(rand::rng().random_range(Self::MIN_GUEST_VNI..=Self::MAX_VNI))
     }
 
     /// Create a new random VNI in the Oxide-reserved space.
     pub fn random_system() -> Self {
-        Self(rand::thread_rng().gen_range(0..Self::MIN_GUEST_VNI))
+        Self(rand::rng().random_range(0..Self::MIN_GUEST_VNI))
     }
 }
 
@@ -3419,6 +3430,13 @@ pub struct TufArtifactMeta {
 
     /// The size of the artifact in bytes.
     pub size: u64,
+
+    /// Contents of the `BORD` field of a Hubris archive caboose. Only
+    /// applicable to artifacts that are Hubris archives.
+    ///
+    /// This field should always be `Some(_)` if `sign` is `Some(_)`, but the
+    /// opposite is not true (SP images will have a `board` but not a `sign`).
+    pub board: Option<String>,
 
     /// Contents of the `SIGN` field of a Hubris archive caboose, i.e.,
     /// an identifier for the set of valid signing keys. Currently only

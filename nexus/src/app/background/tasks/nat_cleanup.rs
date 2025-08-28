@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Background task for garbage collecting ipv4_nat_entry table.
+//! Background task for garbage collecting nat_entry table.
 //! Responsible for cleaning up soft deleted entries once they
 //! have been propagated to running dpd instances.
 
@@ -20,7 +20,7 @@ use serde_json::json;
 use std::sync::Arc;
 
 /// Background task that periodically prunes soft-deleted entries
-/// from ipv4_nat_entry table
+/// from nat_entry table
 pub struct Ipv4NatGarbageCollector {
     datastore: Arc<DataStore>,
     resolver: Resolver,
@@ -43,7 +43,7 @@ impl BackgroundTask for Ipv4NatGarbageCollector {
         async {
             let log = &opctx.log;
 
-            let result = self.datastore.ipv4_nat_current_version(opctx).await;
+            let result = self.datastore.nat_current_version(opctx).await;
 
             let mut min_gen = match result {
                 Ok(gen) => gen,
@@ -111,7 +111,7 @@ impl BackgroundTask for Ipv4NatGarbageCollector {
 
             let result = match self
                 .datastore
-                .ipv4_nat_cleanup(opctx, min_gen, retention_threshold)
+                .nat_cleanup(opctx, min_gen, retention_threshold)
                 .await {
                     Ok(v) => v,
                     Err(e) => {

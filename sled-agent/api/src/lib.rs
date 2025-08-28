@@ -30,6 +30,9 @@ use omicron_common::{
 use omicron_uuid_kinds::{
     DatasetUuid, PropolisUuid, SupportBundleUuid, ZpoolUuid,
 };
+use openapi_manager_types::{
+    SupportedVersion, SupportedVersions, api_versions,
+};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sled_agent_types::{
@@ -50,6 +53,34 @@ use sled_agent_types::{
 use sled_diagnostics::SledDiagnosticsQueryOutput;
 use tufaceous_artifact::ArtifactHash;
 use uuid::Uuid;
+
+api_versions!([
+    // WHEN CHANGING THE API (part 1 of 2):
+    //
+    // +- Pick a new semver and define it in the list below.  The list MUST
+    // |  remain sorted, which generally means that your version should go at
+    // |  the very top.
+    // |
+    // |  Duplicate this line, uncomment the *second* copy, update that copy for
+    // |  your new API version, and leave the first copy commented out as an
+    // |  example for the next person.
+    // v
+    // (next_int, IDENT),
+    (2, REMOVE_DESTROY_ORPHANED_DATASETS_CHICKEN_SWITCH),
+    (1, INITIAL),
+]);
+
+// WHEN CHANGING THE API (part 2 of 2):
+//
+// The call to `api_versions!` above defines constants of type
+// `semver::Version` that you can use in your Dropshot API definition to specify
+// the version when a particular endpoint was added or removed.  For example, if
+// you used:
+//
+//     (2, ADD_FOOBAR)
+//
+// Then you could use `VERSION_ADD_FOOBAR` as the version in which endpoints
+// were added or removed.
 
 // Host OS images are just over 800 MiB currently; set this to 2 GiB to give
 // some breathing room.
@@ -677,6 +708,7 @@ pub trait SledAgentApi {
     #[endpoint {
         method = GET,
         path = "/chicken-switch/destroy-orphaned-datasets",
+        versions = ..VERSION_REMOVE_DESTROY_ORPHANED_DATASETS_CHICKEN_SWITCH,
     }]
     async fn chicken_switch_destroy_orphaned_datasets_get(
         request_context: RequestContext<Self::Context>,

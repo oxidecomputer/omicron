@@ -27,19 +27,6 @@ pub use artifacts::ArtifactCache;
 pub use artifacts::ArtifactCacheError;
 pub use common_sp_update::SpComponentUpdateError;
 pub use common_sp_update::SpComponentUpdateHelperImpl;
-pub use common_sp_update::SpComponentUpdater;
 pub use driver::MgsUpdateDriver;
 pub use driver_update::DEFAULT_RETRY_TIMEOUT;
-pub use host_phase1_updater::HostPhase1Updater;
 pub use mgs_clients::MgsClients;
-pub use rot_updater::RotUpdater;
-pub use sp_updater::SpUpdater;
-
-#[derive(Debug, PartialEq, Clone)]
-pub enum UpdateProgress {
-    Started,
-    Preparing { progress: Option<f64> },
-    InProgress { progress: Option<f64> },
-    Complete,
-    Failed(String),
-}

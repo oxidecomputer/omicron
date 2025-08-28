@@ -13,6 +13,7 @@ use api_identity::ObjectIdentity;
 use chrono::DateTime;
 use chrono::Utc;
 use daft::Diffable;
+pub use omicron_common::api::external::IpVersion;
 use omicron_common::api::external::{
     AffinityPolicy, AllowedSourceIps as ExternalAllowedSourceIps, ByteCount,
     Digest, Error, FailureDomain, IdentityMetadata, InstanceState, Name,
@@ -959,9 +960,18 @@ pub struct User {
 pub struct CurrentUser {
     #[serde(flatten)]
     pub user: User,
-
     /** Name of the silo to which this user belongs. */
     pub silo_name: Name,
+    /**
+     * Whether this user has the viewer role on the fleet. Used by the web
+     * console to determine whether to show system-level UI.
+     */
+    pub fleet_viewer: bool,
+    /**
+     * Whether this user has the admin role on their silo. Used by the web
+     * console to determine whether to show admin-only UI elements.
+     */
+    pub silo_admin: bool,
 }
 
 // SILO GROUPS
@@ -1117,11 +1127,59 @@ pub struct AllowList {
 
 // OxQL QUERIES
 
+/// A table represents one or more timeseries with the same schema.
+///
+/// A table is the result of an OxQL query. It contains a name, usually the name
+/// of the timeseries schema from which the data is derived, and any number of
+/// timeseries, which contain the actual data.
+//
+// # Motivation
+//
+// This struct is derived from [`oxql_types::Table`] but presents timeseries data as a `Vec`
+// rather than a map keyed by [`TimeseriesKey`]. This provides a cleaner JSON
+// representation for external consumers, as these numeric keys are ephemeral
+// identifiers that have no meaning to API consumers. Key ordering is retained
+// as this is contructed from the already sorted values present in [`Table`].
+//
+// When serializing a [`Table`] to JSON, the `BTreeMap<TimeseriesKey, Timeseries>`
+// structure produces output with numeric keys like:
+// ```json
+// {
+//   "timeseries": {
+//     "2352746367989923131": { ... },
+//     "3940108470521992408": { ... }
+//   }
+// }
+// ```
+//
+// The `Table` view instead serializes timeseries as an array:
+// ```json
+// {
+//   "timeseries": [ { ... }, { ... } ]
+// }
+// ```
+#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
+pub struct OxqlTable {
+    /// The name of the table.
+    pub name: String,
+    /// The set of timeseries in the table, ordered by key.
+    pub timeseries: Vec<oxql_types::Timeseries>,
+}
+
+impl From<oxql_types::Table> for OxqlTable {
+    fn from(table: oxql_types::Table) -> Self {
+        OxqlTable {
+            name: table.name.clone(),
+            timeseries: table.into_iter().collect(),
+        }
+    }
+}
+
 /// The result of a successful OxQL query.
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
 pub struct OxqlQueryResult {
     /// Tables resulting from the query, each containing timeseries.
-    pub tables: Vec<oxql_types::Table>,
+    pub tables: Vec<OxqlTable>,
 }
 
 // ALERTS
@@ -1254,12 +1312,14 @@ pub struct AlertDelivery {
     pub id: Uuid,
 
     /// The UUID of the alert receiver that this event was delivered to.
+    #[schemars(with = "Uuid")]
     pub receiver_id: AlertReceiverUuid,
 
     /// The event class.
     pub alert_class: String,
 
     /// The UUID of the event.
+    #[schemars(with = "Uuid")]
     pub alert_id: AlertUuid,
 
     /// The state of this delivery.

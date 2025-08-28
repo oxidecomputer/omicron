@@ -9,7 +9,7 @@ use crate::{Configuration, Epoch, PlatformId, Threshold};
 use gfss::shamir::Share;
 use omicron_uuid_kinds::RackUuid;
 use serde::{Deserialize, Serialize};
-use std::{collections::BTreeSet, time::Duration};
+use std::collections::BTreeSet;
 
 /// A request from nexus informing a node to start coordinating a
 /// reconfiguration.
@@ -20,19 +20,18 @@ pub struct ReconfigureMsg {
     pub last_committed_epoch: Option<Epoch>,
     pub members: BTreeSet<PlatformId>,
     pub threshold: Threshold,
-
-    // The timeout before we send a follow up request to a peer
-    pub retry_timeout: Duration,
 }
 
 /// Messages sent between trust quorum members over a sprockets channel
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "danger_partial_eq_ct_wrapper", derive(PartialEq, Eq))]
 pub struct PeerMsg {
     pub rack_id: RackUuid,
     pub kind: PeerMsgKind,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "danger_partial_eq_ct_wrapper", derive(PartialEq, Eq))]
 pub enum PeerMsgKind {
     /// Sent from a coordinator node to inform a peer about a new configuration
     Prepare {
@@ -66,7 +65,7 @@ pub enum PeerMsgKind {
     LrtqShare(LrtqShare),
 
     /// Inform a node that it is no longer part of the trust quorum as of the
-    /// given epoch
+    /// given epoch, which the responder knows is commmitted.
     Expunged(Epoch),
 
     /// Inform a node that it is utilizing an old committed onfiguration and

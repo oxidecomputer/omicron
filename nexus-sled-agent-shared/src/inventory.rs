@@ -276,6 +276,18 @@ pub struct BootPartitionContents {
     pub slot_b: Result<BootPartitionDetails, String>,
 }
 
+impl BootPartitionContents {
+    pub fn slot_details(
+        &self,
+        slot: M2Slot,
+    ) -> &Result<BootPartitionDetails, String> {
+        match slot {
+            M2Slot::A => &self.slot_a,
+            M2Slot::B => &self.slot_b,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
 pub struct BootPartitionDetails {
     pub header: BootImageHeader,
