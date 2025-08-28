@@ -20,8 +20,8 @@ use crate::validators::{
     MismatchedRackIdError, ReconfigurationError, ValidatedReconfigureMsg,
 };
 use crate::{
-    Alarm, Configuration, CoordinatorState, Epoch, NodeHandlerCtx, PlatformId,
-    messages::*,
+    Alarm, Configuration, CoordinatorState, Epoch, ExpungedMetadata,
+    NodeHandlerCtx, PlatformId, messages::*,
 };
 use daft::{Diffable, Leaf};
 use gfss::shamir::Share;
@@ -101,9 +101,10 @@ impl Node {
         };
 
         if let Some(kcs) = &self.key_share_computer {
-            // We know from our `ValidatedReconfigureMsg` that we haven't seen a newer
-            // configuration and we have the correct last committed configuration. Therefore if we are computing a key share,
-            // we must be doing it for a stale commit and should cancel it.
+            // We know from our `ValidatedReconfigureMsg` that we haven't seen
+            // a newer configuration and we have the correct last committed
+            // configuration. Therefore if we are computing a key share, we must
+            // be doing it for a stale commit and should cancel it.
             //
             // I don't think it's actually possible to hit this condition, but
             // we check anyway.
@@ -138,6 +139,19 @@ impl Node {
     ) -> Result<(), CommitError> {
         {
             let ps = ctx.persistent_state();
+
+            if let Some(expunged) = &ps.expunged {
+                error!(
+                    self.log,
+                    "Commit attempted on expunged node";
+                    "expunged_epoch" => %expunged.epoch,
+                    "expunging_node" => %expunged.from
+                );
+                return Err(CommitError::Expunged {
+                    epoch: expunged.epoch,
+                    from: expunged.from.clone(),
+                });
+            }
 
             // If we have a configuration the rack id must match the one from
             // Nexus
@@ -243,13 +257,26 @@ impl Node {
         from: PlatformId,
         msg: PeerMsg,
     ) {
+        if ctx.persistent_state().is_expunged() {
+            warn!(
+                self.log,
+                "Received message while expunged. Dropping.";
+                "from" => %from,
+                "msg" => msg.kind.name()
+            );
+            return;
+        }
+
         if let Some(rack_id) = ctx.persistent_state().rack_id() {
             if rack_id != msg.rack_id {
-                error!(self.log, "Mismatched rack id";
-                       "from" => %from,
-                       "msg" => msg.kind.name(),
-                       "expected" => %rack_id,
-                       "got" => %msg.rack_id);
+                error!(
+                   self.log,
+                   "Mismatched rack id";
+                   "from" => %from,
+                   "msg" => msg.kind.name(),
+                   "expected" => %rack_id,
+                   "got" => %msg.rack_id
+                );
                 return;
             }
         }
@@ -268,6 +295,9 @@ impl Node {
             }
             PeerMsgKind::CommitAdvance(config) => {
                 self.handle_commit_advance(ctx, from, config)
+            }
+            PeerMsgKind::Expunged(epoch) => {
+                self.handle_expunged(ctx, from, epoch);
             }
             _ => todo!(
                 "cannot handle message variant yet - not implemented: {msg:?}"
@@ -304,6 +334,85 @@ impl Node {
                   "Received prepare ack when not coordinating";
                    "from" => %from,
                    "acked_epoch" => %epoch
+            );
+        }
+    }
+
+    fn handle_expunged(
+        &mut self,
+        ctx: &mut impl NodeHandlerCtx,
+        from: PlatformId,
+        epoch: Epoch,
+    ) {
+        if let Some(config) = ctx.persistent_state().latest_config() {
+            if epoch < config.epoch {
+                // It's possible, but unlikely, that we were expunged at `epoch`
+                // and later re-added to the trust-quorum, but the reply to
+                // an old message is still floating in the network. This is
+                // especially unlikely since, we should really have restarted
+                // sprockets connections in this case. In any event, the race
+                // condition exists at the protocol level, and so we handle it.
+                if config.members.contains_key(ctx.platform_id()) {
+                    let m = concat!(
+                        "Received Expunged message for old epoch. ",
+                        "We must have been re-added as a trust-quorum member."
+                    );
+                    warn!(
+                        self.log,
+                        "{m}";
+                        "from" => %from,
+                        "received_epoch" => %epoch,
+                        "epoch" => %config.epoch
+                    );
+                }
+                return;
+            } else if epoch > config.epoch {
+                let m = concat!(
+                    "Received Expunged message for newer epoch. ",
+                    "Recording expungement in persistent state."
+                );
+                warn!(
+                    self.log,
+                    "{m}";
+                    "from" => %from,
+                    "received_epoch" => %epoch,
+                    "epoch" => %config.epoch
+                );
+                // Intentionally fall through
+            } else {
+                let m = concat!(
+                    "Received Expunged message for latest known epoch. ",
+                    "Recording expungement in persistent state."
+                );
+                warn!(
+                    self.log,
+                    "{m}";
+                    "from" => %from,
+                    "received_epoch" => %epoch,
+                    "epoch" => %config.epoch
+                );
+                // Intentionally fall through
+            }
+
+            // Perform the actual expunge
+            ctx.update_persistent_state(|ps| {
+                ps.expunged = Some(ExpungedMetadata { epoch, from });
+                true
+            });
+
+            // Stop coordinating and computing a key share
+            self.coordinator_state = None;
+            self.key_share_computer = None;
+        } else {
+            let m = concat!(
+                "Received Expunge message, but we have no configurations. ",
+                "We must have been factory reset already."
+            );
+            error!(
+                self.log,
+                "{m}";
+                "from" => %from,
+                "received_epoch" => %epoch
             );
         }
     }
@@ -469,7 +578,10 @@ impl Node {
                             %latest_committed_config.epoch,
                         "requested_epoch" => %epoch
                     );
-                    // TODO: Send an expunged message
+                    ctx.send(
+                        from,
+                        PeerMsgKind::Expunged(latest_committed_config.epoch),
+                    );
                     return;
                 }
                 info!(
@@ -499,7 +611,13 @@ impl Node {
                     "from" => %from,
                     "epoch" => %epoch
                 );
-                // TODO: Send an expunged message
+                // Technically, this node does not yet know that the
+                // configuration at `epoch` has been committed. However,
+                // requesting nodes only ask for key shares when they know that
+                // the configuration has been committed. Therefore, rather than
+                // introduce a new message such as `NotAMember`, we inform the
+                // requesting node that they have been expunged.
+                ctx.send(from, PeerMsgKind::Expunged(epoch));
                 return;
             }
         }
@@ -720,6 +838,8 @@ pub enum CommitError {
     ),
     #[error("cannot commit: not prepared for epoch {0}")]
     NotPrepared(Epoch),
+    #[error("cannot commit: expunged at epoch {epoch} by {from}")]
+    Expunged { epoch: Epoch, from: PlatformId },
 }
 
 #[cfg(test)]
