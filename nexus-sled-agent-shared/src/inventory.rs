@@ -223,39 +223,51 @@ impl ConfigReconcilerInventory {
             datasets,
             orphaned_datasets: IdOrdMap::new(),
             zones,
-            boot_partitions: {
-                BootPartitionContents {
-                    boot_disk: Ok(M2Slot::A),
-                    slot_a: Ok(BootPartitionDetails {
-                        header: BootImageHeader {
-                            flags: 0,
-                            data_size: 1000,
-                            image_size: 1000,
-                            target_size: 1000,
-                            sha256: [0; 32],
-                            image_name: "fake from debug_assume_success()"
-                                .to_string(),
-                        },
-                        artifact_hash: ArtifactHash([0x0a; 32]),
-                        artifact_size: 1000,
-                    }),
-                    slot_b: Ok(BootPartitionDetails {
-                        header: BootImageHeader {
-                            flags: 0,
-                            data_size: 1000,
-                            image_size: 1000,
-                            target_size: 1000,
-                            sha256: [1; 32],
-                            image_name: "fake from debug_assume_success()"
-                                .to_string(),
-                        },
-                        artifact_hash: ArtifactHash([0x0b; 32]),
-                        artifact_size: 1000,
-                    }),
-                }
-            },
+            boot_partitions: BootPartitionContents::debug_assume_success(),
             remove_mupdate_override,
         }
+    }
+
+    /// Given a sled config, update an existing reconciler result to simulate an
+    /// output that sled-agent could have emitted if reconciliation succeeded.
+    ///
+    /// This method should only be used by tests and dev tools; real code should
+    /// look at the actual `last_reconciliation` value from the parent
+    /// [`Inventory`].
+    pub fn debug_update_assume_success(&mut self, config: OmicronSledConfig) {
+        let external_disks = config
+            .disks
+            .iter()
+            .map(|d| (d.id, ConfigReconcilerInventoryResult::Ok))
+            .collect();
+        let datasets = config
+            .datasets
+            .iter()
+            .map(|d| (d.id, ConfigReconcilerInventoryResult::Ok))
+            .collect();
+        let zones = config
+            .zones
+            .iter()
+            .map(|z| (z.id, ConfigReconcilerInventoryResult::Ok))
+            .collect();
+        let remove_mupdate_override =
+            config.remove_mupdate_override.map(|_| {
+                RemoveMupdateOverrideInventory {
+                    boot_disk_result: Ok(
+                        RemoveMupdateOverrideBootSuccessInventory::Removed,
+                    ),
+                    non_boot_message: "mupdate override successfully removed \
+                                   on non-boot disks"
+                        .to_owned(),
+                }
+            });
+
+        self.last_reconciled_config = config;
+        self.external_disks = external_disks;
+        self.datasets = datasets;
+        self.orphaned_datasets = IdOrdMap::new();
+        self.zones = zones;
+        self.remove_mupdate_override = remove_mupdate_override;
     }
 }
 
@@ -284,6 +296,36 @@ impl BootPartitionContents {
         match slot {
             M2Slot::A => &self.slot_a,
             M2Slot::B => &self.slot_b,
+        }
+    }
+
+    pub fn debug_assume_success() -> Self {
+        Self {
+            boot_disk: Ok(M2Slot::A),
+            slot_a: Ok(BootPartitionDetails {
+                header: BootImageHeader {
+                    flags: 0,
+                    data_size: 1000,
+                    image_size: 1000,
+                    target_size: 1000,
+                    sha256: [0; 32],
+                    image_name: "fake from debug_assume_success()".to_string(),
+                },
+                artifact_hash: ArtifactHash([0x0a; 32]),
+                artifact_size: 1000,
+            }),
+            slot_b: Ok(BootPartitionDetails {
+                header: BootImageHeader {
+                    flags: 0,
+                    data_size: 1000,
+                    image_size: 1000,
+                    target_size: 1000,
+                    sha256: [1; 32],
+                    image_name: "fake from debug_assume_success()".to_string(),
+                },
+                artifact_hash: ArtifactHash([0x0b; 32]),
+                artifact_size: 1000,
+            }),
         }
     }
 }

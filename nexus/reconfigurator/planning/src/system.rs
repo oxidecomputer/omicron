@@ -461,8 +461,17 @@ impl SystemDescription {
                 completed_at: Utc::now(),
                 ran_for: Duration::from_secs(5),
             };
-        sled.inventory_sled_agent.last_reconciliation =
-            Some(ConfigReconcilerInventory::debug_assume_success(sled_config));
+        match sled.inventory_sled_agent.last_reconciliation.as_mut() {
+            Some(last_reconciliation) => {
+                last_reconciliation.debug_update_assume_success(sled_config);
+            }
+            None => {
+                sled.inventory_sled_agent.last_reconciliation =
+                    Some(ConfigReconcilerInventory::debug_assume_success(
+                        sled_config,
+                    ));
+            }
+        };
 
         Ok(self)
     }
