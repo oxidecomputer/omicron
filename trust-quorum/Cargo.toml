@@ -52,3 +52,4 @@ trust-quorum-test-utils.workspace = true
 # subtle when we do this. On the other hand its very useful for testing and
 # debugging outside of production.
 danger_partial_eq_ct_wrapper = ["gfss/danger_partial_eq_ct_wrapper"]
+testing = []
