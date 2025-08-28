@@ -6602,6 +6602,32 @@
           "by_baseboard"
         ]
       },
+      "PendingRecovery": {
+        "description": "Snapshot of reassignment state when a recovery pass started",
+        "type": "object",
+        "properties": {
+          "blueprint_id": {
+            "nullable": true,
+            "description": "which blueprint id we'd be fully caught up to upon completion",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TypedUuidForBlueprintKind"
+              }
+            ]
+          },
+          "generation": {
+            "description": "what `reassignment_generation` was when this recovery started",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Generation"
+              }
+            ]
+          }
+        },
+        "required": [
+          "generation"
+        ]
+      },
       "PendingSagaInfo": {
         "description": "Describes a pending saga (for debugging why quiesce is stuck)",
         "type": "object",
@@ -8388,6 +8414,15 @@
             "allOf": [
               {
                 "$ref": "#/components/schemas/Generation"
+              }
+            ]
+          },
+          "recovery_pending": {
+            "nullable": true,
+            "description": "If a recovery pass is ongoing, a snapshot of reassignment state when it started (which reflects what we'll be caught up to when it finishes)",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PendingRecovery"
               }
             ]
           },
