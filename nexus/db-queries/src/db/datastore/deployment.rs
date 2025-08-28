@@ -4614,7 +4614,7 @@ mod tests {
             let conn = datastore.pool_connection_for_tests().await.unwrap();
             
             // Tables prefixed with `bp_` that are *not* specific to a single blueprint
-            // and therefore intentionally ignored.
+            // and therefore intentionally ignored.  There is only one of these right now.
             let tables_ignored: BTreeSet<_> = ["bp_target"].into_iter().collect();
             let tables_checked = self.tables_checked();
 
