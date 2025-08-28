@@ -675,12 +675,14 @@ pub trait NexusExternalApi {
     // IP Pools
 
     /// List IP pools
+    ///
+    /// For the current silo.
     #[endpoint {
         method = GET,
         path = "/v1/ip-pools",
         tags = ["projects"],
     }]
-    async fn project_ip_pool_list(
+    async fn ip_pool_list(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<PaginatedByNameOrId>,
     ) -> Result<HttpResponseOk<ResultsPage<views::SiloIpPool>>, HttpError>;
@@ -691,18 +693,20 @@ pub trait NexusExternalApi {
         path = "/v1/ip-pools/{pool}",
         tags = ["projects"],
     }]
-    async fn project_ip_pool_view(
+    async fn ip_pool_view(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::IpPoolPath>,
     ) -> Result<HttpResponseOk<views::SiloIpPool>, HttpError>;
 
     /// List IP pools
+    ///
+    /// List all IP pools regardless of silo links.
     #[endpoint {
         method = GET,
         path = "/v1/system/ip-pools",
         tags = ["system/ip-pools"],
     }]
-    async fn ip_pool_list(
+    async fn system_ip_pool_list(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<PaginatedByNameOrId>,
     ) -> Result<HttpResponseOk<ResultsPage<views::IpPool>>, HttpError>;
@@ -724,7 +728,7 @@ pub trait NexusExternalApi {
         path = "/v1/system/ip-pools/{pool}",
         tags = ["system/ip-pools"],
     }]
-    async fn ip_pool_view(
+    async fn system_ip_pool_view(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::IpPoolPath>,
     ) -> Result<HttpResponseOk<views::IpPool>, HttpError>;

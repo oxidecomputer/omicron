@@ -280,37 +280,37 @@ async fn rack_prepare(
     })?;
 
     let pool_name = "default";
-    api_retry!(
-        if let Err(e) = oxide.ip_pool_view().pool("default").send().await {
-            if let Some(reqwest::StatusCode::NOT_FOUND) = e.status() {
-                print!("default ip pool does not exist, creating ...");
-                oxide
-                    .ip_pool_create()
-                    .body(IpPoolCreate {
-                        name: pool_name.parse().unwrap(),
-                        description: "Default IP pool".to_string(),
-                    })
-                    .send()
-                    .await?;
-                oxide
-                    .ip_pool_silo_link()
-                    .pool(pool_name)
-                    .body(IpPoolLinkSilo {
-                        silo: NameOrId::Name("recovery".parse().unwrap()),
-                        is_default: true,
-                    })
-                    .send()
-                    .await?;
-                println!("done");
-                Ok(())
-            } else {
-                Err(e)
-            }
-        } else {
-            println!("default ip pool already exists");
+    api_retry!(if let Err(e) =
+        oxide.system_ip_pool_view().pool("default").send().await
+    {
+        if let Some(reqwest::StatusCode::NOT_FOUND) = e.status() {
+            print!("default ip pool does not exist, creating ...");
+            oxide
+                .ip_pool_create()
+                .body(IpPoolCreate {
+                    name: pool_name.parse().unwrap(),
+                    description: "Default IP pool".to_string(),
+                })
+                .send()
+                .await?;
+            oxide
+                .ip_pool_silo_link()
+                .pool(pool_name)
+                .body(IpPoolLinkSilo {
+                    silo: NameOrId::Name("recovery".parse().unwrap()),
+                    is_default: true,
+                })
+                .send()
+                .await?;
+            println!("done");
             Ok(())
+        } else {
+            Err(e)
         }
-    )?;
+    } else {
+        println!("default ip pool already exists");
+        Ok(())
+    })?;
 
     let pool = api_retry!(
         oxide
