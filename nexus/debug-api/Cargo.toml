@@ -1,0 +1,12 @@
+[package]
+name = "nexus-debug-api"
+version = "0.1.0"
+edition = "2024"
+license = "MPL-2.0"
+
+[lints]
+workspace = true
+
+[dependencies]
+dropshot.workspace = true
+nexus-types.workspace = true

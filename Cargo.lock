@@ -6550,6 +6550,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "nexus-debug-api"
+version = "0.1.0"
+dependencies = [
+ "dropshot",
+ "nexus-types",
+]
+
+[[package]]
 name = "nexus-defaults"
 version = "0.1.0"
 dependencies = [
@@ -8738,6 +8746,7 @@ dependencies = [
  "installinator-api",
  "itertools 0.14.0",
  "newtype_derive",
+ "nexus-debug-api",
  "nexus-external-api",
  "nexus-internal-api",
  "ntp-admin-api",
