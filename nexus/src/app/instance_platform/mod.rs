@@ -81,8 +81,8 @@ use omicron_common::api::external::Error;
 use omicron_common::api::internal::shared::NetworkInterface;
 use sled_agent_client::types::{
     BlobStorageBackend, Board, BootOrderEntry, BootSettings, Chipset,
-    ComponentV0, Cpuid, CpuidVendor, CrucibleStorageBackend,
-    I440Fx, InstanceSpecV0, NvmeDisk, PciPath, QemuPvpanic, SerialPort,
+    ComponentV0, Cpuid, CpuidVendor, CrucibleStorageBackend, I440Fx,
+    InstanceSpecV0, NvmeDisk, PciPath, QemuPvpanic, SerialPort,
     SerialPortNumber, SpecKey, VirtioDisk, VirtioNetworkBackend, VirtioNic,
     VmmSpec,
 };
@@ -510,9 +510,10 @@ fn cpuid_from_vmm_cpu_platform(
     let cpuid = match platform {
         db::model::VmmCpuPlatform::SledDefault => return None,
         db::model::VmmCpuPlatform::AmdMilan
-        | db::model::VmmCpuPlatform::AmdTurin => {
-            Cpuid { entries: cpu_platform::milan_rfd314(), vendor: CpuidVendor::Amd }
-        }
+        | db::model::VmmCpuPlatform::AmdTurin => Cpuid {
+            entries: cpu_platform::milan_rfd314(),
+            vendor: CpuidVendor::Amd,
+        },
     };
 
     Some(cpuid)

@@ -2,14 +2,15 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use sled_agent_client::types::CpuidEntry;
 use raw_cpuid::{
     ApmInfo, CpuIdDump, CpuIdResult, ExtendedFeatureIdentification2,
-    ExtendedFeatures, ExtendedProcessorFeatureIdentifiers, ExtendedState, ExtendedStateInfo,
-    ExtendedTopologyLevel, FeatureInfo, L1CacheTlbInfo, L2And3CacheTlbInfo,
-    PerformanceOptimizationInfo, ProcessorCapacityAndFeatureInfo, ProcessorTopologyInfo,
-    ThermalPowerInfo, Tlb1gbPageInfo, Vendor, VendorInfo,
+    ExtendedFeatures, ExtendedProcessorFeatureIdentifiers, ExtendedState,
+    ExtendedStateInfo, ExtendedTopologyLevel, FeatureInfo, L1CacheTlbInfo,
+    L2And3CacheTlbInfo, PerformanceOptimizationInfo,
+    ProcessorCapacityAndFeatureInfo, ProcessorTopologyInfo, ThermalPowerInfo,
+    Tlb1gbPageInfo, Vendor, VendorInfo,
 };
+use sled_agent_client::types::CpuidEntry;
 
 macro_rules! cpuid_leaf {
     ($leaf:literal, $eax:literal, $ebx:literal, $ecx:literal, $edx:literal) => {
@@ -71,10 +72,18 @@ const MILAN_CPUID: [CpuidEntry; 32] = [
     cpuid_leaf!(0x8000001A, 0x00000006, 0x00000000, 0x00000000, 0x00000000),
     cpuid_leaf!(0x8000001B, 0x00000000, 0x00000000, 0x00000000, 0x00000000),
     cpuid_leaf!(0x8000001C, 0x00000000, 0x00000000, 0x00000000, 0x00000000),
-    cpuid_subleaf!(0x8000001D, 0x0, 0x00000121, 0x01C0003F, 0x0000003F, 0x00000000),
-    cpuid_subleaf!(0x8000001D, 0x1, 0x00000122, 0x01C0003F, 0x0000003F, 0x00000000),
-    cpuid_subleaf!(0x8000001D, 0x2, 0x00000143, 0x01C0003F, 0x000003FF, 0x00000002),
-    cpuid_subleaf!(0x8000001D, 0x3, 0x00000163, 0x03C0003F, 0x00007FFF, 0x00000001),
+    cpuid_subleaf!(
+        0x8000001D, 0x0, 0x00000121, 0x01C0003F, 0x0000003F, 0x00000000
+    ),
+    cpuid_subleaf!(
+        0x8000001D, 0x1, 0x00000122, 0x01C0003F, 0x0000003F, 0x00000000
+    ),
+    cpuid_subleaf!(
+        0x8000001D, 0x2, 0x00000143, 0x01C0003F, 0x000003FF, 0x00000002
+    ),
+    cpuid_subleaf!(
+        0x8000001D, 0x3, 0x00000163, 0x03C0003F, 0x00007FFF, 0x00000001
+    ),
     cpuid_leaf!(0x8000001E, 0x00000000, 0x00000100, 0x00000000, 0x00000000),
     cpuid_leaf!(0x8000001F, 0x00000000, 0x00000000, 0x00000000, 0x00000000),
     cpuid_leaf!(0x80000021, 0x00000045, 0x00000000, 0x00000000, 0x00000000),
@@ -432,14 +441,18 @@ pub fn milan_rfd314() -> Vec<CpuidEntry> {
 
     let mut cpuid = raw_cpuid::CpuId::with_cpuid_reader(baseline);
 
-    let mut leaf = cpuid.get_extended_feature_info().expect("baseline Milan defines leaf 1");
+    let mut leaf = cpuid
+        .get_extended_feature_info()
+        .expect("baseline Milan defines leaf 1");
 
     // RFD 314 describes the circumstances around RDSEED, but it is not currently available.
     leaf.set_rdseed(false);
 
     cpuid.set_extended_feature_info(Some(leaf));
 
-    let mut leaf = cpuid.get_extended_processor_and_feature_identifiers().expect("baseline Milan defines leaf 7");
+    let mut leaf = cpuid
+        .get_extended_processor_and_feature_identifiers()
+        .expect("baseline Milan defines leaf 7");
     // RFD 314 describes these leaf 7 wrinkles.
     //
     // Extended APIC space support was originally provided to guests because the host supports it
