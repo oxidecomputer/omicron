@@ -186,6 +186,13 @@ chicken switches:
 * zone adds waiting on blockers
 * zone adds and updates are blocked:
   - sleds have remove mupdate override set in blueprint: d81c6a84-79b8-4958-ae41-ea46c9b19763
+  - sleds have deployment units with image sources not set to Artifact:
+    - sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: 7 zones
+    - sled aff6c093-197d-42c5-ad80-9f10ba051a34: 1 zone
+    - sled b82ede02-399c-48c6-a1de-411df4fa49a7: 2 zones
+    - sled d81c6a84-79b8-4958-ae41-ea46c9b19763: 2 zones
+    - sled e96e226f-4ed9-4c01-91b9-69a9cd076c9e: 2 zones
+
 * zone updates waiting on zone add blockers
 
 
@@ -426,6 +433,12 @@ chicken switches:
 * zone adds waiting on blockers
 * zone adds and updates are blocked:
   - sleds have remove mupdate override set in blueprint: d81c6a84-79b8-4958-ae41-ea46c9b19763
+  - sleds have deployment units with image sources not set to Artifact:
+    - sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: 7 zones
+    - sled aff6c093-197d-42c5-ad80-9f10ba051a34: 1 zone
+    - sled b82ede02-399c-48c6-a1de-411df4fa49a7: 2 zones
+    - sled d81c6a84-79b8-4958-ae41-ea46c9b19763: 2 zones
+
 * zone updates waiting on zone add blockers
 
 

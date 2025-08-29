@@ -514,9 +514,13 @@ parent:    4d4e6c38-cd95-4c4e-8f45-6af4d686964b
  PENDING MGS-MANAGED UPDATES: 0
 
 planning report for blueprint 9f71f5d3-a272-4382-9154-6ea2e171a6c6:
-chicken switches:
-    add zones with mupdate override:   false
+* zone adds and updates are blocked:
+  - sleds have deployment units with image sources not set to Artifact:
+    - sled 2d1cb4f2-cf44-40fc-b118-85036eb732a9: 15 zones
+    - sled 75bc286f-2b4b-482c-9431-59272af529da: 12 zones
+    - sled affab35f-600a-4109-8ea0-34a067a4e0bc: 12 zones
 
+* adding zones despite being blocked, as specified by the `add_zones_with_mupdate_override` chicken switch
 * discretionary zones placed:
   * 3 zones on sled 75bc286f-2b4b-482c-9431-59272af529da: nexus, nexus, nexus
   * 3 zones on sled affab35f-600a-4109-8ea0-34a067a4e0bc: nexus, nexus, nexus
