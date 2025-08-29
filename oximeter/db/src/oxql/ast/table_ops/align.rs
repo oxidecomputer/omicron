@@ -143,13 +143,23 @@ impl fmt::Display for AlignmentMethod {
     }
 }
 
-// Align the timeseries in a table by computing the average within each output
-// period.
-fn align_mean_within(
+// Align the timeseries in a table by computing a value within each output period.
+
+fn align_and_reduce<F>(
     table: &Table,
     query_end: &DateTime<Utc>,
     period: &Duration,
-) -> Result<Table, Error> {
+    reducer: F) -> Result<Table, Error>
+    where F: Fn(
+        &MetricType,
+        &[DateTime<Utc>],
+        &[DateTime<Utc>],
+        &[Option<f64>],
+        DateTime<Utc>,
+        DateTime<Utc>
+    ) -> Option<f64>
+{
+
     let mut output_table = Table::new(table.name());
     for timeseries in table.iter() {
         let points = &timeseries.points;
@@ -160,13 +170,14 @@ fn align_mean_within(
         let data_type = points.data_types().next().unwrap();
         anyhow::ensure!(
             data_type.is_numeric(),
-            "Alignment by mean requires numeric data type, not {}",
+            "Alignment requires numeric data type, not {}",
             data_type
         );
         let metric_type = points.metric_type().unwrap();
+
         anyhow::ensure!(
             matches!(metric_type, MetricType::Gauge | MetricType::Delta),
-            "Alignment by mean requires a gauge or delta metric, not {}",
+            "Alignment requires a gauge or delta metric, not {}",
             metric_type,
         );
         verify_max_upsampling_ratio(points.timestamps(), &period)?;
@@ -226,164 +237,8 @@ fn align_mean_within(
             }
 
             // Aggregate all values within this time window.
-            //
-            // This works a bit differently for gauge timeseries and deltas.
-            // Gauges are simpler, so let's consider them first. A point is
-            // "within" the window if the timestamp is within the window. Every
-            // point is either completely within or completely without the
-            // window, so we just add the values.
-            //
-            // Deltas have a start time, which makes things a bit more
-            // complicated. In that case, a point can overlap _partially_ with
-            // the output time window, and we'd like to take that partial
-            // overlap into account. To do that, we find relevant values which
-            // have either a start time or timestamp within the output window.
-            // We compute the fraction of overlap with the window, which is in
-            // [0.0, 1.0], and multiply the value by that fraction. One can
-            // think of this as a dot-product between the interval-overlap array
-            // and the value array, divided by the 1-norm, or number of nonzero
-            // entries.
-            let output_value = if matches!(metric_type, MetricType::Gauge) {
-                mean_gauge_value_in_window(
-                    points.timestamps(),
-                    &input_points,
-                    window_start,
-                    output_time,
-                )
-            } else {
-                mean_delta_value_in_window(
-                    points.start_times().unwrap(),
-                    points.timestamps(),
-                    &input_points,
-                    window_start,
-                    output_time,
-                )
-            };
-            output_values.push(output_value);
-
-            // In any case, we push the window's end time and increment to the
-            // next period.
-            output_timestamps.push(output_time);
-            ix += 1;
-        }
-
-        // We've accumulated our input values into the output arrays, but in
-        // reverse order. Flip them and push onto the existing table, as a gauge
-        // timeseries.
-        let mut new_timeseries = Timeseries::new(
-            timeseries.fields.clone().into_iter(),
-            DataType::Double,
-            MetricType::Gauge,
-        )
-        .unwrap();
-        let values =
-            ValueArray::Double(output_values.into_iter().rev().collect());
-        let timestamps = output_timestamps.into_iter().rev().collect();
-        let values = Values { values, metric_type: MetricType::Gauge };
-        new_timeseries.points = Points::new(None, timestamps, vec![values]);
-        new_timeseries
-            .set_alignment(Alignment { end_time: *query_end, period: *period });
-        output_table.insert(new_timeseries).unwrap();
-    }
-    Ok(output_table)
-}
-
-// Align the timeseries in a table by computing the per second rate within each output
-// period.
-
-fn align_rate(
-    table: &Table,
-    query_end: &DateTime<Utc>,
-    period: &Duration,
-) -> Result<Table, Error> {
-    let mut output_table = Table::new(table.name());
-    for timeseries in table.iter() {
-        let points = &timeseries.points;
-        anyhow::ensure!(
-            points.dimensionality() == 1,
-            "Aligning multidimensional timeseries is not yet supported"
-        );
-        let data_type = points.data_types().next().unwrap();
-        anyhow::ensure!(
-            data_type.is_numeric(),
-            "Alignment by mean requires numeric data type, not {}",
-            data_type
-        );
-        let metric_type = points.metric_type().unwrap();
-        anyhow::ensure!(
-            metric_type == MetricType::Delta,
-            "Alignment by rate requires a delta metric, not {}",
-            metric_type,
-        );
-        verify_max_upsampling_ratio(points.timestamps(), &period)?;
-
-        // Always convert the output to doubles, when computing the mean. The
-        // output is always a gauge, so we do not need the start times of the
-        // input either.
-        //
-        // IMPORTANT: We compute the mean in the loop below from the back of the
-        // array (latest timestamp) to the front (earliest timestamp). They are
-        // appended to these arrays here in that _reversed_ order. These arrays
-        // are flipped before pushing them onto the timeseries at the end of the
-        // loop below.
-        let mut output_values = Vec::with_capacity(points.len());
-        let mut output_timestamps = Vec::with_capacity(points.len());
-
-        // Convert the input to doubles now, so the tight loop below does less
-        // conversion / matching inside.
-        let input_points = match points.values(0).unwrap() {
-            ValueArray::Integer(values) => values
-                .iter()
-                .map(|maybe_int| maybe_int.map(|int| int as f64))
-                .collect(),
-            ValueArray::Double(values) => values.clone(),
-            _ => unreachable!(),
-        };
-
-        // Alignment works as follows:
-        //
-        // - Start at the end of the timestamp array, working our way backwards
-        // in time.
-        // - Create the output timestamp from the current step.
-        // - Find all points in the input array that are within the alignment
-        // period.
-        // - Compute the mean of those.
-        let period_ =
-            TimeDelta::from_std(*period).context("time delta out of range")?;
-        let first_timestamp = points.timestamps()[0];
-        let mut ix: u32 = 0;
-        loop {
-            // Compute the next output timestamp, by shifting the query end time
-            // by the period and the index.
-            let time_offset = TimeDelta::from_std(ix * *period)
-                .context("time delta out of range")?;
-            let output_time = query_end
-                .checked_sub_signed(time_offset)
-                .context("overflow computing next output timestamp")?;
-            let window_start = output_time
-                .checked_sub_signed(period_)
-                .context("overflow computing next output window start")?;
-
-            // The output time is before any of the data in the input array,
-            // we're done. It's OK for the _start time_ to be before any input
-            // timestamps.
-            if output_time < first_timestamp {
-                break;
-            }
-
-            // Aggregate all values within this time window.
-            //
-            // Deltas have a start time, which makes things a bit more
-            // complicated. In that case, a point can overlap _partially_ with
-            // the output time window, and we'd like to take that partial
-            // overlap into account. To do that, we find relevant values which
-            // have either a start time or timestamp within the output window.
-            // We compute the fraction of overlap with the window, which is in
-            // [0.0, 1.0], and multiply the value by that fraction. One can
-            // think of this as a dot-product between the interval-overlap array
-            // and the value array, divided by the 1-norm, or number of nonzero
-            // entries.
-            let output_value = rate_value_in_window(
+            let output_value = reducer(
+                &metric_type,
                 points.start_times().unwrap(),
                 points.timestamps(),
                 &input_points,
@@ -418,6 +273,73 @@ fn align_rate(
     }
     Ok(output_table)
 }
+
+// Align the timeseries in a table by computing the average within each output
+// period.
+
+fn align_mean_within(
+    table: &Table,
+    query_end: &DateTime<Utc>,
+    period: &Duration,
+) -> Result<Table, Error> {
+    align_and_reduce(table, query_end, period, mean_value_in_window)
+}
+
+// Align the timeseries in a table by computing the per second rate within each output
+// period.
+
+fn align_rate(
+    table: &Table,
+    query_end: &DateTime<Utc>,
+    period: &Duration,
+) -> Result<Table, Error> {
+    align_and_reduce(table, query_end, period, rate_value_in_window)
+}
+
+fn mean_value_in_window(
+    metric_type: &MetricType,
+    start_times: &[DateTime<Utc>],
+    timestamps: &[DateTime<Utc>],
+    input_points: &[Option<f64>],
+    window_start: DateTime<Utc>,
+    window_end: DateTime<Utc>,
+) -> Option<f64> {
+    // Aggregate all values within this time window.
+    //
+    // This works a bit differently for gauge timeseries and deltas.
+    // Gauges are simpler, so let's consider them first. A point is
+    // "within" the window if the timestamp is within the window. Every
+    // point is either completely within or completely without the
+    // window, so we just add the values.
+    //
+    // Deltas have a start time, which makes things a bit more
+    // complicated. In that case, a point can overlap _partially_ with
+    // the output time window, and we'd like to take that partial
+    // overlap into account. To do that, we find relevant values which
+    // have either a start time or timestamp within the output window.
+    // We compute the fraction of overlap with the window, which is in
+    // [0.0, 1.0], and multiply the value by that fraction. One can
+    // think of this as a dot-product between the interval-overlap array
+    // and the value array, divided by the 1-norm, or number of nonzero
+    // entries.
+    if matches!(metric_type, MetricType::Gauge) {
+        mean_gauge_value_in_window(
+            timestamps,
+            input_points,
+            window_start,
+            window_end,
+        )
+    } else {
+        mean_delta_value_in_window(
+            start_times,
+            timestamps,
+            input_points,
+            window_start,
+            window_end,
+        )
+    }
+}
+
 
 // Given an interval start and end, and a window start and end, compute the
 // fraction of the _interval_ that the time window represents.
@@ -564,12 +486,18 @@ fn mean_gauge_value_in_window(
 // This uses both the start and end times when considering each point. Each
 // point's value is weighted by the faction of overlap with the window.
 fn rate_value_in_window(
+    metric_type: &MetricType,
     start_times: &[DateTime<Utc>],
     timestamps: &[DateTime<Utc>],
     input_points: &[Option<f64>],
     window_start: DateTime<Utc>,
     window_end: DateTime<Utc>,
 ) -> Option<f64> {
+    anyhow::ensure!(
+        metric_type == MetricType::Delta,
+        "Alignment requires a delta metric, not {}",
+        metric_type,
+    );
     // We can find the indices where the timestamp and start times separately
     // overlap the window of interest. Then any interval is potentially of
     // interest if _either_ its start time or timestamp is within the window.
@@ -924,6 +852,7 @@ mod tests {
         let window_end = timestamps[timestamps.len() - 1];
 
         let mean = rate_value_in_window(
+            &MetricType::Delta,
             &start_times,
             &timestamps,
             &input_points,
