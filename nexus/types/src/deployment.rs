@@ -72,7 +72,7 @@ mod clickhouse;
 pub mod execution;
 mod network_resources;
 mod planning_input;
-mod planning_report;
+pub mod planning_report;
 mod zone_type;
 
 use crate::inventory::BaseboardId;

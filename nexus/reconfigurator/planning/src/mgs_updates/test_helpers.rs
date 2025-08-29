@@ -38,6 +38,7 @@ use nexus_types::deployment::PendingMgsUpdateHostPhase1Details;
 use nexus_types::deployment::PendingMgsUpdateRotBootloaderDetails;
 use nexus_types::deployment::PendingMgsUpdateRotDetails;
 use nexus_types::deployment::PendingMgsUpdateSpDetails;
+use nexus_types::deployment::planning_report::MgsUpdateComponent;
 use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::Collection;
 use omicron_common::api::external::Generation;
@@ -139,27 +140,6 @@ const ROT_SIGN_PSC: &str =
     "2222222222222222222222222222222222222222222222222222222222222222";
 const ROT_SIGN_SWITCH: &str =
     "3333333333333333333333333333333333333333333333333333333333333333";
-
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
-pub(super) enum MgsUpdateComponent {
-    Sp,
-    Rot,
-    RotBootloader,
-    HostOs,
-}
-
-impl From<&'_ PendingMgsUpdateDetails> for MgsUpdateComponent {
-    fn from(value: &'_ PendingMgsUpdateDetails) -> Self {
-        match value {
-            PendingMgsUpdateDetails::Rot { .. } => Self::Rot,
-            PendingMgsUpdateDetails::RotBootloader { .. } => {
-                Self::RotBootloader
-            }
-            PendingMgsUpdateDetails::Sp { .. } => Self::Sp,
-            PendingMgsUpdateDetails::HostPhase1(_) => Self::HostOs,
-        }
-    }
-}
 
 /// Description of a single fake board (sled, switch, or PSC).
 #[derive(Debug)]

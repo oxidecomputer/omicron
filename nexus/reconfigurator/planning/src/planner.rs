@@ -191,6 +191,7 @@ impl<'a> Planner<'a> {
 
         // Only plan MGS-based updates updates if there are no outstanding
         // MUPdate overrides.
+        // TODO-K: mgs updates here
         let mgs_updates = if add_update_blocked_reasons.is_empty() {
             self.do_plan_mgs_updates()?
         } else {
@@ -216,10 +217,14 @@ impl<'a> Planner<'a> {
             PlanningZoneUpdatesStepReport::waiting_on(
                 ZoneUpdatesWaitingOn::DiscretionaryZones,
             )
+        // TODO-K: mgs_updates can be empty if some updates failed. Make sure to
+        // keep track of failed updates and wait until they are on the expected
+        // new version befor proceeding to update zones
         } else if !mgs_updates.is_empty() {
             // ... or if there are still pending updates for the RoT / SP /
             // Host OS / etc. ...
             // TODO This is not quite right.  See oxidecomputer/omicron#8285.
+            // TODO-K: change here?
             PlanningZoneUpdatesStepReport::waiting_on(
                 ZoneUpdatesWaitingOn::PendingMgsUpdates,
             )

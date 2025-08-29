@@ -10,6 +10,8 @@ use super::BlueprintZoneImageSource;
 use super::CockroachDbPreserveDowngrade;
 use super::PendingMgsUpdates;
 use super::PlannerChickenSwitches;
+use crate::deployment::PendingMgsUpdateDetails;
+use crate::inventory::BaseboardId;
 
 use daft::Diffable;
 use indent_write::fmt::IndentWriter;
@@ -474,15 +476,80 @@ impl PlanningMupdateOverrideStepReport {
 }
 
 #[derive(
+    Debug,
+    Deserialize,
+    Serialize,
+    PartialEq,
+    Eq,
+    Diffable,
+    PartialOrd,
+    JsonSchema,
+    Ord,
+    Clone,
+    Copy,
+)]
+pub enum MgsUpdateComponent {
+    Sp,
+    Rot,
+    RotBootloader,
+    HostOs,
+}
+
+impl From<&'_ PendingMgsUpdateDetails> for MgsUpdateComponent {
+    fn from(value: &'_ PendingMgsUpdateDetails) -> Self {
+        match value {
+            PendingMgsUpdateDetails::Rot { .. } => Self::Rot,
+            PendingMgsUpdateDetails::RotBootloader { .. } => {
+                Self::RotBootloader
+            }
+            PendingMgsUpdateDetails::Sp { .. } => Self::Sp,
+            PendingMgsUpdateDetails::HostPhase1(_) => Self::HostOs,
+        }
+    }
+}
+
+#[derive(
+    Debug,
+    Deserialize,
+    Serialize,
+    PartialEq,
+    Eq,
+    Diffable,
+    PartialOrd,
+    JsonSchema,
+    Ord,
+    Clone,
+    Copy,
+)]
+pub enum FailedMgsUpdateReason {
+    MissingArtifact,
+    // Add more
+}
+
+#[derive(
+    Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Diffable, JsonSchema,
+)]
+pub struct FailedMgsUpdate {
+    pub baseboard_id: BaseboardId,
+    pub component: MgsUpdateComponent,
+    pub reason: FailedMgsUpdateReason,
+}
+
+#[derive(
     Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Diffable, JsonSchema,
 )]
 pub struct PlanningMgsUpdatesStepReport {
     pub pending_mgs_updates: PendingMgsUpdates,
+    // TODO-K: keep the component here that we were unable to update
+    // and the reason why
+    // add a comment
+    pub failed_mgs_update: Option<FailedMgsUpdate>,
 }
 
 impl PlanningMgsUpdatesStepReport {
     pub fn new(pending_mgs_updates: PendingMgsUpdates) -> Self {
-        Self { pending_mgs_updates }
+        // TODO-K: actually include the failed update
+        Self { pending_mgs_updates, failed_mgs_update: None }
     }
 
     pub fn is_empty(&self) -> bool {
@@ -492,7 +559,8 @@ impl PlanningMgsUpdatesStepReport {
 
 impl fmt::Display for PlanningMgsUpdatesStepReport {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let Self { pending_mgs_updates } = self;
+        // TODO-K: implement display
+        let Self { pending_mgs_updates, .. } = self;
         if !pending_mgs_updates.is_empty() {
             let n = pending_mgs_updates.len();
             let s = plural(n);
