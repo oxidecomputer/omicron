@@ -4,7 +4,7 @@
 
 use sled_agent_client::types::CpuidEntry;
 use raw_cpuid::{
-    ApmInfo, CpuIdDump, CpuIdReader, CpuIdResult, CpuIdWriter, ExtendedFeatureIdentification2,
+    ApmInfo, CpuIdDump, CpuIdResult, ExtendedFeatureIdentification2,
     ExtendedFeatures, ExtendedProcessorFeatureIdentifiers, ExtendedState, ExtendedStateInfo,
     ExtendedTopologyLevel, FeatureInfo, L1CacheTlbInfo, L2And3CacheTlbInfo,
     PerformanceOptimizationInfo, ProcessorCapacityAndFeatureInfo, ProcessorTopologyInfo,
@@ -88,9 +88,8 @@ const MILAN_CPUID: [CpuidEntry; 32] = [
 /// This CPUID configuration as-is is untested; guests may not boot, this may be too reductive,
 /// etc.
 fn milan_ideal() -> CpuIdDump {
-    let mut bits = CpuIdDump::new();
-    let mut cpuid = raw_cpuid::CpuId::with_cpuid_reader(bits);
-    let mut leaf = VendorInfo::amd();
+    let mut cpuid = raw_cpuid::CpuId::with_cpuid_reader(CpuIdDump::new());
+    let leaf = VendorInfo::amd();
     cpuid.set_vendor_info(Some(leaf));
     cpuid.set_extended_function_info(Some(leaf));
 
@@ -186,8 +185,9 @@ fn milan_ideal() -> CpuIdDump {
     leaf.set_sse2(true);
     // bit 27 is reserved
 
-    leaf.set_htt(false); // managed dynamically in practice
-                         // bits 29-31 are not used here.
+    // managed dynamically in practice
+    leaf.set_htt(false);
+    // bits 29-31 are not used here.
 
     cpuid.set_feature_info(Some(leaf));
 
@@ -356,7 +356,7 @@ fn milan_ideal() -> CpuIdDump {
     cpuid.set_extended_processor_and_feature_identifiers(Some(leaf));
 
     // Leaves 8000_0002 through 8000_0005
-    cpuid.set_processor_brand_string(Some(b"AMD EPYC 7713P 64-Core Processor"));
+    cpuid.set_processor_brand_string(Some(b"AMD EPYC 7003-like Processor"));
 
     // Hide L1 cache+TLB info (leaf 8000_0005h)
     cpuid.set_l1_cache_and_tlb_info(None);
@@ -426,20 +426,20 @@ fn milan_ideal() -> CpuIdDump {
     cpuid.into_source()
 }
 
-pub fn milan_rfd314() -> CpuIdDump {
+pub fn milan_rfd314() -> Vec<CpuidEntry> {
     // This is the Milan we'd "want" to expose, absent any other constraints.
-    let mut baseline = milan_ideal();
+    let baseline = milan_ideal();
 
     let mut cpuid = raw_cpuid::CpuId::with_cpuid_reader(baseline);
 
-    let mut leaf = cpuid.get_extended_feature_info();
+    let mut leaf = cpuid.get_extended_feature_info().expect("baseline Milan defines leaf 1");
 
     // RFD 314 describes the circumstances around RDSEED, but it is not currently available.
     leaf.set_rdseed(false);
 
     cpuid.set_extended_feature_info(Some(leaf));
 
-    let mut leaf = cpuid.get_extended_processor_and_feature_identifiers();
+    let mut leaf = cpuid.get_extended_processor_and_feature_identifiers().expect("baseline Milan defines leaf 7");
     // RFD 314 describes these leaf 7 wrinkles.
     //
     // Extended APIC space support was originally provided to guests because the host supports it
@@ -582,4 +582,34 @@ pub fn milan_rfd314() -> CpuIdDump {
         edx: 0x00000001,
     });
     cpuid.set_extended_cache_parameters(Some(levels.as_slice()));
+
+    dump_to_cpuid_entries(cpuid.into_source())
+}
+
+fn dump_to_cpuid_entries(dump: CpuIdDump) -> Vec<CpuidEntry> {
+    let mut entries = Vec::new();
+
+    for (leaf, subleaf, regs) in dump.into_iter() {
+        entries.push(CpuidEntry {
+            leaf: leaf,
+            subleaf: subleaf,
+            eax: regs.eax,
+            ebx: regs.ebx,
+            ecx: regs.ecx,
+            edx: regs.edx,
+        });
+    }
+
+    // Entry order does not actually matter. Sort here because it's fast (~30-35 leaves) and
+    // looking at the vec in logs or on the wire *so* much nicer.
+    entries.sort_by(|left, right| {
+        let by_leaf = left.leaf.cmp(&right.leaf);
+        if by_leaf == std::cmp::Ordering::Equal {
+            left.subleaf.cmp(&right.subleaf)
+        } else {
+            by_leaf
+        }
+    });
+
+    entries
 }
