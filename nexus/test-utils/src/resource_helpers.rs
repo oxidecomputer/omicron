@@ -20,7 +20,6 @@ use nexus_types::deployment::Blueprint;
 use nexus_types::external_api::params;
 use nexus_types::external_api::shared;
 use nexus_types::external_api::shared::Baseboard;
-use nexus_types::external_api::shared::IdentityType;
 use nexus_types::external_api::shared::IpRange;
 use nexus_types::external_api::views;
 use nexus_types::external_api::views::AffinityGroup;
@@ -66,6 +65,7 @@ use omicron_test_utils::dev::poll::wait_for_condition;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
+use omicron_uuid_kinds::SiloUserUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use oxnet::Ipv4Net;
@@ -1099,7 +1099,7 @@ pub async fn grant_iam<T>(
     client: &ClientTestContext,
     grant_resource_url: &str,
     grant_role: T,
-    grant_user: Uuid,
+    grant_user: SiloUserUuid,
     run_as: AuthnMode,
 ) where
     T: serde::Serialize + serde::de::DeserializeOwned,
@@ -1113,11 +1113,8 @@ pub async fn grant_iam<T>(
             .expect("failed to fetch policy")
             .parsed_body()
             .expect("failed to parse policy");
-    let new_role_assignment = shared::RoleAssignment {
-        identity_type: IdentityType::SiloUser,
-        identity_id: grant_user,
-        role_name: grant_role,
-    };
+    let new_role_assignment =
+        shared::RoleAssignment::for_silo_user(grant_user, grant_role);
     let new_role_assignments = existing_policy
         .role_assignments
         .into_iter()

@@ -750,12 +750,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                 sled_id,
                 Ipv6Addr::LOCALHOST,
                 self.dendrite.get(&switch_location).unwrap().port,
-                self.gateway
-                    .get(&switch_location)
-                    .unwrap()
-                    .client
-                    .bind_address
-                    .port(),
+                self.gateway.get(&switch_location).unwrap().port,
                 self.mgd.get(&switch_location).unwrap().port,
             )
             .unwrap();

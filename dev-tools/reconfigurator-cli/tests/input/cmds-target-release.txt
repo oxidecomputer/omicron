@@ -258,10 +258,195 @@ sled-update-host-phase2 d81c6a84-79b8-4958-ae41-ea46c9b19763 --boot-disk B --slo
 sled-update-host-phase1 d81c6a84-79b8-4958-ae41-ea46c9b19763 --active B --slot-b 2053f8594971bbf0a7326c833e2ffc12b065b9d823b9c0b967d275fa595e4e89
 inventory-generate
 
-# Do one more planning run. This should update one control plane zone.
+# Do another planning run. This should start updating zones (one at a time).
 blueprint-plan latest latest
 blueprint-diff latest
 
-# We should continue walking through the update. We need to build out a
-# reconfigurator-cli subcommand to simulate updated zone image sources (just
-# like we have sled-update-sp for simulated SP updates).
+# Update the first control plane zone and plan again, which should update the
+# next zone on this sled.
+sled-set 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c omicron-config latest
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+# Repeat until all non-Nexus zones on this sled have been updated. Some of these
+# steps update a zone in place; others expunge a zone and are followed by a zone
+# addition. It doesn't seem _particularly_ useful to spell out which step is
+# updating which zone, in terms of keeping this test up to date, but we will
+# have to tweak the number of times we iterate on this sled as our simulated
+# system or planner placement changes.
+sled-set 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c omicron-config latest
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+sled-set 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c omicron-config latest
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+sled-set 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c omicron-config latest
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+sled-set 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c omicron-config latest
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+sled-set 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c omicron-config latest
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+sled-set 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c omicron-config latest
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+sled-set 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c omicron-config latest
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+sled-set 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c omicron-config latest
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+sled-set 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c omicron-config latest
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+sled-set 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c omicron-config latest
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+# The previous plan updated the last non-Nexus zone on this sled. Nexus comes
+# after everything else, so the next step should update the first zone on the
+# next sled.
+sled-set 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c omicron-config latest
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+# Step through updates of all the non-Nexus zones on this sled.
+sled-set 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 omicron-config latest
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+sled-set 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 omicron-config latest
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+sled-set 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 omicron-config latest
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+sled-set 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 omicron-config latest
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+sled-set 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 omicron-config latest
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+sled-set 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 omicron-config latest
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+sled-set 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 omicron-config latest
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+sled-set 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 omicron-config latest
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+sled-set 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 omicron-config latest
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+sled-set 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 omicron-config latest
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+# The previous plan updated the last non-Nexus zone on this sled. Nexus comes
+# after everything else, so the next step should update the first zone on the
+# next sled.
+sled-set 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 omicron-config latest
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+# Step through updates of all the non-Nexus zones on this sled.
+sled-set d81c6a84-79b8-4958-ae41-ea46c9b19763 omicron-config latest
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+sled-set d81c6a84-79b8-4958-ae41-ea46c9b19763 omicron-config latest
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+sled-set d81c6a84-79b8-4958-ae41-ea46c9b19763 omicron-config latest
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+sled-set d81c6a84-79b8-4958-ae41-ea46c9b19763 omicron-config latest
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+sled-set d81c6a84-79b8-4958-ae41-ea46c9b19763 omicron-config latest
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+sled-set d81c6a84-79b8-4958-ae41-ea46c9b19763 omicron-config latest
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+sled-set d81c6a84-79b8-4958-ae41-ea46c9b19763 omicron-config latest
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+sled-set d81c6a84-79b8-4958-ae41-ea46c9b19763 omicron-config latest
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+sled-set d81c6a84-79b8-4958-ae41-ea46c9b19763 omicron-config latest
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+sled-set d81c6a84-79b8-4958-ae41-ea46c9b19763 omicron-config latest
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+# The previous step updated the last non-Nexus zone on the final sled. We should
+# now see a blueprint where every in-service zone (other than Nexus) has an
+# image source set to an artifact from our TUF repo.
+blueprint-show latest
+
+# We ought to update the inventory for the final sled and then step through
+# the Nexus handoff process, but that work is still in progress.

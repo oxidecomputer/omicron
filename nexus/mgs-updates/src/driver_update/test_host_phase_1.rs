@@ -375,7 +375,7 @@ async fn basic_failures() {
     // tests below; get the actual artifact hashes reported by our test setup
     // and ensure none of them matches that.
     let (active_phase_1_hash, inactive_phase_1_hash, phase_1_slot) = {
-        let sp_init = SpTestState::load(&gwtestctx.client(), SpType::Sled, 1)
+        let sp_init = SpTestState::load(&gwtestctx.client, SpType::Sled, 1)
             .await
             .expect("loading initial state");
         (

@@ -52,6 +52,7 @@ zip.workspace = true
 
 [dev-dependencies]
 expectorate.workspace = true
+gateway-client.workspace = true
 gateway-test-utils.workspace = true
 omicron-test-utils.workspace = true
 serde_json.workspace = true

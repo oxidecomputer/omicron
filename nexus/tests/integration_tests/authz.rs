@@ -16,7 +16,7 @@ use omicron_common::api::external::IdentityMetadataCreateParams;
 use dropshot::ResultsPage;
 use nexus_test_utils::resource_helpers::{create_local_user, create_silo};
 
-use uuid::Uuid;
+use omicron_uuid_kinds::SiloUserUuid;
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
@@ -178,7 +178,8 @@ async fn test_list_silo_users_for_unpriv(cptestctx: &ControlPlaneTestContext) {
             .unwrap();
 
     // And only show the first silo's user
-    let user_ids: Vec<Uuid> = users.items.iter().map(|x| x.id).collect();
+    let user_ids: Vec<SiloUserUuid> =
+        users.items.iter().map(|x| x.id).collect();
     assert_eq!(user_ids, vec![new_silo_user_id]);
 }
 

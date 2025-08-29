@@ -6,7 +6,6 @@
 
 use camino::Utf8Path;
 use camino::Utf8PathBuf;
-use dropshot::test_util::ClientTestContext;
 use dropshot::test_util::LogContext;
 use gateway_messages::SpPort;
 use omicron_gateway::MgsArguments;
@@ -18,7 +17,6 @@ use omicron_test_utils::dev::poll::CondCheckError;
 use qorb::resolver::AllBackends;
 use qorb::resolver::Resolver;
 use qorb::resolvers::fixed::FixedResolver;
-use slog::o;
 use sp_sim::SimRack;
 use sp_sim::SimulatedSp;
 use std::collections::HashSet;
@@ -37,8 +35,9 @@ pub const DEFAULT_SP_SIM_CONFIG: &str =
     concat!(env!("CARGO_MANIFEST_DIR"), "/configs/sp_sim_config.test.toml");
 
 pub struct GatewayTestContext {
-    pub client: ClientTestContext,
+    pub client: gateway_client::Client,
     pub server: omicron_gateway::Server,
+    pub port: u16,
     pub simrack: SimRack,
     pub logctx: LogContext,
     pub gateway_id: Uuid,
@@ -47,13 +46,6 @@ pub struct GatewayTestContext {
 }
 
 impl GatewayTestContext {
-    pub fn client(&self) -> gateway_client::Client {
-        gateway_client::Client::new(
-            &self.client.url("/").to_string(),
-            self.logctx.log.new(slog::o!("component" => "MgsClient")),
-        )
-    }
-
     pub fn mgs_backends(&self) -> watch::Receiver<AllBackends> {
         self.resolver_backends.clone()
     }
@@ -268,9 +260,9 @@ pub async fn test_setup_with_config(
         .dropshot_server_for_address(localhost_port_0)
         .unwrap()
         .local_addr();
-    let client = ClientTestContext::new(
-        server_addr,
-        log.new(o!("component" => "client test context")),
+    let client = gateway_client::Client::new(
+        &format!("http://{server_addr}"),
+        logctx.log.new(slog::o!("component" => "MgsClient")),
     );
 
     let mut resolver = FixedResolver::new(std::iter::once(server_addr));
@@ -279,6 +271,7 @@ pub async fn test_setup_with_config(
     GatewayTestContext {
         client,
         server,
+        port: server_addr.port(),
         simrack,
         logctx,
         gateway_id,

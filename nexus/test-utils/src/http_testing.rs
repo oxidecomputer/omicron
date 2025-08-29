@@ -15,6 +15,7 @@ use headers::authorization::Credentials;
 use http_body_util::BodyExt;
 use nexus_db_queries::authn::external::spoof;
 use nexus_db_queries::db::identity::Asset;
+use omicron_uuid_kinds::SiloUserUuid;
 use serde_urlencoded;
 use std::convert::TryInto;
 use std::fmt::Debug;
@@ -546,7 +547,7 @@ impl TestResponse {
 pub enum AuthnMode {
     UnprivilegedUser,
     PrivilegedUser,
-    SiloUser(uuid::Uuid),
+    SiloUser(SiloUserUuid),
     Session(String),
 }
 

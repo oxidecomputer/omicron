@@ -79,14 +79,6 @@ use tufaceous_lib::assemble::ArtifactManifest;
 
 mod log_capture;
 
-/// The default key for TUF repository generation.
-///
-/// This was randomly generated through a tufaceous invocation.
-pub static DEFAULT_TUFACEOUS_KEY: &str = "ed25519:\
-MFECAQEwBQYDK2VwBCIEIJ9CnAhwk8PPt1x8icu\
-z9c12PdfCRHJpoUkuqJmIZ8GbgSEAbNGMpsHK5_w32\
-qwYdZH_BeVssmKzQlFsnPuaiHx2hy0=";
-
 /// REPL state
 #[derive(Debug)]
 struct ReconfiguratorSim {
@@ -244,7 +236,7 @@ fn process_command(
             cmd_sled_update_host_phase_2(sim, args)
         }
         Commands::SledUpdateRotBootloader(args) => {
-            cmd_sled_update_rot_bootlaoder(sim, args)
+            cmd_sled_update_rot_bootloader(sim, args)
         }
         Commands::SiloList => cmd_silo_list(sim),
         Commands::SiloAdd(args) => cmd_silo_add(sim, args),
@@ -1667,7 +1659,7 @@ fn cmd_sled_update_install_dataset(
     )))
 }
 
-fn cmd_sled_update_rot_bootlaoder(
+fn cmd_sled_update_rot_bootloader(
     sim: &mut ReconfiguratorSim,
     args: SledUpdateRotBootloaderArgs,
 ) -> anyhow::Result<Option<String>> {

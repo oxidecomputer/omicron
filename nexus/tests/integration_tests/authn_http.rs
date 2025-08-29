@@ -19,6 +19,7 @@ use dropshot::test_util::LogContext;
 use dropshot::test_util::TestContext;
 use headers::authorization::Credentials;
 use http::header::HeaderValue;
+use nexus_db_queries::authn::Actor;
 use nexus_db_queries::authn::external::AuthenticatorContext;
 use nexus_db_queries::authn::external::HttpAuthnScheme;
 use nexus_db_queries::authn::external::SiloUserSilo;
@@ -28,6 +29,7 @@ use nexus_db_queries::authn::external::spoof::HttpAuthnSpoof;
 use nexus_db_queries::authn::external::spoof::SPOOF_SCHEME_NAME;
 use nexus_types::silo::DEFAULT_SILO_ID;
 use omicron_uuid_kinds::ConsoleSessionUuid;
+use omicron_uuid_kinds::SiloUserUuid;
 use std::sync::Mutex;
 use uuid::Uuid;
 
@@ -62,8 +64,7 @@ async fn test_authn_spoof_allowed() {
 
     // Successful authentication
     let valid_uuid = "7f927c86-3371-4295-c34a-e3246a4b9c02";
-    let header =
-        spoof::make_header_value(valid_uuid.parse().unwrap()).0.encode();
+    let header = spoof::make_header_value(valid_uuid).0.encode();
     assert_eq!(
         whoami_request(Some(header), None, &testctx).await.unwrap(),
         WhoamiResponse {
@@ -107,7 +108,7 @@ async fn test_authn_session_cookie() {
     let valid_session = FakeSession {
         id: ConsoleSessionUuid::new_v4(),
         token: "valid".to_string(),
-        silo_user_id: Uuid::new_v4(),
+        silo_user_id: SiloUserUuid::new_v4(),
         silo_id: Uuid::new_v4(),
         time_last_used: Utc::now() - Duration::seconds(5),
         time_created: Utc::now() - Duration::seconds(5),
@@ -115,7 +116,7 @@ async fn test_authn_session_cookie() {
     let idle_expired_session = FakeSession {
         id: ConsoleSessionUuid::new_v4(),
         token: "idle_expired".to_string(),
-        silo_user_id: Uuid::new_v4(),
+        silo_user_id: SiloUserUuid::new_v4(),
         silo_id: Uuid::new_v4(),
         time_last_used: Utc::now() - Duration::hours(2),
         time_created: Utc::now() - Duration::hours(3),
@@ -123,7 +124,7 @@ async fn test_authn_session_cookie() {
     let abs_expired_session = FakeSession {
         id: ConsoleSessionUuid::new_v4(),
         token: "abs_expired".to_string(),
-        silo_user_id: Uuid::new_v4(),
+        silo_user_id: SiloUserUuid::new_v4(),
         silo_id: Uuid::new_v4(),
         time_last_used: Utc::now(),
         time_created: Utc::now() - Duration::hours(10),
@@ -196,11 +197,9 @@ async fn test_authn_spoof_unconfigured() {
     let values = [
         None,
         Some(
-            spoof::make_header_value(
-                "7f927c86-3371-4295-c34a-e3246a4b9c02".parse().unwrap(),
-            )
-            .0
-            .encode(),
+            spoof::make_header_value("7f927c86-3371-4295-c34a-e3246a4b9c02")
+                .0
+                .encode(),
         ),
         Some(spoof::make_header_value_raw(b"not-a-uuid").unwrap()),
         Some(spoof::SPOOF_HEADER_BAD_ACTOR.0.encode()),
@@ -334,7 +333,7 @@ impl AuthenticatorContext for WhoamiServerState {
 impl SiloUserSilo for WhoamiServerState {
     async fn silo_user_silo(
         &self,
-        silo_user_id: Uuid,
+        silo_user_id: SiloUserUuid,
     ) -> Result<Uuid, nexus_db_queries::authn::Reason> {
         assert_eq!(
             silo_user_id.to_string(),
@@ -348,7 +347,7 @@ impl SiloUserSilo for WhoamiServerState {
 struct FakeSession {
     id: ConsoleSessionUuid,
     token: String,
-    silo_user_id: Uuid,
+    silo_user_id: SiloUserUuid,
     silo_id: Uuid,
     time_created: DateTime<Utc>,
     time_last_used: DateTime<Utc>,
@@ -358,7 +357,7 @@ impl session_cookie::Session for FakeSession {
     fn id(&self) -> ConsoleSessionUuid {
         self.id
     }
-    fn silo_user_id(&self) -> Uuid {
+    fn silo_user_id(&self) -> SiloUserUuid {
         self.silo_user_id
     }
     fn silo_id(&self) -> Uuid {
@@ -435,7 +434,11 @@ async fn whoami_get(
 ) -> Result<dropshot::HttpResponseOk<WhoamiResponse>, dropshot::HttpError> {
     let whoami_state = rqctx.context();
     let authn = whoami_state.authn.authn_request(&rqctx).await?;
-    let actor = authn.actor().map(|a| a.actor_id().to_string());
+    let actor = authn.actor().map(|actor| match actor {
+        Actor::SiloUser { silo_user_id, .. } => silo_user_id.to_string(),
+
+        Actor::UserBuiltin { user_builtin_id } => user_builtin_id.to_string(),
+    });
     let authenticated = actor.is_some();
     let schemes_tried =
         authn.schemes_tried().iter().map(|s| s.to_string()).collect();

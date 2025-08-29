@@ -29,15 +29,13 @@ pub static ROLE_ASSIGNMENTS_PRIVILEGED: LazyLock<Vec<model::RoleAssignment>> =
         vec![
             // The "test-privileged" user gets the "admin" role on the sole
             // Fleet as well as the default Silo.
-            model::RoleAssignment::new(
-                model::IdentityType::SiloUser,
+            model::RoleAssignment::new_for_silo_user(
                 USER_TEST_PRIVILEGED.id(),
                 ResourceType::Fleet,
                 *crate::FLEET_ID,
                 "admin",
             ),
-            model::RoleAssignment::new(
-                model::IdentityType::SiloUser,
+            model::RoleAssignment::new_for_silo_user(
                 USER_TEST_PRIVILEGED.id(),
                 ResourceType::Silo,
                 DEFAULT_SILO_ID,
@@ -62,14 +60,14 @@ pub static USER_TEST_UNPRIVILEGED: LazyLock<model::SiloUser> =
 
 #[cfg(test)]
 mod test {
-    use super::super::assert_valid_uuid;
+    use super::super::assert_valid_typed_uuid;
     use super::USER_TEST_PRIVILEGED;
     use super::USER_TEST_UNPRIVILEGED;
     use nexus_types::identity::Asset;
 
     #[test]
     fn test_silo_user_ids_are_valid() {
-        assert_valid_uuid(&USER_TEST_PRIVILEGED.id());
-        assert_valid_uuid(&USER_TEST_UNPRIVILEGED.id());
+        assert_valid_typed_uuid(&USER_TEST_PRIVILEGED.id());
+        assert_valid_typed_uuid(&USER_TEST_UNPRIVILEGED.id());
     }
 }
