@@ -16,6 +16,8 @@
 //! Node, and so this should not be problematic.
 
 use crate::compute_key_share::KeyShareComputer;
+use crate::crypto::ReconstructedRackSecret;
+use crate::rack_secret_loader::{LoadRackSecretError, RackSecretLoader};
 use crate::validators::{
     MismatchedRackIdError, ReconfigurationError, ValidatedReconfigureMsg,
 };
@@ -44,6 +46,10 @@ pub struct Node {
     /// In memory state for when this node is trying to compute its own key
     /// share for a committed epoch.
     key_share_computer: Option<KeyShareComputer>,
+
+    /// A mechanism for loading rack secrets by collecting key shares
+    /// for the latest committed epoch.
+    rack_secret_loader: RackSecretLoader,
 }
 
 // For diffs we want to allow access to all fields, but not make them public in
@@ -74,7 +80,27 @@ impl Node {
         let id_str = format!("{:?}", ctx.platform_id());
         let log =
             log.new(o!("component" => "trust-quorum", "platform_id" => id_str));
-        Node { log, coordinator_state: None, key_share_computer: None }
+        let rack_secret_loader = RackSecretLoader::new(&log);
+        Node {
+            log,
+            coordinator_state: None,
+            key_share_computer: None,
+            rack_secret_loader,
+        }
+    }
+
+    /// Attempt to load a rack secret at the given epoch.
+    ///
+    /// If no secrets are loaded the node will start collecting shares for the
+    /// latest committed epoch and return `Ok(None)`. `Ok(None)` will continue
+    /// to be returned while share collection is in progress. The secret will
+    /// be returned on the next call after it becomes available.
+    pub fn load_rack_secret(
+        &mut self,
+        ctx: &mut impl NodeHandlerCtx,
+        epoch: Epoch,
+    ) -> Result<Option<ReconstructedRackSecret>, LoadRackSecretError> {
+        self.rack_secret_loader.load(ctx, epoch)
     }
 
     /// Start coordinating a reconfiguration
@@ -659,22 +685,17 @@ impl Node {
         share: Share,
     ) {
         if let Some(cs) = &mut self.coordinator_state {
-            cs.handle_share(ctx, from, epoch, share);
+            cs.handle_share(ctx, from.clone(), epoch, share.clone());
         } else if let Some(ksc) = &mut self.key_share_computer {
-            if ksc.handle_share(ctx, from, epoch, share) {
+            if ksc.handle_share(ctx, from.clone(), epoch, share.clone()) {
                 // We're have completed computing our share and saved it to
                 // our persistent state. We have also marked the configuration
                 // committed.
                 self.key_share_computer = None;
             }
-        } else {
-            warn!(
-                self.log,
-                "Received share when not coordinating or computing share";
-                "from" => %from,
-                "epoch" => %epoch
-            );
         }
+
+        self.rack_secret_loader.handle_share(from, epoch, share);
     }
 
     fn handle_prepare(

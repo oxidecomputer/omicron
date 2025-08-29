@@ -12,6 +12,7 @@ use crate::{
     Alarm, Configuration, Epoch, NodeHandlerCtx, PeerMsgKind, PlatformId,
     RackSecret, Share,
 };
+use daft::Diffable;
 use slog::{Logger, error, info, o};
 
 #[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]
@@ -27,13 +28,15 @@ pub enum LoadRackSecretError {
 }
 
 /// Manage retrieval of key shares to load various rack secrets
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Diffable)]
 pub struct RackSecretLoader {
+    #[daft(ignore)]
     log: Logger,
     loaded: BTreeMap<Epoch, ReconstructedRackSecret>,
     // We can only collect shares for the latest committed epoch. We then derive
     // a key from the computed rack secret to decrypt rack secrets for prior
     // configurations.
+    #[daft(leaf)]
     collector: Option<ShareCollector>,
 }
 
