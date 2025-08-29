@@ -7884,6 +7884,7 @@ dependencies = [
  "qorb",
  "rand 0.8.5",
  "range-requests",
+ "raw-cpuid",
  "rcgen",
  "ref-cast",
  "regex",
@@ -10757,6 +10758,14 @@ dependencies = [
  "unicode-segmentation",
  "unicode-truncate",
  "unicode-width 0.2.0",
+]
+
+[[package]]
+name = "raw-cpuid"
+version = "11.5.0"
+source = "git+https://github.com/oxidecomputer/rust-cpuid?rev=be8fc446862b548e0e6558c56439a46ba459c1c7#be8fc446862b548e0e6558c56439a46ba459c1c7"
+dependencies = [
+ "bitflags 2.9.1",
 ]
 
 [[package]]

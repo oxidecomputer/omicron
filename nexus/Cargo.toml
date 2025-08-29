@@ -164,6 +164,7 @@ oximeter-collector.workspace = true
 pem.workspace = true
 petgraph.workspace = true
 pretty_assertions.workspace = true
+raw-cpuid.workspace = true
 rcgen.workspace = true
 regex.workspace = true
 similar-asserts.workspace = true

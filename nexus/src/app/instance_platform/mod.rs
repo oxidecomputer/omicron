@@ -67,6 +67,9 @@
 //! backends, this is easily done by using component IDs as backend names, as
 //! described above.
 
+// CPU platforms are broken out only because they're wordy.
+mod cpu_platform;
+
 use std::collections::{BTreeMap, HashMap};
 
 use crate::app::instance::InstanceRegisterReason;
@@ -78,7 +81,7 @@ use omicron_common::api::external::Error;
 use omicron_common::api::internal::shared::NetworkInterface;
 use sled_agent_client::types::{
     BlobStorageBackend, Board, BootOrderEntry, BootSettings, Chipset,
-    ComponentV0, Cpuid, CpuidEntry, CpuidVendor, CrucibleStorageBackend,
+    ComponentV0, Cpuid, CpuidVendor, CrucibleStorageBackend,
     I440Fx, InstanceSpecV0, NvmeDisk, PciPath, QemuPvpanic, SerialPort,
     SerialPortNumber, SpecKey, VirtioDisk, VirtioNetworkBackend, VirtioNic,
     VmmSpec,
@@ -504,104 +507,11 @@ impl super::Nexus {
 fn cpuid_from_vmm_cpu_platform(
     platform: db::model::VmmCpuPlatform,
 ) -> Option<Cpuid> {
-    macro_rules! cpuid_leaf {
-        ($leaf:literal, $eax:literal, $ebx:literal, $ecx:literal, $edx:literal) => {
-            CpuidEntry {
-                leaf: $leaf,
-                subleaf: None,
-                eax: $eax,
-                ebx: $ebx,
-                ecx: $ecx,
-                edx: $edx,
-            }
-        };
-    }
-
-    macro_rules! cpuid_subleaf {
-        ($leaf:literal, $sl:literal, $eax:literal, $ebx:literal, $ecx:literal, $edx:literal) => {
-            CpuidEntry {
-                leaf: $leaf,
-                subleaf: Some($sl),
-                eax: $eax,
-                ebx: $ebx,
-                ecx: $ecx,
-                edx: $edx,
-            }
-        };
-    }
-
-    // See [RFD 314](https://314.rfd.oxide.computer/) section 6 for all the
-    // gnarly details.
-    const MILAN_CPUID: [CpuidEntry; 32] = [
-        cpuid_leaf!(0x0, 0x0000000D, 0x68747541, 0x444D4163, 0x69746E65),
-        cpuid_leaf!(0x1, 0x00A00F11, 0x00000800, 0xF6D83203, 0x078BFBFF),
-        cpuid_leaf!(0x5, 0x00000000, 0x00000000, 0x00000000, 0x00000000),
-        cpuid_leaf!(0x6, 0x00000004, 0x00000000, 0x00000000, 0x00000000),
-        cpuid_subleaf!(
-            0x7, 0x0, 0x00000000, 0x219803A9, 0x00000600, 0x00000010
-        ),
-        cpuid_subleaf!(
-            0xB, 0x0, 0x00000001, 0x00000002, 0x00000100, 0x00000000
-        ),
-        cpuid_subleaf!(
-            0xB, 0x1, 0x00000000, 0x00000000, 0x00000201, 0x00000000
-        ),
-        cpuid_subleaf!(
-            0xB, 0x2, 0x00000000, 0x00000000, 0x00000002, 0x00000000
-        ),
-        cpuid_subleaf!(
-            0xD, 0x0, 0x00000007, 0x00000340, 0x00000340, 0x00000000
-        ),
-        cpuid_subleaf!(
-            0xD, 0x1, 0x00000007, 0x00000340, 0x00000000, 0x00000000
-        ),
-        cpuid_subleaf!(
-            0xD, 0x2, 0x00000100, 0x00000240, 0x00000000, 0x00000000
-        ),
-        cpuid_leaf!(0x80000000, 0x80000021, 0x68747541, 0x444D4163, 0x69746E65),
-        // ecx bit 23 should be flipped true at some point, but is currently
-        // hidden and will continue to be for the moment.
-        // ecx bit 3 should be masked, but is is not and advertises support for
-        // unsupported extensions to LAPIC space.
-        //
-        // RFD 314 talks about these bits more, but we currently allow them to
-        // be wrong as they have been wrong before and we'll get to them
-        // individually later.
-        cpuid_leaf!(0x80000001, 0x00A00F11, 0x40000000, 0x444001F1, 0x27D3FBFF),
-        cpuid_leaf!(0x80000002, 0x20444D41, 0x43595045, 0x31373720, 0x36205033),
-        cpuid_leaf!(0x80000003, 0x6F432D34, 0x50206572, 0x65636F72, 0x726F7373),
-        cpuid_leaf!(0x80000004, 0x20202020, 0x20202020, 0x20202020, 0x00202020),
-        cpuid_leaf!(0x80000005, 0xFF40FF40, 0xFF40FF40, 0x20080140, 0x20080140),
-        cpuid_leaf!(0x80000006, 0x48002200, 0x68004200, 0x02006140, 0x08009140),
-        cpuid_leaf!(0x80000007, 0x00000000, 0x00000000, 0x00000000, 0x00000100),
-        cpuid_leaf!(0x80000008, 0x00003030, 0x00000205, 0x00000000, 0x00000000),
-        cpuid_leaf!(0x8000000A, 0x00000000, 0x00000000, 0x00000000, 0x00000000),
-        cpuid_leaf!(0x80000019, 0xF040F040, 0xF0400000, 0x00000000, 0x00000000),
-        cpuid_leaf!(0x8000001A, 0x00000006, 0x00000000, 0x00000000, 0x00000000),
-        cpuid_leaf!(0x8000001B, 0x00000000, 0x00000000, 0x00000000, 0x00000000),
-        cpuid_leaf!(0x8000001C, 0x00000000, 0x00000000, 0x00000000, 0x00000000),
-        cpuid_subleaf!(
-            0x8000001D, 0x0, 0x00000121, 0x01C0003F, 0x0000003F, 0x00000000
-        ),
-        cpuid_subleaf!(
-            0x8000001D, 0x1, 0x00000122, 0x01C0003F, 0x0000003F, 0x00000000
-        ),
-        cpuid_subleaf!(
-            0x8000001D, 0x2, 0x00000143, 0x01C0003F, 0x000003FF, 0x00000002
-        ),
-        cpuid_subleaf!(
-            0x8000001D, 0x3, 0x00000163, 0x03C0003F, 0x00007FFF, 0x00000001
-        ),
-        cpuid_leaf!(0x8000001E, 0x00000000, 0x00000100, 0x00000000, 0x00000000),
-        cpuid_leaf!(0x8000001F, 0x00000000, 0x00000000, 0x00000000, 0x00000000),
-        cpuid_leaf!(0x80000021, 0x00000045, 0x00000000, 0x00000000, 0x00000000),
-    ];
-
     let cpuid = match platform {
         db::model::VmmCpuPlatform::SledDefault => return None,
         db::model::VmmCpuPlatform::AmdMilan
         | db::model::VmmCpuPlatform::AmdTurin => {
-            Cpuid { entries: MILAN_CPUID.to_vec(), vendor: CpuidVendor::Amd }
+            Cpuid { entries: cpu_platform::milan_rfd314(), vendor: CpuidVendor::Amd }
         }
     };
 
