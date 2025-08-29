@@ -8,6 +8,7 @@
 
 use crate::services::ServiceManager;
 use crate::sled_agent::SledAgent;
+use sled_agent_api::OperatorSwitchZonePolicy;
 use sled_agent_config_reconciler::RawDisksSender;
 use sled_hardware::{HardwareManager, HardwareUpdate};
 use sled_hardware_types::Baseboard;
@@ -16,24 +17,6 @@ use slog::Logger;
 use tokio::sync::broadcast::error::RecvError;
 use tokio::sync::{broadcast, oneshot, watch};
 
-/// Policy allowing an operator (via `omdb`) to control whether the switch zone
-/// is started or stopped.
-///
-/// This is an _extremely_ dicey operation in general; a stopped switch zone
-/// leaves the rack inoperable! We are only adding this as a workaround and test
-/// tool for handling sidecar resets; see
-/// https://github.com/oxidecomputer/omicron/issues/8480 for background.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum OperatorSwitchZonePolicy {
-    /// Start the switch zone if a switch is present.
-    ///
-    /// This is the default policy.
-    StartIfSwitchPresent,
-
-    /// Stop the switch zone despite a switch being present.
-    StopDespiteSwitchPresence,
-}
-
 /// A handle controlling the behavior of a [`HardwareMonitor`]
 #[derive(Debug, Clone)]
 pub struct HardwareMonitorHandle {
@@ -41,6 +24,10 @@ pub struct HardwareMonitorHandle {
 }
 
 impl HardwareMonitorHandle {
+    pub fn current_switch_zone_policy(&self) -> OperatorSwitchZonePolicy {
+        *self.switch_zone_policy_tx.borrow()
+    }
+
     pub fn set_switch_zone_policy(&self, policy: OperatorSwitchZonePolicy) {
         self.switch_zone_policy_tx.send_if_modified(|p| {
             if *p != policy {
@@ -91,7 +78,7 @@ pub struct HardwareMonitor {
     service_manager: Option<ServiceManager>,
 
     /// Whether or not the tofino is loaded.
-    tofino_loaded: bool,
+    is_tofino_loaded: bool,
 }
 
 impl HardwareMonitor {
@@ -123,7 +110,7 @@ impl HardwareMonitor {
             raw_disks_tx,
             sled_agent: None,
             service_manager: None,
-            tofino_loaded: false,
+            is_tofino_loaded: false,
         };
         tokio::spawn(monitor.run());
         let handle = HardwareMonitorHandle { switch_zone_policy_tx };
@@ -215,7 +202,7 @@ impl HardwareMonitor {
     }
 
     async fn set_tofino_loaded(&mut self, tofino_loaded: bool) {
-        self.tofino_loaded = tofino_loaded;
+        self.is_tofino_loaded = tofino_loaded;
         self.ensure_switch_zone_activated_or_deactivated().await;
     }
 
@@ -227,13 +214,24 @@ impl HardwareMonitor {
 
         // Decide whether to activate or deactivate based on the combination of
         // `tofino_loaded` and the operator policy.
-        let tofino_loaded = self.tofino_loaded;
         let policy = *self.switch_zone_policy_rx.borrow_and_update();
-        let should_activate = match (tofino_loaded, policy) {
+        let should_activate = match (self.is_tofino_loaded, policy) {
             // We have a tofino and policy says to start the switch zone
-            (true, OperatorSwitchZonePolicy::StartIfSwitchPresent) => true,
+            (true, OperatorSwitchZonePolicy::StartIfSwitchPresent) => {
+                info!(
+                    self.log,
+                    "tofino present and policy allows switch zone; \
+                     will activate it"
+                );
+                true
+            }
             // We have a tofino but policy says to stop the switch zone
             (true, OperatorSwitchZonePolicy::StopDespiteSwitchPresence) => {
+                info!(
+                    self.log,
+                    "tofino present but policy disables switch zone; \
+                     will deactivate it"
+                );
                 false
             }
             // If we don't have a tofino, stop the switch zone regardless of

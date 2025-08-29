@@ -1041,4 +1041,21 @@ impl SledAgentApi for SledAgentImpl {
             ))
         }
     }
+
+    async fn debug_operator_switch_zone_policy_get(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<OperatorSwitchZonePolicy>, HttpError> {
+        let sa = request_context.context();
+        Ok(HttpResponseOk(sa.hardware_monitor().current_switch_zone_policy()))
+    }
+
+    async fn debug_operator_switch_zone_policy_put(
+        request_context: RequestContext<Self::Context>,
+        body: TypedBody<OperatorSwitchZonePolicy>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = request_context.context();
+        let policy = body.into_inner();
+        sa.hardware_monitor().set_switch_zone_policy(policy);
+        Ok(HttpResponseUpdatedNoContent())
+    }
 }
