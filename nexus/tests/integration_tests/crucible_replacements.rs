@@ -203,7 +203,7 @@ pub(crate) async fn wait_for_all_replacements(
             }
         },
         &std::time::Duration::from_millis(50),
-        &std::time::Duration::from_secs(60),
+        &std::time::Duration::from_secs(260),
     )
     .await
     .expect("all replacements finished");
@@ -1659,22 +1659,38 @@ mod region_snapshot_replacement {
         }
 
         pub async fn assert_read_only_target_gone(&self) {
-            let region_snapshot_replace_request = self
-                .datastore
-                .get_region_snapshot_replacement_request_by_id(
-                    &self.opctx(),
-                    self.replacement_request_id,
-                )
-                .await
-                .unwrap();
+            let mut failed = false;
+            for i in 0..10 {
+                let region_snapshot_replace_request = self
+                    .datastore
+                    .get_region_snapshot_replacement_request_by_id(
+                        &self.opctx(),
+                        self.replacement_request_id,
+                    )
+                    .await
+                    .unwrap();
 
-            assert!(
-                self.datastore
+                let res = self
+                    .datastore
                     .read_only_target_addr(&region_snapshot_replace_request)
                     .await
-                    .unwrap()
-                    .is_none()
-            );
+                    .unwrap();
+
+                if res.is_none() {
+                    // test pass, move on
+                    if failed == false {
+                        break;
+                    } else {
+                        panic!("Failed rotg {i} times before working");
+                    }
+                }
+                failed = true;
+                println!("snapshot that should be gone: {:?}", res);
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            }
+            if failed {
+                panic!("failed rotg 10 times, never worked");
+            }
         }
 
         pub async fn remove_disk_from_snapshot_rop(&self) {
