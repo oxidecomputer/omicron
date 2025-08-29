@@ -27,6 +27,7 @@ use crate::db::queries::ip_pool::FilterOverlappingIpRanges;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
+use diesel::result::DatabaseErrorKind;
 use diesel::result::Error as DieselError;
 use ipnetwork::IpNetwork;
 use nexus_db_errors::ErrorHandler;
@@ -587,23 +588,40 @@ impl DataStore {
 
         let conn = self.pool_connection_authorized(opctx).await?;
 
+        // We always insert and update the record on conflicts.
+        //
+        // This lets us use the database constraints for a few checks, such as
+        // assigning more than one default pool for a silo, and ensuring that
+        // there is no default at all for the internal silo.
         let result = diesel::insert_into(dsl::ip_pool_resource)
-            .values(ip_pool_resource.clone())
+            .values(ip_pool_resource)
+            .on_conflict((dsl::ip_pool_id, dsl::resource_id, dsl::resource_type))
+            .do_update()
+            .set(ip_pool_resource)
             .get_result_async(&*conn)
             .await
             .map_err(|e| {
-                public_error_from_diesel(
-                    e,
-                    ErrorHandler::Conflict(
-                        ResourceType::IpPoolResource,
-                        &format!(
-                            "ip_pool_id: {:?}, resource_id: {:?}, resource_type: {:?}",
-                            ip_pool_resource.ip_pool_id,
-                            ip_pool_resource.resource_id,
-                            ip_pool_resource.resource_type,
+                match e {
+                    // Specifically catch conflicts on the unique index which
+                    // ensures at most one default IP Pool per silo.
+                    DieselError::DatabaseError(DatabaseErrorKind::UniqueViolation, ref info)
+                        if info.constraint_name() == Some("one_default_ip_pool_per_resource") =>
+                    {
+                        public_error_from_diesel(
+                            e,
+                            ErrorHandler::Conflict(
+                                ResourceType::IpPoolResource,
+                                &format!(
+                                    "ip_pool_id: {}, resource_id: {}, resource_type: {:?}",
+                                    ip_pool_resource.ip_pool_id,
+                                    ip_pool_resource.resource_id,
+                                    ip_pool_resource.resource_type,
+                                ),
+                            )
                         )
-                    ),
-                )
+                    }
+                    _ => public_error_from_diesel(e, ErrorHandler::Server),
+                }
             })?;
 
         if ip_pool_resource.is_default {
@@ -1360,7 +1378,7 @@ mod test {
             is_default: false,
         };
         datastore
-            .ip_pool_link_silo(&opctx, link_body.clone())
+            .ip_pool_link_silo(&opctx, link_body)
             .await
             .expect("Failed to associate IP pool with silo");
 
@@ -1378,12 +1396,12 @@ mod test {
         assert_eq!(silo_pools[0].0.id(), pool1_for_silo.id());
         assert_eq!(silo_pools[0].1.is_default, false);
 
-        // linking an already linked silo errors due to PK conflict
-        let err = datastore
+        // linking an already linked silo is fine
+        let new = datastore
             .ip_pool_link_silo(&opctx, link_body)
             .await
-            .expect_err("Creating the same link again should conflict");
-        assert_matches!(err, Error::ObjectAlreadyExists { .. });
+            .expect("Creating the same link again should not conflict");
+        assert_eq!(new, link_body);
 
         // now make it default
         datastore
@@ -1489,9 +1507,6 @@ mod test {
             assert_eq!(is_internal, Ok(false));
 
             // now link it to the current silo, and it is still not internal.
-            //
-            // We're only making the IPv4 pool the default right now. See
-            // https://github.com/oxidecomputer/omicron/issues/8884 for more.
             let silo_id = opctx.authn.silo_required().unwrap().id();
             let is_default = matches!(version, IpVersion::V4);
             let link = IpPoolResource {
@@ -1508,6 +1523,79 @@ mod test {
             let is_internal =
                 datastore.ip_pool_is_internal(&opctx, &authz_other_pool).await;
             assert_eq!(is_internal, Ok(false));
+        }
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn cannot_set_default_ip_pool_for_internal_silo() {
+        let logctx =
+            dev::test_setup_log("cannot_set_default_ip_pool_for_internal_silo");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        for version in [IpVersion::V4, IpVersion::V6] {
+            // confirm internal pools appear as internal
+            let (authz_pool, pool) = datastore
+                .ip_pools_service_lookup(&opctx, version)
+                .await
+                .unwrap();
+            assert_eq!(pool.ip_version, version);
+
+            let is_internal =
+                datastore.ip_pool_is_internal(&opctx, &authz_pool).await;
+            assert_eq!(is_internal, Ok(true));
+
+            // Try to link it as the default.
+            let (authz_silo, ..) =
+                nexus_db_lookup::LookupPath::new(&opctx, datastore)
+                    .silo_id(nexus_types::silo::INTERNAL_SILO_ID)
+                    .lookup_for(authz::Action::Read)
+                    .await
+                    .expect("Should be able to lookup internal silo");
+            let link = IpPoolResource {
+                ip_pool_id: authz_pool.id(),
+                resource_type: IpPoolResourceType::Silo,
+                resource_id: authz_silo.id(),
+                is_default: true,
+            };
+            let Err(e) = datastore.ip_pool_link_silo(opctx, link).await else {
+                panic!(
+                    "should have failed to link IP Pool to internal silo as a default"
+                );
+            };
+            let Error::InternalError { internal_message } = &e else {
+                panic!("should have received an internal error");
+            };
+            assert!(
+                internal_message.contains("failed to satisfy CHECK constraint"),
+                "Expected a CHECK constraint violation, found: {}",
+                internal_message,
+            );
+
+            // We can link it if it's not the default.
+            let link = IpPoolResource { is_default: false, ..link };
+            datastore.ip_pool_link_silo(opctx, link).await.expect(
+                "Should be able to link non-default pool to internal silo",
+            );
+
+            // Try to set it to the default, and ensure that this also fails.
+            let Err(e) = datastore
+                .ip_pool_set_default(opctx, &authz_pool, &authz_silo, true)
+                .await
+            else {
+                panic!("should have failed to set internal pool to default");
+            };
+            let Error::InternalError { internal_message } = &e else {
+                panic!("should have received an internal error");
+            };
+            assert!(
+                internal_message.contains("failed to satisfy CHECK constraint"),
+                "Expected a CHECK constraint violation, found: {}",
+                internal_message,
+            );
         }
 
         db.terminate().await;
