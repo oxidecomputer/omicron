@@ -81,8 +81,7 @@ impl MgsRunArgs {
         .await;
         println!("mgs-dev: MGS is running.");
 
-        let addr = gwtestctx.client.bind_address;
-        println!("mgs-dev: MGS API: http://{:?}", addr);
+        println!("mgs-dev: MGS API: {}", gwtestctx.client.baseurl());
 
         // Wait for a signal.
         let caught_signal = signal_stream.next().await;

@@ -231,7 +231,7 @@ SP DETAILS: type "Switch" slot 1
 
 ---------------------------------------------
 stderr:
-note: using MGS URL http://[::1]:REDACTED_PORT/
+note: using MGS URL http://[::1]:REDACTED_PORT
 =============================================
 EXECUTING COMMAND: omdb ["nexus", "background-tasks", "doc"]
 termination: Exited(0)

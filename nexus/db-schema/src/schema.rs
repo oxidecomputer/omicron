@@ -751,6 +751,8 @@ table! {
         mapped_fleet_roles -> Jsonb,
 
         rcgen -> Int8,
+
+        admin_group_name -> Nullable<Text>,
     }
 }
 

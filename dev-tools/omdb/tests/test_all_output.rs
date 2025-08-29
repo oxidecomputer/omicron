@@ -138,15 +138,12 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
     let postgres_url = cptestctx.database.listen_url();
     let nexus_internal_url =
         format!("http://{}/", cptestctx.internal_client.bind_address);
-    let mgs_url = format!(
-        "http://{}/",
-        cptestctx
-            .gateway
-            .get(&SwitchLocation::Switch0)
-            .expect("nexus_test always sets up MGS on switch 0")
-            .client
-            .bind_address
-    );
+    let mgs_url = cptestctx
+        .gateway
+        .get(&SwitchLocation::Switch0)
+        .expect("nexus_test always sets up MGS on switch 0")
+        .client
+        .baseurl();
     let ox_url = format!("http://{}/", cptestctx.oximeter.server_address());
     let ox_test_producer = cptestctx.producer.address().ip();
     let ch_url = format!("http://{}/", cptestctx.clickhouse.http_address());

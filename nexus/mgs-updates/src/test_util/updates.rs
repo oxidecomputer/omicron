@@ -99,12 +99,12 @@ impl UpdateDescription<'_> {
     /// Execution does not start until you call `run_until_status()` or
     /// `finish()`on the returned value.
     pub async fn setup(&self) -> InProgressAttempt {
-        let mgs_client = self.gwtestctx.client();
+        let mgs_client = &self.gwtestctx.client;
 
         // Fetch information about the device that we're going to update.
         // This will be used to configure the preconditions (expected baseboard
         // id and expected active/inactive slot contents).
-        let sp1 = SpTestState::load(&mgs_client, self.sp_type, self.slot_id)
+        let sp1 = SpTestState::load(mgs_client, self.sp_type, self.slot_id)
             .await
             .expect("loading initial state");
         let baseboard_id = Arc::new(
@@ -351,7 +351,7 @@ impl UpdateDescription<'_> {
             step: Some(StepResult::ReadyAgain(StepThrough::new(future))),
             sp_type: self.sp_type,
             slot_id: self.slot_id,
-            mgs_client: self.gwtestctx.client(),
+            mgs_client: self.gwtestctx.client.clone(),
             sp1,
             deployed_artifact: *self.artifact_hash,
             deployed_caboose: deployed_caboose.cloned(),
