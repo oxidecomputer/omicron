@@ -6143,27 +6143,27 @@ async fn test_instance_ephemeral_ip_from_correct_pool(
         std::net::Ipv4Addr::new(10, 0, 0, 5),
     )
     .unwrap();
-    let capacity1 = ipv4_range1.len() as _;
+    let capacity1 = ipv4_range1.len().into();
     let range1 = IpRange::V4(ipv4_range1);
     let ipv4_range2 = Ipv4Range::new(
         std::net::Ipv4Addr::new(10, 1, 0, 1),
         std::net::Ipv4Addr::new(10, 1, 0, 5),
     )
     .unwrap();
-    let capacity2 = ipv4_range2.len() as _;
+    let capacity2 = ipv4_range2.len().into();
     let range2 = IpRange::V4(ipv4_range2);
 
     // make first pool the default for the priv user's silo
     create_ip_pool(&client, "pool1", Some(range1)).await;
     link_ip_pool(&client, "pool1", &DEFAULT_SILO.id(), /*default*/ true).await;
 
-    assert_ip_pool_utilization(client, "pool1", capacity1, capacity1).await;
+    assert_ip_pool_utilization(client, "pool1", 0, capacity1).await;
 
     // second pool is associated with the silo but not default
     create_ip_pool(&client, "pool2", Some(range2)).await;
     link_ip_pool(&client, "pool2", &DEFAULT_SILO.id(), /*default*/ false).await;
 
-    assert_ip_pool_utilization(client, "pool2", capacity2, capacity2).await;
+    assert_ip_pool_utilization(client, "pool2", 0, capacity2).await;
 
     // Create an instance with pool name blank, expect IP from default pool
     create_instance_with_pool(client, "pool1-inst", None).await;
@@ -6174,10 +6174,9 @@ async fn test_instance_ephemeral_ip_from_correct_pool(
         "Expected ephemeral IP to come from pool1"
     );
     // 1 ephemeral + 1 snat
-    assert_ip_pool_utilization(client, "pool1", capacity1 - 2.0, capacity1)
-        .await;
+    assert_ip_pool_utilization(client, "pool1", 2, capacity1).await;
     // pool2 unaffected
-    assert_ip_pool_utilization(client, "pool2", capacity2, capacity2).await;
+    assert_ip_pool_utilization(client, "pool2", 0, capacity2).await;
 
     // Create an instance explicitly using the non-default "other-pool".
     create_instance_with_pool(client, "pool2-inst", Some("pool2")).await;
@@ -6190,12 +6189,10 @@ async fn test_instance_ephemeral_ip_from_correct_pool(
     // SNAT comes from default pool, but count does not change because
     // SNAT IPs can be shared. https://github.com/oxidecomputer/omicron/issues/5043
     // is about getting SNAT IP from specified pool instead of default.
-    assert_ip_pool_utilization(client, "pool1", capacity1 - 2.0, capacity1)
-        .await;
+    assert_ip_pool_utilization(client, "pool1", 2, capacity1).await;
 
     // ephemeral IP comes from specified pool
-    assert_ip_pool_utilization(client, "pool2", capacity2 - 1.0, capacity2)
-        .await;
+    assert_ip_pool_utilization(client, "pool2", 1, capacity2).await;
 
     // make pool2 default and create instance with default pool. check that it now it comes from pool2
     let _: views::IpPoolSiloLink = object_put(
@@ -6213,11 +6210,9 @@ async fn test_instance_ephemeral_ip_from_correct_pool(
     );
 
     // pool1 unchanged
-    assert_ip_pool_utilization(client, "pool1", capacity1 - 2.0, capacity1)
-        .await;
-    // +1 snat (now that pool2 is default) and +1 ephemeral, so 5 - 3 == 2.
-    assert_ip_pool_utilization(client, "pool2", capacity2 - 3.0, capacity2)
-        .await;
+    assert_ip_pool_utilization(client, "pool1", 2, capacity1).await;
+    // +1 snat (now that pool2 is default) and +1 ephemeral, so 3 total
+    assert_ip_pool_utilization(client, "pool2", 3, capacity2).await;
 
     // try to delete association with pool1, but it fails because there is an
     // instance with an IP from the pool in this silo
@@ -6239,10 +6234,9 @@ async fn test_instance_ephemeral_ip_from_correct_pool(
 
     // pool1 is back up to 5 because it had 1 snat + 1 ephemeral from pool1-inst
     // and 1 snat from pool2-inst
-    assert_ip_pool_utilization(client, "pool1", capacity1, capacity1).await;
+    assert_ip_pool_utilization(client, "pool1", 0, capacity1).await;
     // pool2 drops one because it had 1 ephemeral from pool2-inst
-    assert_ip_pool_utilization(client, "pool2", capacity2 - 2.0, capacity2)
-        .await;
+    assert_ip_pool_utilization(client, "pool2", 2, capacity2).await;
 
     // now unlink works
     object_delete(client, &pool1_silo_url).await;
@@ -6437,12 +6431,12 @@ async fn test_instance_attach_several_external_ips(
         std::net::Ipv4Addr::new(10, 0, 0, 10),
     )
     .unwrap();
-    let capacity = range.len() as _;
+    let capacity = range.len().into();
     let default_pool_range = IpRange::V4(range);
     create_ip_pool(&client, "default", Some(default_pool_range)).await;
     link_ip_pool(&client, "default", &DEFAULT_SILO.id(), true).await;
 
-    assert_ip_pool_utilization(client, "default", capacity, capacity).await;
+    assert_ip_pool_utilization(client, "default", 0, capacity).await;
 
     // Create several floating IPs for the instance, totalling 8 IPs.
     let mut external_ip_create =
@@ -6473,14 +6467,9 @@ async fn test_instance_attach_several_external_ips(
     .await;
 
     // 1 ephemeral + 7 floating + 1 SNAT
-    const N_EXPECTED_IPS: f64 = 9.0;
-    assert_ip_pool_utilization(
-        client,
-        "default",
-        capacity - N_EXPECTED_IPS,
-        capacity,
-    )
-    .await;
+    const N_EXPECTED_IPS: u32 = 9;
+    assert_ip_pool_utilization(client, "default", N_EXPECTED_IPS, capacity)
+        .await;
 
     // Verify that all external IPs are visible on the instance and have
     // been allocated in order.
@@ -6641,7 +6630,7 @@ async fn test_instance_create_in_silo(cptestctx: &ControlPlaneTestContext) {
     link_ip_pool(&client, "default", &silo.identity.id, true).await;
 
     const CAPACITY: f64 = 65536.0;
-    assert_ip_pool_utilization(client, "default", CAPACITY, CAPACITY).await;
+    assert_ip_pool_utilization(client, "default", 0, CAPACITY).await;
 
     // Create test projects
     NexusRequest::objects_post(

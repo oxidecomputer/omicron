@@ -391,37 +391,97 @@ impl DataStore {
             })
     }
 
+    /// Return the number of IPs allocated from and the capacity of the provided
+    /// IP Pool.
+    pub async fn ip_pool_utilization(
+        &self,
+        opctx: &OpContext,
+        authz_pool: &authz::IpPool,
+    ) -> Result<(i64, u128), Error> {
+        opctx.authorize(authz::Action::Read, authz_pool).await?;
+        opctx.authorize(authz::Action::ListChildren, authz_pool).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
+        self.transaction_retry_wrapper("ip_pool_utilization")
+            .transaction(&conn, |conn| async move {
+                let allocated = self
+                    .ip_pool_allocated_count_on_connection(&conn, authz_pool)
+                    .await?;
+                self.ip_pool_list_ranges_batched_on_connection(
+                    &conn, authz_pool,
+                )
+                .await
+                .map(|ranges| (allocated, ranges))
+            })
+            .await
+            .map_err(|e| match &e {
+                DieselError::NotFound => public_error_from_diesel(
+                    e,
+                    ErrorHandler::NotFoundByResource(authz_pool),
+                ),
+                _ => public_error_from_diesel(e, ErrorHandler::Server),
+            })
+            .and_then(|(allocated, ranges)| {
+                Self::accumulate_ip_range_sizes(ranges)
+                    .map(|cap| (allocated, cap))
+            })
+    }
+
     /// Return the total number of IPs allocated from the provided pool.
-    pub async fn ip_pool_allocated_count(
+    #[cfg(test)]
+    async fn ip_pool_allocated_count(
         &self,
         opctx: &OpContext,
         authz_pool: &authz::IpPool,
     ) -> Result<i64, Error> {
         opctx.authorize(authz::Action::Read, authz_pool).await?;
-
-        use nexus_db_schema::schema::external_ip;
-
-        external_ip::table
-            .filter(external_ip::ip_pool_id.eq(authz_pool.id()))
-            .filter(external_ip::time_deleted.is_null())
-            .select(diesel::dsl::count_distinct(external_ip::ip))
-            .first_async::<i64>(&*self.pool_connection_authorized(opctx).await?)
+        let conn = self.pool_connection_authorized(opctx).await?;
+        self.ip_pool_allocated_count_on_connection(&conn, authz_pool)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
+    async fn ip_pool_allocated_count_on_connection(
+        &self,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        authz_pool: &authz::IpPool,
+    ) -> Result<i64, DieselError> {
+        use nexus_db_schema::schema::external_ip;
+        external_ip::table
+            .filter(external_ip::ip_pool_id.eq(authz_pool.id()))
+            .filter(external_ip::time_deleted.is_null())
+            .select(diesel::dsl::count_distinct(external_ip::ip))
+            .first_async::<i64>(conn)
+            .await
+    }
+
     /// Return the total capacity of the provided pool.
-    pub async fn ip_pool_total_capacity(
+    #[cfg(test)]
+    async fn ip_pool_total_capacity(
         &self,
         opctx: &OpContext,
         authz_pool: &authz::IpPool,
     ) -> Result<u128, Error> {
         opctx.authorize(authz::Action::Read, authz_pool).await?;
         opctx.authorize(authz::Action::ListChildren, authz_pool).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
+        self.ip_pool_list_ranges_batched_on_connection(&conn, authz_pool)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(
+                    e,
+                    ErrorHandler::NotFoundByResource(authz_pool),
+                )
+            })
+            .and_then(Self::accumulate_ip_range_sizes)
+    }
 
+    async fn ip_pool_list_ranges_batched_on_connection(
+        &self,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        authz_pool: &authz::IpPool,
+    ) -> Result<Vec<(IpNetwork, IpNetwork)>, DieselError> {
         use nexus_db_schema::schema::ip_pool_range;
-
-        let ranges = ip_pool_range::table
+        ip_pool_range::table
             .filter(ip_pool_range::ip_pool_id.eq(authz_pool.id()))
             .filter(ip_pool_range::time_deleted.is_null())
             .select((ip_pool_range::first_address, ip_pool_range::last_address))
@@ -434,19 +494,15 @@ impl DataStore {
             // than 10,000 ranges in a pool, we will undercount, but I have a
             // hard time seeing that as a practical problem.
             .limit(10000)
-            .get_results_async::<(IpNetwork, IpNetwork)>(
-                &*self.pool_connection_authorized(opctx).await?,
-            )
+            .get_results_async::<(IpNetwork, IpNetwork)>(conn)
             .await
-            .map_err(|e| {
-                public_error_from_diesel(
-                    e,
-                    ErrorHandler::NotFoundByResource(authz_pool),
-                )
-            })?;
+    }
 
+    fn accumulate_ip_range_sizes(
+        ranges: Vec<(IpNetwork, IpNetwork)>,
+    ) -> Result<u128, Error> {
         let mut count: u128 = 0;
-        for range in &ranges {
+        for range in ranges.into_iter() {
             let first = range.0.ip();
             let last = range.1.ip();
             let r = IpRange::try_from((first, last))

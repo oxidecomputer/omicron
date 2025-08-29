@@ -166,24 +166,18 @@ async fn test_floating_ip_create(cptestctx: &ControlPlaneTestContext) {
     let default_pool = create_default_ip_pool(&client).await;
 
     const CAPACITY: f64 = 65536.0;
-    assert_ip_pool_utilization(client, "default", CAPACITY, CAPACITY).await;
+    assert_ip_pool_utilization(client, "default", 0, CAPACITY).await;
 
     let ipv4_range =
         Ipv4Range::new(Ipv4Addr::new(10, 1, 0, 1), Ipv4Addr::new(10, 1, 0, 5))
             .unwrap();
-    let other_capacity = ipv4_range.len() as f64;
+    let other_capacity = ipv4_range.len().into();
     let other_pool_range = IpRange::V4(ipv4_range);
     // not automatically linked to currently silo. see below
     let (other_pool, ..) =
         create_ip_pool(&client, "other-pool", Some(other_pool_range)).await;
 
-    assert_ip_pool_utilization(
-        client,
-        "other-pool",
-        other_capacity,
-        other_capacity,
-    )
-    .await;
+    assert_ip_pool_utilization(client, "other-pool", 0, other_capacity).await;
 
     let project = create_project(client, PROJECT_NAME).await;
 
@@ -203,8 +197,7 @@ async fn test_floating_ip_create(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(fip.ip, IpAddr::from(Ipv4Addr::new(10, 0, 0, 0)));
     assert_eq!(fip.ip_pool_id, default_pool.identity.id);
 
-    assert_ip_pool_utilization(client, "default", CAPACITY - 1.0, CAPACITY)
-        .await;
+    assert_ip_pool_utilization(client, "default", 1, CAPACITY).await;
 
     // Create with chosen IP and fallback to default pool.
     let fip_name = FIP_NAMES[1];
@@ -223,8 +216,7 @@ async fn test_floating_ip_create(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(fip.ip, ip_addr);
     assert_eq!(fip.ip_pool_id, default_pool.identity.id);
 
-    assert_ip_pool_utilization(client, "default", CAPACITY - 2.0, CAPACITY)
-        .await;
+    assert_ip_pool_utilization(client, "default", 2, CAPACITY).await;
 
     // Creating with other-pool fails with 404 until it is linked to the current silo
     let fip_name = FIP_NAMES[2];
@@ -241,13 +233,7 @@ async fn test_floating_ip_create(cptestctx: &ControlPlaneTestContext) {
         object_create_error(client, &url, &params, StatusCode::NOT_FOUND).await;
     assert_eq!(error.message, "not found: ip-pool with name \"other-pool\"");
 
-    assert_ip_pool_utilization(
-        client,
-        "other-pool",
-        other_capacity,
-        other_capacity,
-    )
-    .await;
+    assert_ip_pool_utilization(client, "other-pool", 0, other_capacity).await;
 
     // now link the pool and everything should work with the exact same params
     let silo_id = DEFAULT_SILO.id();
@@ -261,13 +247,7 @@ async fn test_floating_ip_create(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(fip.ip, IpAddr::from(Ipv4Addr::new(10, 1, 0, 1)));
     assert_eq!(fip.ip_pool_id, other_pool.identity.id);
 
-    assert_ip_pool_utilization(
-        client,
-        "other-pool",
-        other_capacity - 1.0,
-        other_capacity,
-    )
-    .await;
+    assert_ip_pool_utilization(client, "other-pool", 1, other_capacity).await;
 
     // Create with chosen IP from non-default pool.
     let fip_name = FIP_NAMES[3];
@@ -286,13 +266,7 @@ async fn test_floating_ip_create(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(fip.ip, ip_addr);
     assert_eq!(fip.ip_pool_id, other_pool.identity.id);
 
-    assert_ip_pool_utilization(
-        client,
-        "other-pool",
-        other_capacity - 2.0,
-        other_capacity,
-    )
-    .await;
+    assert_ip_pool_utilization(client, "other-pool", 2, other_capacity).await;
 }
 
 #[nexus_test]
@@ -772,7 +746,7 @@ async fn test_external_ip_live_attach_detach(
     let project = create_project(client, PROJECT_NAME).await;
 
     const CAPACITY: f64 = 65536.0;
-    assert_ip_pool_utilization(client, "default", CAPACITY, CAPACITY).await;
+    assert_ip_pool_utilization(client, "default", 0, CAPACITY).await;
 
     // Create 2 instances, and a floating IP for each instance.
     // One instance will be started, and one will be stopped.
@@ -791,8 +765,7 @@ async fn test_external_ip_live_attach_detach(
     }
 
     // 2 floating IPs have been allocated
-    assert_ip_pool_utilization(client, "default", CAPACITY - 2.0, CAPACITY)
-        .await;
+    assert_ip_pool_utilization(client, "default", 2, CAPACITY).await;
 
     let mut instances = vec![];
     for (i, start) in [false, true].iter().enumerate() {
@@ -829,8 +802,7 @@ async fn test_external_ip_live_attach_detach(
 
     // the two instances above were deliberately not given ephemeral IPs, but
     // they still always get SNAT IPs, but they share one, so we go from 2 to 3
-    assert_ip_pool_utilization(client, "default", CAPACITY - 3.0, CAPACITY)
-        .await;
+    assert_ip_pool_utilization(client, "default", 3, CAPACITY).await;
 
     // Attach a floating IP and ephemeral IP to each instance.
     let mut recorded_ephs = vec![];
@@ -878,8 +850,7 @@ async fn test_external_ip_live_attach_detach(
 
     // now 5 because an ephemeral IP was added for each instance. floating IPs
     // were attached, but they were already allocated
-    assert_ip_pool_utilization(client, "default", CAPACITY - 5.0, CAPACITY)
-        .await;
+    assert_ip_pool_utilization(client, "default", 5, CAPACITY).await;
 
     // Detach a floating IP and ephemeral IP from each instance.
     for (instance, fip) in instances.iter().zip(&fips) {
@@ -913,8 +884,7 @@ async fn test_external_ip_live_attach_detach(
     }
 
     // 2 ephemeral go away on detachment but still 2 floating and 1 SNAT
-    assert_ip_pool_utilization(client, "default", CAPACITY - 3.0, CAPACITY)
-        .await;
+    assert_ip_pool_utilization(client, "default", 3, CAPACITY).await;
 
     // Finally, two kind of funny tests. There is special logic in the handler
     // for the case where the floating IP is specified by name but the instance
@@ -1002,8 +972,7 @@ async fn test_external_ip_live_attach_detach(
     );
 
     // none of that changed the number of allocated IPs
-    assert_ip_pool_utilization(client, "default", CAPACITY - 3.0, CAPACITY)
-        .await;
+    assert_ip_pool_utilization(client, "default", 3, CAPACITY).await;
 }
 
 #[nexus_test]

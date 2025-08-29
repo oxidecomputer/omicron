@@ -40,20 +40,17 @@ impl super::Nexus {
         let (.., authz_pool) =
             pool_lookup.lookup_for(authz::Action::Read).await?;
 
-        // TODO-correctness: We probably want to run these in the same
-        // transaction, otherwise the two counts may change relative to one
-        // another in between each.
-        let allocated = self
-            .db_datastore
-            .ip_pool_allocated_count(opctx, &authz_pool)
-            .await?;
-        let capacity = self
-            .db_datastore
-            .ip_pool_total_capacity(opctx, &authz_pool)
-            .await?;
-        let capacity = capacity as f64;
-        let remaining = capacity - allocated as f64;
-        if remaining < 0.0 {
+        let (allocated, capacity) =
+            self.db_datastore.ip_pool_utilization(opctx, &authz_pool).await?;
+
+        // Compute the remaining count in full 128-bit arithmetic, checking for
+        // negative values, and convert to f64s at the end.
+        let Ok(allocated) = u128::try_from(allocated) else {
+            return Err(Error::internal_error(
+                "Impossible negative number of allocated IP addresses",
+            ));
+        };
+        let Some(remaining) = capacity.checked_sub(allocated) else {
             return Err(Error::internal_error(
                 format!(
                     "Computed an impossible negative count of remaining IP \
@@ -61,7 +58,9 @@ impl super::Nexus {
                 )
                 .as_str(),
             ));
-        }
+        };
+        let remaining = remaining as f64;
+        let capacity = capacity as f64;
         Ok(IpPoolUtilization { remaining, capacity })
     }
 }

@@ -1057,14 +1057,20 @@ pub async fn detach_ip_address_from_igw(
         .unwrap();
 }
 
+/// Assert that the utilization of the provided pool matches expectations.
+///
+/// Note that the third argument is the number of _allocated_ addresses as an
+/// integer. This is compared against the count of remaining addresses
+/// internally, which is what the API returns.
 pub async fn assert_ip_pool_utilization(
     client: &ClientTestContext,
     pool_name: &str,
-    remaining: f64,
+    allocated: u32,
     capacity: f64,
 ) {
     let url = format!("/v1/system/ip-pools/{}/utilization", pool_name);
     let utilization: views::IpPoolUtilization = object_get(client, &url).await;
+    let remaining = capacity - f64::from(allocated);
     assert_eq!(
         remaining, utilization.remaining,
         "IP pool '{}': expected {} remaining, got {}",

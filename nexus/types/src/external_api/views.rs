@@ -391,6 +391,13 @@ pub struct IpPool {
 }
 
 /// The utilization of IP addresses in a pool.
+///
+/// Note that both the count of remaining addresses and the total capacity are
+/// integers, reported as floating point numbers. This accommodates allocations
+/// larger than a 64-bit integer, which is common with IPv6 address spaces. With
+/// very large IP Pools (> 2**53 addresses), integer precision will be lost, in
+/// exchange for representing the entire range. In such a case the pool still
+/// has many available addresses.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct IpPoolUtilization {
     /// The number of remaining addresses in the pool.

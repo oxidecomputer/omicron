@@ -830,7 +830,7 @@ async fn test_ipv4_ip_pool_utilization_total(
 
     let _pool = create_pool(client, "p0").await;
 
-    assert_ip_pool_utilization(client, "p0", 0.0, 0.0).await;
+    assert_ip_pool_utilization(client, "p0", 0, 0.0).await;
 
     let add_url = "/v1/system/ip-pools/p0/ranges/add";
 
@@ -844,7 +844,7 @@ async fn test_ipv4_ip_pool_utilization_total(
     );
     object_create::<IpRange, IpPoolRange>(client, &add_url, &range).await;
 
-    assert_ip_pool_utilization(client, "p0", 5.0, 5.0).await;
+    assert_ip_pool_utilization(client, "p0", 0, 5.0).await;
 }
 
 // We're going to test adding an IPv6 pool and collecting its utilization, even
@@ -877,7 +877,7 @@ async fn test_ipv6_ip_pool_utilization_total(
         .expect("should be able to create IPv6 pool");
 
     // Check the utilization is zero.
-    assert_ip_pool_utilization(client, "p0", 0.0, 0.0).await;
+    assert_ip_pool_utilization(client, "p0", 0, 0.0).await;
 
     // Now let's add a gigantic range. This requires direct datastore
     // shenanigans because adding IPv6 ranges through the API is currently not
@@ -904,7 +904,7 @@ async fn test_ipv6_ip_pool_utilization_total(
         .expect("could not add range");
 
     let capacity = ipv6_range.len() as f64;
-    assert_ip_pool_utilization(client, "p0", capacity, capacity).await;
+    assert_ip_pool_utilization(client, "p0", 0, capacity).await;
 }
 
 // Data for testing overlapping IP ranges
