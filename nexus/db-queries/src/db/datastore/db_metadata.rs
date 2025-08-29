@@ -112,10 +112,11 @@ fn skippable_version(
 /// Describes the state of the database access with respect this Nexus
 #[derive(Debug, Copy, Clone, PartialEq)]
 enum NexusAccess {
-    /// Nexus does not yet have access to the database.
+    /// Nexus does not yet have access to the database, but can take over when
+    /// the current-generation Nexus instances quiesce.
     DoesNotHaveAccessYet { nexus_id: OmicronZoneUuid },
 
-    /// Nexus has been explicitly locked out of the database.
+    /// Nexus has been permanently, explicitly locked out of the database.
     LockedOut,
 
     /// Nexus should have normal access to the database
@@ -128,6 +129,15 @@ enum NexusAccess {
     /// We may or may not have a record of this Nexus, but it should have
     /// access.
     HasImplicitAccess,
+
+    /// Nexus does not yet have access to the database, but it might get
+    /// access later. Unlike [Self::DoesNotHaveAccessYet], this variant
+    /// is triggered because we don't have an explicit records.
+    ///
+    /// Although some Nexuses have records, this one doesn't. This can
+    /// mean that a Nexus zone has just been deployed, and booted before
+    /// its record has been populated.
+    NoRecordNoAccess,
 }
 
 /// Describes the state of the schema with respect this Nexus
@@ -167,10 +177,17 @@ pub enum DatastoreSetupAction {
     /// are either "not_yet" or "quiesced".
     NeedsHandoff { nexus_id: OmicronZoneUuid },
 
+    /// Wait, then try to set up the datastore later.
+    ///
+    /// This can be triggered by observing incomplete data, such as missing
+    /// records in the "db_metadata_nexus" table, which may be populated by
+    /// waiting for an existing system to finish execution.
+    TryLater,
+
     /// Start a schema update
     Update,
 
-    /// Refuse to use the database
+    /// Permanently refuse to use the database
     Refuse,
 }
 
@@ -208,6 +225,12 @@ impl DatastoreSetupAction {
             // The schema updated beyond what we want, do not use it.
             (_, NewerThanDesired) => Self::Refuse,
 
+            // If we aren't sure if we have access yet, try again later.
+            (
+                NoRecordNoAccess,
+                UpToDate | OlderThanDesired | OlderThanDesiredSkipAccessCheck,
+            ) => Self::TryLater,
+
             // If we don't have access yet, but could do something once handoff
             // occurs, then handoff is needed
             (
@@ -239,13 +262,11 @@ impl DataStore {
         // Check if any "db_metadata_nexus" rows exist.
         // If they don't exist, treat the database as having access.
         //
-        // This handles the case for:
-        // - Fresh deployments where RSS hasn't populated the table yet (we need
-        // access to finish "rack_initialization").
-        // - Systems that haven't been migrated to include nexus access control
-        // (we need access to the database to backfill these records).
+        // This handles the case for fresh deployments where RSS hasn't
+        // populated the table yet (we need access to finish
+        // "rack_initialization").
         //
-        // After initialization/migration, this conditional should never trigger
+        // After initialization, this conditional should never trigger
         // again.
         let any_records_exist = self.database_nexus_access_any_exist().await?;
         if !any_records_exist {
@@ -259,14 +280,14 @@ impl DataStore {
             return Ok(NexusAccess::HasImplicitAccess);
         }
 
-        // Records exist, so enforce the access control check
+        // Records exist, so enforce the identity check
         let Some(state) =
             self.database_nexus_access(nexus_id).await?.map(|s| s.state())
         else {
             let msg = "Nexus does not have access to the database (no \
                        db_metadata_nexus record)";
             warn!(&self.log, "{msg}"; "nexus_id" => ?nexus_id);
-            return Ok(NexusAccess::DoesNotHaveAccessYet { nexus_id });
+            return Ok(NexusAccess::NoRecordNoAccess);
         };
 
         let status = match state {
@@ -1304,10 +1325,7 @@ mod test {
             )
             .await
             .expect("Failed to check schema and access");
-        assert_eq!(
-            action.action(),
-            &DatastoreSetupAction::NeedsHandoff { nexus_id }
-        );
+        assert_eq!(action.action(), &DatastoreSetupAction::TryLater);
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -1344,7 +1362,7 @@ mod test {
         assert_eq!(action.action(), &DatastoreSetupAction::Ready);
 
         // Explicit CheckAndTakeover with a Nexus ID that doesn't exist should
-        // not get access
+        // not get access, and should be told to retry later.
         let nexus_id = OmicronZoneUuid::new_v4();
         let action = datastore
             .check_schema_and_access(
@@ -1353,10 +1371,7 @@ mod test {
             )
             .await
             .expect("Failed to check schema and access");
-        assert_eq!(
-            action.action(),
-            &DatastoreSetupAction::NeedsHandoff { nexus_id },
-        );
+        assert_eq!(action.action(), &DatastoreSetupAction::TryLater);
 
         db.terminate().await;
         logctx.cleanup_successful();
