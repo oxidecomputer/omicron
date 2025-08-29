@@ -1485,20 +1485,28 @@ mod region_snapshot_replacement {
 
             // Assert no volumes are referencing the snapshot address
 
-            let volumes = self
-                .datastore
-                .find_volumes_referencing_socket_addr(
-                    &self.opctx(),
-                    self.snapshot_socket_addr,
-                )
-                .await
-                .unwrap();
+            let mut failed = false;
+            for i in 1..10 {
+                let volumes = self
+                    .datastore
+                    .find_volumes_referencing_socket_addr(
+                        &self.opctx(),
+                        self.snapshot_socket_addr,
+                    )
+                    .await
+                    .unwrap();
 
-            if !volumes.is_empty() {
-                eprintln!("{:?}", volumes);
+                if !volumes.is_empty() {
+                    eprintln!("Volume should be gone, try {i} {:?}", volumes);
+                    failed = true;
+                    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                } else {
+                    break;
+                }
             }
-
-            assert!(volumes.is_empty());
+            if failed {
+                panic!("Volume references not cleaned up at first try");
+            }
         }
 
         /// Assert no Crucible resources are leaked
@@ -1649,10 +1657,11 @@ mod region_snapshot_replacement {
             match result {
                 InsertStepResult::Inserted { .. } => {}
 
-                _ => {
+                x => {
                     assert!(
                         false,
-                        "bad result from create_region_snapshot_replacement_step"
+                        "bad result: {:?} from create_region_snapshot_replacement_step",
+                        x
                     );
                 }
             }
@@ -1678,18 +1687,14 @@ mod region_snapshot_replacement {
 
                 if res.is_none() {
                     // test pass, move on
-                    if failed == false {
-                        break;
-                    } else {
-                        panic!("Failed rotg {i} times before working");
-                    }
+                    break;
                 }
                 failed = true;
-                println!("snapshot that should be gone: {:?}", res);
+                eprintln!("loop {i}, snapshot that should be gone: {:?}", res);
                 tokio::time::sleep(std::time::Duration::from_secs(2)).await;
             }
             if failed {
-                panic!("failed rotg 10 times, never worked");
+                panic!("failed some number of times checking for target gone");
             }
         }
 
