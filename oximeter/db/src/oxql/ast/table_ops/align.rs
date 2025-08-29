@@ -486,18 +486,13 @@ fn mean_gauge_value_in_window(
 // This uses both the start and end times when considering each point. Each
 // point's value is weighted by the faction of overlap with the window.
 fn rate_value_in_window(
-    metric_type: &MetricType,
+    _metric_type: &MetricType,
     start_times: &[DateTime<Utc>],
     timestamps: &[DateTime<Utc>],
     input_points: &[Option<f64>],
     window_start: DateTime<Utc>,
     window_end: DateTime<Utc>,
 ) -> Option<f64> {
-    anyhow::ensure!(
-        metric_type == MetricType::Delta,
-        "Alignment requires a delta metric, not {}",
-        metric_type,
-    );
     // We can find the indices where the timestamp and start times separately
     // overlap the window of interest. Then any interval is potentially of
     // interest if _either_ its start time or timestamp is within the window.
