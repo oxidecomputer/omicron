@@ -81,7 +81,9 @@ use omicron_common::address::{
     CLICKHOUSE_ADMIN_PORT, CLICKHOUSE_TCP_PORT,
     get_internal_dns_server_addresses,
 };
-use omicron_common::address::{Ipv6Subnet, NEXUS_TECHPORT_EXTERNAL_PORT};
+use omicron_common::address::{
+    Ipv6Subnet, NEXUS_DEBUG_PORT, NEXUS_TECHPORT_EXTERNAL_PORT,
+};
 use omicron_common::api::external::Generation;
 use omicron_common::api::internal::shared::{
     HostPortConfig, RackNetworkConfig, SledIdentifiers,
@@ -2328,6 +2330,15 @@ impl ServiceManager {
                     },
                     dropshot_internal: dropshot::ConfigDropshot {
                         bind_address: (*internal_address).into(),
+                        default_request_body_max_bytes: 1048576,
+                        default_handler_task_mode: HandlerTaskMode::Detached,
+                        log_headers: vec![],
+                    },
+                    dropshot_debug: dropshot::ConfigDropshot {
+                        bind_address: SocketAddr::new(
+                            (*internal_address.ip()).into(),
+                            NEXUS_DEBUG_PORT,
+                        ),
                         default_request_body_max_bytes: 1048576,
                         default_handler_task_mode: HandlerTaskMode::Detached,
                         log_headers: vec![],
