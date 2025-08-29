@@ -230,7 +230,8 @@ pub struct Blueprint {
     /// The generation of the active group of Nexuses
     ///
     /// If a Nexus instance notices it has a nexus_generation less than
-    /// this value, it will start to quiesce (see: RFD 588).
+    /// this value, it will start to quiesce in preparation for handing off
+    /// control to the newer generation (see: RFD 588).
     pub nexus_generation: Generation,
 
     /// CockroachDB state fingerprint when this blueprint was created
