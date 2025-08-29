@@ -401,16 +401,18 @@ impl DataStore {
         opctx.authorize(authz::Action::Read, authz_pool).await?;
         opctx.authorize(authz::Action::ListChildren, authz_pool).await?;
         let conn = self.pool_connection_authorized(opctx).await?;
-        self.transaction_retry_wrapper("ip_pool_utilization")
+        let (allocated, ranges) = self
+            .transaction_retry_wrapper("ip_pool_utilization")
             .transaction(&conn, |conn| async move {
                 let allocated = self
                     .ip_pool_allocated_count_on_connection(&conn, authz_pool)
                     .await?;
-                self.ip_pool_list_ranges_batched_on_connection(
-                    &conn, authz_pool,
-                )
-                .await
-                .map(|ranges| (allocated, ranges))
+                let ranges = self
+                    .ip_pool_list_ranges_batched_on_connection(
+                        &conn, authz_pool,
+                    )
+                    .await?;
+                Ok((allocated, ranges))
             })
             .await
             .map_err(|e| match &e {
@@ -419,11 +421,9 @@ impl DataStore {
                     ErrorHandler::NotFoundByResource(authz_pool),
                 ),
                 _ => public_error_from_diesel(e, ErrorHandler::Server),
-            })
-            .and_then(|(allocated, ranges)| {
-                Self::accumulate_ip_range_sizes(ranges)
-                    .map(|cap| (allocated, cap))
-            })
+            })?;
+        let capacity = Self::accumulate_ip_range_sizes(ranges)?;
+        Ok((allocated, capacity))
     }
 
     /// Return the total number of IPs allocated from the provided pool.
