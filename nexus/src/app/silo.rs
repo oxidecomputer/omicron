@@ -50,6 +50,7 @@ impl super::Nexus {
         let silo = self.silo_lookup(opctx, NameOrId::Id(silo.id()))?;
         Ok(silo)
     }
+
     pub fn silo_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,

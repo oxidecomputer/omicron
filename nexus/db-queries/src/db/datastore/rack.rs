@@ -57,7 +57,6 @@ use nexus_types::external_api::shared;
 use nexus_types::external_api::shared::IpRange;
 use nexus_types::external_api::shared::SiloRole;
 use nexus_types::identity::Resource;
-use nexus_types::silo::INTERNAL_SILO_ID;
 use omicron_common::api::external::AllowedSourceIps;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
@@ -974,40 +973,15 @@ impl DataStore {
                 },
                 version,
             );
-
-            let internal_pool_id = internal_pool.id();
-
-            let internal_created = self
-                .ip_pool_create(opctx, internal_pool)
+            // Create the pool, but don't mark it as the default. We cannot have
+            // a default for the internal silo.
+            self.ip_pool_create(opctx, internal_pool)
                 .await
                 .map(|_| true)
                 .or_else(|e| match e {
                     Error::ObjectAlreadyExists { .. } => Ok(false),
                     _ => Err(e),
                 })?;
-
-            // make default for the internal silo. only need to do this if
-            // the create went through, i.e., if it wasn't already there
-            //
-            // TODO-completeness: We're linking both IP pools here, but only the
-            // IPv4 pool is set as a default. We need a way for the operator to
-            // control this, either at RSS or through the API. An alternative is
-            // to not set a default at all, even though both are linked.
-            //
-            // See https://github.com/oxidecomputer/omicron/issues/8884
-            if internal_created {
-                let is_default = matches!(version, IpVersion::V4);
-                self.ip_pool_link_silo(
-                    opctx,
-                    db::model::IpPoolResource {
-                        ip_pool_id: internal_pool_id,
-                        resource_type: db::model::IpPoolResourceType::Silo,
-                        resource_id: INTERNAL_SILO_ID,
-                        is_default,
-                    },
-                )
-                .await?;
-            }
         }
 
         Ok(())
