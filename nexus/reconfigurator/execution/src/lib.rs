@@ -409,13 +409,17 @@ fn register_deploy_db_metadata_nexus_records_step<'a>(
         .new_step(
             ExecutionStepId::Ensure,
             "Ensure db_metadata_nexus_state records exist",
-            async move |_cx| {
-                database::deploy_db_metadata_nexus_records(
-                    opctx, &datastore, &blueprint,
+            async move |_cx| match database::deploy_db_metadata_nexus_records(
+                opctx, &datastore, &blueprint,
+            )
+            .await
+            {
+                Ok(()) => StepSuccess::new(()).into(),
+                Err(err) => StepWarning::new(
+                    (),
+                    err.context("ensuring db_metadata_nexus_state").to_string(),
                 )
-                .await
-                .context("ensuring db_metadata_nexus_state")?;
-                StepSuccess::new(()).into()
+                .into(),
             },
         )
         .register();
