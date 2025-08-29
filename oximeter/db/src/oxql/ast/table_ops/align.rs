@@ -108,11 +108,11 @@ impl Align {
                 .collect(),
             AlignmentMethod::MeanWithin => tables
                 .iter()
-                .map(|table| align_mean_within(table, query_end, &self.period))
+                .map(|table| align_and_reduce(table, query_end, &self.period, mean_value_in_window))
                 .collect(),
             AlignmentMethod::Rate => tables
                 .iter()
-                .map(|table| align_rate(table, query_end, &self.period))
+                .map(|table| align_and_reduce(table, query_end, &self.period, rate_value_in_window))
                 .collect(),
         }
     }
@@ -272,28 +272,6 @@ fn align_and_reduce<F>(
         output_table.insert(new_timeseries).unwrap();
     }
     Ok(output_table)
-}
-
-// Align the timeseries in a table by computing the average within each output
-// period.
-
-fn align_mean_within(
-    table: &Table,
-    query_end: &DateTime<Utc>,
-    period: &Duration,
-) -> Result<Table, Error> {
-    align_and_reduce(table, query_end, period, mean_value_in_window)
-}
-
-// Align the timeseries in a table by computing the per second rate within each output
-// period.
-
-fn align_rate(
-    table: &Table,
-    query_end: &DateTime<Utc>,
-    period: &Duration,
-) -> Result<Table, Error> {
-    align_and_reduce(table, query_end, period, rate_value_in_window)
 }
 
 fn mean_value_in_window(
