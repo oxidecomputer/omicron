@@ -1543,7 +1543,7 @@ pub(crate) mod test {
         assert_eq!(
             db_request.replacement_state,
             RegionSnapshotReplacementState::Requested
-        );
+        ); // ZZZ This failed Allocating != Requested
         assert_eq!(db_request.operating_saga_id, None);
     }
 

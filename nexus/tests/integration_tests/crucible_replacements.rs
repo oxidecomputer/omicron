@@ -1697,6 +1697,32 @@ mod region_snapshot_replacement {
                 panic!("failed some number of times checking for target gone");
             }
         }
+        pub async fn pre_assert_read_only_target_gone(&self) {
+            eprintln!(
+                "PRE1 replace_request_id: {:?}",
+                self.replacement_request_id
+            );
+            let region_snapshot_replace_request = self
+                .datastore
+                .get_region_snapshot_replacement_request_by_id(
+                    &self.opctx(),
+                    self.replacement_request_id,
+                )
+                .await
+                .unwrap();
+
+            eprintln!(
+                "PRE2 rs_replace_request: {:?}",
+                region_snapshot_replace_request
+            );
+            let res = self
+                .datastore
+                .read_only_target_addr(&region_snapshot_replace_request)
+                .await
+                .unwrap();
+
+            eprintln!("PRE3 target that should be gone: {:?}", res);
+        }
 
         pub async fn remove_disk_from_snapshot_rop(&self) {
             let disk_url = get_disk_url("disk-from-snapshot");
@@ -1973,9 +1999,13 @@ async fn test_region_snapshot_replacement_step_after_rop_remove_target_gone(
     test_harness.transition_request_to_replacement_done().await;
     test_harness.transition_request_to_running().await;
 
+    test_harness.pre_assert_read_only_target_gone().await;
     test_harness.create_manual_region_snapshot_replacement_step().await;
+    test_harness.pre_assert_read_only_target_gone().await;
     test_harness.delete_the_disk().await;
+    test_harness.pre_assert_read_only_target_gone().await;
     test_harness.delete_the_snapshot().await;
+    test_harness.pre_assert_read_only_target_gone().await;
 
     // Remove the ROP of the disk created from the snapshot
     test_harness.remove_disk_from_snapshot_rop().await;
