@@ -1055,6 +1055,35 @@ impl SledAgentApi for SledAgentImpl {
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let sa = request_context.context();
         let policy = body.into_inner();
+        match policy {
+            OperatorSwitchZonePolicy::StartIfSwitchPresent => (),
+            OperatorSwitchZonePolicy::StopDespiteSwitchPresence => {
+                // Disabling our switch zone is very dangerous: if our switch
+                // zone is the only one that's up, shutting it off will disable
+                // all connectivity to the rack. As a safety, refuse to set our
+                // policy to "off" if this request came from our switch zone;
+                // i.e., only allow disabling the switch zone if we have at
+                // least some evidence that the _other_ switch zone is up.
+                let (our_switch_zone_ip, _) = sa.switch_zone_underlay_info();
+                if request_context.request.remote_addr().ip()
+                    == our_switch_zone_ip
+                {
+                    // Build an explicit `HttpError` instead of using
+                    // `HttpError::for_bad_request()` so we can return a useful
+                    // `external_message`.
+                    let message = "requests to disable the switch zone must \
+                                   come from the other switch zone"
+                        .to_string();
+                    return Err(HttpError {
+                        status_code: ErrorStatusCode::BAD_REQUEST,
+                        error_code: None,
+                        external_message: message.clone(),
+                        internal_message: message,
+                        headers: None,
+                    });
+                }
+            }
+        }
         sa.hardware_monitor().set_switch_zone_policy(policy);
         Ok(HttpResponseUpdatedNoContent())
     }
