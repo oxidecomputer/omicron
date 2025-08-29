@@ -2728,6 +2728,7 @@ table! {
         auth_method -> Nullable<Text>,
         time_completed -> Nullable<Timestamptz>,
         http_status_code -> Nullable<Int4>, // SqlU16
+        resource_id -> Nullable<Text>,
         error_code -> Nullable<Text>,
         error_message -> Nullable<Text>,
         result_kind -> Nullable<crate::enums::AuditLogResultKindEnum>,
@@ -2749,6 +2750,7 @@ table! {
         auth_method -> Nullable<Text>,
         time_completed -> Timestamptz,
         http_status_code -> Nullable<Int4>, // SqlU16
+        resource_id -> Nullable<Text>,
         error_code -> Nullable<Text>,
         error_message -> Nullable<Text>,
         result_kind -> crate::enums::AuditLogResultKindEnum,

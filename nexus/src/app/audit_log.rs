@@ -151,10 +151,14 @@ impl super::Nexus {
         opctx: &OpContext,
         entry: &AuditLogEntryInit,
         result: &Result<R, HttpError>,
+        resource_id: Option<String>,
     ) -> UpdateResult<()> {
         let completion = match result {
-            Ok(response) => AuditLogCompletion::Success {
-                http_status_code: response.status_code().as_u16(),
+            Ok(response) => {
+                AuditLogCompletion::Success {
+                    http_status_code: response.status_code().as_u16(),
+                    resource_id: resource_id,
+                }
             },
             Err(error) => AuditLogCompletion::Error {
                 http_status_code: error.status_code.as_status().as_u16(),

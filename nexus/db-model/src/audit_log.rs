@@ -191,6 +191,8 @@ pub struct AuditLogEntry {
     pub error_code: Option<String>,
     /// Always present if result is an error
     pub error_message: Option<String>,
+    /// Optional because not present for all operations
+    pub resource_id: Option<String>,
 }
 
 /// Struct that we can use as a kind of constructor arg for our actual audit
@@ -200,6 +202,7 @@ pub struct AuditLogEntry {
 pub enum AuditLogCompletion {
     Success {
         http_status_code: u16,
+        resource_id: Option<String>,
     },
     Error {
         http_status_code: u16,
@@ -225,18 +228,20 @@ pub struct AuditLogCompletionUpdate {
     pub http_status_code: Option<SqlU16>,
     pub error_code: Option<String>,
     pub error_message: Option<String>,
+    pub resource_id: Option<String>,
 }
 
 impl From<AuditLogCompletion> for AuditLogCompletionUpdate {
     fn from(completion: AuditLogCompletion) -> Self {
         let time_completed = Utc::now();
         match completion {
-            AuditLogCompletion::Success { http_status_code } => Self {
+            AuditLogCompletion::Success { http_status_code, resource_id, } => Self {
                 time_completed,
                 result_kind: AuditLogResultKind::Success,
                 http_status_code: Some(SqlU16(http_status_code)),
                 error_code: None,
                 error_message: None,
+                resource_id,
             },
             AuditLogCompletion::Error {
                 http_status_code,
@@ -248,6 +253,7 @@ impl From<AuditLogCompletion> for AuditLogCompletionUpdate {
                 http_status_code: Some(SqlU16(http_status_code)),
                 error_code,
                 error_message: Some(error_message),
+                resource_id: None,
             },
             AuditLogCompletion::Timeout => Self {
                 time_completed,
@@ -255,6 +261,7 @@ impl From<AuditLogCompletion> for AuditLogCompletionUpdate {
                 http_status_code: None,
                 error_code: None,
                 error_message: None,
+                resource_id: None,
             },
         }
     }
@@ -274,6 +281,7 @@ impl TryFrom<AuditLogEntry> for views::AuditLogEntry {
             operation_id: entry.operation_id,
             source_ip: entry.source_ip.ip(),
             user_agent: entry.user_agent,
+            resource_id: entry.resource_id,
             actor: match entry.actor_kind {
                 AuditLogActorKind::UserBuiltin => {
                     let user_builtin_id = entry.actor_id.ok_or_else(|| {

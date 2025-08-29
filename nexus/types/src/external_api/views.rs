@@ -1718,6 +1718,9 @@ pub struct AuditLogEntry {
 
     pub actor: AuditLogEntryActor,
 
+    /// The ID of the created resource, if any
+    pub resource_id: Option<String>,
+
     /// How the user authenticated the request. Possible values are
     /// "session_cookie" and "access_token". Optional because it will not be
     /// defined on unauthenticated requests like login attempts.
