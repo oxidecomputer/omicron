@@ -543,6 +543,11 @@ pub struct PlanningMgsUpdatesStepReport {
     // TODO-K: keep the component here that we were unable to update
     // and the reason why
     // add a comment
+    //
+    // TODO-K: Maybe we want to check that all updates are in the version
+    // we want, instead of keeping track of failed ones? Because an in-flight
+    // update may have been removed from pending updates and won't be on
+    // failed updates either
     pub failed_mgs_update: Option<FailedMgsUpdate>,
 }
 
