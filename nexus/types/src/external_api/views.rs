@@ -396,6 +396,8 @@ pub struct InternetGatewayIpAddress {
 pub struct IpPool {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
+    /// The IP version for the pool.
+    pub ip_version: IpVersion,
 }
 
 /// The utilization of IP addresses in a pool.
