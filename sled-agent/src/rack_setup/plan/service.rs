@@ -22,9 +22,9 @@ use nexus_types::deployment::{
 };
 use omicron_common::address::{
     DENDRITE_PORT, DNS_HTTP_PORT, DNS_PORT, Ipv6Subnet, MGD_PORT, MGS_PORT,
-    NEXUS_INTERNAL_PORT, NTP_PORT, NUM_SOURCE_NAT_PORTS, REPO_DEPOT_PORT,
-    RSS_RESERVED_ADDRESSES, ReservedRackSubnet, SLED_PREFIX, get_sled_address,
-    get_switch_zone_address,
+    NEXUS_DEBUG_PORT, NEXUS_INTERNAL_PORT, NTP_PORT, NUM_SOURCE_NAT_PORTS,
+    REPO_DEPOT_PORT, RSS_RESERVED_ADDRESSES, ReservedRackSubnet, SLED_PREFIX,
+    get_sled_address, get_switch_zone_address,
 };
 use omicron_common::api::external::{MacAddr, Vni};
 use omicron_common::api::internal::shared::{
@@ -544,11 +544,7 @@ impl Plan {
             let internal_address =
                 SocketAddrV6::new(ip, NEXUS_INTERNAL_PORT, 0, 0);
             dns_builder
-                .host_zone_with_one_backend(
-                    id,
-                    ServiceName::Nexus,
-                    internal_address,
-                )
+                .host_zone_nexus(id, internal_address, NEXUS_DEBUG_PORT)
                 .unwrap();
             let (nic, external_ip) = svc_port_builder.next_nexus(id)?;
             let filesystem_pool = sled.alloc_zpool_from_u2s()?;

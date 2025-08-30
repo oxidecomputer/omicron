@@ -9,7 +9,7 @@ use internal_dns_types::{
     config::DnsConfigBuilder,
     names::{ServiceName, ZONE_APEX_NAME},
 };
-use omicron_common::api::external::Name;
+use omicron_common::{address::NEXUS_DEBUG_PORT, api::external::Name};
 
 use crate::{
     deployment::{
@@ -98,7 +98,17 @@ pub fn blueprint_internal_dns_config(
             BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
                 internal_address,
                 ..
-            }) => (ServiceName::Nexus, internal_address),
+            }) => {
+                // Add both the `nexus` service as well as the `nexus-debug`
+                // service. Continue so we don't fall through and call
+                // `host_zone_with_one_backend`.
+                dns_builder.host_zone_nexus(
+                    zone.id,
+                    *internal_address,
+                    NEXUS_DEBUG_PORT,
+                )?;
+                continue 'all_zones;
+            }
             BlueprintZoneType::Crucible(blueprint_zone_type::Crucible {
                 address,
                 ..

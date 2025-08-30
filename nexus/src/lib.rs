@@ -138,6 +138,16 @@ impl InternalServer {
     }
 }
 
+impl nexus_test_interface::InternalServer for InternalServer {
+    fn get_http_server_internal_address(&self) -> SocketAddr {
+        self.http_server_internal.local_addr()
+    }
+
+    fn get_http_server_debug_address(&self) -> SocketAddr {
+        self.http_server_debug.local_addr()
+    }
+}
+
 type DropshotServer = dropshot::HttpServer<ApiContext>;
 
 /// Packages up a [`Nexus`], running both external and internal HTTP API servers
@@ -258,11 +268,10 @@ impl nexus_test_interface::NexusServer for Server {
     async fn start_internal(
         config: &NexusConfig,
         log: &Logger,
-    ) -> Result<(InternalServer, SocketAddr), String> {
+    ) -> Result<InternalServer, String> {
         let internal_server = InternalServer::start(config, &log).await?;
         internal_server.apictx.context.nexus.wait_for_populate().await.unwrap();
-        let addr = internal_server.http_server_internal.local_addr();
-        Ok((internal_server, addr))
+        Ok(internal_server)
     }
 
     async fn stop_internal(internal_server: InternalServer) {

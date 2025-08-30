@@ -48,12 +48,12 @@ use std::sync::Arc;
 
 #[async_trait]
 pub trait NexusServer: Send + Sync + 'static {
-    type InternalServer: Send + Sync + 'static;
+    type InternalServer: InternalServer;
 
     async fn start_internal(
         config: &NexusConfig,
         log: &Logger,
-    ) -> Result<(Self::InternalServer, SocketAddr), String>;
+    ) -> Result<Self::InternalServer, String>;
 
     /// Stops the execution of a `Self::InternalServer`.
     ///
@@ -128,4 +128,9 @@ pub trait NexusServer: Send + Sync + 'static {
     ) -> Result<Option<Collection>, Error>;
 
     async fn close(self);
+}
+
+pub trait InternalServer: Send + Sync + 'static {
+    fn get_http_server_internal_address(&self) -> SocketAddr;
+    fn get_http_server_debug_address(&self) -> SocketAddr;
 }

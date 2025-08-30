@@ -987,6 +987,7 @@ mod test {
             ServiceName::InternalDns,
             ServiceName::ExternalDns,
             ServiceName::Nexus,
+            ServiceName::NexusDebug,
             ServiceName::Oximeter,
             ServiceName::Dendrite,
             ServiceName::CruciblePantry,

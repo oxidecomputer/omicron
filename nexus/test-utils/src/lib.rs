@@ -42,6 +42,7 @@ use nexus_sled_agent_shared::inventory::OmicronSledConfig;
 use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
 use nexus_sled_agent_shared::inventory::SledCpuFamily;
 use nexus_sled_agent_shared::recovery_silo::RecoverySiloConfig;
+use nexus_test_interface::InternalServer;
 use nexus_test_interface::NexusServer;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintDatasetConfig;
@@ -377,6 +378,19 @@ impl RackInitRequestBuilder {
         self.internal_dns_config
             .service_backend_sled(service_name, &sled, address.port())
             .expect("Failed to set up DNS for GZ service");
+    }
+
+    // Special handling of Nexus, which has multiple SRV records for its single
+    // zone.
+    fn add_nexus_to_dns(
+        &mut self,
+        zone_id: OmicronZoneUuid,
+        address: SocketAddrV6,
+        debug_port: u16,
+    ) {
+        self.internal_dns_config
+            .host_zone_nexus(zone_id, address, debug_port)
+            .expect("Failed to set up Nexus DNS");
     }
 
     // Special handling of ClickHouse, which has multiple SRV records for its
@@ -822,18 +836,23 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                 .clone(),
         };
 
-        let (nexus_internal, nexus_internal_addr) =
-            N::start_internal(&self.config, &log).await?;
-
-        let address = SocketAddrV6::new(
-            match nexus_internal_addr.ip() {
-                IpAddr::V4(addr) => addr.to_ipv6_mapped(),
-                IpAddr::V6(addr) => addr,
-            },
-            nexus_internal_addr.port(),
-            0,
-            0,
-        );
+        let nexus_internal = N::start_internal(&self.config, &log).await?;
+        let nexus_internal_addr =
+            nexus_internal.get_http_server_internal_address();
+        let internal_address = match nexus_internal_addr {
+            SocketAddr::V4(addr) => {
+                SocketAddrV6::new(addr.ip().to_ipv6_mapped(), addr.port(), 0, 0)
+            }
+            SocketAddr::V6(addr) => addr,
+        };
+        let debug_address = match nexus_internal.get_http_server_debug_address()
+        {
+            SocketAddr::V4(addr) => {
+                SocketAddrV6::new(addr.ip().to_ipv6_mapped(), addr.port(), 0, 0)
+            }
+            SocketAddr::V6(addr) => addr,
+        };
+        assert_eq!(internal_address.ip(), debug_address.ip());
 
         let mac = self
             .rack_init_builder
@@ -843,10 +862,10 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         let external_address =
             self.config.deployment.dropshot_external.dropshot.bind_address.ip();
         let nexus_id = self.config.deployment.id;
-        self.rack_init_builder.add_service_to_dns(
+        self.rack_init_builder.add_nexus_to_dns(
             nexus_id,
-            address,
-            ServiceName::Nexus,
+            internal_address,
+            debug_address.port(),
         );
 
         self.blueprint_zones.push(BlueprintZoneConfig {
@@ -864,7 +883,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                     ip: external_address,
                 },
                 external_tls: self.config.deployment.dropshot_external.tls,
-                internal_address: address,
+                internal_address,
                 nic: NetworkInterface {
                     id: Uuid::new_v4(),
                     ip: NEXUS_OPTE_IPV4_SUBNET
