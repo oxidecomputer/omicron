@@ -29,6 +29,7 @@ static KNOWN_VERSIONS: LazyLock<Vec<KnownVersion>> = LazyLock::new(|| {
         // v
         // KnownVersion::new(next_int, "unique-dirname-with-the-sql-files"),
         KnownVersion::new(186, "nexus-generation"),
+        KnownVersion::new(185, "populate-db-metadata-nexus"),
         KnownVersion::new(184, "store-silo-admin-group-name"),
         KnownVersion::new(183, "add-ip-version-to-pools"),
         KnownVersion::new(182, "add-tuf-artifact-board"),
