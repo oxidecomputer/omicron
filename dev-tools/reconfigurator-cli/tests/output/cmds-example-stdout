@@ -399,6 +399,7 @@ parent:    02697f74-b14a-4418-90f0-c28b2a3a6aa9
     internal DNS version:::   1
     external DNS version:::   1
     target release min gen:   1
+    nexus gen::::::::::::::   1
 
  PENDING MGS-MANAGED UPDATES: 0
 
@@ -518,6 +519,7 @@ parent:    02697f74-b14a-4418-90f0-c28b2a3a6aa9
     internal DNS version:::   1
     external DNS version:::   1
     target release min gen:   1
+    nexus gen::::::::::::::   1
 
  PENDING MGS-MANAGED UPDATES: 0
 
@@ -633,6 +635,7 @@ to:   blueprint 86db3308-f817-4626-8838-4085949a6a41
     internal DNS version:::   1 (unchanged)
     external DNS version:::   1 (unchanged)
     target release min gen:   1 (unchanged)
+    nexus gen::::::::::::::   1 (unchanged)
 
  OXIMETER SETTINGS:
     generation:   1 (unchanged)
@@ -710,6 +713,7 @@ to:   blueprint 86db3308-f817-4626-8838-4085949a6a41
     internal DNS version:::   1 (unchanged)
     external DNS version:::   1 (unchanged)
     target release min gen:   1 (unchanged)
+    nexus gen::::::::::::::   1 (unchanged)
 
  OXIMETER SETTINGS:
     generation:   1 (unchanged)
@@ -787,6 +791,7 @@ to:   blueprint 02697f74-b14a-4418-90f0-c28b2a3a6aa9
     internal DNS version:::   1 (unchanged)
     external DNS version:::   1 (unchanged)
     target release min gen:   1 (unchanged)
+    nexus gen::::::::::::::   1 (unchanged)
 
  OXIMETER SETTINGS:
     generation:   1 (unchanged)
@@ -1023,6 +1028,7 @@ parent:    02697f74-b14a-4418-90f0-c28b2a3a6aa9
     internal DNS version:::   1
     external DNS version:::   1
     target release min gen:   1
+    nexus gen::::::::::::::   1
 
  PENDING MGS-MANAGED UPDATES: 0
 
@@ -1661,6 +1667,7 @@ to:   blueprint 86db3308-f817-4626-8838-4085949a6a41
     internal DNS version:::   1 (unchanged)
     external DNS version:::   1 (unchanged)
     target release min gen:   1 (unchanged)
+    nexus gen::::::::::::::   1 (unchanged)
 
  OXIMETER SETTINGS:
     generation:   1 (unchanged)

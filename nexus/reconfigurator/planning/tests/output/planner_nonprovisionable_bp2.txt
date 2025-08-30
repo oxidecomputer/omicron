@@ -510,6 +510,7 @@ parent:    4d4e6c38-cd95-4c4e-8f45-6af4d686964b
     internal DNS version:::   1
     external DNS version:::   1
     target release min gen:   1
+    nexus gen::::::::::::::   1
 
  PENDING MGS-MANAGED UPDATES: 0
 

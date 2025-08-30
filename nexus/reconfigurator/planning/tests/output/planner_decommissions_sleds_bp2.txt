@@ -322,6 +322,7 @@ parent:    516e80a3-b362-4fac-bd3c-4559717120dd
     internal DNS version:::   1
     external DNS version:::   1
     target release min gen:   1
+    nexus gen::::::::::::::   1
 
  PENDING MGS-MANAGED UPDATES: 0
 
