@@ -175,7 +175,6 @@ fn milan_ideal() -> CpuIdDump {
     let mut leaf = FeatureInfo::new(Vendor::Amd);
 
     // Set up EAX: Family 19h model 1h.
-    leaf.set_extended_family_id(0x00); // why is this like this one of these two lines should go away
     leaf.set_extended_family_id(0xA);
     leaf.set_base_family_id(0x0F);
     leaf.set_base_model_id(0x01);
