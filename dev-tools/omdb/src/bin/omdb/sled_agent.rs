@@ -5,11 +5,13 @@
 //! omdb commands that query or update specific Sleds
 
 use crate::Omdb;
+use crate::check_allow_destructive::DestructiveOperationToken;
 use crate::helpers::CONNECTION_OPTIONS_HEADING;
 use anyhow::Context;
 use anyhow::bail;
 use clap::Args;
 use clap::Subcommand;
+use sled_agent_client::types::OperatorSwitchZonePolicy;
 
 /// Arguments to the "omdb sled-agent" subcommand
 #[derive(Debug, Args)]
@@ -34,6 +36,10 @@ enum SledAgentCommands {
     #[clap(subcommand)]
     Zones(ZoneCommands),
 
+    /// control the switch zone policy
+    #[clap(subcommand)]
+    SwitchZonePolicy(SwitchZonePolicyCommands),
+
     /// print information about the local bootstore node
     #[clap(subcommand)]
     Bootstore(BootstoreCommands),
@@ -41,13 +47,28 @@ enum SledAgentCommands {
 
 #[derive(Debug, Subcommand)]
 enum ZoneCommands {
-    /// Print list of all running control plane zones
+    /// print list of all running control plane zones
     List,
 }
 
 #[derive(Debug, Subcommand)]
+enum SwitchZonePolicyCommands {
+    /// get the current policy
+    Get,
+
+    /// enable starting the switch zone if a switch is present
+    Enable,
+
+    /// disable the switch zone
+    ///
+    /// This is extremely dangerous! If used incorrectly, it can render the rack
+    /// inaccessible.
+    DangerDangerDisable,
+}
+
+#[derive(Debug, Subcommand)]
 enum BootstoreCommands {
-    /// Show the internal state of the local bootstore node
+    /// show the internal state of the local bootstore node
     Status,
 }
 
@@ -71,7 +92,7 @@ impl SledAgentArgs {
     /// Run a `omdb sled-agent` subcommand.
     pub(crate) async fn run_cmd(
         &self,
-        _omdb: &Omdb,
+        omdb: &Omdb,
         log: &slog::Logger,
     ) -> Result<(), anyhow::Error> {
         // This is a little goofy. The sled URL is required, but can come
@@ -88,6 +109,31 @@ impl SledAgentArgs {
         match &self.command {
             SledAgentCommands::Zones(ZoneCommands::List) => {
                 cmd_zones_list(&client).await
+            }
+            SledAgentCommands::SwitchZonePolicy(
+                SwitchZonePolicyCommands::Get,
+            ) => cmd_switch_zone_policy_get(&client).await,
+            SledAgentCommands::SwitchZonePolicy(
+                SwitchZonePolicyCommands::Enable,
+            ) => {
+                let token = omdb.check_allow_destructive()?;
+                cmd_switch_zone_policy_put(
+                    &client,
+                    OperatorSwitchZonePolicy::StartIfSwitchPresent,
+                    token,
+                )
+                .await
+            }
+            SledAgentCommands::SwitchZonePolicy(
+                SwitchZonePolicyCommands::DangerDangerDisable,
+            ) => {
+                let token = omdb.check_allow_destructive()?;
+                cmd_switch_zone_policy_put(
+                    &client,
+                    OperatorSwitchZonePolicy::StopDespiteSwitchPresence,
+                    token,
+                )
+                .await
             }
             SledAgentCommands::Bootstore(BootstoreCommands::Status) => {
                 cmd_bootstore_status(&client).await
@@ -113,6 +159,44 @@ async fn cmd_zones_list(
     }
 
     Ok(())
+}
+
+/// Runs `omdb sled-agent switch-zone-policy get`
+async fn cmd_switch_zone_policy_get(
+    client: &sled_agent_client::Client,
+) -> anyhow::Result<()> {
+    let response = client
+        .debug_operator_switch_zone_policy_get()
+        .await
+        .context("getting policy")?;
+    let policy = response.into_inner();
+
+    match policy {
+        OperatorSwitchZonePolicy::StartIfSwitchPresent => {
+            println!("switch zone will start if a switch is present (default)");
+        }
+        OperatorSwitchZonePolicy::StopDespiteSwitchPresence => {
+            println!(
+                "switch zone DISABLED and will not start even if a \
+                 switch is present"
+            );
+        }
+    }
+
+    Ok(())
+}
+
+/// Runs `omdb sled-agent switch-zone-policy {enable,danger-danger-disable}`
+async fn cmd_switch_zone_policy_put(
+    client: &sled_agent_client::Client,
+    policy: OperatorSwitchZonePolicy,
+    _destruction_token: DestructiveOperationToken,
+) -> anyhow::Result<()> {
+    client
+        .debug_operator_switch_zone_policy_put(policy)
+        .await
+        .context("setting policy")?;
+    cmd_switch_zone_policy_get(client).await
 }
 
 /// Runs `omdb sled-agent bootstore status`

@@ -791,6 +791,19 @@ impl SledAgentApi for SledAgentSimImpl {
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         method_unimplemented()
     }
+
+    async fn debug_operator_switch_zone_policy_get(
+        _request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<OperatorSwitchZonePolicy>, HttpError> {
+        method_unimplemented()
+    }
+
+    async fn debug_operator_switch_zone_policy_put(
+        _request_context: RequestContext<Self::Context>,
+        _body: TypedBody<OperatorSwitchZonePolicy>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        method_unimplemented()
+    }
 }
 
 fn method_unimplemented<T>() -> Result<T, HttpError> {
