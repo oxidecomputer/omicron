@@ -2569,7 +2569,7 @@
             ]
           },
           "nexus_generation": {
-            "description": "The generation of the active group of Nexuses\n\nIf a Nexus instance notices it has a nexus_generation less than this value, it will start to quiesce (see: RFD 588).",
+            "description": "The generation of the active group of Nexuses\n\nIf a Nexus instance notices it has a nexus_generation less than this value, it will start to quiesce in preparation for handing off control to the newer generation (see: RFD 588).",
             "allOf": [
               {
                 "$ref": "#/components/schemas/Generation"
