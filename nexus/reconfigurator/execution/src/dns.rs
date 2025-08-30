@@ -1502,6 +1502,14 @@ mod test {
             datastore.zpool_list_all_external_batched(&opctx).await.unwrap();
         let ip_pool_range_rows =
             fetch_all_service_ip_pool_ranges(&datastore, &opctx).await;
+        let active_nexus_zones = datastore
+            .get_active_db_metadata_nexus(&opctx)
+            .await
+            .internal_context("fetching active nexuses")
+            .unwrap()
+            .into_iter()
+            .map(|z| z.nexus_id())
+            .collect();
         let planning_input = {
             let mut builder = PlanningInputFromDb {
                 sled_rows: &sled_rows,
@@ -1527,6 +1535,8 @@ mod test {
                 tuf_repo: TufRepoPolicy::initial(),
                 old_repo: TufRepoPolicy::initial(),
                 chicken_switches: PlannerChickenSwitches::default(),
+                active_nexus_zones,
+                not_yet_nexus_zones: Vec::new(),
                 log,
             }
             .build()
