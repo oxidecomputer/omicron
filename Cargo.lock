@@ -10763,7 +10763,7 @@ dependencies = [
 [[package]]
 name = "raw-cpuid"
 version = "11.5.0"
-source = "git+https://github.com/oxidecomputer/rust-cpuid.git?rev=eb65cd77789428ea817288bd86d7f7a1e19f97a4#eb65cd77789428ea817288bd86d7f7a1e19f97a4"
+source = "git+https://github.com/oxidecomputer/rust-cpuid.git?rev=0a8dbd2311263f6a59ea58089e33c8331436ff3a#0a8dbd2311263f6a59ea58089e33c8331436ff3a"
 dependencies = [
  "bitflags 2.9.1",
 ]
