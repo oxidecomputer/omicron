@@ -984,6 +984,7 @@ mod test {
         db.terminate().await;
         logctx.cleanup_successful();
     }
+
     fn create_test_blueprint(
         nexus_zones: Vec<(OmicronZoneUuid, BlueprintZoneDisposition)>,
     ) -> Blueprint {
