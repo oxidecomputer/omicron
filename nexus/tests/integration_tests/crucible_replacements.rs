@@ -1071,24 +1071,33 @@ async fn test_racing_replacements_for_soft_deleted_disk_volume(
         activate_background_task(&internal_client, "region_replacement_driver")
             .await;
 
-    assert!(match last_background_task.last {
+    let res = match last_background_task.last {
         LastResult::Completed(last_result_completed) => {
             match serde_json::from_value::<RegionReplacementDriverStatus>(
                 last_result_completed.details,
             ) {
                 Err(e) => {
+                    eprintln!("Json not what we expected");
                     eprintln!("{e}");
                     false
                 }
 
-                Ok(v) => !v.drive_invoked_ok.is_empty(),
+                Ok(v) => {
+                    if !v.drive_invoked_ok.is_empty() {
+                        true
+                    } else {
+                        eprintln!("v.drive_ok: {:?}", v.drive_invoked_ok);
+                        false
+                    }
+                }
             }
         }
-
-        _ => {
+        x => {
+            eprintln!("Unexpected result here: {:?}", x);
             false
         }
-    });
+    };
+    assert!(res);
 
     // wait for the drive saga to complete here
     wait_for_condition(
@@ -1669,6 +1678,10 @@ mod region_snapshot_replacement {
 
         pub async fn assert_read_only_target_gone(&self) {
             let mut failed = false;
+            eprintln!(
+                "NOW1 replace_request_id: {:?}",
+                self.replacement_request_id
+            );
             for i in 0..10 {
                 let region_snapshot_replace_request = self
                     .datastore
@@ -1678,6 +1691,10 @@ mod region_snapshot_replacement {
                     )
                     .await
                     .unwrap();
+                eprintln!(
+                    "NOW2 rs_replace_request: {:?}",
+                    region_snapshot_replace_request
+                );
 
                 let res = self
                     .datastore
@@ -1685,13 +1702,14 @@ mod region_snapshot_replacement {
                     .await
                     .unwrap();
 
+                eprintln!("NOW3 target that should be gone: {:?}", res);
                 if res.is_none() {
                     // test pass, move on
                     break;
                 }
                 failed = true;
                 eprintln!("loop {i}, snapshot that should be gone: {:?}", res);
-                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                tokio::time::sleep(std::time::Duration::from_secs(4)).await;
             }
             if failed {
                 panic!("failed some number of times checking for target gone");
@@ -1727,7 +1745,7 @@ mod region_snapshot_replacement {
         pub async fn remove_disk_from_snapshot_rop(&self) {
             let disk_url = get_disk_url("disk-from-snapshot");
 
-            eprintln!("Remove disk from snapshot for disk {:?}", disk_url);
+            eprintln!("NOW Remove disk from snapshot for disk {:?}", disk_url);
             let disk_from_snapshot: external::Disk =
                 NexusRequest::object_get(&self.client, &disk_url)
                     .authn_as(AuthnMode::PrivilegedUser)
@@ -1739,7 +1757,7 @@ mod region_snapshot_replacement {
 
             let disk_id = disk_from_snapshot.identity.id;
 
-            eprintln!("Remove disk id {:?}", disk_id);
+            eprintln!("NOW Remove disk id {:?}", disk_id);
             // Note: `make_request` needs a type here, otherwise rustc cannot
             // figure out the type of the `request_body` parameter
             self.internal_client
