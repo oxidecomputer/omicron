@@ -4563,7 +4563,14 @@ mod tests {
                 counts.insert(table_name.to_string(), count);
             }
 
-            BlueprintTableCounts { counts }
+            let table_counts = BlueprintTableCounts { counts };
+            
+            // Verify no new blueprint tables were added without updating this function
+            if let Err(msg) = table_counts.verify_all_tables_covered(datastore).await {
+                panic!("{}", msg);
+            }
+            
+            table_counts
         }
 
         /// Returns true if all tables are empty (0 rows).
@@ -4672,15 +4679,15 @@ mod tests {
             .filter(|table| !exception_tables.contains(&table.as_str()))
             .collect();
         
-        assert!(
-            problematic_tables.is_empty(),
-            "Expected tables to be populated for blueprint {blueprint_id}: {:?}",
-            problematic_tables
-        );
-
-        // Verify no new blueprint tables were added without updating this function
-        if let Err(msg) = counts.verify_all_tables_covered(datastore).await {
-            panic!("{}", msg);
+        if !problematic_tables.is_empty() {
+            panic!(
+                "Expected tables to be populated for blueprint {blueprint_id}: {:?}\n\n\
+                If every blueprint should be expected to have a value in this table, then this is a bug. \
+                Otherwise, you may need to add a table to the exception list in `ensure_blueprint_fully_populated()`. \
+                If you do this, please ensure that you add a test to `test_representative_blueprint()` that creates a \
+                blueprint that _does_ populate this table and verifies it.",
+                problematic_tables
+            );
         }
     }
 }
