@@ -4643,7 +4643,10 @@ mod tests {
             
             if !tables_unchecked.is_empty() {
                 Err(format!(
-                    "found blueprint-related table(s) not covered by BlueprintTableCounts: {}",
+                    "found blueprint-related table(s) not covered by BlueprintTableCounts: {}\n\n\
+                    If you see this message, you probably added a blueprint table whose name started with `bp_*`. \
+                    Add it to the query list in BlueprintTableCounts::new() so that this function checks the table. \
+                    You may also need to update blueprint deletion/insertion code to handle rows in that table.",
                     tables_unchecked.join(", ")
                 ))
             } else {
