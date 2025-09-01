@@ -121,7 +121,7 @@ impl IpPool {
 
 impl From<IpPool> for views::IpPool {
     fn from(pool: IpPool) -> Self {
-        Self { identity: pool.identity() }
+        Self { identity: pool.identity(), ip_version: pool.ip_version.into() }
     }
 }
 

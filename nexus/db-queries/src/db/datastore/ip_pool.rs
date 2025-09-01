@@ -57,16 +57,6 @@ use omicron_common::api::external::http_pagination::PaginatedBy;
 use ref_cast::RefCast;
 use uuid::Uuid;
 
-pub struct IpsAllocated {
-    pub ipv4: i64,
-    pub ipv6: i64,
-}
-
-pub struct IpsCapacity {
-    pub ipv4: u32,
-    pub ipv6: u128,
-}
-
 /// Helper type with both an authz IP Pool and the actual DB record.
 #[derive(Debug, Clone)]
 pub struct ServiceIpPool {
@@ -401,53 +391,100 @@ impl DataStore {
             })
     }
 
-    pub async fn ip_pool_allocated_count(
+    /// Return the number of IPs allocated from and the capacity of the provided
+    /// IP Pool.
+    pub async fn ip_pool_utilization(
         &self,
         opctx: &OpContext,
         authz_pool: &authz::IpPool,
-    ) -> Result<IpsAllocated, Error> {
-        opctx.authorize(authz::Action::Read, authz_pool).await?;
-
-        use diesel::dsl::sql;
-        use diesel::sql_types::BigInt;
-        use nexus_db_schema::schema::external_ip;
-
-        let (ipv4, ipv6) = external_ip::table
-            .filter(external_ip::ip_pool_id.eq(authz_pool.id()))
-            .filter(external_ip::time_deleted.is_null())
-            // need to do distinct IP because SNAT IPs are shared between
-            // multiple instances, and each gets its own row in the table
-            .select((
-                sql::<BigInt>(
-                    "count(distinct ip) FILTER (WHERE family(ip) = 4)",
-                ),
-                sql::<BigInt>(
-                    "count(distinct ip) FILTER (WHERE family(ip) = 6)",
-                ),
-            ))
-            .first_async::<(i64, i64)>(
-                &*self.pool_connection_authorized(opctx).await?,
-            )
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
-
-        Ok(IpsAllocated { ipv4, ipv6 })
-    }
-
-    pub async fn ip_pool_total_capacity(
-        &self,
-        opctx: &OpContext,
-        authz_pool: &authz::IpPool,
-    ) -> Result<IpsCapacity, Error> {
+    ) -> Result<(i64, u128), Error> {
         opctx.authorize(authz::Action::Read, authz_pool).await?;
         opctx.authorize(authz::Action::ListChildren, authz_pool).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
+        let (allocated, ranges) = self
+            .transaction_retry_wrapper("ip_pool_utilization")
+            .transaction(&conn, |conn| async move {
+                let allocated = self
+                    .ip_pool_allocated_count_on_connection(&conn, authz_pool)
+                    .await?;
+                let ranges = self
+                    .ip_pool_list_ranges_batched_on_connection(
+                        &conn, authz_pool,
+                    )
+                    .await?;
+                Ok((allocated, ranges))
+            })
+            .await
+            .map_err(|e| match &e {
+                DieselError::NotFound => public_error_from_diesel(
+                    e,
+                    ErrorHandler::NotFoundByResource(authz_pool),
+                ),
+                _ => public_error_from_diesel(e, ErrorHandler::Server),
+            })?;
+        let capacity = Self::accumulate_ip_range_sizes(ranges)?;
+        Ok((allocated, capacity))
+    }
 
+    /// Return the total number of IPs allocated from the provided pool.
+    #[cfg(test)]
+    async fn ip_pool_allocated_count(
+        &self,
+        opctx: &OpContext,
+        authz_pool: &authz::IpPool,
+    ) -> Result<i64, Error> {
+        opctx.authorize(authz::Action::Read, authz_pool).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
+        self.ip_pool_allocated_count_on_connection(&conn, authz_pool)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    async fn ip_pool_allocated_count_on_connection(
+        &self,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        authz_pool: &authz::IpPool,
+    ) -> Result<i64, DieselError> {
+        use nexus_db_schema::schema::external_ip;
+        external_ip::table
+            .filter(external_ip::ip_pool_id.eq(authz_pool.id()))
+            .filter(external_ip::time_deleted.is_null())
+            .select(diesel::dsl::count_distinct(external_ip::ip))
+            .first_async::<i64>(conn)
+            .await
+    }
+
+    /// Return the total capacity of the provided pool.
+    #[cfg(test)]
+    async fn ip_pool_total_capacity(
+        &self,
+        opctx: &OpContext,
+        authz_pool: &authz::IpPool,
+    ) -> Result<u128, Error> {
+        opctx.authorize(authz::Action::Read, authz_pool).await?;
+        opctx.authorize(authz::Action::ListChildren, authz_pool).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
+        self.ip_pool_list_ranges_batched_on_connection(&conn, authz_pool)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(
+                    e,
+                    ErrorHandler::NotFoundByResource(authz_pool),
+                )
+            })
+            .and_then(Self::accumulate_ip_range_sizes)
+    }
+
+    async fn ip_pool_list_ranges_batched_on_connection(
+        &self,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        authz_pool: &authz::IpPool,
+    ) -> Result<Vec<(IpNetwork, IpNetwork)>, DieselError> {
         use nexus_db_schema::schema::ip_pool_range;
-
-        let ranges = ip_pool_range::table
+        ip_pool_range::table
             .filter(ip_pool_range::ip_pool_id.eq(authz_pool.id()))
             .filter(ip_pool_range::time_deleted.is_null())
-            .select(IpPoolRange::as_select())
+            .select((ip_pool_range::first_address, ip_pool_range::last_address))
             // This is a rare unpaginated DB query, which means we are
             // vulnerable to a resource exhaustion attack in which someone
             // creates a very large number of ranges in order to make this
@@ -457,28 +494,25 @@ impl DataStore {
             // than 10,000 ranges in a pool, we will undercount, but I have a
             // hard time seeing that as a practical problem.
             .limit(10000)
-            .get_results_async::<IpPoolRange>(
-                &*self.pool_connection_authorized(opctx).await?,
-            )
+            .get_results_async::<(IpNetwork, IpNetwork)>(conn)
             .await
-            .map_err(|e| {
-                public_error_from_diesel(
-                    e,
-                    ErrorHandler::NotFoundByResource(authz_pool),
-                )
-            })?;
+    }
 
-        let mut ipv4: u32 = 0;
-        let mut ipv6: u128 = 0;
-
-        for range in &ranges {
-            let r = IpRange::from(range);
+    fn accumulate_ip_range_sizes(
+        ranges: Vec<(IpNetwork, IpNetwork)>,
+    ) -> Result<u128, Error> {
+        let mut count: u128 = 0;
+        for range in ranges.into_iter() {
+            let first = range.0.ip();
+            let last = range.1.ip();
+            let r = IpRange::try_from((first, last))
+                .map_err(|e| Error::internal_error(e.as_str()))?;
             match r {
-                IpRange::V4(r) => ipv4 += r.len(),
-                IpRange::V6(r) => ipv6 += r.len(),
+                IpRange::V4(r) => count += u128::from(r.len()),
+                IpRange::V6(r) => count += r.len(),
             }
         }
-        Ok(IpsCapacity { ipv4, ipv6 })
+        Ok(count)
     }
 
     pub async fn ip_pool_silo_list(
@@ -1523,8 +1557,7 @@ mod test {
             .ip_pool_total_capacity(&opctx, &authz_pool)
             .await
             .unwrap();
-        assert_eq!(max_ips.ipv4, 0);
-        assert_eq!(max_ips.ipv6, 0);
+        assert_eq!(max_ips, 0);
 
         let range = IpRange::V4(
             Ipv4Range::new(
@@ -1543,8 +1576,7 @@ mod test {
             .ip_pool_total_capacity(&opctx, &authz_pool)
             .await
             .unwrap();
-        assert_eq!(max_ips.ipv4, 5);
-        assert_eq!(max_ips.ipv6, 0);
+        assert_eq!(max_ips, 5);
 
         let link = IpPoolResource {
             ip_pool_id: pool.id(),
@@ -1561,8 +1593,7 @@ mod test {
             .ip_pool_allocated_count(&opctx, &authz_pool)
             .await
             .unwrap();
-        assert_eq!(ip_count.ipv4, 0);
-        assert_eq!(ip_count.ipv6, 0);
+        assert_eq!(ip_count, 0);
 
         let identity = IdentityMetadataCreateParams {
             name: "my-ip".parse().unwrap(),
@@ -1578,16 +1609,14 @@ mod test {
             .ip_pool_allocated_count(&opctx, &authz_pool)
             .await
             .unwrap();
-        assert_eq!(ip_count.ipv4, 1);
-        assert_eq!(ip_count.ipv6, 0);
+        assert_eq!(ip_count, 1);
 
         // allocating one has nothing to do with total capacity
         let max_ips = datastore
             .ip_pool_total_capacity(&opctx, &authz_pool)
             .await
             .unwrap();
-        assert_eq!(max_ips.ipv4, 5);
-        assert_eq!(max_ips.ipv6, 0);
+        assert_eq!(max_ips, 5);
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -1642,8 +1671,7 @@ mod test {
             .ip_pool_total_capacity(&opctx, &authz_pool)
             .await
             .unwrap();
-        assert_eq!(max_ips.ipv4, 0);
-        assert_eq!(max_ips.ipv6, 0);
+        assert_eq!(max_ips, 0);
 
         // Add an IPv6 range
         let ipv6_range = IpRange::V6(
@@ -1661,15 +1689,13 @@ mod test {
             .ip_pool_total_capacity(&opctx, &authz_pool)
             .await
             .unwrap();
-        assert_eq!(max_ips.ipv4, 0);
-        assert_eq!(max_ips.ipv6, 11 + 65536);
+        assert_eq!(max_ips, 11 + 65536);
 
         let ip_count = datastore
             .ip_pool_allocated_count(&opctx, &authz_pool)
             .await
             .unwrap();
-        assert_eq!(ip_count.ipv4, 0);
-        assert_eq!(ip_count.ipv6, 0);
+        assert_eq!(ip_count, 0);
 
         let identity = IdentityMetadataCreateParams {
             name: "my-ip".parse().unwrap(),
@@ -1685,16 +1711,14 @@ mod test {
             .ip_pool_allocated_count(&opctx, &authz_pool)
             .await
             .unwrap();
-        assert_eq!(ip_count.ipv4, 0);
-        assert_eq!(ip_count.ipv6, 1);
+        assert_eq!(ip_count, 1);
 
         // allocating one has nothing to do with total capacity
         let max_ips = datastore
             .ip_pool_total_capacity(&opctx, &authz_pool)
             .await
             .unwrap();
-        assert_eq!(max_ips.ipv4, 0);
-        assert_eq!(max_ips.ipv6, 11 + 65536);
+        assert_eq!(max_ips, 11 + 65536);
 
         // add a giant range for fun
         let ipv6_range = IpRange::V6(
@@ -1715,8 +1739,7 @@ mod test {
             .ip_pool_total_capacity(&opctx, &authz_pool)
             .await
             .unwrap();
-        assert_eq!(max_ips.ipv4, 0);
-        assert_eq!(max_ips.ipv6, 1208925819614629174706166);
+        assert_eq!(max_ips, 1208925819614629174706166);
 
         db.terminate().await;
         logctx.cleanup_successful();

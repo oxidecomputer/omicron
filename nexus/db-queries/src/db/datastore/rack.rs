@@ -727,6 +727,7 @@ impl DataStore {
                     // - Zpools
                     // - Datasets
                     // - A blueprint
+                    // - Nexus database access records
                     //
                     // Which RSS has already allocated during bootstrapping.
 
@@ -789,6 +790,22 @@ impl DataStore {
                              as target";
                             &e,
                         );
+                        err.set(RackInitError::BlueprintTargetSet(e)).unwrap();
+                        DieselError::RollbackTransaction
+                    })?;
+
+                    // Insert Nexus database access records
+                    self.initialize_nexus_access_from_blueprint_on_connection(
+                        &conn,
+                        blueprint.all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+                            .filter_map(|(_sled, zone_cfg)| {
+                                if zone_cfg.zone_type.is_nexus() {
+                                    Some(zone_cfg.id)
+                                } else {
+                                    None
+                                }
+                            }).collect(),
+                    ).await.map_err(|e| {
                         err.set(RackInitError::BlueprintTargetSet(e)).unwrap();
                         DieselError::RollbackTransaction
                     })?;
@@ -1090,6 +1107,7 @@ mod test {
                     internal_dns_version: *Generation::new(),
                     external_dns_version: *Generation::new(),
                     target_release_minimum_generation: *Generation::new(),
+                    nexus_generation: *Generation::new(),
                     cockroachdb_fingerprint: String::new(),
                     clickhouse_cluster_config: None,
                     oximeter_read_version: *Generation::new(),
@@ -1514,6 +1532,7 @@ mod test {
                                 slot: 0,
                                 transit_ips: vec![],
                             },
+                            nexus_generation: *Generation::new(),
                         },
                     ),
                     image_source: BlueprintZoneImageSource::InstallDataset,
@@ -1584,6 +1603,7 @@ mod test {
             internal_dns_version: *Generation::new(),
             external_dns_version: *Generation::new(),
             target_release_minimum_generation: *Generation::new(),
+            nexus_generation: *Generation::new(),
             cockroachdb_fingerprint: String::new(),
             clickhouse_cluster_config: None,
             oximeter_read_version: *Generation::new(),
@@ -1772,6 +1792,7 @@ mod test {
                                 slot: 0,
                                 transit_ips: vec![],
                             },
+                            nexus_generation: *Generation::new(),
                         },
                     ),
                     image_source: BlueprintZoneImageSource::InstallDataset,
@@ -1805,6 +1826,7 @@ mod test {
                                 slot: 0,
                                 transit_ips: vec![],
                             },
+                            nexus_generation: *Generation::new(),
                         },
                     ),
                     image_source: BlueprintZoneImageSource::InstallDataset,
@@ -1849,6 +1871,7 @@ mod test {
             internal_dns_version: *Generation::new(),
             external_dns_version: *Generation::new(),
             target_release_minimum_generation: *Generation::new(),
+            nexus_generation: *Generation::new(),
             cockroachdb_fingerprint: String::new(),
             clickhouse_cluster_config: None,
             oximeter_read_version: *Generation::new(),
@@ -2055,6 +2078,7 @@ mod test {
                             slot: 0,
                             transit_ips: vec![],
                         },
+                        nexus_generation: *Generation::new(),
                     },
                 ),
                 image_source: BlueprintZoneImageSource::InstallDataset,
@@ -2106,6 +2130,7 @@ mod test {
             creator: "test suite".to_string(),
             comment: "test blueprint".to_string(),
             report: PlanningReport::new(blueprint_id),
+            nexus_generation: *Generation::new(),
         };
 
         let rack = datastore
@@ -2279,6 +2304,7 @@ mod test {
                             slot: 0,
                             transit_ips: vec![],
                         },
+                        nexus_generation: *Generation::new(),
                     },
                 ),
                 image_source: BlueprintZoneImageSource::InstallDataset,
@@ -2297,6 +2323,7 @@ mod test {
             internal_dns_version: *Generation::new(),
             external_dns_version: *Generation::new(),
             target_release_minimum_generation: *Generation::new(),
+            nexus_generation: *Generation::new(),
             cockroachdb_fingerprint: String::new(),
             clickhouse_cluster_config: None,
             oximeter_read_version: *Generation::new(),
@@ -2419,6 +2446,7 @@ mod test {
                                 slot: 0,
                                 transit_ips: vec![],
                             },
+                            nexus_generation: *Generation::new(),
                         },
                     ),
                     image_source: BlueprintZoneImageSource::InstallDataset,
@@ -2439,6 +2467,7 @@ mod test {
             internal_dns_version: *Generation::new(),
             external_dns_version: *Generation::new(),
             target_release_minimum_generation: *Generation::new(),
+            nexus_generation: *Generation::new(),
             cockroachdb_fingerprint: String::new(),
             clickhouse_cluster_config: None,
             oximeter_read_version: *Generation::new(),

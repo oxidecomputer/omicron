@@ -515,6 +515,7 @@ pub struct BlueprintBuilder<'a> {
     sled_editors: BTreeMap<SledUuid, SledEditor>,
     cockroachdb_setting_preserve_downgrade: CockroachDbPreserveDowngrade,
     target_release_minimum_generation: Generation,
+    nexus_generation: Generation,
     report: Option<PlanningReport>,
 
     creator: String,
@@ -582,6 +583,7 @@ impl<'a> BlueprintBuilder<'a> {
             internal_dns_version: Generation::new(),
             external_dns_version: Generation::new(),
             target_release_minimum_generation: Generation::new(),
+            nexus_generation: Generation::new(),
             cockroachdb_fingerprint: String::new(),
             cockroachdb_setting_preserve_downgrade:
                 CockroachDbPreserveDowngrade::DoNotModify,
@@ -663,6 +665,7 @@ impl<'a> BlueprintBuilder<'a> {
             pending_mgs_updates: parent_blueprint.pending_mgs_updates.clone(),
             target_release_minimum_generation: parent_blueprint
                 .target_release_minimum_generation,
+            nexus_generation: parent_blueprint.nexus_generation,
             report: None,
             creator: creator.to_owned(),
             operations: Vec::new(),
@@ -857,6 +860,7 @@ impl<'a> BlueprintBuilder<'a> {
             external_dns_version: self.input.external_dns_version(),
             target_release_minimum_generation: self
                 .target_release_minimum_generation,
+            nexus_generation: self.nexus_generation,
             cockroachdb_fingerprint: self
                 .input
                 .cockroachdb_settings()
@@ -1608,6 +1612,7 @@ impl<'a> BlueprintBuilder<'a> {
             nic,
             external_tls,
             external_dns_servers: external_dns_servers.clone(),
+            nexus_generation: Generation::new(),
         });
         let filesystem_pool =
             self.sled_select_zpool(sled_id, zone_type.kind())?;

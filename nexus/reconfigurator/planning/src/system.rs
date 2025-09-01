@@ -63,6 +63,7 @@ use omicron_common::api::external::Generation;
 use omicron_common::disk::DiskIdentity;
 use omicron_common::disk::DiskVariant;
 use omicron_common::disk::M2Slot;
+use omicron_common::policy::CRUCIBLE_PANTRY_REDUNDANCY;
 use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
 use omicron_common::policy::NEXUS_REDUNDANCY;
 use omicron_uuid_kinds::MupdateOverrideUuid;
@@ -163,6 +164,7 @@ impl SystemDescription {
         // Policy defaults
         let target_nexus_zone_count = NEXUS_REDUNDANCY;
         let target_internal_dns_zone_count = INTERNAL_DNS_REDUNDANCY;
+        let target_crucible_pantry_zone_count = CRUCIBLE_PANTRY_REDUNDANCY;
 
         // TODO-cleanup These are wrong, but we don't currently set up any
         // of these zones in our fake system, so this prevents downstream test
@@ -171,7 +173,6 @@ impl SystemDescription {
         let target_boundary_ntp_zone_count = 0;
         let target_cockroachdb_zone_count = 0;
         let target_oximeter_zone_count = 0;
-        let target_crucible_pantry_zone_count = 0;
 
         let target_cockroachdb_cluster_version =
             CockroachDbClusterVersion::POLICY;
