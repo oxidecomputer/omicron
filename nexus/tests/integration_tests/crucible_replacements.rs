@@ -382,6 +382,7 @@ mod region_replacement {
 
         pub async fn delete_the_disk(&self) {
             let disk_url = get_disk_url("disk");
+            eprintln!("Delete this disk: {:?}", disk_url);
             NexusRequest::object_delete(&self.client, &disk_url)
                 .authn_as(AuthnMode::PrivilegedUser)
                 .execute()
@@ -403,6 +404,7 @@ mod region_replacement {
 
             // Assert the request is in state Complete
 
+            eprintln!("Waited for all replacements, including  {:?}", self.replacement_request_id);
             let region_replacement = self
                 .datastore
                 .get_region_replacement_request_by_id(
@@ -1663,16 +1665,31 @@ mod region_snapshot_replacement {
                 .await
                 .unwrap();
 
+            // ZZZ: is "AlreadyHandled" an error here?
+            // Could that be a valid result if some other actor put the
+            // replacement step into place?
+            // We get back:
+            // bad result: AlreadyHandled { existing_step_id: 83e38140-f238-4fed-8cef-58121d507a49
+            // }
+            // Can we dump an existing ID and get more info from it?
             match result {
                 InsertStepResult::Inserted { .. } => {}
 
-                x => {
-                    assert!(
-                        false,
-                        "bad result: {:?} from create_region_snapshot_replacement_step",
-                        x
-                    );
-                }
+				InsertStepResult::AlreadyHandled { existing_step_id } => {
+				   let region_snapshot_replace_request = self
+						.datastore
+						.get_region_snapshot_replacement_request_by_id(
+							&self.opctx(),
+							existing_step_id,
+						)
+						.await
+						.unwrap();
+					eprintln!(
+						"we were suppose to create this: {:?}",
+						region_snapshot_replace_request
+					);
+                    panic!("Something else created our replacement");
+				}
             }
         }
 
@@ -1709,7 +1726,7 @@ mod region_snapshot_replacement {
                 }
                 failed = true;
                 eprintln!("loop {i}, snapshot that should be gone: {:?}", res);
-                tokio::time::sleep(std::time::Duration::from_secs(4)).await;
+                tokio::time::sleep(std::time::Duration::from_secs(40)).await;
             }
             if failed {
                 panic!("failed some number of times checking for target gone");
