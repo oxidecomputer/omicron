@@ -279,7 +279,18 @@ pub struct EncryptedRackSecrets {
     data: Box<[u8]>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error, SlogInlineError)]
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    thiserror::Error,
+    SlogInlineError,
+    Serialize,
+    Deserialize,
+)]
 pub enum DecryptionError {
     // An opaque error indicating decryption failed
     #[error("Failed to decrypt rack secrets")]

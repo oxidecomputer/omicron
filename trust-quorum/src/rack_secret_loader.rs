@@ -70,7 +70,7 @@ impl RackSecretLoader {
             } else {
                 unreachable!(
                     "already would have returned rack secret for latest \
-                    committed epoch if requested"
+                    committed epoch ({epoch}) if requested"
                 );
             }
         }
@@ -115,6 +115,7 @@ impl RackSecretLoader {
 
     pub fn handle_share(
         &mut self,
+        ctx: &mut impl NodeHandlerCtx,
         from: PlatformId,
         epoch: Epoch,
         share: Share,
@@ -131,11 +132,11 @@ impl RackSecretLoader {
             return;
         };
 
-        if let Some(loaded) = collector.handle_share(from, epoch, share) {
+        if let Some(loaded) = collector.handle_share(ctx, from, epoch, share) {
             // We are done collecting shares for `epoch`
             //
             // All possible rack secrets were decrypted and loaded
-            let _ = self.loaded = loaded;
+            self.loaded = loaded;
             self.collector = None;
         }
     }
@@ -171,7 +172,7 @@ impl ShareCollector {
         let config = ctx
             .persistent_state()
             .latest_committed_configuration()
-            .ok_or_else(|| LoadRackSecretError::NoCommittedConfigurations)?
+            .ok_or(LoadRackSecretError::NoCommittedConfigurations)?
             .clone();
 
         let my_id = ctx.platform_id().clone();
@@ -198,6 +199,7 @@ impl ShareCollector {
     /// and the rack secret has been computed, `None` otherwise.
     pub fn handle_share(
         &mut self,
+        ctx: &mut impl NodeHandlerCtx,
         from: PlatformId,
         epoch: Epoch,
         share: Share,
@@ -246,6 +248,12 @@ impl ShareCollector {
                                 "epoch" => %self.config.epoch,
                                 &err
                             );
+                            ctx.raise_alarm(
+                                Alarm::RackSecretDecryptionFailed {
+                                    epoch,
+                                    err,
+                                },
+                            );
                             None
                         }
                     }
@@ -270,13 +278,13 @@ impl ShareCollector {
     fn send_get_share_requests(&self, ctx: &mut impl NodeHandlerCtx) {
         for to in self.config.members.keys() {
             if ctx.connected().contains(to) {
+                ctx.send(to.clone(), PeerMsgKind::GetShare(self.config.epoch));
                 info!(
                     self.log,
                     "Sent GetShare";
                     "epoch" => %self.config.epoch,
                     "to" => %to
                 );
-                ctx.send(to.clone(), PeerMsgKind::GetShare(self.config.epoch));
             }
         }
     }
@@ -458,13 +466,13 @@ mod tests {
         // First share returns none, as not enough were retrieved.
         let mut iter = initial_shares.iter().skip(1);
         let (from, share) = iter.next().unwrap();
-        loader.handle_share(from.clone(), Epoch(1), share.clone());
+        loader.handle_share(&mut ctx, from.clone(), Epoch(1), share.clone());
         assert_eq!(Ok(None), loader.load(&mut ctx, Epoch(1)));
 
         // Second share should load the secret.
         // threshold = 3 (2 retrieved shares plus ourself)
         let (from, share) = iter.next().unwrap();
-        loader.handle_share(from.clone(), Epoch(1), share.clone());
+        loader.handle_share(&mut ctx, from.clone(), Epoch(1), share.clone());
         let rs = loader.load(&mut ctx, Epoch(1)).unwrap().unwrap();
         assert_eq!(rs.expose_secret(), initial_rack_secret.expose_secret());
 
@@ -520,9 +528,9 @@ mod tests {
         // becoming available.
         let mut iter = shares_2.iter().skip(1);
         let (from, share) = iter.next().unwrap();
-        loader.handle_share(from.clone(), Epoch(2), share.clone());
+        loader.handle_share(&mut ctx, from.clone(), Epoch(2), share.clone());
         let (from, share) = iter.next().unwrap();
-        loader.handle_share(from.clone(), Epoch(2), share.clone());
+        loader.handle_share(&mut ctx, from.clone(), Epoch(2), share.clone());
 
         let rs = loader.load(&mut ctx, Epoch(2)).unwrap().unwrap();
         assert_eq!(rs, rack_secret_2);
@@ -545,9 +553,9 @@ mod tests {
         assert_eq!(Ok(None), loader.load(&mut ctx, Epoch(2)));
         let mut iter = shares_2.iter().skip(1);
         let (from, share) = iter.next().unwrap();
-        loader.handle_share(from.clone(), Epoch(2), share.clone());
+        loader.handle_share(&mut ctx, from.clone(), Epoch(2), share.clone());
         let (from, share) = iter.next().unwrap();
-        loader.handle_share(from.clone(), Epoch(2), share.clone());
+        loader.handle_share(&mut ctx, from.clone(), Epoch(2), share.clone());
 
         // Loading the secret for epoch 2 succeeds
         let rs = loader.load(&mut ctx, Epoch(2)).unwrap().unwrap();

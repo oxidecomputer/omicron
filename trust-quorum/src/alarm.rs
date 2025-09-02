@@ -6,7 +6,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::{Configuration, Epoch, PlatformId};
+use crate::{Configuration, Epoch, PlatformId, crypto::DecryptionError};
 
 #[allow(clippy::large_enum_variant)]
 #[derive(
@@ -40,4 +40,12 @@ pub enum Alarm {
         latest_committed_epoch: Epoch,
         collecting_epoch: Epoch,
     },
+
+    /// Decrypting the rack secret failed when presented with `valid` shares.
+    ///
+    /// `Configuration` membership contains the hashes of each valid share. All
+    /// shares utilized to decrypt the rack secret were validated against these
+    /// hashes, and yet, the decryption still failed. This indicates either a
+    /// bit flip in a share after validation, or, more likely, an invalid hash.
+    RackSecretDecryptionFailed { epoch: Epoch, err: DecryptionError },
 }
