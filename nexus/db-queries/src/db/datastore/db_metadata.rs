@@ -109,7 +109,7 @@ fn skippable_version(
     return false;
 }
 
-/// Describes the state of the database access with respect this Nexus
+/// Describes the state of the database access with respect to this Nexus
 #[derive(Debug, Copy, Clone, PartialEq)]
 enum NexusAccess {
     /// Nexus does not yet have access to the database, but can take over when
@@ -131,7 +131,7 @@ enum NexusAccess {
     HasImplicitAccess,
 
     /// Nexus does not yet have access to the database, but it might get
-    /// access later. Unlike [Self::DoesNotHaveAccessYet], this variant
+    /// access later. Unlike [`Self::DoesNotHaveAccessYet`], this variant
     /// is triggered because we don't have an explicit records.
     ///
     /// Although some Nexuses have records, this one doesn't. This can
@@ -191,10 +191,10 @@ pub enum DatastoreSetupAction {
     Refuse,
 }
 
-/// Committment that the database is willing to perform a [DatastoreSetupAction]
-/// to a desired schema [Version].
+/// Committment that the database is willing to perform a
+/// [`DatastoreSetupAction`] to a desired schema [`Version`].
 ///
-/// Can be created through [DataStore::check_schema_and_access]
+/// Can be created through [`DataStore::check_schema_and_access`]
 #[derive(Clone)]
 pub struct ValidatedDatastoreSetupAction {
     action: DatastoreSetupAction,
