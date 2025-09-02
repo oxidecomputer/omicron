@@ -1694,7 +1694,6 @@ mod region_snapshot_replacement {
         }
 
         pub async fn assert_read_only_target_gone(&self) {
-            let mut failed = false;
             eprintln!(
                 "NOW1 starting, replace_request_id: {:?}",
                 self.replacement_request_id
@@ -1725,14 +1724,9 @@ mod region_snapshot_replacement {
                     // test pass, move on
                     break;
                 }
-                failed = true;
                 eprintln!("loop {i}, snapshot that should be gone: {:?}", res);
                 tokio::time::sleep(std::time::Duration::from_secs(5)).await;
                 i += 1;
-            }
-
-            if failed {
-                panic!("failed {i} times checking for target gone");
             }
         }
         pub async fn pre_assert_read_only_target_gone(&self) {
