@@ -1500,7 +1500,7 @@ mod region_snapshot_replacement {
             // Assert no volumes are referencing the snapshot address
 
             let mut failed = false;
-            for i in 1..10 {
+            for i in 1..30 {
                 let volumes = self
                     .datastore
                     .find_volumes_referencing_socket_addr(
@@ -1513,7 +1513,7 @@ mod region_snapshot_replacement {
                 if !volumes.is_empty() {
                     eprintln!("Volume should be gone, try {i} {:?}", volumes);
                     failed = true;
-                    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
                 } else {
                     break;
                 }
@@ -1699,10 +1699,11 @@ mod region_snapshot_replacement {
         pub async fn assert_read_only_target_gone(&self) {
             let mut failed = false;
             eprintln!(
-                "NOW1 replace_request_id: {:?}",
+                "NOW1 starting, replace_request_id: {:?}",
                 self.replacement_request_id
             );
-            for i in 0..10 {
+            let mut i = 1;
+            loop {
                 let region_snapshot_replace_request = self
                     .datastore
                     .get_region_snapshot_replacement_request_by_id(
@@ -1729,10 +1730,12 @@ mod region_snapshot_replacement {
                 }
                 failed = true;
                 eprintln!("loop {i}, snapshot that should be gone: {:?}", res);
-                tokio::time::sleep(std::time::Duration::from_secs(40)).await;
+                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                i += 1;
             }
+
             if failed {
-                panic!("failed some number of times checking for target gone");
+                panic!("failed {i} times checking for target gone");
             }
         }
         pub async fn pre_assert_read_only_target_gone(&self) {
