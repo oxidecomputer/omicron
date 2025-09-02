@@ -322,4 +322,5 @@ pub(crate) fn error_means_caboose_is_invalid(
     let message = format!("{error:?}");
     message.contains("the image caboose does not contain")
         || message.contains("the image does not include a caboose")
+        || message.contains("failed to read data from the caboose")
 }
