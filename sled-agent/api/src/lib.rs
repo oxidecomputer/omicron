@@ -990,7 +990,7 @@ pub struct VpcPathParam {
 /// This is an _extremely_ dicey operation in general; a stopped switch zone
 /// leaves the rack inoperable! We are only adding this as a workaround and test
 /// tool for handling sidecar resets; see
-/// https://github.com/oxidecomputer/omicron/issues/8480 for background.
+/// <https://github.com/oxidecomputer/omicron/issues/8480> for background.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, JsonSchema,
 )]
