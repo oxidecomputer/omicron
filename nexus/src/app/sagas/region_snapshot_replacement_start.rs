@@ -1545,10 +1545,11 @@ pub(crate) mod test {
                 .await
                 .unwrap();
 
+            // Will these also change on unwind?
             assert_eq!(db_request.new_region_id, None);
             assert_eq!(db_request.operating_saga_id, None);
 
-            if matches!(
+            if !matches!(
                 db_request.replacement_state,
                 RegionSnapshotReplacementState::Requested
             ) {
@@ -1557,6 +1558,7 @@ pub(crate) mod test {
                     "loop {i} Failed {:?} != Requested",
                     db_request.replacement_state
                 );
+                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
             } else {
                 break;
             }
