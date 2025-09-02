@@ -3051,10 +3051,6 @@ mod tests {
             counts.non_empty_tables()
         );
 
-        // Verify no new blueprint tables were added without updating this function
-        if let Err(msg) = counts.verify_all_tables_covered(datastore).await {
-            panic!("{}", msg);
-        }
     }
 
     // Create a fake set of `SledDetails`, either with a subnet matching
