@@ -489,13 +489,7 @@ task: "nat_garbage_collector"
 
 task: "blueprint_loader"
   configured period: every <REDACTED_DURATION>m <REDACTED_DURATION>s
-<<<<<<< HEAD
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
-||||||| parent of 127d5a805 (add the "second" Nexus to the test suite blueprint; fix omdb tests)
-  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
-=======
-  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
->>>>>>> 127d5a805 (add the "second" Nexus to the test suite blueprint; fix omdb tests)
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     target blueprint: ......<REDACTED_BLUEPRINT_ID>.......
     execution:        disabled
@@ -504,13 +498,7 @@ task: "blueprint_loader"
 
 task: "blueprint_executor"
   configured period: every <REDACTED_DURATION>m
-<<<<<<< HEAD
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
-||||||| parent of 127d5a805 (add the "second" Nexus to the test suite blueprint; fix omdb tests)
-  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
-=======
-  last completed activation: <REDACTED ITERATIONS>, triggered by a dependent task completing
->>>>>>> 127d5a805 (add the "second" Nexus to the test suite blueprint; fix omdb tests)
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     target blueprint: ......<REDACTED_BLUEPRINT_ID>....... 
     execution:        disabled                             
@@ -570,13 +558,7 @@ warning: unknown background task: "chicken_switches_watcher" (don't know how to 
 
 task: "crdb_node_id_collector"
   configured period: every <REDACTED_DURATION>m
-<<<<<<< HEAD
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
-||||||| parent of 127d5a805 (add the "second" Nexus to the test suite blueprint; fix omdb tests)
-  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
-=======
-  last completed activation: <REDACTED ITERATIONS>, triggered by a dependent task completing
->>>>>>> 127d5a805 (add the "second" Nexus to the test suite blueprint; fix omdb tests)
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
 warning: unknown background task: "crdb_node_id_collector" (don't know how to interpret details: Object {"errors": Array [Object {"err": String("failed to fetch node ID for zone ..........<REDACTED_UUID>........... at http://[::1]:REDACTED_PORT: Communication Error: error sending request for url (http://[::1]:REDACTED_PORT/node/id): error sending request for url (http://[::1]:REDACTED_PORT/node/id): client error (Connect): tcp connect error: Connection refused (os error <OS_ERROR_REDACTED>)"), "zone_id": String("..........<REDACTED_UUID>...........")}], "nsuccess": Number(0)})
 
@@ -877,15 +859,7 @@ termination: Exited(0)
 stdout:
 task: "blueprint_loader"
   configured period: every <REDACTED_DURATION>m <REDACTED_DURATION>s
-<<<<<<< HEAD
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
-||||||| parent of 127d5a805 (add the "second" Nexus to the test suite blueprint; fix omdb tests)
-  currently executing: no
-  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
-=======
-  currently executing: no
-  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
->>>>>>> 127d5a805 (add the "second" Nexus to the test suite blueprint; fix omdb tests)
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     target blueprint: ......<REDACTED_BLUEPRINT_ID>.......
     execution:        disabled
@@ -894,15 +868,7 @@ task: "blueprint_loader"
 
 task: "blueprint_executor"
   configured period: every <REDACTED_DURATION>m
-<<<<<<< HEAD
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
-||||||| parent of 127d5a805 (add the "second" Nexus to the test suite blueprint; fix omdb tests)
-  currently executing: no
-  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
-=======
-  currently executing: no
-  last completed activation: <REDACTED ITERATIONS>, triggered by a dependent task completing
->>>>>>> 127d5a805 (add the "second" Nexus to the test suite blueprint; fix omdb tests)
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     target blueprint: ......<REDACTED_BLUEPRINT_ID>....... 
     execution:        disabled                             
@@ -1041,15 +1007,7 @@ task: "nat_garbage_collector"
 
 task: "blueprint_loader"
   configured period: every <REDACTED_DURATION>m <REDACTED_DURATION>s
-<<<<<<< HEAD
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
-||||||| parent of 127d5a805 (add the "second" Nexus to the test suite blueprint; fix omdb tests)
-  currently executing: no
-  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
-=======
-  currently executing: no
-  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
->>>>>>> 127d5a805 (add the "second" Nexus to the test suite blueprint; fix omdb tests)
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     target blueprint: ......<REDACTED_BLUEPRINT_ID>.......
     execution:        disabled
@@ -1058,15 +1016,7 @@ task: "blueprint_loader"
 
 task: "blueprint_executor"
   configured period: every <REDACTED_DURATION>m
-<<<<<<< HEAD
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
-||||||| parent of 127d5a805 (add the "second" Nexus to the test suite blueprint; fix omdb tests)
-  currently executing: no
-  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
-=======
-  currently executing: no
-  last completed activation: <REDACTED ITERATIONS>, triggered by a dependent task completing
->>>>>>> 127d5a805 (add the "second" Nexus to the test suite blueprint; fix omdb tests)
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     target blueprint: ......<REDACTED_BLUEPRINT_ID>....... 
     execution:        disabled                             
@@ -1126,15 +1076,7 @@ warning: unknown background task: "chicken_switches_watcher" (don't know how to 
 
 task: "crdb_node_id_collector"
   configured period: every <REDACTED_DURATION>m
-<<<<<<< HEAD
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
-||||||| parent of 127d5a805 (add the "second" Nexus to the test suite blueprint; fix omdb tests)
-  currently executing: no
-  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
-=======
-  currently executing: no
-  last completed activation: <REDACTED ITERATIONS>, triggered by a dependent task completing
->>>>>>> 127d5a805 (add the "second" Nexus to the test suite blueprint; fix omdb tests)
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
 warning: unknown background task: "crdb_node_id_collector" (don't know how to interpret details: Object {"errors": Array [Object {"err": String("failed to fetch node ID for zone ..........<REDACTED_UUID>........... at http://[::1]:REDACTED_PORT: Communication Error: error sending request for url (http://[::1]:REDACTED_PORT/node/id): error sending request for url (http://[::1]:REDACTED_PORT/node/id): client error (Connect): tcp connect error: Connection refused (os error <OS_ERROR_REDACTED>)"), "zone_id": String("..........<REDACTED_UUID>...........")}], "nsuccess": Number(0)})
 
