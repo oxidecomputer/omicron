@@ -60,14 +60,10 @@ async fn test_quiesce(cptestctx: &ControlPlaneTestContext) {
         .map_or_else(PlannerChickenSwitches::default, |cs| {
             cs.switches.planner_switches
         });
-    let planning_input = PlanningInputFromDb::assemble(
-        &opctx,
-        &datastore,
-        chicken_switches,
-        None,
-    )
-    .await
-    .expect("planning input");
+    let planning_input =
+        PlanningInputFromDb::assemble(&opctx, &datastore, chicken_switches)
+            .await
+            .expect("planning input");
     let target_blueprint = nexus
         .blueprint_target_view(&opctx)
         .await
@@ -88,12 +84,7 @@ async fn test_quiesce(cptestctx: &ControlPlaneTestContext) {
         PlannerRng::from_entropy(),
     )
     .expect("creating BlueprintBuilder");
-    builder
-        .set_nexus_generation(
-            blueprint1.nexus_generation,
-            blueprint1.nexus_generation.next(),
-        )
-        .expect("failed to set blueprint's Nexus generation");
+    builder.set_nexus_generation(blueprint1.nexus_generation.next());
     let blueprint2 = builder.build();
     nexus
         .blueprint_import(&opctx, blueprint2.clone())
