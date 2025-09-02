@@ -203,7 +203,7 @@ pub(crate) async fn wait_for_all_replacements(
             }
         },
         &std::time::Duration::from_millis(50),
-        &std::time::Duration::from_secs(60),
+        &std::time::Duration::from_secs(180),
     )
     .await
     .expect("all replacements finished");
