@@ -1393,7 +1393,7 @@ mod test {
         assert_eq!(qq.fully_drained_blueprint(), Some(blueprint3_id));
         assert!(qq.is_fully_drained());
 
-        // Fully drained case 3: quiescing itself causes us to immediately
+        // Fully drained case 4: quiescing itself causes us to immediately
         // become fully drained.
         //
         // This case requires a fresh handle, since the current one is already
