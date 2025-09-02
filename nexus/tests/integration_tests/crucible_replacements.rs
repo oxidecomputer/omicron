@@ -404,7 +404,10 @@ mod region_replacement {
 
             // Assert the request is in state Complete
 
-            eprintln!("Waited for all replacements, including  {:?}", self.replacement_request_id);
+            eprintln!(
+                "Waited for all replacements, including  {:?}",
+                self.replacement_request_id
+            );
             let region_replacement = self
                 .datastore
                 .get_region_replacement_request_by_id(
@@ -1675,21 +1678,21 @@ mod region_snapshot_replacement {
             match result {
                 InsertStepResult::Inserted { .. } => {}
 
-				InsertStepResult::AlreadyHandled { existing_step_id } => {
-				   let region_snapshot_replace_request = self
-						.datastore
-						.get_region_snapshot_replacement_request_by_id(
-							&self.opctx(),
-							existing_step_id,
-						)
-						.await
-						.unwrap();
-					eprintln!(
-						"we were suppose to create this: {:?}",
-						region_snapshot_replace_request
-					);
+                InsertStepResult::AlreadyHandled { existing_step_id } => {
+                    let region_snapshot_replace_request = self
+                        .datastore
+                        .get_region_snapshot_replacement_request_by_id(
+                            &self.opctx(),
+                            existing_step_id,
+                        )
+                        .await
+                        .unwrap();
+                    eprintln!(
+                        "we were suppose to create this: {:?}",
+                        region_snapshot_replace_request
+                    );
                     panic!("Something else created our replacement");
-				}
+                }
             }
         }
 
