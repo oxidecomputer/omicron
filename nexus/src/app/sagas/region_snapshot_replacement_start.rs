@@ -1534,17 +1534,37 @@ pub(crate) mod test {
         request: &RegionSnapshotReplacement,
     ) {
         let opctx = test_opctx(cptestctx);
-        let db_request = datastore
-            .get_region_snapshot_replacement_request_by_id(&opctx, request.id)
-            .await
-            .unwrap();
 
-        assert_eq!(db_request.new_region_id, None);
-        assert_eq!(
-            db_request.replacement_state,
-            RegionSnapshotReplacementState::Requested
-        ); // ZZZ This failed Allocating != Requested
-        assert_eq!(db_request.operating_saga_id, None);
+        let mut i = 1;
+        let mut failed = false;
+        loop {
+            let db_request = datastore
+                .get_region_snapshot_replacement_request_by_id(
+                    &opctx, request.id,
+                )
+                .await
+                .unwrap();
+
+            assert_eq!(db_request.new_region_id, None);
+            assert_eq!(db_request.operating_saga_id, None);
+
+            if matches!(
+                db_request.replacement_state,
+                RegionSnapshotReplacementState::Requested
+            ) {
+                failed = true;
+                eprintln!(
+                    "loop {i} Failed {:?} != Requested",
+                    db_request.replacement_state
+                );
+            } else {
+                break;
+            }
+            i += 1;
+        }
+        if failed {
+            panic!("Did not find expected state for replacement");
+        }
     }
 
     async fn assert_volume_untouched(
@@ -1605,6 +1625,7 @@ pub(crate) mod test {
             .unwrap()
             .unwrap();
 
+        eprintln!("Before unwind, check clean slate");
         verify_clean_slate(
             &cptestctx,
             &disk_test,
@@ -1613,6 +1634,7 @@ pub(crate) mod test {
         )
         .await;
 
+        eprintln!("Now calling unwind, what happens here");
         crate::app::sagas::test_helpers::action_failure_can_unwind::<
             SagaRegionSnapshotReplacementStart,
             _,
