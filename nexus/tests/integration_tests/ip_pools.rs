@@ -501,9 +501,15 @@ async fn test_ip_pool_silo_link(cptestctx: &ControlPlaneTestContext) {
     let _: IpPoolSiloLink =
         object_create(client, "/v1/system/ip-pools/p0/silos", &params).await;
 
-    // second attempt to create the same link is successful too.
-    let _: IpPoolSiloLink =
-        object_create(client, "/v1/system/ip-pools/p0/silos", &params).await;
+    // second attempt to create the same link errors due to conflict
+    let error = object_create_error(
+        client,
+        "/v1/system/ip-pools/p0/silos",
+        &params,
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+    assert_eq!(error.error_code.unwrap(), "ObjectAlreadyExists");
 
     // get silo ID so we can test association by ID as well
     let silo_url = format!("/v1/system/silos/{}", silo.name());

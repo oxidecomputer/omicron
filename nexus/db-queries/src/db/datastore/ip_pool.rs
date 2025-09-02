@@ -588,25 +588,20 @@ impl DataStore {
 
         let conn = self.pool_connection_authorized(opctx).await?;
 
-        // We always insert and update the record on conflicts.
-        //
-        // This lets us use the database constraints for a few checks, such as
-        // assigning more than one default pool for a silo, and ensuring that
-        // there is no default at all for the internal silo.
         let result = diesel::insert_into(dsl::ip_pool_resource)
             .values(ip_pool_resource)
-            .on_conflict((dsl::ip_pool_id, dsl::resource_id, dsl::resource_type))
-            .do_update()
-            .set(ip_pool_resource)
             .get_result_async(&*conn)
             .await
             .map_err(|e| {
                 match e {
-                    // Specifically catch conflicts on the unique index which
-                    // ensures at most one default IP Pool per silo.
-                    DieselError::DatabaseError(DatabaseErrorKind::UniqueViolation, ref info)
-                        if info.constraint_name() == Some("one_default_ip_pool_per_resource") =>
+                    // Catch the check constraint ensuring the internal silo has
+                    // no default pool
+                    DieselError::DatabaseError(DatabaseErrorKind::CheckViolation, ref info)
+                        if info.constraint_name() == Some("internal_silo_has_no_default_pool") =>
                     {
+                        Error::invalid_request( "The internal Silo cannot have a default IP Pool")
+                    }
+                    DieselError::DatabaseError(DatabaseErrorKind::UniqueViolation, _) => {
                         public_error_from_diesel(
                             e,
                             ErrorHandler::Conflict(
