@@ -108,11 +108,11 @@ impl Align {
                 .collect(),
             AlignmentMethod::MeanWithin => tables
                 .iter()
-                .map(|table| align_and_reduce(table, query_end, &self.period, mean_value_in_window))
+                .map(|table| align_and_aggregate(table, query_end, &self.period, mean_value_in_window))
                 .collect(),
             AlignmentMethod::Rate => tables
                 .iter()
-                .map(|table| align_and_reduce(table, query_end, &self.period, rate_value_in_window))
+                .map(|table| align_and_aggregate(table, query_end, &self.period, rate_value_in_window))
                 .collect(),
         }
     }
@@ -145,11 +145,11 @@ impl fmt::Display for AlignmentMethod {
 
 // Align the timeseries in a table by computing a value within each output period.
 
-fn align_and_reduce<F>(
+fn align_and_aggregate<F>(
     table: &Table,
     query_end: &DateTime<Utc>,
     period: &Duration,
-    reducer: F) -> Result<Table, Error>
+    aggregator: F) -> Result<Table, Error>
     where F: Fn(
         &MetricType,
         &[DateTime<Utc>],
@@ -237,7 +237,7 @@ fn align_and_reduce<F>(
             }
 
             // Aggregate all values within this time window.
-            let output_value = reducer(
+            let output_value = aggregator(
                 &metric_type,
                 points.start_times().unwrap(),
                 points.timestamps(),
