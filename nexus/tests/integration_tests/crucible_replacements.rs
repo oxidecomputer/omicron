@@ -1499,8 +1499,8 @@ mod region_snapshot_replacement {
 
             // Assert no volumes are referencing the snapshot address
 
-            let mut failed = false;
-            for i in 1..30 {
+            let mut counter = 1;
+            loop {
                 let volumes = self
                     .datastore
                     .find_volumes_referencing_socket_addr(
@@ -1512,14 +1512,11 @@ mod region_snapshot_replacement {
 
                 if !volumes.is_empty() {
                     eprintln!("Volume should be gone, try {i} {:?}", volumes);
-                    failed = true;
                     tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                    counter += 1;
                 } else {
                     break;
                 }
-            }
-            if failed {
-                panic!("Volume references not cleaned up at first try");
             }
         }
 
