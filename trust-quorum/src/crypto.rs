@@ -127,7 +127,17 @@ impl PartialEq for ReconstructedRackSecret {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    thiserror::Error,
+    PartialOrd,
+    Ord,
+    Serialize,
+    Deserialize,
+)]
 #[error("invalid rack secret size")]
 pub struct InvalidRackSecretSizeError;
 
@@ -173,7 +183,18 @@ impl From<RackSecret> for ReconstructedRackSecret {
     }
 }
 
-#[derive(Debug, Clone, thiserror::Error, PartialEq, Eq, SlogInlineError)]
+#[derive(
+    Debug,
+    Clone,
+    thiserror::Error,
+    PartialEq,
+    Eq,
+    SlogInlineError,
+    PartialOrd,
+    Ord,
+    Serialize,
+    Deserialize,
+)]
 pub enum RackSecretReconstructError {
     #[error("share combine error")]
     Combine(

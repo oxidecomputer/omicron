@@ -6,7 +6,10 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::{Configuration, Epoch, PlatformId, crypto::DecryptionError};
+use crate::{
+    Configuration, Epoch, PlatformId,
+    crypto::{DecryptionError, RackSecretReconstructError},
+};
 
 #[allow(clippy::large_enum_variant)]
 #[derive(
@@ -41,11 +44,26 @@ pub enum Alarm {
         collecting_epoch: Epoch,
     },
 
-    /// Decrypting the rack secret failed when presented with `valid` shares.
+    /// Decrypting the encrypted rack secrets failed when presented with a
+    /// `valid` RackSecret.
     ///
     /// `Configuration` membership contains the hashes of each valid share. All
-    /// shares utilized to decrypt the rack secret were validated against these
-    /// hashes, and yet, the decryption still failed. This indicates either a
-    /// bit flip in a share after validation, or, more likely, an invalid hash.
+    /// shares utilized to reconstruct the rack secret were validated against
+    /// these hashes, and the rack seceret was reconstructed. However, using
+    /// the rack secret to derive encryption keys and decrypt the secrets from
+    /// old configurations still failed. This should never be possible, and
+    /// therefore we raise an alarm.
     RackSecretDecryptionFailed { epoch: Epoch, err: DecryptionError },
+
+    /// Reconstructing the rack secret failed when presented with `valid` shares.
+    ///
+    /// `Configuration` membership contains the hashes of each valid share. All
+    /// shares utilized to reconstruct the rack secret were validated against
+    /// these hashes, and yet, the reconstruction still failed. This indicates
+    /// either a bit flip in a share after validation, or, more likely, an
+    /// invalid hash.
+    RackSecretReconstructionFailed {
+        epoch: Epoch,
+        err: RackSecretReconstructError,
+    },
 }

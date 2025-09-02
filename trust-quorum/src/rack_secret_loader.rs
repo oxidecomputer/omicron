@@ -268,6 +268,10 @@ impl ShareCollector {
                     "epoch" => %self.config.epoch,
                     &err
                 );
+                ctx.raise_alarm(Alarm::RackSecretReconstructionFailed {
+                    epoch,
+                    err,
+                });
                 None
             }
         }
