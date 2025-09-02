@@ -107,6 +107,7 @@ use slog_error_chain::InlineErrorChain;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
+use std::time::Duration;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::Mutex;
 use tokio::sync::oneshot;
@@ -3246,21 +3247,12 @@ impl ServiceManager {
             SwitchZoneConfig { id: Uuid::new_v4(), addresses, services };
 
         self.ensure_switch_zone(
-            // request=
             Some(request),
-            // filesystems=
             filesystems,
-            // data_links=
             data_links,
+            underlay_info,
         )
         .await?;
-
-        // If we've given the switch an underlay address, we also need to inject
-        // SMF properties so that tfport uplinks can be created.
-        if let Some((ip, Some(rack_network_config))) = underlay_info {
-            self.ensure_switch_zone_uplinks_configured(ip, rack_network_config)
-                .await?;
-        }
 
         Ok(())
     }
@@ -3409,6 +3401,8 @@ impl ServiceManager {
             vec![],
             // data_links=
             vec![],
+            // underlay_info=
+            None,
         )
         .await
     }
@@ -3427,8 +3421,11 @@ impl ServiceManager {
         request: SwitchZoneConfig,
         filesystems: Vec<zone::Fs>,
         data_links: Vec<String>,
+        underlay_info: Option<(Ipv6Addr, Option<&RackNetworkConfig>)>,
     ) {
         let (exit_tx, exit_rx) = oneshot::channel();
+        let underlay_info =
+            underlay_info.map(|(ip, rack_config)| (ip, rack_config.cloned()));
         *zone = SwitchZoneState::Initializing {
             request,
             filesystems,
@@ -3436,7 +3433,8 @@ impl ServiceManager {
             worker: Some(Task {
                 exit_tx,
                 initializer: tokio::task::spawn(async move {
-                    self.initialize_switch_zone_loop(exit_rx).await
+                    self.initialize_switch_zone_loop(underlay_info, exit_rx)
+                        .await
                 }),
             }),
         };
@@ -3448,6 +3446,7 @@ impl ServiceManager {
         request: Option<SwitchZoneConfig>,
         filesystems: Vec<zone::Fs>,
         data_links: Vec<String>,
+        underlay_info: Option<(Ipv6Addr, Option<&RackNetworkConfig>)>,
     ) -> Result<(), Error> {
         let log = &self.inner.log;
 
@@ -3462,6 +3461,7 @@ impl ServiceManager {
                     request,
                     filesystems,
                     data_links,
+                    underlay_info,
                 );
             }
             (
@@ -3902,13 +3902,21 @@ impl ServiceManager {
     // inititalized, or it has been told to stop.
     async fn initialize_switch_zone_loop(
         &self,
+        underlay_info: Option<(Ipv6Addr, Option<RackNetworkConfig>)>,
         mut exit_rx: oneshot::Receiver<()>,
     ) {
+        // We don't really expect failures trying to initialize the switch zone
+        // unless something is unhealthy. This timeout is somewhat arbitrary,
+        // but we probably don't want to use backoff here.
+        const RETRY_DELAY: Duration = Duration::from_secs(1);
+
+        // First, go into a loop to bring up the switch zone; retry until we
+        // succeed or are told to give up via `exit_rx`.
         loop {
             {
                 let mut sled_zone = self.inner.switch_zone.lock().await;
                 match self.try_initialize_switch_zone(&mut sled_zone).await {
-                    Ok(()) => return,
+                    Ok(()) => break,
                     Err(e) => warn!(
                         self.inner.log,
                         "Failed to initialize switch zone: {e}"
@@ -3920,10 +3928,36 @@ impl ServiceManager {
                 // If we've been told to stop trying, bail.
                 _ = &mut exit_rx => return,
 
-                // Poll for the device every second - this timeout is somewhat
-                // arbitrary, but we probably don't want to use backoff here.
-                _ = tokio::time::sleep(tokio::time::Duration::from_secs(1)) => (),
+                _ = tokio::time::sleep(RETRY_DELAY) => continue,
             };
+        }
+
+        // Then, if we have underlay info, go into a loop trying to configure
+        // our uplinks. As above, retry until we succeed or are told to stop.
+        if let Some((ip, Some(rack_network_config))) = underlay_info {
+            loop {
+                match self
+                    .ensure_switch_zone_uplinks_configured(
+                        ip,
+                        &rack_network_config,
+                    )
+                    .await
+                {
+                    Ok(()) => break,
+                    Err(e) => warn!(
+                        self.inner.log,
+                        "Failed to configure switch zone uplinks";
+                        InlineErrorChain::new(&e),
+                    ),
+                }
+
+                tokio::select! {
+                    // If we've been told to stop trying, bail.
+                    _ = &mut exit_rx => return,
+
+                    _ = tokio::time::sleep(RETRY_DELAY) => continue,
+                };
+            }
         }
     }
 }
