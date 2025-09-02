@@ -733,7 +733,7 @@ pub trait SledAgentApi {
 
     /// A debugging endpoint only used by `omdb` that allows us to test
     /// restarting the switch zone without restarting sled-agent. See
-    /// https://github.com/oxidecomputer/omicron/issues/8480 for context.
+    /// <https://github.com/oxidecomputer/omicron/issues/8480> for context.
     #[endpoint {
         method = GET,
         path = "/debug/switch-zone-policy",
@@ -745,7 +745,12 @@ pub trait SledAgentApi {
 
     /// A debugging endpoint only used by `omdb` that allows us to test
     /// restarting the switch zone without restarting sled-agent. See
-    /// https://github.com/oxidecomputer/omicron/issues/8480 for context.
+    /// <https://github.com/oxidecomputer/omicron/issues/8480> for context.
+    ///
+    /// Setting the switch zone policy is asynchronous and inherently racy with
+    /// the standard process of starting the switch zone. If the switch zone is
+    /// in the process of being started or stopped when this policy is changed,
+    /// the new policy may not take effect until that transition completes.
     #[endpoint {
         method = PUT,
         path = "/debug/switch-zone-policy",
