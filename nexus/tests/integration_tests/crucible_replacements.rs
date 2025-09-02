@@ -1511,7 +1511,7 @@ mod region_snapshot_replacement {
                     .unwrap();
 
                 if !volumes.is_empty() {
-                    eprintln!("Volume should be gone, try {i} {:?}", volumes);
+                    eprintln!("Volume should be gone, try {counter} {:?}", volumes);
                     tokio::time::sleep(std::time::Duration::from_secs(5)).await;
                     counter += 1;
                 } else {
