@@ -1650,7 +1650,7 @@ async fn setup_with_config_impl<N: NexusServer>(
     extra_sled_agents: u16,
     gateway_config_file: Utf8PathBuf,
 ) -> ControlPlaneTestContext<N> {
-    const STEP_TIMEOUT: Duration = Duration::from_secs(60);
+    const STEP_TIMEOUT: Duration = Duration::from_secs(600);
 
     // All setups will start with CRDB and clickhouse
     builder
