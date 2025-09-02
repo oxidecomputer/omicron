@@ -32,7 +32,9 @@ changes:                    names added: 3, names removed: 0
 
 +  @                                                  NS   ns1.oxide-dev.test
 +  ns1                                                AAAA ::1
-+  test-suite-silo.sys                                A    127.0.0.1
++  test-suite-silo.sys                                (records: 2)
++      A    127.0.0.1
++      AAAA 100::1
 ---------------------------------------------
 stderr:
 note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
@@ -46,7 +48,9 @@ External zone: oxide-dev.test
   NAME                                               RECORDS
   @                                                  NS   ns1.oxide-dev.test
   ns1                                                AAAA ::1
-  test-suite-silo.sys                                A    127.0.0.1
+  test-suite-silo.sys                                (records: 2)
+      A    127.0.0.1
+      AAAA 100::1
 ---------------------------------------------
 stderr:
 note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
@@ -489,15 +493,33 @@ task: "nat_garbage_collector"
 
 task: "blueprint_loader"
   configured period: every <REDACTED_DURATION>m <REDACTED_DURATION>s
+<<<<<<< HEAD
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+||||||| parent of 127d5a805 (add the "second" Nexus to the test suite blueprint; fix omdb tests)
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+=======
+  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
+>>>>>>> 127d5a805 (add the "second" Nexus to the test suite blueprint; fix omdb tests)
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    last completion reported error: failed to read target blueprint: Internal Error: no target blueprint set
+    target blueprint: ......<REDACTED_BLUEPRINT_ID>.......
+    execution:        disabled
+    created at:       <REDACTED_TIMESTAMP>
+    status:           first target blueprint
 
 task: "blueprint_executor"
   configured period: every <REDACTED_DURATION>m
+<<<<<<< HEAD
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+||||||| parent of 127d5a805 (add the "second" Nexus to the test suite blueprint; fix omdb tests)
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+=======
+  last completed activation: <REDACTED ITERATIONS>, triggered by a dependent task completing
+>>>>>>> 127d5a805 (add the "second" Nexus to the test suite blueprint; fix omdb tests)
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    last completion reported error: no blueprint
+    target blueprint: ......<REDACTED_BLUEPRINT_ID>....... 
+    execution:        disabled                             
+    status:           (no event report found)              
+    error:            (none)                               
 
 task: "abandoned_vmm_reaper"
   configured period: every <REDACTED_DURATION>m
@@ -531,7 +553,18 @@ task: "blueprint_rendezvous"
   configured period: every <REDACTED_DURATION>m
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    last completion reported error: no blueprint
+    target blueprint:     ......<REDACTED_BLUEPRINT_ID>.......
+    inventory collection: ..........<REDACTED_UUID>...........
+    debug_dataset rendezvous counts:
+        num_inserted:           0
+        num_already_exist:      0
+        num_not_in_inventory:   0
+        num_tombstoned:         0
+        num_already_tombstoned: 0
+    crucible_dataset rendezvous counts:
+        num_inserted:         0
+        num_already_exist:    0
+        num_not_in_inventory: 0
 
 task: "chicken_switches_watcher"
   configured period: every <REDACTED_DURATION>s
@@ -541,9 +574,15 @@ warning: unknown background task: "chicken_switches_watcher" (don't know how to 
 
 task: "crdb_node_id_collector"
   configured period: every <REDACTED_DURATION>m
+<<<<<<< HEAD
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+||||||| parent of 127d5a805 (add the "second" Nexus to the test suite blueprint; fix omdb tests)
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+=======
+  last completed activation: <REDACTED ITERATIONS>, triggered by a dependent task completing
+>>>>>>> 127d5a805 (add the "second" Nexus to the test suite blueprint; fix omdb tests)
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    last completion reported error: no blueprint
+warning: unknown background task: "crdb_node_id_collector" (don't know how to interpret details: Object {"errors": Array [Object {"err": String("failed to fetch node ID for zone ..........<REDACTED_UUID>........... at http://[::1]:REDACTED_PORT: Communication Error: error sending request for url (http://[::1]:REDACTED_PORT/node/id): error sending request for url (http://[::1]:REDACTED_PORT/node/id): client error (Connect): tcp connect error: Connection refused (os error 146)"), "zone_id": String("..........<REDACTED_UUID>...........")}], "nsuccess": Number(0)})
 
 task: "decommissioned_disk_cleaner"
   configured period: every <REDACTED_DURATION>m
@@ -842,15 +881,37 @@ termination: Exited(0)
 stdout:
 task: "blueprint_loader"
   configured period: every <REDACTED_DURATION>m <REDACTED_DURATION>s
+<<<<<<< HEAD
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+||||||| parent of 127d5a805 (add the "second" Nexus to the test suite blueprint; fix omdb tests)
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+=======
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
+>>>>>>> 127d5a805 (add the "second" Nexus to the test suite blueprint; fix omdb tests)
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    last completion reported error: failed to read target blueprint: Internal Error: no target blueprint set
+    target blueprint: ......<REDACTED_BLUEPRINT_ID>.......
+    execution:        disabled
+    created at:       <REDACTED_TIMESTAMP>
+    status:           first target blueprint
 
 task: "blueprint_executor"
   configured period: every <REDACTED_DURATION>m
+<<<<<<< HEAD
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+||||||| parent of 127d5a805 (add the "second" Nexus to the test suite blueprint; fix omdb tests)
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+=======
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a dependent task completing
+>>>>>>> 127d5a805 (add the "second" Nexus to the test suite blueprint; fix omdb tests)
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    last completion reported error: no blueprint
+    target blueprint: ......<REDACTED_BLUEPRINT_ID>....... 
+    execution:        disabled                             
+    status:           (no event report found)              
+    error:            (none)                               
 
 ---------------------------------------------
 stderr:
@@ -984,15 +1045,37 @@ task: "nat_garbage_collector"
 
 task: "blueprint_loader"
   configured period: every <REDACTED_DURATION>m <REDACTED_DURATION>s
+<<<<<<< HEAD
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+||||||| parent of 127d5a805 (add the "second" Nexus to the test suite blueprint; fix omdb tests)
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+=======
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
+>>>>>>> 127d5a805 (add the "second" Nexus to the test suite blueprint; fix omdb tests)
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    last completion reported error: failed to read target blueprint: Internal Error: no target blueprint set
+    target blueprint: ......<REDACTED_BLUEPRINT_ID>.......
+    execution:        disabled
+    created at:       <REDACTED_TIMESTAMP>
+    status:           first target blueprint
 
 task: "blueprint_executor"
   configured period: every <REDACTED_DURATION>m
+<<<<<<< HEAD
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+||||||| parent of 127d5a805 (add the "second" Nexus to the test suite blueprint; fix omdb tests)
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+=======
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a dependent task completing
+>>>>>>> 127d5a805 (add the "second" Nexus to the test suite blueprint; fix omdb tests)
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    last completion reported error: no blueprint
+    target blueprint: ......<REDACTED_BLUEPRINT_ID>....... 
+    execution:        disabled                             
+    status:           (no event report found)              
+    error:            (none)                               
 
 task: "abandoned_vmm_reaper"
   configured period: every <REDACTED_DURATION>m
@@ -1026,7 +1109,18 @@ task: "blueprint_rendezvous"
   configured period: every <REDACTED_DURATION>m
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    last completion reported error: no blueprint
+    target blueprint:     ......<REDACTED_BLUEPRINT_ID>.......
+    inventory collection: ..........<REDACTED_UUID>...........
+    debug_dataset rendezvous counts:
+        num_inserted:           0
+        num_already_exist:      0
+        num_not_in_inventory:   0
+        num_tombstoned:         0
+        num_already_tombstoned: 0
+    crucible_dataset rendezvous counts:
+        num_inserted:         0
+        num_already_exist:    0
+        num_not_in_inventory: 0
 
 task: "chicken_switches_watcher"
   configured period: every <REDACTED_DURATION>s
@@ -1036,9 +1130,17 @@ warning: unknown background task: "chicken_switches_watcher" (don't know how to 
 
 task: "crdb_node_id_collector"
   configured period: every <REDACTED_DURATION>m
+<<<<<<< HEAD
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+||||||| parent of 127d5a805 (add the "second" Nexus to the test suite blueprint; fix omdb tests)
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+=======
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a dependent task completing
+>>>>>>> 127d5a805 (add the "second" Nexus to the test suite blueprint; fix omdb tests)
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    last completion reported error: no blueprint
+warning: unknown background task: "crdb_node_id_collector" (don't know how to interpret details: Object {"errors": Array [Object {"err": String("failed to fetch node ID for zone ..........<REDACTED_UUID>........... at http://[::1]:REDACTED_PORT: Communication Error: error sending request for url (http://[::1]:REDACTED_PORT/node/id): error sending request for url (http://[::1]:REDACTED_PORT/node/id): client error (Connect): tcp connect error: Connection refused (os error 146)"), "zone_id": String("..........<REDACTED_UUID>...........")}], "nsuccess": Number(0)})
 
 task: "decommissioned_disk_cleaner"
   configured period: every <REDACTED_DURATION>m
@@ -1303,53 +1405,6 @@ task: "webhook_deliverator"
 stderr:
 note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
 =============================================
-EXECUTING COMMAND: omdb ["nexus", "chicken-switches", "show", "current"]
-termination: Exited(0)
----------------------------------------------
-stdout:
-No chicken switches enabled
----------------------------------------------
-stderr:
-note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
-=============================================
-EXECUTING COMMAND: omdb ["-w", "nexus", "chicken-switches", "set", "--planner-enabled", "true"]
-termination: Exited(0)
----------------------------------------------
-stdout:
-chicken switches updated to version 1:
-    planner enabled: true
-    planner switches:
-        add zones with mupdate override:   true
----------------------------------------------
-stderr:
-note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
-=============================================
-EXECUTING COMMAND: omdb ["-w", "nexus", "chicken-switches", "set", "--add-zones-with-mupdate-override", "false"]
-termination: Exited(0)
----------------------------------------------
-stdout:
-chicken switches updated to version 2:
-    planner enabled:   true (unchanged)
-    planner switches:
-    *   add zones with mupdate override:   true -> false
----------------------------------------------
-stderr:
-note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
-=============================================
-EXECUTING COMMAND: omdb ["nexus", "chicken-switches", "show", "current"]
-termination: Exited(0)
----------------------------------------------
-stdout:
-Reconfigurator chicken switches:
-    version: 2
-    modified time: <REDACTED_TIMESTAMP>
-    planner enabled: true
-    planner switches:
-        add zones with mupdate override:   false
----------------------------------------------
-stderr:
-note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
-=============================================
 EXECUTING COMMAND: omdb ["nexus", "sagas", "list"]
 termination: Exited(0)
 ---------------------------------------------
@@ -1486,6 +1541,7 @@ parent:    <none>
     oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_external_dns_..........<REDACTED_UUID>...........      ..........<REDACTED_UUID>...........   in service    none    none          off        
     oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_internal_dns_..........<REDACTED_UUID>...........      ..........<REDACTED_UUID>...........   in service    none    none          off        
     oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_nexus_..........<REDACTED_UUID>...........             ..........<REDACTED_UUID>...........   in service    none    none          off        
+    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_nexus_..........<REDACTED_UUID>...........             ..........<REDACTED_UUID>...........   in service    none    none          off        
     oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_ntp_..........<REDACTED_UUID>...........               ..........<REDACTED_UUID>...........   in service    none    none          off        
 
 
@@ -1500,6 +1556,7 @@ parent:    <none>
     external_dns      ..........<REDACTED_UUID>...........   install dataset   in service    ::1             
     internal_dns      ..........<REDACTED_UUID>...........   install dataset   in service    ::1             
     nexus             ..........<REDACTED_UUID>...........   install dataset   in service    ::ffff:127.0.0.1
+    nexus             ..........<REDACTED_UUID>...........   install dataset   in service    ::1             
 
 
  COCKROACHDB SETTINGS:
@@ -1610,6 +1667,7 @@ parent:    <none>
     oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_external_dns_..........<REDACTED_UUID>...........      ..........<REDACTED_UUID>...........   in service    none    none          off        
     oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_internal_dns_..........<REDACTED_UUID>...........      ..........<REDACTED_UUID>...........   in service    none    none          off        
     oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_nexus_..........<REDACTED_UUID>...........             ..........<REDACTED_UUID>...........   in service    none    none          off        
+    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_nexus_..........<REDACTED_UUID>...........             ..........<REDACTED_UUID>...........   in service    none    none          off        
     oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_ntp_..........<REDACTED_UUID>...........               ..........<REDACTED_UUID>...........   in service    none    none          off        
 
 
@@ -1624,6 +1682,7 @@ parent:    <none>
     external_dns      ..........<REDACTED_UUID>...........   install dataset   in service    ::1             
     internal_dns      ..........<REDACTED_UUID>...........   install dataset   in service    ::1             
     nexus             ..........<REDACTED_UUID>...........   install dataset   in service    ::ffff:127.0.0.1
+    nexus             ..........<REDACTED_UUID>...........   install dataset   in service    ::1             
 
 
  COCKROACHDB SETTINGS:
@@ -1686,6 +1745,53 @@ stdout:
 stderr:
 note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
 Error: `blueprint2_id` was not specified and blueprint1 has no parent
+=============================================
+EXECUTING COMMAND: omdb ["nexus", "chicken-switches", "show", "current"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+No chicken switches enabled
+---------------------------------------------
+stderr:
+note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
+=============================================
+EXECUTING COMMAND: omdb ["-w", "nexus", "chicken-switches", "set", "--planner-enabled", "true"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+chicken switches updated to version 1:
+    planner enabled: true
+    planner switches:
+        add zones with mupdate override:   true
+---------------------------------------------
+stderr:
+note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
+=============================================
+EXECUTING COMMAND: omdb ["-w", "nexus", "chicken-switches", "set", "--add-zones-with-mupdate-override", "false"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+chicken switches updated to version 2:
+    planner enabled:   true (unchanged)
+    planner switches:
+    *   add zones with mupdate override:   true -> false
+---------------------------------------------
+stderr:
+note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
+=============================================
+EXECUTING COMMAND: omdb ["nexus", "chicken-switches", "show", "current"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+Reconfigurator chicken switches:
+    version: 2
+    modified time: <REDACTED_TIMESTAMP>
+    planner enabled: true
+    planner switches:
+        add zones with mupdate override:   false
+---------------------------------------------
+stderr:
+note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
 =============================================
 EXECUTING COMMAND: omdb ["reconfigurator", "export", "<TMP_PATH_REDACTED>"]
 termination: Exited(0)
