@@ -511,7 +511,9 @@ fn cpuid_from_vmm_cpu_platform(
         db::model::VmmCpuPlatform::SledDefault => return None,
         db::model::VmmCpuPlatform::AmdMilan
         | db::model::VmmCpuPlatform::AmdTurin => Cpuid {
-            entries: cpu_platform::dump_to_cpuid_entries(cpu_platform::milan_rfd314()),
+            entries: cpu_platform::dump_to_cpuid_entries(
+                cpu_platform::milan_rfd314(),
+            ),
             vendor: CpuidVendor::Amd,
         },
     };

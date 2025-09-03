@@ -401,7 +401,8 @@ fn milan_ideal() -> CpuIdDump {
     leaf.set_misaligned_sse_mode(true);
 
     leaf.set_prefetchw(true);
-    leaf.set_osvw(false); // May be set in hardware, hopefully can hide hardware errata from guests
+    // May be set in hardware, hopefully can hide hardware errata from guests
+    leaf.set_osvw(false);
     leaf.set_ibs(false);
     leaf.set_xop(false);
 
@@ -618,8 +619,8 @@ pub fn milan_rfd314() -> CpuIdDump {
         .set_extended_processor_and_feature_identifiers(Some(leaf))
         .expect("can set leaf 8000_0001h");
 
-    // VMs on Milan currently get brand string and cache topology information from the host
-    // processor, so replicate it to minimize changes for now.
+    // VMs on Milan currently get brand string and cache topology information
+    // from the host processor, so replicate it to minimize changes for now.
 
     // Leaves 8000_0002 through 8000_0005
     cpuid
@@ -741,8 +742,8 @@ pub fn dump_to_cpuid_entries(dump: CpuIdDump) -> Vec<CpuidEntry> {
         });
     }
 
-    // Entry order does not actually matter. Sort here because it's fast (~30-35 leaves) and
-    // looking at the vec in logs or on the wire *so* much nicer.
+    // Entry order does not actually matter. Sort here because it's fast (~30-35
+    // leaves) and looking at the vec in logs or on the wire *so* much nicer.
     entries.sort_by(|left, right| {
         let by_leaf = left.leaf.cmp(&right.leaf);
         if by_leaf == std::cmp::Ordering::Equal {
@@ -837,9 +838,15 @@ fn milan_rfd314_is_as_described() {
         cpuid_leaf!(0x8000001A, 0x00000006, 0x00000000, 0x00000000, 0x00000000),
         cpuid_leaf!(0x8000001B, 0x00000000, 0x00000000, 0x00000000, 0x00000000),
         cpuid_leaf!(0x8000001C, 0x00000000, 0x00000000, 0x00000000, 0x00000000),
-        cpuid_subleaf!(0x8000001D, 0x00, 0x00000121, 0x0000003F, 0x00000000, 0x00000000),
-        cpuid_subleaf!(0x8000001D, 0x01, 0x00000143, 0x0000003F, 0x00000000, 0x00000000),
-        cpuid_subleaf!(0x8000001D, 0x02, 0x00000163, 0x0000003F, 0x00000000, 0x00000000),
+        cpuid_subleaf!(
+            0x8000001D, 0x00, 0x00000121, 0x0000003F, 0x00000000, 0x00000000
+        ),
+        cpuid_subleaf!(
+            0x8000001D, 0x01, 0x00000143, 0x0000003F, 0x00000000, 0x00000000
+        ),
+        cpuid_subleaf!(
+            0x8000001D, 0x02, 0x00000163, 0x0000003F, 0x00000000, 0x00000000
+        ),
         cpuid_leaf!(0x8000001E, 0x00000000, 0x00000100, 0x00000000, 0x00000000),
         cpuid_leaf!(0x8000001F, 0x00000000, 0x00000000, 0x00000000, 0x00000000),
         cpuid_leaf!(0x80000021, 0x00000045, 0x00000000, 0x00000000, 0x00000000),
@@ -873,12 +880,22 @@ fn milan_current_vs_rfd314_is_understood() {
         cpuid_leaf!(0x1, 0x00A00F11, 0x01020800, 0xFEDA3203, 0x178BFBFF),
         cpuid_leaf!(0x5, 0x00000040, 0x00000040, 0x00000003, 0x00000011),
         cpuid_leaf!(0x6, 0x00000004, 0x00000000, 0x00000000, 0x00000000),
-        cpuid_subleaf!(0x7, 0x0, 0x00000000, 0x201003A9, 0x00000600, 0x00000000),
-        cpuid_subleaf!(0x7, 0x1, 0x00000000, 0x00000000, 0x00000000, 0x00000000),
+        cpuid_subleaf!(
+            0x7, 0x0, 0x00000000, 0x201003A9, 0x00000600, 0x00000000
+        ),
+        cpuid_subleaf!(
+            0x7, 0x1, 0x00000000, 0x00000000, 0x00000000, 0x00000000
+        ),
         // leaf B is missing, and leaf D is the synthetic topology Bhyve invents.
-        cpuid_subleaf!(0xD, 0x0, 0x00000007, 0x00000340, 0x00000340, 0x00000000),
-        cpuid_subleaf!(0xD, 0x1, 0x00000001, 0x00000340, 0x00000000, 0x00000000),
-        cpuid_subleaf!(0xD, 0x2, 0x00000100, 0x00000240, 0x00000000, 0x00000000),
+        cpuid_subleaf!(
+            0xD, 0x0, 0x00000007, 0x00000340, 0x00000340, 0x00000000
+        ),
+        cpuid_subleaf!(
+            0xD, 0x1, 0x00000001, 0x00000340, 0x00000000, 0x00000000
+        ),
+        cpuid_subleaf!(
+            0xD, 0x2, 0x00000100, 0x00000240, 0x00000000, 0x00000000
+        ),
         // Include the all-zero leaf 10h explicitly so that the maximum standard
         // leaf matches below.
         cpuid_leaf!(0x10, 0x00000000, 0x00000000, 0x00000000, 0x00000000),
@@ -896,9 +913,15 @@ fn milan_current_vs_rfd314_is_understood() {
         cpuid_leaf!(0x8000001A, 0x00000006, 0x00000000, 0x00000000, 0x00000000),
         cpuid_leaf!(0x8000001B, 0x000003FF, 0x00000000, 0x00000000, 0x00000000),
         cpuid_leaf!(0x8000001C, 0x00000000, 0x00000000, 0x00000000, 0x00000000),
-        cpuid_subleaf!(0x8000001D, 0x00, 0x00004121, 0x0000003F, 0x00000000, 0x00000000),
-        cpuid_subleaf!(0x8000001D, 0x01, 0x00004143, 0x0000003F, 0x00000000, 0x00000000),
-        cpuid_subleaf!(0x8000001D, 0x02, 0x00004163, 0x0000003F, 0x00000000, 0x00000000),
+        cpuid_subleaf!(
+            0x8000001D, 0x00, 0x00004121, 0x0000003F, 0x00000000, 0x00000000
+        ),
+        cpuid_subleaf!(
+            0x8000001D, 0x01, 0x00004143, 0x0000003F, 0x00000000, 0x00000000
+        ),
+        cpuid_subleaf!(
+            0x8000001D, 0x02, 0x00004163, 0x0000003F, 0x00000000, 0x00000000
+        ),
         cpuid_leaf!(0x8000001E, 0x00000000, 0x00000000, 0x00000000, 0x00000000),
         cpuid_leaf!(0x8000001F, 0x0101FD3F, 0x00004173, 0x000001FD, 0x00000001),
         cpuid_leaf!(0x80000021, 0x0000204D, 0x00000000, 0x00000000, 0x00000000),
@@ -920,7 +943,8 @@ fn milan_current_vs_rfd314_is_understood() {
     feature_info.set_htt(true);
     cpuid.set_feature_info(Some(feature_info)).expect("can set leaf 1h");
 
-    let mut monitor_mwait = cpuid.get_monitor_mwait_info().expect("can get leaf 5h");
+    let mut monitor_mwait =
+        cpuid.get_monitor_mwait_info().expect("can get leaf 5h");
     // The monitor/mwait leaf was passed through non-zeroed even though
     // monitor/mwait support is hidden.
     monitor_mwait.set_smallest_monitor_line(0x40);
@@ -933,7 +957,8 @@ fn milan_current_vs_rfd314_is_understood() {
     monitor_mwait.set_supported_c1_states(1);
     cpuid.set_monitor_mwait_info(Some(monitor_mwait)).expect("can set leaf 5h");
 
-    let mut ext_features = cpuid.get_extended_feature_info().expect("can get leaf 7h");
+    let mut ext_features =
+        cpuid.get_extended_feature_info().expect("can get leaf 7h");
     // Byhve didn't/doesn't pass ADX through from the host
     ext_features.set_adx(false);
     // ... or CLFLUSHOPT?
@@ -944,9 +969,13 @@ fn milan_current_vs_rfd314_is_understood() {
     // or FSRM
     ext_features.set_fsrm(false);
 
-    cpuid.set_extended_feature_info(Some(ext_features)).expect("can set leaf 7h");
+    cpuid
+        .set_extended_feature_info(Some(ext_features))
+        .expect("can set leaf 7h");
 
-    let mut ext_processor_features = cpuid.get_extended_processor_and_feature_identifiers().expect("can get leaf 8000_0001h");
+    let mut ext_processor_features = cpuid
+        .get_extended_processor_and_feature_identifiers()
+        .expect("can get leaf 8000_0001h");
     // This is dynamically managed, true in the sampled VM.
     ext_processor_features.set_cmp_legacy(true);
     // Neither of these features are actually available to guests, but byhve had
@@ -955,7 +984,11 @@ fn milan_current_vs_rfd314_is_understood() {
     ext_processor_features.set_wdt(true);
     // TODO: Fast FXSAVE was not passed through?
     ext_processor_features.set_fast_fxsave_fxstor(false);
-    cpuid.set_extended_processor_and_feature_identifiers(Some(ext_processor_features)).expect("can set leaf 8000_0001h");
+    cpuid
+        .set_extended_processor_and_feature_identifiers(Some(
+            ext_processor_features,
+        ))
+        .expect("can set leaf 8000_0001h");
 
     let mut leaf = cpuid
         .get_processor_capacity_feature_info()
@@ -1047,20 +1080,27 @@ fn milan_current_vs_rfd314_is_understood() {
     leaf.set_itlb_l2_1gb_size(0);
     cpuid.set_tlb_1gb_page_info(Some(leaf)).expect("can set leaf 8000_0019h");
 
-    let mut processor_topo = cpuid.get_processor_topology_info().expect("can get leaf 8000_001Eh");
+    let mut processor_topo =
+        cpuid.get_processor_topology_info().expect("can get leaf 8000_001Eh");
     // By virtue of having a single vCPU, the representative VM has one thread
     // per core rather than two.
     processor_topo.set_threads_per_core(1);
-    cpuid.set_processor_topology_info(Some(processor_topo)).expect("can set leaf 8000_001Eh");
+    cpuid
+        .set_processor_topology_info(Some(processor_topo))
+        .expect("can set leaf 8000_001Eh");
 
-    let mut ext_features_2 = cpuid.get_extended_feature_identification_2().expect("can get leaf 8000_0021h");
+    let mut ext_features_2 = cpuid
+        .get_extended_feature_identification_2()
+        .expect("can get leaf 8000_0021h");
     // Bhyve passed through the feature bit for this MSR, though the MSR itself
     // is not allowed.
     ext_features_2.set_prefetch_ctl_msr(true);
     // Bhyve passed through the feature bit for SMM page config lock, though
     // guests cannot actually control it.
     ext_features_2.set_smm_pg_cfg_lock(true);
-    cpuid.set_extended_feature_identification_2(Some(ext_features_2)).expect("can set leaf 8000_0021h");
+    cpuid
+        .set_extended_feature_identification_2(Some(ext_features_2))
+        .expect("can set leaf 8000_0021h");
 
     // Now touch up the RFD314 Milan definition in the specific ways we know it
     // differs from what guests got at the time.
