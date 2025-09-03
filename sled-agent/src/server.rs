@@ -79,7 +79,7 @@ impl Server {
                 .version_policy(dropshot::VersionPolicy::Dynamic(Box::new(
                     dropshot::ClientSpecifiesVersionInHeader::new(
                         omicron_common::api::VERSION_HEADER,
-                        sled_agent_api::VERSION_REMOVE_DESTROY_ORPHANED_DATASETS_CHICKEN_SWITCH,
+                        sled_agent_api::VERSION_ADD_SWITCH_ZONE_OPERATOR_POLICY,
                     ),
                 )))
                 .start()

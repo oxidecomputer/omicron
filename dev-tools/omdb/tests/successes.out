@@ -655,14 +655,14 @@ task: "physical_disk_adoption"
     last completion reported error: task disabled
 
 task: "read_only_region_replacement_start"
-  configured period: every <REDACTED_DURATION>m
+  configured period: every <REDACTED_DURATION>days <REDACTED_DURATION>h <REDACTED_DURATION>m <REDACTED_DURATION>s
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     total requests created ok: 0
     errors: 0
 
 task: "region_replacement"
-  configured period: every <REDACTED_DURATION>m
+  configured period: every <REDACTED_DURATION>days <REDACTED_DURATION>h <REDACTED_DURATION>m <REDACTED_DURATION>s
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     region replacement requests created ok: 0
@@ -671,7 +671,7 @@ task: "region_replacement"
     errors: 0
 
 task: "region_replacement_driver"
-  configured period: every <REDACTED_DURATION>m
+  configured period: every <REDACTED_DURATION>days <REDACTED_DURATION>h <REDACTED_DURATION>m <REDACTED_DURATION>s
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     region replacement drive sagas started ok: 0
@@ -679,21 +679,21 @@ task: "region_replacement_driver"
     errors: 0
 
 task: "region_snapshot_replacement_finish"
-  configured period: every <REDACTED_DURATION>m
+  configured period: every <REDACTED_DURATION>days <REDACTED_DURATION>h <REDACTED_DURATION>m <REDACTED_DURATION>s
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     region snapshot replacement finish sagas started ok: 0
     errors: 0
 
 task: "region_snapshot_replacement_garbage_collection"
-  configured period: every <REDACTED_DURATION>m
+  configured period: every <REDACTED_DURATION>days <REDACTED_DURATION>h <REDACTED_DURATION>m <REDACTED_DURATION>s
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     total garbage collections requested: 0
     errors: 0
 
 task: "region_snapshot_replacement_start"
-  configured period: every <REDACTED_DURATION>m
+  configured period: every <REDACTED_DURATION>days <REDACTED_DURATION>h <REDACTED_DURATION>m <REDACTED_DURATION>s
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     total requests created ok: 0
@@ -702,7 +702,7 @@ task: "region_snapshot_replacement_start"
     errors: 0
 
 task: "region_snapshot_replacement_step"
-  configured period: every <REDACTED_DURATION>m
+  configured period: every <REDACTED_DURATION>days <REDACTED_DURATION>h <REDACTED_DURATION>m <REDACTED_DURATION>s
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     total step records created ok: 0
@@ -1173,14 +1173,14 @@ task: "physical_disk_adoption"
     last completion reported error: task disabled
 
 task: "read_only_region_replacement_start"
-  configured period: every <REDACTED_DURATION>m
+  configured period: every <REDACTED_DURATION>days <REDACTED_DURATION>h <REDACTED_DURATION>m <REDACTED_DURATION>s
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     total requests created ok: 0
     errors: 0
 
 task: "region_replacement"
-  configured period: every <REDACTED_DURATION>m
+  configured period: every <REDACTED_DURATION>days <REDACTED_DURATION>h <REDACTED_DURATION>m <REDACTED_DURATION>s
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     region replacement requests created ok: 0
@@ -1189,7 +1189,7 @@ task: "region_replacement"
     errors: 0
 
 task: "region_replacement_driver"
-  configured period: every <REDACTED_DURATION>m
+  configured period: every <REDACTED_DURATION>days <REDACTED_DURATION>h <REDACTED_DURATION>m <REDACTED_DURATION>s
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     region replacement drive sagas started ok: 0
@@ -1197,21 +1197,21 @@ task: "region_replacement_driver"
     errors: 0
 
 task: "region_snapshot_replacement_finish"
-  configured period: every <REDACTED_DURATION>m
+  configured period: every <REDACTED_DURATION>days <REDACTED_DURATION>h <REDACTED_DURATION>m <REDACTED_DURATION>s
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     region snapshot replacement finish sagas started ok: 0
     errors: 0
 
 task: "region_snapshot_replacement_garbage_collection"
-  configured period: every <REDACTED_DURATION>m
+  configured period: every <REDACTED_DURATION>days <REDACTED_DURATION>h <REDACTED_DURATION>m <REDACTED_DURATION>s
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     total garbage collections requested: 0
     errors: 0
 
 task: "region_snapshot_replacement_start"
-  configured period: every <REDACTED_DURATION>m
+  configured period: every <REDACTED_DURATION>days <REDACTED_DURATION>h <REDACTED_DURATION>m <REDACTED_DURATION>s
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     total requests created ok: 0
@@ -1220,7 +1220,7 @@ task: "region_snapshot_replacement_start"
     errors: 0
 
 task: "region_snapshot_replacement_step"
-  configured period: every <REDACTED_DURATION>m
+  configured period: every <REDACTED_DURATION>days <REDACTED_DURATION>h <REDACTED_DURATION>m <REDACTED_DURATION>s
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     total step records created ok: 0
