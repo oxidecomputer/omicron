@@ -112,7 +112,7 @@ impl Align {
                 .collect(),
             AlignmentMethod::Rate => tables
                 .iter()
-                .map(|table| align_and_aggregate(table, query_end, &self.period, rate_value_in_window))
+                .map(|table| align_and_aggregate(table, query_end, &self.period, rate_in_window))
                 .collect(),
         }
     }
@@ -463,7 +463,7 @@ fn mean_gauge_value_in_window(
 //
 // This uses both the start and end times when considering each point. Each
 // point's value is weighted by the faction of overlap with the window.
-fn rate_value_in_window(
+fn rate_in_window(
     _metric_type: &MetricType,
     start_times: &[DateTime<Utc>],
     timestamps: &[DateTime<Utc>],
@@ -802,7 +802,7 @@ mod tests {
     }
 
     #[test]
-    fn test_rate_value_in_window_steady_state() {
+    fn test_rate_in_window_steady_state() {
         // 1000 bytes every 10 seconds -> 100 bytes per second
         let raw_data = &[
             ("2025-08-12T19:17:00.0000Z", "2025-08-12T19:17:10.0000Z", 1000f64),
@@ -824,7 +824,7 @@ mod tests {
         let window_start = start_times[0];
         let window_end = timestamps[timestamps.len() - 1];
 
-        let mean = rate_value_in_window(
+        let mean = rate_in_window(
             &MetricType::Delta,
             &start_times,
             &timestamps,
