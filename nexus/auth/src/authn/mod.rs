@@ -50,6 +50,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use tinystr::TinyAsciiStr;
 use uuid::Uuid;
 
 /// Describes how the actor performing the current operation is authenticated
@@ -169,40 +170,40 @@ impl Context {
 
     /// Returns an authenticated context for handling internal API contexts
     pub fn internal_api() -> Context {
-        Context::context_for_builtin_user(USER_INTERNAL_API.id)
+        Context::context_for_builtin_user(USER_INTERNAL_API.id, USER_INTERNAL_API.name.as_str())
     }
 
     /// Returns an authenticated context for saga recovery
     pub fn internal_saga_recovery() -> Context {
-        Context::context_for_builtin_user(USER_SAGA_RECOVERY.id)
+        Context::context_for_builtin_user(USER_SAGA_RECOVERY.id, USER_SAGA_RECOVERY.name.as_str())
     }
 
     /// Returns an authenticated context for use by internal resource allocation
     pub fn internal_read() -> Context {
-        Context::context_for_builtin_user(USER_INTERNAL_READ.id)
+        Context::context_for_builtin_user(USER_INTERNAL_READ.id, USER_INTERNAL_READ.name.as_str())
     }
 
     /// Returns an authenticated context for use for authenticating external
     /// requests
     pub fn external_authn() -> Context {
-        Context::context_for_builtin_user(USER_EXTERNAL_AUTHN.id)
+        Context::context_for_builtin_user(USER_EXTERNAL_AUTHN.id, USER_EXTERNAL_AUTHN.name.as_str())
     }
 
     /// Returns an authenticated context for Nexus-startup database
     /// initialization
     pub fn internal_db_init() -> Context {
-        Context::context_for_builtin_user(USER_DB_INIT.id)
+        Context::context_for_builtin_user(USER_DB_INIT.id, USER_DB_INIT.name.as_str())
     }
 
     /// Returns an authenticated context for Nexus-driven service balancing.
     pub fn internal_service_balancer() -> Context {
-        Context::context_for_builtin_user(USER_SERVICE_BALANCER.id)
+        Context::context_for_builtin_user(USER_SERVICE_BALANCER.id, USER_SERVICE_BALANCER.name.as_str())
     }
 
-    fn context_for_builtin_user(user_builtin_id: BuiltInUserUuid) -> Context {
+    fn context_for_builtin_user(user_builtin_id: BuiltInUserUuid, user_name: &'static str) -> Context {
         Context {
             kind: Kind::Authenticated(
-                Details { actor: Actor::UserBuiltin { user_builtin_id } },
+                Details { actor: Actor::UserBuiltin { user_builtin_id, user_name: user_name.parse().unwrap() } },
                 None,
             ),
             schemes_tried: Vec::new(),
@@ -219,6 +220,7 @@ impl Context {
                     actor: Actor::SiloUser {
                         silo_user_id: USER_TEST_PRIVILEGED.id(),
                         silo_id: USER_TEST_PRIVILEGED.silo_id,
+                        silo_name: "test-privileged".parse().unwrap(),
                     },
                 },
                 Some(SiloAuthnPolicy::try_from(&*DEFAULT_SILO).unwrap()),
@@ -234,6 +236,7 @@ impl Context {
         Context::for_test_user(
             USER_TEST_UNPRIVILEGED.id(),
             USER_TEST_UNPRIVILEGED.silo_id,
+            "test-unprivileged",
             SiloAuthnPolicy::try_from(&*DEFAULT_SILO).unwrap(),
         )
     }
@@ -243,11 +246,12 @@ impl Context {
     pub fn for_test_user(
         silo_user_id: SiloUserUuid,
         silo_id: Uuid,
+        silo_name: &'static str,
         silo_authn_policy: SiloAuthnPolicy,
     ) -> Context {
         Context {
             kind: Kind::Authenticated(
-                Details { actor: Actor::SiloUser { silo_user_id, silo_id } },
+                Details { actor: Actor::SiloUser { silo_user_id, silo_id, silo_name: silo_name.parse().unwrap() } },
                 Some(silo_authn_policy),
             ),
             schemes_tried: Vec::new(),
@@ -368,8 +372,15 @@ pub struct Details {
 /// Who is performing an operation
 #[derive(Clone, Copy, Deserialize, Eq, PartialEq, Serialize)]
 pub enum Actor {
-    UserBuiltin { user_builtin_id: BuiltInUserUuid },
-    SiloUser { silo_user_id: SiloUserUuid, silo_id: Uuid },
+    UserBuiltin { 
+        user_builtin_id: BuiltInUserUuid,
+        user_name: TinyAsciiStr<32>,
+    },
+    SiloUser { 
+        silo_user_id: SiloUserUuid,
+        silo_id: Uuid,
+        silo_name: TinyAsciiStr<32>,
+    },
 }
 
 impl Actor {
@@ -389,7 +400,7 @@ impl Actor {
 
     pub fn built_in_user_id(&self) -> Option<BuiltInUserUuid> {
         match self {
-            Actor::UserBuiltin { user_builtin_id } => Some(*user_builtin_id),
+            Actor::UserBuiltin { user_builtin_id, .. } => Some(*user_builtin_id),
             Actor::SiloUser { .. } => None,
         }
     }
@@ -416,14 +427,16 @@ impl std::fmt::Debug for Actor {
         // Do NOT include sensitive fields (e.g., private key or a bearer
         // token) in this output!
         match self {
-            Actor::UserBuiltin { user_builtin_id } => f
+            Actor::UserBuiltin { user_builtin_id, user_name } => f
                 .debug_struct("Actor::UserBuiltin")
                 .field("user_builtin_id", &user_builtin_id)
+                .field("user_name", &user_name)
                 .finish_non_exhaustive(),
-            Actor::SiloUser { silo_user_id, silo_id } => f
+            Actor::SiloUser { silo_user_id, silo_id, silo_name } => f
                 .debug_struct("Actor::SiloUser")
                 .field("silo_user_id", &silo_user_id)
                 .field("silo_id", &silo_id)
+                .field("silo_name", &silo_name)
                 .finish_non_exhaustive(),
         }
     }
@@ -434,6 +447,7 @@ impl std::fmt::Debug for Actor {
 pub struct ConsoleSessionWithSiloId {
     pub console_session: nexus_db_model::ConsoleSession,
     pub silo_id: Uuid,
+    pub silo_name: TinyAsciiStr<32>,
 }
 
 /// Label for a particular authentication scheme (used in log messages and

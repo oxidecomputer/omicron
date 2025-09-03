@@ -107,6 +107,7 @@ async fn test_audit_log_list(ctx: &ControlPlaneTestContext) {
         views::AuditLogEntryActor::SiloUser {
             silo_user_id: USER_TEST_PRIVILEGED.id(),
             silo_id: DEFAULT_SILO_ID,
+            silo_name: "default".to_string(),
         }
     );
 
@@ -151,6 +152,7 @@ async fn test_audit_log_list(ctx: &ControlPlaneTestContext) {
         views::AuditLogEntryActor::SiloUser {
             silo_user_id: me.user.id,
             silo_id: me.user.silo_id,
+            silo_name: "default".to_string(),
         }
     );
 
@@ -389,6 +391,7 @@ fn verify_entry(
         views::AuditLogEntryActor::SiloUser {
             silo_user_id: USER_TEST_PRIVILEGED.id(),
             silo_id: DEFAULT_SILO_ID,
+            silo_name: "default".to_string(),
         }
     );
     assert_eq!(entry.source_ip.to_string(), "127.0.0.1");

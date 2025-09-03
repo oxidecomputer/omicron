@@ -106,6 +106,7 @@ impl oso::PolarClass for AuthenticatedActor {
                 AuthenticatedActor {
                     actor: authn::Actor::UserBuiltin {
                         user_builtin_id: authn::USER_DB_INIT.id,
+                        user_name: authn::USER_DB_INIT.name.as_str().parse().unwrap(),
                     },
                     roles: RoleSet::new(),
                     silo_policy: None,
@@ -116,6 +117,7 @@ impl oso::PolarClass for AuthenticatedActor {
                 AuthenticatedActor {
                     actor: authn::Actor::UserBuiltin {
                         user_builtin_id: authn::USER_INTERNAL_API.id,
+                        user_name: authn::USER_INTERNAL_API.name.as_str().parse().unwrap(),
                     },
                     roles: RoleSet::new(),
                     silo_policy: None,

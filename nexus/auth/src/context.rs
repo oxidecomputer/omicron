@@ -133,17 +133,19 @@ impl OpContext {
             metadata.insert(String::from("actor"), format!("{:?}", actor));
 
             match &actor {
-                authn::Actor::SiloUser { silo_user_id, silo_id } => {
+                authn::Actor::SiloUser { silo_user_id, silo_id, silo_name } => {
                     log.new(o!(
                         "authenticated" => true,
                         "silo_user_id" => silo_user_id.to_string(),
                         "silo_id" => silo_id.to_string(),
+                        "silo_name" => silo_name.to_string(),
                     ))
                 }
 
-                authn::Actor::UserBuiltin { user_builtin_id } => log.new(o!(
+                authn::Actor::UserBuiltin { user_builtin_id, user_name } => log.new(o!(
                     "authenticated" => true,
                     "user_builtin_id" => user_builtin_id.to_string(),
+                    "user_name" => user_name.to_string(),
                 )),
             }
         } else {
@@ -389,6 +391,9 @@ impl Session for ConsoleSessionWithSiloId {
     }
     fn silo_id(&self) -> Uuid {
         self.silo_id
+    }
+    fn silo_name(&self) -> &str {
+        self.silo_name.as_str()
     }
     fn time_last_used(&self) -> DateTime<Utc> {
         self.console_session.time_last_used

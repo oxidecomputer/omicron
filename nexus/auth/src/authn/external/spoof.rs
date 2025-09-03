@@ -63,6 +63,7 @@ static SPOOF_RESERVED_BAD_CREDS_ACTOR: LazyLock<Actor> =
         user_builtin_id: "22222222-2222-2222-2222-222222222222"
             .parse()
             .unwrap(),
+        user_name: "spoof-user".parse().unwrap(),
     });
 
 /// Complete HTTP header value to trigger the "bad actor" error
@@ -108,7 +109,7 @@ where
                 match ctx.silo_user_silo(silo_user_id).await {
                     Err(error) => SchemeResult::Failed(error),
                     Ok(silo_id) => {
-                        let actor = Actor::SiloUser { silo_id, silo_user_id };
+                        let actor = Actor::SiloUser { silo_id, silo_user_id, silo_name: "spoof-user".parse().unwrap()};
                         SchemeResult::Authenticated(Details { actor })
                     }
                 }

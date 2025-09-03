@@ -54,15 +54,22 @@ impl super::Nexus {
     ) -> CreateResult<AuditLogEntryInit> {
         // for now, this conversion is pretty much 1-1
         let actor = match opctx.authn.actor() {
-            Some(nexus_auth::authn::Actor::UserBuiltin { user_builtin_id }) => {
-                AuditLogActor::UserBuiltin { user_builtin_id: *user_builtin_id }
+            Some(nexus_auth::authn::Actor::UserBuiltin { 
+                user_builtin_id, user_name 
+            }) => {
+                AuditLogActor::UserBuiltin { 
+                    user_builtin_id: *user_builtin_id,
+                    user_name: user_name.to_string(),
+                }
             }
             Some(nexus_auth::authn::Actor::SiloUser {
                 silo_user_id,
                 silo_id,
+                silo_name,
             }) => AuditLogActor::SiloUser {
                 silo_user_id: *silo_user_id,
                 silo_id: *silo_id,
+                silo_name: silo_name.to_string(),
             },
             None => AuditLogActor::Unauthenticated,
         };

@@ -1596,6 +1596,7 @@ pub enum AuditLogEntryActor {
     UserBuiltin {
         #[schemars(with = "Uuid")]
         user_builtin_id: BuiltInUserUuid,
+        user_name: String,
     },
 
     SiloUser {
@@ -1603,6 +1604,7 @@ pub enum AuditLogEntryActor {
         silo_user_id: SiloUserUuid,
 
         silo_id: Uuid,
+        silo_name: String,
     },
 
     Unauthenticated,

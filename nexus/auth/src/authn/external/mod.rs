@@ -267,6 +267,7 @@ mod test {
             user_builtin_id: "1c91bab2-4841-669f-cc32-de80da5bbf39"
                 .parse()
                 .unwrap(),
+            user_name: "actor1",
         };
         let grunt1 = Box::new(GruntScheme {
             name: name1,
@@ -283,6 +284,7 @@ mod test {
             user_builtin_id: "799684af-533a-cb66-b5ac-ab55a791d5ef"
                 .parse()
                 .unwrap(),
+            user_name: "actor2",
         };
         let grunt2 = Box::new(GruntScheme {
             name: name2,

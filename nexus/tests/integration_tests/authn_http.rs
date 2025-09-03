@@ -110,6 +110,7 @@ async fn test_authn_session_cookie() {
         token: "valid".to_string(),
         silo_user_id: SiloUserUuid::new_v4(),
         silo_id: Uuid::new_v4(),
+        silo_name: "test-silo-valid",
         time_last_used: Utc::now() - Duration::seconds(5),
         time_created: Utc::now() - Duration::seconds(5),
     };
@@ -118,6 +119,7 @@ async fn test_authn_session_cookie() {
         token: "idle_expired".to_string(),
         silo_user_id: SiloUserUuid::new_v4(),
         silo_id: Uuid::new_v4(),
+        silo_name: "test-silo-idle-expired",
         time_last_used: Utc::now() - Duration::hours(2),
         time_created: Utc::now() - Duration::hours(3),
     };
@@ -126,6 +128,7 @@ async fn test_authn_session_cookie() {
         token: "abs_expired".to_string(),
         silo_user_id: SiloUserUuid::new_v4(),
         silo_id: Uuid::new_v4(),
+        silo_name: "test-silo-abs-expired",
         time_last_used: Utc::now(),
         time_created: Utc::now() - Duration::hours(10),
     };
@@ -349,6 +352,7 @@ struct FakeSession {
     token: String,
     silo_user_id: SiloUserUuid,
     silo_id: Uuid,
+    silo_name: &'static str,
     time_created: DateTime<Utc>,
     time_last_used: DateTime<Utc>,
 }
@@ -362,6 +366,9 @@ impl session_cookie::Session for FakeSession {
     }
     fn silo_id(&self) -> Uuid {
         self.silo_id
+    }
+    fn silo_name(&self) -> &'static str {
+        self.silo_name
     }
     fn time_created(&self) -> DateTime<Utc> {
         self.time_created
@@ -437,7 +444,7 @@ async fn whoami_get(
     let actor = authn.actor().map(|actor| match actor {
         Actor::SiloUser { silo_user_id, .. } => silo_user_id.to_string(),
 
-        Actor::UserBuiltin { user_builtin_id } => user_builtin_id.to_string(),
+        Actor::UserBuiltin { user_builtin_id, user_name } => user_builtin_id.to_string(),
     });
     let authenticated = actor.is_some();
     let schemes_tried =
