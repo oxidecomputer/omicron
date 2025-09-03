@@ -341,9 +341,9 @@ impl nexus_test_interface::NexusServer for Server {
             .await
             .expect("Could not initialize rack");
 
-        // Now that we have a blueprint, determination of whether sagas are
-        // quiesced can complete.  Wait for that so that tests can assume they
-        // can immediately kick off sagas.
+        // Now that we have a blueprint, determine whether sagas should be
+        // quiesced.  Wait for that so that tests can assume they can
+        // immediately kick off sagas.
         internal_server
             .apictx
             .context

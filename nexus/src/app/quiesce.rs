@@ -129,7 +129,9 @@ async fn do_quiesce(quiesce: NexusQuiesceHandle) {
     // TODO per RFD 588, this is where we will enter a loop, pausing either on
     // timeout or when our local quiesce state changes.  At each pause: if we
     // need to update our db_metadata_nexus record, do so.  Then load the
-    // current blueprint and check the records for all nexus instances.
+    // current blueprint and check the records for all nexus instances.  This
+    // work is covered by a combination of oxidecomputer/omicron#8859,
+    // oxidecomputer/omicron#8857, and oxidecomputer/omicron#8796.
     //
     // For now, we skip the cross-Nexus coordination and simply wait for our own
     // Nexus to finish what it's doing.
@@ -175,7 +177,7 @@ async fn do_quiesce(quiesce: NexusQuiesceHandle) {
     });
 
     // TODO per RFD 588, this is where we will enter a loop trying to update our
-    // database record for the last time.
+    // database record for the last time.  See oxidecomputer/omicron#8971.
 
     quiesce.state.send_modify(|q| {
         let QuiesceState::RecordingQuiesce {
