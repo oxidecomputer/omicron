@@ -11,6 +11,7 @@ use nexus_types::deployment::ExpectedVersion;
 use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdateDetails;
 use nexus_types::deployment::PendingMgsUpdateRotBootloaderDetails;
+use nexus_types::deployment::planning_report::FailedMgsUpdateReason;
 use nexus_types::inventory::BaseboardId;
 use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::Collection;
@@ -60,7 +61,9 @@ pub fn try_make_update_rot_bootloader(
     baseboard_id: &Arc<BaseboardId>,
     inventory: &Collection,
     current_artifacts: &TufRepoDescription,
-) -> Option<PendingMgsUpdate> {
+    // TODO-K: This needs to stay as an option because Ok(None) means there is
+    // update needed
+) -> Result<Option<PendingMgsUpdate>, FailedMgsUpdateReason> {
     let Some(sp_info) = inventory.sps.get(baseboard_id) else {
         warn!(
             log,
@@ -68,7 +71,7 @@ pub fn try_make_update_rot_bootloader(
              (missing SP info from inventory)";
             baseboard_id
         );
-        return None;
+        return Err(FailedMgsUpdateReason::SpNotInInventory);
     };
 
     let Some(stage0_caboose) =
@@ -80,7 +83,7 @@ pub fn try_make_update_rot_bootloader(
              (missing stage0 caboose from inventory)";
             baseboard_id,
         );
-        return None;
+        return Err(FailedMgsUpdateReason::CabooseNotInInventory);
     };
 
     let Ok(expected_stage0_version) = stage0_caboose.caboose.version.parse()
@@ -92,7 +95,7 @@ pub fn try_make_update_rot_bootloader(
             baseboard_id,
             "found_version" => &stage0_caboose.caboose.version,
         );
-        return None;
+        return Err(FailedMgsUpdateReason::FailedVersionParse);
     };
 
     let board = &stage0_caboose.caboose.board;
@@ -103,7 +106,7 @@ pub fn try_make_update_rot_bootloader(
              (missing sign in stage0 caboose from inventory)";
             baseboard_id
         );
-        return None;
+        return Err(FailedMgsUpdateReason::CabooseMissingSign);
     };
 
     let matching_artifacts: Vec<_> = current_artifacts
@@ -160,7 +163,7 @@ pub fn try_make_update_rot_bootloader(
             "cannot configure RoT bootloader update for board (no matching artifact)";
             baseboard_id,
         );
-        return None;
+        return Err(FailedMgsUpdateReason::NoMatchingArtifactFound);
     }
 
     if matching_artifacts.len() > 1 {
@@ -180,7 +183,7 @@ pub fn try_make_update_rot_bootloader(
     // needed.
     if artifact.id.version == expected_stage0_version {
         debug!(log, "no RoT bootloader update needed for board"; baseboard_id);
-        return None;
+        return Ok(None);
     }
 
     // Begin configuring an update.
@@ -198,11 +201,11 @@ pub fn try_make_update_rot_bootloader(
                  (found stage0 next contents but version was not valid)";
                 baseboard_id
             );
-            return None;
+            return Err(FailedMgsUpdateReason::FailedVersionParse);
         }
     };
 
-    Some(PendingMgsUpdate {
+    Ok(Some(PendingMgsUpdate {
         baseboard_id: baseboard_id.clone(),
         sp_type: sp_info.sp_type,
         slot_id: sp_info.sp_slot,
@@ -214,5 +217,5 @@ pub fn try_make_update_rot_bootloader(
         ),
         artifact_hash: artifact.hash,
         artifact_version: artifact.id.version.clone(),
-    })
+    }))
 }

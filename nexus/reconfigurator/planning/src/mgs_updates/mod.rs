@@ -27,6 +27,9 @@ use nexus_types::deployment::PendingMgsUpdateRotDetails;
 use nexus_types::deployment::PendingMgsUpdateSpDetails;
 use nexus_types::deployment::PendingMgsUpdates;
 use nexus_types::deployment::TargetReleaseDescription;
+use nexus_types::deployment::planning_report::MgsUpdateComponent;
+use nexus_types::deployment::planning_report::SkippedMgsUpdate;
+use nexus_types::deployment::planning_report::SkippedMgsUpdates;
 use nexus_types::inventory::BaseboardId;
 use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::Collection;
@@ -64,6 +67,8 @@ pub(crate) struct PlannedMgsUpdates {
     /// Pending changes to sleds' host phase 2 contents; each of these should
     /// result in a change to the respective sled's `BlueprintSledConfig`.
     pub(crate) pending_host_phase_2_changes: PendingHostPhase2Changes,
+
+    // TODO-K: Add skipped updates here?
 }
 
 /// Generates a new set of `PendingMgsUpdates` based on:
@@ -198,7 +203,8 @@ pub(crate) fn plan_mgs_updates(
         }
 
         match try_make_update(log, board, inventory, current_artifacts) {
-            Some((update, mut host_phase_2)) => {
+            // TODO-K: use skipped_updates
+            Some((update, mut host_phase_2, _skipped_updates)) => {
                 info!(log, "configuring MGS-driven update"; &update);
                 pending_updates.insert(update);
                 pending_host_phase_2_changes.append(&mut host_phase_2);
@@ -495,26 +501,75 @@ fn try_make_update(
     baseboard_id: &Arc<BaseboardId>,
     inventory: &Collection,
     current_artifacts: &TufRepoDescription,
-) -> Option<(PendingMgsUpdate, PendingHostPhase2Changes)> {
+) -> Option<(PendingMgsUpdate, PendingHostPhase2Changes, SkippedMgsUpdates)> {
+    let mut skipped_mgs_updates = SkippedMgsUpdates::empty();
     // We try MGS-driven update components in a hardcoded priority order until
     // any of them returns `Some`.  The order is described in RFD 565 section
     // "Update Sequence".
-    if let Some(update) = try_make_update_rot_bootloader(
+    match try_make_update_rot_bootloader(
         log,
         baseboard_id,
         inventory,
         current_artifacts,
-    )
-    .or_else(|| {
-        try_make_update_rot(log, baseboard_id, inventory, current_artifacts)
-    })
-    .or_else(|| {
-        try_make_update_sp(log, baseboard_id, inventory, current_artifacts)
-    }) {
-        // We have a non-host update; there are no pending host phase 2 changes
-        // necessary.
-        return Some((update, PendingHostPhase2Changes::empty()));
+    ) {
+        // TODO-K: Will have to clean this up, the nesting will become horrible
+        Ok(p) => {
+            if let Some(update) = p
+                .or_else(|| {
+                    try_make_update_rot(
+                        log,
+                        baseboard_id,
+                        inventory,
+                        current_artifacts,
+                    )
+                })
+                .or_else(|| {
+                    try_make_update_sp(
+                        log,
+                        baseboard_id,
+                        inventory,
+                        current_artifacts,
+                    )
+                })
+            {
+                // We have a non-host update; there are no pending host phase 2 changes
+                // necessary.
+                return Some((
+                    update,
+                    PendingHostPhase2Changes::empty(),
+                    skipped_mgs_updates,
+                ));
+            }
+        }
+        Err(e) => {
+            // TODO-K: Remove unwrap
+            skipped_mgs_updates
+                .by_baseboard
+                .insert_unique(SkippedMgsUpdate {
+                    baseboard_id: baseboard_id.clone(),
+                    component: MgsUpdateComponent::RotBootloader,
+                    reason: e,
+                })
+                .unwrap();
+        }
     }
+
+    // if let Some(update) = try_make_update_rot_bootloader(
+    //     log,
+    //     baseboard_id,
+    //     inventory,
+    //     current_artifacts,
+    // )
+    // .or_else(|| {
+    //     try_make_update_rot(log, baseboard_id, inventory, current_artifacts)
+    // })
+    // .or_else(|| {
+    //     try_make_update_sp(log, baseboard_id, inventory, current_artifacts)
+    // }) {
+    //     // We have a non-host update; there are no pending host phase 2 changes
+    //     // necessary.
+    //     return Some((update, PendingHostPhase2Changes::empty()));
+    // }
 
     host_phase_1::try_make_update(
         log,

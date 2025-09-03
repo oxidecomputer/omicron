@@ -14,6 +14,9 @@ use crate::deployment::PendingMgsUpdateDetails;
 use crate::inventory::BaseboardId;
 
 use daft::Diffable;
+use iddqd::IdOrdItem;
+use iddqd::IdOrdMap;
+use iddqd::id_upcast;
 use indent_write::fmt::IndentWriter;
 use omicron_common::policy::COCKROACHDB_REDUNDANCY;
 use omicron_uuid_kinds::BlueprintUuid;
@@ -25,11 +28,11 @@ use omicron_uuid_kinds::ZpoolUuid;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
-
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::fmt;
 use std::fmt::Write;
+use std::sync::Arc;
 
 /// A full blueprint planning report. Other than the blueprint ID, each
 /// field corresponds to a step in the update planner, i.e., a subroutine
@@ -475,6 +478,7 @@ impl PlanningMupdateOverrideStepReport {
     }
 }
 
+// TODO-K: Moce this to deplyment.rs
 #[derive(
     Debug,
     Deserialize,
@@ -522,17 +526,52 @@ impl From<&'_ PendingMgsUpdateDetails> for MgsUpdateComponent {
     Copy,
 )]
 pub enum FailedMgsUpdateReason {
-    MissingArtifact,
+    // TODO-K: add some nice errors with information
+    NoMatchingArtifactFound,
+    // SP details
+    SpNotInInventory,
+    // Include caboose of what
+    CabooseNotInInventory,
+    // Retrieve where the verion parse comes from
+    FailedVersionParse,
+    // Include caboose of what
+    CabooseMissingSign,
     // Add more
 }
 
 #[derive(
     Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Diffable, JsonSchema,
 )]
-pub struct FailedMgsUpdate {
-    pub baseboard_id: BaseboardId,
+pub struct SkippedMgsUpdate {
+    pub baseboard_id: Arc<BaseboardId>,
     pub component: MgsUpdateComponent,
     pub reason: FailedMgsUpdateReason,
+}
+
+impl IdOrdItem for SkippedMgsUpdate {
+    type Key<'a> = &'a BaseboardId;
+    fn key(&self) -> Self::Key<'_> {
+        &*self.baseboard_id
+    }
+    id_upcast!();
+}
+
+#[derive(
+    Clone, Debug, Eq, PartialEq, Deserialize, Serialize, JsonSchema, Diffable,
+)]
+pub struct SkippedMgsUpdates {
+    // The IdOrdMap key is the baseboard_id. Only one outstanding MGS-managed
+    // update is allowed for a given baseboard.
+    //
+    // Note that keys aren't strings so this can't be serialized as a JSON map,
+    // but IdOrdMap serializes as an array.
+    pub by_baseboard: IdOrdMap<SkippedMgsUpdate>,
+}
+
+impl SkippedMgsUpdates {
+    pub fn empty() -> Self {
+        Self { by_baseboard: IdOrdMap::new() }
+    }
 }
 
 #[derive(
@@ -547,8 +586,8 @@ pub struct PlanningMgsUpdatesStepReport {
     // TODO-K: Maybe we want to check that all updates are in the version
     // we want, instead of keeping track of failed ones? Because an in-flight
     // update may have been removed from pending updates and won't be on
-    // failed updates either
-    pub failed_mgs_update: Option<FailedMgsUpdate>,
+    // failed updates either - No because the prechecks verify component version
+    pub failed_mgs_update: Option<SkippedMgsUpdate>,
 }
 
 impl PlanningMgsUpdatesStepReport {

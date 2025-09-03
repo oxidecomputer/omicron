@@ -12,6 +12,7 @@ use nexus_types::deployment::BlueprintHostPhase2DesiredContents;
 use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdateDetails;
 use nexus_types::deployment::PendingMgsUpdateHostPhase1Details;
+use nexus_types::deployment::planning_report::SkippedMgsUpdates;
 use nexus_types::inventory::BaseboardId;
 use nexus_types::inventory::Collection;
 use omicron_common::api::external::TufArtifactMeta;
@@ -270,7 +271,7 @@ pub(super) fn try_make_update(
     baseboard_id: &Arc<BaseboardId>,
     inventory: &Collection,
     current_artifacts: &TufRepoDescription,
-) -> Option<(PendingMgsUpdate, PendingHostPhase2Changes)> {
+) -> Option<(PendingMgsUpdate, PendingHostPhase2Changes, SkippedMgsUpdates)> {
     let Some(sp_info) = inventory.sps.get(baseboard_id) else {
         warn!(
             log,
@@ -506,6 +507,8 @@ pub(super) fn try_make_update(
             artifact_version: phase_1_artifact.id.version.clone(),
         },
         pending_host_phase_2_changes,
+        // TODO-K: This is wrong, fix
+        SkippedMgsUpdates::empty(),
     ))
 }
 
