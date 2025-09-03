@@ -507,6 +507,8 @@ fn milan_ideal() -> CpuIdDump {
     cpuid.set_extended_cache_parameters(None).expect("can set leaf 8000_001Dh");
 
     let mut leaf = ProcessorTopologyInfo::empty();
+    // This is managed dynamically, where a single vCPU instance will see this
+    // set to 1 instead.
     leaf.set_threads_per_core(2);
     cpuid
         .set_processor_topology_info(Some(leaf))
@@ -695,30 +697,28 @@ pub fn milan_rfd314() -> Vec<CpuidEntry> {
     cpuid.set_tlb_1gb_page_info(Some(leaf)).expect("can set leaf 8000_0019h");
 
     // Set up extended cache hierarchy info (leaf 8000_001Dh)
+    //
+    // This is the fabricated cache topology from Bhyve. We could be more
+    // precise, for dubious benefit. This is discussed in more detail in RFD
+    // 314.
     let mut levels = Vec::new();
     levels.push(CpuIdResult {
         eax: 0x00000121,
-        ebx: 0x01C0003F,
-        ecx: 0x0000003F,
-        edx: 0x00000000,
-    });
-    levels.push(CpuIdResult {
-        eax: 0x00000122,
-        ebx: 0x01C0003F,
-        ecx: 0x0000003F,
+        ebx: 0x0000003F,
+        ecx: 0x00000000,
         edx: 0x00000000,
     });
     levels.push(CpuIdResult {
         eax: 0x00000143,
-        ebx: 0x01C0003F,
-        ecx: 0x000003FF,
-        edx: 0x00000002,
+        ebx: 0x0000003F,
+        ecx: 0x00000000,
+        edx: 0x00000000,
     });
     levels.push(CpuIdResult {
         eax: 0x00000163,
-        ebx: 0x03C0003F,
-        ecx: 0x00007FFF,
-        edx: 0x00000001,
+        ebx: 0x0000003F,
+        ecx: 0x00000000,
+        edx: 0x00000000,
     });
     cpuid
         .set_extended_cache_parameters(Some(levels.as_slice()))
