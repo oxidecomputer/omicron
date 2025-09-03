@@ -1519,6 +1519,11 @@ mod region_snapshot_replacement {
                     );
                     tokio::time::sleep(std::time::Duration::from_secs(5)).await;
                     counter += 1;
+                    if counter > 200 {
+                        panic!(
+                            "Tried 200 times, and still this did not finish"
+                        );
+                    }
                 } else {
                     break;
                 }
@@ -1660,6 +1665,16 @@ mod region_snapshot_replacement {
                     .await
                     .unwrap();
 
+            /*
+            let pre_result = self
+                .datastore
+                .lookup_region_snapshot_replacement_request(
+                    &self.opctx(),
+                    RegionSnapshot,,
+                )
+                .await
+                */
+
             let result = self
                 .datastore
                 .create_region_snapshot_replacement_step(
@@ -1670,6 +1685,7 @@ mod region_snapshot_replacement {
                 .await
                 .unwrap();
 
+            eprintln!("result: {:?}", result);
             // ZZZ: is "AlreadyHandled" an error here?
             // Could that be a valid result if some other actor put the
             // replacement step into place?
@@ -1691,7 +1707,7 @@ mod region_snapshot_replacement {
                         )
                         .await;
                     eprintln!(
-                        "we were suppose to create this: {:?} but got {:?}",
+                        "we were suppose to create this: {:?} but found it AlreadyHandled, then got {:?}",
                         self.replacement_request_id,
                         region_snapshot_replace_request
                     );
