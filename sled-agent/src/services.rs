@@ -41,6 +41,7 @@ use clickhouse_admin_types::CLICKHOUSE_SERVER_CONFIG_DIR;
 use clickhouse_admin_types::CLICKHOUSE_SERVER_CONFIG_FILE;
 use dpd_client::{Client as DpdClient, Error as DpdError, types as DpdTypes};
 use dropshot::HandlerTaskMode;
+use futures::future;
 use illumos_utils::addrobj::AddrObject;
 use illumos_utils::addrobj::IPV6_LINK_LOCAL_ADDROBJ_NAME;
 use illumos_utils::dladm::{
@@ -3268,6 +3269,68 @@ impl ServiceManager {
         Ok(())
     }
 
+    // Retry ensuring switch zone uplinks until success or we're told to stop.
+    //
+    // TODO-correctness: This is not in great shape, and may get stuck in an
+    // infinite retry loop _within_ one attempt, or may succeed even if it
+    // didn't fully configure all switch zone services. See
+    // <https://github.com/oxidecomputer/omicron/issues/8970> for details.
+    async fn ensure_switch_zone_uplinks_configured_loop(
+        &self,
+        underlay_info: &UnderlayInfo,
+        exit_rx: Option<oneshot::Receiver<()>>,
+    ) {
+        // We don't really expect failures trying to initialize the switch zone
+        // unless something is unhealthy. This timeout is somewhat arbitrary,
+        // but we probably don't want to use backoff here.
+        const RETRY_DELAY: Duration = Duration::from_secs(1);
+
+        // We can only ensure uplinks if we have a rack network config.
+        //
+        // TODO-correctness How can we have an underlay IP without a rack
+        // network config??
+        let Some(rack_network_config) = &underlay_info.rack_network_config
+        else {
+            return;
+        };
+
+        // Convert the optional into a future we can poll. If we have no
+        // `exit_rx`, we construct a future that never resolves.
+        let mut exit_rx = match exit_rx {
+            Some(rx) => future::Either::Left(rx),
+            None => future::Either::Right(future::pending()),
+        };
+
+        loop {
+            match self
+                .ensure_switch_zone_uplinks_configured(
+                    underlay_info.ip,
+                    &rack_network_config,
+                )
+                .await
+            {
+                Ok(()) => {
+                    info!(self.inner.log, "configured switch zone uplinks");
+                    break;
+                }
+                Err(e) => {
+                    warn!(
+                        self.inner.log,
+                        "Failed to configure switch zone uplinks";
+                        InlineErrorChain::new(&e),
+                    );
+                }
+            }
+
+            tokio::select! {
+                // If we've been told to stop trying, bail.
+                _ = &mut exit_rx => return,
+
+                _ = tokio::time::sleep(RETRY_DELAY) => continue,
+            };
+        }
+    }
+
     // Ensure our switch zone (at the given IP address) has its uplinks
     // configured based on `rack_network_config`. This first requires us to ask
     // MGS running in the switch zone which switch we are, so we know which
@@ -3949,32 +4012,11 @@ impl ServiceManager {
         // Then, if we have underlay info, go into a loop trying to configure
         // our uplinks. As above, retry until we succeed or are told to stop.
         if let Some(underlay_info) = underlay_info {
-            if let Some(rack_network_config) = underlay_info.rack_network_config
-            {
-                loop {
-                    match self
-                        .ensure_switch_zone_uplinks_configured(
-                            underlay_info.ip,
-                            &rack_network_config,
-                        )
-                        .await
-                    {
-                        Ok(()) => break,
-                        Err(e) => warn!(
-                            self.inner.log,
-                            "Failed to configure switch zone uplinks";
-                            InlineErrorChain::new(&e),
-                        ),
-                    }
-
-                    tokio::select! {
-                        // If we've been told to stop trying, bail.
-                        _ = &mut exit_rx => return,
-
-                        _ = tokio::time::sleep(RETRY_DELAY) => continue,
-                    };
-                }
-            }
+            self.ensure_switch_zone_uplinks_configured_loop(
+                &underlay_info,
+                Some(exit_rx),
+            )
+            .await;
         }
     }
 }
