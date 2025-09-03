@@ -15,7 +15,7 @@ use illumos_utils::dladm::PhysicalLink;
 use omicron_common::vlan::VlanID;
 use serde::Deserialize;
 use sled_hardware::UnparsedDisk;
-use sled_hardware::is_gimlet;
+use sled_hardware::is_oxide_sled;
 use sprockets_tls::keys::SprocketsConfig;
 
 #[derive(Clone, Debug, Deserialize)]
@@ -158,7 +158,7 @@ impl Config {
         if let Some(link) = self.data_link.as_ref() {
             Ok(link.clone())
         } else {
-            if is_gimlet().map_err(ConfigError::SystemDetection)? {
+            if is_oxide_sled().map_err(ConfigError::SystemDetection)? {
                 Dladm::list_physical()
                     .await
                     .map_err(ConfigError::FindLinks)?

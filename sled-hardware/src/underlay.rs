@@ -4,7 +4,7 @@
 
 //! Finding the underlay network physical links and address objects.
 
-use crate::is_gimlet;
+use crate::is_oxide_sled;
 use illumos_utils::addrobj;
 use illumos_utils::addrobj::AddrObject;
 use illumos_utils::dladm::CHELSIO_LINK_PREFIX;
@@ -69,7 +69,7 @@ pub async fn find_nics(
 pub async fn find_chelsio_links(
     config_data_links: &[String; 2],
 ) -> Result<Vec<PhysicalLink>, Error> {
-    if is_gimlet().map_err(Error::SystemDetection)? {
+    if is_oxide_sled().map_err(Error::SystemDetection)? {
         Dladm::list_physical().await.map_err(Error::FindLinks).map(|links| {
             links
                 .into_iter()

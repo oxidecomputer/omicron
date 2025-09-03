@@ -85,6 +85,6 @@ pub async fn ensure_partition_layout(
 }
 
 /// Return true if the host system is an Oxide Gimlet.
-pub fn is_gimlet() -> anyhow::Result<bool> {
+pub fn is_oxide_sled() -> anyhow::Result<bool> {
     Ok(false)
 }

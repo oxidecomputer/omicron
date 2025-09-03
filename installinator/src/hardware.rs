@@ -21,9 +21,9 @@ pub struct Hardware {
 
 impl Hardware {
     pub async fn scan(log: &Logger) -> Result<Self> {
-        let is_gimlet = sled_hardware::is_gimlet()
+        let is_oxide_sled = sled_hardware::is_oxide_sled()
             .context("failed to detect whether host is a gimlet")?;
-        ensure!(is_gimlet, "hardware scan only supported on gimlets");
+        ensure!(is_oxide_sled, "hardware scan only supported on gimlets");
 
         let hardware = HardwareManager::new(log, SledMode::Auto, vec![])
             .map_err(|err| {

@@ -44,6 +44,11 @@ impl From<types::Baseboard> for sled_hardware_types::Baseboard {
                     identifier, model, revision,
                 )
             }
+            types::Baseboard::Cosmo { identifier, model, revision } => {
+                sled_hardware_types::Baseboard::new_cosmo(
+                    identifier, model, revision,
+                )
+            }
             types::Baseboard::Unknown => {
                 sled_hardware_types::Baseboard::unknown()
             }
@@ -62,6 +67,11 @@ impl From<sled_hardware_types::Baseboard> for types::Baseboard {
                 model,
                 revision,
             } => types::Baseboard::Gimlet { identifier, model, revision },
+            sled_hardware_types::Baseboard::Cosmo {
+                identifier,
+                model,
+                revision,
+            } => types::Baseboard::Cosmo { identifier, model, revision },
             sled_hardware_types::Baseboard::Unknown => {
                 types::Baseboard::Unknown
             }

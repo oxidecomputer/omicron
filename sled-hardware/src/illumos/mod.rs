@@ -9,7 +9,7 @@ use gethostname::gethostname;
 use illumos_devinfo::{DevInfo, DevLinkType, DevLinks, Node, Property};
 use libnvme::{Nvme, controller::Controller};
 use omicron_common::disk::{DiskIdentity, DiskVariant};
-use sled_hardware_types::{Baseboard, SledCpuFamily};
+use sled_hardware_types::{Baseboard, OxideSled, SledCpuFamily};
 use slog::Logger;
 use slog::debug;
 use slog::error;
@@ -33,8 +33,8 @@ enum Error {
     #[error("Failed to access devinfo: {0}")]
     DevInfo(anyhow::Error),
 
-    #[error("Device does not appear to be an Oxide Gimlet: {0}")]
-    NotAGimlet(String),
+    #[error("Device does not appear to be an Oxide sled: {0}")]
+    NotAnOxideSled(String),
 
     #[error("Invalid Utf8 path: {0}")]
     FromPathBuf(#[from] camino::FromPathBufError),
@@ -76,16 +76,14 @@ enum Error {
     FirmwareLogPage(#[from] libnvme::firmware::FirmwareLogPageError),
 }
 
-const GIMLET_ROOT_NODE_NAME: &str = "Oxide,Gimlet";
-
 /// Return true if the host system is an Oxide Gimlet.
-pub fn is_gimlet() -> anyhow::Result<bool> {
+pub fn is_oxide_sled() -> anyhow::Result<bool> {
     let mut device_info = DevInfo::new()?;
     let mut node_walker = device_info.walk_node();
     let Some(root) = node_walker.next().transpose()? else {
         anyhow::bail!("No nodes in device tree");
     };
-    Ok(root.node_name() == GIMLET_ROOT_NODE_NAME)
+    Ok(OxideSled::try_from_root_node_name(&root.node_name()).is_some())
 }
 
 // A snapshot of information about the underlying Tofino device
@@ -144,9 +142,9 @@ impl HardwareSnapshot {
             )));
         };
         let root_node = root.node_name();
-        if root_node != GIMLET_ROOT_NODE_NAME {
-            return Err(Error::NotAGimlet(root_node));
-        }
+        let Some(sled_type) = OxideSled::try_from_root_node_name(&root_node) else {
+            return Err(Error::NotAnOxideSled(root_node));
+        };
 
         let properties = find_properties(
             &root,
@@ -157,7 +155,8 @@ impl HardwareSnapshot {
                 "boot-storage-unit",
             ],
         )?;
-        let baseboard = Baseboard::new_gimlet(
+        let baseboard = Baseboard::new_oxide_sled(
+            sled_type,
             string_from_property(&properties[0])?,
             string_from_property(&properties[1])?,
             u32_from_property(&properties[2])?,
@@ -174,7 +173,7 @@ impl HardwareSnapshot {
         while let Some(node) =
             node_walker.next().transpose().map_err(Error::DevInfo)?
         {
-            poll_blkdev_node(&log, &mut disks, node, boot_storage_unit)?;
+            poll_blkdev_node(&log, sled_type, &mut disks, node, boot_storage_unit)?;
         }
 
         Ok(Self { tofino, disks, baseboard })
@@ -294,7 +293,7 @@ impl HardwareView {
             }
         }
 
-        use HardwareUpdate::*;
+        use HardwareUpdate::{DiskRemoved, DiskAdded, DiskUpdated};
         for disk in removed {
             updates.push(DiskRemoved(disk));
         }
@@ -309,22 +308,23 @@ impl HardwareView {
     }
 }
 
-fn slot_to_disk_variant(slot: i64) -> Option<DiskVariant> {
-    match slot {
-        // For the source of these values, refer to:
-        //
-        // https://github.com/oxidecomputer/illumos-gate/blob/87a8bbb8edfb89ad5012beb17fa6f685c7795416/usr/src/uts/oxide/milan/milan_dxio_data.c#L823-L847
-        0x00..=0x09 => Some(DiskVariant::U2),
-        0x11..=0x12 => Some(DiskVariant::M2),
-        _ => None,
+fn slot_to_disk_variant(sled: OxideSled, slot: i64) -> Option<DiskVariant> {
+    let u2_slots = sled.u2_disk_slots();
+    let m2_slots = sled.m2_disk_slots();
+    if u2_slots.contains(&slot) {
+        Some(DiskVariant::U2)
+    } else if m2_slots.contains(&slot) {
+        Some(DiskVariant::M2)
+    } else {
+        None
     }
 }
 
-fn slot_is_boot_disk(slot: i64, boot_storage_unit: BootStorageUnit) -> bool {
-    match (boot_storage_unit, slot) {
-        // See reference for these values in `slot_to_disk_variant` above.
-        (BootStorageUnit::A, 0x11) | (BootStorageUnit::B, 0x12) => true,
-        _ => false,
+fn slot_is_boot_disk(sled: OxideSled, slot: i64, boot_storage_unit: BootStorageUnit) -> bool {
+    let slots = sled.bootdisk_slots();
+    match boot_storage_unit {
+        BootStorageUnit::A => slots[0] == slot,
+        BootStorageUnit::B => slots[1] == slot,
     }
 }
 
@@ -481,6 +481,7 @@ fn find_properties<'a, const N: usize>(
 
 fn poll_blkdev_node(
     log: &Logger,
+    sled: OxideSled,
     disks: &mut HashMap<DiskIdentity, UnparsedDisk>,
     node: Node<'_>,
     boot_storage_unit: BootStorageUnit,
@@ -551,7 +552,7 @@ fn poll_blkdev_node(
     let slot = i64_from_property(
         &find_properties(&pcieb_node, ["physical-slot#"])?[0],
     )?;
-    let Some(variant) = slot_to_disk_variant(slot) else {
+    let Some(variant) = slot_to_disk_variant(sled, slot) else {
         warn!(log, "Slot# {slot} is not recognized as a disk: {devfs_path}");
         return Err(Error::UnrecognizedSlot { slot });
     };
@@ -589,7 +590,7 @@ fn poll_blkdev_node(
         slot,
         variant,
         device_id.clone(),
-        slot_is_boot_disk(slot, boot_storage_unit),
+        slot_is_boot_disk(sled, slot, boot_storage_unit),
         firmware.clone(),
     );
     disks.insert(device_id, disk);
@@ -609,7 +610,7 @@ fn poll_device_tree(
         Ok(polled_hw) => polled_hw,
 
         Err(e) => {
-            if let Error::NotAGimlet(root_node) = &e {
+            if let Error::NotAnOxideSled(root_node) = &e {
                 let mut inner = inner.lock().unwrap();
 
                 if root_node.as_str() == "i86pc" {
@@ -681,9 +682,9 @@ async fn hardware_tracking_task(
 ) {
     loop {
         match poll_device_tree(&log, &inner, &nongimlet_observed_disks, &tx) {
-            // We've already warned about `NotAGimlet` by this point,
+            // We've already warned about `NotAnOxideSled` by this point,
             // so let's not spam the logs.
-            Ok(_) | Err(Error::NotAGimlet(_)) => (),
+            Ok(_) | Err(Error::NotAnOxideSled(_)) => (),
             Err(err) => {
                 warn!(log, "Failed to query device tree: {err}");
             }
@@ -765,7 +766,7 @@ impl HardwareManager {
             Ok(_) => (),
             // Allow non-gimlet devices to proceed with a "null" view of
             // hardware, otherwise they won't be able to start.
-            Err(Error::NotAGimlet(root)) => {
+            Err(Error::NotAnOxideSled(root)) => {
                 warn!(
                     log,
                     "Device is not a Gimlet ({root}), proceeding with null hardware view"
