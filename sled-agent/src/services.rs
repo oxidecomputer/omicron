@@ -105,6 +105,7 @@ use sled_hardware::underlay;
 use sled_hardware_types::Baseboard;
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
+use std::mem;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
@@ -3900,6 +3901,13 @@ impl ServiceManager {
                 // into an infinite retry loop, which isn't great! We should fix
                 // this.
                 if let Some(underlay_info) = underlay_info {
+                    // Explicitly drop the lock we have on
+                    // `self.inner.switch_zone`, because
+                    // `ensure_switch_zone_uplinks_configured_loop()` will
+                    // reacquire it later. This is _really really fragile_ and
+                    // very gross. We really need to rework how switch zone
+                    // initialization happens to clean this up.
+                    mem::drop(sled_zone);
                     self.ensure_switch_zone_uplinks_configured_loop(
                         &underlay_info,
                         None,
