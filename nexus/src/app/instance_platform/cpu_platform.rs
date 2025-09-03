@@ -702,25 +702,26 @@ pub fn milan_rfd314() -> CpuIdDump {
     // This is the fabricated cache topology from Bhyve. We could be more
     // precise, for dubious benefit. This is discussed in more detail in RFD
     // 314.
-    let mut levels = Vec::new();
-    levels.push(CpuIdResult {
-        eax: 0x00000121,
-        ebx: 0x0000003F,
-        ecx: 0x00000000,
-        edx: 0x00000000,
-    });
-    levels.push(CpuIdResult {
-        eax: 0x00000143,
-        ebx: 0x0000003F,
-        ecx: 0x00000000,
-        edx: 0x00000000,
-    });
-    levels.push(CpuIdResult {
-        eax: 0x00000163,
-        ebx: 0x0000003F,
-        ecx: 0x00000000,
-        edx: 0x00000000,
-    });
+    let mut levels = vec![
+        CpuIdResult {
+            eax: 0x00000121,
+            ebx: 0x0000003F,
+            ecx: 0x00000000,
+            edx: 0x00000000,
+        },
+        CpuIdResult {
+            eax: 0x00000143,
+            ebx: 0x0000003F,
+            ecx: 0x00000000,
+            edx: 0x00000000,
+        },
+        CpuIdResult {
+            eax: 0x00000163,
+            ebx: 0x0000003F,
+            ecx: 0x00000000,
+            edx: 0x00000000,
+        },
+    ];
     cpuid
         .set_extended_cache_parameters(Some(levels.as_slice()))
         .expect("can set leaf 8000_001Dh");
@@ -733,8 +734,8 @@ pub fn dump_to_cpuid_entries(dump: CpuIdDump) -> Vec<CpuidEntry> {
 
     for (leaf, subleaf, regs) in dump.into_iter() {
         entries.push(CpuidEntry {
-            leaf: leaf,
-            subleaf: subleaf,
+            leaf,
+            subleaf,
             eax: regs.eax,
             ebx: regs.ebx,
             ecx: regs.ecx,
