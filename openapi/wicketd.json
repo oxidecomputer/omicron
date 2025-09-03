@@ -1063,7 +1063,7 @@
         }
       },
       "Baseboard": {
-        "description": "Describes properties that should uniquely identify a Gimlet.",
+        "description": "Describes properties that should uniquely identify a system.",
         "oneOf": [
           {
             "type": "object",
@@ -1083,6 +1083,34 @@
                 "type": "string",
                 "enum": [
                   "gimlet"
+                ]
+              }
+            },
+            "required": [
+              "identifier",
+              "model",
+              "revision",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "identifier": {
+                "type": "string"
+              },
+              "model": {
+                "type": "string"
+              },
+              "revision": {
+                "type": "integer",
+                "format": "uint32",
+                "minimum": 0
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "cosmo"
                 ]
               }
             },

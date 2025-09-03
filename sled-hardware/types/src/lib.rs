@@ -4,10 +4,48 @@
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use std::ops::RangeInclusive;
 
 pub mod underlay;
 
-/// Describes properties that should uniquely identify a Gimlet.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum OxideSled {
+    Gimlet,
+    Cosmo,
+}
+
+impl OxideSled {
+    pub fn try_from_root_node_name(root_node_name: &str) -> Option<Self> {
+        const GIMLET_ROOT_NODE_NAME: &str = "Oxide,Gimlet";
+        const COSMO_ROOT_NODE_NAME: &str = "Oxide,Cosmo";
+        match root_node_name {
+            GIMLET_ROOT_NODE_NAME => Some(Self::Gimlet),
+            COSMO_ROOT_NODE_NAME => Some(Self::Cosmo),
+            _ => None,
+        }
+    }
+
+    pub fn m2_disk_slots(&self) -> RangeInclusive<i64> {
+        match self {
+            Self::Gimlet | Self::Cosmo => 0x11..=0x12,
+        }
+    }
+
+    pub fn u2_disk_slots(&self) -> RangeInclusive<i64> {
+        match self {
+            Self::Gimlet => 0x00..=0x09,
+            Self::Cosmo => 0x20..=0x29,
+        }
+    }
+
+    pub fn bootdisk_slots(&self) -> [i64; 2] {
+        match self {
+            Self::Gimlet | Self::Cosmo => [0x11, 0x12],
+        }
+    }
+}
+
+/// Describes properties that should uniquely identify a system.
 #[derive(
     Clone,
     Debug,
@@ -23,6 +61,7 @@ pub mod underlay;
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Baseboard {
     Gimlet { identifier: String, model: String, revision: u32 },
+    Cosmo { identifier: String, model: String, revision: u32 },
 
     Unknown,
 
@@ -30,6 +69,18 @@ pub enum Baseboard {
 }
 
 impl Baseboard {
+    pub fn new_oxide_sled(
+        kind: OxideSled,
+        identifier: String,
+        model: String,
+        revision: u32,
+    ) -> Self {
+        match kind {
+            OxideSled::Gimlet => Self::new_gimlet(identifier, model, revision),
+            OxideSled::Cosmo => Self::new_cosmo(identifier, model, revision),
+        }
+    }
+
     #[allow(dead_code)]
     pub fn new_gimlet(
         identifier: String,
@@ -37,6 +88,10 @@ impl Baseboard {
         revision: u32,
     ) -> Self {
         Self::Gimlet { identifier, model, revision }
+    }
+
+    pub fn new_cosmo(identifier: String, model: String, revision: u32) -> Self {
+        Self::Cosmo { identifier, model, revision }
     }
 
     pub fn new_pc(identifier: String, model: String) -> Self {
@@ -52,6 +107,7 @@ impl Baseboard {
     pub fn type_string(&self) -> &str {
         match &self {
             Self::Gimlet { .. } => "gimlet",
+            Self::Cosmo { .. } => "cosmo",
             Self::Pc { .. } => "pc",
             Self::Unknown => "unknown",
         }
@@ -60,6 +116,7 @@ impl Baseboard {
     pub fn identifier(&self) -> &str {
         match &self {
             Self::Gimlet { identifier, .. } => &identifier,
+            Self::Cosmo { identifier, .. } => &identifier,
             Self::Pc { identifier, .. } => &identifier,
             Self::Unknown => "unknown",
         }
@@ -68,6 +125,7 @@ impl Baseboard {
     pub fn model(&self) -> &str {
         match self {
             Self::Gimlet { model, .. } => &model,
+            Self::Cosmo { model, .. } => &model,
             Self::Pc { model, .. } => &model,
             Self::Unknown => "unknown",
         }
@@ -76,6 +134,7 @@ impl Baseboard {
     pub fn revision(&self) -> u32 {
         match self {
             Self::Gimlet { revision, .. } => *revision,
+            Self::Cosmo { revision, .. } => *revision,
             Self::Pc { .. } => 0,
             Self::Unknown => 0,
         }
@@ -87,6 +146,9 @@ impl std::fmt::Display for Baseboard {
         match self {
             Baseboard::Gimlet { identifier, model, revision } => {
                 write!(f, "gimlet-{identifier}-{model}-{revision}")
+            }
+            Baseboard::Cosmo { identifier, model, revision } => {
+                write!(f, "cosmo-{identifier}-{model}-{revision}")
             }
             Baseboard::Unknown => write!(f, "unknown"),
             Baseboard::Pc { identifier, model } => {

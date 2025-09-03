@@ -32,7 +32,7 @@ impl HardwareManager {
     pub fn new(
         _log: &Logger,
         _sled_mode: SledMode,
-        _nongimlet_observed_disks: Vec<UnparsedDisk>,
+        _nonsled_observed_disks: Vec<UnparsedDisk>,
     ) -> Result<Self, String> {
         unimplemented!("Accessing hardware unsupported on non-illumos");
     }
@@ -84,7 +84,7 @@ pub async fn ensure_partition_layout(
     unimplemented!("Accessing hardware unsupported on non-illumos");
 }
 
-/// Return true if the host system is an Oxide Gimlet.
-pub fn is_gimlet() -> anyhow::Result<bool> {
+/// Return true if the host system is an Oxide sled.
+pub fn is_oxide_sled() -> anyhow::Result<bool> {
     Ok(false)
 }

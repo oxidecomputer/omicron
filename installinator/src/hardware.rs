@@ -21,9 +21,9 @@ pub struct Hardware {
 
 impl Hardware {
     pub async fn scan(log: &Logger) -> Result<Self> {
-        let is_gimlet = sled_hardware::is_gimlet()
-            .context("failed to detect whether host is a gimlet")?;
-        ensure!(is_gimlet, "hardware scan only supported on gimlets");
+        let is_oxide_sled = sled_hardware::is_oxide_sled()
+            .context("failed to detect whether host is an oxide sled")?;
+        ensure!(is_oxide_sled, "hardware scan only supported on oxide sleds");
 
         let hardware = HardwareManager::new(log, SledMode::Auto, vec![])
             .map_err(|err| {
@@ -34,7 +34,7 @@ impl Hardware {
             hardware.disks().into_values().map(|disk| disk.into()).collect();
 
         info!(
-            log, "found gimlet hardware";
+            log, "found oxide sled hardware";
             "baseboard" => ?hardware.baseboard(),
             "is_scrimlet" => hardware.is_scrimlet(),
             "num_disks" => disks.len(),

@@ -1384,24 +1384,28 @@ impl ServiceInner {
             })
             .collect();
 
-        let ntp_clients = ntp_addresses
-            .into_iter()
-            .map(|address| {
-                let dur = std::time::Duration::from_secs(60);
-                let client = reqwest::ClientBuilder::new()
-                    .connect_timeout(dur)
-                    .timeout(dur)
-                    .build()
-                    .map_err(SetupServiceError::HttpClient)?;
-                let client = NtpAdminClient::new_with_client(
-                    &format!("http://{}", address),
-                    client,
-                    self.log.new(o!("NtpAdminClient" => address.to_string())),
-                );
-                Ok(client)
-            })
-            .collect::<Result<Vec<_>, SetupServiceError>>()?;
-        self.wait_for_timesync(&ntp_clients).await?;
+        let skip_timesync = config.skip_timesync.unwrap_or(false);
+        if !skip_timesync {
+            let ntp_clients = ntp_addresses
+                .into_iter()
+                .map(|address| {
+                    let dur = std::time::Duration::from_secs(60);
+                    let client = reqwest::ClientBuilder::new()
+                        .connect_timeout(dur)
+                        .timeout(dur)
+                        .build()
+                        .map_err(SetupServiceError::HttpClient)?;
+                    let client = NtpAdminClient::new_with_client(
+                        &format!("http://{}", address),
+                        client,
+                        self.log
+                            .new(o!("NtpAdminClient" => address.to_string())),
+                    );
+                    Ok(client)
+                })
+                .collect::<Result<Vec<_>, SetupServiceError>>()?;
+            self.wait_for_timesync(&ntp_clients).await?;
+        }
 
         info!(self.log, "Finished setting up Internal DNS and NTP");
 

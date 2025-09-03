@@ -95,9 +95,10 @@ pub mod back_compat {
             })
         }
     }
-    impl From<RackInitializeRequestV1> for RackInitializeRequest {
+
+    impl From<RackInitializeRequestV1> for RackInitializeRequestV2 {
         fn from(v1: RackInitializeRequestV1) -> Self {
-            RackInitializeRequest {
+            RackInitializeRequestV2 {
                 trust_quorum_peers: v1.trust_quorum_peers,
                 bootstrap_discovery: v1.bootstrap_discovery,
                 ntp_servers: v1.ntp_servers,
@@ -110,6 +111,85 @@ pub mod back_compat {
                 recovery_silo: v1.recovery_silo,
                 rack_network_config: v1.rack_network_config.into(),
                 allowed_source_ips: v1.allowed_source_ips,
+            }
+        }
+    }
+
+    #[derive(Clone, Deserialize)]
+    struct UnvalidatedRackInitializeRequestV2 {
+        trust_quorum_peers: Option<Vec<Baseboard>>,
+        bootstrap_discovery: BootstrapAddressDiscovery,
+        ntp_servers: Vec<String>,
+        dns_servers: Vec<IpAddr>,
+        internal_services_ip_pool_ranges: Vec<IpRange>,
+        external_dns_ips: Vec<IpAddr>,
+        external_dns_zone_name: String,
+        external_certificates: Vec<Certificate>,
+        recovery_silo: RecoverySiloConfig,
+        rack_network_config: RackNetworkConfig,
+        #[serde(default = "default_allowed_source_ips")]
+        allowed_source_ips: AllowedSourceIps,
+    }
+
+    #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
+    #[serde(try_from = "UnvalidatedRackInitializeRequestV2")]
+    pub struct RackInitializeRequestV2 {
+        pub trust_quorum_peers: Option<Vec<Baseboard>>,
+        pub bootstrap_discovery: BootstrapAddressDiscovery,
+        pub ntp_servers: Vec<String>,
+        pub dns_servers: Vec<IpAddr>,
+        pub internal_services_ip_pool_ranges: Vec<IpRange>,
+        pub external_dns_ips: Vec<IpAddr>,
+        pub external_dns_zone_name: String,
+        pub external_certificates: Vec<Certificate>,
+        pub recovery_silo: RecoverySiloConfig,
+        pub rack_network_config: RackNetworkConfig,
+        #[serde(default = "default_allowed_source_ips")]
+        pub allowed_source_ips: AllowedSourceIps,
+    }
+
+    impl TryFrom<UnvalidatedRackInitializeRequestV2> for RackInitializeRequestV2 {
+        type Error = anyhow::Error;
+
+        fn try_from(value: UnvalidatedRackInitializeRequestV2) -> Result<Self> {
+            validate_external_dns(
+                &value.external_dns_ips,
+                &value.internal_services_ip_pool_ranges,
+            )?;
+
+            Ok(RackInitializeRequestV2 {
+                trust_quorum_peers: value.trust_quorum_peers,
+                bootstrap_discovery: value.bootstrap_discovery,
+                ntp_servers: value.ntp_servers,
+                dns_servers: value.dns_servers,
+                internal_services_ip_pool_ranges: value
+                    .internal_services_ip_pool_ranges,
+                external_dns_ips: value.external_dns_ips,
+                external_dns_zone_name: value.external_dns_zone_name,
+                external_certificates: value.external_certificates,
+                recovery_silo: value.recovery_silo,
+                rack_network_config: value.rack_network_config,
+                allowed_source_ips: value.allowed_source_ips,
+            })
+        }
+    }
+
+    impl From<RackInitializeRequestV2> for RackInitializeRequest {
+        fn from(v2: RackInitializeRequestV2) -> Self {
+            RackInitializeRequest {
+                trust_quorum_peers: v2.trust_quorum_peers,
+                bootstrap_discovery: v2.bootstrap_discovery,
+                ntp_servers: v2.ntp_servers,
+                dns_servers: v2.dns_servers,
+                internal_services_ip_pool_ranges: v2
+                    .internal_services_ip_pool_ranges,
+                external_dns_ips: v2.external_dns_ips,
+                external_dns_zone_name: v2.external_dns_zone_name,
+                external_certificates: v2.external_certificates,
+                recovery_silo: v2.recovery_silo,
+                rack_network_config: v2.rack_network_config.into(),
+                allowed_source_ips: v2.allowed_source_ips,
+                skip_timesync: None,
             }
         }
     }
@@ -131,6 +211,7 @@ struct UnvalidatedRackInitializeRequest {
     rack_network_config: RackNetworkConfig,
     #[serde(default = "default_allowed_source_ips")]
     allowed_source_ips: AllowedSourceIps,
+    skip_timesync: Option<bool>,
 }
 
 fn validate_external_dns(
@@ -177,6 +258,7 @@ impl TryFrom<UnvalidatedRackInitializeRequest> for RackInitializeRequest {
             recovery_silo: value.recovery_silo,
             rack_network_config: value.rack_network_config,
             allowed_source_ips: value.allowed_source_ips,
+            skip_timesync: value.skip_timesync,
         })
     }
 }
@@ -229,6 +311,9 @@ pub struct RackInitializeRequest {
     /// IPs or subnets allowed to make requests to user-facing services
     #[serde(default = "default_allowed_source_ips")]
     pub allowed_source_ips: AllowedSourceIps,
+
+    /// Skip timesync (for debugging)
+    pub skip_timesync: Option<bool>,
 }
 
 impl RackInitializeRequest {
@@ -298,19 +383,25 @@ impl RackInitializeRequest {
     pub fn from_toml_with_fallback(
         data: &str,
     ) -> Result<RackInitializeRequest> {
-        let v2_err = match toml::from_str::<RackInitializeRequest>(&data) {
+        let current_err = match toml::from_str::<RackInitializeRequest>(&data) {
             Ok(req) => return Ok(req),
             Err(e) => e,
         };
+        if let Ok(v2) =
+            toml::from_str::<back_compat::RackInitializeRequestV2>(&data)
+        {
+            return Ok(v2.into());
+        }
         if let Ok(v1) =
             toml::from_str::<back_compat::RackInitializeRequestV1>(&data)
         {
-            return Ok(v1.into());
+            let v2: back_compat::RackInitializeRequestV2 = v1.into();
+            return Ok(v2.into());
         }
 
         // If we fail to parse the request as any known version, we return the
         // error corresponding to the parse failure of the newest schema.
-        Err(v2_err.into())
+        Err(current_err.into())
     }
 
     /// Return a configuration suitable for testing.
@@ -375,7 +466,7 @@ impl std::fmt::Debug for RackInitializeRequest {
         // If you find a compiler error here, and you just added a field to this
         // struct, be sure to add it to the Debug impl below!
         let RackInitializeRequest {
-            trust_quorum_peers: trust_qurorum_peers,
+            trust_quorum_peers,
             bootstrap_discovery,
             ntp_servers,
             dns_servers,
@@ -386,10 +477,11 @@ impl std::fmt::Debug for RackInitializeRequest {
             recovery_silo,
             rack_network_config,
             allowed_source_ips,
+            skip_timesync,
         } = &self;
 
         f.debug_struct("RackInitializeRequest")
-            .field("trust_quorum_peers", trust_qurorum_peers)
+            .field("trust_quorum_peers", trust_quorum_peers)
             .field("bootstrap_discovery", bootstrap_discovery)
             .field("ntp_servers", ntp_servers)
             .field("dns_servers", dns_servers)
@@ -403,6 +495,7 @@ impl std::fmt::Debug for RackInitializeRequest {
             .field("recovery_silo", recovery_silo)
             .field("rack_network_config", rack_network_config)
             .field("allowed_source_ips", allowed_source_ips)
+            .field("skip_timesync", skip_timesync)
             .finish()
     }
 }
@@ -631,6 +724,7 @@ mod tests {
                 bfd: Vec::new(),
             },
             allowed_source_ips: AllowedSourceIps::Any,
+            skip_timesync: None,
         };
 
         assert_eq!(
