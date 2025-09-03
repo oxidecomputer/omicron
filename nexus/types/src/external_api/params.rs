@@ -1283,7 +1283,9 @@ pub struct InstanceCreate {
     pub anti_affinity_groups: Vec<NameOrId>,
 
     /// The CPU platform to be used for this instance. If this is `null`, the
-    /// instance requires no particular CPU platform.
+    /// instance requires no particular CPU platform; when it is started the
+    /// instance will have the most general CPU platform supported by the sled
+    /// it is initially placed on.
     #[serde(default)]
     pub cpu_platform: Option<InstanceCpuPlatform>,
 }

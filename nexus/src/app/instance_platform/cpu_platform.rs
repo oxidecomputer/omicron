@@ -149,9 +149,12 @@ pub fn functionally_same(base: CpuIdDump, target: CpuIdDump) -> bool {
     // TODO: really not sure if we should include things like cache
     // hierarchy/core topology information here. Misrepresenting the actual
     // system can result in cache-sized buffers being sized incorrectly (or at
-    // least suboptimally), but as long as cache sizes grow rather than shrink
-    // it may only be "performance is not as good as it could be" rather than a
-    // more deleterious outcome.
+    // least suboptimally). If the processor caches do not match the reported
+    // topology, software that tries to use the topology to flush caches by
+    // flushing each set individually would not behave correctly; if caches are
+    // larger than reported, such a manual flushing procedure would not actually
+    // flush the whole cache. Anyone doing this *really* should use WBINVD (or
+    // INVD) anyway.
 
     true
 }

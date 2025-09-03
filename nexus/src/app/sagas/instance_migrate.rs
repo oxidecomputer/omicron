@@ -11,6 +11,7 @@ use crate::app::sagas::{
     declare_saga_actions, instance_common::allocate_vmm_ipv6,
 };
 use nexus_db_lookup::LookupPath;
+use nexus_db_model::VmmCpuPlatform;
 use nexus_db_queries::db::identity::Resource;
 use nexus_db_queries::{authn, authz, db};
 use nexus_types::internal_api::params::InstanceMigrateRequest;
@@ -179,10 +180,56 @@ async fn sim_reserve_sled_resources(
     let params = sagactx.saga_params::<Params>()?;
     let propolis_id = sagactx.lookup::<PropolisUuid>("dst_propolis_id")?;
 
+    let Some(compatible_sled_families) =
+        params.src_vmm.cpu_platform.compatible_sled_cpu_families()
+    else {
+        // If we're here there are no compatible sled families for the VMM's CPU
+        // platform. That means the VMM's CPU platform is "SledDefault" and we
+        // just don't know what sleds might be compatible with the CPU platform
+        // the VM has in practice. A VMM in this state implies two things:
+        // * The instance does not specify a CPU platform.
+        // * The instance was placed on a sled with an unknown CPU type.
+        //
+        // If the instance specified a CPU platform, it would have been placed
+        // on a sled with a known compatible CPU platform. So it must not have
+        // one.
+        //
+        // Since the instance was placed on a sled with an unknown CPU type, we
+        // have no idea if the migration target is actually safe to move it to.
+        // For all we know we could be asked to move VM from an AMD CPU to an
+        // ARM CPU.
+        //
+        // For now, refuse the migration in this circumstance. This probably
+        // impacts test environments in particular (sorry James!) and one might
+        // imagine a config option to allow such potentially-problematic
+        // migrations.
+        if params.src_vmm.cpu_platform != VmmCpuPlatform::SledDefault {
+            // Well, the claim about the VMM CPU platform was wrong, but the
+            // consequences still hold. This implies a broken case in
+            // `compatible_sled_cpu_families`. Log about the bug, but we still
+            // can't migrate this instance.
+            warn!(osagactx.log(),
+                "VMM has no compatible sled CPU families \
+                 but has a real CPU platform?!";
+                "instance_id" => %params.instance.id(),
+                "src_propolis_id" => %params.src_vmm.id,
+                "src_vmm_cpu_platform" => %params.src_vmm.cpu_platform);
+        }
+        return Err(ActionError::action_failed(Error::invalid_request(
+            "cannot migrate an instance with a VMM CPU platform of SledDefault",
+        )));
+    };
+
     // Add a constraint that requires the allocator to reserve on the
     // migration's destination sled instead of a random sled.
+    //
+    // The destination sled ID is arbitrary (from the internal API), so it's
+    // possible that we were told to migrate to a sled that is incompatible with
+    // the VMM's CPU platform. Constrain by that so we'll fail to pick the
+    // destination sled if it's truly incompatible.
     let constraints = db::model::SledReservationConstraintBuilder::new()
         .must_select_from(&[params.migrate_params.dst_sled_id])
+        .cpu_families(compatible_sled_families)
         .build();
 
     let resource = super::instance_common::reserve_vmm_resources(
