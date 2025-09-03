@@ -7576,8 +7576,23 @@
         ]
       },
       "QuiesceState": {
-        "description": "See [`QuiesceStatus`] for more on Nexus quiescing.\n\nAt any given time, Nexus is always in one of these states:\n\n```text Running             (normal operation) | | quiesce starts v WaitingForSagas     (no new sagas are allowed, but some are still running) | | no more sagas running v WaitingForDb        (no sagas running; no new db connections may be acquired by Nexus at-large, but some are still held) | | no more database connections held v Quiesced            (no sagas running, no database connections in use) ```\n\nQuiescing is (currently) a one-way trip: once a Nexus process starts quiescing, it will never go back to normal operation.  It will never go back to an earlier stage, either.",
+        "description": "See [`QuiesceStatus`] for more on Nexus quiescing.\n\nAt any given time, Nexus is always in one of these states:\n\n```text Undetermined        (have not loaded persistent state; don't know yet) | | load persistent state and find we're not quiescing v Running             (normal operation) | | quiesce starts v DrainingSagas       (no new sagas are allowed, but some are still running) | | no more sagas running v DrainingDb          (no sagas running; no new db connections may be |                  acquired by Nexus at-large, but some are still held) | | no more database connections held v RecordingQuiesce    (everything is quiesced aside from one connection being |                  used to record our final quiesced state) | | finish recording quiesce state in database v Quiesced            (no sagas running, no database connections in use) ```\n\nQuiescing is (currently) a one-way trip: once a Nexus process starts quiescing, it will never go back to normal operation.  It will never go back to an earlier stage, either.",
         "oneOf": [
+          {
+            "description": "We have not yet determined based on persistent state if we're supposed to be quiesced or not",
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "undetermined"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
           {
             "description": "Normal operation",
             "type": "object",
@@ -7594,7 +7609,7 @@
             ]
           },
           {
-            "description": "New sagas disallowed, but some are still running.",
+            "description": "New sagas disallowed, but some are still running on some Nexus instances",
             "type": "object",
             "properties": {
               "quiesce_details": {
@@ -7612,7 +7627,7 @@
               "state": {
                 "type": "string",
                 "enum": [
-                  "waiting_for_sagas"
+                  "draining_sagas"
                 ]
               }
             },
@@ -7622,13 +7637,13 @@
             ]
           },
           {
-            "description": "No sagas running, no new database connections may be claimed, but some database connections are still held.",
+            "description": "No sagas running on any Nexus instances\n\nNo new database connections may be claimed, but some database connections are still held.",
             "type": "object",
             "properties": {
               "quiesce_details": {
                 "type": "object",
                 "properties": {
-                  "duration_waiting_for_sagas": {
+                  "duration_draining_sagas": {
                     "$ref": "#/components/schemas/Duration"
                   },
                   "time_requested": {
@@ -7637,14 +7652,50 @@
                   }
                 },
                 "required": [
-                  "duration_waiting_for_sagas",
+                  "duration_draining_sagas",
                   "time_requested"
                 ]
               },
               "state": {
                 "type": "string",
                 "enum": [
-                  "waiting_for_db"
+                  "draining_db"
+                ]
+              }
+            },
+            "required": [
+              "quiesce_details",
+              "state"
+            ]
+          },
+          {
+            "description": "No database connections in use except to record the final \"quiesced\" state",
+            "type": "object",
+            "properties": {
+              "quiesce_details": {
+                "type": "object",
+                "properties": {
+                  "duration_draining_db": {
+                    "$ref": "#/components/schemas/Duration"
+                  },
+                  "duration_draining_sagas": {
+                    "$ref": "#/components/schemas/Duration"
+                  },
+                  "time_requested": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                },
+                "required": [
+                  "duration_draining_db",
+                  "duration_draining_sagas",
+                  "time_requested"
+                ]
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "recording_quiesce"
                 ]
               }
             },
@@ -7660,13 +7711,16 @@
               "quiesce_details": {
                 "type": "object",
                 "properties": {
+                  "duration_draining_db": {
+                    "$ref": "#/components/schemas/Duration"
+                  },
+                  "duration_draining_sagas": {
+                    "$ref": "#/components/schemas/Duration"
+                  },
+                  "duration_recording_quiesce": {
+                    "$ref": "#/components/schemas/Duration"
+                  },
                   "duration_total": {
-                    "$ref": "#/components/schemas/Duration"
-                  },
-                  "duration_waiting_for_db": {
-                    "$ref": "#/components/schemas/Duration"
-                  },
-                  "duration_waiting_for_sagas": {
                     "$ref": "#/components/schemas/Duration"
                   },
                   "time_quiesced": {
@@ -7679,9 +7733,10 @@
                   }
                 },
                 "required": [
+                  "duration_draining_db",
+                  "duration_draining_sagas",
+                  "duration_recording_quiesce",
                   "duration_total",
-                  "duration_waiting_for_db",
-                  "duration_waiting_for_sagas",
                   "time_quiesced",
                   "time_requested"
                 ]

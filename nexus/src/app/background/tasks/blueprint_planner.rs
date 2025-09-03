@@ -273,18 +273,15 @@ impl BackgroundTask for BlueprintPlanner {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::app::background::Activator;
     use crate::app::background::tasks::blueprint_execution::BlueprintExecutor;
     use crate::app::background::tasks::blueprint_load::TargetBlueprintLoader;
     use crate::app::background::tasks::inventory_collection::InventoryCollector;
+    use crate::app::{background::Activator, quiesce::NexusQuiesceHandle};
     use nexus_inventory::now_db_precision;
     use nexus_test_utils_macros::nexus_test;
-    use nexus_types::{
-        deployment::{
-            PendingMgsUpdates, PlannerChickenSwitches,
-            ReconfiguratorChickenSwitches,
-        },
-        quiesce::SagaQuiesceHandle,
+    use nexus_types::deployment::{
+        PendingMgsUpdates, PlannerChickenSwitches,
+        ReconfiguratorChickenSwitches,
     };
     use omicron_uuid_kinds::OmicronZoneUuid;
 
@@ -423,7 +420,7 @@ mod test {
             OmicronZoneUuid::new_v4(),
             Activator::new(),
             dummy_tx,
-            SagaQuiesceHandle::new(opctx.log.clone()),
+            NexusQuiesceHandle::new(&opctx.log, datastore.clone()),
         );
         let value = executor.activate(&opctx).await;
         let value = value.as_object().expect("response is not a JSON object");
