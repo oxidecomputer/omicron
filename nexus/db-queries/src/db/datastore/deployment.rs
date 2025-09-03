@@ -3050,7 +3050,6 @@ mod tests {
             "Blueprint {blueprint_id} not fully deleted. Non-empty tables: {:?}",
             counts.non_empty_tables()
         );
-
     }
 
     // Create a fake set of `SledDetails`, either with a subnet matching
@@ -4548,24 +4547,35 @@ mod tests {
                 query_count!(bp_omicron_zone, blueprint_id),
                 query_count!(bp_omicron_zone_nic, blueprint_id),
                 query_count!(bp_clickhouse_cluster_config, blueprint_id),
-                query_count!(bp_clickhouse_keeper_zone_id_to_node_id, blueprint_id),
-                query_count!(bp_clickhouse_server_zone_id_to_node_id, blueprint_id),
+                query_count!(
+                    bp_clickhouse_keeper_zone_id_to_node_id,
+                    blueprint_id
+                ),
+                query_count!(
+                    bp_clickhouse_server_zone_id_to_node_id,
+                    blueprint_id
+                ),
                 query_count!(bp_oximeter_read_policy, blueprint_id),
                 query_count!(bp_pending_mgs_update_sp, blueprint_id),
                 query_count!(bp_pending_mgs_update_rot, blueprint_id),
-                query_count!(bp_pending_mgs_update_rot_bootloader, blueprint_id),
+                query_count!(
+                    bp_pending_mgs_update_rot_bootloader,
+                    blueprint_id
+                ),
             ] {
                 let count: i64 = result.unwrap();
                 counts.insert(table_name.to_string(), count);
             }
 
             let table_counts = BlueprintTableCounts { counts };
-            
+
             // Verify no new blueprint tables were added without updating this function
-            if let Err(msg) = table_counts.verify_all_tables_covered(datastore).await {
+            if let Err(msg) =
+                table_counts.verify_all_tables_covered(datastore).await
+            {
                 panic!("{}", msg);
             }
-            
+
             table_counts
         }
 
@@ -4574,18 +4584,15 @@ mod tests {
             self.counts.values().all(|&count| count == 0)
         }
 
-
         /// Returns a list of table names that are empty.
         fn empty_tables(&self) -> Vec<String> {
             self.counts
                 .iter()
-                .filter_map(|(table, &count)| {
-                    if count == 0 {
-                        Some(table.clone())
-                    } else {
-                        None
-                    }
-                })
+                .filter_map(
+                    |(table, &count)| {
+                        if count == 0 { Some(table.clone()) } else { None }
+                    },
+                )
                 .collect()
         }
 
@@ -4593,16 +4600,13 @@ mod tests {
         fn non_empty_tables(&self) -> Vec<String> {
             self.counts
                 .iter()
-                .filter_map(|(table, &count)| {
-                    if count > 0 {
-                        Some(table.clone())
-                    } else {
-                        None
-                    }
-                })
+                .filter_map(
+                    |(table, &count)| {
+                        if count > 0 { Some(table.clone()) } else { None }
+                    },
+                )
                 .collect()
         }
-
 
         /// Get all table names that were checked.
         fn tables_checked(&self) -> BTreeSet<&str> {
@@ -4615,10 +4619,11 @@ mod tests {
             datastore: &DataStore,
         ) -> Result<(), String> {
             let conn = datastore.pool_connection_for_tests().await.unwrap();
-            
+
             // Tables prefixed with `bp_` that are *not* specific to a single blueprint
             // and therefore intentionally ignored.  There is only one of these right now.
-            let tables_ignored: BTreeSet<_> = ["bp_target"].into_iter().collect();
+            let tables_ignored: BTreeSet<_> =
+                ["bp_target"].into_iter().collect();
             let tables_checked = self.tables_checked();
 
             let mut query = QueryBuilder::new();
@@ -4636,7 +4641,7 @@ mod tests {
                     !tables_ignored.contains(t) && !tables_checked.contains(t)
                 })
                 .collect();
-            
+
             if !tables_unchecked.is_empty() {
                 Err(format!(
                     "found blueprint-related table(s) not covered by BlueprintTableCounts: {}\n\n\
@@ -4664,7 +4669,7 @@ mod tests {
         // - ClickHouse tables: only populated when blueprint includes ClickHouse configuration
         let exception_tables = [
             "bp_pending_mgs_update_sp",
-            "bp_pending_mgs_update_rot", 
+            "bp_pending_mgs_update_rot",
             "bp_pending_mgs_update_rot_bootloader",
             "bp_clickhouse_cluster_config",
             "bp_clickhouse_keeper_zone_id_to_node_id",
@@ -4677,7 +4682,7 @@ mod tests {
             .into_iter()
             .filter(|table| !exception_tables.contains(&table.as_str()))
             .collect();
-        
+
         if !problematic_tables.is_empty() {
             panic!(
                 "Expected tables to be populated for blueprint {blueprint_id}: {:?}\n\n\
