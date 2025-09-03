@@ -6555,6 +6555,7 @@ version = "0.1.0"
 dependencies = [
  "dropshot",
  "nexus-types",
+ "omicron-workspace-hack",
 ]
 
 [[package]]

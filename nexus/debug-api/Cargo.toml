@@ -10,3 +10,4 @@ workspace = true
 [dependencies]
 dropshot.workspace = true
 nexus-types.workspace = true
+omicron-workspace-hack.workspace = true
