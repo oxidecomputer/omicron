@@ -158,6 +158,8 @@ mod test {
         after: DateTime<Utc>,
         status: QuiesceStatus,
     ) {
+        // ZZZ debug app::quiesce::test::test_quiesce_full
+        eprintln!("status: {:?}", status);
         let QuiesceState::Quiesced {
             time_requested,
             time_quiesced,
@@ -179,6 +181,11 @@ mod test {
         assert!(time_quiesced >= time_requested);
         assert!(duration_total >= duration_waiting_for_sagas);
         assert!(duration_total >= duration_waiting_for_db);
+        eprintln!(
+            "dt: {:?} <= {after} - {before} which evaluates to: {:?}",
+            duration_total,
+            (after - before).to_std().unwrap()
+        );
         assert!(duration_total <= (after - before).to_std().unwrap());
         assert!(status.sagas_pending.is_empty());
         assert!(status.db_claims.is_empty());
