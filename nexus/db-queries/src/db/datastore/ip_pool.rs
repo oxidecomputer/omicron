@@ -87,6 +87,16 @@ impl ServiceIpPools {
     }
 }
 
+// Constraint used to ensure we don't set a default IP Pool for the internal
+// silo.
+const INTERNAL_SILO_DEFAULT_CONSTRAINT: &'static str =
+    "internal_silo_has_no_default_pool";
+
+// Error message emitted when we attempt to set a default IP Pool for the
+// internal silo.
+const INTERNAL_SILO_DEFAULT_ERROR: &'static str =
+    "The internal Silo cannot have a default IP Pool";
+
 impl DataStore {
     /// List IP Pools
     pub async fn ip_pools_list(
@@ -597,9 +607,9 @@ impl DataStore {
                     // Catch the check constraint ensuring the internal silo has
                     // no default pool
                     DieselError::DatabaseError(DatabaseErrorKind::CheckViolation, ref info)
-                        if info.constraint_name() == Some("internal_silo_has_no_default_pool") =>
+                        if info.constraint_name() == Some(INTERNAL_SILO_DEFAULT_CONSTRAINT) =>
                     {
-                        Error::invalid_request( "The internal Silo cannot have a default IP Pool")
+                        Error::invalid_request(INTERNAL_SILO_DEFAULT_ERROR)
                     }
                     DieselError::DatabaseError(DatabaseErrorKind::UniqueViolation, _) => {
                         public_error_from_diesel(
@@ -898,21 +908,47 @@ impl DataStore {
                     IpPoolResourceUpdateError::FailedToUnsetDefault(err),
                 )) => public_error_from_diesel(err, ErrorHandler::Server),
                 Some(TxnError::Database(err)) => {
-                    public_error_from_diesel(err, ErrorHandler::Server)
+                    match err {
+                        // Catch the check constraint ensuring the internal silo has
+                        // no default pool
+                        DieselError::DatabaseError(
+                            DatabaseErrorKind::CheckViolation,
+                            ref info,
+                        ) if info.constraint_name()
+                            == Some(INTERNAL_SILO_DEFAULT_CONSTRAINT) =>
+                        {
+                            Error::invalid_request(INTERNAL_SILO_DEFAULT_ERROR)
+                        }
+                        _ => {
+                            public_error_from_diesel(err, ErrorHandler::Server)
+                        }
+                    }
                 }
                 None => {
-                    public_error_from_diesel(
-                        e,
-                        ErrorHandler::NotFoundByLookup(
-                            ResourceType::IpPoolResource,
-                            // TODO: would be nice to put the actual names and/or ids in
-                            // here but LookupType on each of the two silos doesn't have
-                            // a nice to_string yet or a way of composing them
-                            LookupType::ByCompositeId(
-                                "(pool, silo)".to_string(),
+                    match e {
+                        // Catch the check constraint ensuring the internal silo has
+                        // no default pool
+                        DieselError::DatabaseError(
+                            DatabaseErrorKind::CheckViolation,
+                            ref info,
+                        ) if info.constraint_name()
+                            == Some(INTERNAL_SILO_DEFAULT_CONSTRAINT) =>
+                        {
+                            Error::invalid_request(INTERNAL_SILO_DEFAULT_ERROR)
+                        }
+                        _ => public_error_from_diesel(
+                            e,
+                            ErrorHandler::NotFoundByLookup(
+                                ResourceType::IpPoolResource,
+                                // TODO: would be nice to put the actual names and/or ids in
+                                // here but LookupType on each of the two silos doesn't have
+                                // a nice to_string yet or a way of composing them
+                                LookupType::ByCompositeId(
+                                    "(pool, silo)".to_string(),
+                                ),
                             ),
                         ),
-                    )
+                    }
                 }
             })
     }
@@ -1282,12 +1318,13 @@ mod test {
     use std::num::NonZeroU32;
 
     use crate::authz;
+    use crate::db::datastore::ip_pool::INTERNAL_SILO_DEFAULT_ERROR;
     use crate::db::model::{
         IpPool, IpPoolResource, IpPoolResourceType, Project,
     };
     use crate::db::pub_test_utils::TestDatabase;
     use assert_matches::assert_matches;
-    use nexus_db_model::IpVersion;
+    use nexus_db_model::{IpPoolIdentity, IpVersion};
     use nexus_types::external_api::params;
     use nexus_types::identity::Resource;
     use omicron_common::address::{IpRange, Ipv4Range, Ipv6Range};
@@ -1296,6 +1333,7 @@ mod test {
         DataPageParams, Error, IdentityMetadataCreateParams, LookupType,
     };
     use omicron_test_utils::dev;
+    use uuid::Uuid;
 
     #[tokio::test]
     async fn test_default_ip_pools() {
@@ -1391,12 +1429,12 @@ mod test {
         assert_eq!(silo_pools[0].0.id(), pool1_for_silo.id());
         assert_eq!(silo_pools[0].1.is_default, false);
 
-        // linking an already linked silo is fine
-        let new = datastore
+        // linking an already linked silo errors due to PK conflict
+        let err = datastore
             .ip_pool_link_silo(&opctx, link_body)
             .await
-            .expect("Creating the same link again should not conflict");
-        assert_eq!(new, link_body);
+            .expect_err("Creating the same link again should conflict");
+        assert_matches!(err, Error::ObjectAlreadyExists { .. });
 
         // now make it default
         datastore
@@ -1531,17 +1569,33 @@ mod test {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
-        for version in [IpVersion::V4, IpVersion::V6] {
-            // confirm internal pools appear as internal
-            let (authz_pool, pool) = datastore
-                .ip_pools_service_lookup(&opctx, version)
+        for ip_version in [IpVersion::V4, IpVersion::V6] {
+            // Make some new pool.
+            let params = IpPool {
+                identity: IpPoolIdentity::new(
+                    Uuid::new_v4(),
+                    IdentityMetadataCreateParams {
+                        name: format!("test-pool-{}", ip_version)
+                            .parse()
+                            .unwrap(),
+                        description: String::new(),
+                    },
+                ),
+                ip_version,
+                rcgen: 0,
+            };
+            let pool = datastore
+                .ip_pool_create(&opctx, params)
                 .await
-                .unwrap();
-            assert_eq!(pool.ip_version, version);
-
-            let is_internal =
-                datastore.ip_pool_is_internal(&opctx, &authz_pool).await;
-            assert_eq!(is_internal, Ok(true));
+                .expect("Should be able to create pool");
+            assert_eq!(pool.ip_version, ip_version);
+            let authz_pool =
+                nexus_db_lookup::LookupPath::new(&opctx, datastore)
+                    .ip_pool_id(pool.id())
+                    .lookup_for(authz::Action::Read)
+                    .await
+                    .expect("Should be able to lookup new IP Pool")
+                    .0;
 
             // Try to link it as the default.
             let (authz_silo, ..) =
@@ -1561,14 +1615,10 @@ mod test {
                     "should have failed to link IP Pool to internal silo as a default"
                 );
             };
-            let Error::InternalError { internal_message } = &e else {
-                panic!("should have received an internal error");
+            let Error::InvalidRequest { message } = &e else {
+                panic!("should have received an invalid request, got: {:?}", e);
             };
-            assert!(
-                internal_message.contains("failed to satisfy CHECK constraint"),
-                "Expected a CHECK constraint violation, found: {}",
-                internal_message,
-            );
+            assert_eq!(message.external_message(), INTERNAL_SILO_DEFAULT_ERROR);
 
             // We can link it if it's not the default.
             let link = IpPoolResource { is_default: false, ..link };
@@ -1583,14 +1633,10 @@ mod test {
             else {
                 panic!("should have failed to set internal pool to default");
             };
-            let Error::InternalError { internal_message } = &e else {
-                panic!("should have received an internal error");
+            let Error::InvalidRequest { message } = &e else {
+                panic!("should have received an invalid request, got: {:?}", e);
             };
-            assert!(
-                internal_message.contains("failed to satisfy CHECK constraint"),
-                "Expected a CHECK constraint violation, found: {}",
-                internal_message,
-            );
+            assert_eq!(message.external_message(), INTERNAL_SILO_DEFAULT_ERROR);
         }
 
         db.terminate().await;
