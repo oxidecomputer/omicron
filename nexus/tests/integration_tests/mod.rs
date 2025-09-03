@@ -35,6 +35,7 @@ mod pantry;
 mod password_login;
 mod probe;
 mod projects;
+mod quiesce;
 mod quotas;
 mod rack;
 mod role_assignments;

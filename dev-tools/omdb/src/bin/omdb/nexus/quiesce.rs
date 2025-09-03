@@ -61,10 +61,13 @@ async fn quiesce_show(
         .context("fetching quiesce state")?
         .into_inner();
     match quiesce.state {
+        QuiesceState::Undetermined => {
+            println!("has not yet determined if it is quiescing");
+        }
         QuiesceState::Running => {
             println!("running normally (not quiesced, not quiescing)");
         }
-        QuiesceState::WaitingForSagas { time_requested } => {
+        QuiesceState::DrainingSagas { time_requested } => {
             println!(
                 "quiescing since {} ({} ago)",
                 humantime::format_rfc3339_millis(time_requested.into()),
@@ -72,9 +75,9 @@ async fn quiesce_show(
             );
             println!("details: waiting for running sagas to finish");
         }
-        QuiesceState::WaitingForDb {
+        QuiesceState::DrainingDb {
             time_requested,
-            duration_waiting_for_sagas,
+            duration_draining_sagas,
             ..
         } => {
             println!(
@@ -87,13 +90,34 @@ async fn quiesce_show(
             );
             println!(
                 "    previously: waiting for sagas took {}",
-                format_duration_ms(duration_waiting_for_sagas.into()),
+                format_duration_ms(duration_draining_sagas.into()),
+            );
+        }
+        QuiesceState::RecordingQuiesce {
+            time_requested,
+            duration_draining_sagas,
+            duration_draining_db,
+            ..
+        } => {
+            println!(
+                "quiescing since {} ({} ago)",
+                humantime::format_rfc3339_millis(time_requested.into()),
+                format_time_delta(now - time_requested),
+            );
+            println!(
+                "    waiting for sagas took {}",
+                format_duration_ms(duration_draining_sagas.into()),
+            );
+            println!(
+                "    waiting for db quiesce took {}",
+                format_duration_ms(duration_draining_db.into()),
             );
         }
         QuiesceState::Quiesced {
             time_quiesced,
-            duration_waiting_for_sagas,
-            duration_waiting_for_db,
+            duration_draining_sagas,
+            duration_draining_db,
+            duration_recording_quiesce,
             duration_total,
             ..
         } => {
@@ -104,11 +128,15 @@ async fn quiesce_show(
             );
             println!(
                 "    waiting for sagas took {}",
-                format_duration_ms(duration_waiting_for_sagas.into()),
+                format_duration_ms(duration_draining_sagas.into()),
             );
             println!(
                 "    waiting for db quiesce took {}",
-                format_duration_ms(duration_waiting_for_db.into()),
+                format_duration_ms(duration_draining_db.into()),
+            );
+            println!(
+                "    recording quiesce took {}",
+                format_duration_ms(duration_recording_quiesce.into()),
             );
             println!(
                 "    total quiesce time: {}",
