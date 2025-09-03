@@ -835,69 +835,32 @@ mod test {
         cpuid_subleaf!(
             0xD, 0x2, 0x00000100, 0x00000240, 0x00000000, 0x00000000
         ),
-        cpuid_leaf!(
-            0x80000000, 0x80000021, 0x68747541, 0x444D4163, 0x69746E65
-        ),
-        cpuid_leaf!(
-            0x80000001, 0x00A00F11, 0x40000000, 0x444001F9, 0x27D3FBFF
-        ),
-        cpuid_leaf!(
-            0x80000002, 0x20444D41, 0x43595045, 0x31373720, 0x36205033
-        ),
-        cpuid_leaf!(
-            0x80000003, 0x6F432D34, 0x50206572, 0x65636F72, 0x726F7373
-        ),
-        cpuid_leaf!(
-            0x80000004, 0x20202020, 0x20202020, 0x20202020, 0x00202020
-        ),
-        cpuid_leaf!(
-            0x80000005, 0xFF40FF40, 0xFF40FF40, 0x20080140, 0x20080140
-        ),
-        cpuid_leaf!(
-            0x80000006, 0x48002200, 0x68004200, 0x02006140, 0x08009140
-        ),
-        cpuid_leaf!(
-            0x80000007, 0x00000000, 0x00000000, 0x00000000, 0x00000100
-        ),
-        cpuid_leaf!(
-            0x80000008, 0x00003030, 0x00000205, 0x00000000, 0x00000000
-        ),
-        cpuid_leaf!(
-            0x8000000A, 0x00000000, 0x00000000, 0x00000000, 0x00000000
-        ),
-        cpuid_leaf!(
-            0x80000019, 0xF040F040, 0xF0400000, 0x00000000, 0x00000000
-        ),
-        cpuid_leaf!(
-            0x8000001A, 0x00000006, 0x00000000, 0x00000000, 0x00000000
-        ),
-        cpuid_leaf!(
-            0x8000001B, 0x00000000, 0x00000000, 0x00000000, 0x00000000
-        ),
-        cpuid_leaf!(
-            0x8000001C, 0x00000000, 0x00000000, 0x00000000, 0x00000000
+        cpuid_leaf!(0x80000000, 0x80000021, 0x68747541, 0x444D4163, 0x69746E65),
+        cpuid_leaf!(0x80000001, 0x00A00F11, 0x40000000, 0x444001F9, 0x27D3FBFF),
+        cpuid_leaf!(0x80000002, 0x20444D41, 0x43595045, 0x31373720, 0x36205033),
+        cpuid_leaf!(0x80000003, 0x6F432D34, 0x50206572, 0x65636F72, 0x726F7373),
+        cpuid_leaf!(0x80000004, 0x20202020, 0x20202020, 0x20202020, 0x00202020),
+        cpuid_leaf!(0x80000005, 0xFF40FF40, 0xFF40FF40, 0x20080140, 0x20080140),
+        cpuid_leaf!(0x80000006, 0x48002200, 0x68004200, 0x02006140, 0x08009140),
+        cpuid_leaf!(0x80000007, 0x00000000, 0x00000000, 0x00000000, 0x00000100),
+        cpuid_leaf!(0x80000008, 0x00003030, 0x00000205, 0x00000000, 0x00000000),
+        cpuid_leaf!(0x8000000A, 0x00000000, 0x00000000, 0x00000000, 0x00000000),
+        cpuid_leaf!(0x80000019, 0xF040F040, 0xF0400000, 0x00000000, 0x00000000),
+        cpuid_leaf!(0x8000001A, 0x00000006, 0x00000000, 0x00000000, 0x00000000),
+        cpuid_leaf!(0x8000001B, 0x00000000, 0x00000000, 0x00000000, 0x00000000),
+        cpuid_leaf!(0x8000001C, 0x00000000, 0x00000000, 0x00000000, 0x00000000),
+        cpuid_subleaf!(
+            0x8000001D, 0x00, 0x00000121, 0x0000003F, 0x00000000, 0x00000000
         ),
         cpuid_subleaf!(
-            0x8000001D, 0x00, 0x00000121, 0x0000003F, 0x00000000,
-            0x00000000
+            0x8000001D, 0x01, 0x00000143, 0x0000003F, 0x00000000, 0x00000000
         ),
         cpuid_subleaf!(
-            0x8000001D, 0x01, 0x00000143, 0x0000003F, 0x00000000,
-            0x00000000
+            0x8000001D, 0x02, 0x00000163, 0x0000003F, 0x00000000, 0x00000000
         ),
-        cpuid_subleaf!(
-            0x8000001D, 0x02, 0x00000163, 0x0000003F, 0x00000000,
-            0x00000000
-        ),
-        cpuid_leaf!(
-            0x8000001E, 0x00000000, 0x00000100, 0x00000000, 0x00000000
-        ),
-        cpuid_leaf!(
-            0x8000001F, 0x00000000, 0x00000000, 0x00000000, 0x00000000
-        ),
-        cpuid_leaf!(
-            0x80000021, 0x00000045, 0x00000000, 0x00000000, 0x00000000
-        ),
+        cpuid_leaf!(0x8000001E, 0x00000000, 0x00000100, 0x00000000, 0x00000000),
+        cpuid_leaf!(0x8000001F, 0x00000000, 0x00000000, 0x00000000, 0x00000000),
+        cpuid_leaf!(0x80000021, 0x00000045, 0x00000000, 0x00000000, 0x00000000),
     ];
 
     // Test that the initial RFD 314 definition matches what we compute as the
@@ -918,101 +881,64 @@ mod test {
         }
     }
 
-        // This CPUID leaf blob is what a guest booted on a Gimlet as of around
-        // August 2025 would have gotten as its passed-through CPUID leaves.
-        //
-        // This is present only to validate initial CPU platforms work and in
-        // particular that the initial specified-up-front CPU platform does not
-        // differ in unexpected ways from what guests had been getting to that
-        // point.
-        const MILAN_BEFORE_RFD314: [CpuidEntry; 30] = [
-            cpuid_leaf!(0x0, 0x00000010, 0x68747541, 0x444D4163, 0x69746E65),
-            cpuid_leaf!(0x1, 0x00A00F11, 0x01020800, 0xFEDA3203, 0x178BFBFF),
-            cpuid_leaf!(0x5, 0x00000040, 0x00000040, 0x00000003, 0x00000011),
-            cpuid_leaf!(0x6, 0x00000004, 0x00000000, 0x00000000, 0x00000000),
-            cpuid_subleaf!(
-                0x7, 0x0, 0x00000000, 0x201003A9, 0x00000600, 0x00000000
-            ),
-            cpuid_subleaf!(
-                0x7, 0x1, 0x00000000, 0x00000000, 0x00000000, 0x00000000
-            ),
-            // leaf B is missing, and leaf D is the synthetic topology Bhyve invents.
-            cpuid_subleaf!(
-                0xD, 0x0, 0x00000007, 0x00000340, 0x00000340, 0x00000000
-            ),
-            cpuid_subleaf!(
-                0xD, 0x1, 0x00000001, 0x00000340, 0x00000000, 0x00000000
-            ),
-            cpuid_subleaf!(
-                0xD, 0x2, 0x00000100, 0x00000240, 0x00000000, 0x00000000
-            ),
-            // Include the all-zero leaf 10h explicitly so that the maximum standard
-            // leaf matches below.
-            cpuid_leaf!(0x10, 0x00000000, 0x00000000, 0x00000000, 0x00000000),
-            cpuid_leaf!(
-                0x80000000, 0x80000023, 0x68747541, 0x444D4163, 0x69746E65
-            ),
-            cpuid_leaf!(
-                0x80000001, 0x00A00F11, 0x40000000, 0x444031FB, 0x25D3FBFF
-            ),
-            cpuid_leaf!(
-                0x80000002, 0x20444D41, 0x43595045, 0x31373720, 0x36205033
-            ),
-            cpuid_leaf!(
-                0x80000003, 0x6F432D34, 0x50206572, 0x65636F72, 0x726F7373
-            ),
-            cpuid_leaf!(
-                0x80000004, 0x20202020, 0x20202020, 0x20202020, 0x00202020
-            ),
-            cpuid_leaf!(
-                0x80000005, 0xFF40FF40, 0xFF40FF40, 0x20080140, 0x20080140
-            ),
-            cpuid_leaf!(
-                0x80000006, 0x48002200, 0x68004200, 0x02006140, 0x08009140
-            ),
-            cpuid_leaf!(
-                0x80000007, 0x00000000, 0x00000000, 0x00000000, 0x00000100
-            ),
-            cpuid_leaf!(
-                0x80000008, 0x00003030, 0x00000007, 0x00000000, 0x00010007
-            ),
-            cpuid_leaf!(
-                0x8000000A, 0x00000001, 0x00008000, 0x00000000, 0x119BBCFF
-            ),
-            cpuid_leaf!(
-                0x80000019, 0xF040F040, 0xF0400000, 0x00000000, 0x00000000
-            ),
-            cpuid_leaf!(
-                0x8000001A, 0x00000006, 0x00000000, 0x00000000, 0x00000000
-            ),
-            cpuid_leaf!(
-                0x8000001B, 0x000003FF, 0x00000000, 0x00000000, 0x00000000
-            ),
-            cpuid_leaf!(
-                0x8000001C, 0x00000000, 0x00000000, 0x00000000, 0x00000000
-            ),
-            cpuid_subleaf!(
-                0x8000001D, 0x00, 0x00004121, 0x0000003F, 0x00000000,
-                0x00000000
-            ),
-            cpuid_subleaf!(
-                0x8000001D, 0x01, 0x00004143, 0x0000003F, 0x00000000,
-                0x00000000
-            ),
-            cpuid_subleaf!(
-                0x8000001D, 0x02, 0x00004163, 0x0000003F, 0x00000000,
-                0x00000000
-            ),
-            cpuid_leaf!(
-                0x8000001E, 0x00000000, 0x00000000, 0x00000000, 0x00000000
-            ),
-            cpuid_leaf!(
-                0x8000001F, 0x0101FD3F, 0x00004173, 0x000001FD, 0x00000001
-            ),
-            cpuid_leaf!(
-                0x80000021, 0x0000204D, 0x00000000, 0x00000000, 0x00000000
-            ),
-        ];
+    // This CPUID leaf blob is what a guest booted on a Gimlet as of around
+    // August 2025 would have gotten as its passed-through CPUID leaves.
+    //
+    // This is present only to validate initial CPU platforms work and in
+    // particular that the initial specified-up-front CPU platform does not
+    // differ in unexpected ways from what guests had been getting to that
+    // point.
+    const MILAN_BEFORE_RFD314: [CpuidEntry; 30] = [
+        cpuid_leaf!(0x0, 0x00000010, 0x68747541, 0x444D4163, 0x69746E65),
+        cpuid_leaf!(0x1, 0x00A00F11, 0x01020800, 0xFEDA3203, 0x178BFBFF),
+        cpuid_leaf!(0x5, 0x00000040, 0x00000040, 0x00000003, 0x00000011),
+        cpuid_leaf!(0x6, 0x00000004, 0x00000000, 0x00000000, 0x00000000),
+        cpuid_subleaf!(
+            0x7, 0x0, 0x00000000, 0x201003A9, 0x00000600, 0x00000000
+        ),
+        cpuid_subleaf!(
+            0x7, 0x1, 0x00000000, 0x00000000, 0x00000000, 0x00000000
+        ),
+        // leaf B is missing, and leaf D is the synthetic topology Bhyve invents.
+        cpuid_subleaf!(
+            0xD, 0x0, 0x00000007, 0x00000340, 0x00000340, 0x00000000
+        ),
+        cpuid_subleaf!(
+            0xD, 0x1, 0x00000001, 0x00000340, 0x00000000, 0x00000000
+        ),
+        cpuid_subleaf!(
+            0xD, 0x2, 0x00000100, 0x00000240, 0x00000000, 0x00000000
+        ),
+        // Include the all-zero leaf 10h explicitly so that the maximum standard
+        // leaf matches below.
+        cpuid_leaf!(0x10, 0x00000000, 0x00000000, 0x00000000, 0x00000000),
+        cpuid_leaf!(0x80000000, 0x80000023, 0x68747541, 0x444D4163, 0x69746E65),
+        cpuid_leaf!(0x80000001, 0x00A00F11, 0x40000000, 0x444031FB, 0x25D3FBFF),
+        cpuid_leaf!(0x80000002, 0x20444D41, 0x43595045, 0x31373720, 0x36205033),
+        cpuid_leaf!(0x80000003, 0x6F432D34, 0x50206572, 0x65636F72, 0x726F7373),
+        cpuid_leaf!(0x80000004, 0x20202020, 0x20202020, 0x20202020, 0x00202020),
+        cpuid_leaf!(0x80000005, 0xFF40FF40, 0xFF40FF40, 0x20080140, 0x20080140),
+        cpuid_leaf!(0x80000006, 0x48002200, 0x68004200, 0x02006140, 0x08009140),
+        cpuid_leaf!(0x80000007, 0x00000000, 0x00000000, 0x00000000, 0x00000100),
+        cpuid_leaf!(0x80000008, 0x00003030, 0x00000007, 0x00000000, 0x00010007),
+        cpuid_leaf!(0x8000000A, 0x00000001, 0x00008000, 0x00000000, 0x119BBCFF),
+        cpuid_leaf!(0x80000019, 0xF040F040, 0xF0400000, 0x00000000, 0x00000000),
+        cpuid_leaf!(0x8000001A, 0x00000006, 0x00000000, 0x00000000, 0x00000000),
+        cpuid_leaf!(0x8000001B, 0x000003FF, 0x00000000, 0x00000000, 0x00000000),
+        cpuid_leaf!(0x8000001C, 0x00000000, 0x00000000, 0x00000000, 0x00000000),
+        cpuid_subleaf!(
+            0x8000001D, 0x00, 0x00004121, 0x0000003F, 0x00000000, 0x00000000
+        ),
+        cpuid_subleaf!(
+            0x8000001D, 0x01, 0x00004143, 0x0000003F, 0x00000000, 0x00000000
+        ),
+        cpuid_subleaf!(
+            0x8000001D, 0x02, 0x00004163, 0x0000003F, 0x00000000, 0x00000000
+        ),
+        cpuid_leaf!(0x8000001E, 0x00000000, 0x00000000, 0x00000000, 0x00000000),
+        cpuid_leaf!(0x8000001F, 0x0101FD3F, 0x00004173, 0x000001FD, 0x00000001),
+        cpuid_leaf!(0x80000021, 0x0000204D, 0x00000000, 0x00000000, 0x00000000),
+    ];
 
     // The difference between guests on Milan with Byhve default CPUID masking
     // and the profile defined by RFD 314 is *relatively* small, and mostly in
