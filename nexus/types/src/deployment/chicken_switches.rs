@@ -130,13 +130,10 @@ impl ReconfiguratorChickenSwitches {
     }
 }
 
-// Allow the clippy::derivable_impls lint: spell out the default values for
-// these chicken switches for clarity.
-#[expect(clippy::derivable_impls)]
 impl Default for ReconfiguratorChickenSwitches {
     fn default() -> Self {
         Self {
-            planner_enabled: false,
+            planner_enabled: true,
             planner_switches: PlannerChickenSwitches::default(),
         }
     }
@@ -222,24 +219,19 @@ pub struct PlannerChickenSwitches {
 }
 
 impl PlannerChickenSwitches {
-    /// Returns the default value for a `SystemDescription`, e.g. in
-    /// reconfigurator-cli.
-    pub fn default_for_system_description() -> Self {
-        // In reconfigurator-cli we set this to false to ensure tests run
-        // against the desired configuration for r17.
-        Self { add_zones_with_mupdate_override: false }
-    }
-
     pub fn display(&self) -> PlannerChickenSwitchesDisplay<'_> {
         PlannerChickenSwitchesDisplay { switches: self }
     }
 }
 
+// Allow the clippy::derivable_impls lint: spell out the default values for
+// these chicken switches for clarity.
+#[expect(clippy::derivable_impls)]
 impl Default for PlannerChickenSwitches {
     fn default() -> Self {
-        // On customer systems for now, we don't block zone additions on mupdate
-        // overrides being present.
-        Self { add_zones_with_mupdate_override: true }
+        // By default, we block zone additions on mupdate overrides being
+        // present (see the docs on `add_zones_with_mupdate_override` above).
+        Self { add_zones_with_mupdate_override: false }
     }
 }
 

@@ -769,16 +769,18 @@ impl DataStore {
                         DieselError::RollbackTransaction
                     })?;
 
-                    // Mark the RSS-generated blueprint as the current target,
-                    // DISABLED. We may change this to enabled in the future
-                    // when more of Reconfigurator is automated, but for now we
-                    // require a support operation to enable it.
+                    // Mark the RSS-generated blueprint as the current target
+                    // with execution enabled. Executing this blueprint should
+                    // do nothing: it describes the system as RSS has deployed
+                    // it. But leaving execution enabled is important for
+                    // Reconfigurator to be able to make changes in response to
+                    // operator requests (expungements, upgrades, etc.).
                     Self::blueprint_target_set_current_on_connection(
                         &conn,
                         opctx,
                         BlueprintTarget {
                             target_id: blueprint.id,
-                            enabled: false,
+                            enabled: true,
                             time_made_target: Utc::now(),
                         },
                     )

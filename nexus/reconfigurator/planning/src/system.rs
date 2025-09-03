@@ -206,8 +206,7 @@ impl SystemDescription {
             oximeter_read_policy: OximeterReadPolicy::new(1),
             tuf_repo: TufRepoPolicy::initial(),
             old_repo: TufRepoPolicy::initial(),
-            chicken_switches:
-                PlannerChickenSwitches::default_for_system_description(),
+            chicken_switches: PlannerChickenSwitches::default(),
             ignore_impossible_mgs_updates_since: Utc::now(),
         }
     }
