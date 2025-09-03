@@ -3895,6 +3895,17 @@ impl ServiceManager {
                         }
                     }
                 }
+
+                // We also need to ensure any uplinks are configured. This goes
+                // into an infinite retry loop, which isn't great! We should fix
+                // this.
+                if let Some(underlay_info) = underlay_info {
+                    self.ensure_switch_zone_uplinks_configured_loop(
+                        &underlay_info,
+                        None,
+                    )
+                    .await;
+                }
             }
             (SwitchZoneState::Running { .. }, Some(_)) => {
                 info!(log, "Enabling {zone_typestr} zone (already complete)");
