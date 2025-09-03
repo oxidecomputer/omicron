@@ -1512,6 +1512,8 @@ mod test {
                     zone_type: BlueprintZoneType::Nexus(
                         blueprint_zone_type::Nexus {
                             internal_address: "[::1]:80".parse().unwrap(),
+                            debug_port:
+                                omicron_common::address::NEXUS_DEBUG_PORT,
                             external_ip: OmicronZoneExternalFloatingIp {
                                 id: ExternalIpUuid::new_v4(),
                                 ip: nexus_ip,
@@ -1772,6 +1774,8 @@ mod test {
                     zone_type: BlueprintZoneType::Nexus(
                         blueprint_zone_type::Nexus {
                             internal_address: "[::1]:80".parse().unwrap(),
+                            debug_port:
+                                omicron_common::address::NEXUS_DEBUG_PORT,
                             external_ip: OmicronZoneExternalFloatingIp {
                                 id: ExternalIpUuid::new_v4(),
                                 ip: nexus_ip_start.into(),
@@ -1804,6 +1808,8 @@ mod test {
                     zone_type: BlueprintZoneType::Nexus(
                         blueprint_zone_type::Nexus {
                             internal_address: "[::1]:80".parse().unwrap(),
+                            debug_port:
+                                omicron_common::address::NEXUS_DEBUG_PORT,
                             external_ip: OmicronZoneExternalFloatingIp {
                                 id: ExternalIpUuid::new_v4(),
                                 ip: nexus_ip_end.into(),
@@ -2058,6 +2064,7 @@ mod test {
                 zone_type: BlueprintZoneType::Nexus(
                     blueprint_zone_type::Nexus {
                         internal_address: "[::1]:80".parse().unwrap(),
+                        debug_port: omicron_common::address::NEXUS_DEBUG_PORT,
                         external_ip: OmicronZoneExternalFloatingIp {
                             id: ExternalIpUuid::new_v4(),
                             ip: nexus_ip_start.into(),
@@ -2284,6 +2291,7 @@ mod test {
                 zone_type: BlueprintZoneType::Nexus(
                     blueprint_zone_type::Nexus {
                         internal_address: "[::1]:80".parse().unwrap(),
+                        debug_port: omicron_common::address::NEXUS_DEBUG_PORT,
                         external_ip: OmicronZoneExternalFloatingIp {
                             id: ExternalIpUuid::new_v4(),
                             ip: nexus_ip,
@@ -2426,6 +2434,8 @@ mod test {
                     zone_type: BlueprintZoneType::Nexus(
                         blueprint_zone_type::Nexus {
                             internal_address: "[::1]:80".parse().unwrap(),
+                            debug_port:
+                                omicron_common::address::NEXUS_DEBUG_PORT,
                             external_ip: OmicronZoneExternalFloatingIp {
                                 id: ExternalIpUuid::new_v4(),
                                 ip,

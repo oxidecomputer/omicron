@@ -4252,6 +4252,7 @@ mod tests {
                             0,
                             0,
                         ),
+                        debug_port: 0,
                         external_ip: OmicronZoneExternalFloatingIp {
                             id: ExternalIpUuid::new_v4(),
                             ip: "10.0.0.1".parse().unwrap(),

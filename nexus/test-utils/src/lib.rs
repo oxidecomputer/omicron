@@ -42,6 +42,7 @@ use nexus_sled_agent_shared::inventory::OmicronSledConfig;
 use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
 use nexus_sled_agent_shared::inventory::SledCpuFamily;
 use nexus_sled_agent_shared::recovery_silo::RecoverySiloConfig;
+use nexus_test_interface::InternalServer;
 use nexus_test_interface::NexusServer;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintDatasetConfig;
@@ -373,6 +374,19 @@ impl RackInitRequestBuilder {
         self.internal_dns_config
             .service_backend_sled(service_name, &sled, address.port())
             .expect("Failed to set up DNS for GZ service");
+    }
+
+    // Special handling of Nexus, which has multiple SRV records for its single
+    // zone.
+    fn add_nexus_to_dns(
+        &mut self,
+        zone_id: OmicronZoneUuid,
+        address: SocketAddrV6,
+        debug_port: u16,
+    ) {
+        self.internal_dns_config
+            .host_zone_nexus(zone_id, address, debug_port)
+            .expect("Failed to set up Nexus DNS");
     }
 
     // Special handling of ClickHouse, which has multiple SRV records for its
@@ -818,25 +832,35 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                 .clone(),
         };
 
-        let (nexus_internal, nexus_internal_addr) =
-            N::start_internal(&self.config, &log).await?;
+        let nexus_internal = N::start_internal(&self.config, &log).await?;
+        let nexus_internal_addr =
+            nexus_internal.get_http_server_internal_address();
+        let internal_address = match nexus_internal_addr {
+            SocketAddr::V4(addr) => {
+                SocketAddrV6::new(addr.ip().to_ipv6_mapped(), addr.port(), 0, 0)
+            }
+            SocketAddr::V6(addr) => addr,
+        };
+        let debug_address = match nexus_internal.get_http_server_debug_address()
+        {
+            SocketAddr::V4(addr) => {
+                SocketAddrV6::new(addr.ip().to_ipv6_mapped(), addr.port(), 0, 0)
+            }
+            SocketAddr::V6(addr) => addr,
+        };
+        assert_eq!(internal_address.ip(), debug_address.ip());
 
-        let address = SocketAddrV6::new(
-            match nexus_internal_addr.ip() {
-                IpAddr::V4(addr) => addr.to_ipv6_mapped(),
-                IpAddr::V6(addr) => addr,
-            },
-            nexus_internal_addr.port(),
-            0,
-            0,
-        );
-
-        self.rack_init_builder.add_service_to_dns(
+        self.rack_init_builder.add_nexus_to_dns(
             self.config.deployment.id,
-            address,
-            ServiceName::Nexus,
+            internal_address,
+            debug_address.port(),
         );
-        self.record_nexus_zone(self.config.clone(), address, 0);
+        self.record_nexus_zone(
+            self.config.clone(),
+            internal_address,
+            debug_address.port(),
+            0,
+        );
         self.nexus_internal = Some(nexus_internal);
         self.nexus_internal_addr = Some(nexus_internal_addr);
         Ok(())
@@ -880,13 +904,21 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                  nexus/examples/config-second.toml"
             );
         };
-        self.record_nexus_zone(second_nexus_config, second_internal_address, 1);
+        let second_debug_port =
+            second_nexus_config.deployment.dropshot_debug.bind_address.port();
+        self.record_nexus_zone(
+            second_nexus_config,
+            second_internal_address,
+            second_debug_port,
+            1,
+        );
     }
 
     fn record_nexus_zone(
         &mut self,
         config: NexusConfig,
         internal_address: SocketAddrV6,
+        debug_port: u16,
         which: usize,
     ) {
         let id = config.deployment.id;
@@ -915,6 +947,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                 },
                 external_tls: config.deployment.dropshot_external.tls,
                 internal_address,
+                debug_port,
                 nic: NetworkInterface {
                     id: Uuid::new_v4(),
                     ip: NEXUS_OPTE_IPV4_SUBNET

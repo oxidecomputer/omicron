@@ -85,6 +85,7 @@ members = [
     "nexus/db-model",
     "nexus/db-queries",
     "nexus/db-schema",
+    "nexus/debug-api",
     "nexus/defaults",
     "nexus/external-api",
     "nexus/internal-api",
@@ -245,6 +246,7 @@ default-members = [
     "nexus/db-model",
     "nexus/db-queries",
     "nexus/db-schema",
+    "nexus/debug-api",
     "nexus/defaults",
     "nexus/external-api",
     "nexus/internal-api",
@@ -541,6 +543,7 @@ nexus-db-lookup = { path = "nexus/db-lookup" }
 nexus-db-model = { path = "nexus/db-model" }
 nexus-db-queries = { path = "nexus/db-queries" }
 nexus-db-schema = { path = "nexus/db-schema" }
+nexus-debug-api = { path = "nexus/debug-api" }
 nexus-defaults = { path = "nexus/defaults" }
 nexus-external-api = { path = "nexus/external-api" }
 nexus-inventory = { path = "nexus/inventory" }

@@ -59,6 +59,7 @@ nexus-background-task-interface.workspace = true
 # Not under "dev-dependencies"; these also need to be implemented for
 # integration tests.
 nexus-config.workspace = true
+nexus-debug-api.workspace = true
 nexus-external-api.workspace = true
 nexus-internal-api.workspace = true
 nexus-mgs-updates.workspace = true

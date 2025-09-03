@@ -13,6 +13,7 @@
 pub mod app; // Public for documentation examples
 mod cidata;
 mod context; // Public for documentation examples
+mod debug_api;
 pub mod external_api; // Public for testing
 mod internal_api;
 mod populate;
@@ -22,6 +23,7 @@ pub use app::Nexus;
 pub use app::test_interfaces::TestInterfaces;
 use context::ApiContext;
 use context::ServerContext;
+use debug_api::http_entrypoints::debug_api;
 use dropshot::ConfigDropshot;
 use external_api::http_entrypoints::external_api;
 use internal_api::http_entrypoints::internal_api;
@@ -65,6 +67,8 @@ pub struct InternalServer {
     apictx: ApiContext,
     /// dropshot server for internal API
     http_server_internal: dropshot::HttpServer<ApiContext>,
+    /// dropshot server for debug API
+    http_server_debug: dropshot::HttpServer<ApiContext>,
     config: NexusConfig,
     log: Logger,
 }
@@ -104,12 +108,43 @@ impl InternalServer {
             }
         };
 
+        // Launch the debug server. This is launched at the same time as the
+        // internal server, before all the other servers. (Most debug endpoints
+        // will not be useful until after Nexus finishes starting, but some
+        // may be.)
+        let http_server_debug = match dropshot::ServerBuilder::new(
+            debug_api(),
+            context.clone(),
+            log.new(o!("component" => "dropshot_debug")),
+        )
+        .config(config.deployment.dropshot_debug.clone())
+        .start()
+        .map_err(|error| format!("initializing debug server: {}", error))
+        {
+            Ok(server) => server,
+            Err(err) => {
+                context.context.nexus.datastore().terminate().await;
+                return Err(err);
+            }
+        };
+
         Ok(Self {
             apictx: context,
             http_server_internal,
+            http_server_debug,
             config: config.clone(),
             log,
         })
+    }
+}
+
+impl nexus_test_interface::InternalServer for InternalServer {
+    fn get_http_server_internal_address(&self) -> SocketAddr {
+        self.http_server_internal.local_addr()
+    }
+
+    fn get_http_server_debug_address(&self) -> SocketAddr {
+        self.http_server_debug.local_addr()
     }
 }
 
@@ -126,6 +161,7 @@ impl Server {
     async fn start(internal: InternalServer) -> Result<Self, String> {
         let apictx = internal.apictx;
         let http_server_internal = internal.http_server_internal;
+        let http_server_debug = internal.http_server_debug;
         let log = internal.log;
         let config = internal.config;
 
@@ -212,6 +248,7 @@ impl Server {
                 http_server_external,
                 http_server_techport_external,
                 http_server_internal,
+                http_server_debug,
                 producer_server,
             )
             .await;
@@ -240,11 +277,10 @@ impl nexus_test_interface::NexusServer for Server {
     async fn start_internal(
         config: &NexusConfig,
         log: &Logger,
-    ) -> Result<(InternalServer, SocketAddr), String> {
+    ) -> Result<InternalServer, String> {
         let internal_server = InternalServer::start(config, &log).await?;
         internal_server.apictx.context.nexus.wait_for_populate().await.unwrap();
-        let addr = internal_server.http_server_internal.local_addr();
-        Ok((internal_server, addr))
+        Ok(internal_server)
     }
 
     async fn stop_internal(internal_server: InternalServer) {
@@ -369,6 +405,10 @@ impl nexus_test_interface::NexusServer for Server {
 
     async fn get_http_server_internal_address(&self) -> SocketAddr {
         self.apictx.context.nexus.get_internal_server_address().await.unwrap()
+    }
+
+    async fn get_http_server_debug_address(&self) -> SocketAddr {
+        self.apictx.context.nexus.get_debug_server_address().await.unwrap()
     }
 
     async fn upsert_test_dataset(

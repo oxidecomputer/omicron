@@ -309,6 +309,7 @@ ZONE ERRORS:
 mismatched zone type: after: Nexus(
     Nexus {
         internal_address: [fd01:1122:3344:105::22]:12221,
+        debug_port: 12232,
         external_ip: OmicronZoneExternalFloatingIp {
             id: 6ebcade9-3a69-465e-99e9-6bf8eb9a8390 (external_ip),
             ip: 192.0.2.2,

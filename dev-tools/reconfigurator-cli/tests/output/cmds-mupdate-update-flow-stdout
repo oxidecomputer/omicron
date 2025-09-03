@@ -705,7 +705,7 @@ to:   blueprint a5a8f242-ffa5-473c-8efd-2acf2dc0b736
 
 internal DNS:
   DNS zone: "control-plane.oxide.internal" (unchanged)
-    unchanged names: 39 (records: 53)
+    unchanged names: 40 (records: 56)
 
 external DNS:
   DNS zone: "oxide.example" (unchanged)
@@ -808,7 +808,7 @@ to:   blueprint 626487fa-7139-45ec-8416-902271fc730b
 
 internal DNS:
   DNS zone: "control-plane.oxide.internal" (unchanged)
-    unchanged names: 38 (records: 51)
+    unchanged names: 39 (records: 54)
 
 external DNS:
   DNS zone: "oxide.example" (unchanged)
@@ -1045,7 +1045,7 @@ to:   blueprint c1a0d242-9160-40f4-96ae-61f8f40a0b1b
 
 internal DNS:
   DNS zone: "control-plane.oxide.internal" (unchanged)
-    unchanged names: 39 (records: 53)
+    unchanged names: 40 (records: 56)
 
 external DNS:
   DNS zone: "oxide.example" (unchanged)
@@ -1351,7 +1351,7 @@ to:   blueprint afb09faf-a586-4483-9289-04d4f1d8ba23
 
 internal DNS:
   DNS zone: "control-plane.oxide.internal" (unchanged)
-    unchanged names: 39 (records: 53)
+    unchanged names: 40 (records: 56)
 
 external DNS:
   DNS zone: "oxide.example" (unchanged)
@@ -1675,7 +1675,7 @@ to:   blueprint ce365dff-2cdb-4f35-a186-b15e20e1e700
 
 internal DNS:
   DNS zone: "control-plane.oxide.internal" (unchanged)
-    unchanged names: 39 (records: 53)
+    unchanged names: 40 (records: 56)
 
 external DNS:
   DNS zone: "oxide.example" (unchanged)
@@ -1931,7 +1931,7 @@ to:   blueprint 8f2d1f39-7c88-4701-aa43-56bf281b28c1
 
 internal DNS:
   DNS zone: "control-plane.oxide.internal" (unchanged)
-    unchanged names: 39 (records: 53)
+    unchanged names: 40 (records: 56)
 
 external DNS:
   DNS zone: "oxide.example" (unchanged)
@@ -2203,7 +2203,7 @@ to:   blueprint 12d602a6-5ab4-487a-b94e-eb30cdf30300
 
 internal DNS:
   DNS zone: "control-plane.oxide.internal" (unchanged)
-    unchanged names: 39 (records: 53)
+    unchanged names: 40 (records: 56)
 
 external DNS:
   DNS zone: "oxide.example" (unchanged)
@@ -2357,7 +2357,7 @@ to:   blueprint 61a93ea3-c872-48e0-aace-e86b0c52b839
 
 internal DNS:
   DNS zone: "control-plane.oxide.internal" (unchanged)
-    unchanged names: 40 (records: 55)
+    unchanged names: 41 (records: 58)
 
 external DNS:
   DNS zone: "oxide.example" (unchanged)
@@ -2488,7 +2488,7 @@ internal DNS:
 +       SRV  port   123 6444f8a5-6465-4f0b-a549-1993c113569c.host.control-plane.oxide.internal
 +       SRV  port   123 6af1f5f5-6a16-40f0-a830-651e738967aa.host.control-plane.oxide.internal
 +       SRV  port   123 f10a4fb9-759f-4a65-b25e-5794ad2d07d8.host.control-plane.oxide.internal
-    unchanged names: 39 (records: 52)
+    unchanged names: 40 (records: 55)
 
 external DNS:
   DNS zone: "oxide.example" (unchanged)
