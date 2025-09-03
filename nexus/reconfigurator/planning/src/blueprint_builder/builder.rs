@@ -353,6 +353,10 @@ pub(crate) enum Operation {
         num_datasets_expunged: usize,
         num_zones_expunged: usize,
     },
+    SetNexusGeneration {
+        current_generation: Generation,
+        new_generation: Generation,
+    },
     SetTargetReleaseMinimumGeneration {
         current_generation: Generation,
         new_generation: Generation,
@@ -462,6 +466,13 @@ impl fmt::Display for Operation {
                 write!(
                     f,
                     "updated target release minimum generation from \
+                     {current_generation} to {new_generation}"
+                )
+            }
+            Self::SetNexusGeneration { current_generation, new_generation } => {
+                write!(
+                    f,
+                    "updated nexus generation from \
                      {current_generation} to {new_generation}"
                 )
             }
@@ -2185,6 +2196,22 @@ impl<'a> BlueprintBuilder<'a> {
             new_generation,
         });
         Ok(())
+    }
+
+    /// Get the value of `nexus_generation`.
+    pub fn nexus_generation(&self) -> Generation {
+        self.nexus_generation
+    }
+
+    /// Given the current value of `nexus_generation`, set the new value for
+    /// this blueprint.
+    pub fn set_nexus_generation(&mut self, new_generation: Generation) {
+        let current_generation = self.nexus_generation;
+        self.nexus_generation = new_generation;
+        self.record_operation(Operation::SetNexusGeneration {
+            current_generation,
+            new_generation,
+        });
     }
 
     /// Allow a test to manually add an external DNS address, which could
