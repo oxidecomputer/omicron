@@ -1073,7 +1073,11 @@ CREATE TABLE IF NOT EXISTS omicron.public.silo_quotas (
     time_modified TIMESTAMPTZ NOT NULL,
     cpus INT8 NOT NULL,
     memory_bytes INT8 NOT NULL,
-    storage_bytes INT8 NOT NULL
+    storage_bytes INT8 NOT NULL,
+
+    CONSTRAINT cpus_not_negative CHECK (cpus >= 0),
+    CONSTRAINT memory_not_negative CHECK (memory_bytes >= 0),
+    CONSTRAINT storage_not_negative CHECK (storage_bytes >= 0)
 );
 
 /**
@@ -6613,7 +6617,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '187.0.0', NULL)
+    (TRUE, NOW(), NOW(), '188.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

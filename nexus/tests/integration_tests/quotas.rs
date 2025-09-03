@@ -12,6 +12,7 @@ use nexus_test_utils::resource_helpers::create_local_user;
 use nexus_test_utils::resource_helpers::grant_iam;
 use nexus_test_utils::resource_helpers::link_ip_pool;
 use nexus_test_utils::resource_helpers::object_create;
+use nexus_test_utils::resource_helpers::object_create_error;
 use nexus_test_utils::resource_helpers::test_params;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params;
@@ -48,6 +49,27 @@ impl ResourceAllocator {
         .authn_as(self.auth.clone())
         .execute()
         .await
+    }
+
+    async fn set_quotas_expect_error(
+        &self,
+        client: &ClientTestContext,
+        quotas: params::SiloQuotasUpdate,
+        code: http::StatusCode,
+    ) -> HttpErrorResponseBody {
+        NexusRequest::expect_failure_with_body(
+            client,
+            code,
+            http::Method::PUT,
+            "/v1/system/silos/quota-test-silo/quotas",
+            &Some(&quotas),
+        )
+        .authn_as(self.auth.clone())
+        .execute()
+        .await
+        .expect("Expected failure updating quotas")
+        .parsed_body::<HttpErrorResponseBody>()
+        .expect("Failed to read response after setting quotas")
     }
 
     async fn get_quotas(&self, client: &ClientTestContext) -> SiloQuotas {
@@ -385,4 +407,69 @@ async fn test_quota_limits(cptestctx: &ControlPlaneTestContext) {
         assert_eq!(quotas.limits.memory, quota_limit.memory.unwrap());
         assert_eq!(quotas.limits.storage, quota_limit.storage.unwrap());
     }
+}
+
+#[nexus_test]
+async fn test_negative_quota(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+
+    // Can't make a silo with a negative quota
+    let mut quotas = params::SiloQuotasCreate::empty();
+    quotas.cpus = -1;
+    let response = object_create_error(
+        client,
+        "/v1/system/silos",
+        &params::SiloCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "negative-cpus-not-allowed".parse().unwrap(),
+                description: "".into(),
+            },
+            quotas,
+            discoverable: true,
+            identity_mode: shared::SiloIdentityMode::LocalOnly,
+            admin_group_name: None,
+            tls_certificates: vec![],
+            mapped_fleet_roles: Default::default(),
+        },
+        http::StatusCode::BAD_REQUEST,
+    )
+    .await;
+
+    assert!(
+        response.message.contains(
+            "Cannot create silo quota: CPU quota must not be negative"
+        ),
+        "Unexpected response: {}",
+        response.message
+    );
+
+    // Make the silo with an empty quota
+    let system = setup_silo_with_quota(
+        &client,
+        "quota-test-silo",
+        params::SiloQuotasCreate::empty(),
+    )
+    .await;
+
+    // Can't update a silo with a negative quota
+    let quota_limit = params::SiloQuotasUpdate {
+        cpus: Some(-1),
+        memory: Some(0_u64.try_into().unwrap()),
+        storage: Some(0_u64.try_into().unwrap()),
+    };
+    let response = system
+        .set_quotas_expect_error(
+            client,
+            quota_limit.clone(),
+            http::StatusCode::BAD_REQUEST,
+        )
+        .await;
+
+    assert!(
+        response.message.contains(
+            "Cannot update silo quota: CPU quota must not be negative"
+        ),
+        "Unexpected response: {}",
+        response.message
+    );
 }
