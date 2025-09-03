@@ -608,7 +608,7 @@ pub fn milan_rfd314() -> Vec<CpuidEntry> {
     //
     // RDTSCP requires some Bhyve and Propolis work to support, so it is masked
     // off for now.
-    leaf.set_ext_apic_space(false); // TODO: I thought this was set. is it not? check PR
+    leaf.set_ext_apic_space(true);
     leaf.set_perf_cntr_extensions(false);
     leaf.set_rdtscp(false);
 
@@ -824,7 +824,7 @@ fn milan_rfd314_is_as_described() {
             0xD, 0x2, 0x00000100, 0x00000240, 0x00000000, 0x00000000
         ),
         cpuid_leaf!(0x80000000, 0x80000021, 0x68747541, 0x444D4163, 0x69746E65),
-        cpuid_leaf!(0x80000001, 0x00A00F11, 0x40000000, 0x444001F1, 0x27D3FBFF),
+        cpuid_leaf!(0x80000001, 0x00A00F11, 0x40000000, 0x444001F9, 0x27D3FBFF),
         cpuid_leaf!(0x80000002, 0x20444D41, 0x43595045, 0x31373720, 0x36205033),
         cpuid_leaf!(0x80000003, 0x6F432D34, 0x50206572, 0x65636F72, 0x726F7373),
         cpuid_leaf!(0x80000004, 0x20202020, 0x20202020, 0x20202020, 0x00202020),
