@@ -311,6 +311,14 @@ impl From<Error> for omicron_common::api::external::Error {
     }
 }
 
+/// Information describing the underlay network, used when activating the switch
+/// zone.
+#[derive(Debug, Clone)]
+pub struct UnderlayInfo {
+    pub ip: Ipv6Addr,
+    pub rack_network_config: Option<RackNetworkConfig>,
+}
+
 fn display_zone_init_errors(errors: &[(String, Box<Error>)]) -> String {
     if errors.len() == 1 {
         return format!(
@@ -3152,7 +3160,7 @@ impl ServiceManager {
         &self,
         // If we're reconfiguring the switch zone with an underlay address, we
         // also need the rack network config to set tfport uplinks.
-        underlay_info: Option<(Ipv6Addr, Option<&RackNetworkConfig>)>,
+        underlay_info: Option<UnderlayInfo>,
         baseboard: Baseboard,
     ) -> Result<(), Error> {
         info!(self.inner.log, "Ensuring scrimlet services (enabling services)");
@@ -3239,8 +3247,11 @@ impl ServiceManager {
             }
         };
 
-        let mut addresses =
-            if let Some((ip, _)) = underlay_info { vec![ip] } else { vec![] };
+        let mut addresses = if let Some(info) = &underlay_info {
+            vec![info.ip]
+        } else {
+            vec![]
+        };
         addresses.push(Ipv6Addr::LOCALHOST);
 
         let request =
@@ -3421,11 +3432,9 @@ impl ServiceManager {
         request: SwitchZoneConfig,
         filesystems: Vec<zone::Fs>,
         data_links: Vec<String>,
-        underlay_info: Option<(Ipv6Addr, Option<&RackNetworkConfig>)>,
+        underlay_info: Option<UnderlayInfo>,
     ) {
         let (exit_tx, exit_rx) = oneshot::channel();
-        let underlay_info =
-            underlay_info.map(|(ip, rack_config)| (ip, rack_config.cloned()));
         *zone = SwitchZoneState::Initializing {
             request,
             filesystems,
@@ -3446,7 +3455,7 @@ impl ServiceManager {
         request: Option<SwitchZoneConfig>,
         filesystems: Vec<zone::Fs>,
         data_links: Vec<String>,
-        underlay_info: Option<(Ipv6Addr, Option<&RackNetworkConfig>)>,
+        underlay_info: Option<UnderlayInfo>,
     ) -> Result<(), Error> {
         let log = &self.inner.log;
 
@@ -3902,7 +3911,7 @@ impl ServiceManager {
     // inititalized, or it has been told to stop.
     async fn initialize_switch_zone_loop(
         &self,
-        underlay_info: Option<(Ipv6Addr, Option<RackNetworkConfig>)>,
+        underlay_info: Option<UnderlayInfo>,
         mut exit_rx: oneshot::Receiver<()>,
     ) {
         // We don't really expect failures trying to initialize the switch zone
@@ -3916,11 +3925,16 @@ impl ServiceManager {
             {
                 let mut sled_zone = self.inner.switch_zone.lock().await;
                 match self.try_initialize_switch_zone(&mut sled_zone).await {
-                    Ok(()) => break,
-                    Err(e) => warn!(
-                        self.inner.log,
-                        "Failed to initialize switch zone: {e}"
-                    ),
+                    Ok(()) => {
+                        info!(self.inner.log, "initialized switch zone");
+                        break;
+                    }
+                    Err(e) => {
+                        warn!(
+                            self.inner.log, "Failed to initialize switch zone";
+                            InlineErrorChain::new(&e),
+                        );
+                    }
                 }
             }
 
@@ -3934,29 +3948,32 @@ impl ServiceManager {
 
         // Then, if we have underlay info, go into a loop trying to configure
         // our uplinks. As above, retry until we succeed or are told to stop.
-        if let Some((ip, Some(rack_network_config))) = underlay_info {
-            loop {
-                match self
-                    .ensure_switch_zone_uplinks_configured(
-                        ip,
-                        &rack_network_config,
-                    )
-                    .await
-                {
-                    Ok(()) => break,
-                    Err(e) => warn!(
-                        self.inner.log,
-                        "Failed to configure switch zone uplinks";
-                        InlineErrorChain::new(&e),
-                    ),
+        if let Some(underlay_info) = underlay_info {
+            if let Some(rack_network_config) = underlay_info.rack_network_config
+            {
+                loop {
+                    match self
+                        .ensure_switch_zone_uplinks_configured(
+                            underlay_info.ip,
+                            &rack_network_config,
+                        )
+                        .await
+                    {
+                        Ok(()) => break,
+                        Err(e) => warn!(
+                            self.inner.log,
+                            "Failed to configure switch zone uplinks";
+                            InlineErrorChain::new(&e),
+                        ),
+                    }
+
+                    tokio::select! {
+                        // If we've been told to stop trying, bail.
+                        _ = &mut exit_rx => return,
+
+                        _ = tokio::time::sleep(RETRY_DELAY) => continue,
+                    };
                 }
-
-                tokio::select! {
-                    // If we've been told to stop trying, bail.
-                    _ = &mut exit_rx => return,
-
-                    _ = tokio::time::sleep(RETRY_DELAY) => continue,
-                };
             }
         }
     }
