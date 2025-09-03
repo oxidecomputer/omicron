@@ -76,6 +76,8 @@ mod planning_report;
 mod zone_type;
 
 use crate::inventory::BaseboardId;
+use anyhow::anyhow;
+use anyhow::bail;
 pub use blueprint_diff::BlueprintDiffSummary;
 use blueprint_display::BpPendingMgsUpdates;
 pub use chicken_switches::PlannerChickenSwitches;
@@ -227,6 +229,13 @@ pub struct Blueprint {
     /// driving the system to the target release.
     pub target_release_minimum_generation: Generation,
 
+    /// The generation of the active group of Nexuses
+    ///
+    /// If a Nexus instance notices it has a nexus_generation less than
+    /// this value, it will start to quiesce in preparation for handing off
+    /// control to the newer generation (see: RFD 588).
+    pub nexus_generation: Generation,
+
     /// CockroachDB state fingerprint when this blueprint was created
     // See `nexus/db-queries/src/db/datastore/cockroachdb_settings.rs` for more
     // on this.
@@ -275,6 +284,7 @@ impl Blueprint {
             external_dns_version: self.external_dns_version,
             target_release_minimum_generation: self
                 .target_release_minimum_generation,
+            nexus_generation: self.nexus_generation,
             cockroachdb_fingerprint: self.cockroachdb_fingerprint.clone(),
             cockroachdb_setting_preserve_downgrade: Some(
                 self.cockroachdb_setting_preserve_downgrade,
@@ -374,6 +384,26 @@ impl Blueprint {
     /// blueprint.
     pub fn display(&self) -> BlueprintDisplay<'_> {
         BlueprintDisplay { blueprint: self }
+    }
+
+    /// Returns whether the given Nexus instance should be quiescing or quiesced
+    /// in preparation for handoff to the next generation
+    pub fn is_nexus_quiescing(
+        &self,
+        nexus_id: OmicronZoneUuid,
+    ) -> Result<bool, anyhow::Error> {
+        let zone = self
+            .all_omicron_zones(|_z| true)
+            .find(|(_sled_id, zone_config)| zone_config.id == nexus_id)
+            .ok_or_else(|| {
+                anyhow!("zone {} does not exist in blueprint", nexus_id)
+            })?
+            .1;
+        let BlueprintZoneType::Nexus(zone_config) = &zone.zone_type else {
+            bail!("zone {} is not a Nexus zone", nexus_id);
+        };
+
+        Ok(zone_config.nexus_generation < self.nexus_generation)
     }
 }
 
@@ -609,6 +639,7 @@ impl BlueprintDisplay<'_> {
                         .target_release_minimum_generation
                         .to_string(),
                 ),
+                (NEXUS_GENERATION, self.blueprint.nexus_generation.to_string()),
             ],
         )
     }
@@ -651,6 +682,7 @@ impl fmt::Display for BlueprintDisplay<'_> {
             // These six fields are handled by `make_metadata_table()`, called
             // below.
             target_release_minimum_generation: _,
+            nexus_generation: _,
             internal_dns_version: _,
             external_dns_version: _,
             time_created: _,
@@ -2073,6 +2105,10 @@ pub struct BlueprintMetadata {
     ///
     /// See [`Blueprint::target_release_minimum_generation`].
     pub target_release_minimum_generation: Generation,
+    /// The Nexus generation number
+    ///
+    /// See [`Blueprint::nexus_generation`].
+    pub nexus_generation: Generation,
     /// CockroachDB state fingerprint when this blueprint was created
     pub cockroachdb_fingerprint: String,
     /// Whether to set `cluster.preserve_downgrade_option` and what to set it to

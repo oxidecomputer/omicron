@@ -138,6 +138,15 @@ impl Server {
         // the external server we're about to start.
         apictx.context.nexus.await_ip_allowlist_plumbing().await;
 
+        // Wait until Nexus has determined if sagas are supposed to be quiesced.
+        // This is not strictly necessary.  The goal here is to prevent 503
+        // errors to clients that reach this Nexus while it's starting up and
+        // before it's figured out that it doesn't need to quiesce.  The risk of
+        // doing this is that Nexus gets stuck here, but that should only happen
+        // if it's unable to load the current blueprint, in which case
+        // something's pretty wrong and it's likely pretty stuck anyway.
+        apictx.context.nexus.wait_for_saga_determination().await;
+
         // Launch the external server.
         let tls_config = apictx
             .context
@@ -331,6 +340,16 @@ impl nexus_test_interface::NexusServer for Server {
             )
             .await
             .expect("Could not initialize rack");
+
+        // Now that we have a blueprint, determine whether sagas should be
+        // quiesced.  Wait for that so that tests can assume they can
+        // immediately kick off sagas.
+        internal_server
+            .apictx
+            .context
+            .nexus
+            .wait_for_saga_determination()
+            .await;
 
         // Start the Nexus external API.
         Server::start(internal_server).await.unwrap()
