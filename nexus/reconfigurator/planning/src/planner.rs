@@ -224,13 +224,17 @@ impl<'a> Planner<'a> {
         // TODO-K: mgs_updates can be empty if some updates failed. Make sure to
         // keep track of failed updates and wait until they are on the expected
         // new version befor proceeding to update zones
-        } else if !mgs_updates.is_empty() {
+        } else if !mgs_updates.pending_mgs_updates.is_empty() {
             // ... or if there are still pending updates for the RoT / SP /
             // Host OS / etc. ...
-            // TODO This is not quite right.  See oxidecomputer/omicron#8285.
-            // TODO-K: change here?
             PlanningZoneUpdatesStepReport::waiting_on(
                 ZoneUpdatesWaitingOn::PendingMgsUpdates,
+            )
+        } else if !mgs_updates.skipped_mgs_updates.is_empty() {
+            // ... or if there are skipped updates for the RoT / SP / Host OS /
+            // RoT bootloader.
+            PlanningZoneUpdatesStepReport::waiting_on(
+                ZoneUpdatesWaitingOn::SkippedMgsUpdates,
             )
         } else if !add.add_update_blocked_reasons.is_empty() {
             // ... or if there are pending zone add blockers.
@@ -1885,7 +1889,7 @@ impl<'a> Planner<'a> {
         source_repo.zone_image_source(zone_kind)
     }
 
-    /// Return `true` iff a zone of the given kind is ready to be updated;
+    /// Return `true` if a zone of the given kind is ready to be updated;
     /// i.e., its dependencies have been updated.
     fn is_zone_ready_for_update(
         &self,
@@ -1893,8 +1897,8 @@ impl<'a> Planner<'a> {
         mgs_updates: &PlanningMgsUpdatesStepReport,
     ) -> Result<bool, TufRepoContentsError> {
         // We return false regardless of `zone_kind` if there are still
-        // pending updates for components earlier in the update ordering
-        // than zones: RoT bootloader / RoT / SP / Host OS.
+        // pending or skipped updates for components earlier in the update
+        // ordering than zones: RoT bootloader / RoT / SP / Host OS.
         if !mgs_updates.is_empty() {
             return Ok(false);
         }

@@ -61,8 +61,6 @@ pub fn try_make_update_rot_bootloader(
     baseboard_id: &Arc<BaseboardId>,
     inventory: &Collection,
     current_artifacts: &TufRepoDescription,
-    // TODO-K: This needs to stay as an option because Ok(None) means there is
-    // update needed
 ) -> Result<Option<PendingMgsUpdate>, FailedMgsUpdateReason> {
     let Some(sp_info) = inventory.sps.get(baseboard_id) else {
         warn!(

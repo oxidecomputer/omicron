@@ -57,6 +57,7 @@ use serde::Serialize;
 use slog::Key;
 use std::collections::BTreeMap;
 use std::fmt;
+use std::fmt::Display;
 use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
 use std::sync::Arc;
@@ -1290,6 +1291,52 @@ impl fmt::Display for BlueprintHostPhase2DesiredContents {
                 write!(f, "artifact: {version}")
             }
         }
+    }
+}
+
+#[derive(
+    Debug,
+    Deserialize,
+    Serialize,
+    PartialEq,
+    Eq,
+    Diffable,
+    PartialOrd,
+    JsonSchema,
+    Ord,
+    Clone,
+    Copy,
+)]
+pub enum MgsUpdateComponent {
+    Sp,
+    Rot,
+    RotBootloader,
+    HostOs,
+}
+
+// TODO-K: Implement into() instead
+impl From<&'_ PendingMgsUpdateDetails> for MgsUpdateComponent {
+    fn from(value: &'_ PendingMgsUpdateDetails) -> Self {
+        match value {
+            PendingMgsUpdateDetails::Rot { .. } => Self::Rot,
+            PendingMgsUpdateDetails::RotBootloader { .. } => {
+                Self::RotBootloader
+            }
+            PendingMgsUpdateDetails::Sp { .. } => Self::Sp,
+            PendingMgsUpdateDetails::HostPhase1(_) => Self::HostOs,
+        }
+    }
+}
+
+impl Display for MgsUpdateComponent {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            MgsUpdateComponent::HostOs => "Host OS",
+            MgsUpdateComponent::Rot => "RoT",
+            MgsUpdateComponent::RotBootloader => "RoT Bootloader",
+            MgsUpdateComponent::Sp => "SP",
+        };
+        write!(f, "{s}")
     }
 }
 

@@ -20,6 +20,7 @@ use crate::mgs_updates::sp::try_make_update_sp;
 use gateway_types::rot::RotSlot;
 use nexus_types::deployment::ExpectedActiveRotSlot;
 use nexus_types::deployment::ExpectedVersion;
+use nexus_types::deployment::MgsUpdateComponent;
 use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdateDetails;
 use nexus_types::deployment::PendingMgsUpdateRotBootloaderDetails;
@@ -27,7 +28,6 @@ use nexus_types::deployment::PendingMgsUpdateRotDetails;
 use nexus_types::deployment::PendingMgsUpdateSpDetails;
 use nexus_types::deployment::PendingMgsUpdates;
 use nexus_types::deployment::TargetReleaseDescription;
-use nexus_types::deployment::planning_report::MgsUpdateComponent;
 use nexus_types::deployment::planning_report::SkippedMgsUpdate;
 use nexus_types::deployment::planning_report::SkippedMgsUpdates;
 use nexus_types::inventory::BaseboardId;
@@ -68,7 +68,7 @@ pub(crate) struct PlannedMgsUpdates {
     /// result in a change to the respective sled's `BlueprintSledConfig`.
     pub(crate) pending_host_phase_2_changes: PendingHostPhase2Changes,
 
-    // TODO-K: Add skipped updates here?
+    // Updates to components that failed for some reason and have been skipped.
     pub(crate) skipped_mgs_updates: SkippedMgsUpdates,
 }
 
@@ -169,10 +169,10 @@ pub(crate) fn plan_mgs_updates(
     // containing artifacts), then we cannot configure more updates.
     let current_artifacts = match current_artifacts {
         TargetReleaseDescription::Initial => {
-            // TODO-K: change comment to no updates needed and change to info
-            warn!(
+            info!(
                 log,
-                "cannot issue more MGS-driven updates (no current artifacts)",
+                "system in initial release state \
+                no update artifacts available (no update necessary)",
             );
             return PlannedMgsUpdates {
                 pending_updates,
@@ -208,19 +208,19 @@ pub(crate) fn plan_mgs_updates(
         }
 
         match try_make_update(log, board, inventory, current_artifacts) {
-            // TODO-K: use skipped_updates, this is where the skipped updates are collected
             Some((update, mut host_phase_2, skipped_updates)) => {
                 info!(log, "configuring MGS-driven update"; &update);
                 pending_updates.insert(update);
                 pending_host_phase_2_changes.append(&mut host_phase_2);
-                // TODO-K: change so that we actually add the skipped updates
                 for skipped in &skipped_updates {
-                    // TODO-K: Handle unwrap, or wrap the insert_unique method
-                    // into another helper method, the second sounds better
-                    skipped_mgs_updates
-                        .by_baseboard
-                        .insert_unique(skipped.clone())
-                        .unwrap();
+                    warn!(
+                        log,
+                        "update to {} {} has been skipped: {}",
+                        skipped.baseboard_id,
+                        skipped.component,
+                        skipped.reason
+                    );
+                    skipped_mgs_updates.insert(skipped.clone());
                 }
             }
             None => {
@@ -561,15 +561,11 @@ fn try_make_update(
             }
         }
         Err(e) => {
-            // TODO-K: Handle unwrap
-            skipped_mgs_updates
-                .by_baseboard
-                .insert_unique(SkippedMgsUpdate {
-                    baseboard_id: baseboard_id.clone(),
-                    component: MgsUpdateComponent::RotBootloader,
-                    reason: e,
-                })
-                .unwrap();
+            skipped_mgs_updates.insert(SkippedMgsUpdate {
+                baseboard_id: baseboard_id.clone(),
+                component: MgsUpdateComponent::RotBootloader,
+                reason: e,
+            });
         }
     }
 

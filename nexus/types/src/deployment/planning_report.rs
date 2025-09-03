@@ -10,7 +10,7 @@ use super::BlueprintZoneImageSource;
 use super::CockroachDbPreserveDowngrade;
 use super::PendingMgsUpdates;
 use super::PlannerChickenSwitches;
-use crate::deployment::PendingMgsUpdateDetails;
+use crate::deployment::MgsUpdateComponent;
 use crate::inventory::BaseboardId;
 
 use daft::Diffable;
@@ -480,52 +480,7 @@ impl PlanningMupdateOverrideStepReport {
     }
 }
 
-// TODO-K: Move this to deplyment.rs
-#[derive(
-    Debug,
-    Deserialize,
-    Serialize,
-    PartialEq,
-    Eq,
-    Diffable,
-    PartialOrd,
-    JsonSchema,
-    Ord,
-    Clone,
-    Copy,
-)]
-pub enum MgsUpdateComponent {
-    Sp,
-    Rot,
-    RotBootloader,
-    HostOs,
-}
-
-impl From<&'_ PendingMgsUpdateDetails> for MgsUpdateComponent {
-    fn from(value: &'_ PendingMgsUpdateDetails) -> Self {
-        match value {
-            PendingMgsUpdateDetails::Rot { .. } => Self::Rot,
-            PendingMgsUpdateDetails::RotBootloader { .. } => {
-                Self::RotBootloader
-            }
-            PendingMgsUpdateDetails::Sp { .. } => Self::Sp,
-            PendingMgsUpdateDetails::HostPhase1(_) => Self::HostOs,
-        }
-    }
-}
-
-impl Display for MgsUpdateComponent {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let s = match self {
-            MgsUpdateComponent::HostOs => "Host OS",
-            MgsUpdateComponent::Rot => "RoT",
-            MgsUpdateComponent::RotBootloader => "RoT Bootloader",
-            MgsUpdateComponent::Sp => "SP",
-        };
-        write!(f, "{s}")
-    }
-}
-
+/// Describes the reason why an SP component failed to update
 #[derive(
     Debug,
     Deserialize,
@@ -540,20 +495,18 @@ impl Display for MgsUpdateComponent {
     Copy,
 )]
 pub enum FailedMgsUpdateReason {
-    // TODO-K: add some nice errors with information
+    /// No artifact with the required conditions for the component was found
     NoMatchingArtifactFound,
-    // SP details
+    /// The component's corresponding SP was not found in the inventory
     SpNotInInventory,
-    // Include caboose of what
+    /// The component's caboose was not found in the inventory
     CabooseNotInInventory,
-    // Retrieve where the verion parse comes from
+    /// The version in the caboose or artifact was not able to be parsed
     FailedVersionParse,
-    // Include caboose of what
+    /// The component's caboose was missing a value for "sign"
     CabooseMissingSign,
-    // Add more
 }
 
-// TODO-K: Do I need display? or are the error bits enough
 impl Display for FailedMgsUpdateReason {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let s = match self {
@@ -581,8 +534,11 @@ impl Display for FailedMgsUpdateReason {
     Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Diffable, JsonSchema,
 )]
 pub struct SkippedMgsUpdate {
+    /// id of the baseboard that we attempted to update
     pub baseboard_id: Arc<BaseboardId>,
+    /// type of SP component that we attempted to update
     pub component: MgsUpdateComponent,
+    /// reason why the update failed
     pub reason: FailedMgsUpdateReason,
 }
 
@@ -598,6 +554,9 @@ impl IdOrdItem for SkippedMgsUpdate {
     Clone, Debug, Eq, PartialEq, Deserialize, Serialize, JsonSchema, Diffable,
 )]
 pub struct SkippedMgsUpdates {
+    // The IdOrdMap key is the baseboard_id. We only need to know which devices
+    // were skipped, so only one skipped MGS-managed update is allowed for a
+    // given baseboard.
     pub by_baseboard: IdOrdMap<SkippedMgsUpdate>,
 }
 
@@ -612,6 +571,13 @@ impl SkippedMgsUpdates {
 
     pub fn is_empty(&self) -> bool {
         self.by_baseboard.is_empty()
+    }
+
+    pub fn insert(
+        &mut self,
+        update: SkippedMgsUpdate,
+    ) -> Option<SkippedMgsUpdate> {
+        self.by_baseboard.insert_overwrite(update)
     }
 }
 
@@ -628,7 +594,6 @@ impl<'a> IntoIterator for &'a SkippedMgsUpdates {
 )]
 pub struct PlanningMgsUpdatesStepReport {
     pub pending_mgs_updates: PendingMgsUpdates,
-    // TODO-K: Add a nice comment here about what is happening
     pub skipped_mgs_updates: SkippedMgsUpdates,
 }
 
@@ -637,18 +602,17 @@ impl PlanningMgsUpdatesStepReport {
         pending_mgs_updates: PendingMgsUpdates,
         skipped_mgs_updates: SkippedMgsUpdates,
     ) -> Self {
-        // TODO-K: actually include the failed update
         Self { pending_mgs_updates, skipped_mgs_updates }
     }
 
     pub fn is_empty(&self) -> bool {
         self.pending_mgs_updates.is_empty()
+            && self.skipped_mgs_updates.is_empty()
     }
 }
 
 impl fmt::Display for PlanningMgsUpdatesStepReport {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        // TODO-K: implement display
         let Self { pending_mgs_updates, skipped_mgs_updates } = self;
         if !pending_mgs_updates.is_empty() {
             let n = pending_mgs_updates.len();
@@ -669,7 +633,7 @@ impl fmt::Display for PlanningMgsUpdatesStepReport {
             for update in skipped_mgs_updates.iter() {
                 writeln!(
                     f,
-                    "  * {}: {} {}",
+                    "  * {} {}: {}",
                     update.baseboard_id, update.component, update.reason
                 )?;
             }
@@ -1142,8 +1106,11 @@ pub enum ZoneUpdatesWaitingOn {
     /// Waiting on discretionary zone placement.
     DiscretionaryZones,
 
-    /// Waiting on updates to RoT / SP / Host OS / etc.
+    /// Waiting on updates to RoT bootloader / RoT / SP / Host OS.
     PendingMgsUpdates,
+
+    /// Waiting on skipped updates to RoT bootloader / RoT / SP / Host OS.
+    SkippedMgsUpdates,
 
     /// Waiting on the same set of blockers zone adds are waiting on.
     ZoneAddBlockers,
@@ -1154,7 +1121,10 @@ impl ZoneUpdatesWaitingOn {
         match self {
             Self::DiscretionaryZones => "discretionary zones",
             Self::PendingMgsUpdates => {
-                "pending MGS updates (RoT / SP / Host OS / etc.)"
+                "pending MGS updates (RoT bootloader / RoT / SP / Host OS)"
+            }
+            Self::SkippedMgsUpdates => {
+                "skipped MGS updates (RoT bootloader / RoT / SP / Host OS)"
             }
             Self::ZoneAddBlockers => "zone add blockers",
         }
