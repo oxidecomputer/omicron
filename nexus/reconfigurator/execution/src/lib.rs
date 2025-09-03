@@ -22,6 +22,7 @@ use nexus_types::deployment::execution::{
     StepHandle, StepResult, UpdateEngine,
 };
 use nexus_types::quiesce::SagaQuiesceHandle;
+use nexus_types::quiesce::SagaReassignmentDone;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use slog::info;
 use slog_error_chain::InlineErrorChain;
@@ -662,18 +663,16 @@ fn register_reassign_sagas_step<'a>(
                         match reassigned {
                             Ok(needs_saga_recovery) => (
                                 StepSuccess::new(needs_saga_recovery).build(),
-                                needs_saga_recovery,
+                                SagaReassignmentDone::ReassignedAllAsOf(
+                                    blueprint.id,
+                                    needs_saga_recovery,
+                                ),
                             ),
-                            Err(error) => {
-                                // It's possible that we failed after having
-                                // re-assigned sagas in the database.
-                                let maybe_reassigned = true;
-                                (
-                                    StepWarning::new(false, error.to_string())
-                                        .build(),
-                                    maybe_reassigned,
-                                )
-                            }
+                            Err(error) => (
+                                StepWarning::new(false, error.to_string())
+                                    .build(),
+                                SagaReassignmentDone::Indeterminate,
+                            ),
                         }
                     })
                     .await)
