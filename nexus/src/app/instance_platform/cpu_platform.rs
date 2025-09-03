@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use raw_cpuid::{
-    ApmInfo, CpuIdDump, CpuIdResult, CpuIdWriter,
+    ApmInfo, CpuId, CpuIdDump, CpuIdReader, CpuIdResult, CpuIdWriter,
     ExtendedFeatureIdentification2, ExtendedFeatures,
     ExtendedProcessorFeatureIdentifiers, ExtendedState, ExtendedStateInfo,
     ExtendedTopologyLevel, FeatureInfo, L1CacheTlbInfo, L2And3CacheTlbInfo,
@@ -26,8 +26,8 @@ use sled_agent_client::types::CpuidEntry;
 /// "`clflush` operates on the same number of words".
 #[allow(dead_code)]
 pub fn functionally_same(base: CpuIdDump, target: CpuIdDump) -> bool {
-    let base = raw_cpuid::CpuId::with_cpuid_reader(base);
-    let target = raw_cpuid::CpuId::with_cpuid_reader(target);
+    let base = CpuId::with_cpuid_reader(base);
+    let target = CpuId::with_cpuid_reader(target);
 
     match (base.get_feature_info(), target.get_feature_info()) {
         (Some(base_info), Some(target_info)) => {
@@ -165,7 +165,7 @@ pub fn functionally_same(base: CpuIdDump, target: CpuIdDump) -> bool {
 /// where possible.  This CPUID configuration as-is is untested; guests may not
 /// boot, this may be too reductive, etc.
 fn milan_ideal() -> CpuIdDump {
-    let mut cpuid = raw_cpuid::CpuId::with_cpuid_reader(CpuIdDump::new());
+    let mut cpuid = CpuId::with_cpuid_reader(CpuIdDump::new());
     let leaf = VendorInfo::amd();
     cpuid.set_vendor_info(Some(leaf)).expect("can set leaf 0");
     cpuid
@@ -543,11 +543,11 @@ fn milan_ideal() -> CpuIdDump {
     dump
 }
 
-pub fn milan_rfd314() -> Vec<CpuidEntry> {
+pub fn milan_rfd314() -> CpuIdDump {
     // This is the Milan we'd "want" to expose, absent any other constraints.
     let baseline = milan_ideal();
 
-    let mut cpuid = raw_cpuid::CpuId::with_cpuid_reader(baseline);
+    let mut cpuid = CpuId::with_cpuid_reader(baseline);
 
     let mut leaf = cpuid
         .get_extended_feature_info()
@@ -724,10 +724,10 @@ pub fn milan_rfd314() -> Vec<CpuidEntry> {
         .set_extended_cache_parameters(Some(levels.as_slice()))
         .expect("can set leaf 8000_001Dh");
 
-    dump_to_cpuid_entries(cpuid.into_source())
+    cpuid.into_source()
 }
 
-fn dump_to_cpuid_entries(dump: CpuIdDump) -> Vec<CpuidEntry> {
+pub fn dump_to_cpuid_entries(dump: CpuIdDump) -> Vec<CpuidEntry> {
     let mut entries = Vec::new();
 
     for (leaf, subleaf, regs) in dump.into_iter() {
@@ -755,34 +755,34 @@ fn dump_to_cpuid_entries(dump: CpuIdDump) -> Vec<CpuidEntry> {
     entries
 }
 
+macro_rules! cpuid_leaf {
+    ($leaf:literal, $eax:literal, $ebx:literal, $ecx:literal, $edx:literal) => {
+        CpuidEntry {
+            leaf: $leaf,
+            subleaf: None,
+            eax: $eax,
+            ebx: $ebx,
+            ecx: $ecx,
+            edx: $edx,
+        }
+    };
+}
+
+macro_rules! cpuid_subleaf {
+    ($leaf:literal, $sl:literal, $eax:literal, $ebx:literal, $ecx:literal, $edx:literal) => {
+        CpuidEntry {
+            leaf: $leaf,
+            subleaf: Some($sl),
+            eax: $eax,
+            ebx: $ebx,
+            ecx: $ecx,
+            edx: $edx,
+        }
+    };
+}
+
 #[test]
 fn milan_rfd314_is_as_described() {
-    macro_rules! cpuid_leaf {
-        ($leaf:literal, $eax:literal, $ebx:literal, $ecx:literal, $edx:literal) => {
-            CpuidEntry {
-                leaf: $leaf,
-                subleaf: None,
-                eax: $eax,
-                ebx: $ebx,
-                ecx: $ecx,
-                edx: $edx,
-            }
-        };
-    }
-
-    macro_rules! cpuid_subleaf {
-        ($leaf:literal, $sl:literal, $eax:literal, $ebx:literal, $ecx:literal, $edx:literal) => {
-            CpuidEntry {
-                leaf: $leaf,
-                subleaf: Some($sl),
-                eax: $eax,
-                ebx: $ebx,
-                ecx: $ecx,
-                edx: $edx,
-            }
-        };
-    }
-
     // This CPUID leaf blob is a collection of the leaves described in RFD 314.
     // RFD 314 is the source of truth for what bits are set here and why.
     // `milan_rfd314()` constructs what ought to be an *identical* set of bits,
@@ -794,7 +794,7 @@ fn milan_rfd314_is_as_described() {
     // between 314 and the present day. Actual guest CPU platforms may differ as
     // we enable additional guest functionality in the future; this is not a
     // source of truth for actual guest platforms.
-    const MILAN_CPUID: [CpuidEntry; 33] = [
+    const MILAN_CPUID: [CpuidEntry; 32] = [
         cpuid_leaf!(0x0, 0x0000000D, 0x68747541, 0x444D4163, 0x69746E65),
         cpuid_leaf!(0x1, 0x00A00F11, 0x00000800, 0xF6D83203, 0x078BFBFF),
         cpuid_leaf!(0x5, 0x00000000, 0x00000000, 0x00000000, 0x00000000),
@@ -837,24 +837,15 @@ fn milan_rfd314_is_as_described() {
         cpuid_leaf!(0x8000001A, 0x00000006, 0x00000000, 0x00000000, 0x00000000),
         cpuid_leaf!(0x8000001B, 0x00000000, 0x00000000, 0x00000000, 0x00000000),
         cpuid_leaf!(0x8000001C, 0x00000000, 0x00000000, 0x00000000, 0x00000000),
-        cpuid_subleaf!(
-            0x8000001D, 0x0, 0x00000121, 0x01C0003F, 0x0000003F, 0x00000000
-        ),
-        cpuid_subleaf!(
-            0x8000001D, 0x1, 0x00000122, 0x01C0003F, 0x0000003F, 0x00000000
-        ),
-        cpuid_subleaf!(
-            0x8000001D, 0x2, 0x00000143, 0x01C0003F, 0x000003FF, 0x00000002
-        ),
-        cpuid_subleaf!(
-            0x8000001D, 0x3, 0x00000163, 0x03C0003F, 0x00007FFF, 0x00000001
-        ),
+        cpuid_subleaf!(0x8000001D, 0x00, 0x00000121, 0x0000003F, 0x00000000, 0x00000000),
+        cpuid_subleaf!(0x8000001D, 0x01, 0x00000143, 0x0000003F, 0x00000000, 0x00000000),
+        cpuid_subleaf!(0x8000001D, 0x02, 0x00000163, 0x0000003F, 0x00000000, 0x00000000),
         cpuid_leaf!(0x8000001E, 0x00000000, 0x00000100, 0x00000000, 0x00000000),
         cpuid_leaf!(0x8000001F, 0x00000000, 0x00000000, 0x00000000, 0x00000000),
         cpuid_leaf!(0x80000021, 0x00000045, 0x00000000, 0x00000000, 0x00000000),
     ];
 
-    let computed = milan_rfd314();
+    let computed = dump_to_cpuid_entries(milan_rfd314());
 
     // `milan_rfd314` sorts by leaf/subleaf, so everything *should* be in the
     // same order.. just a question if it's all the same:
@@ -862,7 +853,300 @@ fn milan_rfd314_is_as_described() {
         eprintln!("comparing {:#08x}.{:?}", l.leaf, l.subleaf);
         assert_eq!(
             l, r,
-            "leaf {:#08x} (subleaf? {:?}) did not match",
+            "leaf 0x{:08x} (subleaf? {:?}) did not match",
+            l.leaf, l.subleaf
+        );
+    }
+}
+
+#[test]
+fn milan_current_vs_rfd314_is_understood() {
+    // This CPUID leaf blob is what a guest booted on a Gimlet as of around
+    // August 2025 would have gotten as its passed-through CPUID leaves.
+    //
+    // This is present only to validate initial CPU platforms work and in
+    // particular that the initial specified-up-front CPU platform does not
+    // differ in unexpected ways from what guests had been getting to that
+    // point.
+    const MILAN_BEFORE_RFD314: [CpuidEntry; 30] = [
+        cpuid_leaf!(0x0, 0x00000010, 0x68747541, 0x444D4163, 0x69746E65),
+        cpuid_leaf!(0x1, 0x00A00F11, 0x01020800, 0xFEDA3203, 0x178BFBFF),
+        cpuid_leaf!(0x5, 0x00000040, 0x00000040, 0x00000003, 0x00000011),
+        cpuid_leaf!(0x6, 0x00000004, 0x00000000, 0x00000000, 0x00000000),
+        cpuid_subleaf!(0x7, 0x0, 0x00000000, 0x201003A9, 0x00000600, 0x00000000),
+        cpuid_subleaf!(0x7, 0x1, 0x00000000, 0x00000000, 0x00000000, 0x00000000),
+        // leaf B is missing, and leaf D is the synthetic topology Bhyve invents.
+        cpuid_subleaf!(0xD, 0x0, 0x00000007, 0x00000340, 0x00000340, 0x00000000),
+        cpuid_subleaf!(0xD, 0x1, 0x00000001, 0x00000340, 0x00000000, 0x00000000),
+        cpuid_subleaf!(0xD, 0x2, 0x00000100, 0x00000240, 0x00000000, 0x00000000),
+        // Include the all-zero leaf 10h explicitly so that the maximum standard
+        // leaf matches below.
+        cpuid_leaf!(0x10, 0x00000000, 0x00000000, 0x00000000, 0x00000000),
+        cpuid_leaf!(0x80000000, 0x80000023, 0x68747541, 0x444D4163, 0x69746E65),
+        cpuid_leaf!(0x80000001, 0x00A00F11, 0x40000000, 0x444031FB, 0x25D3FBFF),
+        cpuid_leaf!(0x80000002, 0x20444D41, 0x43595045, 0x31373720, 0x36205033),
+        cpuid_leaf!(0x80000003, 0x6F432D34, 0x50206572, 0x65636F72, 0x726F7373),
+        cpuid_leaf!(0x80000004, 0x20202020, 0x20202020, 0x20202020, 0x00202020),
+        cpuid_leaf!(0x80000005, 0xFF40FF40, 0xFF40FF40, 0x20080140, 0x20080140),
+        cpuid_leaf!(0x80000006, 0x48002200, 0x68004200, 0x02006140, 0x08009140),
+        cpuid_leaf!(0x80000007, 0x00000000, 0x00000000, 0x00000000, 0x00000100),
+        cpuid_leaf!(0x80000008, 0x00003030, 0x00000007, 0x00000000, 0x00010007),
+        cpuid_leaf!(0x8000000A, 0x00000001, 0x00008000, 0x00000000, 0x119BBCFF),
+        cpuid_leaf!(0x80000019, 0xF040F040, 0xF0400000, 0x00000000, 0x00000000),
+        cpuid_leaf!(0x8000001A, 0x00000006, 0x00000000, 0x00000000, 0x00000000),
+        cpuid_leaf!(0x8000001B, 0x000003FF, 0x00000000, 0x00000000, 0x00000000),
+        cpuid_leaf!(0x8000001C, 0x00000000, 0x00000000, 0x00000000, 0x00000000),
+        cpuid_subleaf!(0x8000001D, 0x00, 0x00004121, 0x0000003F, 0x00000000, 0x00000000),
+        cpuid_subleaf!(0x8000001D, 0x01, 0x00004143, 0x0000003F, 0x00000000, 0x00000000),
+        cpuid_subleaf!(0x8000001D, 0x02, 0x00004163, 0x0000003F, 0x00000000, 0x00000000),
+        cpuid_leaf!(0x8000001E, 0x00000000, 0x00000000, 0x00000000, 0x00000000),
+        cpuid_leaf!(0x8000001F, 0x0101FD3F, 0x00004173, 0x000001FD, 0x00000001),
+        cpuid_leaf!(0x80000021, 0x0000204D, 0x00000000, 0x00000000, 0x00000000),
+    ];
+
+    let mut cpuid = CpuId::with_cpuid_reader(milan_rfd314());
+
+    let mut feature_info = cpuid.get_feature_info().expect("can get leaf 1h");
+    // The representative CPUID dump happened to come from processor 1 on a
+    // two-processor VM.
+    feature_info.set_max_logical_processor_ids(2);
+    feature_info.set_initial_local_apic_id(1);
+    // TODO: Guests were told PCID was supported, but 314 says that it is not
+    // supported..?
+    feature_info.set_pcid(true);
+    // The snapshot comes from a VM that enabled XSAVE.
+    feature_info.set_oxsave(true);
+    // The snapshot comes from a VM where HTT was dynamically managed to "true".
+    feature_info.set_htt(true);
+    cpuid.set_feature_info(Some(feature_info)).expect("can set leaf 1h");
+
+    let mut monitor_mwait = cpuid.get_monitor_mwait_info().expect("can get leaf 5h");
+    // The monitor/mwait leaf was passed through non-zeroed even though
+    // monitor/mwait support is hidden.
+    monitor_mwait.set_smallest_monitor_line(0x40);
+    monitor_mwait.set_largest_monitor_line(0x40);
+    monitor_mwait.set_extensions_supported(1);
+    monitor_mwait.set_interrupts_as_break_event(1);
+    // These are "reserved" according to the AMD APM, but in practice look quite
+    // similar to their Intel meaning...
+    monitor_mwait.set_supported_c0_states(1);
+    monitor_mwait.set_supported_c1_states(1);
+    cpuid.set_monitor_mwait_info(Some(monitor_mwait)).expect("can set leaf 5h");
+
+    let mut ext_features = cpuid.get_extended_feature_info().expect("can get leaf 7h");
+    // Byhve didn't/doesn't pass ADX through from the host
+    ext_features.set_adx(false);
+    // ... or CLFLUSHOPT?
+    ext_features.set_clflushopt(false);
+    // ... or CLWB?
+    ext_features.set_clwb(false);
+
+    // or FSRM
+    ext_features.set_fsrm(false);
+
+    cpuid.set_extended_feature_info(Some(ext_features)).expect("can set leaf 7h");
+
+    let mut ext_processor_features = cpuid.get_extended_processor_and_feature_identifiers().expect("can get leaf 8000_0001h");
+    // This is dynamically managed, true in the sampled VM.
+    ext_processor_features.set_cmp_legacy(true);
+    // Neither of these features are actually available to guests, but byhve had
+    // been passing the CPUID bits through
+    ext_processor_features.set_skinit(true);
+    ext_processor_features.set_wdt(true);
+    // TODO: Fast FXSAVE was not passed through?
+    ext_processor_features.set_fast_fxsave_fxstor(false);
+    cpuid.set_extended_processor_and_feature_identifiers(Some(ext_processor_features)).expect("can set leaf 8000_0001h");
+
+    let mut leaf = cpuid
+        .get_processor_capacity_feature_info()
+        .expect("can get leaf 8000_0008h");
+
+    // Support for the instructions retired MSR was passed through by bhyve even
+    // though the MSR itself is not available to guests.
+    leaf.set_inst_ret_cntr_msr(true);
+
+    // TODO: Support for `wbnoinvd` was hidden from guests by byhve?
+    leaf.set_wbnoinvd(false);
+
+    // INVLPGB and RDPRU max were passed through even those instructions are not
+    // supported.
+    leaf.set_invlpgb_max_pages(7);
+    leaf.set_max_rdpru_id(1);
+
+    cpuid
+        .set_processor_capacity_feature_info(Some(leaf))
+        .expect("can set leaf 8000_0008h");
+
+    // Set up L1 cache+TLB info (leaf 8000_0005h)
+    let mut leaf = L1CacheTlbInfo::empty();
+
+    leaf.set_itlb_2m_4m_size(0x40);
+    leaf.set_itlb_2m_4m_associativity(0xff);
+    leaf.set_dtlb_2m_4m_size(0x40);
+    leaf.set_dtlb_2m_4m_associativity(0xff);
+
+    leaf.set_itlb_4k_size(0x40);
+    leaf.set_itlb_4k_associativity(0xff);
+    leaf.set_dtlb_4k_size(0x40);
+    leaf.set_dtlb_4k_associativity(0xff);
+
+    leaf.set_dcache_line_size(0x40);
+    leaf.set_dcache_lines_per_tag(0x01);
+    leaf.set_dcache_associativity(0x08);
+    leaf.set_dcache_size(0x20);
+
+    leaf.set_icache_line_size(0x40);
+    leaf.set_icache_lines_per_tag(0x01);
+    leaf.set_icache_associativity(0x08);
+    leaf.set_icache_size(0x20);
+
+    cpuid
+        .set_l1_cache_and_tlb_info(Some(leaf))
+        .expect("can set leaf 8000_0005h");
+
+    // Set up L2 and L3 cache+TLB info (leaf 8000_0006h)
+    let mut leaf = L2And3CacheTlbInfo::empty();
+
+    // Set up leaf 8000_0006h EAX
+    leaf.set_itlb_2m_4m_size(0x200);
+    leaf.set_itlb_2m_4m_associativity(0x2);
+    leaf.set_dtlb_2m_4m_size(0x800);
+    leaf.set_dtlb_2m_4m_associativity(0x4);
+
+    // Set up leaf 8000_0006h EBX
+    leaf.set_itlb_4k_size(0x200);
+    leaf.set_itlb_4k_associativity(0x4);
+    leaf.set_dtlb_4k_size(0x800);
+    leaf.set_dtlb_4k_associativity(0x6);
+
+    // Set up leaf 8000_0006h ECX
+    leaf.set_l2cache_line_size(0x40);
+    leaf.set_l2cache_lines_per_tag(0x1);
+    leaf.set_l2cache_associativity(0x6);
+    leaf.set_l2cache_size(0x0200);
+
+    // Set up leaf 8000_0006h EDX
+    leaf.set_l3cache_line_size(0x40);
+    leaf.set_l3cache_lines_per_tag(0x1);
+    leaf.set_l3cache_associativity(0x9);
+    leaf.set_l3cache_size(0x0200);
+
+    cpuid
+        .set_l2_l3_cache_and_tlb_info(Some(leaf))
+        .expect("can set leaf 8000_0006h");
+
+    // Set up TLB information for 1GiB pages (leaf 8000_0019h)
+    let mut leaf = Tlb1gbPageInfo::empty();
+    leaf.set_dtlb_l1_1gb_associativity(0xF);
+    leaf.set_dtlb_l1_1gb_size(0x40);
+    leaf.set_itlb_l1_1gb_associativity(0xF);
+    leaf.set_itlb_l1_1gb_size(0x40);
+    leaf.set_dtlb_l2_1gb_associativity(0xF);
+    leaf.set_dtlb_l2_1gb_size(0x40);
+    leaf.set_itlb_l2_1gb_associativity(0);
+    leaf.set_itlb_l2_1gb_size(0);
+    cpuid.set_tlb_1gb_page_info(Some(leaf)).expect("can set leaf 8000_0019h");
+
+    let mut processor_topo = cpuid.get_processor_topology_info().expect("can get leaf 8000_001Eh");
+    // By virtue of having a single vCPU, the representative VM has one thread
+    // per core rather than two.
+    processor_topo.set_threads_per_core(1);
+    cpuid.set_processor_topology_info(Some(processor_topo)).expect("can set leaf 8000_001Eh");
+
+    let mut ext_features_2 = cpuid.get_extended_feature_identification_2().expect("can get leaf 8000_0021h");
+    // Bhyve passed through the feature bit for this MSR, though the MSR itself
+    // is not allowed.
+    ext_features_2.set_prefetch_ctl_msr(true);
+    // Bhyve passed through the feature bit for SMM page config lock, though
+    // guests cannot actually control it.
+    ext_features_2.set_smm_pg_cfg_lock(true);
+    cpuid.set_extended_feature_identification_2(Some(ext_features_2)).expect("can set leaf 8000_0021h");
+
+    // Now touch up the RFD314 Milan definition in the specific ways we know it
+    // differs from what guests got at the time.
+
+    // Some non-feature tweaks:
+    let mut dump = cpuid.into_source();
+
+    // Leaf B is not passed through from the host on AMD systems:
+    // https://www.illumos.org/issues/17529
+    dump.set_leaf(0xB, None);
+
+    // Leaf D (extended state information) doesn't have a nice read/write API in
+    // `rust-cpuid`, so adjust expectations more manually..
+    //
+    // Guests had `xsavec` and `xgetbv w/ ecx=1` hidden before.
+    let mut ext_state = dump.cpuid2(0xD, 1);
+    ext_state.eax &= !0x0000_0006;
+    dump.set_subleaf(0xD, 1, Some(ext_state));
+
+    // SVM features were not zeroed, but the SVM bit itself was not passed
+    // through.
+    let mut svm = CpuIdResult::empty();
+    svm.eax = 0x0000_0001;
+    svm.ebx = 0x0000_8000;
+    svm.ecx = 0x0000_0000;
+    svm.edx = 0x119B_BCFF;
+    dump.set_leaf(0x8000_000A, Some(svm));
+
+    // IBS capabilities were not zeroed, but the IBS MSRs are not
+    // guest-accessible.
+    let mut ibs = CpuIdResult::empty();
+    ibs.eax = 0x0000_03FF;
+    ibs.ebx = 0x0000_0000;
+    ibs.ecx = 0x0000_0000;
+    ibs.edx = 0x0000_0000;
+    dump.set_leaf(0x8000_001B, Some(ibs));
+
+    // The "cores sharing cache" bits under leaf 8000_001D are somewhat dynamic.
+    // For L1 and L2 caches, these are the number of threads per core, and for
+    // L3 this is threads in the virtual processor. The representative VM had
+    // two cores, which is presented as an SMT pair, so all levels read as 2.
+    //
+    // This is stored as one minus the actual value at each level, so one core
+    // is a bit pattern of all zeroes. The "cores sharing cache" field starts at
+    // bit 14. So we want to store the bit pattern `0...1` at that offset. There
+    // isn't a nice way to patch this into an existing cache topology in
+    // `raw_cpuid`, so we have to get a bit gross with it..
+    for level in 0..3 {
+        let mut leaf = dump.cpuid2(0x8000_001D, level);
+        // Mask out all the bits for "cores sharing cache"
+        leaf.eax &= !0x03ffc000;
+        leaf.eax |= 1 << 14;
+        dump.set_subleaf(0x8000_001D, level, Some(leaf));
+    }
+
+    // Memory encryption features were not zeroed, but the feature itself is not
+    // supported.
+    let mut sme = CpuIdResult::empty();
+    sme.eax = 0x0101_FD3F;
+    sme.ebx = 0x0000_4173;
+    sme.ecx = 0x0000_01FD;
+    sme.edx = 0x0000_0001;
+    dump.set_leaf(0x8000_001F, Some(sme));
+
+    // Milan has standard leaves up to 0x10, but Bhyve zeroes out the last few.
+    // Nothing reduces the max standard leaf, so guests saw a different value
+    // than the `0x0000000D` that RFD 314 describes. To get here with
+    // `raw_cpuid`, add a zeroed out leaf "0x10" to drag the max standard leaf
+    // that high.
+    dump.set_leaf(0x10, Some(CpuIdResult::empty()));
+
+    // Similar to above, extended leaves go to 0x8000_0021, but hardware goes up
+    // to 0x8000_0023 and when zeroing the last few leaves the max valid leaf
+    // did not get moved back down. Add a zeroed out leaf "0x8000_0023" to drag
+    // the max extended leaf as high as before.
+    dump.set_leaf(0x8000_0023, Some(CpuIdResult::empty()));
+
+    let computed = dump_to_cpuid_entries(dump);
+
+    // `milan_rfd314` sorts by leaf/subleaf, so everything *should* be in the
+    // same order.. just a question if it's all the same:
+    for (l, r) in MILAN_BEFORE_RFD314.iter().zip(computed.as_slice().iter()) {
+        eprintln!("comparing {:#08x}.{:?}", l.leaf, l.subleaf);
+        assert_eq!(
+            l, r,
+            "leaf 0x{:08x} (subleaf? {:?}) did not match",
             l.leaf, l.subleaf
         );
     }
