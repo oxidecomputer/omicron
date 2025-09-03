@@ -1676,7 +1676,9 @@ mod region_snapshot_replacement {
             // We get back:
             // bad result: AlreadyHandled { existing_step_id: 83e38140-f238-4fed-8cef-58121d507a49
             // }
-            // Can we dump an existing ID and get more info from it?
+            // Can we dump an existing ID and get more info from it?  Yes, but it's also
+            // possible it's also done, and the request ID is not found.
+            // We unwrap with: internal_message: "unexpected database error: Record not found"
             match result {
                 InsertStepResult::Inserted { .. } => {}
 
@@ -1687,10 +1689,10 @@ mod region_snapshot_replacement {
                             &self.opctx(),
                             existing_step_id,
                         )
-                        .await
-                        .unwrap();
+                        .await;
                     eprintln!(
-                        "we were suppose to create this: {:?}",
+                        "we were suppose to create this: {:?} but got {:?}",
+                        self.replacement_request_id,
                         region_snapshot_replace_request
                     );
                     panic!("Something else created our replacement");
