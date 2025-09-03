@@ -928,7 +928,10 @@ mod tests {
     use std::net::Ipv6Addr;
 
     const PROJECT_NAME: &str = "bobs-barrel-of-bits";
-    const LARGE_NUMBER_OF_ROWS: usize = 3000;
+
+    // Enough rows that CRDB's query planner will complain when full table
+    // scans are not allowed.
+    const LARGE_NUMBER_OF_ROWS: usize = 10;
 
     #[tokio::test]
     async fn test_resource_id_collision() {
