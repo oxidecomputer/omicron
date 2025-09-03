@@ -644,7 +644,7 @@ external DNS:
 > # Planning a new blueprint will now replace the expunged zone, with new records for its replacement.
 > blueprint-plan 58d5e830-0884-47d8-a7cd-b2b3751adeb4
 INFO skipping noop image source check for all sleds, reason: no target release is currently set
-WARN cannot issue more MGS-driven updates (no current artifacts)
+INFO system in initial release state no update artifacts available (no update necessary)
 generated blueprint af934083-59b5-4bf6-8966-6fb5292c29e1 based on parent blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4
 planning report for blueprint af934083-59b5-4bf6-8966-6fb5292c29e1:
 chicken switches:

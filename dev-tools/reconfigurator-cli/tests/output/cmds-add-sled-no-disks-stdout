@@ -37,7 +37,7 @@ generated inventory collection eb0796d5-ab8a-4f7b-a884-b4aeacb8ab51 from configu
 > # we added has no disks.
 > blueprint-plan dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21 eb0796d5-ab8a-4f7b-a884-b4aeacb8ab51
 INFO skipping noop image source check for all sleds, reason: no target release is currently set
-WARN cannot issue more MGS-driven updates (no current artifacts)
+INFO system in initial release state no update artifacts available (no update necessary)
 generated blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1 based on parent blueprint dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21
 planning report for blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1:
 chicken switches:

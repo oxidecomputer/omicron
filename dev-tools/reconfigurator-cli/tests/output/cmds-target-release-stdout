@@ -221,7 +221,7 @@ chicken switches:
 
 * 1 pending MGS update:
   * model0:serial0: RotBootloader(PendingMgsUpdateRotBootloaderDetails { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: NoValidVersion })
-* zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+* zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
 
 
 > blueprint-diff latest
@@ -281,7 +281,7 @@ chicken switches:
 
 * 1 pending MGS update:
   * model0:serial0: RotBootloader(PendingMgsUpdateRotBootloaderDetails { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: NoValidVersion })
-* zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+* zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
 
 
 > blueprint-diff latest
@@ -343,7 +343,7 @@ chicken switches:
 
 * 1 pending MGS update:
   * model0:serial0: Rot(PendingMgsUpdateRotDetails { expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: NoValidVersion, expected_persistent_boot_preference: A, expected_pending_persistent_boot_preference: None, expected_transient_boot_preference: None })
-* zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+* zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
 
 
 > blueprint-diff latest
@@ -414,7 +414,7 @@ chicken switches:
 
 * 1 pending MGS update:
   * model0:serial0: Sp(PendingMgsUpdateSpDetails { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: NoValidVersion })
-* zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+* zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
 
 
 > blueprint-diff latest
@@ -486,7 +486,7 @@ chicken switches:
 
 * 1 pending MGS update:
   * model0:serial0: HostPhase1(PendingMgsUpdateHostPhase1Details { expected_active_phase_1_slot: A, expected_boot_disk: A, expected_active_phase_1_hash: ArtifactHash("0101010101010101010101010101010101010101010101010101010101010101"), expected_active_phase_2_hash: ArtifactHash("0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a"), expected_inactive_phase_1_hash: ArtifactHash("0202020202020202020202020202020202020202020202020202020202020202"), expected_inactive_phase_2_hash: ArtifactHash("f3dd0c7a1bd4500ea0d8bcf67581f576d47752b2f1998a4cb0f0c3155c483008"), sled_agent_address: [fd00:1122:3344:101::1]:12345 })
-* zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+* zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
 
 
 > blueprint-diff latest
@@ -607,7 +607,7 @@ chicken switches:
 
 * 1 pending MGS update:
   * model0:serial0: HostPhase1(PendingMgsUpdateHostPhase1Details { expected_active_phase_1_slot: A, expected_boot_disk: A, expected_active_phase_1_hash: ArtifactHash("0101010101010101010101010101010101010101010101010101010101010101"), expected_active_phase_2_hash: ArtifactHash("0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a"), expected_inactive_phase_1_hash: ArtifactHash("0202020202020202020202020202020202020202020202020202020202020202"), expected_inactive_phase_2_hash: ArtifactHash("f3dd0c7a1bd4500ea0d8bcf67581f576d47752b2f1998a4cb0f0c3155c483008"), sled_agent_address: [fd00:1122:3344:101::1]:12345 })
-* zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+* zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
 
 
 > blueprint-diff latest
@@ -668,7 +668,7 @@ chicken switches:
 
 * 1 pending MGS update:
   * model0:serial0: HostPhase1(PendingMgsUpdateHostPhase1Details { expected_active_phase_1_slot: A, expected_boot_disk: A, expected_active_phase_1_hash: ArtifactHash("0101010101010101010101010101010101010101010101010101010101010101"), expected_active_phase_2_hash: ArtifactHash("0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a"), expected_inactive_phase_1_hash: ArtifactHash("0202020202020202020202020202020202020202020202020202020202020202"), expected_inactive_phase_2_hash: ArtifactHash("f3dd0c7a1bd4500ea0d8bcf67581f576d47752b2f1998a4cb0f0c3155c483008"), sled_agent_address: [fd00:1122:3344:101::1]:12345 })
-* zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+* zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
 
 
 > blueprint-diff latest
@@ -728,7 +728,7 @@ chicken switches:
 
 * 1 pending MGS update:
   * model0:serial0: HostPhase1(PendingMgsUpdateHostPhase1Details { expected_active_phase_1_slot: A, expected_boot_disk: A, expected_active_phase_1_hash: ArtifactHash("0101010101010101010101010101010101010101010101010101010101010101"), expected_active_phase_2_hash: ArtifactHash("0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a"), expected_inactive_phase_1_hash: ArtifactHash("0202020202020202020202020202020202020202020202020202020202020202"), expected_inactive_phase_2_hash: ArtifactHash("f3dd0c7a1bd4500ea0d8bcf67581f576d47752b2f1998a4cb0f0c3155c483008"), sled_agent_address: [fd00:1122:3344:101::1]:12345 })
-* zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+* zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
 
 
 > blueprint-diff latest
@@ -790,7 +790,7 @@ chicken switches:
 
 * 1 pending MGS update:
   * model1:serial1: RotBootloader(PendingMgsUpdateRotBootloaderDetails { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: NoValidVersion })
-* zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+* zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
 
 
 > blueprint-diff latest
@@ -863,7 +863,7 @@ chicken switches:
 
 * 1 pending MGS update:
   * model1:serial1: RotBootloader(PendingMgsUpdateRotBootloaderDetails { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: Version(ArtifactVersion("0.5.0")) })
-* zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+* zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
 
 
 > blueprint-diff latest
@@ -931,7 +931,7 @@ chicken switches:
 
 * 1 pending MGS update:
   * model1:serial1: Rot(PendingMgsUpdateRotDetails { expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: NoValidVersion, expected_persistent_boot_preference: A, expected_pending_persistent_boot_preference: None, expected_transient_boot_preference: None })
-* zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+* zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
 
 
 > blueprint-diff latest
@@ -1003,7 +1003,7 @@ chicken switches:
 
 * 1 pending MGS update:
   * model1:serial1: Rot(PendingMgsUpdateRotDetails { expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: Version(ArtifactVersion("0.5.0")), expected_persistent_boot_preference: A, expected_pending_persistent_boot_preference: None, expected_transient_boot_preference: None })
-* zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+* zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
 
 
 > blueprint-diff latest
@@ -1071,7 +1071,7 @@ chicken switches:
 
 * 1 pending MGS update:
   * model1:serial1: Sp(PendingMgsUpdateSpDetails { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: NoValidVersion })
-* zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+* zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
 
 
 > blueprint-diff latest
@@ -1142,7 +1142,7 @@ chicken switches:
 
 * 1 pending MGS update:
   * model1:serial1: Sp(PendingMgsUpdateSpDetails { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: Version(ArtifactVersion("0.5.0")) })
-* zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+* zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
 
 
 > blueprint-diff latest
@@ -1211,7 +1211,7 @@ chicken switches:
 
 * 1 pending MGS update:
   * model1:serial1: HostPhase1(PendingMgsUpdateHostPhase1Details { expected_active_phase_1_slot: A, expected_boot_disk: A, expected_active_phase_1_hash: ArtifactHash("0101010101010101010101010101010101010101010101010101010101010101"), expected_active_phase_2_hash: ArtifactHash("0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a"), expected_inactive_phase_1_hash: ArtifactHash("0202020202020202020202020202020202020202020202020202020202020202"), expected_inactive_phase_2_hash: ArtifactHash("f3dd0c7a1bd4500ea0d8bcf67581f576d47752b2f1998a4cb0f0c3155c483008"), sled_agent_address: [fd00:1122:3344:102::1]:12345 })
-* zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+* zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
 
 
 > blueprint-diff latest
@@ -1347,7 +1347,7 @@ chicken switches:
 
 * 1 pending MGS update:
   * model1:serial1: HostPhase1(PendingMgsUpdateHostPhase1Details { expected_active_phase_1_slot: A, expected_boot_disk: A, expected_active_phase_1_hash: ArtifactHash("0101010101010101010101010101010101010101010101010101010101010101"), expected_active_phase_2_hash: ArtifactHash("0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a"), expected_inactive_phase_1_hash: ArtifactHash("ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"), expected_inactive_phase_2_hash: ArtifactHash("f3dd0c7a1bd4500ea0d8bcf67581f576d47752b2f1998a4cb0f0c3155c483008"), sled_agent_address: [fd00:1122:3344:102::1]:12345 })
-* zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+* zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
 
 
 > blueprint-diff latest
@@ -1421,7 +1421,7 @@ chicken switches:
 
 * 1 pending MGS update:
   * model2:serial2: RotBootloader(PendingMgsUpdateRotBootloaderDetails { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: NoValidVersion })
-* zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+* zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
 
 
 > blueprint-diff latest
@@ -1488,7 +1488,7 @@ chicken switches:
 
 * 1 pending MGS update:
   * model2:serial2: Rot(PendingMgsUpdateRotDetails { expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: NoValidVersion, expected_persistent_boot_preference: A, expected_pending_persistent_boot_preference: None, expected_transient_boot_preference: None })
-* zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+* zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
 
 
 > blueprint-diff latest
@@ -1559,7 +1559,7 @@ chicken switches:
 
 * 1 pending MGS update:
   * model2:serial2: Rot(PendingMgsUpdateRotDetails { expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: Version(ArtifactVersion("1.0.0")), expected_persistent_boot_preference: B, expected_pending_persistent_boot_preference: None, expected_transient_boot_preference: None })
-* zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+* zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
 
 
 > blueprint-diff latest
@@ -1632,7 +1632,7 @@ chicken switches:
 
 * 1 pending MGS update:
   * model2:serial2: Rot(PendingMgsUpdateRotDetails { expected_active_slot: ExpectedActiveRotSlot { slot: B, version: ArtifactVersion("1.1.0") }, expected_inactive_version: Version(ArtifactVersion("0.0.2")), expected_persistent_boot_preference: B, expected_pending_persistent_boot_preference: Some(B), expected_transient_boot_preference: None })
-* zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+* zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
 
 
 > blueprint-diff latest
@@ -1702,7 +1702,7 @@ chicken switches:
 
 * 1 pending MGS update:
   * model2:serial2: Rot(PendingMgsUpdateRotDetails { expected_active_slot: ExpectedActiveRotSlot { slot: B, version: ArtifactVersion("1.1.0") }, expected_inactive_version: Version(ArtifactVersion("0.0.2")), expected_persistent_boot_preference: B, expected_pending_persistent_boot_preference: None, expected_transient_boot_preference: Some(B) })
-* zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+* zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
 
 
 > blueprint-diff latest
@@ -1770,7 +1770,7 @@ chicken switches:
 
 * 1 pending MGS update:
   * model2:serial2: Sp(PendingMgsUpdateSpDetails { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: NoValidVersion })
-* zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+* zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
 
 
 > blueprint-diff latest
@@ -1837,7 +1837,7 @@ chicken switches:
 
 * 1 pending MGS update:
   * model2:serial2: HostPhase1(PendingMgsUpdateHostPhase1Details { expected_active_phase_1_slot: A, expected_boot_disk: A, expected_active_phase_1_hash: ArtifactHash("0101010101010101010101010101010101010101010101010101010101010101"), expected_active_phase_2_hash: ArtifactHash("0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a"), expected_inactive_phase_1_hash: ArtifactHash("0202020202020202020202020202020202020202020202020202020202020202"), expected_inactive_phase_2_hash: ArtifactHash("f3dd0c7a1bd4500ea0d8bcf67581f576d47752b2f1998a4cb0f0c3155c483008"), sled_agent_address: [fd00:1122:3344:103::1]:12345 })
-* zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+* zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
 
 
 > blueprint-diff latest
