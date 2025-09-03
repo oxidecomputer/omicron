@@ -2269,6 +2269,7 @@ impl ServiceManager {
                 zone_type:
                     OmicronZoneType::Nexus {
                         internal_address,
+                        debug_port,
                         external_tls,
                         external_dns_servers,
                         ..
@@ -2328,6 +2329,15 @@ impl ServiceManager {
                     },
                     dropshot_internal: dropshot::ConfigDropshot {
                         bind_address: (*internal_address).into(),
+                        default_request_body_max_bytes: 1048576,
+                        default_handler_task_mode: HandlerTaskMode::Detached,
+                        log_headers: vec![],
+                    },
+                    dropshot_debug: dropshot::ConfigDropshot {
+                        bind_address: SocketAddr::new(
+                            (*internal_address.ip()).into(),
+                            *debug_port,
+                        ),
                         default_request_body_max_bytes: 1048576,
                         default_handler_task_mode: HandlerTaskMode::Detached,
                         log_headers: vec![],

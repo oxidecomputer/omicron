@@ -53,6 +53,11 @@ default_request_body_max_bytes = 1048576
 bind_address = "[::1]:12221"
 default_request_body_max_bytes = 1048576
 
+[deployment.dropshot_debug]
+# IP Address and TCP port on which to listen for the debug API
+bind_address = "[::1]:12232"
+default_request_body_max_bytes = 1048576
+
 [deployment.internal_dns]
 # Example address.
 # If you're using `omicron-dev run-all`, this is value is overwritten

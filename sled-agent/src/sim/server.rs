@@ -123,7 +123,7 @@ impl Server {
         .version_policy(dropshot::VersionPolicy::Dynamic(Box::new(
             dropshot::ClientSpecifiesVersionInHeader::new(
                 omicron_common::api::VERSION_HEADER,
-                sled_agent_api::VERSION_ADD_SWITCH_ZONE_OPERATOR_POLICY,
+                sled_agent_api::VERSION_ADD_NEXUS_DEBUG_PORT_TO_INVENTORY,
             ),
         )))
         .start()
@@ -433,6 +433,7 @@ pub async fn run_standalone_server(
                     SocketAddr::V4(_) => panic!("did not expect v4 address"),
                     SocketAddr::V6(a) => a,
                 },
+                debug_port: 0,
                 external_ip: from_ipaddr_to_external_floating_ip(ip),
                 nic: nexus_types::inventory::NetworkInterface {
                     id: Uuid::new_v4(),

@@ -127,7 +127,7 @@ impl HostPhase2TestContext {
             .version_policy(dropshot::VersionPolicy::Dynamic(Box::new(
                 dropshot::ClientSpecifiesVersionInHeader::new(
                     omicron_common::api::VERSION_HEADER,
-                    sled_agent_api::VERSION_ADD_SWITCH_ZONE_OPERATOR_POLICY,
+                    sled_agent_api::VERSION_ADD_NEXUS_DEBUG_PORT_TO_INVENTORY,
                 ),
             )))
             .start()
@@ -519,7 +519,7 @@ mod api_impl {
 
         async fn omicron_config_put(
             _rqctx: RequestContext<Self::Context>,
-            _body: TypedBody<OmicronSledConfig>,
+            _body: OmicronSledConfig,
         ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
             unimplemented!()
         }

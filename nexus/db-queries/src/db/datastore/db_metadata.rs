@@ -2009,6 +2009,7 @@ mod test {
                 filesystem_pool: ZpoolName::new_external(ZpoolUuid::new_v4()),
                 zone_type: BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
                     internal_address: "[::1]:0".parse().unwrap(),
+                    debug_port: 0,
                     external_dns_servers: Vec::new(),
                     external_ip: nexus_types::deployment::OmicronZoneExternalFloatingIp {
                         id: ExternalIpUuid::new_v4(),

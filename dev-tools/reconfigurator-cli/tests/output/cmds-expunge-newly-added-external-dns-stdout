@@ -481,7 +481,7 @@ internal DNS:
 -       SRV  port  5353 8c0a1969-15b6-4165-ba6d-a27c24151037.host.control-plane.oxide.internal
 +       SRV  port  5353 1dc649b1-2ce2-4a85-bc1f-b8a3ef23a70e.host.control-plane.oxide.internal
 +       SRV  port  5353 8c0a1969-15b6-4165-ba6d-a27c24151037.host.control-plane.oxide.internal
-    unchanged names: 91 (records: 103)
+    unchanged names: 92 (records: 106)
 
 external DNS:
 * DNS zone: "oxide.example": 
@@ -987,7 +987,7 @@ internal DNS:
 +       SRV  port  5353 fe2d5287-24e3-4071-b214-2640b097a759.host.control-plane.oxide.internal
 +   name: fe2d5287-24e3-4071-b214-2640b097a759.host          (records: 1)
 +       AAAA fd00:1122:3344:103::30
-    unchanged names: 91 (records: 103)
+    unchanged names: 92 (records: 106)
 
 external DNS:
 * DNS zone: "oxide.example": 
@@ -1489,7 +1489,7 @@ internal DNS:
 -       SRV  port  5353 fe2d5287-24e3-4071-b214-2640b097a759.host.control-plane.oxide.internal
 +       SRV  port  5353 1dc649b1-2ce2-4a85-bc1f-b8a3ef23a70e.host.control-plane.oxide.internal
 +       SRV  port  5353 fe2d5287-24e3-4071-b214-2640b097a759.host.control-plane.oxide.internal
-    unchanged names: 91 (records: 103)
+    unchanged names: 92 (records: 106)
 
 external DNS:
 * DNS zone: "oxide.example": 

@@ -1696,7 +1696,7 @@ internal DNS:
 +       SRV  port   123 ac5bb28e-91d5-42f3-a57a-d84e1c414c17.host.control-plane.oxide.internal
 -   name: e668d83e-a28c-42dc-b574-467e57403cc1.host          (records: 1)
 -       AAAA fd00:1122:3344:103::24
-    unchanged names: 43 (records: 55)
+    unchanged names: 44 (records: 58)
 
 external DNS:
   DNS zone: "oxide.example" (unchanged)

@@ -11,6 +11,7 @@ use cockroach_admin_api::cockroach_admin_api_mod;
 use dns_server_api::dns_server_api_mod;
 use gateway_api::gateway_api_mod;
 use installinator_api::installinator_api_mod;
+use nexus_debug_api::nexus_debug_api_mod;
 use nexus_external_api::nexus_external_api_mod;
 use nexus_internal_api::nexus_internal_api_mod;
 use ntp_admin_api::ntp_admin_api_mod;
@@ -126,6 +127,15 @@ pub fn all_apis() -> Vec<ManagedApiConfig> {
             api_description: nexus_external_api_mod::stub_api_description,
             ident: "nexus",
             extra_validation: Some(nexus_external_api::validate_api),
+        },
+        ManagedApiConfig {
+            title: "Nexus debug API",
+            versions: Versions::new_lockstep(semver::Version::new(0, 0, 1)),
+            description: "Nexus debug API",
+            boundary: ApiBoundary::Internal,
+            api_description: nexus_debug_api_mod::stub_api_description,
+            ident: "nexus-debug",
+            extra_validation: None,
         },
         ManagedApiConfig {
             title: "Nexus internal API",

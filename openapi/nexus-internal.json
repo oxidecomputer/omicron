@@ -3511,6 +3511,12 @@
           {
             "type": "object",
             "properties": {
+              "debug_port": {
+                "description": "The port at which the debug server is reachable. This shares the same IP address with `internal_address`.",
+                "type": "integer",
+                "format": "uint16",
+                "minimum": 0
+              },
               "external_dns_servers": {
                 "description": "External DNS servers Nexus can use to resolve external hosts.",
                 "type": "array",
@@ -3559,6 +3565,7 @@
               }
             },
             "required": [
+              "debug_port",
               "external_dns_servers",
               "external_ip",
               "external_tls",
@@ -6203,6 +6210,13 @@
           {
             "type": "object",
             "properties": {
+              "debug_port": {
+                "description": "The port at which the debug server is reachable. This shares the same IP address with `internal_address`.",
+                "default": 12232,
+                "type": "integer",
+                "format": "uint16",
+                "minimum": 0
+              },
               "external_dns_servers": {
                 "description": "External DNS servers Nexus can use to resolve external hosts.",
                 "type": "array",
