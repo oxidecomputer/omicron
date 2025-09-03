@@ -68,17 +68,13 @@ async fn test_host_phase1_hashing() {
     .await;
 
     // We'll only talk to one sp-sim for this test.
-    let mgs_client = mgstestctx.client();
+    let mgs_client = &mgstestctx.client;
     let sp_sim = &mgstestctx.simrack.gimlets[0];
     let sp_type = SpType::Sled;
     let sp_component = SpComponent::HOST_CPU_BOOT_FLASH.const_as_str();
     let sp_slot = 0;
-    let phase1_checker = Phase1HashStatusChecker {
-        mgs_client: &mgs_client,
-        sp_type,
-        sp_slot,
-        sp_component,
-    };
+    let phase1_checker =
+        Phase1HashStatusChecker { mgs_client, sp_type, sp_slot, sp_component };
 
     // We want explicit (i.e., not-timer-based) control over when hashing
     // completes.
@@ -128,9 +124,21 @@ async fn test_host_phase1_hashing() {
         .await
         .expect("starting hashing while hashing should be okay");
 
-    // Calculate the hash we expect to see.
+    // Calculate the hashes we expect to see.
     let expected_sha256_0 = Sha256::digest(
-        sp_sim.last_host_phase1_update_data(0).await.as_deref().unwrap_or(&[]),
+        sp_sim
+            .host_phase1_data(0)
+            .await
+            .as_deref()
+            .expect("sled should have data in slot 0"),
+    )
+    .into();
+    let expected_sha256_1 = Sha256::digest(
+        sp_sim
+            .host_phase1_data(1)
+            .await
+            .as_deref()
+            .expect("sled should have data in slot 1"),
     )
     .into();
 
@@ -155,7 +163,7 @@ async fn test_host_phase1_hashing() {
     phase1_checker
         .assert_status(&[
             (0, ComponentFirmwareHashStatus::Hashed(expected_sha256_0)),
-            (1, ComponentFirmwareHashStatus::Hashed(expected_sha256_0)),
+            (1, ComponentFirmwareHashStatus::Hashed(expected_sha256_1)),
         ])
         .await;
 
@@ -222,7 +230,7 @@ async fn test_host_phase1_hashing() {
     }
 
     // Confirm the simulator wrote the expected data in slot 1.
-    let slot_1_data = sp_sim.last_host_phase1_update_data(1).await.unwrap();
+    let slot_1_data = sp_sim.host_phase1_data(1).await.unwrap();
     assert_eq!(*slot_1_data, *fake_phase1);
 
     // Writing an update should have put slot 1 back into the "needs hashing"

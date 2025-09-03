@@ -5,154 +5,30 @@
 //! Module containing types for updating SPs via MGS.
 
 use crate::MgsClients;
-use crate::SpComponentUpdateError;
-use crate::SpComponentUpdateHelper;
-use crate::UpdateProgress;
+use crate::SpComponentUpdateHelperImpl;
 use crate::common_sp_update::FoundVersion;
 use crate::common_sp_update::PostUpdateError;
 use crate::common_sp_update::PrecheckError;
 use crate::common_sp_update::PrecheckStatus;
-use crate::common_sp_update::SpComponentUpdater;
-use crate::common_sp_update::deliver_update;
 use crate::common_sp_update::error_means_caboose_is_invalid;
 use futures::FutureExt;
 use futures::future::BoxFuture;
 use gateway_client::SpComponent;
-use gateway_client::types::SpType;
 use nexus_types::deployment::PendingMgsUpdate;
-use nexus_types::deployment::PendingMgsUpdateDetails;
-use slog::Logger;
-use slog::{debug, info};
-use tokio::sync::watch;
-use uuid::Uuid;
+use nexus_types::deployment::PendingMgsUpdateSpDetails;
+use slog::debug;
 
-type GatewayClientError = gateway_client::Error<gateway_client::types::Error>;
-
-pub struct SpUpdater {
-    log: Logger,
-    progress: watch::Sender<Option<UpdateProgress>>,
-    sp_type: SpType,
-    sp_slot: u16,
-    update_id: Uuid,
-    // TODO-clarity maybe a newtype for this? TBD how we get this from
-    // wherever it's stored, which might give us a stronger type already.
-    sp_hubris_archive: Vec<u8>,
+pub struct ReconfiguratorSpUpdater {
+    details: PendingMgsUpdateSpDetails,
 }
 
-impl SpUpdater {
-    pub fn new(
-        sp_type: SpType,
-        sp_slot: u16,
-        update_id: Uuid,
-        sp_hubris_archive: Vec<u8>,
-        log: &Logger,
-    ) -> Self {
-        let log = log.new(slog::o!(
-            "component" => "SpUpdater",
-            "sp_type" => format!("{sp_type:?}"),
-            "sp_slot" => sp_slot,
-            "update_id" => format!("{update_id}"),
-        ));
-        let progress = watch::Sender::new(None);
-        Self { log, progress, sp_type, sp_slot, update_id, sp_hubris_archive }
-    }
-
-    pub fn progress_watcher(&self) -> watch::Receiver<Option<UpdateProgress>> {
-        self.progress.subscribe()
-    }
-
-    /// Drive this SP update to completion (or failure).
-    ///
-    /// Only one MGS instance is required to drive an update; however, if
-    /// multiple MGS instances are available and passed to this method and an
-    /// error occurs communicating with one instance, `SpUpdater` will try the
-    /// remaining instances before failing.
-    pub async fn update(
-        mut self,
-        mgs_clients: &mut MgsClients,
-    ) -> Result<(), SpComponentUpdateError> {
-        // Deliver and drive the update to "completion" (which isn't really
-        // complete for the SP, since we still have to reset it after the
-        // delivery of the update completes).
-        deliver_update(&mut self, mgs_clients).await?;
-
-        // The async block below wants a `&self` reference, but we take `self`
-        // for API clarity (to start a new SP update, the caller should
-        // construct a new `SpUpdater`). Create a `&self` ref that we use
-        // through the remainder of this method.
-        let me = &self;
-
-        mgs_clients
-            .try_all_serially(&self.log, |client| async move {
-                me.finalize_update_via_reset(&client).await
-            })
-            .await?;
-
-        // wait for any progress watchers to be dropped before we return;
-        // otherwise, they'll get `RecvError`s when trying to check the current
-        // status
-        self.progress.closed().await;
-
-        Ok(())
-    }
-
-    async fn finalize_update_via_reset(
-        &self,
-        client: &gateway_client::Client,
-    ) -> Result<(), GatewayClientError> {
-        client
-            .sp_component_reset(self.sp_type, self.sp_slot, self.component())
-            .await?;
-
-        self.progress.send_replace(Some(UpdateProgress::Complete));
-        info!(
-            self.log, "SP update complete";
-            "mgs_addr" => client.baseurl(),
-        );
-
-        Ok(())
+impl ReconfiguratorSpUpdater {
+    pub fn new(details: PendingMgsUpdateSpDetails) -> Self {
+        Self { details }
     }
 }
 
-impl SpComponentUpdater for SpUpdater {
-    fn component(&self) -> &'static str {
-        SpComponent::SP_ITSELF.const_as_str()
-    }
-
-    fn target_sp_type(&self) -> SpType {
-        self.sp_type
-    }
-
-    fn target_sp_slot(&self) -> u16 {
-        self.sp_slot
-    }
-
-    fn firmware_slot(&self) -> u16 {
-        // The SP has two firmware slots, but they're aren't individually
-        // labled. We always request an update to slot 0, which means "the
-        // inactive slot".
-        0
-    }
-
-    fn update_id(&self) -> Uuid {
-        self.update_id
-    }
-
-    fn update_data(&self) -> Vec<u8> {
-        self.sp_hubris_archive.clone()
-    }
-
-    fn progress(&self) -> &watch::Sender<Option<UpdateProgress>> {
-        &self.progress
-    }
-
-    fn logger(&self) -> &Logger {
-        &self.log
-    }
-}
-
-pub struct ReconfiguratorSpUpdater;
-impl SpComponentUpdateHelper for ReconfiguratorSpUpdater {
+impl SpComponentUpdateHelperImpl for ReconfiguratorSpUpdater {
     /// Checks if the component is already updated or ready for update
     fn precheck<'a>(
         &'a self,
@@ -189,7 +65,7 @@ impl SpComponentUpdateHelper for ReconfiguratorSpUpdater {
                         .sp_component_caboose_get(
                             update.sp_type,
                             update.slot_id,
-                            &SpComponent::SP_ITSELF.to_string(),
+                            SpComponent::SP_ITSELF.const_as_str(),
                             0,
                         )
                         .await
@@ -210,16 +86,10 @@ impl SpComponentUpdateHelper for ReconfiguratorSpUpdater {
             // don't want to roll that back.  (If for some reason we *do* want
             // to do this update, the planner will have to notice that what's
             // here is wrong and update the blueprint.)
-            let PendingMgsUpdateDetails::Sp {
+            let PendingMgsUpdateSpDetails {
                 expected_active_version,
                 expected_inactive_version,
-            } = &update.details
-            else {
-                unreachable!(
-                    "pending MGS update details within ReconfiguratorSpUpdater \
-                    will always be for the SP"
-                );
-            };
+            } = &self.details;
             if caboose.version != expected_active_version.to_string() {
                 return Err(PrecheckError::WrongActiveVersion {
                     expected: expected_active_version.clone(),
@@ -241,7 +111,7 @@ impl SpComponentUpdateHelper for ReconfiguratorSpUpdater {
                         .sp_component_caboose_get(
                             update.sp_type,
                             update.slot_id,
-                            &SpComponent::SP_ITSELF.to_string(),
+                            SpComponent::SP_ITSELF.const_as_str(),
                             1,
                         )
                         .await
@@ -282,10 +152,9 @@ impl SpComponentUpdateHelper for ReconfiguratorSpUpdater {
                         .sp_component_reset(
                             update.sp_type,
                             update.slot_id,
-                            &SpComponent::SP_ITSELF.to_string(),
+                            SpComponent::SP_ITSELF.const_as_str(),
                         )
-                        .await?;
-                    Ok(())
+                        .await
                 })
                 .await?;
             Ok(())

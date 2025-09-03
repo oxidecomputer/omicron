@@ -22,15 +22,20 @@ use gateway_client::types::SpIdentifier;
 use gateway_client::types::SpIgnition;
 use internal_dns_resolver::Resolver;
 use internal_dns_types::names::ServiceName;
+use nexus_db_model::Ereport;
 use nexus_db_model::SupportBundle;
 use nexus_db_model::SupportBundleState;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
+use nexus_db_queries::db::datastore;
+use nexus_db_queries::db::datastore::EreportFilters;
+use nexus_db_queries::db::pagination::Paginator;
 use nexus_types::deployment::SledFilter;
 use nexus_types::identity::Asset;
 use nexus_types::internal_api::background::SupportBundleCleanupReport;
 use nexus_types::internal_api::background::SupportBundleCollectionReport;
+use nexus_types::internal_api::background::SupportBundleEreportStatus;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::LookupType;
@@ -49,9 +54,12 @@ use std::future::Future;
 use std::io::Write;
 use std::num::NonZeroU64;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use tokio::io::AsyncReadExt;
 use tokio::io::AsyncSeekExt;
+use tokio::io::AsyncWriteExt;
 use tokio::io::SeekFrom;
+use tokio_util::task::AbortOnDropHandle;
 use tufaceous_artifact::ArtifactHash;
 use zip::ZipArchive;
 use zip::ZipWriter;
@@ -84,11 +92,20 @@ struct BundleRequest {
     //
     // Typically, this is CHUNK_SIZE, but can be modified for testing.
     transfer_chunk_size: NonZeroU64,
+
+    ereport_query: Option<EreportFilters>,
 }
 
 impl Default for BundleRequest {
     fn default() -> Self {
-        Self { skip_sled_info: false, transfer_chunk_size: CHUNK_SIZE }
+        Self {
+            skip_sled_info: false,
+            transfer_chunk_size: CHUNK_SIZE,
+            ereport_query: Some(EreportFilters {
+                start_time: Some(chrono::Utc::now() - chrono::Days::new(7)),
+                ..EreportFilters::default()
+            }),
+        }
     }
 }
 
@@ -409,6 +426,8 @@ impl SupportBundleCollector {
             request: request.clone(),
             bundle: bundle.clone(),
             transfer_chunk_size: request.transfer_chunk_size,
+            host_ereports_collected: AtomicUsize::new(0),
+            sp_ereports_collected: AtomicUsize::new(0),
         });
 
         let authz_bundle = authz_support_bundle_from_id(bundle.id.into());
@@ -454,6 +473,8 @@ struct BundleCollection {
     request: BundleRequest,
     bundle: SupportBundle,
     transfer_chunk_size: NonZeroU64,
+    host_ereports_collected: AtomicUsize,
+    sp_ereports_collected: AtomicUsize,
 }
 
 impl BundleCollection {
@@ -592,11 +613,12 @@ impl BundleCollection {
             })?;
 
             // Only stream at most "transfer_chunk_size" bytes at once
-            let remaining = std::cmp::min(
+            let chunk_size = std::cmp::min(
                 self.transfer_chunk_size.get(),
                 total_len - offset,
             );
-            let limited_file = file.take(remaining);
+
+            let limited_file = file.take(chunk_size);
             let stream = tokio_util::io::ReaderStream::new(limited_file);
             let body = reqwest::Body::wrap_stream(stream);
 
@@ -605,16 +627,16 @@ impl BundleCollection {
                 "Streaming bundle chunk";
                 "bundle" => %self.bundle.id,
                 "offset" => offset,
-                "length" => remaining,
+                "length" => chunk_size,
             );
 
             sled_client.support_bundle_transfer(
                 &zpool, &dataset, &support_bundle, offset, body
             ).await.with_context(|| {
-                format!("Failed to transfer bundle: {remaining}@{offset} of {total_len} to sled")
+                format!("Failed to transfer bundle: {chunk_size}@{offset} of {total_len} to sled")
             })?;
 
-            offset += self.transfer_chunk_size.get();
+            offset += chunk_size;
         }
 
         sled_client
@@ -663,6 +685,32 @@ impl BundleCollection {
         )
         .await?;
 
+        let ereport_collection = if let Some(ref ereport_filters) =
+            self.request.ereport_query
+        {
+            // If ereports are to be included in the bundle, have someone go do
+            // that in the background while we're gathering up other stuff. Note
+            // that the `JoinHandle`s for these tasks are wrapped in
+            // `AbortOnDropHandle`s for cancellation correctness; this ensures
+            // that if collecting the bundle is cancelled and this future is
+            // dropped, the tasks that we've spawned to collect ereports are
+            // aborted as well.
+            let dir = dir.path().join("ereports");
+            let host = AbortOnDropHandle::new(tokio::spawn(
+                self.clone().collect_host_ereports(
+                    ereport_filters.clone(),
+                    dir.clone(),
+                ),
+            ));
+            let sp = AbortOnDropHandle::new(tokio::spawn(
+                self.clone().collect_sp_ereports(ereport_filters.clone(), dir),
+            ));
+            Some((host, sp))
+        } else {
+            debug!(log, "Support bundle: ereports not requested");
+            None
+        };
+
         let sp_dumps_dir = dir.path().join("sp_task_dumps");
         tokio::fs::create_dir_all(&sp_dumps_dir).await.with_context(|| {
             format!("failed to create SP task dump directory {sp_dumps_dir}")
@@ -710,6 +758,50 @@ impl BundleCollection {
             }
         }
 
+        if let Some((host, sp)) = ereport_collection {
+            let (host, sp) = tokio::join!(host, sp);
+            const TASK_FAILURE_MSG: &str = "task failed";
+            let n_collected =
+                self.host_ereports_collected.load(Ordering::Acquire);
+            report.host_ereports = match host
+                .map_err(|e| anyhow::anyhow!("{TASK_FAILURE_MSG}: {e}"))
+                .and_then(|x| x)
+            {
+                Ok(_) => SupportBundleEreportStatus::Collected { n_collected },
+                Err(err) => {
+                    warn!(
+                        &self.log,
+                        "Support bundle: host ereport collection failed \
+                         ({n_collected} collected successfully)";
+                        "err" => ?err,
+                    );
+                    SupportBundleEreportStatus::Failed {
+                        n_collected,
+                        error: err.to_string(),
+                    }
+                }
+            };
+            let n_collected =
+                self.sp_ereports_collected.load(Ordering::Acquire);
+            report.sp_ereports = match sp
+                .map_err(|e| anyhow::anyhow!("{TASK_FAILURE_MSG}: {e}"))
+                .and_then(|x| x)
+            {
+                Ok(_) => SupportBundleEreportStatus::Collected { n_collected },
+                Err(err) => {
+                    warn!(
+                        &self.log,
+                        "Support bundle: SP ereport collection failed \
+                         ({n_collected} collected successfully)";
+                        "err" => ?err,
+                    );
+                    SupportBundleEreportStatus::Failed {
+                        n_collected,
+                        error: err.to_string(),
+                    }
+                }
+            };
+        }
         Ok(report)
     }
 
@@ -859,6 +951,90 @@ impl BundleCollection {
         }
         return Ok(());
     }
+
+    async fn collect_sp_ereports(
+        self: Arc<Self>,
+        filters: EreportFilters,
+        dir: Utf8PathBuf,
+    ) -> anyhow::Result<()> {
+        let mut paginator = Paginator::new(
+            datastore::SQL_BATCH_SIZE,
+            dropshot::PaginationOrder::Ascending,
+        );
+        while let Some(p) = paginator.next() {
+            let ereports = self
+                .datastore
+                .sp_ereports_fetch_matching(
+                    &self.opctx,
+                    &filters,
+                    &p.current_pagparams(),
+                )
+                .await
+                .map_err(|e| {
+                    e.internal_context("failed to query for SP ereports")
+                })?;
+            paginator = p.found_batch(&ereports, &|ereport| {
+                (ereport.restart_id.into_untyped_uuid(), ereport.ena)
+            });
+
+            let n_ereports = ereports.len();
+            for ereport in ereports {
+                write_ereport(ereport.into(), &dir).await?;
+                self.sp_ereports_collected.fetch_add(1, Ordering::Release);
+            }
+            debug!(self.log, "Support bundle: added {n_ereports} SP ereports");
+        }
+
+        info!(
+            self.log,
+            "Support bundle: collected {} total SP ereports",
+            self.sp_ereports_collected.load(Ordering::Relaxed)
+        );
+        Ok(())
+    }
+
+    async fn collect_host_ereports(
+        self: Arc<Self>,
+        filters: EreportFilters,
+        dir: Utf8PathBuf,
+    ) -> anyhow::Result<()> {
+        let mut paginator = Paginator::new(
+            datastore::SQL_BATCH_SIZE,
+            dropshot::PaginationOrder::Ascending,
+        );
+        while let Some(p) = paginator.next() {
+            let ereports = self
+                .datastore
+                .host_ereports_fetch_matching(
+                    &self.opctx,
+                    &filters,
+                    &p.current_pagparams(),
+                )
+                .await
+                .map_err(|e| {
+                    e.internal_context("failed to query for host OS ereports")
+                })?;
+            paginator = p.found_batch(&ereports, &|ereport| {
+                (ereport.restart_id.into_untyped_uuid(), ereport.ena)
+            });
+            let n_ereports = ereports.len();
+            for ereport in ereports {
+                write_ereport(ereport.into(), &dir).await?;
+                self.host_ereports_collected.fetch_add(1, Ordering::Release);
+            }
+            debug!(
+                self.log,
+                "Support bundle: added {n_ereports} host OS ereports"
+            );
+        }
+
+        info!(
+            self.log,
+            "Support bundle: collected {} total host ereports",
+            self.host_ereports_collected.load(Ordering::Relaxed)
+        );
+        Ok(())
+    }
 }
 
 impl BackgroundTask for SupportBundleCollector {
@@ -902,6 +1078,58 @@ impl BackgroundTask for SupportBundleCollector {
         }
         .boxed()
     }
+}
+
+async fn write_ereport(ereport: Ereport, dir: &Utf8Path) -> anyhow::Result<()> {
+    // Here's where we construct the file path for each ereport JSON file,
+    // given the top-level ereport directory path.  Each ereport is stored in a
+    // subdirectory for the part and serial numbers of the system that produced
+    // the ereport.  Part numbers must be included in addition to serial
+    // numbers, as the v1 serial scheme only guarantees uniqueness within a
+    // part number.  These paths take the following form:
+    //
+    //   {part-number}-{serial_number}/{restart_id}/{ENA}.json
+    //
+    // We can assume that the restart ID and ENA consist only of
+    // filesystem-safe characters, as the restart ID is known to be a UUID, and
+    // the ENA is just an integer.  For the serial and part numbers, which
+    // Nexus doesn't have full control over --- it came from the ereport
+    // metadata --- we must check that it doesn't contain any characters
+    // unsuitable for use in a filesystem path.
+    let pn = ereport
+        .metadata
+        .part_number
+        .as_deref()
+        // If the part or serial numbers contain any unsavoury characters, it
+        // goes in the `unknown_serial` hole! Note that the alleged serial
+        // number from the ereport will still be present in the JSON as a
+        // string, so we're not *lying* about what was received; we're just
+        // giving up on using it in the path.
+        .filter(|&s| is_fs_safe_single_path_component(s))
+        .unwrap_or("unknown_part");
+    let sn = ereport
+        .metadata
+        .serial_number
+        .as_deref()
+        .filter(|&s| is_fs_safe_single_path_component(s))
+        .unwrap_or("unknown_serial");
+
+    let dir = dir
+        .join(format!("{pn}-{sn}"))
+        // N.B. that we call `into_untyped_uuid()` here, as the `Display`
+        // implementation for a typed UUID appends " (ereporter_restart)", which
+        // we don't want.
+        .join(ereport.id.restart_id.into_untyped_uuid().to_string());
+    tokio::fs::create_dir_all(&dir)
+        .await
+        .with_context(|| format!("failed to create directory '{dir}'"))?;
+    let file_path = dir.join(format!("{}.json", ereport.id.ena));
+    let json = serde_json::to_vec(&ereport).with_context(|| {
+        format!("failed to serialize ereport {pn}:{sn}/{}", ereport.id)
+    })?;
+    tokio::fs::write(&file_path, json)
+        .await
+        .with_context(|| format!("failed to write '{file_path}'"))
 }
 
 // Takes a directory "dir", and zips the contents into a single zipfile.
@@ -982,7 +1210,7 @@ async fn save_zone_log_zip_or_error(
         Ok(res) => {
             let bytestream = res.into_inner();
             let output_dir = path.join(format!("logs/{zone}"));
-            let output_file = output_dir.join("logs.zip");
+            let output_path = output_dir.join("logs.zip");
 
             // Ensure the logs output directory exists.
             tokio::fs::create_dir_all(&output_dir).await.with_context(
@@ -990,8 +1218,8 @@ async fn save_zone_log_zip_or_error(
             )?;
 
             let mut file =
-                tokio::fs::File::create(&output_file).await.with_context(
-                    || format!("failed to create file: {output_file}"),
+                tokio::fs::File::create(&output_path).await.with_context(
+                    || format!("failed to create file: {output_path}"),
                 )?;
 
             let stream = bytestream.into_inner().map(|chunk| {
@@ -999,12 +1227,13 @@ async fn save_zone_log_zip_or_error(
             });
             let mut reader = tokio_util::io::StreamReader::new(stream);
             let _nbytes = tokio::io::copy(&mut reader, &mut file).await?;
+            file.flush().await?;
 
             // Unpack the zip so we don't end up with zip files inside of our
             // final zip
-            let zipfile = output_file.clone();
+            let zipfile_path = output_path.clone();
             tokio::task::spawn_blocking(move || {
-                extract_zip_file(&output_dir, &zipfile)
+                extract_zip_file(&output_dir, &zipfile_path)
             })
             .await
             .map_err(|join_error| {
@@ -1013,12 +1242,12 @@ async fn save_zone_log_zip_or_error(
             })??;
 
             // Cleanup the zip file since we no longer need it
-            if let Err(e) = tokio::fs::remove_file(&output_file).await {
+            if let Err(e) = tokio::fs::remove_file(&output_path).await {
                 error!(
                     logger,
                     "failed to cleanup temporary logs zip file";
                     "error" => %e,
-                    "file" => %output_file,
+                    "file" => %output_path,
 
                 );
             }
@@ -1185,6 +1414,48 @@ async fn save_sp_dumps(
     Ok(())
 }
 
+fn is_fs_safe_single_path_component(s: &str) -> bool {
+    // Might be path traversal...
+    if s == "." || s == ".." {
+        return false;
+    }
+
+    if s == "~" {
+        return false;
+    }
+
+    const BANNED_CHARS: &[char] = &[
+        // Check for path separators.
+        //
+        // Naively, we might reach for `std::path::is_separator()` here.
+        // However, this function only checks if a path is a permitted
+        // separator on the *current* platform --- so, running on illumos, we
+        // will only check for Unix path separators.  But, because the support
+        // bundle may be extracted on a workstation system by Oxide support
+        // personnel or by the customer, we should also make sure we don't
+        // allow the use of Windows path separators, which `is_separator()`
+        // won't check for on Unix systems.
+        '/', '\\',
+        // Characters forbidden on Windows, per:
+        // https://learn.microsoft.com/en-us/windows/win32/fileio/naming-a-file#naming-conventions
+        '<', '>', ':', '"', '|', '?', '*',
+    ];
+
+    // Rather than using `s.contains()`, we do all the checks in one pass.
+    for c in s.chars() {
+        if BANNED_CHARS.contains(&c) {
+            return false;
+        }
+
+        // Definitely no control characters!
+        if c.is_control() {
+            return false;
+        }
+    }
+
+    true
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -1206,7 +1477,8 @@ mod test {
     use omicron_common::disk::SharedDatasetConfig;
     use omicron_common::zpool_name::ZpoolName;
     use omicron_uuid_kinds::{
-        BlueprintUuid, DatasetUuid, PhysicalDiskUuid, SledUuid,
+        BlueprintUuid, DatasetUuid, EreporterRestartUuid, OmicronZoneUuid,
+        PhysicalDiskUuid, SledUuid,
     };
     use uuid::Uuid;
 
@@ -1347,6 +1619,142 @@ mod test {
         id
     }
 
+    async fn make_fake_ereports(datastore: &DataStore, opctx: &OpContext) {
+        use crate::db;
+
+        const SP_SERIAL: &str = "BRM42000069";
+        const HOST_SERIAL: &str = "BRM66600042";
+        const GIMLET_PN: &str = "9130000019";
+        // Make some SP ereports...
+        let sp_restart_id = EreporterRestartUuid::new_v4();
+        datastore.sp_ereports_insert(&opctx, db::model::SpType::Sled, 8, vec![
+            db::model::SpEreport {
+                restart_id: sp_restart_id.into(),
+                ena: ereport_types::Ena(1).into(),
+                time_collected: chrono::Utc::now(),
+                time_deleted: None,
+                collector_id: OmicronZoneUuid::new_v4().into(),
+                sp_type: db::model::SpType::Sled,
+                sp_slot: 8.into(),
+                part_number: Some(GIMLET_PN.to_string()),
+                serial_number: Some(SP_SERIAL.to_string()),
+                class: Some("ereport.fake.whatever".to_string()),
+                report: serde_json::json!({"hello world": true})
+            },
+            db::model::SpEreport {
+                restart_id: sp_restart_id.into(),
+                ena: ereport_types::Ena(2).into(),
+                time_collected: chrono::Utc::now(),
+                time_deleted: None,
+                collector_id: OmicronZoneUuid::new_v4().into(),
+                sp_type: db::model::SpType::Sled,
+                sp_slot: 8.into(),
+                part_number: Some(GIMLET_PN.to_string()),
+                serial_number: Some(SP_SERIAL.to_string()),
+                class: Some("ereport.something.blah".to_string()),
+                report: serde_json::json!({"system_working": "seems to be",})
+            },
+            db::model::SpEreport {
+                restart_id: EreporterRestartUuid::new_v4().into(),
+                ena: ereport_types::Ena(1).into(),
+                time_collected: chrono::Utc::now(),
+                time_deleted: None,
+                collector_id: OmicronZoneUuid::new_v4().into(),
+                sp_type: db::model::SpType::Sled,
+                sp_slot: 8.into(),
+                // Let's do a silly one! No VPD, to make sure that's also
+                // handled correctly.
+                part_number: None,
+                serial_number: None,
+                class: Some("ereport.fake.whatever".to_string()),
+                report: serde_json::json!({"hello_world": true})
+            },
+        ]).await.expect("failed to insert fake SP ereports");
+        // And one from a different serial. N.B. that I made sure the number of
+        // host-OS and SP ereports are different for when we make assertions
+        // about the bundle report.
+        datastore
+            .sp_ereports_insert(
+                &opctx,
+                db::model::SpType::Switch,
+                1,
+                vec![db::model::SpEreport {
+                    restart_id: EreporterRestartUuid::new_v4().into(),
+                    ena: ereport_types::Ena(1).into(),
+                    time_collected: chrono::Utc::now(),
+                    time_deleted: None,
+                    collector_id: OmicronZoneUuid::new_v4().into(),
+                    sp_type: db::model::SpType::Switch,
+                    sp_slot: 1.into(),
+                    part_number: Some("9130000006".to_string()),
+                    serial_number: Some("BRM41000555".to_string()),
+                    class: Some("ereport.fake.whatever".to_string()),
+                    report: serde_json::json!({"im_a_sidecar": true}),
+                }],
+            )
+            .await
+            .expect("failed to insert another fake SP ereport");
+        // And some host OS ones...
+        let sled_id = SledUuid::new_v4();
+        let restart_id = EreporterRestartUuid::new_v4().into();
+        datastore
+            .host_ereports_insert(
+                &opctx,
+                sled_id,
+                vec![
+                    db::model::HostEreport {
+                        restart_id,
+                        ena: ereport_types::Ena(1).into(),
+                        time_collected: chrono::Utc::now(),
+                        time_deleted: None,
+                        collector_id: OmicronZoneUuid::new_v4().into(),
+                        sled_id: sled_id.into(),
+                        sled_serial: HOST_SERIAL.to_string(),
+                        part_number: Some(GIMLET_PN.to_string()),
+                        class: Some("ereport.fake.whatever".to_string()),
+                        report: serde_json::json!({"hello_world": true}),
+                    },
+                    db::model::HostEreport {
+                        restart_id,
+                        ena: ereport_types::Ena(2).into(),
+                        time_collected: chrono::Utc::now(),
+                        time_deleted: None,
+                        collector_id: OmicronZoneUuid::new_v4().into(),
+                        sled_id: sled_id.into(),
+                        sled_serial: HOST_SERIAL.to_string(),
+                        part_number: Some(GIMLET_PN.to_string()),
+                        class: Some("ereport.fake.whatever.thingy".to_string()),
+                        report: serde_json::json!({"goodbye_world": false}),
+                    },
+                ],
+            )
+            .await
+            .expect("failed to insert fake host OS ereports");
+        // And another one with the same serial but different restart/sled IDs
+        let sled_id = SledUuid::new_v4();
+        datastore
+            .host_ereports_insert(
+                &opctx,
+                sled_id,
+                vec![
+                    db::model::HostEreport {
+                        restart_id: EreporterRestartUuid::new_v4().into(),
+                        ena: ereport_types::Ena(1).into(),
+                        time_collected: chrono::Utc::now(),
+                        time_deleted: None,
+                        collector_id: OmicronZoneUuid::new_v4().into(),
+                        sled_id: sled_id.into(),
+                        sled_serial: HOST_SERIAL.to_string(),
+                        part_number: Some(GIMLET_PN.to_string()),
+                        class: Some("ereport.something.hostos_related".to_string()),
+                        report: serde_json::json!({"illumos": "very yes", "whatever": 42}),
+                    },
+                ],
+            )
+            .await
+            .expect("failed to insert another fake host OS ereport");
+    }
+
     struct TestDataset {
         zpool_id: ZpoolUuid,
         dataset_id: DatasetUuid,
@@ -1451,6 +1859,10 @@ mod test {
         let _datasets =
             TestDataset::setup(cptestctx, &datastore, &opctx, 1).await;
 
+        // Make up some ereports so that we can test that they're included in
+        // the bundle.
+        make_fake_ereports(&datastore, &opctx).await;
+
         // Assign a bundle to ourselves. We expect to collect it on
         // the next call to "collect_bundle".
         let bundle = datastore
@@ -1487,6 +1899,14 @@ mod test {
         assert!(report.listed_in_service_sleds);
         assert!(report.listed_sps);
         assert!(report.activated_in_db_ok);
+        assert_eq!(
+            report.host_ereports,
+            SupportBundleEreportStatus::Collected { n_collected: 3 }
+        );
+        assert_eq!(
+            report.sp_ereports,
+            SupportBundleEreportStatus::Collected { n_collected: 4 }
+        );
 
         let observed_bundle = datastore
             .support_bundle_get(&opctx, bundle.id.into())
@@ -1543,6 +1963,7 @@ mod test {
         let request = BundleRequest {
             skip_sled_info: true,
             transfer_chunk_size: NonZeroU64::new(16).unwrap(),
+            ereport_query: None,
         };
 
         let report = collector
@@ -1561,7 +1982,7 @@ mod test {
             .expect("Bundle should definitely be in db by this point");
         assert_eq!(observed_bundle.state, SupportBundleState::Active);
 
-        // Download a file from the bundle, to verify that it was trasnferred
+        // Download a file from the bundle, to verify that it was transferred
         // successfully.
         let head = false;
         let range = None;

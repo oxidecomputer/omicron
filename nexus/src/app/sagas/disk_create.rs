@@ -481,7 +481,7 @@ async fn sdc_regions_ensure(
     }
 
     // Create volume construction request for this disk
-    let mut rng = StdRng::from_entropy();
+    let mut rng = StdRng::from_os_rng();
     let volume_construction_request = VolumeConstructionRequest::Volume {
         id: disk_id,
         block_size,

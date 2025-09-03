@@ -6,18 +6,25 @@
 //! updates.
 
 use super::MgsClients;
-use super::UpdateProgress;
+use crate::host_phase1_updater::ReconfiguratorHostPhase1Updater;
+use crate::mgs_clients::GatewaySpComponentResetError;
+use crate::mgs_clients::RetryableMgsError;
+use crate::rot_bootloader_updater::ReconfiguratorRotBootloaderUpdater;
+use crate::rot_updater::ReconfiguratorRotUpdater;
+use crate::sp_updater::ReconfiguratorSpUpdater;
 use futures::future::BoxFuture;
 use gateway_client::types::SpType;
-use gateway_client::types::SpUpdateStatus;
 use gateway_types::rot::RotSlot;
 use nexus_types::deployment::ExpectedVersion;
 use nexus_types::deployment::PendingMgsUpdate;
-use slog::Logger;
-use slog::{debug, error, info, warn};
+use nexus_types::deployment::PendingMgsUpdateDetails;
+use omicron_common::disk::M2Slot;
+use slog::error;
+use std::net::SocketAddrV6;
 use std::time::Duration;
 use thiserror::Error;
-use tokio::sync::watch;
+use tufaceous_artifact::ArtifactHash;
+use tufaceous_artifact::ArtifactKind;
 use tufaceous_artifact::ArtifactVersion;
 use uuid::Uuid;
 
@@ -25,6 +32,8 @@ use uuid::Uuid;
 pub(crate) const STATUS_POLL_INTERVAL: Duration = Duration::from_secs(3);
 
 type GatewayClientError = gateway_client::Error<gateway_client::types::Error>;
+type SledAgentClientError =
+    sled_agent_client::Error<sled_agent_client::types::Error>;
 
 /// Error type returned when an update to a component managed by the SP fails.
 ///
@@ -34,6 +43,8 @@ type GatewayClientError = gateway_client::Error<gateway_client::types::Error>;
 pub enum SpComponentUpdateError {
     #[error("error communicating with MGS")]
     MgsCommunication(#[from] GatewayClientError),
+    #[error("error resetting component via MGS")]
+    MgsResetComponent(#[from] GatewaySpComponentResetError),
     #[error("different update is now preparing ({0})")]
     DifferentUpdatePreparing(Uuid),
     #[error("different update is now in progress ({0})")]
@@ -54,204 +65,12 @@ pub enum SpComponentUpdateError {
     UpdateFailedWithMessage(String),
 }
 
-/// Describes an update to a component for which the SP drives the update
+/// Implementors provide helper functions used while updating a particular SP
+/// component
 ///
-/// This trait is essentially historical at this point.  We maintain impls so
-/// that we have tested reference implementations.  But these will eventually be
-/// migrated to `ReconfiguratorSpComponentUpdater` instead.
-pub trait SpComponentUpdater {
-    /// The target component.
-    ///
-    /// Should be produced via `SpComponent::const_as_str()`.
-    fn component(&self) -> &'static str;
-
-    /// The type of the target SP.
-    fn target_sp_type(&self) -> SpType;
-
-    /// The slot number of the target SP.
-    fn target_sp_slot(&self) -> u16;
-
-    /// The target firmware slot for the component.
-    fn firmware_slot(&self) -> u16;
-
-    /// The ID of this update.
-    fn update_id(&self) -> Uuid;
-
-    /// The update payload data to send to MGS.
-    // TODO-performance This has to be convertible into a `reqwest::Body`, so we
-    // return an owned Vec. That requires all our implementors to clone the data
-    // at least once; maybe we should use `Bytes` instead (which is cheap to
-    // clone and also convertible into a reqwest::Body)?
-    fn update_data(&self) -> Vec<u8>;
-
-    /// The sending half of the watch channel to report update progress.
-    fn progress(&self) -> &watch::Sender<Option<UpdateProgress>>;
-
-    /// Logger to use while performing this update.
-    fn logger(&self) -> &Logger;
-}
-
-pub(super) async fn deliver_update(
-    updater: &(dyn SpComponentUpdater + Send + Sync),
-    mgs_clients: &mut MgsClients,
-) -> Result<(), SpComponentUpdateError> {
-    // Start the update.
-    mgs_clients
-        .try_all_serially(updater.logger(), |client| async move {
-            client
-                .sp_component_update(
-                    updater.target_sp_type(),
-                    updater.target_sp_slot(),
-                    updater.component(),
-                    updater.firmware_slot(),
-                    &updater.update_id(),
-                    reqwest::Body::from(updater.update_data()),
-                )
-                .await?;
-            updater.progress().send_replace(Some(UpdateProgress::Started));
-            info!(
-                updater.logger(), "update started";
-                "mgs_addr" => client.baseurl(),
-            );
-            Ok(())
-        })
-        .await?;
-
-    // Wait for the update to complete.
-    loop {
-        let status = mgs_clients
-            .try_all_serially(updater.logger(), |client| async move {
-                let update_status = client
-                    .sp_component_update_status(
-                        updater.target_sp_type(),
-                        updater.target_sp_slot(),
-                        updater.component(),
-                    )
-                    .await?;
-
-                debug!(
-                    updater.logger(), "got update status";
-                    "mgs_addr" => client.baseurl(),
-                    "status" => ?update_status,
-                );
-
-                Ok(update_status)
-            })
-            .await?;
-
-        if status_is_complete(
-            status.into_inner(),
-            updater.update_id(),
-            updater.progress(),
-            updater.logger(),
-        )? {
-            updater.progress().send_replace(Some(UpdateProgress::InProgress {
-                progress: Some(1.0),
-            }));
-            return Ok(());
-        }
-
-        tokio::time::sleep(STATUS_POLL_INTERVAL).await;
-    }
-}
-
-fn status_is_complete(
-    status: SpUpdateStatus,
-    update_id: Uuid,
-    progress_tx: &watch::Sender<Option<UpdateProgress>>,
-    log: &Logger,
-) -> Result<bool, SpComponentUpdateError> {
-    match status {
-        // For `Preparing` and `InProgress`, we could check the progress
-        // information returned by these steps and try to check that
-        // we're still _making_ progress, but every Nexus instance needs
-        // to do that anyway in case we (or the MGS instance delivering
-        // the update) crash, so we'll omit that check here. Instead, we
-        // just sleep and we'll poll again shortly.
-        SpUpdateStatus::Preparing { id, progress } => {
-            if id == update_id {
-                let progress = progress.and_then(|progress| {
-                    if progress.current > progress.total {
-                        warn!(
-                            log, "nonsense preparing progress";
-                            "current" => progress.current,
-                            "total" => progress.total,
-                        );
-                        None
-                    } else if progress.total == 0 {
-                        None
-                    } else {
-                        Some(
-                            f64::from(progress.current)
-                                / f64::from(progress.total),
-                        )
-                    }
-                });
-                progress_tx
-                    .send_replace(Some(UpdateProgress::Preparing { progress }));
-                Ok(false)
-            } else {
-                Err(SpComponentUpdateError::DifferentUpdatePreparing(id))
-            }
-        }
-        SpUpdateStatus::InProgress { id, bytes_received, total_bytes } => {
-            if id == update_id {
-                let progress = if bytes_received > total_bytes {
-                    warn!(
-                        log, "nonsense update progress";
-                        "bytes_received" => bytes_received,
-                        "total_bytes" => total_bytes,
-                    );
-                    None
-                } else if total_bytes == 0 {
-                    None
-                } else {
-                    Some(f64::from(bytes_received) / f64::from(total_bytes))
-                };
-                progress_tx.send_replace(Some(UpdateProgress::InProgress {
-                    progress,
-                }));
-                Ok(false)
-            } else {
-                Err(SpComponentUpdateError::DifferentUpdateInProgress(id))
-            }
-        }
-        SpUpdateStatus::Complete { id } => {
-            if id == update_id {
-                Ok(true)
-            } else {
-                Err(SpComponentUpdateError::DifferentUpdateComplete(id))
-            }
-        }
-        SpUpdateStatus::None => Err(SpComponentUpdateError::UpdateStatusLost),
-        SpUpdateStatus::Aborted { id } => {
-            if id == update_id {
-                Err(SpComponentUpdateError::UpdateAborted)
-            } else {
-                Err(SpComponentUpdateError::DifferentUpdateAborted(id))
-            }
-        }
-        SpUpdateStatus::Failed { code, id } => {
-            if id == update_id {
-                Err(SpComponentUpdateError::UpdateFailedWithCode(code))
-            } else {
-                Err(SpComponentUpdateError::DifferentUpdateFailed(id))
-            }
-        }
-        SpUpdateStatus::RotError { id, message } => {
-            if id == update_id {
-                Err(SpComponentUpdateError::UpdateFailedWithMessage(format!(
-                    "rot error: {message}"
-                )))
-            } else {
-                Err(SpComponentUpdateError::DifferentUpdateFailed(id))
-            }
-        }
-    }
-}
-
-/// Provides helper functions used while updating a particular SP component
-pub trait SpComponentUpdateHelper {
+/// This trait is object safe; consumers should use `SpComponentUpdateError`,
+/// which wraps an implementor of this trait.
+pub trait SpComponentUpdateHelperImpl {
     /// Checks if the component is already updated or ready for update
     fn precheck<'a>(
         &'a self,
@@ -268,6 +87,54 @@ pub trait SpComponentUpdateHelper {
         mgs_clients: &'a mut MgsClients,
         update: &'a PendingMgsUpdate,
     ) -> BoxFuture<'a, Result<(), PostUpdateError>>;
+}
+
+/// Provides helper functions used while updating a particular SP component
+pub struct SpComponentUpdateHelper {
+    inner: Box<dyn SpComponentUpdateHelperImpl + Send + Sync>,
+}
+
+impl SpComponentUpdateHelper {
+    /// Construct a update helper for a specific kind of update
+    pub fn new(details: &PendingMgsUpdateDetails) -> Self {
+        let inner: Box<dyn SpComponentUpdateHelperImpl + Send + Sync> =
+            match details {
+                PendingMgsUpdateDetails::Sp(details) => {
+                    Box::new(ReconfiguratorSpUpdater::new(details.clone()))
+                }
+                PendingMgsUpdateDetails::Rot(details) => {
+                    Box::new(ReconfiguratorRotUpdater::new(details.clone()))
+                }
+                PendingMgsUpdateDetails::RotBootloader(details) => Box::new(
+                    ReconfiguratorRotBootloaderUpdater::new(details.clone()),
+                ),
+                PendingMgsUpdateDetails::HostPhase1(details) => Box::new(
+                    ReconfiguratorHostPhase1Updater::new(details.clone()),
+                ),
+            };
+        Self { inner }
+    }
+
+    /// Checks if the component is already updated or ready for update
+    pub async fn precheck(
+        &self,
+        log: &slog::Logger,
+        mgs_clients: &mut MgsClients,
+        update: &PendingMgsUpdate,
+    ) -> Result<PrecheckStatus, PrecheckError> {
+        self.inner.precheck(log, mgs_clients, update).await
+    }
+
+    /// Attempts once to perform any post-update actions (e.g., reset the
+    /// device)
+    pub async fn post_update(
+        &self,
+        log: &slog::Logger,
+        mgs_clients: &mut MgsClients,
+        update: &PendingMgsUpdate,
+    ) -> Result<(), PostUpdateError> {
+        self.inner.post_update(log, mgs_clients, update).await
+    }
 }
 
 /// Describes the live state of the component before the update begins
@@ -290,6 +157,13 @@ pub enum PrecheckError {
     #[error("communicating with RoT: {message:?}")]
     RotCommunicationFailed { message: String },
 
+    #[error("fetching inventory from sled-agent at {address}")]
+    SledAgentInventory {
+        address: SocketAddrV6,
+        #[source]
+        err: SledAgentClientError,
+    },
+
     #[error(
         "in {sp_type} slot {slot_id}, expected to find \
          part {expected_part:?} serial {expected_serial:?}, but found \
@@ -304,8 +178,10 @@ pub enum PrecheckError {
         found_serial: String,
     },
 
-    #[error("expected to find active slot {expected:?}, but found {found:?}")]
-    WrongActiveSlot { expected: RotSlot, found: RotSlot },
+    #[error(
+        "expected to find active RoT slot {expected:?}, but found {found:?}"
+    )]
+    WrongActiveRotSlot { expected: RotSlot, found: RotSlot },
 
     #[error(
         "expected to find active version {:?}, but found {found:?}",
@@ -314,15 +190,72 @@ pub enum PrecheckError {
     WrongActiveVersion { expected: ArtifactVersion, found: String },
 
     #[error(
+        "expected to find active {kind} artifact {expected}, but found {found}"
+    )]
+    WrongActiveArtifact {
+        kind: ArtifactKind,
+        expected: ArtifactHash,
+        found: ArtifactHash,
+    },
+
+    #[error("failed to determine current active {kind} artifact: {err}")]
+    DeterminingActiveArtifact { kind: ArtifactKind, err: String },
+
+    #[error(
         "expected to find inactive version {expected:?}, but found {found:?}"
     )]
     WrongInactiveVersion { expected: ExpectedVersion, found: FoundVersion },
+
+    #[error(
+        "expected to find inactive {kind} artifact {expected}, \
+         but found {found}"
+    )]
+    WrongInactiveArtifact {
+        kind: ArtifactKind,
+        expected: ArtifactHash,
+        found: ArtifactHash,
+    },
+
+    #[error(
+        "failed to determine current inactive host OS phase 2 artifact: {err}"
+    )]
+    DeterminingInactiveHostPhase2 { err: String },
+
+    #[error("inventory missing `last_reconciliation` result")]
+    SledAgentInventoryMissingLastReconciliation,
+
+    #[error(
+        "invalid host phase 1 slot reported by SP (expected 0 or 1, got {slot})"
+    )]
+    InvalidHostPhase1Slot { slot: u16 },
+
+    #[error(
+        "expected to find active host phase 1 slot {expected}, \
+         but found {found}"
+    )]
+    WrongActiveHostPhase1Slot { expected: M2Slot, found: M2Slot },
+
+    #[error(
+        "expected to find host OS boot disk {expected:?}, but found {found:?}"
+    )]
+    WrongHostOsBootDisk { expected: M2Slot, found: M2Slot },
+
+    #[error(
+        "active phase 1 slot {phase1:?} does not match boot disk {boot_disk:?}"
+    )]
+    MismatchedHostOsActiveSlot { phase1: M2Slot, boot_disk: M2Slot },
+
+    #[error("inventory reported an error determining boot disk: {err}")]
+    DeterminingHostOsBootDisk { err: String },
 }
 
 #[derive(Debug, thiserror::Error)]
 pub enum PostUpdateError {
     #[error("communicating with MGS")]
     GatewayClientError(#[from] GatewayClientError),
+
+    #[error("resetting component via MGS")]
+    GatewaySpComponentResetError(#[from] GatewaySpComponentResetError),
 
     #[error("transient error: {message:?}")]
     TransientError { message: String },
@@ -335,7 +268,10 @@ impl PostUpdateError {
     pub fn is_fatal(&self) -> bool {
         match self {
             PostUpdateError::GatewayClientError(error) => {
-                !matches!(error, gateway_client::Error::CommunicationError(_))
+                !error.should_try_next_mgs()
+            }
+            PostUpdateError::GatewaySpComponentResetError(error) => {
+                !error.should_try_next_mgs()
             }
             PostUpdateError::TransientError { .. } => false,
             PostUpdateError::FatalError { .. } => true,
@@ -386,4 +322,5 @@ pub(crate) fn error_means_caboose_is_invalid(
     let message = format!("{error:?}");
     message.contains("the image caboose does not contain")
         || message.contains("the image does not include a caboose")
+        || message.contains("failed to read data from the caboose")
 }

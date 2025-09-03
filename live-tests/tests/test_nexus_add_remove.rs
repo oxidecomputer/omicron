@@ -16,6 +16,7 @@ use nexus_client::types::SagaState;
 use nexus_inventory::CollectionBuilder;
 use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
 use nexus_reconfigurator_planning::planner::Planner;
+use nexus_reconfigurator_planning::planner::PlannerRng;
 use nexus_reconfigurator_preparation::PlanningInputFromDb;
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::BlueprintZoneDisposition;
@@ -157,7 +158,7 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
     info!(log, "created demo saga"; "demo_saga" => ?demo_saga);
 
     // Now expunge the zone we just created.
-    let _ = blueprint_edit_current_target(
+    let (_blueprint2, blueprint3) = blueprint_edit_current_target(
         log,
         &planning_input,
         &collection,
@@ -171,6 +172,17 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
     )
     .await
     .expect("editing blueprint to expunge zone");
+    let (_, expunged_zone_config) = blueprint3
+        .all_omicron_zones(|_| true)
+        .find(|(_sled_id, zone_config)| zone_config.id == new_zone.id)
+        .expect("expunged zone in new blueprint");
+    let BlueprintZoneDisposition::Expunged {
+        as_of_generation: expunged_generation,
+        ..
+    } = expunged_zone_config.disposition
+    else {
+        panic!("expected expunged zone to have disposition Expunged");
+    };
 
     // At some point, we should be unable to reach this Nexus any more.
     wait_for_condition(
@@ -227,21 +239,27 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
             let agent = latest_collection.sled_agents.get(&sled_id).expect(
                 "collection information for the sled we added a Nexus to",
             );
-            if let Some(config) = &agent.ledgered_sled_config {
-                if config.zones.iter().any(|z| z.id == new_zone.id) {
-                    debug!(log, "zone still present in ledger");
-                    return Err(CondCheckError::<()>::NotYet);
-                }
+            let ledgered_config = agent
+                .ledgered_sled_config
+                .as_ref()
+                .expect("sled should have ledgered config");
+            if ledgered_config.zones.iter().any(|z| z.id == new_zone.id) {
+                debug!(log, "zone still present in ledger");
+                return Err(CondCheckError::<()>::NotYet);
             }
-            if let Some(config) = agent
+
+            let reconciled_config = &agent
                 .last_reconciliation
                 .as_ref()
-                .map(|lr| &lr.last_reconciled_config)
-            {
-                if config.zones.iter().any(|z| z.id == new_zone.id) {
-                    debug!(log, "zone still present in inventory");
-                    return Err(CondCheckError::<()>::NotYet);
-                }
+                .expect("sled should have reconciled config")
+                .last_reconciled_config;
+            if reconciled_config.zones.iter().any(|z| z.id == new_zone.id) {
+                debug!(log, "zone still present in inventory");
+                return Err(CondCheckError::<()>::NotYet);
+            }
+            if reconciled_config.generation < expunged_generation {
+                debug!(log, "sled's reconciled config is too old");
+                return Err(CondCheckError::<()>::NotYet);
             }
             return Ok(latest_collection);
         },
@@ -267,6 +285,7 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
         &planning_input,
         "live test suite",
         &latest_collection,
+        PlannerRng::from_entropy(),
     )
     .expect("constructing planner");
     let new_blueprint = planner.plan().expect("creating blueprint");

@@ -97,10 +97,8 @@ pub async fn start_servers(
         .config(dropshot_config.clone())
         .version_policy(dropshot::VersionPolicy::Dynamic(Box::new(
             dropshot::ClientSpecifiesVersionInHeader::new(
-                "api-version"
-                    .parse::<http::header::HeaderName>()
-                    .expect("api-version is a valid header name"),
-                semver::Version::new(2, 0, 0),
+                omicron_common::api::VERSION_HEADER,
+                dns_server_api::VERSION_SOA_AND_NS,
             ),
         )))
         .start()

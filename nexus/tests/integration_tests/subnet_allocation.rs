@@ -47,6 +47,7 @@ async fn create_instance_expect_failure(
                 vpc_name: "default".parse().unwrap(),
                 subnet_name: subnet_name.parse().unwrap(),
                 ip: None,
+                transit_ips: vec![],
             },
         ]);
     let new_instance = params::InstanceCreate {
@@ -135,6 +136,7 @@ async fn test_subnet_allocation(cptestctx: &ControlPlaneTestContext) {
             vpc_name: "default".parse().unwrap(),
             subnet_name: SUBNET_NAME.parse().unwrap(),
             ip: None,
+            transit_ips: vec![],
         },
     ]);
 

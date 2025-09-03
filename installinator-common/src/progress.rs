@@ -43,6 +43,9 @@ impl StepSpec for InstallinatorSpec {
 )]
 #[serde(rename_all = "snake_case")]
 pub enum InstallinatorComponent {
+    /// The installinator document.
+    InstallinatorDocument,
+
     /// The host phase 2 component.
     HostPhase2,
 

@@ -8,17 +8,19 @@ license = "MPL-2.0"
 workspace = true
 
 [dependencies]
+anyhow.workspace = true
 bcs.workspace = true
 bootstore.workspace = true
 camino.workspace = true
 chacha20poly1305.workspace = true
+daft.workspace = true
 derive_more.workspace = true
 gfss.workspace = true
 hex.workspace = true
 hkdf.workspace = true
 iddqd.workspace = true
 omicron-uuid-kinds.workspace = true
-rand = { workspace = true, features = ["getrandom"] }
+rand = { workspace = true, features = ["os_rng"] }
 secrecy.workspace = true
 serde.workspace = true
 serde_with.workspace = true
@@ -35,6 +37,19 @@ omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
 assert_matches.workspace = true
+dropshot.workspace = true
 omicron-test-utils.workspace = true
 proptest.workspace = true
+serde_json.workspace = true
 test-strategy.workspace = true
+trust-quorum-test-utils.workspace = true
+
+[features]
+# Impl `PartialEq` and `Eq` for types implementing `subtle::ConstantTimeEq` when
+# this feature is enabled.
+# 
+# This is of unknown risk. The rust compiler may obviate the security of using
+# subtle when we do this. On the other hand its very useful for testing and
+# debugging outside of production.
+danger_partial_eq_ct_wrapper = ["gfss/danger_partial_eq_ct_wrapper"]
+testing = []

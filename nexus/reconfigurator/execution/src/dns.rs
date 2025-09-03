@@ -323,6 +323,7 @@ mod test {
     use nexus_inventory::now_db_precision;
     use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
     use nexus_reconfigurator_planning::example::ExampleSystemBuilder;
+    use nexus_reconfigurator_planning::planner::PlannerRng;
     use nexus_reconfigurator_preparation::PlanningInputFromDb;
     use nexus_sled_agent_shared::inventory::OmicronZoneConfig;
     use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
@@ -350,6 +351,7 @@ mod test {
     use nexus_types::deployment::OximeterReadPolicy;
     use nexus_types::deployment::PendingMgsUpdates;
     use nexus_types::deployment::PlannerChickenSwitches;
+    use nexus_types::deployment::PlanningReport;
     use nexus_types::deployment::SledFilter;
     use nexus_types::deployment::TufRepoPolicy;
     use nexus_types::deployment::blueprint_zone_type;
@@ -595,6 +597,7 @@ mod test {
                     nic,
                     external_tls,
                     external_dns_servers,
+                    nexus_generation: Generation::new(),
                 })
             }
             OmicronZoneType::Oximeter { address } => {
@@ -707,8 +710,9 @@ mod test {
 
         let dns_empty = dns_config_empty();
         let initial_dns_generation = dns_empty.generation;
+        let blueprint_id = BlueprintUuid::new_v4();
         let mut blueprint = Blueprint {
-            id: BlueprintUuid::new_v4(),
+            id: blueprint_id,
             sleds: blueprint_sleds,
             pending_mgs_updates: PendingMgsUpdates::new(),
             cockroachdb_setting_preserve_downgrade:
@@ -717,6 +721,7 @@ mod test {
             internal_dns_version: initial_dns_generation,
             external_dns_version: Generation::new(),
             target_release_minimum_generation: Generation::new(),
+            nexus_generation: Generation::new(),
             cockroachdb_fingerprint: String::new(),
             clickhouse_cluster_config: None,
             oximeter_read_version: Generation::new(),
@@ -724,6 +729,7 @@ mod test {
             time_created: now_db_precision(),
             creator: "test-suite".to_string(),
             comment: "test blueprint".to_string(),
+            report: PlanningReport::new(blueprint_id),
         };
 
         // To make things slightly more interesting, let's add a zone that's
@@ -1371,6 +1377,30 @@ mod test {
         DnsDiff::new(left_zone, right_zone).unwrap()
     }
 
+    async fn fetch_all_service_ip_pool_ranges(
+        datastore: &DataStore,
+        opctx: &OpContext,
+    ) -> Vec<nexus_db_model::IpPoolRange> {
+        let service_pools = datastore
+            .ip_pools_service_lookup_both_versions(&opctx)
+            .await
+            .expect("success looking up both versions of the service IP Pools");
+        let mut ranges = datastore
+            .ip_pool_list_ranges_batched(&opctx, &service_pools.ipv4.authz_pool)
+            .await
+            .expect("success listing IPv4 pool ranges");
+        ranges.append(
+            &mut datastore
+                .ip_pool_list_ranges_batched(
+                    &opctx,
+                    &service_pools.ipv6.authz_pool,
+                )
+                .await
+                .expect("success listing IPv6 pool ranges"),
+        );
+        ranges
+    }
+
     // Tests end-to-end DNS behavior:
     //
     // - If we create a blueprint matching the current system, and then apply
@@ -1470,14 +1500,8 @@ mod test {
             .unwrap();
         let zpool_rows =
             datastore.zpool_list_all_external_batched(&opctx).await.unwrap();
-        let ip_pool_range_rows = {
-            let (authz_service_ip_pool, _) =
-                datastore.ip_pools_service_lookup(&opctx).await.unwrap();
-            datastore
-                .ip_pool_list_ranges_batched(&opctx, &authz_service_ip_pool)
-                .await
-                .unwrap()
-        };
+        let ip_pool_range_rows =
+            fetch_all_service_ip_pool_ranges(&datastore, &opctx).await;
         let planning_input = {
             let mut builder = PlanningInputFromDb {
                 sled_rows: &sled_rows,
@@ -1524,6 +1548,7 @@ mod test {
             &planning_input,
             &collection,
             "test suite",
+            PlannerRng::from_entropy(),
         )
         .unwrap();
         let sled_id =

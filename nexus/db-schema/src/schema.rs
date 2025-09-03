@@ -628,6 +628,7 @@ table! {
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
+        ip_version -> crate::enums::IpVersionEnum,
         rcgen -> Int8,
     }
 }
@@ -655,7 +656,7 @@ table! {
 }
 
 table! {
-    ipv4_nat_entry (id) {
+    nat_entry (id) {
         id -> Uuid,
         external_address -> Inet,
         first_port -> Int4,
@@ -670,9 +671,9 @@ table! {
     }
 }
 
-// View used for summarizing changes to ipv4_nat_entry
+// View used for summarizing changes to nat_entry
 table! {
-    ipv4_nat_changes (version) {
+    nat_changes (version) {
         external_address -> Inet,
         first_port -> Int4,
         last_port -> Int4,
@@ -685,9 +686,9 @@ table! {
 }
 
 // This is the sequence used for the version number
-// in ipv4_nat_entry.
+// in nat_entry.
 table! {
-    ipv4_nat_version (last_value) {
+    nat_version (last_value) {
         last_value -> Int8,
         log_cnt -> Int8,
         is_called -> Bool,
@@ -752,6 +753,8 @@ table! {
         mapped_fleet_roles -> Jsonb,
 
         rcgen -> Int8,
+
+        admin_group_name -> Nullable<Text>,
     }
 }
 
@@ -1418,6 +1421,8 @@ table! {
         sha256 -> Text,
         artifact_size -> Int8,
         generation_added -> Int8,
+        sign -> Nullable<Binary>,
+        board -> Nullable<Text>,
     }
 }
 
@@ -1562,6 +1567,17 @@ table! {
 }
 
 table! {
+    inv_host_phase_1_active_slot (inv_collection_id, hw_baseboard_id) {
+        inv_collection_id -> Uuid,
+        hw_baseboard_id -> Uuid,
+        time_collected -> Timestamptz,
+        source -> Text,
+
+        slot -> crate::enums::HwM2SlotEnum,
+    }
+}
+
+table! {
     inv_host_phase_1_flash_hash (inv_collection_id, hw_baseboard_id, slot) {
         inv_collection_id -> Uuid,
         hw_baseboard_id -> Uuid,
@@ -1644,7 +1660,7 @@ table! {
         boot_partition_a_error -> Nullable<Text>,
         boot_partition_b_error -> Nullable<Text>,
 
-        clear_mupdate_override_boot_success -> Nullable<crate::enums::ClearMupdateOverrideBootSuccessEnum>,
+        clear_mupdate_override_boot_success -> Nullable<crate::enums::RemoveMupdateOverrideBootSuccessEnum>,
         clear_mupdate_override_boot_error -> Nullable<Text>,
         clear_mupdate_override_non_boot_message -> Nullable<Text>,
     }
@@ -1956,6 +1972,8 @@ table! {
         cockroachdb_setting_preserve_downgrade -> Nullable<Text>,
 
         target_release_minimum_generation -> Int8,
+
+        nexus_generation -> Int8,
     }
 }
 
@@ -2056,6 +2074,7 @@ table! {
         filesystem_pool -> Uuid,
         image_source -> crate::enums::BpZoneImageSourceEnum,
         image_artifact_sha256 -> Nullable<Text>,
+        nexus_generation -> Nullable<Int8>,
     }
 }
 
@@ -2158,6 +2177,25 @@ table! {
         expected_persistent_boot_preference -> crate::enums::HwRotSlotEnum,
         expected_pending_persistent_boot_preference -> Nullable<crate::enums::HwRotSlotEnum>,
         expected_transient_boot_preference -> Nullable<crate::enums::HwRotSlotEnum>,
+    }
+}
+
+table! {
+    bp_pending_mgs_update_host_phase_1 (blueprint_id, hw_baseboard_id) {
+        blueprint_id -> Uuid,
+        hw_baseboard_id -> Uuid,
+        sp_type -> crate::enums::SpTypeEnum,
+        sp_slot -> Int4,
+        artifact_sha256 -> Text,
+        artifact_version -> Text,
+        expected_active_phase_1_slot -> crate::enums::HwM2SlotEnum,
+        expected_boot_disk -> crate::enums::HwM2SlotEnum,
+        expected_active_phase_1_hash -> Text,
+        expected_active_phase_2_hash -> Text,
+        expected_inactive_phase_1_hash -> Text,
+        expected_inactive_phase_2_hash -> Text,
+        sled_agent_ip -> Inet,
+        sled_agent_port -> Int4,
     }
 }
 
@@ -2337,6 +2375,14 @@ table! {
         time_modified -> Timestamptz,
         version -> Text,
         target_version -> Nullable<Text>,
+    }
+}
+
+table! {
+    db_metadata_nexus (nexus_id) {
+        nexus_id -> Uuid,
+        last_drained_blueprint_id -> Nullable<Uuid>,
+        state -> crate::enums::DbMetadataNexusStateEnum,
     }
 }
 
@@ -2656,6 +2702,8 @@ table! {
         class -> Nullable<Text>,
 
         report -> Jsonb,
+
+        part_number -> Nullable<Text>,
     }
 }
 
@@ -2677,3 +2725,45 @@ table! {
     }
 }
 allow_tables_to_appear_in_same_query!(user_data_export, snapshot, image);
+
+table! {
+    audit_log (id) {
+        id -> Uuid,
+        time_started -> Timestamptz,
+        request_id -> Text,
+        request_uri -> Text,
+        operation_id -> Text,
+        source_ip -> Inet,
+        user_agent -> Nullable<Text>,
+        actor_id -> Nullable<Uuid>,
+        actor_silo_id -> Nullable<Uuid>,
+        actor_kind -> crate::enums::AuditLogActorKindEnum,
+        auth_method -> Nullable<Text>,
+        time_completed -> Nullable<Timestamptz>,
+        http_status_code -> Nullable<Int4>, // SqlU16
+        error_code -> Nullable<Text>,
+        error_message -> Nullable<Text>,
+        result_kind -> Nullable<crate::enums::AuditLogResultKindEnum>,
+    }
+}
+
+table! {
+    audit_log_complete (id) {
+        id -> Uuid,
+        time_started -> Timestamptz,
+        request_id -> Text,
+        request_uri -> Text,
+        operation_id -> Text,
+        source_ip -> Inet,
+        user_agent -> Nullable<Text>,
+        actor_id -> Nullable<Uuid>,
+        actor_silo_id -> Nullable<Uuid>,
+        actor_kind -> crate::enums::AuditLogActorKindEnum,
+        auth_method -> Nullable<Text>,
+        time_completed -> Timestamptz,
+        http_status_code -> Nullable<Int4>, // SqlU16
+        error_code -> Nullable<Text>,
+        error_message -> Nullable<Text>,
+        result_kind -> crate::enums::AuditLogResultKindEnum,
+    }
+}

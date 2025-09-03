@@ -5,7 +5,6 @@
 // Copyright 2025 Oxide Computer Company
 
 use base64::prelude::*;
-use dropshot::test_util;
 use gateway_messages::SpPort;
 use gateway_test_utils::current_simulator_state;
 use gateway_test_utils::setup;
@@ -27,13 +26,14 @@ async fn task_dump() {
     assert!(sim_state.iter().all(|sp| sp.state.is_ok()));
 
     // Get task dump count for sled 0.
-    let url = format!("{}", client.url("/sp/sled/0/task-dump"));
-    let resp: u32 = test_util::object_get(client, &url).await;
-
+    let resp = client
+        .sp_task_dump_count(gateway_client::types::SpType::Sled, 0)
+        .await
+        .unwrap()
+        .into_inner();
     assert_eq!(resp, 1);
 
     // Get the task dump.
-    let url = format!("{}", client.url("/sp/sled/0/task-dump/0"));
     let TaskDump {
         task_index,
         timestamp,
@@ -42,7 +42,11 @@ async fn task_dump() {
         gitc,
         vers,
         base64_zip,
-    } = test_util::object_get(client, &url).await;
+    } = client
+        .sp_task_dump_get(gateway_client::types::SpType::Sled, 0, 0)
+        .await
+        .unwrap()
+        .into_inner();
 
     assert_eq!(0, task_index);
     assert_eq!(1, timestamp);

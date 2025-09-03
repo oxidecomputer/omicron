@@ -9,6 +9,7 @@ use crate::authn;
 use crate::authz;
 use crate::context::OpContext;
 use crate::db::model::ConsoleSession;
+use crate::db::model::to_db_typed_uuid;
 use crate::db::pagination::paginated;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::TimeDelta;
@@ -125,7 +126,7 @@ impl DataStore {
             })?;
 
         let (.., db_silo_user) = LookupPath::new(opctx, self)
-            .silo_user_id(console_session.silo_user_id)
+            .silo_user_id(console_session.silo_user_id())
             .fetch()
             .await
             .map_err(|e| {
@@ -186,7 +187,7 @@ impl DataStore {
 
         use nexus_db_schema::schema::console_session::dsl;
         paginated(dsl::console_session, dsl::id, &pagparams)
-            .filter(dsl::silo_user_id.eq(user_id))
+            .filter(dsl::silo_user_id.eq(to_db_typed_uuid(user_id)))
             // session is not expired according to abs timeout
             .filter(dsl::time_created.ge(now - abs_ttl))
             // session is also not expired according to idle timeout
@@ -211,7 +212,7 @@ impl DataStore {
 
         use nexus_db_schema::schema::console_session;
         diesel::delete(console_session::table)
-            .filter(console_session::silo_user_id.eq(user_id))
+            .filter(console_session::silo_user_id.eq(to_db_typed_uuid(user_id)))
             .execute_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))

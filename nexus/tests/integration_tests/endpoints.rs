@@ -22,6 +22,7 @@ use nexus_test_utils::resource_helpers::test_params;
 use nexus_types::external_api::params;
 use nexus_types::external_api::shared;
 use nexus_types::external_api::shared::IpRange;
+use nexus_types::external_api::shared::IpVersion;
 use nexus_types::external_api::shared::Ipv4Range;
 use nexus_types::external_api::views::SledProvisionPolicy;
 use omicron_common::api::external::AddressLotKind;
@@ -401,15 +402,6 @@ pub static DEMO_DISK_CREATE: LazyLock<params::DiskCreate> =
             ),
         }
     });
-pub static DEMO_DISK_METRICS_URL: LazyLock<String> = LazyLock::new(|| {
-    format!(
-        "/v1/disks/{}/metrics/activated?start_time={:?}&end_time={:?}&{}",
-        *DEMO_DISK_NAME,
-        Utc::now(),
-        Utc::now(),
-        *DEMO_PROJECT_SELECTOR,
-    )
-});
 
 // Related to importing blocks from an external source
 pub static DEMO_IMPORT_DISK_NAME: LazyLock<Name> =
@@ -721,6 +713,7 @@ pub static DEMO_INSTANCE_NIC_CREATE: LazyLock<
     vpc_name: DEMO_VPC_NAME.clone(),
     subnet_name: DEMO_VPC_SUBNET_NAME.clone(),
     ip: None,
+    transit_ips: vec![],
 });
 pub static DEMO_INSTANCE_NIC_PUT: LazyLock<
     params::InstanceNetworkInterfaceUpdate,
@@ -940,6 +933,7 @@ pub static DEMO_IP_POOL_CREATE: LazyLock<params::IpPoolCreate> =
             name: DEMO_IP_POOL_NAME.clone(),
             description: String::from("an IP pool"),
         },
+        ip_version: IpVersion::V4,
     });
 pub static DEMO_IP_POOL_PROJ_URL: LazyLock<String> = LazyLock::new(|| {
     format!(
@@ -1274,6 +1268,10 @@ pub static DEMO_UPDATE_TRUST_ROOT_CREATE: LazyLock<serde_json::Value> =
         serde_json::from_str(include_str!("data/tuf-expired-root.json"))
             .unwrap()
     });
+
+pub static AUDIT_LOG_URL: LazyLock<String> = LazyLock::new(|| {
+    String::from("/v1/system/audit-log?start_time=2025-01-01T00:00:00Z")
+});
 
 /// Describes an API endpoint to be verified by the "unauthorized" test
 ///
@@ -2052,12 +2050,6 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                 ],
             },
             VerifyEndpoint {
-                url: &DEMO_DISK_METRICS_URL,
-                visibility: Visibility::Protected,
-                unprivileged_access: UnprivilegedAccess::None,
-                allowed_methods: vec![AllowedMethod::Get],
-            },
-            VerifyEndpoint {
                 url: &DEMO_INSTANCE_DISKS_URL,
                 visibility: Visibility::Protected,
                 unprivileged_access: UnprivilegedAccess::None,
@@ -2752,7 +2744,7 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                 url: &DEMO_ADDRESS_LOT_URL,
                 visibility: Visibility::Protected,
                 unprivileged_access: UnprivilegedAccess::None,
-                allowed_methods: vec![AllowedMethod::Delete],
+                allowed_methods: vec![AllowedMethod::GetNonexistent, AllowedMethod::Delete],
             },
             VerifyEndpoint {
                 url: &DEMO_ADDRESS_LOT_BLOCKS_URL,
@@ -3027,6 +3019,13 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
             },
             VerifyEndpoint {
                 url: &ALERT_CLASSES_URL,
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Get],
+            },
+            // Audit log
+            VerifyEndpoint {
+                url: &AUDIT_LOG_URL,
                 visibility: Visibility::Public,
                 unprivileged_access: UnprivilegedAccess::None,
                 allowed_methods: vec![AllowedMethod::Get],

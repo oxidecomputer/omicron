@@ -228,6 +228,8 @@ mod test {
                         },
                         hash,
                         size: 0,
+                        board: None,
+                        sign: None,
                     }],
                 },
             )

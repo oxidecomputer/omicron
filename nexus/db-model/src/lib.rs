@@ -17,6 +17,7 @@ mod alert_delivery_state;
 mod alert_delivery_trigger;
 mod alert_subscription;
 mod allow_list;
+mod audit_log;
 mod bfd;
 mod bgp;
 mod block_size;
@@ -49,6 +50,7 @@ mod instance_state;
 mod internet_gateway;
 mod inventory;
 mod ip_pool;
+mod ipnet;
 mod ipv4net;
 pub mod ipv6;
 mod ipv6net;
@@ -85,7 +87,7 @@ mod webhook_rx;
 // for join-based marker trait generation.
 mod deployment;
 mod ereport;
-mod ipv4_nat_entry;
+pub mod nat_entry;
 mod omicron_zone_config;
 mod quota;
 mod rack;
@@ -154,6 +156,7 @@ pub use alert_delivery_state::*;
 pub use alert_delivery_trigger::*;
 pub use alert_subscription::*;
 pub use allow_list::*;
+pub use audit_log::*;
 pub use bfd::*;
 pub use bgp::*;
 pub use block_size::*;
@@ -188,7 +191,7 @@ pub use instance_state::*;
 pub use internet_gateway::*;
 pub use inventory::*;
 pub use ip_pool::*;
-pub use ipv4_nat_entry::*;
+pub use ipnet::*;
 pub use ipv4net::*;
 pub use ipv6::*;
 pub use ipv6net::*;
@@ -196,6 +199,7 @@ pub use l4_port_range::*;
 pub use migration::*;
 pub use migration_state::*;
 pub use name::*;
+pub use nat_entry::*;
 pub use network_interface::*;
 pub use oximeter_info::*;
 pub use oximeter_read_policy::*;
@@ -434,7 +438,7 @@ pub(crate) use impl_from_sql_text;
 pub trait DatabaseString: Sized {
     type Error: std::fmt::Display;
 
-    fn to_database_string(&self) -> Cow<str>;
+    fn to_database_string(&self) -> Cow<'_, str>;
     fn from_database_string(s: &str) -> Result<Self, Self::Error>;
 }
 
@@ -447,7 +451,7 @@ use std::borrow::Cow;
 impl DatabaseString for FleetRole {
     type Error = anyhow::Error;
 
-    fn to_database_string(&self) -> Cow<str> {
+    fn to_database_string(&self) -> Cow<'_, str> {
         match self {
             FleetRole::Admin => "admin",
             FleetRole::Collaborator => "collaborator",
@@ -472,7 +476,7 @@ impl DatabaseString for FleetRole {
 impl DatabaseString for SiloRole {
     type Error = anyhow::Error;
 
-    fn to_database_string(&self) -> Cow<str> {
+    fn to_database_string(&self) -> Cow<'_, str> {
         match self {
             SiloRole::Admin => "admin",
             SiloRole::Collaborator => "collaborator",
@@ -497,7 +501,7 @@ impl DatabaseString for SiloRole {
 impl DatabaseString for ProjectRole {
     type Error = anyhow::Error;
 
-    fn to_database_string(&self) -> Cow<str> {
+    fn to_database_string(&self) -> Cow<'_, str> {
         match self {
             ProjectRole::Admin => "admin",
             ProjectRole::Collaborator => "collaborator",

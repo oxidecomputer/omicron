@@ -4,19 +4,23 @@
 
 //! Parameter to Node API calls that allows interaction with the system at large
 
-use crate::{Envelope, PeerMsg, PersistentState, PlatformId};
-use std::time::Instant;
+use crate::{
+    Alarm, Envelope, PeerMsg, PeerMsgKind, PersistentState, PlatformId,
+    persistent_state::PersistentStateDiff,
+};
+use daft::{BTreeSetDiff, Diffable, Leaf};
+use std::collections::BTreeSet;
 
 /// An API shared by [`NodeCallerCtx`] and [`NodeHandlerCtx`]
 pub trait NodeCommonCtx {
     fn platform_id(&self) -> &PlatformId;
-    fn now(&self) -> Instant;
     fn persistent_state(&self) -> &PersistentState;
+    fn connected(&self) -> &BTreeSet<PlatformId>;
+    fn alarms(&self) -> &BTreeSet<Alarm>;
 }
 
 /// An API for an [`NodeCtx`] usable from a [`crate::Node`]
 pub trait NodeCallerCtx: NodeCommonCtx {
-    fn set_time(&mut self, now: Instant);
     fn num_envelopes(&self) -> usize;
     fn drain_envelopes(&mut self) -> impl Iterator<Item = Envelope>;
     fn envelopes(&self) -> impl Iterator<Item = &Envelope>;
@@ -33,20 +37,31 @@ pub trait NodeCallerCtx: NodeCommonCtx {
 
 /// An API for an [`NodeCtx`] usable from inside FSM states
 pub trait NodeHandlerCtx: NodeCommonCtx {
-    fn send(&mut self, to: PlatformId, msg: PeerMsg);
+    fn send(&mut self, to: PlatformId, msg: PeerMsgKind);
 
     /// Attempt to update the persistent state inside the callback `f`. If
     /// the state is updated, then `f` should return `true`, otherwise it should
     /// return `false`.
+    ///
+    /// Returns the same value as `f`.
     ///
     /// IMPORTANT: This method sets a bit indicating whether or not the
     /// underlying `PersistentState` was mutated, for use by callers. This
     /// method can safely be called multiple times. If any call mutates the
     /// persistent state, then the bit will remain set. The bit is only cleared
     /// when a caller calls `persistent_state_change_check_and_reset`.
-    fn update_persistent_state<F>(&mut self, f: F)
+    fn update_persistent_state<F>(&mut self, f: F) -> bool
     where
         F: FnOnce(&mut PersistentState) -> bool;
+
+    /// Add a peer to the connected set
+    fn add_connection(&mut self, id: PlatformId);
+
+    /// Remove a peer from the connected set
+    fn remove_connection(&mut self, id: &PlatformId);
+
+    /// Record (in-memory) that an alarm has occurred
+    fn raise_alarm(&mut self, alarm: Alarm);
 }
 
 /// Common parameter to [`crate::Node`] methods
@@ -54,6 +69,8 @@ pub trait NodeHandlerCtx: NodeCommonCtx {
 /// We separate access to this context via different APIs; namely [`NodeCallerCtx`]
 /// and [`NodeHandlerCtx`]. This statically prevents both the caller and
 /// [`crate::Node`] internals from performing improper mutations.
+#[derive(Debug, Clone, Diffable)]
+#[cfg_attr(feature = "danger_partial_eq_ct_wrapper", derive(PartialEq, Eq))]
 pub struct NodeCtx {
     /// The unique hardware ID of a sled
     platform_id: PlatformId,
@@ -70,8 +87,39 @@ pub struct NodeCtx {
     /// Outgoing messages destined for other peers
     outgoing: Vec<Envelope>,
 
-    /// The current time
-    now: Instant,
+    /// Connected peer nodes
+    connected: BTreeSet<PlatformId>,
+
+    /// Any alarms that have occurred
+    alarms: BTreeSet<Alarm>,
+}
+
+// For diffs we want to allow access to all fields, but not make them public in
+// the `NodeCtx` type itself.
+impl<'daft> NodeCtxDiff<'daft> {
+    pub fn platform_id(&self) -> Leaf<&PlatformId> {
+        self.platform_id
+    }
+
+    pub fn persistent_state(&self) -> &PersistentStateDiff<'daft> {
+        &self.persistent_state
+    }
+
+    pub fn persistent_state_changed(&self) -> Leaf<&bool> {
+        self.persistent_state_changed
+    }
+
+    pub fn outgoing(&self) -> Leaf<&[Envelope]> {
+        self.outgoing
+    }
+
+    pub fn connected(&self) -> &BTreeSetDiff<'daft, PlatformId> {
+        &self.connected
+    }
+
+    pub fn alarms(&self) -> &BTreeSetDiff<'daft, Alarm> {
+        &self.alarms
+    }
 }
 
 impl NodeCtx {
@@ -81,7 +129,8 @@ impl NodeCtx {
             persistent_state: PersistentState::empty(),
             persistent_state_changed: false,
             outgoing: Vec::new(),
-            now: Instant::now(),
+            connected: BTreeSet::new(),
+            alarms: BTreeSet::new(),
         }
     }
 }
@@ -91,41 +140,57 @@ impl NodeCommonCtx for NodeCtx {
         &self.platform_id
     }
 
-    fn now(&self) -> Instant {
-        self.now
-    }
-
     fn persistent_state(&self) -> &PersistentState {
         &self.persistent_state
+    }
+
+    fn connected(&self) -> &BTreeSet<PlatformId> {
+        &self.connected
+    }
+
+    fn alarms(&self) -> &BTreeSet<Alarm> {
+        &self.alarms
     }
 }
 
 impl NodeHandlerCtx for NodeCtx {
-    fn send(&mut self, to: PlatformId, msg: PeerMsg) {
+    fn send(&mut self, to: PlatformId, msg_kind: PeerMsgKind) {
+        let rack_id = self.persistent_state.rack_id().expect("rack id exists");
         self.outgoing.push(Envelope {
             to,
             from: self.platform_id.clone(),
-            msg,
+            msg: PeerMsg { rack_id, kind: msg_kind },
         });
     }
 
-    fn update_persistent_state<F>(&mut self, f: F)
+    fn update_persistent_state<F>(&mut self, f: F) -> bool
     where
         F: FnOnce(&mut PersistentState) -> bool,
     {
         // We don't ever revert from true to false, which allows calling this
         // method multiple times in handler context.
         if f(&mut self.persistent_state) {
-            self.persistent_state_changed = true
+            self.persistent_state_changed = true;
+            true
+        } else {
+            false
         }
+    }
+
+    fn add_connection(&mut self, id: PlatformId) {
+        self.connected.insert(id);
+    }
+
+    fn remove_connection(&mut self, id: &PlatformId) {
+        self.connected.remove(id);
+    }
+
+    fn raise_alarm(&mut self, alarm: Alarm) {
+        self.alarms.insert(alarm);
     }
 }
 
 impl NodeCallerCtx for NodeCtx {
-    fn set_time(&mut self, now: Instant) {
-        self.now = now;
-    }
-
     fn num_envelopes(&self) -> usize {
         self.outgoing.len()
     }

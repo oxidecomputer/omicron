@@ -10,6 +10,7 @@
 mod address_lots;
 mod affinity;
 mod allow_list;
+mod audit_log;
 mod authn_http;
 mod authz;
 mod basic;
@@ -34,6 +35,7 @@ mod pantry;
 mod password_login;
 mod probe;
 mod projects;
+mod quiesce;
 mod quotas;
 mod rack;
 mod role_assignments;

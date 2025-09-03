@@ -52,6 +52,7 @@ use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use oxnet::Ipv6Net;
+use rand::seq::IndexedRandom;
 use sled_agent_types::rack_init::RecoverySiloConfig;
 use slog::{Drain, Logger, info};
 use std::collections::BTreeMap;
@@ -119,6 +120,12 @@ impl Server {
             dropshot_log,
         )
         .config(config.dropshot.clone())
+        .version_policy(dropshot::VersionPolicy::Dynamic(Box::new(
+            dropshot::ClientSpecifiesVersionInHeader::new(
+                omicron_common::api::VERSION_HEADER,
+                sled_agent_api::VERSION_ADD_SWITCH_ZONE_OPERATOR_POLICY,
+            ),
+        )))
         .start()
         .map_err(|error| anyhow!("initializing server: {}", error))?;
 
@@ -378,9 +385,8 @@ pub async fn run_standalone_server(
 
     let all_u2_zpools = server.sled_agent.get_zpools();
     let get_random_zpool = || {
-        use rand::seq::SliceRandom;
         let pool = all_u2_zpools
-            .choose(&mut rand::thread_rng())
+            .choose(&mut rand::rng())
             .expect("No external zpools found, but we need one");
         ZpoolName::new_external(ZpoolUuid::from_untyped_uuid(pool.id))
     };
@@ -447,6 +453,7 @@ pub async fn run_standalone_server(
                 },
                 external_tls: false,
                 external_dns_servers: vec![],
+                nexus_generation: Generation::new(),
             }),
             filesystem_pool: get_random_zpool(),
             image_source: BlueprintZoneImageSource::InstallDataset,

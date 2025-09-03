@@ -26,7 +26,7 @@ use omicron_common::address::{
     RSS_RESERVED_ADDRESSES, ReservedRackSubnet, SLED_PREFIX, get_sled_address,
     get_switch_zone_address,
 };
-use omicron_common::api::external::{MacAddr, Vni};
+use omicron_common::api::external::{Generation, MacAddr, Vni};
 use omicron_common::api::internal::shared::{
     NetworkInterface, NetworkInterfaceKind, SourceNatConfig,
     SourceNatConfigError,
@@ -48,7 +48,7 @@ use omicron_uuid_kinds::{
     DatasetUuid, ExternalIpUuid, GenericUuid, OmicronZoneUuid,
     PhysicalDiskUuid, SledUuid, ZpoolUuid,
 };
-use rand::prelude::SliceRandom;
+use rand::seq::IndexedRandom;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sled_agent_client::{
@@ -570,6 +570,7 @@ impl Plan {
                         // development that it might not be.
                         external_tls: !config.external_certificates.is_empty(),
                         external_dns_servers: config.dns_servers.clone(),
+                        nexus_generation: Generation::new(),
                     },
                 ),
                 filesystem_pool,
@@ -874,7 +875,7 @@ impl SledInfo {
 
     fn alloc_zpool_from_u2s(&self) -> Result<ZpoolName, PlanError> {
         self.u2_zpools
-            .choose(&mut rand::thread_rng())
+            .choose(&mut rand::rng())
             .map(|z| *z)
             .ok_or_else(|| PlanError::NotEnoughSleds)
     }

@@ -9,14 +9,10 @@ baseboards:
 cabooses:
     board "SimGimletSp" name "SimGimlet" version "0.0.1" git_commit "fefefefe" sign None
     board "SimGimletSp" name "SimGimlet" version "0.0.2" git_commit "ffffffff" sign None
-    board "SimRot" name "SimGimletRot" version "0.0.3" git_commit "edededed" sign Some("11594bb5548a757e918e6fe056e2ad9e084297c9555417a025d8788eacf55daf")
-    board "SimRot" name "SimSidecarRot" version "0.0.3" git_commit "edededed" sign Some("11594bb5548a757e918e6fe056e2ad9e084297c9555417a025d8788eacf55daf")
-    board "SimRot" name "SimGimletRot" version "0.0.4" git_commit "eeeeeeee" sign Some("11594bb5548a757e918e6fe056e2ad9e084297c9555417a025d8788eacf55daf")
-    board "SimRot" name "SimSidecarRot" version "0.0.4" git_commit "eeeeeeee" sign Some("11594bb5548a757e918e6fe056e2ad9e084297c9555417a025d8788eacf55daf")
-    board "SimRotStage0" name "SimGimletRot" version "0.0.200" git_commit "dadadadad" sign Some("11594bb5548a757e918e6fe056e2ad9e084297c9555417a025d8788eacf55daf")
-    board "SimRotStage0" name "SimSidecarRot" version "0.0.200" git_commit "dadadadad" sign Some("11594bb5548a757e918e6fe056e2ad9e084297c9555417a025d8788eacf55daf")
-    board "SimRotStage0" name "SimGimletRot" version "0.0.200" git_commit "ddddddddd" sign Some("11594bb5548a757e918e6fe056e2ad9e084297c9555417a025d8788eacf55daf")
-    board "SimRotStage0" name "SimSidecarRot" version "0.0.200" git_commit "ddddddddd" sign Some("11594bb5548a757e918e6fe056e2ad9e084297c9555417a025d8788eacf55daf")
+    board "SimRot" name "SimRot" version "0.0.200" git_commit "dadadadad" sign Some("11594bb5548a757e918e6fe056e2ad9e084297c9555417a025d8788eacf55daf")
+    board "SimRot" name "SimRot" version "0.0.200" git_commit "ddddddddd" sign Some("11594bb5548a757e918e6fe056e2ad9e084297c9555417a025d8788eacf55daf")
+    board "SimRot" name "SimRot" version "0.0.3" git_commit "edededed" sign Some("11594bb5548a757e918e6fe056e2ad9e084297c9555417a025d8788eacf55daf")
+    board "SimRot" name "SimRot" version "0.0.4" git_commit "eeeeeeee" sign Some("11594bb5548a757e918e6fe056e2ad9e084297c9555417a025d8788eacf55daf")
     board "SimSidecarSp" name "SimSidecar" version "0.0.1" git_commit "fefefefe" sign None
     board "SimSidecarSp" name "SimSidecar" version "0.0.2" git_commit "ffffffff" sign None
 
@@ -59,14 +55,14 @@ cabooses found:
     RotSlotB baseboard part "FAKE_SIM_SIDECAR" serial "SimSidecar1": board "SimRot"
     RotSlotB baseboard part "i86pc" serial "SimGimlet00": board "SimRot"
     RotSlotB baseboard part "i86pc" serial "SimGimlet01": board "SimRot"
-    Stage0 baseboard part "FAKE_SIM_SIDECAR" serial "SimSidecar0": board "SimRotStage0"
-    Stage0 baseboard part "FAKE_SIM_SIDECAR" serial "SimSidecar1": board "SimRotStage0"
-    Stage0 baseboard part "i86pc" serial "SimGimlet00": board "SimRotStage0"
-    Stage0 baseboard part "i86pc" serial "SimGimlet01": board "SimRotStage0"
-    Stage0Next baseboard part "FAKE_SIM_SIDECAR" serial "SimSidecar0": board "SimRotStage0"
-    Stage0Next baseboard part "FAKE_SIM_SIDECAR" serial "SimSidecar1": board "SimRotStage0"
-    Stage0Next baseboard part "i86pc" serial "SimGimlet00": board "SimRotStage0"
-    Stage0Next baseboard part "i86pc" serial "SimGimlet01": board "SimRotStage0"
+    Stage0 baseboard part "FAKE_SIM_SIDECAR" serial "SimSidecar0": board "SimRot"
+    Stage0 baseboard part "FAKE_SIM_SIDECAR" serial "SimSidecar1": board "SimRot"
+    Stage0 baseboard part "i86pc" serial "SimGimlet00": board "SimRot"
+    Stage0 baseboard part "i86pc" serial "SimGimlet01": board "SimRot"
+    Stage0Next baseboard part "FAKE_SIM_SIDECAR" serial "SimSidecar0": board "SimRot"
+    Stage0Next baseboard part "FAKE_SIM_SIDECAR" serial "SimSidecar1": board "SimRot"
+    Stage0Next baseboard part "i86pc" serial "SimGimlet00": board "SimRot"
+    Stage0Next baseboard part "i86pc" serial "SimGimlet01": board "SimRot"
 
 rot pages found:
     Cmpa baseboard part "FAKE_SIM_SIDECAR" serial "SimSidecar0": data_base64 "c2lkZWNhci1jbXBhAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
@@ -95,8 +91,14 @@ sled agents found:
         host_phase_2.slot_a: CurrentContents
         host_phase_2.slot_b: CurrentContents
         zone 8b88a56f-3eb6-4d80-ba42-75d867bc427d type oximeter
-    no completed reconciliation
-    reconciler task not yet run
+    last reconciled config:
+        generation: 3
+        remove_mupdate_override: None
+        host_phase_2.slot_a: CurrentContents
+        host_phase_2.slot_b: CurrentContents
+        zone 8b88a56f-3eb6-4d80-ba42-75d867bc427d type oximeter
+    result for zone 8b88a56f-3eb6-4d80-ba42-75d867bc427d: Ok
+    reconciler task idle
   sled 9cb9b78f-5614-440c-b66d-e8e81fab69b0 (Scrimlet)
     baseboard Some(BaseboardId { part_number: "sim-gimlet", serial_number: "sim-9cb9b78f-5614-440c-b66d-e8e81fab69b0" })
     ledgered sled config:
@@ -105,7 +107,13 @@ sled agents found:
         host_phase_2.slot_a: CurrentContents
         host_phase_2.slot_b: CurrentContents
         zone 5125277f-0988-490b-ac01-3bba20cc8f07 type oximeter
-    no completed reconciliation
-    reconciler task not yet run
+    last reconciled config:
+        generation: 3
+        remove_mupdate_override: None
+        host_phase_2.slot_a: CurrentContents
+        host_phase_2.slot_b: CurrentContents
+        zone 5125277f-0988-490b-ac01-3bba20cc8f07 type oximeter
+    result for zone 5125277f-0988-490b-ac01-3bba20cc8f07: Ok
+    reconciler task idle
 
 errors:

@@ -142,6 +142,6 @@ impl SledCpuFamily {
 
 impl std::fmt::Display for SledCpuFamily {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.as_str())
+        write!(f, "{}", self.as_str())
     }
 }

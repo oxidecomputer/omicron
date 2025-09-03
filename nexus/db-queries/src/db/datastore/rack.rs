@@ -5,8 +5,10 @@
 //! [`DataStore`] methods on [`Rack`]s.
 
 use super::DataStore;
-use super::SERVICE_IP_POOL_NAME;
+use super::SERVICE_IPV4_POOL_NAME;
+use super::SERVICE_IPV6_POOL_NAME;
 use super::dns::DnsVersionUpdateBuilder;
+use super::ip_pool::ServiceIpPools;
 use crate::authz;
 use crate::context::OpContext;
 use crate::db;
@@ -37,6 +39,7 @@ use nexus_db_lookup::DbConnection;
 use nexus_db_lookup::LookupPath;
 use nexus_db_model::IncompleteNetworkInterface;
 use nexus_db_model::InitialDnsGroup;
+use nexus_db_model::IpVersion;
 use nexus_db_model::PasswordHashString;
 use nexus_db_model::SiloUser;
 use nexus_db_model::SiloUserPasswordHash;
@@ -51,7 +54,6 @@ use nexus_types::deployment::OmicronZoneExternalIp;
 use nexus_types::deployment::blueprint_zone_type;
 use nexus_types::external_api::params as external_params;
 use nexus_types::external_api::shared;
-use nexus_types::external_api::shared::IdentityType;
 use nexus_types::external_api::shared::IpRange;
 use nexus_types::external_api::shared::SiloRole;
 use nexus_types::identity::Resource;
@@ -67,6 +69,7 @@ use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::UserId;
 use omicron_common::bail_unless;
 use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::SiloUserUuid;
 use omicron_uuid_kinds::SledUuid;
 use slog_error_chain::InlineErrorChain;
 use std::sync::{Arc, OnceLock};
@@ -449,7 +452,7 @@ impl DataStore {
         info!(log, "Created recovery silo");
 
         // Create the first user in the initial Recovery Silo
-        let silo_user_id = Uuid::new_v4();
+        let silo_user_id = SiloUserUuid::new_v4();
         let silo_user = SiloUser::new(
             db_silo.id(),
             silo_user_id,
@@ -492,11 +495,10 @@ impl DataStore {
         let (q1, q2) = Self::role_assignment_replace_visible_queries(
             opctx,
             &authz_silo,
-            &[shared::RoleAssignment {
-                identity_type: IdentityType::SiloUser,
-                identity_id: silo_user_id,
-                role_name: SiloRole::Admin,
-            }],
+            &[shared::RoleAssignment::for_silo_user(
+                silo_user_id,
+                SiloRole::Admin,
+            )],
         )
         .await
         .map_err(RackInitError::RoleAssignment)?;
@@ -513,7 +515,7 @@ impl DataStore {
         &self,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         log: &slog::Logger,
-        service_pool: &db::model::IpPool,
+        service_pools: &ServiceIpPools,
         zone_config: &BlueprintZoneConfig,
     ) -> Result<(), RackInitError> {
         // For services with external connectivity, we record their
@@ -607,6 +609,8 @@ impl DataStore {
             );
             return Ok(());
         };
+        let service_pool =
+            service_pools.pool_for_version(external_ip.ip_version().into());
         let db_ip = IncompleteExternalIp::for_omicron_zone(
             service_pool.id(),
             external_ip,
@@ -664,8 +668,10 @@ impl DataStore {
 
         opctx.authorize(authz::Action::CreateChild, &authz::FLEET).await?;
 
-        let (authz_service_pool, service_pool) =
-            self.ip_pools_service_lookup(&opctx).await?;
+        // We may need to populate external IP records for both IPv4 and IPv6
+        // service pools, so fetch both now.
+        let service_ip_pools =
+            self.ip_pools_service_lookup_both_versions(&opctx).await?;
 
         // NOTE: This operation could likely be optimized with a CTE, but given
         // the low-frequency of calls, this optimization has been deferred.
@@ -679,9 +685,7 @@ impl DataStore {
             .transaction(&conn, |conn| {
                 let err = err.clone();
                 let log = log.clone();
-                let authz_service_pool = authz_service_pool.clone();
                 let rack_init = rack_init.clone();
-                let service_pool = service_pool.clone();
                 async move {
                     let rack_id = rack_init.rack_id;
                     let blueprint = rack_init.blueprint;
@@ -723,15 +727,18 @@ impl DataStore {
                     // - Zpools
                     // - Datasets
                     // - A blueprint
+                    // - Nexus database access records
                     //
                     // Which RSS has already allocated during bootstrapping.
 
                     // Set up the IP pool for internal services.
                     for range in service_ip_pool_ranges {
+                        let service_pool = service_ip_pools.pool_for_range(&range);
                         Self::ip_pool_add_range_on_connection(
                             &conn,
                             opctx,
-                            &authz_service_pool,
+                            &service_pool.authz_pool,
+                            &service_pool.db_pool,
                             &range,
                         )
                         .await
@@ -787,12 +794,28 @@ impl DataStore {
                         DieselError::RollbackTransaction
                     })?;
 
+                    // Insert Nexus database access records
+                    self.initialize_nexus_access_from_blueprint_on_connection(
+                        &conn,
+                        blueprint.all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+                            .filter_map(|(_sled, zone_cfg)| {
+                                if zone_cfg.zone_type.is_nexus() {
+                                    Some(zone_cfg.id)
+                                } else {
+                                    None
+                                }
+                            }).collect(),
+                    ).await.map_err(|e| {
+                        err.set(RackInitError::BlueprintTargetSet(e)).unwrap();
+                        DieselError::RollbackTransaction
+                    })?;
+
                     // Allocate networking records for all services.
                     for (_, zone_config) in blueprint.all_omicron_zones(BlueprintZoneDisposition::is_in_service) {
                         self.rack_populate_service_networking_records(
                             &conn,
                             &log,
-                            &service_pool,
+                            &service_ip_pools,
                             zone_config,
                         )
                         .await
@@ -954,36 +977,54 @@ impl DataStore {
 
         self.rack_insert(opctx, &db::model::Rack::new(rack_id)).await?;
 
-        let internal_pool =
-            db::model::IpPool::new(&IdentityMetadataCreateParams {
-                name: SERVICE_IP_POOL_NAME.parse::<Name>().unwrap(),
-                description: String::from("IP Pool for Oxide Services"),
-            });
-
-        let internal_pool_id = internal_pool.id();
-
-        let internal_created = self
-            .ip_pool_create(opctx, internal_pool)
-            .await
-            .map(|_| true)
-            .or_else(|e| match e {
-                Error::ObjectAlreadyExists { .. } => Ok(false),
-                _ => Err(e),
-            })?;
-
-        // make default for the internal silo. only need to do this if
-        // the create went through, i.e., if it wasn't already there
-        if internal_created {
-            self.ip_pool_link_silo(
-                opctx,
-                db::model::IpPoolResource {
-                    ip_pool_id: internal_pool_id,
-                    resource_type: db::model::IpPoolResourceType::Silo,
-                    resource_id: INTERNAL_SILO_ID,
-                    is_default: true,
+        // Insert and link the services IP Pool for both IP versions.
+        for (version, name) in [
+            (IpVersion::V4, SERVICE_IPV4_POOL_NAME),
+            (IpVersion::V6, SERVICE_IPV6_POOL_NAME),
+        ] {
+            let internal_pool = db::model::IpPool::new(
+                &IdentityMetadataCreateParams {
+                    name: name.parse::<Name>().unwrap(),
+                    description: format!(
+                        "IP{version} IP Pool for Oxide Services"
+                    ),
                 },
-            )
-            .await?;
+                version,
+            );
+
+            let internal_pool_id = internal_pool.id();
+
+            let internal_created = self
+                .ip_pool_create(opctx, internal_pool)
+                .await
+                .map(|_| true)
+                .or_else(|e| match e {
+                    Error::ObjectAlreadyExists { .. } => Ok(false),
+                    _ => Err(e),
+                })?;
+
+            // make default for the internal silo. only need to do this if
+            // the create went through, i.e., if it wasn't already there
+            //
+            // TODO-completeness: We're linking both IP pools here, but only the
+            // IPv4 pool is set as a default. We need a way for the operator to
+            // control this, either at RSS or through the API. An alternative is
+            // to not set a default at all, even though both are linked.
+            //
+            // See https://github.com/oxidecomputer/omicron/issues/8884
+            if internal_created {
+                let is_default = matches!(version, IpVersion::V4);
+                self.ip_pool_link_silo(
+                    opctx,
+                    db::model::IpPoolResource {
+                        ip_pool_id: internal_pool_id,
+                        resource_type: db::model::IpPoolResourceType::Silo,
+                        resource_id: INTERNAL_SILO_ID,
+                        is_default,
+                    },
+                )
+                .await?;
+            }
         }
 
         Ok(())
@@ -1020,7 +1061,7 @@ mod test {
     };
     use nexus_types::deployment::{
         BlueprintZoneDisposition, BlueprintZoneImageSource,
-        OmicronZoneExternalSnatIp, OximeterReadMode,
+        OmicronZoneExternalSnatIp, OximeterReadMode, PlanningReport,
     };
     use nexus_types::external_api::shared::SiloIdentityMode;
     use nexus_types::external_api::views::SledState;
@@ -1028,6 +1069,7 @@ mod test {
     use nexus_types::internal_api::params::DnsRecord;
     use nexus_types::inventory::NetworkInterface;
     use nexus_types::inventory::NetworkInterfaceKind;
+    use omicron_common::address::NEXUS_OPTE_IPV6_SUBNET;
     use omicron_common::address::{
         DNS_OPTE_IPV4_SUBNET, NEXUS_OPTE_IPV4_SUBNET, NTP_OPTE_IPV4_SUBNET,
     };
@@ -1043,6 +1085,7 @@ mod test {
     use omicron_uuid_kinds::{SledUuid, TypedUuid};
     use oxnet::IpNet;
     use std::collections::{BTreeMap, HashMap};
+    use std::net::Ipv6Addr;
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
     use std::num::NonZeroU32;
 
@@ -1050,11 +1093,12 @@ mod test {
     // easily specify just the parts that they want.
     impl Default for RackInit {
         fn default() -> Self {
+            let blueprint_id = BlueprintUuid::new_v4();
             RackInit {
                 rack_id: Uuid::parse_str(nexus_test_utils::RACK_UUID).unwrap(),
                 rack_subnet: nexus_test_utils::RACK_SUBNET.parse().unwrap(),
                 blueprint: Blueprint {
-                    id: BlueprintUuid::new_v4(),
+                    id: blueprint_id,
                     sleds: BTreeMap::new(),
                     pending_mgs_updates: PendingMgsUpdates::new(),
                     cockroachdb_setting_preserve_downgrade:
@@ -1063,6 +1107,7 @@ mod test {
                     internal_dns_version: *Generation::new(),
                     external_dns_version: *Generation::new(),
                     target_release_minimum_generation: *Generation::new(),
+                    nexus_generation: *Generation::new(),
                     cockroachdb_fingerprint: String::new(),
                     clickhouse_cluster_config: None,
                     oximeter_read_version: *Generation::new(),
@@ -1070,6 +1115,7 @@ mod test {
                     time_created: Utc::now(),
                     creator: "test suite".to_string(),
                     comment: "test suite".to_string(),
+                    report: PlanningReport::new(blueprint_id),
                 },
                 physical_disks: vec![],
                 zpools: vec![],
@@ -1210,7 +1256,7 @@ mod test {
         let authz_silo_user = authz::SiloUser::new(
             authz_silo,
             silo_users[0].id(),
-            LookupType::ById(silo_users[0].id()),
+            LookupType::by_id(silo_users[0].id()),
         );
         let hash = datastore
             .silo_user_password_hash_fetch(&opctx, &authz_silo_user)
@@ -1486,6 +1532,7 @@ mod test {
                                 slot: 0,
                                 transit_ips: vec![],
                             },
+                            nexus_generation: *Generation::new(),
                         },
                     ),
                     image_source: BlueprintZoneImageSource::InstallDataset,
@@ -1545,8 +1592,9 @@ mod test {
             .into_iter()
             .collect(),
         );
+        let blueprint_id = BlueprintUuid::new_v4();
         let blueprint = Blueprint {
-            id: BlueprintUuid::new_v4(),
+            id: blueprint_id,
             sleds: make_sled_config_only_zones(blueprint_zones),
             pending_mgs_updates: PendingMgsUpdates::new(),
             cockroachdb_setting_preserve_downgrade:
@@ -1555,6 +1603,7 @@ mod test {
             internal_dns_version: *Generation::new(),
             external_dns_version: *Generation::new(),
             target_release_minimum_generation: *Generation::new(),
+            nexus_generation: *Generation::new(),
             cockroachdb_fingerprint: String::new(),
             clickhouse_cluster_config: None,
             oximeter_read_version: *Generation::new(),
@@ -1562,6 +1611,7 @@ mod test {
             time_created: now_db_precision(),
             creator: "test suite".to_string(),
             comment: "test blueprint".to_string(),
+            report: PlanningReport::new(blueprint_id),
         };
 
         let rack = datastore
@@ -1629,10 +1679,12 @@ mod test {
         assert_eq!(ntp2_external_ip.last_port.0, 16383);
 
         // Furthermore, we should be able to see that these IP addresses have
-        // been allocated as a part of the service IP pool.
-        let (.., svc_pool) =
-            datastore.ip_pools_service_lookup(&opctx).await.unwrap();
-        assert_eq!(svc_pool.name().as_str(), "oxide-service-pool");
+        // been allocated as a part of a service IP pool.
+        let (.., svc_pool) = datastore
+            .ip_pools_service_lookup(&opctx, IpVersion::V4)
+            .await
+            .unwrap();
+        assert_eq!(svc_pool.name().as_str(), SERVICE_IPV4_POOL_NAME);
 
         let observed_ip_pool_ranges = get_all_ip_pool_ranges(&datastore).await;
         assert_eq!(observed_ip_pool_ranges.len(), 1);
@@ -1740,6 +1792,7 @@ mod test {
                                 slot: 0,
                                 transit_ips: vec![],
                             },
+                            nexus_generation: *Generation::new(),
                         },
                     ),
                     image_source: BlueprintZoneImageSource::InstallDataset,
@@ -1773,6 +1826,7 @@ mod test {
                                 slot: 0,
                                 transit_ips: vec![],
                             },
+                            nexus_generation: *Generation::new(),
                         },
                     ),
                     image_source: BlueprintZoneImageSource::InstallDataset,
@@ -1806,8 +1860,9 @@ mod test {
             HashMap::from([("api.sys".to_string(), external_records.clone())]),
         );
 
+        let blueprint_id = BlueprintUuid::new_v4();
         let blueprint = Blueprint {
-            id: BlueprintUuid::new_v4(),
+            id: blueprint_id,
             sleds: make_sled_config_only_zones(blueprint_zones),
             pending_mgs_updates: PendingMgsUpdates::new(),
             cockroachdb_setting_preserve_downgrade:
@@ -1816,6 +1871,7 @@ mod test {
             internal_dns_version: *Generation::new(),
             external_dns_version: *Generation::new(),
             target_release_minimum_generation: *Generation::new(),
+            nexus_generation: *Generation::new(),
             cockroachdb_fingerprint: String::new(),
             clickhouse_cluster_config: None,
             oximeter_read_version: *Generation::new(),
@@ -1823,6 +1879,7 @@ mod test {
             time_created: now_db_precision(),
             creator: "test suite".to_string(),
             comment: "test blueprint".to_string(),
+            report: PlanningReport::new(blueprint_id),
         };
 
         let rack = datastore
@@ -1912,14 +1969,252 @@ mod test {
         );
 
         // Furthermore, we should be able to see that this IP addresses have been
-        // allocated as a part of the service IP pool.
-        let (.., svc_pool) =
-            datastore.ip_pools_service_lookup(&opctx).await.unwrap();
-        assert_eq!(svc_pool.name().as_str(), "oxide-service-pool");
+        // allocated as a part of a service IP pool.
+        let (.., svc_pool) = datastore
+            .ip_pools_service_lookup(&opctx, IpVersion::V4)
+            .await
+            .unwrap();
+        assert_eq!(svc_pool.name().as_str(), SERVICE_IPV4_POOL_NAME);
 
         let observed_ip_pool_ranges = get_all_ip_pool_ranges(&datastore).await;
         assert_eq!(observed_ip_pool_ranges.len(), 1);
         assert_eq!(observed_ip_pool_ranges[0].ip_pool_id, svc_pool.id());
+
+        let observed_datasets = get_all_crucible_datasets(&datastore).await;
+        assert!(observed_datasets.is_empty());
+
+        // Verify the internal and external DNS configurations.
+        let dns_config_internal = datastore
+            .dns_config_read(&opctx, DnsGroup::Internal)
+            .await
+            .unwrap();
+        assert_eq!(u64::from(dns_config_internal.generation), 1);
+        assert_eq!(dns_config_internal.zones.len(), 1);
+        assert_eq!(dns_config_internal.zones[0].zone_name, DNS_ZONE);
+        assert_eq!(
+            dns_config_internal.zones[0].records,
+            HashMap::from([("nexus".to_string(), internal_records)]),
+        );
+
+        let dns_config_external = datastore
+            .dns_config_read(&opctx, DnsGroup::External)
+            .await
+            .unwrap();
+        assert_eq!(u64::from(dns_config_external.generation), 2);
+        assert_eq!(dns_config_external.zones.len(), 1);
+        assert_eq!(
+            dns_config_external.zones[0].zone_name,
+            "test-suite.oxide.test",
+        );
+        assert_eq!(
+            dns_config_external.zones[0].records.get("api.sys"),
+            Some(&external_records)
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn rack_set_initialized_with_ipv6_public_addresses() {
+        let test_name = "rack_set_initialized_with_ipv6_public_addresses";
+        let logctx = dev::test_setup_log(test_name);
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let sled = create_test_sled(&datastore, Uuid::new_v4()).await;
+
+        // Ask for a Nexus service with an IPv6 address.
+        let nexus_ip_start =
+            Ipv6Addr::new(0xfd00, 0x1122, 0x3344, 0, 0, 0, 0, 1);
+        let nexus_ip_end =
+            Ipv6Addr::new(0xfd00, 0x1122, 0x3344, 0, 0, 0, 0, 10);
+        let service_ip_pool_ranges = vec![
+            IpRange::try_from((nexus_ip_start, nexus_ip_end))
+                .expect("Cannot create IP Range"),
+        ];
+
+        let mut system = SystemDescription::new();
+        system
+            .service_ip_pool_ranges(service_ip_pool_ranges.clone())
+            .sled(
+                SledBuilder::new().id(TypedUuid::from_untyped_uuid(sled.id())),
+            )
+            .expect("failed to add sled");
+
+        let nexus_id = OmicronZoneUuid::new_v4();
+        let nexus_pip = NEXUS_OPTE_IPV6_SUBNET
+            .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as u128 + 1)
+            .unwrap();
+        let mut macs = MacAddr::iter_system();
+
+        let mut blueprint_zones = BTreeMap::new();
+        blueprint_zones.insert(
+            SledUuid::from_untyped_uuid(sled.id()),
+            [BlueprintZoneConfig {
+                disposition: BlueprintZoneDisposition::InService,
+                id: nexus_id,
+                filesystem_pool: random_zpool(),
+                zone_type: BlueprintZoneType::Nexus(
+                    blueprint_zone_type::Nexus {
+                        internal_address: "[::1]:80".parse().unwrap(),
+                        external_ip: OmicronZoneExternalFloatingIp {
+                            id: ExternalIpUuid::new_v4(),
+                            ip: nexus_ip_start.into(),
+                        },
+                        external_tls: false,
+                        external_dns_servers: vec![],
+                        nic: NetworkInterface {
+                            id: Uuid::new_v4(),
+                            kind: NetworkInterfaceKind::Service {
+                                id: nexus_id.into_untyped_uuid(),
+                            },
+                            name: "nexus1".parse().unwrap(),
+                            ip: nexus_pip.into(),
+                            mac: macs.next().unwrap(),
+                            subnet: IpNet::from(*NEXUS_OPTE_IPV6_SUBNET),
+                            vni: Vni::SERVICES_VNI,
+                            primary: true,
+                            slot: 0,
+                            transit_ips: vec![],
+                        },
+                        nexus_generation: *Generation::new(),
+                    },
+                ),
+                image_source: BlueprintZoneImageSource::InstallDataset,
+            }]
+            .into_iter()
+            .collect::<IdMap<_>>(),
+        );
+
+        let datasets = vec![];
+
+        let internal_records = vec![
+            DnsRecord::Aaaa("fe80::1:2:3:4".parse().unwrap()),
+            DnsRecord::Aaaa("fe80::1:2:3:5".parse().unwrap()),
+        ];
+        let internal_dns = InitialDnsGroup::new(
+            DnsGroup::Internal,
+            DNS_ZONE,
+            "test suite",
+            "initial test suite internal rev",
+            HashMap::from([("nexus".to_string(), internal_records.clone())]),
+        );
+
+        let external_records =
+            vec![DnsRecord::Aaaa("fe80::5:6:7:8".parse().unwrap())];
+        let external_dns = InitialDnsGroup::new(
+            DnsGroup::External,
+            "test-suite.oxide.test",
+            "test suite",
+            "initial test suite external rev",
+            HashMap::from([("api.sys".to_string(), external_records.clone())]),
+        );
+
+        let blueprint_id = BlueprintUuid::new_v4();
+        let blueprint = Blueprint {
+            id: blueprint_id,
+            sleds: make_sled_config_only_zones(blueprint_zones),
+            pending_mgs_updates: PendingMgsUpdates::new(),
+            cockroachdb_setting_preserve_downgrade:
+                CockroachDbPreserveDowngrade::DoNotModify,
+            parent_blueprint_id: None,
+            internal_dns_version: *Generation::new(),
+            external_dns_version: *Generation::new(),
+            target_release_minimum_generation: *Generation::new(),
+            cockroachdb_fingerprint: String::new(),
+            clickhouse_cluster_config: None,
+            oximeter_read_version: *Generation::new(),
+            oximeter_read_mode: OximeterReadMode::SingleNode,
+            time_created: now_db_precision(),
+            creator: "test suite".to_string(),
+            comment: "test blueprint".to_string(),
+            report: PlanningReport::new(blueprint_id),
+            nexus_generation: *Generation::new(),
+        };
+
+        let rack = datastore
+            .rack_set_initialized(
+                &opctx,
+                RackInit {
+                    blueprint: blueprint.clone(),
+                    datasets: datasets.clone(),
+                    service_ip_pool_ranges,
+                    internal_dns,
+                    external_dns,
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect("Failed to initialize rack");
+
+        assert_eq!(rack.id(), rack_id());
+        assert!(rack.initialized);
+
+        // We should see the blueprint we passed in.
+        let (_blueprint_target, observed_blueprint) = datastore
+            .blueprint_target_get_current_full(&opctx)
+            .await
+            .expect("failed to read blueprint");
+        assert_eq!(observed_blueprint, blueprint);
+
+        // We should see the Nexus service we provisioned.
+        let mut observed_zones: Vec<_> = observed_blueprint
+            .all_omicron_zones(BlueprintZoneDisposition::any)
+            .map(|(_, z)| z)
+            .collect();
+        observed_zones.sort_by_key(|z| z.id);
+        assert_eq!(observed_zones.len(), 1);
+
+        // We should see the IP allocated for this service.
+        let observed_external_ips = get_all_external_ips(&datastore).await;
+        for external_ip in &observed_external_ips {
+            assert!(external_ip.is_service);
+            assert!(external_ip.parent_id.is_some());
+            assert_eq!(external_ip.kind, IpKind::Floating);
+        }
+        let observed_external_ips: HashMap<_, _> = observed_external_ips
+            .into_iter()
+            .map(|ip| (ip.parent_id.unwrap(), ip))
+            .collect();
+        assert_eq!(observed_external_ips.len(), 1);
+
+        // The address allocated for the service should match the input.
+        let actual_ip = observed_external_ips
+            [observed_zones[0].id.as_untyped_uuid()]
+        .ip
+        .ip();
+        assert_eq!(
+            actual_ip,
+            if let BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
+                external_ip,
+                ..
+            }) = &blueprint
+                .all_omicron_zones(BlueprintZoneDisposition::any)
+                .next()
+                .unwrap()
+                .1
+                .zone_type
+            {
+                external_ip.ip
+            } else {
+                panic!("Unexpected zone type")
+            }
+        );
+        assert_eq!(actual_ip, nexus_ip_start);
+
+        // Furthermore, we should be able to see that this IP address has been
+        // allocated as a part of a service IPv6 IP pool.
+        let (.., svc_pool) = datastore
+            .ip_pools_service_lookup(&opctx, IpVersion::V6)
+            .await
+            .unwrap();
+        assert_eq!(svc_pool.name().as_str(), SERVICE_IPV6_POOL_NAME);
+
+        let observed_ip_pool_ranges = get_all_ip_pool_ranges(&datastore).await;
+        assert_eq!(observed_ip_pool_ranges.len(), 1);
+        assert_eq!(observed_ip_pool_ranges[0].ip_pool_id, svc_pool.id());
+        assert_eq!(observed_ip_pool_ranges[0].first_address.ip(), actual_ip);
 
         let observed_datasets = get_all_crucible_datasets(&datastore).await;
         assert!(observed_datasets.is_empty());
@@ -2009,6 +2304,7 @@ mod test {
                             slot: 0,
                             transit_ips: vec![],
                         },
+                        nexus_generation: *Generation::new(),
                     },
                 ),
                 image_source: BlueprintZoneImageSource::InstallDataset,
@@ -2016,8 +2312,9 @@ mod test {
             .into_iter()
             .collect::<IdMap<_>>(),
         );
+        let blueprint_id = BlueprintUuid::new_v4();
         let blueprint = Blueprint {
-            id: BlueprintUuid::new_v4(),
+            id: blueprint_id,
             sleds: make_sled_config_only_zones(blueprint_zones),
             pending_mgs_updates: PendingMgsUpdates::new(),
             cockroachdb_setting_preserve_downgrade:
@@ -2026,6 +2323,7 @@ mod test {
             internal_dns_version: *Generation::new(),
             external_dns_version: *Generation::new(),
             target_release_minimum_generation: *Generation::new(),
+            nexus_generation: *Generation::new(),
             cockroachdb_fingerprint: String::new(),
             clickhouse_cluster_config: None,
             oximeter_read_version: *Generation::new(),
@@ -2033,6 +2331,7 @@ mod test {
             time_created: now_db_precision(),
             creator: "test suite".to_string(),
             comment: "test blueprint".to_string(),
+            report: PlanningReport::new(blueprint_id),
         };
 
         let result = datastore
@@ -2147,6 +2446,7 @@ mod test {
                                 slot: 0,
                                 transit_ips: vec![],
                             },
+                            nexus_generation: *Generation::new(),
                         },
                     ),
                     image_source: BlueprintZoneImageSource::InstallDataset,
@@ -2156,8 +2456,9 @@ mod test {
             .collect::<IdMap<_>>(),
         );
 
+        let blueprint_id = BlueprintUuid::new_v4();
         let blueprint = Blueprint {
-            id: BlueprintUuid::new_v4(),
+            id: blueprint_id,
             sleds: make_sled_config_only_zones(blueprint_zones),
             pending_mgs_updates: PendingMgsUpdates::new(),
             cockroachdb_setting_preserve_downgrade:
@@ -2166,6 +2467,7 @@ mod test {
             internal_dns_version: *Generation::new(),
             external_dns_version: *Generation::new(),
             target_release_minimum_generation: *Generation::new(),
+            nexus_generation: *Generation::new(),
             cockroachdb_fingerprint: String::new(),
             clickhouse_cluster_config: None,
             oximeter_read_version: *Generation::new(),
@@ -2173,6 +2475,7 @@ mod test {
             time_created: now_db_precision(),
             creator: "test suite".to_string(),
             comment: "test blueprint".to_string(),
+            report: PlanningReport::new(blueprint_id),
         };
 
         let result = datastore

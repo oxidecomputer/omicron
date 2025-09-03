@@ -47,8 +47,9 @@ use nexus_types::internal_api::params::SwitchPutRequest;
 use nexus_types::internal_api::params::SwitchPutResponse;
 use nexus_types::internal_api::views::BackgroundTask;
 use nexus_types::internal_api::views::DemoSaga;
-use nexus_types::internal_api::views::Ipv4NatEntryView;
 use nexus_types::internal_api::views::MgsUpdateDriverStatus;
+use nexus_types::internal_api::views::NatEntryView;
+use nexus_types::internal_api::views::QuiesceStatus;
 use nexus_types::internal_api::views::Saga;
 use nexus_types::internal_api::views::UpdateStatus;
 use nexus_types::internal_api::views::to_list;
@@ -681,7 +682,7 @@ impl NexusInternalApi for NexusInternalApiImpl {
         rqctx: RequestContext<Self::Context>,
         path_params: Path<RpwNatPathParam>,
         query_params: Query<RpwNatQueryParam>,
-    ) -> Result<HttpResponseOk<Vec<Ipv4NatEntryView>>, HttpError> {
+    ) -> Result<HttpResponseOk<Vec<NatEntryView>>, HttpError> {
         let apictx = &rqctx.context().context;
         let handler = async {
             let opctx =
@@ -691,7 +692,7 @@ impl NexusInternalApi for NexusInternalApiImpl {
             let query = query_params.into_inner();
             let mut changeset = nexus
                 .datastore()
-                .ipv4_nat_changeset(&opctx, path.from_gen, query.limit)
+                .nat_changeset(&opctx, path.from_gen, query.limit)
                 .await?;
             changeset.sort_by_key(|e| e.gen);
             Ok(HttpResponseOk(changeset))
@@ -1470,6 +1471,39 @@ impl NexusInternalApi for NexusInternalApiImpl {
                 )
                 .await?;
             Ok(HttpResponseUpdatedNoContent())
+        };
+        apictx
+            .internal_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn quiesce_start(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let apictx = &rqctx.context().context;
+        let nexus = &apictx.nexus;
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_internal_api(&rqctx).await;
+            nexus.quiesce_start(&opctx).await?;
+            Ok(HttpResponseUpdatedNoContent())
+        };
+        apictx
+            .internal_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn quiesce_get(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<QuiesceStatus>, HttpError> {
+        let apictx = &rqctx.context().context;
+        let nexus = &apictx.nexus;
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_internal_api(&rqctx).await;
+            Ok(HttpResponseOk(nexus.quiesce_state(&opctx).await?))
         };
         apictx
             .internal_latencies

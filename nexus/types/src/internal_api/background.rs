@@ -2,6 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use crate::deployment::PlanningReport;
 use crate::external_api::views;
 use chrono::DateTime;
 use chrono::Utc;
@@ -236,6 +237,24 @@ pub struct SupportBundleCollectionReport {
 
     /// True iff the bundle was successfully made 'active' in the database.
     pub activated_in_db_ok: bool,
+
+    /// Status of host OS ereport collection.
+    pub host_ereports: SupportBundleEreportStatus,
+
+    /// Status of SP ereport collection.
+    pub sp_ereports: SupportBundleEreportStatus,
+}
+
+#[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub enum SupportBundleEreportStatus {
+    /// Ereports were not requested for this bundle.
+    NotRequested,
+
+    /// Ereports were collected successfully.
+    Collected { n_collected: usize },
+
+    /// Ereport collection failed, though some ereports may have been written.
+    Failed { n_collected: usize, error: String },
 }
 
 impl SupportBundleCollectionReport {
@@ -245,6 +264,8 @@ impl SupportBundleCollectionReport {
             listed_in_service_sleds: false,
             listed_sps: false,
             activated_in_db_ok: false,
+            host_ereports: SupportBundleEreportStatus::NotRequested,
+            sp_ereports: SupportBundleEreportStatus::NotRequested,
         }
     }
 }
@@ -460,6 +481,7 @@ impl slog::KV for DebugDatasetsRendezvousStats {
 }
 
 /// The status of a `blueprint_planner` background task activation.
+#[allow(clippy::large_enum_variant)]
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub enum BlueprintPlannerStatus {
     /// Automatic blueprint planning has been explicitly disabled
@@ -479,7 +501,11 @@ pub enum BlueprintPlannerStatus {
 
     /// Planing succeeded, and we saved and made the new blueprint the
     /// current target.
-    Targeted { parent_blueprint_id: BlueprintUuid, blueprint_id: BlueprintUuid },
+    Targeted {
+        parent_blueprint_id: BlueprintUuid,
+        blueprint_id: BlueprintUuid,
+        report: PlanningReport,
+    },
 }
 
 /// The status of a `alert_dispatcher` background task activation.
@@ -555,6 +581,9 @@ pub struct ReadOnlyRegionReplacementStartStatus {
 
 #[derive(Serialize, Deserialize, Default, Debug, PartialEq, Eq)]
 pub struct SpEreportIngesterStatus {
+    /// If `true`, then ereport ingestion has been explicitly disabled by
+    /// the config file.
+    pub disabled: bool,
     pub sps: Vec<SpEreporterStatus>,
     pub errors: Vec<String>,
 }

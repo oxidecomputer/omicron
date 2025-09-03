@@ -4,11 +4,16 @@
 
 use std::{collections::HashMap, fmt};
 
-use iddqd::{IdOrdItem, IdOrdMap, id_upcast};
-use nexus_sled_agent_shared::inventory::{ZoneKind, ZoneManifestBootInventory};
+use anyhow::anyhow;
+use iddqd::{IdOrdItem, IdOrdMap, id_ord_map::RefMut, id_upcast};
+use nexus_sled_agent_shared::inventory::{
+    BootPartitionContents, BootPartitionDetails, ZoneKind,
+    ZoneManifestBootInventory,
+};
 use nexus_types::{
     deployment::{
-        BlueprintArtifactVersion, BlueprintZoneConfig,
+        BlueprintArtifactVersion, BlueprintHostPhase2DesiredContents,
+        BlueprintHostPhase2DesiredSlots, BlueprintZoneConfig,
         BlueprintZoneDisposition, BlueprintZoneImageSource, PlanningInput,
         SledFilter, TargetReleaseDescription,
     },
@@ -104,6 +109,15 @@ impl NoopConvertInfo {
                 })
                 .collect();
 
+            let host_phase_2 = NoopConvertHostPhase2Slots::new(
+                blueprint.current_sled_host_phase_2(sled_id)?,
+                inv_sled
+                    .last_reconciliation
+                    .as_ref()
+                    .map(|s| &s.boot_partitions),
+                &artifacts_by_hash,
+            );
+
             let status = if let Some(mupdate_override_id) =
                 blueprint.sled_get_remove_mupdate_override(sled_id)?
             {
@@ -111,11 +125,13 @@ impl NoopConvertInfo {
                     NoopConvertSledIneligibleReason::MupdateOverride {
                         mupdate_override_id,
                         zones,
+                        host_phase_2: Box::new(host_phase_2),
                     },
                 )
             } else {
                 NoopConvertSledStatus::Eligible(NoopConvertSledEligible {
                     zones,
+                    host_phase_2,
                 })
             };
 
@@ -145,9 +161,41 @@ impl NoopConvertInfo {
             }
         }
     }
+
+    /// Return a mutable reference to [`NoopConvertSledInfo`] for the given
+    /// sled.
+    ///
+    /// Returns `Err(Error::Planner)` if the sled ID wasn't found.
+    pub(crate) fn sled_info_mut(
+        &mut self,
+        sled_id: SledUuid,
+    ) -> Result<NoopConvertSledInfoMut<'_>, Error> {
+        match self {
+            Self::GlobalIneligible(_) => {
+                Ok(NoopConvertSledInfoMut::GlobalIneligible(
+                    NoopConvertGlobalIneligibleReason::NoTargetRelease,
+                ))
+            }
+            Self::GlobalEligible { sleds } => {
+                let Some(sled_info) = sleds.get_mut(&sled_id) else {
+                    return Err(Error::Planner(anyhow!(
+                        "tried to get noop convert zone info \
+                         for unknown sled {sled_id}"
+                    )));
+                };
+                Ok(NoopConvertSledInfoMut::Ok(sled_info))
+            }
+        }
+    }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
+pub(crate) enum NoopConvertSledInfoMut<'a> {
+    Ok(RefMut<'a, NoopConvertSledInfo>),
+    GlobalIneligible(NoopConvertGlobalIneligibleReason),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum NoopConvertGlobalIneligibleReason {
     /// No target release was set.
     NoTargetRelease,
@@ -208,6 +256,9 @@ impl NoopConvertSledStatus {
                     }
                     NoopConvertSledIneligibleReason::ManifestError {
                         ..
+                    }
+                    | NoopConvertSledIneligibleReason::MupdateOverrideError {
+                        ..
                     } => {
                         warn!(
                             log,
@@ -227,6 +278,7 @@ impl NoopConvertSledStatus {
 #[derive(Clone, Debug)]
 pub(crate) struct NoopConvertSledEligible {
     pub(crate) zones: IdOrdMap<NoopConvertZoneInfo>,
+    pub(crate) host_phase_2: NoopConvertHostPhase2Slots,
 }
 
 impl NoopConvertSledEligible {
@@ -239,7 +291,7 @@ impl NoopConvertSledEligible {
 
         info!(
             log,
-            "performed noop image source checks on sled";
+            "performed noop zone image source checks on sled";
             "num_total" => zone_counts.num_total,
             "num_already_artifact" => zone_counts.num_already_artifact,
             // Since mupdate_override_id is None, maybe-eligible zones are
@@ -251,10 +303,12 @@ impl NoopConvertSledEligible {
         for zone in &self.zones {
             zone.log_to(log);
         }
+
+        self.host_phase_2.log_to(log);
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct NoopConvertZoneCounts {
     pub(crate) num_total: usize,
     pub(crate) num_already_artifact: usize,
@@ -263,7 +317,7 @@ pub(crate) struct NoopConvertZoneCounts {
 }
 
 impl NoopConvertZoneCounts {
-    fn new(zones: &IdOrdMap<NoopConvertZoneInfo>) -> Self {
+    pub(crate) fn new(zones: &IdOrdMap<NoopConvertZoneInfo>) -> Self {
         let mut num_already_artifact = 0;
         let mut num_eligible = 0;
         let mut num_ineligible = 0;
@@ -295,7 +349,8 @@ impl NoopConvertZoneCounts {
     }
 }
 
-#[derive(Clone, Debug)]
+/// The reason a sled is ineligible for noop image source conversions.
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum NoopConvertSledIneligibleReason {
     /// This sled is missing from inventory.
     NotInInventory,
@@ -314,8 +369,21 @@ pub(crate) enum NoopConvertSledIneligibleReason {
         /// If the mupdate override is changed, a sled can transition from
         /// ineligible to eligible, or vice versa. We build and retain the zone
         /// map for easy state transitions.
-        #[expect(unused)]
         zones: IdOrdMap<NoopConvertZoneInfo>,
+
+        /// Information about host phase 2.
+        ///
+        /// Stored for reasons similar to `zones` above.
+        host_phase_2: Box<NoopConvertHostPhase2Slots>,
+    },
+
+    /// An error was obtained while retrieving mupdate override information.
+    ///
+    /// In this case, the system is in an indeterminate state: we do not alter
+    /// zone image sources in any way.
+    MupdateOverrideError {
+        /// The error message.
+        message: String,
     },
 }
 
@@ -333,11 +401,18 @@ impl fmt::Display for NoopConvertSledIneligibleReason {
                      ({mupdate_override_id})",
                 )
             }
+            Self::MupdateOverrideError { message } => {
+                write!(
+                    f,
+                    "error retrieving mupdate override information: {}",
+                    message
+                )
+            }
         }
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct NoopConvertZoneInfo {
     pub(crate) zone_id: OmicronZoneUuid,
     pub(crate) kind: ZoneKind,
@@ -492,16 +567,206 @@ impl IdOrdItem for NoopConvertZoneInfo {
     id_upcast!();
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum NoopConvertZoneStatus {
     AlreadyArtifact { version: BlueprintArtifactVersion, hash: ArtifactHash },
     Ineligible(NoopConvertZoneIneligibleReason),
     Eligible(BlueprintZoneImageSource),
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum NoopConvertZoneIneligibleReason {
     NotInManifest,
     ArtifactError { message: String },
+    NotInTufRepo { expected_hash: ArtifactHash },
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct NoopConvertHostPhase2Slots {
+    pub(crate) slot_a: NoopConvertHostPhase2Contents,
+    pub(crate) slot_b: NoopConvertHostPhase2Contents,
+}
+
+impl NoopConvertHostPhase2Slots {
+    fn new(
+        current: BlueprintHostPhase2DesiredSlots,
+        contents: Option<&BootPartitionContents>,
+        artifacts_by_hash: &HashMap<ArtifactHash, &TufArtifactMeta>,
+    ) -> Self {
+        Self {
+            slot_a: NoopConvertHostPhase2Contents::new(
+                current.slot_a,
+                contents.map(|c| &c.slot_a),
+                artifacts_by_hash,
+            ),
+            slot_b: NoopConvertHostPhase2Contents::new(
+                current.slot_b,
+                contents.map(|c| &c.slot_b),
+                artifacts_by_hash,
+            ),
+        }
+    }
+
+    /// Returns true if both slots are already set to Artifact.
+    pub(crate) fn both_already_artifact(&self) -> bool {
+        self.slot_a.is_already_artifact() && self.slot_b.is_already_artifact()
+    }
+
+    fn log_to(&self, log: &slog::Logger) {
+        {
+            let log = log.new(o!("slot" => "a"));
+            self.slot_a.log_to(&log);
+        }
+        {
+            let log = log.new(o!("slot" => "b"));
+            self.slot_b.log_to(&log);
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) enum NoopConvertHostPhase2Contents {
+    AlreadyArtifact { version: BlueprintArtifactVersion, hash: ArtifactHash },
+    Ineligible(NoopConvertHostPhase2IneligibleReason),
+    Eligible(BlueprintHostPhase2DesiredContents),
+}
+
+impl NoopConvertHostPhase2Contents {
+    fn new(
+        current: BlueprintHostPhase2DesiredContents,
+        details: Option<&Result<BootPartitionDetails, String>>,
+        artifacts_by_hash: &HashMap<ArtifactHash, &TufArtifactMeta>,
+    ) -> Self {
+        match current {
+            BlueprintHostPhase2DesiredContents::Artifact { version, hash } => {
+                // The desired contents are already set to Artifact, so no
+                // changes need to be made.
+                Self::AlreadyArtifact { version, hash }
+            }
+            BlueprintHostPhase2DesiredContents::CurrentContents => {
+                // Do the boot partition contents reported by inventory match
+                // what's in the TUF repo?
+                match details {
+                    Some(Ok(details)) => {
+                        // Use details.artifact_hash (which matches what's in
+                        // the TUF repo), NOT details.header.sha256 (which is
+                        // the hash of what comes after the header).
+                        if let Some(meta) =
+                            artifacts_by_hash.get(&details.artifact_hash)
+                        {
+                            let version = BlueprintArtifactVersion::Available {
+                                version: meta.id.version.clone(),
+                            };
+                            let desired =
+                                BlueprintHostPhase2DesiredContents::Artifact {
+                                    version,
+                                    hash: meta.hash,
+                                };
+                            Self::Eligible(desired)
+                        } else {
+                            Self::Ineligible(
+                                NoopConvertHostPhase2IneligibleReason::NotInTufRepo {
+                                    expected_hash: details.artifact_hash,
+                                }
+                            )
+                        }
+                    }
+                    Some(Err(error)) => Self::Ineligible(
+                        NoopConvertHostPhase2IneligibleReason::InventoryError {
+                            message: error.to_string(),
+                        },
+                    ),
+                    None => Self::Ineligible(
+                        NoopConvertHostPhase2IneligibleReason::NoInventory,
+                    ),
+                }
+            }
+        }
+    }
+
+    pub(crate) fn is_already_artifact(&self) -> bool {
+        matches!(self, Self::AlreadyArtifact { .. })
+    }
+
+    pub(crate) fn is_eligible(&self) -> bool {
+        matches!(self, Self::Eligible(_))
+    }
+
+    fn log_to(&self, log: &slog::Logger) {
+        match self {
+            Self::AlreadyArtifact { version, hash } => {
+                // Use debug to avoid spamming reconfigurator-cli output for
+                // this generally expected case.
+                debug!(
+                    log,
+                    "host phase 2 desired contents set to Artifact already";
+                    "version" => %version,
+                    "hash" => %hash,
+                );
+            }
+            Self::Eligible(new_desired_contents) => {
+                debug!(
+                    log,
+                    "host phase 2 desired contents may be eligible \
+                     for noop image source conversion";
+                    "new_desired_contents" => %new_desired_contents,
+                );
+            }
+            Self::Ineligible(
+                NoopConvertHostPhase2IneligibleReason::NoInventory,
+            ) => {
+                // This can happen at the very beginning of startup before the
+                // reconciler is first run.
+                warn!(
+                    log,
+                    "no BootPartitionDetails information available in inventory, \
+                     cannot perform noop checks",
+                );
+            }
+            Self::Ineligible(
+                NoopConvertHostPhase2IneligibleReason::InventoryError {
+                    message,
+                },
+            ) => {
+                warn!(
+                    log,
+                    "BootPartitionDetails inventory reported error, \
+                     cannot perform noop checks";
+                    "message" => %message,
+                );
+            }
+            Self::Ineligible(
+                NoopConvertHostPhase2IneligibleReason::NotInTufRepo {
+                    expected_hash,
+                },
+            ) => {
+                // If a MUPdate happens, sleds should all be MUPdated to the
+                // same version, so the TUF repo is expected to contain all the
+                // hashes. This isn't the case:
+                // * right after a MUPdate when the TUF repo hasn't been
+                //   uploaded yet
+                // * potentially on the non-boot disk?
+                //
+                // This isn't quite a warning or error case, so log this at the
+                // INFO level.
+                info!(
+                    log,
+                    "BootPartitionDetails inventory hash not found in TUF repo, \
+                     ignoring for noop checks";
+                    "expected_hash" => %expected_hash,
+                );
+            }
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) enum NoopConvertHostPhase2IneligibleReason {
+    /// Inventory was missing information about host phase 2 contents.
+    NoInventory,
+    /// Inventory reported an error while fetching host phase 2 contents.
+    InventoryError { message: String },
+    /// An artifact matching the host phase 2 contents was not found in the TUF
+    /// repository.
     NotInTufRepo { expected_hash: ArtifactHash },
 }

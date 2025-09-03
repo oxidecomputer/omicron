@@ -17,7 +17,7 @@ use crate::db::model::SpMgsSlot;
 use crate::db::model::SpType;
 use crate::db::model::SqlU16;
 use crate::db::model::SqlU32;
-use crate::db::pagination::paginated;
+use crate::db::pagination::{paginated, paginated_multicolumn};
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::DateTime;
 use chrono::Utc;
@@ -46,6 +46,44 @@ pub struct EreporterRestartBySerial {
     pub first_seen_at: DateTime<Utc>,
     pub reporter_kind: Reporter,
     pub ereports: u32,
+}
+
+/// A set of filters for fetching ereports.
+#[derive(Clone, Debug, Default)]
+pub struct EreportFilters {
+    /// If present, include only ereports that were collected at the specified
+    /// timestamp or later.
+    ///
+    /// If `end_time` is also present, this value *must* be earlier than
+    /// `end_time`.
+    pub start_time: Option<DateTime<Utc>>,
+    /// If present, include only ereports that were collected at the specified
+    /// timestamp or before.
+    ///
+    /// If `start_time` is also present, this value *must* be later than
+    /// `start_time`.
+    pub end_time: Option<DateTime<Utc>>,
+    /// If this list is non-empty, include only ereports that were reported by
+    /// systems with the provided serial numbers.
+    pub only_serials: Vec<String>,
+    /// If this list is non-empty, include only ereports with the provided class
+    /// strings.
+    // TODO(eliza): globbing could be nice to add here eventually...
+    pub only_classes: Vec<String>,
+}
+
+impl EreportFilters {
+    fn check_time_range(&self) -> Result<(), Error> {
+        if let (Some(start), Some(end)) = (self.start_time, self.end_time) {
+            if start > end {
+                return Err(Error::invalid_request(
+                    "start time must be before end time",
+                ));
+            }
+        }
+
+        Ok(())
+    }
 }
 
 impl DataStore {
@@ -91,6 +129,90 @@ impl DataStore {
         }
 
         Err(Error::non_resourcetype_not_found(format!("ereport {id}")))
+    }
+
+    pub async fn host_ereports_fetch_matching(
+        &self,
+        opctx: &OpContext,
+        filters: &EreportFilters,
+        pagparams: &DataPageParams<'_, (Uuid, DbEna)>,
+    ) -> ListResultVec<HostEreport> {
+        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+        filters.check_time_range()?;
+
+        let mut query = paginated_multicolumn(
+            host_dsl::host_ereport,
+            (host_dsl::restart_id, host_dsl::ena),
+            pagparams,
+        )
+        .filter(host_dsl::time_deleted.is_null())
+        .select(HostEreport::as_select());
+
+        if let Some(start) = filters.start_time {
+            query = query.filter(host_dsl::time_collected.ge(start));
+        }
+
+        if let Some(end) = filters.end_time {
+            query = query.filter(host_dsl::time_collected.le(end));
+        }
+
+        if !filters.only_serials.is_empty() {
+            query = query.filter(
+                host_dsl::sled_serial.eq_any(filters.only_serials.clone()),
+            );
+        }
+
+        if !filters.only_classes.is_empty() {
+            query = query
+                .filter(host_dsl::class.eq_any(filters.only_classes.clone()));
+        }
+
+        query
+            .load_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    pub async fn sp_ereports_fetch_matching(
+        &self,
+        opctx: &OpContext,
+        filters: &EreportFilters,
+        pagparams: &DataPageParams<'_, (Uuid, DbEna)>,
+    ) -> ListResultVec<SpEreport> {
+        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+        filters.check_time_range()?;
+
+        let mut query = paginated_multicolumn(
+            sp_dsl::sp_ereport,
+            (sp_dsl::restart_id, sp_dsl::ena),
+            pagparams,
+        )
+        .filter(sp_dsl::time_deleted.is_null())
+        .select(SpEreport::as_select());
+
+        if let Some(start) = filters.start_time {
+            query = query.filter(sp_dsl::time_collected.ge(start));
+        }
+
+        if let Some(end) = filters.end_time {
+            query = query.filter(sp_dsl::time_collected.le(end));
+        }
+
+        if !filters.only_serials.is_empty() {
+            query = query.filter(
+                sp_dsl::serial_number.eq_any(filters.only_serials.clone()),
+            );
+        }
+
+        if !filters.only_classes.is_empty() {
+            query = query
+                .filter(sp_dsl::class.eq_any(filters.only_classes.clone()));
+        }
+
+        query
+            .load_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     /// List ereports from the SP with the given restart ID.
@@ -144,7 +266,7 @@ impl DataStore {
                 EreporterRestartBySerial {
                     id: EreporterRestartUuid::from_untyped_uuid(restart_id),
                     reporter_kind: Reporter::Sp {
-                        sp_type,
+                        sp_type: sp_type.into(),
                         slot: sp_slot.into(),
                     },
                     first_seen_at: first_seen.expect(FIRST_SEEN_NOT_NULL),
@@ -261,8 +383,20 @@ impl DataStore {
         sled_id: SledUuid,
     ) -> Result<Option<ereport_types::EreportId>, Error> {
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+        self.host_latest_ereport_id_on_conn(
+            &*self.pool_connection_authorized(opctx).await?,
+            sled_id,
+        )
+        .await
+    }
+
+    async fn host_latest_ereport_id_on_conn(
+        &self,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        sled_id: SledUuid,
+    ) -> Result<Option<ereport_types::EreportId>, Error> {
         let id = Self::host_latest_ereport_id_query(sled_id)
-            .get_result_async(&*self.pool_connection_authorized(opctx).await?)
+            .get_result_async(conn)
             .await
             .optional()
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?
@@ -310,6 +444,35 @@ impl DataStore {
             .map_err(|e| {
                 e.internal_context(format!(
                     "failed to refresh latest ereport ID for {sp_type:?} {slot}"
+                ))
+            })?;
+        Ok((created, latest))
+    }
+
+    pub async fn host_ereports_insert(
+        &self,
+        opctx: &OpContext,
+        sled_id: SledUuid,
+        ereports: Vec<HostEreport>,
+    ) -> CreateResult<(usize, Option<ereport_types::EreportId>)> {
+        opctx.authorize(authz::Action::CreateChild, &authz::FLEET).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
+        let created = diesel::insert_into(host_dsl::host_ereport)
+            .values(ereports)
+            .on_conflict((host_dsl::restart_id, host_dsl::ena))
+            .do_nothing()
+            .execute_async(&*conn)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(e, ErrorHandler::Server)
+                    .internal_context("failed to insert ereports")
+            })?;
+        let latest = self
+            .host_latest_ereport_id_on_conn(&conn, sled_id)
+            .await
+            .map_err(|e| {
+                e.internal_context(format!(
+                    "failed to refresh latest ereport ID for {sled_id}"
                 ))
             })?;
         Ok((created, latest))

@@ -4,8 +4,10 @@
 
 //! Developer tool for running MGS.
 
+use camino::Utf8PathBuf;
 use clap::{Args, Parser, Subcommand};
 use futures::StreamExt;
+use gateway_test_utils::setup::DEFAULT_SP_SIM_CONFIG;
 use libc::SIGINT;
 use signal_hook_tokio::Signals;
 use std::net::SocketAddr;
@@ -43,6 +45,9 @@ struct MgsRunArgs {
     /// Oximeter producer.
     #[clap(long)]
     nexus_address: Option<SocketAddr>,
+    /// Override the sp-sim configuration file.
+    #[clap(long, default_value = DEFAULT_SP_SIM_CONFIG)]
+    sp_sim_config_file: Utf8PathBuf,
 }
 
 impl MgsRunArgs {
@@ -54,7 +59,9 @@ impl MgsRunArgs {
 
         println!("mgs-dev: setting up MGS ... ");
         let (mut mgs_config, sp_sim_config) =
-            gateway_test_utils::setup::load_test_config();
+            gateway_test_utils::setup::load_test_config(
+                self.sp_sim_config_file.clone(),
+            );
         if let Some(addr) = self.nexus_address {
             mgs_config.metrics =
                 Some(gateway_test_utils::setup::MetricsConfig {
@@ -74,8 +81,7 @@ impl MgsRunArgs {
         .await;
         println!("mgs-dev: MGS is running.");
 
-        let addr = gwtestctx.client.bind_address;
-        println!("mgs-dev: MGS API: http://{:?}", addr);
+        println!("mgs-dev: MGS API: {}", gwtestctx.client.baseurl());
 
         // Wait for a signal.
         let caught_signal = signal_stream.next().await;

@@ -58,6 +58,7 @@ use nexus_types::{
 use omicron_common::api::external::AddressLot;
 use omicron_common::api::external::AddressLotBlock;
 use omicron_common::api::external::AddressLotCreateResponse;
+use omicron_common::api::external::AddressLotViewResponse;
 use omicron_common::api::external::AffinityGroupMember;
 use omicron_common::api::external::AggregateBgpMessageHistory;
 use omicron_common::api::external::AntiAffinityGroupMember;
@@ -661,7 +662,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             Ok(HttpResponseOk(ScanById::results_page(
                 &query,
                 users,
-                &|_, user: &User| user.id,
+                &|_, user: &User| user.id.into_untyped_uuid(),
             )?))
         };
         apictx
@@ -921,13 +922,23 @@ impl NexusExternalApi for NexusExternalApiImpl {
         new_project: TypedBody<params::ProjectCreate>,
     ) -> Result<HttpResponseCreated<Project>, HttpError> {
         let apictx = rqctx.context();
-        let nexus = &apictx.context.nexus;
         let handler = async {
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
-            let project =
-                nexus.project_create(&opctx, &new_project.into_inner()).await?;
-            Ok(HttpResponseCreated(project.into()))
+            let nexus = &apictx.context.nexus;
+            let audit = nexus.audit_log_entry_init(&opctx, &rqctx).await?;
+
+            let result = async {
+                let project = nexus
+                    .project_create(&opctx, &new_project.into_inner())
+                    .await?;
+                Ok(HttpResponseCreated(project.into()))
+            }
+            .await;
+
+            let _ =
+                nexus.audit_log_entry_complete(&opctx, &audit, &result).await;
+            result
         };
         apictx
             .context
@@ -964,17 +975,26 @@ impl NexusExternalApi for NexusExternalApiImpl {
         path_params: Path<params::ProjectPath>,
     ) -> Result<HttpResponseDeleted, HttpError> {
         let apictx = rqctx.context();
-        let nexus = &apictx.context.nexus;
-        let path = path_params.into_inner();
         let handler = async {
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
-            let project_selector =
-                params::ProjectSelector { project: path.project };
-            let project_lookup =
-                nexus.project_lookup(&opctx, project_selector)?;
-            nexus.project_delete(&opctx, &project_lookup).await?;
-            Ok(HttpResponseDeleted())
+            let nexus = &apictx.context.nexus;
+            let audit = nexus.audit_log_entry_init(&opctx, &rqctx).await?;
+
+            let result = async {
+                let path = path_params.into_inner();
+                let project_selector =
+                    params::ProjectSelector { project: path.project };
+                let project_lookup =
+                    nexus.project_lookup(&opctx, project_selector)?;
+                nexus.project_delete(&opctx, &project_lookup).await?;
+                Ok(HttpResponseDeleted())
+            }
+            .await;
+
+            let _ =
+                nexus.audit_log_entry_complete(&opctx, &audit, &result).await;
+            result
         };
         apictx
             .context
@@ -1852,13 +1872,22 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
             let nexus = &apictx.context.nexus;
-            let query = query_params.into_inner();
-            let params = new_disk.into_inner();
-            let project_lookup = nexus.project_lookup(&opctx, query)?;
-            let disk = nexus
-                .project_create_disk(&opctx, &project_lookup, &params)
-                .await?;
-            Ok(HttpResponseCreated(disk.into()))
+            let audit = nexus.audit_log_entry_init(&opctx, &rqctx).await?;
+
+            let result = async {
+                let query = query_params.into_inner();
+                let params = new_disk.into_inner();
+                let project_lookup = nexus.project_lookup(&opctx, query)?;
+                let disk = nexus
+                    .project_create_disk(&opctx, &project_lookup, &params)
+                    .await?;
+                Ok(HttpResponseCreated(disk.into()))
+            }
+            .await;
+
+            let _ =
+                nexus.audit_log_entry_complete(&opctx, &audit, &result).await;
+            result
         };
         apictx
             .context
@@ -1904,61 +1933,24 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
             let nexus = &apictx.context.nexus;
-            let path = path_params.into_inner();
-            let query = query_params.into_inner();
-            let disk_selector = params::DiskSelector {
-                disk: path.disk,
-                project: query.project,
-            };
-            let disk_lookup = nexus.disk_lookup(&opctx, disk_selector)?;
-            nexus.project_delete_disk(&opctx, &disk_lookup).await?;
-            Ok(HttpResponseDeleted())
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
-    }
+            let audit = nexus.audit_log_entry_init(&opctx, &rqctx).await?;
 
-    async fn disk_metrics_list(
-        rqctx: RequestContext<ApiContext>,
-        path_params: Path<params::DiskMetricsPath>,
-        query_params: Query<
-            PaginationParams<params::ResourceMetrics, params::ResourceMetrics>,
-        >,
-        selector_params: Query<params::OptionalProjectSelector>,
-    ) -> Result<HttpResponseOk<ResultsPage<oximeter_db::Measurement>>, HttpError>
-    {
-        let apictx = rqctx.context();
-        let handler = async {
-            let nexus = &apictx.context.nexus;
-            let path = path_params.into_inner();
-            let query = query_params.into_inner();
+            let result = async {
+                let path = path_params.into_inner();
+                let query = query_params.into_inner();
+                let disk_selector = params::DiskSelector {
+                    disk: path.disk,
+                    project: query.project,
+                };
+                let disk_lookup = nexus.disk_lookup(&opctx, disk_selector)?;
+                nexus.project_delete_disk(&opctx, &disk_lookup).await?;
+                Ok(HttpResponseDeleted())
+            }
+            .await;
 
-            let selector = selector_params.into_inner();
-            let limit = rqctx.page_limit(&query)?;
-            let disk_selector = params::DiskSelector {
-                disk: path.disk,
-                project: selector.project,
-            };
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-            let (.., authz_disk) = nexus
-                .disk_lookup(&opctx, disk_selector)?
-                .lookup_for(authz::Action::Read)
-                .await?;
-
-            let result = nexus
-                .select_timeseries(
-                    &format!("crucible_upstairs:{}", path.metric),
-                    &[&format!("upstairs_uuid=={}", authz_disk.id())],
-                    query,
-                    limit,
-                )
-                .await?;
-
-            Ok(HttpResponseOk(result))
+            let _ =
+                nexus.audit_log_entry_complete(&opctx, &audit, &result).await;
+            result
         };
         apictx
             .context
@@ -2132,22 +2124,31 @@ impl NexusExternalApi for NexusExternalApiImpl {
         new_instance: TypedBody<params::InstanceCreate>,
     ) -> Result<HttpResponseCreated<Instance>, HttpError> {
         let apictx = rqctx.context();
-        let nexus = &apictx.context.nexus;
-        let project_selector = query_params.into_inner();
-        let new_instance_params = &new_instance.into_inner();
         let handler = async {
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
-            let project_lookup =
-                nexus.project_lookup(&opctx, project_selector)?;
-            let instance = nexus
-                .project_create_instance(
-                    &opctx,
-                    &project_lookup,
-                    &new_instance_params,
-                )
-                .await?;
-            Ok(HttpResponseCreated(instance.into()))
+            let nexus = &apictx.context.nexus;
+            let audit = nexus.audit_log_entry_init(&opctx, &rqctx).await?;
+
+            let result = async {
+                let project_selector = query_params.into_inner();
+                let new_instance_params = &new_instance.into_inner();
+                let project_lookup =
+                    nexus.project_lookup(&opctx, project_selector)?;
+                let instance = nexus
+                    .project_create_instance(
+                        &opctx,
+                        &project_lookup,
+                        &new_instance_params,
+                    )
+                    .await?;
+                Ok(HttpResponseCreated(instance.into()))
+            }
+            .await;
+
+            let _ =
+                nexus.audit_log_entry_complete(&opctx, &audit, &result).await;
+            result
         };
         apictx
             .context
@@ -2195,20 +2196,31 @@ impl NexusExternalApi for NexusExternalApiImpl {
         path_params: Path<params::InstancePath>,
     ) -> Result<HttpResponseDeleted, HttpError> {
         let apictx = rqctx.context();
-        let nexus = &apictx.context.nexus;
-        let path = path_params.into_inner();
-        let query = query_params.into_inner();
-        let instance_selector = params::InstanceSelector {
-            project: query.project,
-            instance: path.instance,
-        };
         let handler = async {
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
-            let instance_lookup =
-                nexus.instance_lookup(&opctx, instance_selector)?;
-            nexus.project_destroy_instance(&opctx, &instance_lookup).await?;
-            Ok(HttpResponseDeleted())
+            let nexus = &apictx.context.nexus;
+            let audit = nexus.audit_log_entry_init(&opctx, &rqctx).await?;
+
+            let result = async {
+                let path = path_params.into_inner();
+                let query = query_params.into_inner();
+                let instance_selector = params::InstanceSelector {
+                    project: query.project,
+                    instance: path.instance,
+                };
+                let instance_lookup =
+                    nexus.instance_lookup(&opctx, instance_selector)?;
+                nexus
+                    .project_destroy_instance(&opctx, &instance_lookup)
+                    .await?;
+                Ok(HttpResponseDeleted())
+            }
+            .await;
+
+            let _ =
+                nexus.audit_log_entry_complete(&opctx, &audit, &result).await;
+            result
         };
         apictx
             .context
@@ -3468,6 +3480,36 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
+    async fn networking_address_lot_view(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<params::AddressLotPath>,
+    ) -> Result<HttpResponseOk<AddressLotViewResponse>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let nexus = &apictx.context.nexus;
+            let path = path_params.into_inner();
+            let lookup = nexus.address_lot_lookup(&opctx, path.address_lot)?;
+            let (.., lot) = lookup.fetch().await?;
+            let blocks = nexus
+                .address_lot_block_list(&opctx, &lookup, None)
+                .await?
+                .into_iter()
+                .map(|p| p.into())
+                .collect();
+            Ok(HttpResponseOk(AddressLotViewResponse {
+                lot: lot.into(),
+                blocks,
+            }))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
     async fn networking_address_lot_delete(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::AddressLotPath>,
@@ -3539,7 +3581,11 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let address_lot_lookup =
                 nexus.address_lot_lookup(&opctx, path.address_lot)?;
             let blocks = nexus
-                .address_lot_block_list(&opctx, &address_lot_lookup, &pagparams)
+                .address_lot_block_list(
+                    &opctx,
+                    &address_lot_lookup,
+                    Some(&pagparams),
+                )
                 .await?
                 .into_iter()
                 .map(|p| p.into())
@@ -6525,7 +6571,11 @@ impl NexusExternalApi for NexusExternalApiImpl {
             nexus
                 .timeseries_query(&opctx, &query)
                 .await
-                .map(|tables| HttpResponseOk(views::OxqlQueryResult { tables }))
+                .map(|tables| {
+                    HttpResponseOk(views::OxqlQueryResult {
+                        tables: tables.into_iter().map(Into::into).collect(),
+                    })
+                })
                 .map_err(HttpError::from)
         };
         apictx
@@ -6552,7 +6602,11 @@ impl NexusExternalApi for NexusExternalApiImpl {
             nexus
                 .timeseries_query_project(&opctx, &project_lookup, &query)
                 .await
-                .map(|tables| HttpResponseOk(views::OxqlQueryResult { tables }))
+                .map(|tables| {
+                    HttpResponseOk(views::OxqlQueryResult {
+                        tables: tables.into_iter().map(Into::into).collect(),
+                    })
+                })
                 .map_err(HttpError::from)
         };
         apictx
@@ -6850,7 +6904,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             Ok(HttpResponseOk(ScanById::results_page(
                 &query,
                 users.into_iter().map(|i| i.into()).collect(),
-                &|_, user: &User| user.id,
+                &|_, user: &User| user.id.into_untyped_uuid(),
             )?))
         };
         apictx
@@ -6997,7 +7051,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             Ok(HttpResponseOk(ScanById::results_page(
                 &query,
                 groups,
-                &|_, group: &Group| group.id,
+                &|_, group: &Group| group.id.into_untyped_uuid(),
             )?))
         };
         apictx
@@ -7095,10 +7149,31 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
             let user = nexus.silo_user_fetch_self(&opctx).await?;
-            let (_, silo) = nexus.current_silo_lookup(&opctx)?.fetch().await?;
+            let (authz_silo, silo) =
+                nexus.current_silo_lookup(&opctx)?.fetch().await?;
+
+            // only eat Forbidden errors indicating lack of perms. other errors
+            // blow up normally
+            let fleet_viewer =
+                match opctx.authorize(authz::Action::Read, &authz::FLEET).await
+                {
+                    Ok(()) => true,
+                    Err(Error::Forbidden) => false,
+                    Err(e) => return Err(e.into()),
+                };
+            let silo_admin =
+                match opctx.authorize(authz::Action::Modify, &authz_silo).await
+                {
+                    Ok(()) => true,
+                    Err(Error::Forbidden) => false,
+                    Err(e) => return Err(e.into()),
+                };
+
             Ok(HttpResponseOk(views::CurrentUser {
                 user: user.into(),
                 silo_name: silo.name().clone(),
+                fleet_viewer,
+                silo_admin,
             }))
         };
         apictx
@@ -7130,7 +7205,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             Ok(HttpResponseOk(ScanById::results_page(
                 &query,
                 groups,
-                &|_, group: &views::Group| group.id,
+                &|_, group: &views::Group| group.id.into_untyped_uuid(),
             )?))
         };
         apictx
@@ -7157,12 +7232,23 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .authn
                 .actor_required()
                 .internal_context("listing current user's ssh keys")?;
+
+            let silo_user_id = match actor.silo_user_id() {
+                Some(silo_user_id) => silo_user_id,
+                None => {
+                    return Err(Error::non_resourcetype_not_found(
+                        "could not find silo user",
+                    ))?;
+                }
+            };
+
             let ssh_keys = nexus
-                .ssh_keys_list(&opctx, actor.actor_id(), &paginated_by)
+                .ssh_keys_list(&opctx, silo_user_id, &paginated_by)
                 .await?
                 .into_iter()
                 .map(SshKey::from)
                 .collect::<Vec<SshKey>>();
+
             Ok(HttpResponseOk(ScanByNameOrId::results_page(
                 &query,
                 ssh_keys,
@@ -7189,9 +7275,20 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .authn
                 .actor_required()
                 .internal_context("creating ssh key for current user")?;
+
+            let silo_user_id = match actor.silo_user_id() {
+                Some(silo_user_id) => silo_user_id,
+                None => {
+                    return Err(Error::non_resourcetype_not_found(
+                        "could not find silo user",
+                    ))?;
+                }
+            };
+
             let ssh_key = nexus
-                .ssh_key_create(&opctx, actor.actor_id(), new_key.into_inner())
+                .ssh_key_create(&opctx, silo_user_id, new_key.into_inner())
                 .await?;
+
             Ok(HttpResponseCreated(ssh_key.into()))
         };
         apictx
@@ -7215,15 +7312,24 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .authn
                 .actor_required()
                 .internal_context("fetching one of current user's ssh keys")?;
-            let ssh_key_selector = params::SshKeySelector {
-                silo_user_id: actor.actor_id(),
-                ssh_key: path.ssh_key,
+
+            let silo_user_id = match actor.silo_user_id() {
+                Some(silo_user_id) => silo_user_id,
+                None => {
+                    return Err(Error::non_resourcetype_not_found(
+                        "could not find silo user",
+                    ))?;
+                }
             };
+
+            let ssh_key_selector =
+                params::SshKeySelector { silo_user_id, ssh_key: path.ssh_key };
+
             let ssh_key_lookup =
                 nexus.ssh_key_lookup(&opctx, &ssh_key_selector)?;
-            let (.., silo_user, _, ssh_key) = ssh_key_lookup.fetch().await?;
-            // Ensure the SSH key exists in the current silo
-            assert_eq!(silo_user.id(), actor.actor_id());
+
+            let (.., ssh_key) = ssh_key_lookup.fetch().await?;
+
             Ok(HttpResponseOk(ssh_key.into()))
         };
         apictx
@@ -7247,15 +7353,24 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .authn
                 .actor_required()
                 .internal_context("deleting one of current user's ssh keys")?;
-            let ssh_key_selector = params::SshKeySelector {
-                silo_user_id: actor.actor_id(),
-                ssh_key: path.ssh_key,
+
+            let silo_user_id = match actor.silo_user_id() {
+                Some(silo_user_id) => silo_user_id,
+                None => {
+                    return Err(Error::non_resourcetype_not_found(
+                        "could not find silo user",
+                    ))?;
+                }
             };
+
+            let ssh_key_selector =
+                params::SshKeySelector { silo_user_id, ssh_key: path.ssh_key };
+
             let ssh_key_lookup =
                 nexus.ssh_key_lookup(&opctx, &ssh_key_selector)?;
-            nexus
-                .ssh_key_delete(&opctx, actor.actor_id(), &ssh_key_lookup)
-                .await?;
+
+            nexus.ssh_key_delete(&opctx, silo_user_id, &ssh_key_lookup).await?;
+
             Ok(HttpResponseDeleted())
         };
         apictx
@@ -7764,6 +7879,47 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
+    async fn audit_log_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedByTimeAndId<params::AuditLog>>,
+    ) -> Result<HttpResponseOk<ResultsPage<views::AuditLogEntry>>, HttpError>
+    {
+        let apictx = rqctx.context();
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+
+            let nexus = &apictx.context.nexus;
+            let query = query_params.into_inner();
+            let scan_params = ScanByTimeAndId::from_query(&query)?;
+            let pag_params = data_page_params_for(&rqctx, &query)?;
+
+            let log_entries = nexus
+                .audit_log_list(
+                    &opctx,
+                    &pag_params,
+                    scan_params.selector.start_time,
+                    scan_params.selector.end_time,
+                )
+                .await?;
+            Ok(HttpResponseOk(ScanByTimeAndId::results_page(
+                &query,
+                log_entries
+                    .into_iter()
+                    .map(TryInto::try_into)
+                    .collect::<Result<Vec<_>, _>>()?,
+                &|_, entry: &views::AuditLogEntry| {
+                    (entry.time_completed, entry.id)
+                },
+            )?))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
     async fn login_saml_begin(
         rqctx: RequestContext<Self::Context>,
         _path_params: Path<params::LoginToProviderPathParam>,
@@ -7817,36 +7973,47 @@ impl NexusExternalApi for NexusExternalApiImpl {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
-            let path_params = path_params.into_inner();
 
             // By definition, this request is not authenticated.  These operations
             // happen using the Nexus "external authentication" context, which we
             // keep specifically for this purpose.
             let opctx = nexus.opctx_external_authn();
 
-            let (session, next_url) = nexus
-                .login_saml(
-                    opctx,
-                    body_bytes,
-                    &path_params.silo_name.into(),
-                    &path_params.provider_name.into(),
-                )
-                .await?;
+            let audit =
+                nexus.audit_log_entry_init_unauthed(&opctx, &rqctx).await?;
 
-            let mut response = http_response_see_other(next_url)?;
-            {
-                let headers = response.headers_mut();
-                let cookie = session_cookie::session_cookie_header_value(
-                    &session.token,
-                    // use absolute timeout even though session might idle out first.
-                    // browser expiration is mostly for convenience, as the API will
-                    // reject requests with an expired session regardless
-                    apictx.context.session_absolute_timeout(),
-                    apictx.context.external_tls_enabled,
-                )?;
-                headers.append(header::SET_COOKIE, cookie);
+            let result = async {
+                let path_params = path_params.into_inner();
+                let (session, next_url) = nexus
+                    .login_saml(
+                        opctx,
+                        body_bytes,
+                        &path_params.silo_name.into(),
+                        &path_params.provider_name.into(),
+                    )
+                    .await?;
+
+                let mut response = http_response_see_other(next_url)?;
+                {
+                    let headers = response.headers_mut();
+                    let cookie = session_cookie::session_cookie_header_value(
+                        &session.token,
+                        // use absolute timeout even though session might idle out first.
+                        // browser expiration is mostly for convenience, as the API will
+                        // reject requests with an expired session regardless
+                        apictx.context.session_absolute_timeout(),
+                        apictx.context.external_tls_enabled,
+                    )?;
+                    headers.append(header::SET_COOKIE, cookie);
+                }
+                Ok(response)
             }
-            Ok(response)
+            .await;
+
+            let _ =
+                nexus.audit_log_entry_complete(&opctx, &audit, &result).await;
+
+            result
         };
         apictx
             .context
@@ -7878,36 +8045,46 @@ impl NexusExternalApi for NexusExternalApiImpl {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
-            let path = path_params.into_inner();
-            let credentials = credentials.into_inner();
-            let silo = path.silo_name.into();
-
             // By definition, this request is not authenticated.  These operations
             // happen using the Nexus "external authentication" context, which we
             // keep specifically for this purpose.
             let opctx = nexus.opctx_external_authn();
-            let silo_lookup = nexus.silo_lookup(&opctx, silo)?;
-            let user =
-                nexus.login_local(&opctx, &silo_lookup, credentials).await?;
+            let audit =
+                nexus.audit_log_entry_init_unauthed(&opctx, &rqctx).await?;
 
-            let session = nexus.session_create(opctx, &user).await?;
-            let mut response = HttpResponseHeaders::new_unnamed(
-                HttpResponseUpdatedNoContent(),
-            );
+            let result = async {
+                let path = path_params.into_inner();
+                let credentials = credentials.into_inner();
+                let silo = path.silo_name.into();
 
-            {
-                let headers = response.headers_mut();
-                let cookie = session_cookie::session_cookie_header_value(
-                    &session.token,
-                    // use absolute timeout even though session might idle out first.
-                    // browser expiration is mostly for convenience, as the API will
-                    // reject requests with an expired session regardless
-                    apictx.context.session_absolute_timeout(),
-                    apictx.context.external_tls_enabled,
-                )?;
-                headers.append(header::SET_COOKIE, cookie);
+                let silo_lookup = nexus.silo_lookup(&opctx, silo)?;
+                let user = nexus
+                    .login_local(&opctx, &silo_lookup, credentials)
+                    .await?;
+
+                let session = nexus.session_create(opctx, &user).await?;
+                let mut response = HttpResponseHeaders::new_unnamed(
+                    HttpResponseUpdatedNoContent(),
+                );
+
+                {
+                    let headers = response.headers_mut();
+                    let cookie = session_cookie::session_cookie_header_value(
+                        &session.token,
+                        // use absolute timeout even though session might idle out first.
+                        // browser expiration is mostly for convenience, as the API will
+                        // reject requests with an expired session regardless
+                        apictx.context.session_absolute_timeout(),
+                        apictx.context.external_tls_enabled,
+                    )?;
+                    headers.append(header::SET_COOKIE, cookie);
+                }
+                Ok(response)
             }
-            Ok(response)
+            .await;
+            let _ =
+                nexus.audit_log_entry_complete(&opctx, &audit, &result).await;
+            result
         };
         apictx
             .context
@@ -8116,27 +8293,71 @@ impl NexusExternalApi for NexusExternalApiImpl {
         console_api::console_index_or_login_redirect(rqctx).await
     }
 
+    // Note that the audit logging for the device auth token flow is done in
+    // `device_auth_confirm` because that is where both authentication (using
+    // a web session) and token creation actually happen. This is the endpoint
+    // hit by the web console with an existing session and the device code.
+    // We create the token in the DB but do not put it in the response (it's
+    // a 204).
+    //
+    // In theory we could log the `device_access_token` endpoint as well, but
+    // there are a ton of polling calls, all but one of which return 400s with
+    // a "pending" state. At present I do not think logging when the client
+    // _receives_ the token adds useful information on top of knowing when it
+    // was created. They will virtually always happen at the same time anyway.
+    //
+    // Audit logging in `device_auth_request` would be even more pointless
+    // because at that point we do not know who the user is and nothing
+    // requiring authentication has happened yet -- anybody could spam those
+    // requests and nothing would happen.
+
     async fn device_auth_confirm(
         rqctx: RequestContext<Self::Context>,
         params: TypedBody<params::DeviceAuthVerify>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let apictx = rqctx.context();
-        let nexus = &apictx.context.nexus;
-        let params = params.into_inner();
         let handler = async {
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
-            let &actor = opctx.authn.actor_required().internal_context(
-                "creating new device auth session for current user",
-            )?;
-            let _token = nexus
-                .device_auth_request_verify(
-                    &opctx,
-                    params.user_code,
-                    actor.actor_id(),
-                )
-                .await?;
-            Ok(HttpResponseUpdatedNoContent())
+
+            let nexus = &apictx.context.nexus;
+
+            // This is an authenticated request, so we know who the user
+            // is. In that respect it's more like a regular resource create
+            // operation and not like the true login endpoints `login_local`
+            // and `login_saml`.
+            let audit = nexus.audit_log_entry_init(&opctx, &rqctx).await?;
+
+            let result = async {
+                let params = params.into_inner();
+                let &actor = opctx.authn.actor_required().internal_context(
+                    "creating new device auth session for current user",
+                )?;
+
+                let silo_user_id = match actor.silo_user_id() {
+                    Some(silo_user_id) => silo_user_id,
+                    None => {
+                        return Err(Error::non_resourcetype_not_found(
+                            "could not find silo user",
+                        ))?;
+                    }
+                };
+
+                let _token = nexus
+                    .device_auth_request_verify(
+                        &opctx,
+                        params.user_code,
+                        silo_user_id,
+                    )
+                    .await?;
+
+                Ok(HttpResponseUpdatedNoContent())
+            }
+            .await;
+
+            let _ =
+                nexus.audit_log_entry_complete(&opctx, &audit, &result).await;
+            result
         };
         apictx
             .context

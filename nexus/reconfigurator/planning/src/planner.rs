@@ -9,16 +9,19 @@
 use crate::blueprint_builder::BlueprintBuilder;
 use crate::blueprint_builder::Ensure;
 use crate::blueprint_builder::EnsureMultiple;
+use crate::blueprint_builder::EnsureMupdateOverrideAction;
 use crate::blueprint_builder::Error;
 use crate::blueprint_builder::Operation;
 use crate::blueprint_editor::DisksEditError;
 use crate::blueprint_editor::SledEditError;
+use crate::mgs_updates::ImpossibleUpdatePolicy;
+use crate::mgs_updates::PlannedMgsUpdates;
 use crate::mgs_updates::plan_mgs_updates;
-use crate::planner::image_source::NoopConvertInfo;
-use crate::planner::image_source::NoopConvertSledStatus;
+use crate::planner::image_source::NoopConvertHostPhase2Contents;
 use crate::planner::image_source::NoopConvertZoneStatus;
 use crate::planner::omicron_zone_placement::PlacementError;
 use gateway_client::types::SpType;
+use itertools::Itertools;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryResult;
 use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
 use nexus_sled_agent_shared::inventory::OmicronZoneType;
@@ -32,29 +35,43 @@ use nexus_types::deployment::CockroachDbClusterVersion;
 use nexus_types::deployment::CockroachDbPreserveDowngrade;
 use nexus_types::deployment::CockroachDbSettings;
 use nexus_types::deployment::DiskFilter;
+use nexus_types::deployment::PendingMgsUpdates;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledDetails;
 use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::TufRepoContentsError;
 use nexus_types::deployment::ZpoolFilter;
+use nexus_types::deployment::{
+    CockroachdbUnsafeToShutdown, PlanningAddStepReport,
+    PlanningCockroachdbSettingsStepReport, PlanningDecommissionStepReport,
+    PlanningExpungeStepReport, PlanningMgsUpdatesStepReport,
+    PlanningNoopImageSourceStepReport, PlanningReport,
+    PlanningZoneUpdatesStepReport, ZoneAddWaitingOn, ZoneUnsafeToShutdown,
+    ZoneUpdatesWaitingOn,
+};
 use nexus_types::external_api::views::PhysicalDiskPolicy;
 use nexus_types::external_api::views::SledPolicy;
 use nexus_types::external_api::views::SledState;
 use nexus_types::inventory::Collection;
+use omicron_common::disk::M2Slot;
 use omicron_common::policy::BOUNDARY_NTP_REDUNDANCY;
 use omicron_common::policy::COCKROACHDB_REDUNDANCY;
 use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
-use slog::debug;
-use slog::error;
-use slog::{Logger, info, warn};
+use slog::{Logger, info, o, warn};
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::str::FromStr;
 
+pub(crate) use self::image_source::NoopConvertGlobalIneligibleReason;
+pub(crate) use self::image_source::NoopConvertInfo;
+pub(crate) use self::image_source::NoopConvertSledEligible;
+pub(crate) use self::image_source::NoopConvertSledIneligibleReason;
+pub(crate) use self::image_source::NoopConvertSledInfoMut;
+pub(crate) use self::image_source::NoopConvertSledStatus;
 pub(crate) use self::omicron_zone_placement::DiscretionaryOmicronZone;
 use self::omicron_zone_placement::OmicronZonePlacement;
 use self::omicron_zone_placement::OmicronZonePlacementSledState;
@@ -91,10 +108,8 @@ pub(crate) mod rng;
 /// services, etc.).
 const NUM_CONCURRENT_MGS_UPDATES: usize = 1;
 
-enum UpdateStepResult {
-    ContinueToNextStep,
-    Waiting,
-}
+/// A receipt that `check_input_validity` has been run prior to planning.
+struct InputChecked;
 
 pub struct Planner<'a> {
     log: Logger,
@@ -121,6 +136,7 @@ impl<'a> Planner<'a> {
         // NOTE: Right now, we just assume that this is the latest inventory
         // collection.  See the comment on the corresponding field in `Planner`.
         inventory: &'a Collection,
+        rng: PlannerRng,
     ) -> anyhow::Result<Planner<'a>> {
         let blueprint = BlueprintBuilder::new_based_on(
             &log,
@@ -128,59 +144,116 @@ impl<'a> Planner<'a> {
             input,
             inventory,
             creator,
+            rng,
         )?;
         Ok(Planner { log, input, blueprint, inventory })
     }
 
-    /// Within tests, set a seeded RNG for deterministic results.
-    ///
-    /// This will ensure that tests that use this builder will produce the same
-    /// results each time they are run.
-    pub fn with_rng(mut self, rng: PlannerRng) -> Self {
-        // This is an owned builder (self rather than &mut self) because it is
-        // almost never going to be conditional.
-        self.blueprint.set_rng(rng);
-        self
-    }
-
     pub fn plan(mut self) -> Result<Blueprint, Error> {
-        debug!(
-            self.log,
-            "running planner with chicken switches";
-            self.input.chicken_switches(),
-        );
-        self.check_input_validity()?;
-        self.do_plan()?;
+        let checked = self.check_input_validity()?;
+        let report = self.do_plan(checked)?;
+        self.blueprint.set_report(report);
         Ok(self.blueprint.build())
     }
 
-    fn check_input_validity(&self) -> Result<(), Error> {
+    fn check_input_validity(&self) -> Result<InputChecked, Error> {
         if self.input.target_internal_dns_zone_count() > INTERNAL_DNS_REDUNDANCY
         {
             return Err(Error::PolicySpecifiesTooManyInternalDnsServers);
         }
-        Ok(())
+        Ok(InputChecked)
     }
 
-    fn do_plan(&mut self) -> Result<(), Error> {
-        self.do_plan_expunge()?;
-        self.do_plan_decommission()?;
+    fn do_plan(
+        &mut self,
+        _checked: InputChecked,
+    ) -> Result<PlanningReport, Error> {
+        // Run the planning steps, recording their step reports as we go.
+        let expunge = self.do_plan_expunge()?;
+        let decommission = self.do_plan_decommission()?;
 
-        let noop_info =
+        let mut noop_info =
             NoopConvertInfo::new(self.input, self.inventory, &self.blueprint)?;
+        let actions_by_sled = self.do_plan_mupdate_override(&mut noop_info)?;
+
+        // Log noop-convert results after do_plan_mupdate_override, because this
+        // step might alter noop_info.
         noop_info.log_to(&self.log);
 
-        self.do_plan_noop_image_source(noop_info)?;
-        self.do_plan_add()?;
-        if let UpdateStepResult::ContinueToNextStep = self.do_plan_mgs_updates()
+        // Within `do_plan_noop_image_source`, we plan noop image sources on
+        // sleds other than those currently affected by mupdate overrides. This
+        // means that we don't have to consider anything
+        // `do_plan_mupdate_override` does for this step.
+        let noop_image_source = self.do_plan_noop_image_source(noop_info)?;
+
+        let add_update_blocked_reasons =
+            self.should_plan_add_or_update(&actions_by_sled)?;
+
+        // Only plan MGS-based updates updates if there are no outstanding
+        // MUPdate overrides.
+        let mgs_updates = if add_update_blocked_reasons.is_empty() {
+            self.do_plan_mgs_updates()?
+        } else {
+            PlanningMgsUpdatesStepReport::new(PendingMgsUpdates::new())
+        };
+
+        // Likewise for zone additions, unless overridden with the chicken switch.
+        let add_zones_with_mupdate_override =
+            self.input.chicken_switches().add_zones_with_mupdate_override;
+        let mut add = if add_update_blocked_reasons.is_empty()
+            || add_zones_with_mupdate_override
         {
-            self.do_plan_zone_updates()?;
-        }
-        self.do_plan_cockroachdb_settings();
-        Ok(())
+            self.do_plan_add(&mgs_updates)?
+        } else {
+            PlanningAddStepReport::waiting_on(ZoneAddWaitingOn::Blockers)
+        };
+        add.add_update_blocked_reasons = add_update_blocked_reasons;
+        add.add_zones_with_mupdate_override = add_zones_with_mupdate_override;
+
+        let zone_updates = if add.any_discretionary_zones_placed() {
+            // Do not update any zones if we've added any discretionary zones
+            // (e.g., in response to policy changes) ...
+            PlanningZoneUpdatesStepReport::waiting_on(
+                ZoneUpdatesWaitingOn::DiscretionaryZones,
+            )
+        } else if !mgs_updates.is_empty() {
+            // ... or if there are still pending updates for the RoT / SP /
+            // Host OS / etc. ...
+            // TODO This is not quite right.  See oxidecomputer/omicron#8285.
+            PlanningZoneUpdatesStepReport::waiting_on(
+                ZoneUpdatesWaitingOn::PendingMgsUpdates,
+            )
+        } else if !add.add_update_blocked_reasons.is_empty() {
+            // ... or if there are pending zone add blockers.
+            PlanningZoneUpdatesStepReport::waiting_on(
+                ZoneUpdatesWaitingOn::ZoneAddBlockers,
+            )
+        } else {
+            self.do_plan_zone_updates(&mgs_updates)?
+        };
+
+        // CockroachDB settings aren't dependent on zones, so they can be
+        // planned independently of the rest of the system.
+        let cockroachdb_settings = self.do_plan_cockroachdb_settings();
+
+        Ok(PlanningReport {
+            blueprint_id: self.blueprint.new_blueprint_id(),
+            chicken_switches: *self.input.chicken_switches(),
+            expunge,
+            decommission,
+            noop_image_source,
+            add,
+            mgs_updates,
+            zone_updates,
+            cockroachdb_settings,
+        })
     }
 
-    fn do_plan_decommission(&mut self) -> Result<(), Error> {
+    fn do_plan_decommission(
+        &mut self,
+    ) -> Result<PlanningDecommissionStepReport, Error> {
+        let mut report = PlanningDecommissionStepReport::new();
+
         // Check for any sleds that are currently commissioned but can be
         // decommissioned. Our gates for decommissioning are:
         //
@@ -215,15 +288,10 @@ impl<'a> Planner<'a> {
                     continue;
                 }
                 // If the sled is already decommissioned it... why is it showing
-                // up when we ask for commissioned sleds? Warn, but don't try to
+                // up when we ask for commissioned sleds? Report, but don't try to
                 // decommission it again.
                 (SledPolicy::Expunged, SledState::Decommissioned) => {
-                    error!(
-                        self.log,
-                        "decommissioned sled returned by \
-                         SledFilter::Commissioned";
-                        "sled_id" => %sled_id,
-                    );
+                    report.zombie_sleds.push(sled_id);
                     continue;
                 }
                 // The sled is expunged but not yet decommissioned; fall through
@@ -263,7 +331,7 @@ impl<'a> Planner<'a> {
             }
         }
 
-        Ok(())
+        Ok(report)
     }
 
     fn do_plan_decommission_expunged_disks_for_in_service_sled(
@@ -313,17 +381,22 @@ impl<'a> Planner<'a> {
         self.blueprint.sled_decommission_disks(sled_id, disks_to_decommission)
     }
 
-    fn do_plan_expunge(&mut self) -> Result<(), Error> {
-        let mut commissioned_sled_ids = BTreeSet::new();
+    fn do_plan_expunge(&mut self) -> Result<PlanningExpungeStepReport, Error> {
+        let mut report = PlanningExpungeStepReport::new();
 
         // Remove services from sleds marked expunged. We use
         // `SledFilter::Commissioned` and have a custom `needs_zone_expungement`
         // function that allows us to produce better errors.
+        let mut commissioned_sled_ids = BTreeSet::new();
         for (sled_id, sled_details) in
             self.input.all_sleds(SledFilter::Commissioned)
         {
             commissioned_sled_ids.insert(sled_id);
-            self.do_plan_expunge_for_commissioned_sled(sled_id, sled_details)?;
+            self.do_plan_expunge_for_commissioned_sled(
+                sled_id,
+                sled_details,
+                &mut report,
+            )?;
         }
 
         // Check for any decommissioned sleds (i.e., sleds for which our
@@ -354,13 +427,14 @@ impl<'a> Planner<'a> {
             }
         }
 
-        Ok(())
+        Ok(report)
     }
 
     fn do_plan_expunge_for_commissioned_sled(
         &mut self,
         sled_id: SledUuid,
         sled_details: &SledDetails,
+        report: &mut PlanningExpungeStepReport,
     ) -> Result<(), Error> {
         match sled_details.policy {
             SledPolicy::InService { .. } => {
@@ -397,14 +471,8 @@ impl<'a> Planner<'a> {
                             // isn't in the blueprint at all (e.g., a disk could
                             // have been added and then expunged since our
                             // parent blueprint was created). We don't want to
-                            // fail in this case, but will issue a warning.
-                            warn!(
-                                self.log,
-                                "planning input contained expunged disk not \
-                                 present in parent blueprint";
-                                "sled_id" => %sled_id,
-                                "disk" => ?disk,
-                            );
+                            // fail in this case, but will report it.
+                            report.orphan_disks.insert(sled_id, disk.disk_id);
                         }
                         Err(err) => return Err(err),
                     }
@@ -520,10 +588,15 @@ impl<'a> Planner<'a> {
     fn do_plan_noop_image_source(
         &mut self,
         noop_info: NoopConvertInfo,
-    ) -> Result<(), Error> {
+    ) -> Result<PlanningNoopImageSourceStepReport, Error> {
+        use nexus_types::deployment::PlanningNoopImageSourceSkipSledHostPhase2Reason as SkipSledHostPhase2Reason;
+        use nexus_types::deployment::PlanningNoopImageSourceSkipSledZonesReason as SkipSledZonesReason;
+
+        let mut report = PlanningNoopImageSourceStepReport::new();
+
         let sleds = match noop_info {
             NoopConvertInfo::GlobalEligible { sleds } => sleds,
-            NoopConvertInfo::GlobalIneligible { .. } => return Ok(()),
+            NoopConvertInfo::GlobalIneligible { .. } => return Ok(report),
         };
         for sled in sleds {
             let eligible = match &sled.status {
@@ -532,24 +605,44 @@ impl<'a> Planner<'a> {
             };
 
             let zone_counts = eligible.zone_counts();
-            if zone_counts.num_install_dataset() == 0 {
-                debug!(
-                    self.log,
-                    "all zones are already Artifact, so \
-                     no noop image source action required";
-                    "num_total" => zone_counts.num_total,
+            let skipped_zones = if zone_counts.num_install_dataset() == 0 {
+                report.skip_sled_zones(
+                    sled.sled_id,
+                    SkipSledZonesReason::AllZonesAlreadyArtifact {
+                        num_total: zone_counts.num_total,
+                    },
                 );
+                true
+            } else {
+                false
+            };
+
+            let skipped_host_phase_2 =
+                if eligible.host_phase_2.both_already_artifact() {
+                    report.skip_sled_host_phase_2(
+                        sled.sled_id,
+                        SkipSledHostPhase2Reason::BothSlotsAlreadyArtifact,
+                    );
+                    true
+                } else {
+                    false
+                };
+
+            if skipped_zones && skipped_host_phase_2 {
+                // Nothing to do, continue to the next sled.
                 continue;
             }
-            if zone_counts.num_eligible > 0 {
-                info!(
-                    self.log,
-                    "noop converting {}/{} install-dataset zones to artifact store",
+
+            if zone_counts.num_eligible > 0
+                || eligible.host_phase_2.slot_a.is_eligible()
+                || eligible.host_phase_2.slot_b.is_eligible()
+            {
+                report.converted(
+                    sled.sled_id,
                     zone_counts.num_eligible,
-                    zone_counts.num_install_dataset();
-                    "sled_id" => %sled.sled_id,
-                    "num_total" => zone_counts.num_total,
-                    "num_already_artifact" => zone_counts.num_already_artifact,
+                    zone_counts.num_install_dataset(),
+                    eligible.host_phase_2.slot_a.is_eligible(),
+                    eligible.host_phase_2.slot_b.is_eligible(),
                 );
             }
 
@@ -575,12 +668,60 @@ impl<'a> Planner<'a> {
                     },
                 );
             }
+
+            // Now convert over host phase 2 contents.
+            match &eligible.host_phase_2.slot_a {
+                NoopConvertHostPhase2Contents::Eligible(new_contents) => {
+                    self.blueprint.sled_set_host_phase_2_slot(
+                        sled.sled_id,
+                        M2Slot::A,
+                        new_contents.clone(),
+                    )?;
+                }
+                NoopConvertHostPhase2Contents::AlreadyArtifact { .. }
+                | NoopConvertHostPhase2Contents::Ineligible(_) => {}
+            }
+
+            match &eligible.host_phase_2.slot_b {
+                NoopConvertHostPhase2Contents::Eligible(new_contents) => {
+                    self.blueprint.sled_set_host_phase_2_slot(
+                        sled.sled_id,
+                        M2Slot::B,
+                        new_contents.clone(),
+                    )?;
+                }
+                NoopConvertHostPhase2Contents::AlreadyArtifact { .. }
+                | NoopConvertHostPhase2Contents::Ineligible(_) => {}
+            }
+
+            if eligible.host_phase_2.slot_a.is_eligible()
+                || eligible.host_phase_2.slot_b.is_eligible()
+            {
+                self.blueprint.record_operation(
+                    Operation::SledNoopHostPhase2Updated {
+                        sled_id: sled.sled_id,
+                        slot_a_updated: eligible
+                            .host_phase_2
+                            .slot_a
+                            .is_eligible(),
+                        slot_b_updated: eligible
+                            .host_phase_2
+                            .slot_b
+                            .is_eligible(),
+                    },
+                );
+            }
         }
 
-        Ok(())
+        Ok(report)
     }
 
-    fn do_plan_add(&mut self) -> Result<(), Error> {
+    fn do_plan_add(
+        &mut self,
+        mgs_updates: &PlanningMgsUpdatesStepReport,
+    ) -> Result<PlanningAddStepReport, Error> {
+        let mut report = PlanningAddStepReport::new();
+
         // Internal DNS is a prerequisite for bringing up all other zones.  At
         // this point, we assume that internal DNS (as a service) is already
         // functioning.
@@ -594,8 +735,6 @@ impl<'a> Planner<'a> {
         // We will not mark sleds getting Crucible zones as ineligible; other
         // control plane service zones starting concurrently with Crucible zones
         // is fine.
-        let mut sleds_waiting_for_ntp_zone = BTreeSet::new();
-
         for (sled_id, sled_resources) in
             self.input.all_sled_resources(SledFilter::InService)
         {
@@ -642,12 +781,8 @@ impl<'a> Planner<'a> {
                 .next()
                 .is_none()
             {
-                info!(
-                    self.log,
-                    "skipping sled (no zpools in service)";
-                    "sled_id" => %sled_id,
-                );
-                sleds_waiting_for_ntp_zone.insert(sled_id);
+                report.sleds_without_zpools_for_ntp_zones.insert(sled_id);
+                report.sleds_waiting_for_ntp_zone.insert(sled_id);
                 continue;
             }
 
@@ -657,14 +792,13 @@ impl<'a> Planner<'a> {
             // provision anything else.
             if self.blueprint.sled_ensure_zone_ntp(
                 sled_id,
-                self.image_source_for_new_zone(ZoneKind::InternalNtp)?,
+                self.image_source_for_new_zone(
+                    ZoneKind::InternalNtp,
+                    mgs_updates,
+                )?,
             )? == Ensure::Added
             {
-                info!(
-                    &self.log,
-                    "found sled missing NTP zone (will add one)";
-                    "sled_id" => %sled_id
-                );
+                report.sleds_missing_ntp_zone.insert(sled_id);
                 self.blueprint.record_operation(Operation::AddZone {
                     sled_id,
                     kind: ZoneKind::InternalNtp,
@@ -692,14 +826,11 @@ impl<'a> Planner<'a> {
                             .requires_timesync()
                     })
                 {
-                    info!(
-                        &self.log,
-                        "sled getting NTP zone has other services already; \
-                         considering it eligible for discretionary zones";
-                        "sled_id" => %sled_id,
-                    );
+                    report
+                        .sleds_getting_ntp_and_discretionary_zones
+                        .insert(sled_id);
                 } else {
-                    sleds_waiting_for_ntp_zone.insert(sled_id);
+                    report.sleds_waiting_for_ntp_zone.insert(sled_id);
                     continue;
                 }
             }
@@ -744,12 +875,7 @@ impl<'a> Planner<'a> {
                 })
                 .unwrap_or(false);
             if !has_ntp_inventory {
-                info!(
-                    &self.log,
-                    "parent blueprint contains NTP zone, but it's not in \
-                    inventory yet";
-                    "sled_id" => %sled_id,
-                );
+                report.sleds_without_ntp_zones_in_inventory.insert(sled_id);
                 continue;
             }
 
@@ -760,15 +886,13 @@ impl<'a> Planner<'a> {
                 if self.blueprint.sled_ensure_zone_crucible(
                     sled_id,
                     *zpool_id,
-                    self.image_source_for_new_zone(ZoneKind::Crucible)?,
+                    self.image_source_for_new_zone(
+                        ZoneKind::Crucible,
+                        mgs_updates,
+                    )?,
                 )? == Ensure::Added
                 {
-                    info!(
-                        &self.log,
-                        "found sled zpool missing Crucible zone (will add one)";
-                        "sled_id" => ?sled_id,
-                        "zpool_id" => ?zpool_id,
-                    );
+                    report.missing_crucible_zone(sled_id, *zpool_id);
                     ncrucibles_added += 1;
                 }
             }
@@ -788,16 +912,19 @@ impl<'a> Planner<'a> {
             }
         }
 
-        self.do_plan_add_discretionary_zones(&sleds_waiting_for_ntp_zone)?;
+        self.do_plan_add_discretionary_zones(mgs_updates, &mut report)?;
 
         // Now that we've added all the disks and zones we plan on adding,
         // ensure that all sleds have the datasets they need to have.
-        self.do_plan_datasets()?;
+        self.do_plan_datasets(&mut report)?;
 
-        Ok(())
+        Ok(report)
     }
 
-    fn do_plan_datasets(&mut self) -> Result<(), Error> {
+    fn do_plan_datasets(
+        &mut self,
+        _report: &mut PlanningAddStepReport,
+    ) -> Result<(), Error> {
         for sled_id in self.input.all_sled_ids(SledFilter::InService) {
             if let EnsureMultiple::Changed {
                 added,
@@ -829,7 +956,8 @@ impl<'a> Planner<'a> {
 
     fn do_plan_add_discretionary_zones(
         &mut self,
-        sleds_waiting_for_ntp_zone: &BTreeSet<SledUuid>,
+        mgs_updates: &PlanningMgsUpdatesStepReport,
+        report: &mut PlanningAddStepReport,
     ) -> Result<(), Error> {
         // We usually don't need to construct an `OmicronZonePlacement` to add
         // discretionary zones, so defer its creation until it's needed.
@@ -847,7 +975,8 @@ impl<'a> Planner<'a> {
             DiscretionaryOmicronZone::Nexus,
             DiscretionaryOmicronZone::Oximeter,
         ] {
-            let num_zones_to_add = self.num_additional_zones_needed(zone_kind);
+            let num_zones_to_add =
+                self.num_additional_zones_needed(zone_kind, report);
             if num_zones_to_add == 0 {
                 continue;
             }
@@ -864,7 +993,7 @@ impl<'a> Planner<'a> {
                     .input
                     .all_sled_resources(SledFilter::Discretionary)
                     .filter(|(sled_id, _)| {
-                        !sleds_waiting_for_ntp_zone.contains(&sled_id)
+                        !report.sleds_waiting_for_ntp_zone.contains(&sled_id)
                     })
                     .map(|(sled_id, sled_resources)| {
                         OmicronZonePlacementSledState {
@@ -892,17 +1021,20 @@ impl<'a> Planner<'a> {
                 zone_placement,
                 zone_kind,
                 num_zones_to_add,
+                mgs_updates,
+                report,
             )?;
         }
 
         Ok(())
     }
 
-    // Given the current blueprint state and policy, returns the number of
-    // additional zones needed of the given `zone_kind` to satisfy the policy.
+    /// Given the current blueprint state and policy, returns the number of
+    /// additional zones needed of the given `zone_kind` to satisfy the policy.
     fn num_additional_zones_needed(
         &mut self,
         zone_kind: DiscretionaryOmicronZone,
+        report: &mut PlanningAddStepReport,
     ) -> usize {
         // Count the number of `kind` zones on all in-service sleds. This
         // will include sleds that are in service but not eligible for new
@@ -965,30 +1097,32 @@ impl<'a> Planner<'a> {
         };
 
         // TODO-correctness What should we do if we have _too many_
-        // `zone_kind` zones? For now, just log it the number of zones any
-        // time we have at least the minimum number.
+        // `zone_kind` zones? For now, just report the number of zones
+        // any time we have at least the minimum number.
         let num_zones_to_add =
             target_count.saturating_sub(num_existing_kind_zones);
         if num_zones_to_add == 0 {
-            info!(
-                self.log, "sufficient {zone_kind:?} zones exist in plan";
-                "desired_count" => target_count,
-                "current_count" => num_existing_kind_zones,
+            report.sufficient_zones_exist(
+                ZoneKind::from(zone_kind).report_str(),
+                target_count,
+                num_existing_kind_zones,
             );
         }
         num_zones_to_add
     }
 
-    // Attempts to place `num_zones_to_add` new zones of `kind`.
-    //
-    // It is not an error if there are too few eligible sleds to start a
-    // sufficient number of zones; instead, we'll log a warning and start as
-    // many as we can (up to `num_zones_to_add`).
+    /// Attempts to place `num_zones_to_add` new zones of `kind`.
+    ///
+    /// It is not an error if there are too few eligible sleds to start a
+    /// sufficient number of zones; instead, we'll report it and start as
+    /// many as we can (up to `num_zones_to_add`).
     fn add_discretionary_zones(
         &mut self,
         zone_placement: &mut OmicronZonePlacement,
         kind: DiscretionaryOmicronZone,
         num_zones_to_add: usize,
+        mgs_updates: &PlanningMgsUpdatesStepReport,
+        report: &mut PlanningAddStepReport,
     ) -> Result<(), Error> {
         for i in 0..num_zones_to_add {
             let sled_id = match zone_placement.place_zone(kind) {
@@ -998,18 +1132,17 @@ impl<'a> Planner<'a> {
                     // (albeit unlikely?) we're in a weird state where we need
                     // more sleds or disks to come online, and we may need to be
                     // able to produce blueprints to achieve that status.
-                    warn!(
-                        self.log,
-                        "failed to place all new desired {kind:?} zones";
-                        "placed" => i,
-                        "wanted_to_place" => num_zones_to_add,
+                    report.out_of_eligible_sleds(
+                        ZoneKind::from(kind).report_str(),
+                        i,
+                        num_zones_to_add,
                     );
-
                     break;
                 }
             };
 
-            let image_source = self.image_source_for_new_zone(kind.into())?;
+            let image_source =
+                self.image_source_for_new_zone(kind.into(), mgs_updates)?;
             match kind {
                 DiscretionaryOmicronZone::BoundaryNtp => {
                     self.blueprint.sled_promote_internal_ntp_to_boundary_ntp(
@@ -1045,10 +1178,9 @@ impl<'a> Planner<'a> {
                     .blueprint
                     .sled_add_zone_oximeter(sled_id, image_source)?,
             };
-            info!(
-                self.log, "added zone to sled";
-                "sled_id" => %sled_id,
-                "kind" => ?kind,
+            report.discretionary_zone_placed(
+                sled_id,
+                ZoneKind::from(kind).report_str(),
             );
         }
 
@@ -1057,7 +1189,9 @@ impl<'a> Planner<'a> {
 
     /// Update at most one MGS-managed device (SP, RoT, etc.), if any are out of
     /// date.
-    fn do_plan_mgs_updates(&mut self) -> UpdateStepResult {
+    fn do_plan_mgs_updates(
+        &mut self,
+    ) -> Result<PlanningMgsUpdatesStepReport, Error> {
         // Determine which baseboards we will consider updating.
         //
         // Sleds may be present but not adopted as part of the control plane.
@@ -1074,6 +1208,7 @@ impl<'a> Planner<'a> {
             .all_sleds(SledFilter::SpsUpdatedByReconfigurator)
             .map(|(_sled_id, details)| &details.baseboard_id)
             .collect();
+
         let included_baseboards =
             self.inventory
                 .sps
@@ -1093,27 +1228,47 @@ impl<'a> Planner<'a> {
         let current_updates =
             &self.blueprint.parent_blueprint().pending_mgs_updates;
         let current_artifacts = self.input.tuf_repo().description();
-        let next = plan_mgs_updates(
-            &self.log,
-            &self.inventory,
-            &included_baseboards,
-            &current_updates,
-            current_artifacts,
-            NUM_CONCURRENT_MGS_UPDATES,
-        );
+        let impossible_update_policy =
+            if self.blueprint.parent_blueprint().time_created
+                >= self.input.ignore_impossible_mgs_updates_since()
+            {
+                ImpossibleUpdatePolicy::Keep
+            } else {
+                ImpossibleUpdatePolicy::Reevaluate
+            };
+        let PlannedMgsUpdates { pending_updates, pending_host_phase_2_changes } =
+            plan_mgs_updates(
+                &self.log,
+                &self.inventory,
+                &included_baseboards,
+                current_updates,
+                current_artifacts,
+                NUM_CONCURRENT_MGS_UPDATES,
+                impossible_update_policy,
+            );
+        if pending_updates != *current_updates {
+            // This will only add comments if our set of updates changed _and_
+            // we have at least one update. If we went from "some updates" to
+            // "no updates", that's not really comment-worthy; presumably we'll
+            // do something else comment-worthy in a subsequent step.
+            for update in pending_updates.iter() {
+                self.blueprint.comment(update.description());
+            }
+        }
+        self.blueprint
+            .apply_pending_host_phase_2_changes(pending_host_phase_2_changes)?;
 
-        // TODO This is not quite right.  See oxidecomputer/omicron#8285.
-        let rv = if next.is_empty() {
-            UpdateStepResult::ContinueToNextStep
-        } else {
-            UpdateStepResult::Waiting
-        };
-        self.blueprint.pending_mgs_updates_replace_all(next);
-        rv
+        self.blueprint.pending_mgs_updates_replace_all(pending_updates.clone());
+        Ok(PlanningMgsUpdatesStepReport::new(pending_updates))
     }
 
     /// Update at most one existing zone to use a new image source.
-    fn do_plan_zone_updates(&mut self) -> Result<(), Error> {
+    fn do_plan_zone_updates(
+        &mut self,
+        mgs_updates: &PlanningMgsUpdatesStepReport,
+    ) -> Result<PlanningZoneUpdatesStepReport, Error> {
+        let mut report = PlanningZoneUpdatesStepReport::new();
+
         // We are only interested in non-decommissioned sleds.
         let sleds = self
             .input
@@ -1229,14 +1384,14 @@ impl<'a> Planner<'a> {
                     "sled_id" => %sled_id,
                     "zones_currently_updating" => ?zones_currently_updating,
                 );
-                return Ok(());
+                return Ok(report);
             }
         }
 
         // Find out of date zones, as defined by zones whose image source does
         // not match what it should be based on our current target release.
         let target_release = self.input.tuf_repo().description();
-        let mut out_of_date_zones = sleds
+        let out_of_date_zones = sleds
             .into_iter()
             .flat_map(|sled_id| {
                 let log = &self.log;
@@ -1264,28 +1419,30 @@ impl<'a> Planner<'a> {
                             }
                         };
                         if zone.image_source != desired_image_source {
-                            Some((sled_id, zone, desired_image_source))
+                            Some((sled_id, zone.clone(), desired_image_source))
                         } else {
                             None
                         }
                     })
             })
-            .peekable();
+            .collect::<Vec<_>>();
 
-        // Before we filter out zones that can't be updated, do we have any out
-        // of date zones at all? We need this to explain why we didn't update
-        // any zones below, if we don't.
-        let have_out_of_date_zones = out_of_date_zones.peek().is_some();
+        for (sled_id, zone, desired_image) in out_of_date_zones.iter() {
+            report.out_of_date_zone(*sled_id, zone, desired_image.clone());
+        }
 
         // Of the out-of-date zones, filter out zones that can't be updated yet,
         // either because they're not ready or because it wouldn't be safe to
         // bounce them.
-        let mut updateable_zones =
-            out_of_date_zones.filter(|(_sled_id, zone, _new_image_source)| {
-                if !self.can_zone_be_shut_down_safely(zone) {
+        let mut updateable_zones = out_of_date_zones.iter().filter(
+            |(_sled_id, zone, _new_image_source)| {
+                if !self.can_zone_be_shut_down_safely(zone, &mut report) {
                     return false;
                 }
-                match self.is_zone_ready_for_update(zone.zone_type.kind()) {
+                match self.is_zone_ready_for_update(
+                    zone.zone_type.kind(),
+                    mgs_updates,
+                ) {
                     Ok(true) => true,
                     Ok(false) => false,
                     Err(err) => {
@@ -1300,35 +1457,22 @@ impl<'a> Planner<'a> {
                         false
                     }
                 }
-            });
+            },
+        );
 
-        // Update the first out-of-date zone.
         if let Some((sled_id, zone, new_image_source)) = updateable_zones.next()
         {
-            // Borrow check workaround: `self.update_or_expunge_zone` needs
-            // `&mut self`, but `self` is borrowed in the `updateable_zones`
-            // iterator. Clone the one zone we want to update, then drop the
-            // iterator; now we can call `&mut self` methods.
-            let zone = zone.clone();
-            std::mem::drop(updateable_zones);
-
-            return self.update_or_expunge_zone(
-                sled_id,
-                &zone,
-                new_image_source,
-            );
-        }
-
-        if have_out_of_date_zones {
-            info!(
-                self.log,
-                "not all zones up-to-date, but no zones can be updated now"
-            );
+            // Update the first out-of-date zone.
+            self.update_or_expunge_zone(
+                *sled_id,
+                zone,
+                new_image_source.clone(),
+                report,
+            )
         } else {
-            info!(self.log, "all zones up-to-date");
+            // No zones to update.
+            Ok(report)
         }
-
-        Ok(())
     }
 
     /// Update a zone to use a new image source, either in-place or by
@@ -1338,7 +1482,8 @@ impl<'a> Planner<'a> {
         sled_id: SledUuid,
         zone: &BlueprintZoneConfig,
         new_image_source: BlueprintZoneImageSource,
-    ) -> Result<(), Error> {
+        mut report: PlanningZoneUpdatesStepReport,
+    ) -> Result<PlanningZoneUpdatesStepReport, Error> {
         let zone_kind = zone.zone_type.kind();
 
         // We're called by `do_plan_zone_updates()`, which guarantees the
@@ -1351,18 +1496,12 @@ impl<'a> Planner<'a> {
             | ZoneKind::ClickhouseKeeper
             | ZoneKind::ClickhouseServer
             | ZoneKind::CockroachDb => {
-                info!(
-                    self.log, "updating zone image source in-place";
-                    "sled_id" => %sled_id,
-                    "zone_id" => %zone.id,
-                    "kind" => ?zone.zone_type.kind(),
-                    "image_source" => %new_image_source,
-                );
                 self.blueprint.comment(format!(
                     "updating {:?} zone {} in-place",
                     zone.zone_type.kind(),
                     zone.id
                 ));
+                report.updated_zone(sled_id, &zone);
                 self.blueprint.sled_set_zone_source(
                     sled_id,
                     zone.id,
@@ -1376,25 +1515,257 @@ impl<'a> Planner<'a> {
             | ZoneKind::InternalNtp
             | ZoneKind::Nexus
             | ZoneKind::Oximeter => {
-                info!(
-                    self.log, "expunging out-of-date zone";
-                    "sled_id" => %sled_id,
-                    "zone_id" => %zone.id,
-                    "kind" => ?zone.zone_type.kind(),
-                );
                 self.blueprint.comment(format!(
                     "expunge {:?} zone {} for update",
                     zone.zone_type.kind(),
                     zone.id
                 ));
+                report.expunged_zone(sled_id, zone);
                 self.blueprint.sled_expunge_zone(sled_id, zone.id)?;
             }
         }
 
-        Ok(())
+        Ok(report)
     }
 
-    fn do_plan_cockroachdb_settings(&mut self) {
+    /// Perform planning for mupdate overrides, returning a map of sleds to
+    /// actions taken.
+    fn do_plan_mupdate_override(
+        &mut self,
+        noop_info: &mut NoopConvertInfo,
+    ) -> Result<BTreeMap<SledUuid, EnsureMupdateOverrideAction>, Error> {
+        // For each sled, compare what's in the inventory to what's in the
+        // blueprint.
+        let mut actions_by_sled = BTreeMap::new();
+        let log = self.log.new(o!("phase" => "do_plan_mupdate_override"));
+
+        // We use the list of in-service sleds here -- we don't want to alter
+        // expunged or decommissioned sleds.
+        for sled_id in self.input.all_sled_ids(SledFilter::InService) {
+            let log = log.new(o!("sled_id" => sled_id.to_string()));
+            let Some(inv_sled) = self.inventory.sled_agents.get(&sled_id)
+            else {
+                warn!(log, "no inventory found for in-service sled");
+                continue;
+            };
+            let action = self.blueprint.sled_ensure_mupdate_override(
+                sled_id,
+                inv_sled
+                    .zone_image_resolver
+                    .mupdate_override
+                    .boot_override
+                    .as_ref(),
+                noop_info,
+            )?;
+            action.log_to(&log);
+            actions_by_sled.insert(sled_id, action);
+        }
+
+        // As a result of the action above, did any sleds get a new mupdate
+        // override in the blueprint? In that case, halt consideration of
+        // updates by setting the target_release_minimum_generation.
+        //
+        // Note that this is edge-triggered, not level-triggered. This is a
+        // domain requirement. Consider what happens if:
+        //
+        // 1. Let's say the target release generation is 5.
+        // 2. A sled is mupdated.
+        // 3. As a result of the mupdate, we update the target release minimum
+        //    generation to 6.
+        // 4. Then, an operator sets the target release generation to 6.
+        //
+        // At this point, we *do not* want to set the blueprint's minimum
+        // generation to 7. We only want to do it if we acknowledged a new sled
+        // getting mupdated.
+        //
+        // Some notes:
+        //
+        // * We only process sleds that are currently in the inventory. This
+        //   means that if some sleds take longer to come back up than others
+        //   and the target release is updated in the middle, we'll potentially
+        //   bump the minimum generation multiple times, asking the operator to
+        //   intervene each time.
+        //
+        //   It's worth considering ways to mitigate this in the future: for
+        //   example, we could ensure that for a particular TUF repo a shared
+        //   mupdate override ID is assigned by wicketd, and track the override
+        //   IDs that are currently in flight.
+        //
+        // * We aren't handling errors while fetching the mupdate override here.
+        //   We don't have a history of state transitions for the mupdate
+        //   override, so we can't do edge-triggered logic. We probably need
+        //   another channel to report errors. (But in general, errors should be
+        //   rare.)
+        if actions_by_sled.values().any(|action| {
+            matches!(action, EnsureMupdateOverrideAction::BpSetOverride { .. })
+        }) {
+            let current = self.blueprint.target_release_minimum_generation();
+            let new = self.input.tuf_repo().target_release_generation.next();
+            if current == new {
+                // No change needed.
+                info!(
+                    log,
+                    "would have updated target release minimum generation, but \
+                     it was already set to the desired value, so no change was \
+                     needed";
+                    "generation" => %current,
+                );
+            } else {
+                if current < new {
+                    info!(
+                        log,
+                        "updating target release minimum generation based on \
+                         new set-override actions";
+                        "current_generation" => %current,
+                        "new_generation" => %new,
+                    );
+                } else {
+                    // It would be very strange for the current value to be
+                    // greater than the new value. That would indicate something
+                    // like a row being removed from the target release
+                    // generation table -- one of the invariants of the target
+                    // release generation is that it only moves forward.
+                    //
+                    // In this case we bail out of planning entirely.
+                    return Err(
+                        Error::TargetReleaseMinimumGenerationRollback {
+                            current,
+                            new,
+                        },
+                    );
+                }
+                self.blueprint
+                    .set_target_release_minimum_generation(current, new)
+                    .expect("current value passed in => can't fail");
+            }
+        }
+
+        Ok(actions_by_sled)
+    }
+
+    fn should_plan_add_or_update(
+        &self,
+        actions_by_sled: &BTreeMap<SledUuid, EnsureMupdateOverrideAction>,
+    ) -> Result<Vec<String>, Error> {
+        // We need to determine whether to also perform other actions like
+        // updating or adding zones. We have to be careful here:
+        //
+        // * We may have moved existing zones with an Artifact source to using
+        //   the install dataset via the BpSetOverride action, but we don't want
+        //   to use the install dataset on sleds that weren't MUPdated (because
+        //   the install dataset might be ancient).
+        //
+        // * While any overrides are in place according to inventory, we wait
+        //   for the system to recover and don't start new zones on *any* sleds,
+        //   or perform any further updates.
+        //
+        // This decision is level-triggered on the following conditions:
+        //
+        // 1. If the planning input's target release generation is less than the
+        //    minimum generation set in the blueprint, the operator hasn't set a
+        //    new generation in the blueprint -- we should wait to decide what
+        //    to do until the operator provides an indication.
+        //
+        // 2. If any sleds have the `remove_mupdate_override` field set in the
+        //    blueprint (which is downstream of the inventory reporting the
+        //    presence of a mupdate override), then we need to wait until the
+        //    `remove_mupdate_override` field is cleared. Until that happens,
+        //    we don't want to add zones on *any* sled.
+        //
+        //    This might seem overly conservative (why block zone additions on
+        //    *all* sleds if *any* are currently recovering from a MUPdate?),
+        //    but is probably correct for the medium term: we want to minimize
+        //    the number of different versions of services running at any time.
+        //
+        // 3. If any sleds had errors obtaining mupdate override info, the
+        //    system is in a corrupt state. The planner will not take any
+        //    actions until the error is resolved.
+        //
+        // 4. (TODO: https://github.com/oxidecomputer/omicron/issues/8726)
+        //    If any sleds' deployment units aren't at known versions after
+        //    noop image source changes have been considered, then we shouldn't
+        //    proceed with adding or updating zones. Again, this is driven
+        //    primarily by the desire to minimize the number of versions of
+        //    system software running at any time.
+        //
+        // What does "any sleds" mean in this context? We don't need to care
+        // about decommissioned or expunged sleds, so we consider in-service
+        // sleds.
+        let mut reasons = Vec::new();
+
+        // Condition 1 above.
+        if self.blueprint.target_release_minimum_generation()
+            > self.input.tuf_repo().target_release_generation
+        {
+            reasons.push(format!(
+                "current target release generation ({}) is lower than \
+                 minimum required by blueprint ({})",
+                self.input.tuf_repo().target_release_generation,
+                self.blueprint.target_release_minimum_generation(),
+            ));
+        }
+
+        // Condition 2 above.
+        {
+            let mut sleds_with_override = BTreeSet::new();
+            for sled_id in self.input.all_sled_ids(SledFilter::InService) {
+                if self
+                    .blueprint
+                    .sled_get_remove_mupdate_override(sled_id)?
+                    .is_some()
+                {
+                    sleds_with_override.insert(sled_id);
+                }
+            }
+
+            if !sleds_with_override.is_empty() {
+                reasons.push(format!(
+                    "sleds have remove mupdate override set in blueprint: {}",
+                    sleds_with_override.iter().join(", ")
+                ));
+            }
+        }
+
+        // Condition 3 above.
+        {
+            // Note: actions_by_sled doesn't consider sleds that aren't present
+            // in this inventory run. This can in very rare cases cause issues
+            // where both (a) a server has an error fetching override
+            // information (should never happen in normal operation) and (b)
+            // there's a blip in inventory data. We consider this an acceptable
+            // risk.
+            //
+            // In the future, we could potentially address this by not
+            // proceeding with steps if any sleds are missing from inventory.
+            let sleds_with_mupdate_override_errors: BTreeSet<_> =
+                actions_by_sled
+                    .iter()
+                    .filter_map(|(sled_id, action)| {
+                        matches!(
+                            action,
+                            EnsureMupdateOverrideAction::GetOverrideError { .. }
+                        )
+                        .then_some(*sled_id)
+                    })
+                    .collect();
+            if !sleds_with_mupdate_override_errors.is_empty() {
+                reasons.push(format!(
+                    "sleds have mupdate override errors: {}",
+                    sleds_with_mupdate_override_errors.iter().join(", ")
+                ));
+            }
+        }
+
+        // TODO: implement condition 4 above.
+
+        Ok(reasons)
+    }
+
+    fn do_plan_cockroachdb_settings(
+        &mut self,
+    ) -> PlanningCockroachdbSettingsStepReport {
+        let mut report = PlanningCockroachdbSettingsStepReport::new();
+
         // Figure out what we should set the CockroachDB "preserve downgrade
         // option" setting to based on the planning input.
         //
@@ -1472,12 +1843,8 @@ impl<'a> Planner<'a> {
             Err(_) => CockroachDbPreserveDowngrade::DoNotModify,
         };
         self.blueprint.cockroachdb_preserve_downgrade(value);
-        info!(
-            &self.log,
-            "will ensure cockroachdb setting";
-            "setting" => "cluster.preserve_downgrade_option",
-            "value" => ?value,
-        );
+        report.preserve_downgrade = value;
+        report
 
         // Hey! Listen!
         //
@@ -1492,12 +1859,14 @@ impl<'a> Planner<'a> {
     fn image_source_for_new_zone(
         &self,
         zone_kind: ZoneKind,
+        mgs_updates: &PlanningMgsUpdatesStepReport,
     ) -> Result<BlueprintZoneImageSource, TufRepoContentsError> {
-        let source_repo = if self.is_zone_ready_for_update(zone_kind)? {
-            self.input.tuf_repo().description()
-        } else {
-            self.input.old_repo().description()
-        };
+        let source_repo =
+            if self.is_zone_ready_for_update(zone_kind, mgs_updates)? {
+                self.input.tuf_repo().description()
+            } else {
+                self.input.old_repo().description()
+            };
         source_repo.zone_image_source(zone_kind)
     }
 
@@ -1506,10 +1875,14 @@ impl<'a> Planner<'a> {
     fn is_zone_ready_for_update(
         &self,
         zone_kind: ZoneKind,
+        mgs_updates: &PlanningMgsUpdatesStepReport,
     ) -> Result<bool, TufRepoContentsError> {
-        // TODO-correctness: We should return false regardless of `zone_kind` if
-        // there are still pending updates for components earlier in the update
-        // ordering than zones: RoT bootloader / RoT / SP / Host OS.
+        // We return false regardless of `zone_kind` if there are still
+        // pending updates for components earlier in the update ordering
+        // than zones: RoT bootloader / RoT / SP / Host OS.
+        if !mgs_updates.is_empty() {
+            return Ok(false);
+        }
 
         match zone_kind {
             ZoneKind::Nexus => {
@@ -1558,55 +1931,69 @@ impl<'a> Planner<'a> {
     /// because the underlying disk / sled has been expunged" case. In this
     /// case, we have no choice but to reconcile with the fact that the zone is
     /// now gone.
-    fn can_zone_be_shut_down_safely(&self, zone: &BlueprintZoneConfig) -> bool {
+    fn can_zone_be_shut_down_safely(
+        &self,
+        zone: &BlueprintZoneConfig,
+        report: &mut PlanningZoneUpdatesStepReport,
+    ) -> bool {
+        use ZoneUnsafeToShutdown::*;
         match zone.zone_type.kind() {
             ZoneKind::CockroachDb => {
-                debug!(self.log, "Checking if Cockroach node can shut down");
+                use CockroachdbUnsafeToShutdown::*;
+
                 // We must hear from all nodes
                 let all_statuses = &self.inventory.cockroach_status;
                 if all_statuses.len() < COCKROACHDB_REDUNDANCY {
-                    warn!(self.log, "Not enough nodes");
+                    report.unsafe_zone(
+                        zone,
+                        Cockroachdb { reason: NotEnoughNodes },
+                    );
                     return false;
                 }
 
                 // All nodes must report: "We have the necessary redundancy, and
                 // have observed no underreplicated ranges".
-                for (node_id, status) in all_statuses {
-                    let log = self.log.new(slog::o!(
-                        "operation" => "Checking Cockroach node status for shutdown safety",
-                        "node_id" => node_id.to_string()
-                    ));
+                for (_node_id, status) in all_statuses {
                     let Some(ranges_underreplicated) =
                         status.ranges_underreplicated
                     else {
-                        warn!(log, "Missing underreplicated stat");
+                        report.unsafe_zone(
+                            zone,
+                            Cockroachdb { reason: MissingUnderreplicatedStat },
+                        );
                         return false;
                     };
                     if ranges_underreplicated != 0 {
-                        warn!(log, "Underreplicated ranges != 0"; "ranges_underreplicated" => ranges_underreplicated);
+                        report.unsafe_zone(
+                            zone,
+                            Cockroachdb {
+                                reason: UnderreplicatedRanges {
+                                    n: ranges_underreplicated,
+                                },
+                            },
+                        );
                         return false;
                     }
                     let Some(live_nodes) = status.liveness_live_nodes else {
-                        warn!(log, "Missing live_nodes");
+                        report.unsafe_zone(
+                            zone,
+                            Cockroachdb { reason: MissingLiveNodesStat },
+                        );
                         return false;
                     };
                     if live_nodes < COCKROACHDB_REDUNDANCY as u64 {
-                        warn!(log, "Live nodes < COCKROACHDB_REDUNDANCY"; "live_nodes" => live_nodes);
+                        report.unsafe_zone(
+                            zone,
+                            Cockroachdb {
+                                reason: NotEnoughLiveNodes { live_nodes },
+                            },
+                        );
                         return false;
                     }
-                    info!(
-                        log,
-                        "CockroachDB Node status looks ready for shutdown"
-                    );
                 }
                 true
             }
             ZoneKind::BoundaryNtp => {
-                debug!(
-                    self.log,
-                    "Checking if boundary NTP zone can be shut down"
-                );
-
                 // Find all boundary NTP zones expected to be in-service by our
                 // blueprint.
                 let mut boundary_ntp_zones = std::collections::HashSet::new();
@@ -1636,16 +2023,80 @@ impl<'a> Planner<'a> {
                     }
                 }
 
-                let can_shutdown =
-                    synchronized_boundary_ntp_count >= BOUNDARY_NTP_REDUNDANCY;
-                info!(
-                    self.log,
-                    "Boundary NTP zone shutdown check";
-                    "total_boundary_ntp_zones" => boundary_ntp_zones.len(),
-                    "synchronized_count" => synchronized_boundary_ntp_count,
-                    "can_shutdown" => can_shutdown
-                );
-                can_shutdown
+                if synchronized_boundary_ntp_count < BOUNDARY_NTP_REDUNDANCY {
+                    report.unsafe_zone(
+                        zone,
+                        BoundaryNtp {
+                            total_boundary_ntp_zones: boundary_ntp_zones.len(),
+                            synchronized_count: synchronized_boundary_ntp_count,
+                        },
+                    );
+                    false
+                } else {
+                    true
+                }
+            }
+            ZoneKind::InternalDns => {
+                // Find all internal DNS zones expected to be in-service by our
+                // blueprint.
+                let mut internal_dns_zones = std::collections::HashSet::new();
+                for sled_id in self.blueprint.sled_ids_with_zones() {
+                    for zone in self.blueprint.current_sled_zones(
+                        sled_id,
+                        BlueprintZoneDisposition::is_in_service,
+                    ) {
+                        if zone.zone_type.kind() == ZoneKind::InternalDns {
+                            internal_dns_zones.insert(zone.id);
+                        }
+                    }
+                }
+
+                // Count the number of Internal DNS servers exactly at our
+                // expected generation number.
+                let mut synchronized_internal_dns_count = 0;
+                for status in
+                    self.inventory.internal_dns_generation_status.iter()
+                {
+                    // We consider internal DNS servers up-to-date if they have
+                    // a generation number matching what we observed in the DB
+                    // at the start of blueprint generation.
+                    //
+                    // - If we observe an older generation number in inventory,
+                    // the DNS server is out-of-date.
+                    // - If we observe a newer generation number in inventory,
+                    // the value the planner read from the database is
+                    // out-of-date.
+                    //
+                    // Either way, from our perspective, the internal DNS zone
+                    // shouldn't be considered "ready-to-shutdown".
+                    if internal_dns_zones.contains(&status.zone_id)
+                        && status.generation
+                            == self.input.internal_dns_version()
+                    {
+                        synchronized_internal_dns_count += 1;
+                    }
+                }
+
+                // Our goal is to have enough Internal DNS servers running
+                // at a sufficiently up-to-date version such that if the system
+                // powers off and restarts, at least one exists and can get the
+                // control plane back up and running.
+                //
+                // Our INTERNAL_DNS_REDUNDANCY factor is set so that we can
+                // tolerate "at least one upgrade, and at least one failure
+                // during that upgrade window".
+                if synchronized_internal_dns_count >= INTERNAL_DNS_REDUNDANCY {
+                    true
+                } else {
+                    report.unsafe_zone(
+                        zone,
+                        InternalDns {
+                            total_internal_dns_zones: internal_dns_zones.len(),
+                            synchronized_count: synchronized_internal_dns_count,
+                        },
+                    );
+                    false
+                }
             }
             _ => true, // other zone kinds have no special safety checks
         }
@@ -1698,6 +2149,7 @@ pub(crate) mod test {
     use nexus_types::external_api::views::SledProvisionPolicy;
     use nexus_types::external_api::views::SledState;
     use nexus_types::inventory::CockroachStatus;
+    use nexus_types::inventory::InternalDnsGenerationStatus;
     use nexus_types::inventory::TimeSync;
     use omicron_common::api::external::Generation;
     use omicron_common::api::external::MacAddr;
@@ -1750,6 +2202,7 @@ pub(crate) mod test {
             &input,
             test_name,
             &collection,
+            PlannerRng::from_entropy(),
         )
         .expect("created planner");
         let child_blueprint = planner.plan().expect("planning succeeded");
@@ -1790,9 +2243,9 @@ pub(crate) mod test {
             &example.input,
             "no-op?",
             &example.collection,
+            PlannerRng::from_seed((TEST_NAME, "bp2")),
         )
         .expect("failed to create planner")
-        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp2")))
         .plan()
         .expect("failed to plan");
 
@@ -1827,9 +2280,9 @@ pub(crate) mod test {
             &input,
             "test: add NTP?",
             &example.collection,
+            PlannerRng::from_seed((TEST_NAME, "bp3")),
         )
         .expect("failed to create planner")
-        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp3")))
         .plan()
         .expect("failed to plan");
 
@@ -1871,9 +2324,9 @@ pub(crate) mod test {
             &input,
             "test: add nothing more",
             &example.collection,
+            PlannerRng::from_seed((TEST_NAME, "bp4")),
         )
         .expect("failed to create planner")
-        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp4")))
         .plan()
         .expect("failed to plan");
         let summary = blueprint4.diff_since_blueprint(&blueprint3);
@@ -1909,9 +2362,9 @@ pub(crate) mod test {
             &input,
             "test: add Crucible zones?",
             &collection,
+            PlannerRng::from_seed((TEST_NAME, "bp5")),
         )
         .expect("failed to create planner")
-        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp5")))
         .plan()
         .expect("failed to plan");
 
@@ -2012,9 +2465,9 @@ pub(crate) mod test {
             &input,
             "test_blueprint2",
             &collection,
+            PlannerRng::from_seed((TEST_NAME, "bp2")),
         )
         .expect("failed to create planner")
-        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp2")))
         .plan()
         .expect("failed to plan");
 
@@ -2093,9 +2546,9 @@ pub(crate) mod test {
             &input,
             "test_blueprint2",
             &collection,
+            PlannerRng::from_seed((TEST_NAME, "bp2")),
         )
         .expect("failed to create planner")
-        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp2")))
         .plan()
         .expect("failed to plan");
 
@@ -2181,6 +2634,7 @@ pub(crate) mod test {
             &builder.build(),
             "test_blueprint2",
             &collection,
+            PlannerRng::from_entropy(),
         )
         .expect("created planner")
         .plan()
@@ -2221,9 +2675,9 @@ pub(crate) mod test {
             &input,
             "test_blueprint2",
             &collection,
+            PlannerRng::from_seed((TEST_NAME, "bp2")),
         )
         .expect("failed to create planner")
-        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp2")))
         .plan()
         .expect("failed to plan");
 
@@ -2300,9 +2754,9 @@ pub(crate) mod test {
             &input,
             "test_blueprint2",
             &collection,
+            PlannerRng::from_seed((TEST_NAME, "bp2")),
         )
         .expect("failed to create planner")
-        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp2")))
         .plan()
         .expect("failed to plan");
 
@@ -2341,9 +2795,9 @@ pub(crate) mod test {
             &input,
             "test_blueprint3",
             &collection,
+            PlannerRng::from_seed((TEST_NAME, "bp3")),
         )
         .expect("failed to create planner")
-        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp3")))
         .plan()
         .expect("failed to plan");
 
@@ -2401,6 +2855,7 @@ pub(crate) mod test {
             &input,
             &collection,
             TEST_NAME,
+            PlannerRng::from_entropy(),
         )
         .expect("failed to build blueprint builder");
         let sled_id = builder.sled_ids_with_zones().next().expect("no sleds");
@@ -2419,6 +2874,7 @@ pub(crate) mod test {
             &input,
             &collection,
             TEST_NAME,
+            PlannerRng::from_entropy(),
         )
         .expect("failed to build blueprint builder");
 
@@ -2481,9 +2937,9 @@ pub(crate) mod test {
             &input,
             "test_blueprint2",
             &collection,
+            PlannerRng::from_seed((TEST_NAME, "bp2")),
         )
         .expect("failed to create planner")
-        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp2")))
         .plan()
         .expect("failed to plan");
 
@@ -2512,9 +2968,9 @@ pub(crate) mod test {
             &input,
             "test_blueprint3",
             &collection,
+            PlannerRng::from_seed((TEST_NAME, "bp3")),
         )
         .expect("failed to create planner")
-        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp3")))
         .plan()
         .expect("failed to re-plan");
 
@@ -2630,9 +3086,9 @@ pub(crate) mod test {
             &input,
             "test: some new disks",
             &collection,
+            PlannerRng::from_seed((TEST_NAME, "bp2")),
         )
         .expect("failed to create planner")
-        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp2")))
         .plan()
         .expect("failed to plan");
 
@@ -2716,9 +3172,9 @@ pub(crate) mod test {
             &input,
             "test: fix a dataset",
             &collection,
+            PlannerRng::from_seed((TEST_NAME, "bp2")),
         )
         .expect("failed to create planner")
-        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp2")))
         .plan()
         .expect("failed to plan");
 
@@ -2797,9 +3253,9 @@ pub(crate) mod test {
             &input,
             "test: expunge a disk",
             &collection,
+            PlannerRng::from_seed((TEST_NAME, "bp2")),
         )
         .expect("failed to create planner")
-        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp2")))
         .plan()
         .expect("failed to plan");
 
@@ -2857,9 +3313,9 @@ pub(crate) mod test {
             &input,
             "test: decommission a disk",
             &collection,
+            PlannerRng::from_seed((TEST_NAME, "bp3")),
         )
         .expect("failed to create planner")
-        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp3")))
         .plan()
         .expect("failed to plan");
 
@@ -2913,9 +3369,9 @@ pub(crate) mod test {
             &input,
             "test: expunge and decommission all disks",
             &collection,
+            PlannerRng::from_seed((TEST_NAME, "bp4")),
         )
         .expect("failed to create planner")
-        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp4")))
         .plan()
         .expect("failed to plan");
 
@@ -3003,9 +3459,9 @@ pub(crate) mod test {
             &input,
             "test: expunge a disk",
             &collection,
+            PlannerRng::from_seed((TEST_NAME, "bp2")),
         )
         .expect("failed to create planner")
-        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp2")))
         .plan()
         .expect("failed to plan");
 
@@ -3173,9 +3629,9 @@ pub(crate) mod test {
             &input,
             "test: expunge a disk with a zone on top",
             &collection,
+            PlannerRng::from_seed((TEST_NAME, "bp2")),
         )
         .expect("failed to create planner")
-        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp2")))
         .plan()
         .expect("failed to plan");
 
@@ -3350,9 +3806,9 @@ pub(crate) mod test {
             &input,
             "test_blueprint2",
             &collection,
+            PlannerRng::from_seed((TEST_NAME, "bp2")),
         )
         .expect("failed to create planner")
-        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp2")))
         .plan()
         .expect("failed to plan");
 
@@ -3597,9 +4053,9 @@ pub(crate) mod test {
             &input,
             "test_blueprint2",
             &collection,
+            PlannerRng::from_seed((TEST_NAME, "bp2")),
         )
         .expect("created planner")
-        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp2")))
         .plan()
         .expect("failed to plan");
 
@@ -3641,9 +4097,9 @@ pub(crate) mod test {
             &input,
             "test_blueprint3",
             &collection,
+            PlannerRng::from_seed((TEST_NAME, "bp3")),
         )
         .expect("created planner")
-        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp3")))
         .plan()
         .expect("succeeded in planner");
 
@@ -3692,9 +4148,9 @@ pub(crate) mod test {
             &input,
             "test_blueprint4",
             &collection,
+            PlannerRng::from_seed((TEST_NAME, "bp4")),
         )
         .expect("created planner")
-        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp4")))
         .plan()
         .expect("succeeded in planner");
 
@@ -3752,9 +4208,9 @@ pub(crate) mod test {
             &builder.clone().build(),
             "initial settings",
             &collection,
+            PlannerRng::from_seed((TEST_NAME, "bp2")),
         )
         .expect("failed to create planner")
-        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp2")))
         .plan()
         .expect("failed to plan");
         assert_eq!(bp2.cockroachdb_fingerprint, "bp2");
@@ -3779,9 +4235,9 @@ pub(crate) mod test {
             &builder.clone().build(),
             "initial settings",
             &collection,
+            PlannerRng::from_seed((TEST_NAME, "bp3")),
         )
         .expect("failed to create planner")
-        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp3")))
         .plan()
         .expect("failed to plan");
         assert_eq!(bp3.cockroachdb_fingerprint, "bp3");
@@ -3804,9 +4260,9 @@ pub(crate) mod test {
             &builder.clone().build(),
             "after ensure",
             &collection,
+            PlannerRng::from_seed((TEST_NAME, "bp4")),
         )
         .expect("failed to create planner")
-        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp4")))
         .plan()
         .expect("failed to plan");
         assert_eq!(bp4.cockroachdb_fingerprint, "bp4");
@@ -3833,12 +4289,12 @@ pub(crate) mod test {
                 &builder.clone().build(),
                 "unknown version",
                 &collection,
+                PlannerRng::from_seed((
+                    TEST_NAME,
+                    format!("bp5-{}", preserve_downgrade),
+                )),
             )
             .expect("failed to create planner")
-            .with_rng(PlannerRng::from_seed((
-                TEST_NAME,
-                format!("bp5-{}", preserve_downgrade),
-            )))
             .plan()
             .expect("failed to plan");
             assert_eq!(bp5.cockroachdb_fingerprint, "bp5");
@@ -3892,9 +4348,9 @@ pub(crate) mod test {
             &input,
             "test_blueprint2",
             &collection,
+            PlannerRng::from_seed((TEST_NAME, "bp2")),
         )
         .expect("failed to create planner")
-        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp2")))
         .plan()
         .expect("failed to re-plan");
 
@@ -3962,9 +4418,9 @@ pub(crate) mod test {
             &input,
             "test_blueprint2",
             &collection,
+            PlannerRng::from_seed((TEST_NAME, "bp2")),
         )
         .expect("failed to create planner")
-        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp2")))
         .plan()
         .expect("failed to re-plan");
 
@@ -4026,9 +4482,9 @@ pub(crate) mod test {
             &input,
             "test_blueprint2",
             &collection,
+            PlannerRng::from_seed((TEST_NAME, "bp2")),
         )
         .expect("created planner")
-        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp2")))
         .plan()
         .expect("plan");
 
@@ -4100,9 +4556,9 @@ pub(crate) mod test {
             &input,
             "test_blueprint3",
             &collection,
+            PlannerRng::from_seed((TEST_NAME, "bp3")),
         )
         .expect("created planner")
-        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp3")))
         .plan()
         .expect("plan");
 
@@ -4141,9 +4597,9 @@ pub(crate) mod test {
             &input,
             "test_blueprint4",
             &collection,
+            PlannerRng::from_seed((TEST_NAME, "bp4")),
         )
         .expect("created planner")
-        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp4")))
         .plan()
         .expect("plan");
 
@@ -4189,9 +4645,9 @@ pub(crate) mod test {
             &input,
             "test_blueprint5",
             &collection,
+            PlannerRng::from_seed((TEST_NAME, "bp5")),
         )
         .expect("created planner")
-        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp5")))
         .plan()
         .expect("plan");
 
@@ -4236,9 +4692,9 @@ pub(crate) mod test {
             &input,
             "test_blueprint6",
             &collection,
+            PlannerRng::from_seed((TEST_NAME, "bp6")),
         )
         .expect("created planner")
-        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp6")))
         .plan()
         .expect("plan");
 
@@ -4273,9 +4729,9 @@ pub(crate) mod test {
             &input,
             "test_blueprint7",
             &collection,
+            PlannerRng::from_seed((TEST_NAME, "bp7")),
         )
         .expect("created planner")
-        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp7")))
         .plan()
         .expect("plan");
 
@@ -4316,9 +4772,9 @@ pub(crate) mod test {
             &input,
             "test_blueprint8",
             &collection,
+            PlannerRng::from_seed((TEST_NAME, "bp8")),
         )
         .expect("created planner")
-        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp8")))
         .plan()
         .expect("plan");
 
@@ -4369,9 +4825,9 @@ pub(crate) mod test {
             &input,
             "test_blueprint2",
             &collection,
+            PlannerRng::from_seed((TEST_NAME, "bp2")),
         )
         .expect("created planner")
-        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp2")))
         .plan()
         .expect("plan");
 
@@ -4427,9 +4883,9 @@ pub(crate) mod test {
             &input,
             "test_blueprint3",
             &collection,
+            PlannerRng::from_seed((TEST_NAME, "bp3")),
         )
         .expect("created planner")
-        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp3")))
         .plan()
         .expect("plan");
 
@@ -4464,9 +4920,9 @@ pub(crate) mod test {
             &input,
             "test_blueprint4",
             &collection,
+            PlannerRng::from_seed((TEST_NAME, "bp4")),
         )
         .expect("created planner")
-        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp4")))
         .plan()
         .expect("plan");
 
@@ -4495,9 +4951,9 @@ pub(crate) mod test {
             &input,
             "test_blueprint5",
             &collection,
+            PlannerRng::from_seed((TEST_NAME, "bp5")),
         )
         .expect("created planner")
-        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp5")))
         .plan()
         .expect("plan");
 
@@ -4528,9 +4984,9 @@ pub(crate) mod test {
             &input,
             "test_blueprint6",
             &collection,
+            PlannerRng::from_seed((TEST_NAME, "bp6")),
         )
         .expect("created planner")
-        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp6")))
         .plan()
         .expect("plan");
 
@@ -4588,9 +5044,9 @@ pub(crate) mod test {
             &input,
             "test_blueprint2",
             &collection,
+            PlannerRng::from_seed((TEST_NAME, "bp2")),
         )
         .expect("created planner")
-        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp2")))
         .plan()
         .expect("plan");
 
@@ -4635,9 +5091,9 @@ pub(crate) mod test {
             &input,
             "test_blueprint3",
             &collection,
+            PlannerRng::from_seed((TEST_NAME, "bp3")),
         )
         .expect("created planner")
-        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp3")))
         .plan()
         .expect("plan");
 
@@ -4663,9 +5119,9 @@ pub(crate) mod test {
             &input,
             "test_blueprint4",
             &collection,
+            PlannerRng::from_seed((TEST_NAME, "bp4")),
         )
         .expect("created planner")
-        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp4")))
         .plan()
         .expect("plan");
 
@@ -4764,9 +5220,9 @@ pub(crate) mod test {
             &input,
             "expunge disk",
             &collection,
+            PlannerRng::from_seed((TEST_NAME, "bp2")),
         )
         .expect("created planner")
-        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp2")))
         .plan()
         .expect("planned");
 
@@ -4911,9 +5367,9 @@ pub(crate) mod test {
             &input,
             "removed Nexus zone from inventory",
             &collection,
+            PlannerRng::from_seed((TEST_NAME, "bp3")),
         )
         .expect("created planner")
-        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp3")))
         .plan()
         .expect("planned");
 
@@ -4991,9 +5447,9 @@ pub(crate) mod test {
             &input,
             "expunge disk",
             &collection,
+            PlannerRng::from_seed((TEST_NAME, "bp2")),
         )
         .expect("created planner")
-        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp2")))
         .plan()
         .expect("planned");
 
@@ -5064,9 +5520,9 @@ pub(crate) mod test {
             &input,
             "removed Nexus zone from inventory",
             &collection,
+            PlannerRng::from_seed((TEST_NAME, "bp3")),
         )
         .expect("created planner")
-        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp3")))
         .plan()
         .expect("planned");
 
@@ -5143,6 +5599,8 @@ pub(crate) mod test {
                 },
                 hash: ArtifactHash([0; 32]),
                 size: 0,
+                board: None,
+                sign: None,
             }
         };
     }
@@ -5292,9 +5750,9 @@ pub(crate) mod test {
             &input,
             "test_blueprint3",
             &example.collection,
+            PlannerRng::from_seed((TEST_NAME, "bp3")),
         )
         .expect("can't create planner")
-        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp3")))
         .plan()
         .expect("can't re-plan for new Nexus zone");
         {
@@ -5326,9 +5784,9 @@ pub(crate) mod test {
                 &input,
                 &blueprint_name,
                 &example.collection,
+                PlannerRng::from_seed((TEST_NAME, &blueprint_name)),
             )
             .expect("can't create planner")
-            .with_rng(PlannerRng::from_seed((TEST_NAME, &blueprint_name)))
             .plan()
             .unwrap_or_else(|_| panic!("can't re-plan after {i} iterations"));
 
@@ -5408,9 +5866,9 @@ pub(crate) mod test {
                 &input,
                 &blueprint_name,
                 &example.collection,
+                PlannerRng::from_seed((TEST_NAME, &blueprint_name)),
             )
             .expect("can't create planner")
-            .with_rng(PlannerRng::from_seed((TEST_NAME, &blueprint_name)))
             .plan()
             .unwrap_or_else(|_| panic!("can't re-plan after {i} iterations"));
 
@@ -5489,9 +5947,9 @@ pub(crate) mod test {
             &example.input,
             &blueprint_name,
             &example.collection,
+            PlannerRng::from_seed((TEST_NAME, &blueprint_name)),
         )
         .expect("can't create planner")
-        .with_rng(PlannerRng::from_seed((TEST_NAME, &blueprint_name)))
         .plan()
         .unwrap_or_else(|_| panic!("can't plan to include Cockroach nodes"));
 
@@ -5593,7 +6051,7 @@ pub(crate) mod test {
             let mut result = BTreeMap::new();
             for i in 1..=COCKROACHDB_REDUNDANCY {
                 result.insert(
-                    omicron_cockroach_metrics::NodeId(i.to_string()),
+                    cockroach_admin_types::NodeId(i.to_string()),
                     CockroachStatus {
                         ranges_underreplicated: Some(0),
                         liveness_live_nodes: Some(GOAL_REDUNDANCY),
@@ -5614,8 +6072,8 @@ pub(crate) mod test {
             TEST_NAME,
         );
 
-        // If we're missing info from even a single node, we
-        // will still refuse to update.
+        // If we don't have valid statuses from enough internal DNS zones, we
+        // will refuse to update.
         example.collection.cockroach_status = create_valid_looking_status();
         example.collection.cockroach_status.pop_first();
         assert_planning_makes_no_changes(
@@ -5634,7 +6092,7 @@ pub(crate) mod test {
         *example
             .collection
             .cockroach_status
-            .get_mut(&omicron_cockroach_metrics::NodeId("1".to_string()))
+            .get_mut(&cockroach_admin_types::NodeId("1".to_string()))
             .unwrap() = CockroachStatus {
             ranges_underreplicated: Some(1),
             liveness_live_nodes: Some(GOAL_REDUNDANCY),
@@ -5652,7 +6110,7 @@ pub(crate) mod test {
         *example
             .collection
             .cockroach_status
-            .get_mut(&omicron_cockroach_metrics::NodeId("1".to_string()))
+            .get_mut(&cockroach_admin_types::NodeId("1".to_string()))
             .unwrap() = CockroachStatus {
             ranges_underreplicated: Some(0),
             liveness_live_nodes: Some(GOAL_REDUNDANCY - 1),
@@ -5683,9 +6141,9 @@ pub(crate) mod test {
                 &example.input,
                 &format!("test_blueprint_cockroach_{i}"),
                 &example.collection,
+                PlannerRng::from_seed((TEST_NAME, "bp_crdb")),
             )
             .expect("can't create planner")
-            .with_rng(PlannerRng::from_seed((TEST_NAME, "bp_crdb")))
             .plan()
             .expect("plan for trivial TUF repo");
 
@@ -5868,9 +6326,9 @@ pub(crate) mod test {
             &example.input,
             &blueprint_name,
             &example.collection,
+            rng.next_planner_rng(),
         )
         .expect("can't create planner")
-        .with_rng(PlannerRng::from_seed((TEST_NAME, &blueprint_name)))
         .plan()
         .unwrap_or_else(|err| {
             panic!("can't plan to include boundary NTP: {err}")
@@ -5908,6 +6366,7 @@ pub(crate) mod test {
             &example.input,
             TEST_NAME,
             &example.collection,
+            rng.next_planner_rng(),
         )
         .expect("can't create planner");
         let new_blueprint = planner.plan().expect("planning succeeded");
@@ -6131,9 +6590,9 @@ pub(crate) mod test {
             &example.input,
             "test_blueprint_expunge_old_boundary_ntp",
             &example.collection,
+            rng.next_planner_rng(),
         )
         .expect("can't create planner")
-        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp_ntp")))
         .plan()
         .expect("plan for trivial TUF repo");
         {
@@ -6142,6 +6601,7 @@ pub(crate) mod test {
                 "diff between blueprints (should be expunging boundary NTP using install dataset):\n{}",
                 summary.display()
             );
+            eprintln!("{}", new_blueprint.report);
 
             assert_eq!(summary.total_zones_added(), 0);
             assert_eq!(summary.total_zones_removed(), 0);
@@ -6179,9 +6639,9 @@ pub(crate) mod test {
             &example.input,
             "test_blueprint_boundary_ntp_add_internal_and_promote_one",
             &example.collection,
+            rng.next_planner_rng(),
         )
         .expect("can't create planner")
-        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp_ntp")))
         .plan()
         .expect("plan for trivial TUF repo");
         {
@@ -6190,6 +6650,7 @@ pub(crate) mod test {
                 "diff between blueprints (should be adding one internal NTP and promoting another to boundary):\n{}",
                 summary.display()
             );
+            eprintln!("{}", new_blueprint.report);
 
             assert_eq!(summary.total_zones_added(), 2);
             assert_eq!(summary.total_zones_removed(), 0);
@@ -6218,9 +6679,9 @@ pub(crate) mod test {
             &example.input,
             "test_blueprint_boundary_ntp_expunge_the_other_one",
             &example.collection,
+            rng.next_planner_rng(),
         )
         .expect("can't create planner")
-        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp_ntp")))
         .plan()
         .expect("plan for trivial TUF repo");
         {
@@ -6229,6 +6690,7 @@ pub(crate) mod test {
                 "diff between blueprints (should be expunging another boundary NTP):\n{}",
                 summary.display()
             );
+            eprintln!("{}", new_blueprint.report);
 
             assert_eq!(summary.total_zones_added(), 0);
             assert_eq!(summary.total_zones_removed(), 0);
@@ -6258,9 +6720,9 @@ pub(crate) mod test {
             &example.input,
             "test_blueprint_boundary_ntp_promotion",
             &example.collection,
+            rng.next_planner_rng(),
         )
         .expect("can't create planner")
-        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp_ntp")))
         .plan()
         .expect("plan for trivial TUF repo");
         {
@@ -6269,6 +6731,7 @@ pub(crate) mod test {
                 "diff between blueprints (should be adding promoting internal -> boundary NTP):\n{}",
                 summary.display()
             );
+            eprintln!("{}", new_blueprint.report);
 
             assert_eq!(summary.total_zones_added(), 2);
             assert_eq!(summary.total_zones_removed(), 0);
@@ -6294,9 +6757,9 @@ pub(crate) mod test {
             &example.input,
             "test_blueprint_boundary_ntp_finish_expunging",
             &example.collection,
+            rng.next_planner_rng(),
         )
         .expect("can't create planner")
-        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp_ntp")))
         .plan()
         .expect("plan for trivial TUF repo");
         {
@@ -6305,6 +6768,7 @@ pub(crate) mod test {
                 "diff between blueprints (should be adding wrapping up internal NTP expungement):\n{}",
                 summary.display()
             );
+            eprintln!("{}", new_blueprint.report);
 
             assert_eq!(summary.total_zones_added(), 0);
             assert_eq!(summary.total_zones_removed(), 0);
@@ -6330,6 +6794,274 @@ pub(crate) mod test {
         // Validate that we do not flip back to the install dataset after
         // performing the update, even if we lose timesync data.
         example.collection.ntp_timesync = IdOrdMap::new();
+        assert_planning_makes_no_changes(
+            &log,
+            &blueprint,
+            &example.input,
+            &example.collection,
+            TEST_NAME,
+        );
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn test_update_internal_dns() {
+        static TEST_NAME: &str = "update_internal_dns";
+        let logctx = test_setup_log(TEST_NAME);
+        let log = logctx.log.clone();
+
+        // Use our example system.
+        let mut rng = SimRngState::from_seed(TEST_NAME);
+        let (mut example, mut blueprint) = ExampleSystemBuilder::new_with_rng(
+            &logctx.log,
+            rng.next_system_rng(),
+        )
+        .build();
+        verify_blueprint(&blueprint);
+
+        // All zones should be sourced from the install dataset by default.
+        assert!(
+            blueprint
+                .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+                .all(|(_, z)| matches!(
+                    z.image_source,
+                    BlueprintZoneImageSource::InstallDataset
+                ))
+        );
+
+        // This test "starts" here -- we specify a new TUF repo with an updated
+        // Internal DNS image. We create a new TUF repo where version of
+        // Internal DNS has been updated out of the install dataset.
+        //
+        // The planner should avoid doing this update until it has confirmation
+        // from inventory that the Internal DNS servers are ready.
+
+        let mut input_builder = example.input.clone().into_builder();
+        let version = ArtifactVersion::new_static("1.0.0-freeform")
+            .expect("can't parse artifact version");
+        let fake_hash = ArtifactHash([0; 32]);
+        let image_source = BlueprintZoneImageSource::Artifact {
+            version: BlueprintArtifactVersion::Available {
+                version: version.clone(),
+            },
+            hash: fake_hash,
+        };
+        let artifacts = create_artifacts_at_version(&version);
+        let target_release_generation = Generation::from_u32(2);
+        input_builder.policy_mut().tuf_repo = TufRepoPolicy {
+            target_release_generation,
+            description: TargetReleaseDescription::TufRepo(
+                TufRepoDescription {
+                    repo: TufRepoMeta {
+                        hash: fake_hash,
+                        targets_role_version: 0,
+                        valid_until: Utc::now(),
+                        system_version: Version::new(1, 0, 0),
+                        file_name: String::from(""),
+                    },
+                    artifacts,
+                },
+            ),
+        };
+        example.input = input_builder.build();
+
+        // Manually update all zones except Internal DNS
+        //
+        // We just specified a new TUF repo, everything is going to shift from
+        // the install dataset to this new repo.
+        for mut zone in blueprint
+            .sleds
+            .values_mut()
+            .flat_map(|config| config.zones.iter_mut())
+            .filter(|z| !z.zone_type.is_internal_dns())
+        {
+            zone.image_source = BlueprintZoneImageSource::Artifact {
+                version: BlueprintArtifactVersion::Available {
+                    version: version.clone(),
+                },
+                hash: fake_hash,
+            };
+        }
+        update_collection_from_blueprint(&mut example, &blueprint);
+
+        // Some helper predicates for the assertions below.
+        let is_old_internal_dns = |zone: &BlueprintZoneConfig| -> bool {
+            zone.zone_type.is_internal_dns()
+                && matches!(
+                    zone.image_source,
+                    BlueprintZoneImageSource::InstallDataset
+                )
+        };
+        let is_up_to_date_internal_dns = |zone: &BlueprintZoneConfig| -> bool {
+            zone.zone_type.is_internal_dns()
+                && zone.image_source == image_source
+        };
+        let create_valid_looking_status = |bp: &Blueprint| {
+            let mut result = IdOrdMap::new();
+            for sled in bp.sleds.values() {
+                for zone in &sled.zones {
+                    if zone.zone_type.is_internal_dns() {
+                        result
+                            .insert_unique(InternalDnsGenerationStatus {
+                                zone_id: zone.id,
+                                generation: bp.internal_dns_version,
+                            })
+                            .expect("Observed duplicate Internal DNS zones");
+                    }
+                }
+            }
+            result
+        };
+
+        // If we have missing info in our inventory, the
+        // planner will not update any Internal DNS zones.
+        example.collection.internal_dns_generation_status = IdOrdMap::new();
+        assert_planning_makes_no_changes(
+            &log,
+            &blueprint,
+            &example.input,
+            &example.collection,
+            TEST_NAME,
+        );
+
+        // If we're missing info from even a single zone, we
+        // will still refuse to update.
+        example.collection.internal_dns_generation_status =
+            create_valid_looking_status(&blueprint);
+        let first_zone = example
+            .collection
+            .internal_dns_generation_status
+            .iter()
+            .next()
+            .unwrap()
+            .zone_id;
+        example
+            .collection
+            .internal_dns_generation_status
+            .remove(&first_zone)
+            .expect("Could not remove one status");
+        assert_planning_makes_no_changes(
+            &log,
+            &blueprint,
+            &example.input,
+            &example.collection,
+            TEST_NAME,
+        );
+
+        // If we have any out-of-sync generations in our inventory,
+        // the planner will not update Internal DNS zones.
+        example.collection.internal_dns_generation_status =
+            create_valid_looking_status(&blueprint);
+        // I'd rather have the generation be "too low", but we also reject
+        // generations that are "too far ahead", so this works.
+        example
+            .collection
+            .internal_dns_generation_status
+            .iter_mut()
+            .next()
+            .unwrap()
+            .generation = blueprint.internal_dns_version.next();
+        assert_planning_makes_no_changes(
+            &log,
+            &blueprint,
+            &example.input,
+            &example.collection,
+            TEST_NAME,
+        );
+
+        // Once we have valid DNS statuses, we can start to update Internal DNS
+        // zones.
+        //
+        // We'll update one zone at a time, from the install dataset to the
+        // new TUF repo artifact.
+        for i in 1..=INTERNAL_DNS_REDUNDANCY {
+            example.collection.internal_dns_generation_status =
+                create_valid_looking_status(&blueprint);
+
+            // First blueprint: Remove an internal DNS zone
+
+            println!(
+                "Updating internal DNS {i} of {INTERNAL_DNS_REDUNDANCY} (expunge)"
+            );
+            let new_blueprint = Planner::new_based_on(
+                log.clone(),
+                &blueprint,
+                &example.input,
+                &format!("test_blueprint_internal_dns_{i}_removal"),
+                &example.collection,
+                PlannerRng::from_seed((TEST_NAME, "bp_dns")),
+            )
+            .expect("can't create planner")
+            .plan()
+            .expect("plan for trivial TUF repo");
+            {
+                let summary = new_blueprint.diff_since_blueprint(&blueprint);
+                assert_eq!(summary.total_zones_added(), 0);
+                assert_eq!(summary.total_zones_removed(), 0);
+                assert_eq!(summary.total_zones_modified(), 1);
+            }
+            blueprint = new_blueprint;
+            update_collection_from_blueprint(&mut example, &blueprint);
+            verify_blueprint(&blueprint);
+
+            // Next blueprint: Add an (updated) internal DNS zone back
+
+            println!(
+                "Updating internal DNS {i} of {INTERNAL_DNS_REDUNDANCY} (add)"
+            );
+            let new_blueprint = Planner::new_based_on(
+                log.clone(),
+                &blueprint,
+                &example.input,
+                &format!("test_blueprint_internal_dns_{i}_addition"),
+                &example.collection,
+                PlannerRng::from_seed((TEST_NAME, "bp_dns")),
+            )
+            .expect("can't create planner")
+            .plan()
+            .expect("plan for trivial TUF repo");
+            {
+                let summary = new_blueprint.diff_since_blueprint(&blueprint);
+                assert_eq!(summary.total_zones_added(), 1);
+                assert_eq!(summary.total_zones_removed(), 0);
+                assert_eq!(summary.total_zones_modified(), 1);
+            }
+            blueprint = new_blueprint;
+            update_collection_from_blueprint(&mut example, &blueprint);
+            verify_blueprint(&blueprint);
+
+            assert_eq!(
+                blueprint
+                    .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+                    .filter(|(_, z)| is_old_internal_dns(z))
+                    .count(),
+                INTERNAL_DNS_REDUNDANCY - i
+            );
+            assert_eq!(
+                blueprint
+                    .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+                    .filter(|(_, z)| is_up_to_date_internal_dns(z))
+                    .count(),
+                i
+            );
+        }
+
+        // Validate that we have no further changes to make, once all Internal
+        // DNS zones have been updated.
+        example.collection.internal_dns_generation_status =
+            create_valid_looking_status(&blueprint);
+        assert_planning_makes_no_changes(
+            &log,
+            &blueprint,
+            &example.input,
+            &example.collection,
+            TEST_NAME,
+        );
+
+        // Validate that we do not flip back to the install dataset after
+        // performing the update.
+        example.collection.internal_dns_generation_status = IdOrdMap::new();
         assert_planning_makes_no_changes(
             &log,
             &blueprint,
@@ -6393,21 +7125,7 @@ pub(crate) mod test {
                         system_version: Version::new(1, 0, 0),
                         file_name: String::from(""),
                     },
-                    artifacts: vec![
-                        // Omit `BoundaryNtp` because it has the same artifact
-                        // name as `InternalNtp`.
-                        fake_zone_artifact!(Clickhouse, version.clone()),
-                        fake_zone_artifact!(ClickhouseKeeper, version.clone()),
-                        fake_zone_artifact!(ClickhouseServer, version.clone()),
-                        fake_zone_artifact!(CockroachDb, version.clone()),
-                        fake_zone_artifact!(Crucible, version.clone()),
-                        fake_zone_artifact!(CruciblePantry, version.clone()),
-                        fake_zone_artifact!(ExternalDns, version.clone()),
-                        fake_zone_artifact!(InternalDns, version.clone()),
-                        fake_zone_artifact!(InternalNtp, version.clone()),
-                        fake_zone_artifact!(Nexus, version.clone()),
-                        fake_zone_artifact!(Oximeter, version.clone()),
-                    ],
+                    artifacts: create_artifacts_at_version(&version),
                 },
             ),
         };
@@ -6435,11 +7153,15 @@ pub(crate) mod test {
                 &input,
                 &blueprint_name,
                 &example.collection,
+                PlannerRng::from_seed((TEST_NAME, &blueprint_name)),
             )
             .expect("can't create planner")
-            .with_rng(PlannerRng::from_seed((TEST_NAME, &blueprint_name)))
             .plan()
             .unwrap_or_else(|_| panic!("can't re-plan after {i} iterations"));
+
+            assert_eq!(blueprint.report.blueprint_id, blueprint.id);
+            eprintln!("{}\n", blueprint.report);
+            // TODO: more report testing
 
             {
                 let summary = blueprint.diff_since_blueprint(&parent);

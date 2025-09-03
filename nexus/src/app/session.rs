@@ -20,6 +20,7 @@ use omicron_common::api::external::LookupType;
 use omicron_common::api::external::UpdateResult;
 use omicron_uuid_kinds::ConsoleSessionUuid;
 use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::SiloUserUuid;
 use rand::{RngCore, SeedableRng, rngs::StdRng};
 use uuid::Uuid;
 
@@ -27,7 +28,7 @@ fn generate_session_token() -> String {
     // TODO: "If getrandom is unable to provide secure entropy this method will panic."
     // Should we explicitly handle that?
     // TODO: store generator somewhere so we don't reseed every time
-    let mut rng = StdRng::from_entropy();
+    let mut rng = StdRng::from_os_rng();
     // OWASP recommends at least 64 bits of entropy, OAuth 2 spec 128 minimum, 160 recommended
     // 20 bytes = 160 bits of entropy
     // TODO: the size should be a constant somewhere, maybe even in config?
@@ -56,7 +57,7 @@ impl super::Nexus {
             self.db_datastore.session_lookup_by_token(&opctx, token).await?;
 
         let (.., db_silo_user) = LookupPath::new(opctx, &self.db_datastore)
-            .silo_user_id(db_session.silo_user_id)
+            .silo_user_id(db_session.silo_user_id())
             .fetch()
             .await?;
 
@@ -91,7 +92,7 @@ impl super::Nexus {
     pub(crate) async fn lookup_silo_for_authn(
         &self,
         opctx: &OpContext,
-        silo_user_id: Uuid,
+        silo_user_id: SiloUserUuid,
     ) -> Result<Uuid, Reason> {
         let (.., db_silo_user) = LookupPath::new(opctx, &self.db_datastore)
             .silo_user_id(silo_user_id)

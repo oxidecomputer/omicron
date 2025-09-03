@@ -95,11 +95,9 @@ use nexus_sled_agent_shared::inventory::{
 };
 use nexus_types::deployment::{
     Blueprint, BlueprintDatasetConfig, BlueprintDatasetDisposition,
-    BlueprintHostPhase2DesiredSlots, BlueprintZoneType,
-    CockroachDbPreserveDowngrade, blueprint_zone_type,
-};
-use nexus_types::deployment::{
-    BlueprintSledConfig, OximeterReadMode, PendingMgsUpdates,
+    BlueprintHostPhase2DesiredSlots, BlueprintSledConfig, BlueprintZoneType,
+    CockroachDbPreserveDowngrade, OximeterReadMode, PendingMgsUpdates,
+    PlanningReport, blueprint_zone_type,
 };
 use nexus_types::external_api::views::SledState;
 use ntp_admin_client::{
@@ -1621,8 +1619,9 @@ pub(crate) fn build_initial_blueprint_from_sled_configs(
         );
     }
 
+    let id = BlueprintUuid::new_v4();
     Ok(Blueprint {
-        id: BlueprintUuid::new_v4(),
+        id,
         sleds: blueprint_sleds,
         pending_mgs_updates: PendingMgsUpdates::new(),
         parent_blueprint_id: None,
@@ -1632,6 +1631,7 @@ pub(crate) fn build_initial_blueprint_from_sled_configs(
         // (including creating the recovery silo).
         external_dns_version: Generation::new(),
         target_release_minimum_generation: Generation::new(),
+        nexus_generation: Generation::new(),
         // Nexus will fill in the CockroachDB values during initialization.
         cockroachdb_fingerprint: String::new(),
         cockroachdb_setting_preserve_downgrade:
@@ -1646,6 +1646,7 @@ pub(crate) fn build_initial_blueprint_from_sled_configs(
         time_created: Utc::now(),
         creator: "RSS".to_string(),
         comment: "initial blueprint from rack setup".to_string(),
+        report: PlanningReport::new(id),
     })
 }
 

@@ -7,11 +7,13 @@
 use crate::crypto::{EncryptedRackSecrets, RackSecret, Sha3_256Digest};
 use crate::validators::ValidatedReconfigureMsg;
 use crate::{Epoch, PlatformId, Threshold};
+use daft::Diffable;
 use gfss::shamir::{Share, SplitError};
 use iddqd::{IdOrdItem, id_upcast};
 use omicron_uuid_kinds::RackUuid;
 use secrecy::ExposeSecret;
 use serde::{Deserialize, Serialize};
+use serde_with::serde_as;
 use slog_error_chain::SlogInlineError;
 use std::collections::BTreeMap;
 
@@ -30,7 +32,18 @@ pub enum ConfigurationError {
 /// The configuration for a given epoch.
 ///
 /// Only valid for non-lrtq configurations
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde_as]
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Serialize,
+    Deserialize,
+    Diffable,
+)]
 pub struct Configuration {
     /// Unique Id of the rack
     pub rack_id: RackUuid,
@@ -42,6 +55,7 @@ pub struct Configuration {
     pub coordinator: PlatformId,
 
     // All members of the current configuration and the hash of their key shares
+    #[serde_as(as = "Vec<(_, _)>")]
     pub members: BTreeMap<PlatformId, Sha3_256Digest>,
 
     /// The number of sleds required to reconstruct the rack secret
@@ -109,5 +123,26 @@ impl Configuration {
             },
             shares,
         ))
+    }
+
+    #[cfg(feature = "testing")]
+    pub fn equal_except_for_crypto_data(&self, other: &Self) -> bool {
+        let encrypted_rack_secrets_match =
+            match (&self.encrypted_rack_secrets, &other.encrypted_rack_secrets)
+            {
+                (None, None) => true,
+                (Some(_), Some(_)) => true,
+                _ => false,
+            };
+        self.rack_id == other.rack_id
+            && self.epoch == other.epoch
+            && self.coordinator == other.coordinator
+            && self
+                .members
+                .keys()
+                .zip(other.members.keys())
+                .all(|(id1, id2)| id1 == id2)
+            && self.threshold == other.threshold
+            && encrypted_rack_secrets_match
     }
 }

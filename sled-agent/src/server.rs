@@ -76,6 +76,12 @@ impl Server {
         let http_server =
             dropshot::ServerBuilder::new(http_api(), sled_agent, dropshot_log)
                 .config(dropshot_config)
+                .version_policy(dropshot::VersionPolicy::Dynamic(Box::new(
+                    dropshot::ClientSpecifiesVersionInHeader::new(
+                        omicron_common::api::VERSION_HEADER,
+                        sled_agent_api::VERSION_ADD_SWITCH_ZONE_OPERATOR_POLICY,
+                    ),
+                )))
                 .start()
                 .map_err(|error| format!("initializing server: {}", error))?;
 

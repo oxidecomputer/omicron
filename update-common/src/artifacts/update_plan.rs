@@ -72,13 +72,18 @@ pub struct UpdatePlan {
     pub trampoline_phase_1: ArtifactIdData,
     pub trampoline_phase_2: ArtifactIdData,
 
-    // We need to send installinator the hash of the host_phase_2 data it should
-    // fetch from us; we compute it while generating the plan.
+    // We need to send installinator either the hash of the installinator
+    // document (for newer TUF repos), or the host phase 2 and control plane
+    // hashes (for older TUF repos).
+    //
+    // TODO-cleanup: After r16, installinator_doc_hash will always be present.
+    pub installinator_doc_hash: Option<ArtifactHash>,
+
+    // We compute this while generating the plan.
     pub host_phase_2_hash: ArtifactHash,
 
-    // We also need to send installinator the hash of the control_plane image it
-    // should fetch from us. This is already present in the TUF repository, but
-    // we record it here for use by the update process.
+    // This is already present in the TUF repository, but we record it here
+    // for use by the update process.
     //
     // When built with `ControlPlaneZonesMode::Split`, this hash does not
     // reference any artifacts in our corresponding `ArtifactsWithPlan`.
@@ -136,9 +141,15 @@ pub struct UpdatePlanBuilder<'a> {
 
     // In contrast to the trampoline phase 2 image, the host phase 2 image and
     // the control plane are fetched by installinator from us over the bootstrap
-    // network. The only information we have to send to the SP via MGS is the
-    // hash of these two artifacts; we still hold the data in our `by_hash` map
-    // we build below, but we don't need the data when driving an update.
+    // network.
+    //
+    // For newer TUF repos, this information is contained within the
+    // installinator document. We have to send this data to the SP via MGS.
+    installinator_doc_hash: Option<ArtifactHash>,
+
+    // For older TUF repos, the information we have to send to the SP via MGS is
+    // the hash of these two artifacts; we still hold the data in our `by_hash`
+    // map we build below, but we don't need the data when driving an update.
     host_phase_2_hash: Option<ArtifactHash>,
     control_plane_hash: Option<ArtifactHash>,
 
@@ -181,9 +192,9 @@ impl<'a> UpdatePlanBuilder<'a> {
             host_phase_1: None,
             trampoline_phase_1: None,
             trampoline_phase_2: None,
+            installinator_doc_hash: None,
             host_phase_2_hash: None,
             control_plane_hash: None,
-
             by_id: BTreeMap::new(),
             by_hash: HashMap::new(),
             rot_by_sign: HashMap::new(),
@@ -248,6 +259,14 @@ impl<'a> UpdatePlanBuilder<'a> {
             KnownArtifactKind::Trampoline => {
                 self.add_trampoline_artifact(artifact_id, stream)
             }
+            KnownArtifactKind::InstallinatorDocument => {
+                self.add_installinator_document_artifact(
+                    artifact_id,
+                    artifact_hash,
+                    stream,
+                )
+                .await
+            }
             KnownArtifactKind::ControlPlane => {
                 self.add_control_plane_artifact(
                     artifact_id,
@@ -280,6 +299,7 @@ impl<'a> UpdatePlanBuilder<'a> {
             KnownArtifactKind::GimletRot
             | KnownArtifactKind::Host
             | KnownArtifactKind::Trampoline
+            | KnownArtifactKind::InstallinatorDocument
             | KnownArtifactKind::ControlPlane
             | KnownArtifactKind::Zone
             | KnownArtifactKind::PscRot
@@ -316,7 +336,7 @@ impl<'a> UpdatePlanBuilder<'a> {
 
         let board = Board(caboose.board);
 
-        let slot = match sp_map.entry(board) {
+        let slot = match sp_map.entry(board.clone()) {
             btree_map::Entry::Vacant(slot) => slot,
             btree_map::Entry::Occupied(slot) => {
                 return Err(RepositoryError::DuplicateBoardEntry {
@@ -344,6 +364,8 @@ impl<'a> UpdatePlanBuilder<'a> {
             artifact_id,
             data,
             artifact_kind.into(),
+            Some(board),
+            None,
             self.log,
         )?;
 
@@ -373,6 +395,7 @@ impl<'a> UpdatePlanBuilder<'a> {
             KnownArtifactKind::GimletRot
             | KnownArtifactKind::Host
             | KnownArtifactKind::Trampoline
+            | KnownArtifactKind::InstallinatorDocument
             | KnownArtifactKind::ControlPlane
             | KnownArtifactKind::Zone
             | KnownArtifactKind::PscRot
@@ -398,11 +421,20 @@ impl<'a> UpdatePlanBuilder<'a> {
         let (artifact_id, bootloader_caboose) =
             read_hubris_caboose_from_archive(artifact_id, data.clone())?;
 
+        let sign = match bootloader_caboose.sign {
+            Some(sign) => sign,
+            None => {
+                return Err(RepositoryError::MissingHubrisCabooseSign(
+                    artifact_id,
+                ));
+            }
+        };
+
         // We restrict the bootloader to exactly one entry per (kind, signature)
-        match self.rot_by_sign.entry(RotSignData {
-            kind: artifact_kind,
-            sign: bootloader_caboose.sign.expect("required SIGN in caboose"),
-        }) {
+        match self
+            .rot_by_sign
+            .entry(RotSignData { kind: artifact_kind, sign: sign.clone() })
+        {
             hash_map::Entry::Occupied(_) => {
                 return Err(RepositoryError::DuplicateBoardEntry {
                     board: bootloader_caboose.board,
@@ -411,7 +443,7 @@ impl<'a> UpdatePlanBuilder<'a> {
             }
             hash_map::Entry::Vacant(slot) => slot.insert(vec![RotSignTarget {
                 id: artifact_id.clone(),
-                bord: bootloader_caboose.board,
+                bord: bootloader_caboose.board.clone(),
             }]),
         };
 
@@ -433,6 +465,8 @@ impl<'a> UpdatePlanBuilder<'a> {
             artifact_id,
             data,
             bootloader_kind,
+            Some(Board(bootloader_caboose.board)),
+            Some(sign),
             self.log,
         )?;
 
@@ -468,6 +502,7 @@ impl<'a> UpdatePlanBuilder<'a> {
             KnownArtifactKind::GimletSp
             | KnownArtifactKind::Host
             | KnownArtifactKind::Trampoline
+            | KnownArtifactKind::InstallinatorDocument
             | KnownArtifactKind::ControlPlane
             | KnownArtifactKind::Zone
             | KnownArtifactKind::PscSp
@@ -533,14 +568,20 @@ impl<'a> UpdatePlanBuilder<'a> {
             });
         }
 
-        let entry_a = RotSignData {
-            kind: artifact_kind,
-            sign: image_a_caboose.sign.expect("required SIGN in caboose"),
+        let sign_a = match image_a_caboose.sign {
+            Some(sign) => sign,
+            None => {
+                return Err(RepositoryError::MissingHubrisCabooseSign(
+                    artifact_id,
+                ));
+            }
         };
+
+        let entry_a = RotSignData { kind: artifact_kind, sign: sign_a.clone() };
 
         let target_a = RotSignTarget {
             id: artifact_id.clone(),
-            bord: image_a_caboose.board,
+            bord: image_a_caboose.board.clone(),
         };
 
         match self.rot_by_sign.entry(entry_a) {
@@ -561,14 +602,20 @@ impl<'a> UpdatePlanBuilder<'a> {
             }
         };
 
-        let entry_b = RotSignData {
-            kind: artifact_kind,
-            sign: image_b_caboose.sign.expect("required SIGN in caboose"),
+        let sign_b = match image_b_caboose.sign {
+            Some(sign) => sign,
+            None => {
+                return Err(RepositoryError::MissingHubrisCabooseSign(
+                    artifact_id,
+                ));
+            }
         };
+
+        let entry_b = RotSignData { kind: artifact_kind, sign: sign_b.clone() };
 
         let target_b = RotSignTarget {
             id: artifact_id.clone(),
-            bord: image_b_caboose.board,
+            bord: image_b_caboose.board.clone(),
         };
 
         // We already checked for duplicate boards, no need to check again
@@ -598,12 +645,16 @@ impl<'a> UpdatePlanBuilder<'a> {
             artifact_id.clone(),
             rot_a_data,
             rot_a_kind,
+            Some(Board(image_a_caboose.board)),
+            Some(sign_a),
             self.log,
         )?;
         self.record_extracted_artifact(
             artifact_id,
             rot_b_data,
             rot_b_kind,
+            Some(Board(image_b_caboose.board)),
+            Some(sign_b),
             self.log,
         )?;
 
@@ -646,12 +697,16 @@ impl<'a> UpdatePlanBuilder<'a> {
             artifact_id.clone(),
             phase_1_data,
             ArtifactKind::HOST_PHASE_1,
+            None,
+            None,
             self.log,
         )?;
         self.record_extracted_artifact(
             artifact_id,
             phase_2_data,
             ArtifactKind::HOST_PHASE_2,
+            None,
+            None,
             self.log,
         )?;
 
@@ -703,14 +758,52 @@ impl<'a> UpdatePlanBuilder<'a> {
             artifact_id.clone(),
             phase_1_data,
             ArtifactKind::TRAMPOLINE_PHASE_1,
+            None,
+            None,
             self.log,
         )?;
         self.record_extracted_artifact(
             artifact_id,
             phase_2_data,
             ArtifactKind::TRAMPOLINE_PHASE_2,
+            None,
+            None,
             self.log,
         )?;
+
+        Ok(())
+    }
+
+    async fn add_installinator_document_artifact(
+        &mut self,
+        artifact_id: ArtifactId,
+        artifact_hash: ArtifactHash,
+        stream: impl Stream<Item = Result<bytes::Bytes, tough::error::Error>> + Send,
+    ) -> Result<(), RepositoryError> {
+        // The installinator document is treated as an opaque single-unit
+        // artifact by update-common, so that older versions of update-common
+        // can handle newer versions of this artifact.
+        if self.installinator_doc_hash.is_some() {
+            return Err(RepositoryError::DuplicateInstallinatorDocument);
+        }
+
+        let artifact_kind = artifact_id.kind.clone();
+        let artifact_hash_id =
+            ArtifactHashId { kind: artifact_kind.clone(), hash: artifact_hash };
+
+        let data =
+            self.extracted_artifacts.store(artifact_hash_id, stream).await?;
+
+        self.record_extracted_artifact(
+            artifact_id,
+            data,
+            artifact_kind,
+            None,
+            None,
+            self.log,
+        )?;
+
+        self.installinator_doc_hash = Some(artifact_hash);
 
         Ok(())
     }
@@ -742,6 +835,8 @@ impl<'a> UpdatePlanBuilder<'a> {
                     artifact_id,
                     data,
                     KnownArtifactKind::ControlPlane.into(),
+                    None,
+                    None,
                     self.log,
                 )?;
             }
@@ -776,6 +871,8 @@ impl<'a> UpdatePlanBuilder<'a> {
             artifact_id,
             data,
             artifact_kind,
+            None,
+            None,
             self.log,
         )?;
 
@@ -940,6 +1037,8 @@ impl<'a> UpdatePlanBuilder<'a> {
                 artifact_id,
                 data,
                 KnownArtifactKind::Zone.into(),
+                None,
+                None,
                 self.log,
             )?;
             Ok(())
@@ -963,6 +1062,8 @@ impl<'a> UpdatePlanBuilder<'a> {
         tuf_repo_artifact_id: ArtifactId,
         data: ExtractedArtifactDataHandle,
         data_kind: ArtifactKind,
+        board: Option<Board>,
+        sign: Option<Vec<u8>>,
         log: &Logger,
     ) -> Result<(), RepositoryError> {
         use std::collections::hash_map::Entry;
@@ -1005,6 +1106,8 @@ impl<'a> UpdatePlanBuilder<'a> {
             id: artifacts_meta_id,
             hash: data.hash(),
             size: data.file_size() as u64,
+            board: board.map(|b| b.0),
+            sign,
         });
         by_hash_slot.insert(data);
 
@@ -1124,6 +1227,9 @@ impl<'a> UpdatePlanBuilder<'a> {
                     KnownArtifactKind::Trampoline,
                 ),
             )?,
+            // For backwards compatibility, installinator_doc_hash is currently
+            // optional.
+            installinator_doc_hash: self.installinator_doc_hash,
             host_phase_2_hash: self.host_phase_2_hash.ok_or(
                 RepositoryError::MissingArtifactKind(KnownArtifactKind::Host),
             )?,
@@ -1281,7 +1387,7 @@ mod tests {
     use flate2::{Compression, write::GzEncoder};
     use futures::StreamExt;
     use omicron_test_utils::dev::test_setup_log;
-    use rand::{Rng, distributions::Standard, thread_rng};
+    use rand::{Rng, distr::StandardUniform};
     use sha2::{Digest, Sha256};
     use tufaceous_brand_metadata::{ArchiveType, LayerInfo, Metadata};
     use tufaceous_lib::{
@@ -1289,7 +1395,7 @@ mod tests {
     };
 
     fn make_random_bytes() -> Vec<u8> {
-        thread_rng().sample_iter(Standard).take(128).collect()
+        rand::rng().sample_iter(StandardUniform).take(128).collect()
     }
 
     struct RandomHostOsImage {
@@ -2035,6 +2141,13 @@ mod tests {
                 KnownArtifactKind::ControlPlane => {
                     assert_eq!(hash_ids.len(), 1);
                     assert_eq!(plan.control_plane_hash, hash_ids[0].hash);
+                }
+                KnownArtifactKind::InstallinatorDocument => {
+                    assert_eq!(hash_ids.len(), 1);
+                    assert_eq!(
+                        plan.installinator_doc_hash,
+                        Some(hash_ids[0].hash)
+                    );
                 }
                 KnownArtifactKind::Zone => {
                     unreachable!(

@@ -8,6 +8,7 @@ use crate::artifact_store::ArtifactStore;
 use crate::bootstrap::config::BOOTSTRAP_AGENT_RACK_INIT_PORT;
 use crate::bootstrap::early_networking::EarlyNetworkSetupError;
 use crate::config::Config;
+use crate::hardware_monitor::HardwareMonitorHandle;
 use crate::instance_manager::InstanceManager;
 use crate::long_running_tasks::LongRunningTaskHandles;
 use crate::metrics::{MetricsManager, MetricsRequestQueue};
@@ -33,7 +34,7 @@ use illumos_utils::running_zone::RunningZone;
 use illumos_utils::zpool::PathInPool;
 use itertools::Itertools as _;
 use nexus_sled_agent_shared::inventory::{
-    Inventory, OmicronSledConfig, OmicronZoneConfig, SledRole,
+    Inventory, OmicronSledConfig, SledRole,
 };
 use omicron_common::address::{
     Ipv6Subnet, SLED_PREFIX, get_sled_address, get_switch_zone_address,
@@ -69,7 +70,7 @@ use sled_agent_types::zone_bundle::{
     PriorityOrder, StorageLimit, ZoneBundleCause, ZoneBundleMetadata,
 };
 use sled_agent_types::zone_images::{
-    ClearMupdateOverrideResult, ResolverStatus,
+    PreparedOmicronZone, RemoveMupdateOverrideResult, ResolverStatus,
 };
 use sled_diagnostics::SledDiagnosticsCmdError;
 use sled_diagnostics::SledDiagnosticsCmdOutput;
@@ -361,6 +362,9 @@ struct SledAgentInner {
 
     // A handle to the bootstore.
     bootstore: bootstore::NodeHandle,
+
+    // A handle to the hardware monitor.
+    hardware_monitor: HardwareMonitorHandle,
 
     // Object handling production of metrics for oximeter.
     _metrics_manager: MetricsManager,
@@ -672,6 +676,9 @@ impl SledAgent {
                 rack_network_config,
                 zone_bundler: long_running_task_handles.zone_bundler.clone(),
                 bootstore: long_running_task_handles.bootstore.clone(),
+                hardware_monitor: long_running_task_handles
+                    .hardware_monitor
+                    .clone(),
                 _metrics_manager: metrics_manager,
                 repo_depot,
             }),
@@ -723,6 +730,10 @@ impl SledAgent {
 
     pub fn sprockets(&self) -> SprocketsConfig {
         self.sprockets.clone()
+    }
+
+    pub(crate) fn hardware_monitor(&self) -> &HardwareMonitorHandle {
+        &self.inner.hardware_monitor
     }
 
     /// Trigger a request to Nexus informing it that the current sled exists,
@@ -822,19 +833,6 @@ impl SledAgent {
         config: OmicronSledConfig,
     ) -> Result<Result<(), LedgerNewConfigError>, LedgerTaskError> {
         self.inner.config_reconciler.set_sled_config(config).await
-    }
-
-    /// Get the status of the "destroy orphaned datasets" chicken switch.
-    pub(crate) fn chicken_switch_destroy_orphaned_datasets(&self) -> bool {
-        self.inner.config_reconciler.will_destroy_orphans()
-    }
-
-    /// Set the status of the "destroy orphaned datasets" chicken switch.
-    pub(crate) fn set_chicken_switch_destroy_orphaned_datasets(
-        &self,
-        destroy_orphans: bool,
-    ) {
-        self.inner.config_reconciler.set_destroy_orphans(destroy_orphans);
     }
 
     /// Returns whether or not the sled believes itself to be a scrimlet
@@ -1309,12 +1307,12 @@ impl SledAgentFacilities for ReconcilerFacilities {
 
     async fn start_omicron_zone(
         &self,
-        zone_config: &OmicronZoneConfig,
+        prepared_zone: PreparedOmicronZone<'_>,
         zone_root_path: PathInPool,
     ) -> anyhow::Result<RunningZone> {
         let zone = self
             .service_manager
-            .start_omicron_zone(zone_config, zone_root_path)
+            .start_omicron_zone(prepared_zone, zone_root_path)
             .await?;
         Ok(zone)
     }
@@ -1323,14 +1321,14 @@ impl SledAgentFacilities for ReconcilerFacilities {
         self.service_manager.zone_image_resolver().status()
     }
 
-    fn clear_mupdate_override(
+    fn remove_mupdate_override(
         &self,
         override_id: MupdateOverrideUuid,
         internal_disks: &InternalDisks,
-    ) -> ClearMupdateOverrideResult {
+    ) -> RemoveMupdateOverrideResult {
         self.service_manager
             .zone_image_resolver()
-            .clear_mupdate_override(override_id, internal_disks)
+            .remove_mupdate_override(override_id, internal_disks)
     }
 
     fn metrics_untrack_zone_links(

@@ -50,6 +50,7 @@ use gateway_types::task_dump::TaskDump;
 use gateway_types::update::HostPhase2Progress;
 use gateway_types::update::HostPhase2RecoveryImageId;
 use gateway_types::update::InstallinatorImageId;
+use gateway_types::update::SpComponentResetError;
 use gateway_types::update::SpUpdateStatus;
 use omicron_uuid_kinds::GenericUuid;
 use std::io::Cursor;
@@ -467,23 +468,43 @@ impl GatewayApi for GatewayImpl {
     async fn sp_component_reset(
         rqctx: RequestContext<Self::Context>,
         path: Path<PathSpComponent>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    ) -> Result<HttpResponseUpdatedNoContent, SpComponentResetError> {
         let apictx = rqctx.context();
         let PathSpComponent { sp, component } = path.into_inner();
         let sp_id = sp.into();
         let handler = async {
-            let sp = apictx.mgmt_switch.sp(sp_id)?;
+            let sp = apictx.mgmt_switch.sp(sp_id).map_err(HttpError::from)?;
             let component = component_from_str(&component)?;
+
+            // Our config may specifically disallow resetting the SP of our
+            // local sled. This is because resetting our local SP after an
+            // update doesn't work: `reset_component_trigger` below will issue a
+            // "reset with watchdog", wait for the SP to come back, then send a
+            // "disarm the watchdog" message. But if we've reset our own local
+            // sled, we won't be alive to disarm the watchdog, which will result
+            // in the SP (erroneously) rolling back the update. (In production
+            // we always disallow this; it's a config option to support dev/test
+            // environments that don't need this.)
+            if component == SpComponent::SP_ITSELF
+                && !apictx
+                    .mgmt_switch
+                    .allowed_to_reset_sp(sp_id)
+                    .map_err(HttpError::from)?
+            {
+                return Err(SpComponentResetError::ResetSpOfLocalSled);
+            }
 
             sp.reset_component_prepare(component)
                 // We always want to run with the watchdog when resetting as
-                // disabling the watchdog should be considered a debug only feature
+                // disabling the watchdog should be considered a debug only
+                // feature
                 .and_then(|()| sp.reset_component_trigger(component, false))
                 .await
                 .map_err(|err| SpCommsError::SpCommunicationFailed {
                     sp: sp_id,
                     err,
-                })?;
+                })
+                .map_err(HttpError::from)?;
 
             Ok(HttpResponseUpdatedNoContent {})
         };
@@ -942,7 +963,7 @@ impl GatewayApi for GatewayImpl {
         let handler = async {
             let sp = apictx.mgmt_switch.sp(sp_id)?;
 
-            let image_id = ipcc::InstallinatorImageId::from(body.into_inner());
+            let image_id = to_ipcc_installinator_image_id(body.into_inner());
 
             sp.set_ipcc_key_lookup_value(
                 Key::InstallinatorImageId as u8,
@@ -1171,6 +1192,16 @@ fn component_from_str(s: &str) -> Result<SpComponent, HttpError> {
             "invalid SP component name".to_string(),
         )
     })
+}
+
+fn to_ipcc_installinator_image_id(
+    image_id: InstallinatorImageId,
+) -> ipcc::InstallinatorImageId {
+    ipcc::InstallinatorImageId {
+        update_id: image_id.update_id,
+        host_phase_2: image_id.host_phase_2,
+        control_plane: image_id.control_plane,
+    }
 }
 
 // The _from_comms functions are here rather than `From` impls in gateway-types

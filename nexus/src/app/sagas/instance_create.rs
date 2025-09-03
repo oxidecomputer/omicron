@@ -391,7 +391,8 @@ async fn sic_associate_ssh_keys(
         .map_err(ActionError::action_failed)?;
 
     let (.., authz_user) = LookupPath::new(&opctx, datastore)
-        .silo_user_id(actor.actor_id())
+        .silo_user_actor(&actor)
+        .map_err(ActionError::action_failed)?
         .lookup_for(authz::Action::ListChildren)
         .await
         .map_err(ActionError::action_failed)?;
@@ -610,6 +611,7 @@ async fn create_custom_network_interface(
         db_subnet.clone(),
         interface_params.identity.clone(),
         interface_params.ip,
+        interface_params.transit_ips.iter().map(|ip| (*ip).into()).collect(),
     )
     .map_err(ActionError::action_failed)?;
     datastore
@@ -681,7 +683,8 @@ async fn create_default_primary_network_interface(
         },
         vpc_name: default_name.clone(),
         subnet_name: default_name.clone(),
-        ip: None, // Request an IP address allocation
+        ip: None,            // Request an IP address allocation
+        transit_ips: vec![], // Default interfaces don't use transit IPs
     };
 
     // Lookup authz objects, used in the call to actually create the NIC.
@@ -704,6 +707,7 @@ async fn create_default_primary_network_interface(
         db_subnet.clone(),
         interface_params.identity.clone(),
         interface_params.ip,
+        interface_params.transit_ips.iter().map(|ip| (*ip).into()).collect(),
     )
     .map_err(ActionError::action_failed)?;
     datastore

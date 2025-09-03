@@ -144,10 +144,10 @@ pub struct ConfigReconcilerInventory {
     pub orphaned_datasets: IdOrdMap<OrphanedDataset>,
     pub zones: BTreeMap<OmicronZoneUuid, ConfigReconcilerInventoryResult>,
     pub boot_partitions: BootPartitionContents,
-    /// The result of clearing the mupdate override field.
+    /// The result of removing the mupdate override file on disk.
     ///
     /// `None` if `remove_mupdate_override` was not provided in the sled config.
-    pub clear_mupdate_override: Option<ClearMupdateOverrideInventory>,
+    pub remove_mupdate_override: Option<RemoveMupdateOverrideInventory>,
 }
 
 impl ConfigReconcilerInventory {
@@ -190,6 +190,31 @@ impl ConfigReconcilerInventory {
     /// look at the actual `last_reconciliation` value from the parent
     /// [`Inventory`].
     pub fn debug_assume_success(config: OmicronSledConfig) -> Self {
+        let mut ret = Self {
+            // These fields will be filled in by `debug_update_assume_success`.
+            last_reconciled_config: OmicronSledConfig::default(),
+            external_disks: BTreeMap::new(),
+            datasets: BTreeMap::new(),
+            orphaned_datasets: IdOrdMap::new(),
+            zones: BTreeMap::new(),
+            remove_mupdate_override: None,
+
+            // These fields will not.
+            boot_partitions: BootPartitionContents::debug_assume_success(),
+        };
+
+        ret.debug_update_assume_success(config);
+
+        ret
+    }
+
+    /// Given a sled config, update an existing reconciler result to simulate an
+    /// output that sled-agent could have emitted if reconciliation succeeded.
+    ///
+    /// This method should only be used by tests and dev tools; real code should
+    /// look at the actual `last_reconciliation` value from the parent
+    /// [`Inventory`].
+    pub fn debug_update_assume_success(&mut self, config: OmicronSledConfig) {
         let external_disks = config
             .disks
             .iter()
@@ -205,35 +230,24 @@ impl ConfigReconcilerInventory {
             .iter()
             .map(|z| (z.id, ConfigReconcilerInventoryResult::Ok))
             .collect();
-        let clear_mupdate_override = config.remove_mupdate_override.map(|_| {
-            ClearMupdateOverrideInventory {
-                boot_disk_result: Ok(
-                    ClearMupdateOverrideBootSuccessInventory::Cleared,
-                ),
-                non_boot_message: "mupdate override successfully cleared \
-                                   on non-boot disks"
-                    .to_owned(),
-            }
-        });
-
-        Self {
-            last_reconciled_config: config,
-            external_disks,
-            datasets,
-            orphaned_datasets: IdOrdMap::new(),
-            zones,
-            boot_partitions: {
-                // None of our callers care about this; if that changes, we
-                // could pass in boot partition contents.
-                let err = "constructed via debug_assume_success()".to_string();
-                BootPartitionContents {
-                    boot_disk: Err(err.clone()),
-                    slot_a: Err(err.clone()),
-                    slot_b: Err(err),
+        let remove_mupdate_override =
+            config.remove_mupdate_override.map(|_| {
+                RemoveMupdateOverrideInventory {
+                    boot_disk_result: Ok(
+                        RemoveMupdateOverrideBootSuccessInventory::Removed,
+                    ),
+                    non_boot_message: "mupdate override successfully removed \
+                                       on non-boot disks"
+                        .to_owned(),
                 }
-            },
-            clear_mupdate_override,
-        }
+            });
+
+        self.last_reconciled_config = config;
+        self.external_disks = external_disks;
+        self.datasets = datasets;
+        self.orphaned_datasets = IdOrdMap::new();
+        self.zones = zones;
+        self.remove_mupdate_override = remove_mupdate_override;
     }
 }
 
@@ -252,6 +266,48 @@ pub struct BootPartitionContents {
         schema_with = "SnakeCaseResult::<BootPartitionDetails, String>::json_schema"
     )]
     pub slot_b: Result<BootPartitionDetails, String>,
+}
+
+impl BootPartitionContents {
+    pub fn slot_details(
+        &self,
+        slot: M2Slot,
+    ) -> &Result<BootPartitionDetails, String> {
+        match slot {
+            M2Slot::A => &self.slot_a,
+            M2Slot::B => &self.slot_b,
+        }
+    }
+
+    pub fn debug_assume_success() -> Self {
+        Self {
+            boot_disk: Ok(M2Slot::A),
+            slot_a: Ok(BootPartitionDetails {
+                header: BootImageHeader {
+                    flags: 0,
+                    data_size: 1000,
+                    image_size: 1000,
+                    target_size: 1000,
+                    sha256: [0; 32],
+                    image_name: "fake from debug_assume_success()".to_string(),
+                },
+                artifact_hash: ArtifactHash([0x0a; 32]),
+                artifact_size: 1000,
+            }),
+            slot_b: Ok(BootPartitionDetails {
+                header: BootImageHeader {
+                    flags: 0,
+                    data_size: 1000,
+                    image_size: 1000,
+                    target_size: 1000,
+                    sha256: [1; 32],
+                    image_name: "fake from debug_assume_success()".to_string(),
+                },
+                artifact_hash: ArtifactHash([0x0b; 32]),
+                artifact_size: 1000,
+            }),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
@@ -294,16 +350,16 @@ impl IdOrdItem for OrphanedDataset {
     id_upcast!();
 }
 
-/// Status of clearing the mupdate override in the inventory.
+/// Status of removing the mupdate override in the inventory.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
-pub struct ClearMupdateOverrideInventory {
-    /// The result of clearing the mupdate override on the boot disk.
+pub struct RemoveMupdateOverrideInventory {
+    /// The result of removing the mupdate override on the boot disk.
     #[serde(with = "snake_case_result")]
     #[schemars(
-        schema_with = "SnakeCaseResult::<ClearMupdateOverrideBootSuccessInventory, String>::json_schema"
+        schema_with = "SnakeCaseResult::<RemoveMupdateOverrideBootSuccessInventory, String>::json_schema"
     )]
     pub boot_disk_result:
-        Result<ClearMupdateOverrideBootSuccessInventory, String>,
+        Result<RemoveMupdateOverrideBootSuccessInventory, String>,
 
     /// What happened on non-boot disks.
     ///
@@ -312,12 +368,12 @@ pub struct ClearMupdateOverrideInventory {
     pub non_boot_message: String,
 }
 
-/// Status of clearing the mupdate override on the boot disk.
+/// Status of removing the mupdate override on the boot disk.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum ClearMupdateOverrideBootSuccessInventory {
-    /// The mupdate override was successfully cleared.
-    Cleared,
+pub enum RemoveMupdateOverrideBootSuccessInventory {
+    /// The mupdate override was successfully removed.
+    Removed,
 
     /// No mupdate override was found.
     ///
@@ -536,7 +592,7 @@ impl ZoneManifestBootInventory {
     }
 
     /// Returns a displayer for this inventory.
-    pub fn display(&self) -> ZoneManifestBootInventoryDisplay {
+    pub fn display(&self) -> ZoneManifestBootInventoryDisplay<'_> {
         ZoneManifestBootInventoryDisplay { inner: self }
     }
 }

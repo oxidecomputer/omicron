@@ -2800,111 +2800,6 @@
         }
       }
     },
-    "/v1/disks/{disk}/metrics/{metric}": {
-      "get": {
-        "tags": [
-          "disks"
-        ],
-        "summary": "Fetch disk metrics",
-        "operationId": "disk_metrics_list",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "disk",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
-          {
-            "in": "path",
-            "name": "metric",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/DiskMetricName"
-            }
-          },
-          {
-            "in": "query",
-            "name": "end_time",
-            "description": "An exclusive end time of metrics.",
-            "schema": {
-              "type": "string",
-              "format": "date-time"
-            }
-          },
-          {
-            "in": "query",
-            "name": "limit",
-            "description": "Maximum number of items returned by a single call",
-            "schema": {
-              "nullable": true,
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 1
-            }
-          },
-          {
-            "in": "query",
-            "name": "order",
-            "description": "Query result order",
-            "schema": {
-              "$ref": "#/components/schemas/PaginationOrder"
-            }
-          },
-          {
-            "in": "query",
-            "name": "page_token",
-            "description": "Token returned by previous call to retrieve the subsequent page",
-            "schema": {
-              "nullable": true,
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "start_time",
-            "description": "An inclusive start time of metrics.",
-            "schema": {
-              "type": "string",
-              "format": "date-time"
-            }
-          },
-          {
-            "in": "query",
-            "name": "project",
-            "description": "Name or ID of the project",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/MeasurementResultsPage"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "x-dropshot-pagination": {
-          "required": [
-            "end_time",
-            "start_time"
-          ]
-        }
-      }
-    },
     "/v1/floating-ips": {
       "get": {
         "tags": [
@@ -6857,6 +6752,87 @@
         }
       }
     },
+    "/v1/system/audit-log": {
+      "get": {
+        "tags": [
+          "system/audit-log"
+        ],
+        "summary": "View audit log",
+        "description": "A single item in the audit log represents both the beginning and end of the logged operation (represented by `time_started` and `time_completed`) so that clients do not have to find multiple entries and match them up by request ID to get the full picture of an operation. Because timestamps may not be unique, entries have also have a unique `id` that can be used to deduplicate items fetched from overlapping time intervals.\n\nAudit log entries are designed to be immutable: once you see an entry, fetching it again will never get you a different result. The list is ordered by `time_completed`, not `time_started`. If you fetch the audit log for a time range that is fully in the past, the resulting list is guaranteed to be complete, i.e., fetching the same timespan again later will always produce the same set of entries.",
+        "operationId": "audit_log_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "end_time",
+            "description": "Exclusive",
+            "schema": {
+              "nullable": true,
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/TimeAndIdSortMode"
+            }
+          },
+          {
+            "in": "query",
+            "name": "start_time",
+            "description": "Required, inclusive",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuditLogEntryResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": [
+            "start_time"
+          ]
+        }
+      }
+    },
     "/v1/system/hardware/disks": {
       "get": {
         "tags": [
@@ -9211,6 +9187,42 @@
       }
     },
     "/v1/system/networking/address-lot/{address_lot}": {
+      "get": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Fetch address lot",
+        "operationId": "networking_address_lot_view",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "address_lot",
+            "description": "Name or ID of the address lot",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AddressLotViewResponse"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
       "delete": {
         "tags": [
           "system/networking"
@@ -10894,7 +10906,7 @@
     "/v1/system/update/repository": {
       "put": {
         "tags": [
-          "experimental"
+          "system/update"
         ],
         "summary": "Upload system release repository",
         "description": "System release repositories are verified by the updates trust store.",
@@ -10944,7 +10956,7 @@
     "/v1/system/update/repository/{system_version}": {
       "get": {
         "tags": [
-          "experimental"
+          "system/update"
         ],
         "summary": "Fetch system release repository description by version",
         "operationId": "system_update_get_repository",
@@ -10983,7 +10995,7 @@
     "/v1/system/update/target-release": {
       "get": {
         "tags": [
-          "experimental"
+          "system/update"
         ],
         "summary": "Get the current target release of the rack's system software",
         "description": "This may not correspond to the actual software running on the rack at the time of request; it is instead the release that the rack reconfigurator should be moving towards as a goal state. After some number of planning and execution phases, the software running on the rack should eventually correspond to the release described here.",
@@ -11009,7 +11021,7 @@
       },
       "put": {
         "tags": [
-          "experimental"
+          "system/update"
         ],
         "summary": "Set the current target release of the rack's system software",
         "description": "The rack reconfigurator will treat the software specified here as a goal state for the rack's software, and attempt to asynchronously update to that release.",
@@ -11047,7 +11059,7 @@
     "/v1/system/update/trust-roots": {
       "get": {
         "tags": [
-          "experimental"
+          "system/update"
         ],
         "summary": "List root roles in the updates trust store",
         "description": "A root role is a JSON document describing the cryptographic keys that are trusted to sign system release repositories, as described by The Update Framework. Uploading a repository requires its metadata to be signed by keys trusted by the trust store.",
@@ -11105,7 +11117,7 @@
       },
       "post": {
         "tags": [
-          "experimental"
+          "system/update"
         ],
         "summary": "Add trusted root role to updates trust store",
         "operationId": "system_update_trust_root_create",
@@ -11140,7 +11152,7 @@
     "/v1/system/update/trust-roots/{trust_root_id}": {
       "get": {
         "tags": [
-          "experimental"
+          "system/update"
         ],
         "summary": "Fetch trusted root role",
         "operationId": "system_update_trust_root_view",
@@ -11177,7 +11189,7 @@
       },
       "delete": {
         "tags": [
-          "experimental"
+          "system/update"
         ],
         "summary": "Delete trusted root role",
         "description": "Note that this method does not currently check for any uploaded system release repositories that would become untrusted after deleting the root role.",
@@ -13695,6 +13707,31 @@
           "items"
         ]
       },
+      "AddressLotViewResponse": {
+        "description": "An address lot and associated blocks resulting from viewing an address lot.",
+        "type": "object",
+        "properties": {
+          "blocks": {
+            "description": "The address lot blocks.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AddressLotBlock"
+            }
+          },
+          "lot": {
+            "description": "The address lot.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AddressLot"
+              }
+            ]
+          }
+        },
+        "required": [
+          "blocks",
+          "lot"
+        ]
+      },
       "AffinityGroup": {
         "description": "View of an Affinity Group",
         "type": "object",
@@ -13789,7 +13826,8 @@
                 "type": "object",
                 "properties": {
                   "id": {
-                    "$ref": "#/components/schemas/TypedUuidForInstanceKind"
+                    "type": "string",
+                    "format": "uuid"
                   },
                   "name": {
                     "$ref": "#/components/schemas/Name"
@@ -13956,11 +13994,8 @@
           },
           "alert_id": {
             "description": "The UUID of the event.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/TypedUuidForAlertKind"
-              }
-            ]
+            "type": "string",
+            "format": "uuid"
           },
           "attempts": {
             "description": "Individual attempts to deliver this webhook event, and their outcomes.",
@@ -13977,11 +14012,8 @@
           },
           "receiver_id": {
             "description": "The UUID of the alert receiver that this event was delivered to.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/TypedUuidForAlertReceiverKind"
-              }
-            ]
+            "type": "string",
+            "format": "uuid"
           },
           "state": {
             "description": "The state of this delivery.",
@@ -14477,7 +14509,8 @@
                 "type": "object",
                 "properties": {
                   "id": {
-                    "$ref": "#/components/schemas/TypedUuidForInstanceKind"
+                    "type": "string",
+                    "format": "uuid"
                   },
                   "name": {
                     "$ref": "#/components/schemas/Name"
@@ -14581,6 +14614,230 @@
           "kind",
           "name",
           "version"
+        ]
+      },
+      "AuditLogEntry": {
+        "description": "Audit log entry",
+        "type": "object",
+        "properties": {
+          "actor": {
+            "$ref": "#/components/schemas/AuditLogEntryActor"
+          },
+          "auth_method": {
+            "nullable": true,
+            "description": "How the user authenticated the request. Possible values are \"session_cookie\" and \"access_token\". Optional because it will not be defined on unauthenticated requests like login attempts.",
+            "type": "string"
+          },
+          "id": {
+            "description": "Unique identifier for the audit log entry",
+            "type": "string",
+            "format": "uuid"
+          },
+          "operation_id": {
+            "description": "API endpoint ID, e.g., `project_create`",
+            "type": "string"
+          },
+          "request_id": {
+            "description": "Request ID for tracing requests through the system",
+            "type": "string"
+          },
+          "request_uri": {
+            "description": "URI of the request, truncated to 512 characters. Will only include host and scheme for HTTP/2 requests. For HTTP/1.1, the URI will consist of only the path and query.",
+            "type": "string"
+          },
+          "result": {
+            "description": "Result of the operation",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AuditLogEntryResult"
+              }
+            ]
+          },
+          "source_ip": {
+            "description": "IP address that made the request",
+            "type": "string",
+            "format": "ip"
+          },
+          "time_completed": {
+            "description": "Time operation completed",
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_started": {
+            "description": "When the request was received",
+            "type": "string",
+            "format": "date-time"
+          },
+          "user_agent": {
+            "nullable": true,
+            "description": "User agent string from the request, truncated to 256 characters.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "actor",
+          "id",
+          "operation_id",
+          "request_id",
+          "request_uri",
+          "result",
+          "source_ip",
+          "time_completed",
+          "time_started"
+        ]
+      },
+      "AuditLogEntryActor": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "user_builtin"
+                ]
+              },
+              "user_builtin_id": {
+                "type": "string",
+                "format": "uuid"
+              }
+            },
+            "required": [
+              "kind",
+              "user_builtin_id"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "silo_user"
+                ]
+              },
+              "silo_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "silo_user_id": {
+                "type": "string",
+                "format": "uuid"
+              }
+            },
+            "required": [
+              "kind",
+              "silo_id",
+              "silo_user_id"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "unauthenticated"
+                ]
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          }
+        ]
+      },
+      "AuditLogEntryResult": {
+        "description": "Result of an audit log entry",
+        "oneOf": [
+          {
+            "description": "The operation completed successfully",
+            "type": "object",
+            "properties": {
+              "http_status_code": {
+                "description": "HTTP status code",
+                "type": "integer",
+                "format": "uint16",
+                "minimum": 0
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "success"
+                ]
+              }
+            },
+            "required": [
+              "http_status_code",
+              "kind"
+            ]
+          },
+          {
+            "description": "The operation failed",
+            "type": "object",
+            "properties": {
+              "error_code": {
+                "nullable": true,
+                "type": "string"
+              },
+              "error_message": {
+                "type": "string"
+              },
+              "http_status_code": {
+                "description": "HTTP status code",
+                "type": "integer",
+                "format": "uint16",
+                "minimum": 0
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "error"
+                ]
+              }
+            },
+            "required": [
+              "error_message",
+              "http_status_code",
+              "kind"
+            ]
+          },
+          {
+            "description": "After the logged operation completed, our attempt to write the result to the audit log failed, so it was automatically marked completed later by a background job. This does not imply that the operation itself timed out or failed, only our attempts to log its result.",
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "unknown"
+                ]
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          }
+        ]
+      },
+      "AuditLogEntryResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AuditLogEntry"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
         ]
       },
       "AuthzScope": {
@@ -16558,9 +16815,17 @@
             "description": "Human-readable name that can identify the user",
             "type": "string"
           },
+          "fleet_viewer": {
+            "description": "Whether this user has the viewer role on the fleet. Used by the web console to determine whether to show system-level UI.",
+            "type": "boolean"
+          },
           "id": {
             "type": "string",
             "format": "uuid"
+          },
+          "silo_admin": {
+            "description": "Whether this user has the admin role on their silo. Used by the web console to determine whether to show admin-only UI elements.",
+            "type": "boolean"
           },
           "silo_id": {
             "description": "Uuid of the silo to which this user belongs",
@@ -16578,7 +16843,9 @@
         },
         "required": [
           "display_name",
+          "fleet_viewer",
           "id",
+          "silo_admin",
           "silo_id",
           "silo_name"
         ]
@@ -17885,6 +18152,47 @@
       },
       "ExternalIp": {
         "oneOf": [
+          {
+            "description": "A source NAT IP address.\n\nSNAT addresses are ephemeral addresses used only for outbound connectivity.",
+            "type": "object",
+            "properties": {
+              "first_port": {
+                "description": "The first usable port within the IP address.",
+                "type": "integer",
+                "format": "uint16",
+                "minimum": 0
+              },
+              "ip": {
+                "description": "The IP address.",
+                "type": "string",
+                "format": "ip"
+              },
+              "ip_pool_id": {
+                "description": "ID of the IP Pool from which the address is taken.",
+                "type": "string",
+                "format": "uuid"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "snat"
+                ]
+              },
+              "last_port": {
+                "description": "The last usable port within the IP address.",
+                "type": "integer",
+                "format": "uint16",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "first_port",
+              "ip",
+              "ip_pool_id",
+              "kind",
+              "last_port"
+            ]
+          },
           {
             "type": "object",
             "properties": {
@@ -20322,6 +20630,14 @@
               }
             ]
           },
+          "transit_ips": {
+            "description": "A set of additional networks that this interface may send and receive traffic on.",
+            "default": [],
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IpNet"
+            }
+          },
           "vpc_name": {
             "description": "The VPC in which to create the interface.",
             "allOf": [
@@ -20918,6 +21234,14 @@
             "type": "string",
             "format": "uuid"
           },
+          "ip_version": {
+            "description": "The IP version for the pool.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/IpVersion"
+              }
+            ]
+          },
           "name": {
             "description": "unique, mutable, user-controlled identifier for each resource",
             "allOf": [
@@ -20940,6 +21264,7 @@
         "required": [
           "description",
           "id",
+          "ip_version",
           "name",
           "time_created",
           "time_modified"
@@ -20951,6 +21276,15 @@
         "properties": {
           "description": {
             "type": "string"
+          },
+          "ip_version": {
+            "description": "The IP version of the pool.\n\nThe default is IPv4.",
+            "default": "v4",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/IpVersion"
+              }
+            ]
           },
           "name": {
             "$ref": "#/components/schemas/Name"
@@ -21120,28 +21454,23 @@
         }
       },
       "IpPoolUtilization": {
+        "description": "The utilization of IP addresses in a pool.\n\nNote that both the count of remaining addresses and the total capacity are integers, reported as floating point numbers. This accommodates allocations larger than a 64-bit integer, which is common with IPv6 address spaces. With very large IP Pools (> 2**53 addresses), integer precision will be lost, in exchange for representing the entire range. In such a case the pool still has many available addresses.",
         "type": "object",
         "properties": {
-          "ipv4": {
-            "description": "Number of allocated and total available IPv4 addresses in pool",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Ipv4Utilization"
-              }
-            ]
+          "capacity": {
+            "description": "The total number of addresses in the pool.",
+            "type": "number",
+            "format": "double"
           },
-          "ipv6": {
-            "description": "Number of allocated and total available IPv6 addresses in pool",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Ipv6Utilization"
-              }
-            ]
+          "remaining": {
+            "description": "The number of remaining addresses in the pool.",
+            "type": "number",
+            "format": "double"
           }
         },
         "required": [
-          "ipv4",
-          "ipv6"
+          "capacity",
+          "remaining"
         ]
       },
       "IpRange": {
@@ -21162,6 +21491,14 @@
               }
             ]
           }
+        ]
+      },
+      "IpVersion": {
+        "description": "The IP address version.",
+        "type": "string",
+        "enum": [
+          "v4",
+          "v6"
         ]
       },
       "Ipv4Net": {
@@ -21194,27 +21531,6 @@
           "last"
         ]
       },
-      "Ipv4Utilization": {
-        "type": "object",
-        "properties": {
-          "allocated": {
-            "description": "The number of IPv4 addresses allocated from this pool",
-            "type": "integer",
-            "format": "uint32",
-            "minimum": 0
-          },
-          "capacity": {
-            "description": "The total number of IPv4 addresses in the pool, i.e., the sum of the lengths of the IPv4 ranges. Unlike IPv6 capacity, can be a 32-bit integer because there are only 2^32 IPv4 addresses.",
-            "type": "integer",
-            "format": "uint32",
-            "minimum": 0
-          }
-        },
-        "required": [
-          "allocated",
-          "capacity"
-        ]
-      },
       "Ipv6Net": {
         "example": "fd12:3456::/64",
         "title": "An IPv6 subnet",
@@ -21243,25 +21559,6 @@
         "required": [
           "first",
           "last"
-        ]
-      },
-      "Ipv6Utilization": {
-        "type": "object",
-        "properties": {
-          "allocated": {
-            "description": "The number of IPv6 addresses allocated from this pool. A 128-bit integer string to match the capacity field.",
-            "type": "string",
-            "format": "uint128"
-          },
-          "capacity": {
-            "description": "The total number of IPv6 addresses in the pool, i.e., the sum of the lengths of the IPv6 ranges. An IPv6 range can contain up to 2^128 addresses, so we represent this value in JSON as a numeric string with a custom \"uint128\" format.",
-            "type": "string",
-            "format": "uint128"
-          }
-        },
-        "required": [
-          "allocated",
-          "capacity"
         ]
       },
       "L4PortRange": {
@@ -22020,12 +22317,33 @@
             "description": "Tables resulting from the query, each containing timeseries.",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/Table"
+              "$ref": "#/components/schemas/OxqlTable"
             }
           }
         },
         "required": [
           "tables"
+        ]
+      },
+      "OxqlTable": {
+        "description": "A table represents one or more timeseries with the same schema.\n\nA table is the result of an OxQL query. It contains a name, usually the name of the timeseries schema from which the data is derived, and any number of timeseries, which contain the actual data.",
+        "type": "object",
+        "properties": {
+          "name": {
+            "description": "The name of the table.",
+            "type": "string"
+          },
+          "timeseries": {
+            "description": "The set of timeseries in the table, ordered by key.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Timeseries"
+            }
+          }
+        },
+        "required": [
+          "name",
+          "timeseries"
         ]
       },
       "Password": {
@@ -23276,6 +23594,11 @@
         "description": "View of a Silo\n\nA Silo is the highest level unit of isolation.",
         "type": "object",
         "properties": {
+          "admin_group_name": {
+            "nullable": true,
+            "description": "Optionally, silos can have a group name that is automatically granted the silo admin role.",
+            "type": "string"
+          },
           "description": {
             "description": "human-readable free-form text about a resource",
             "type": "string"
@@ -24291,7 +24614,8 @@
         "type": "object",
         "properties": {
           "id": {
-            "$ref": "#/components/schemas/TypedUuidForSupportBundleKind"
+            "type": "string",
+            "format": "uuid"
           },
           "reason_for_creation": {
             "type": "string"
@@ -25268,25 +25592,6 @@
           "vlan_id"
         ]
       },
-      "Table": {
-        "description": "A table represents one or more timeseries with the same schema.\n\nA table is the result of an OxQL query. It contains a name, usually the name of the timeseries schema from which the data is derived, and any number of timeseries, which contain the actual data.",
-        "type": "object",
-        "properties": {
-          "name": {
-            "type": "string"
-          },
-          "timeseries": {
-            "type": "object",
-            "additionalProperties": {
-              "$ref": "#/components/schemas/Timeseries"
-            }
-          }
-        },
-        "required": [
-          "name",
-          "timeseries"
-        ]
-      },
       "TargetRelease": {
         "description": "View of a system software target release.",
         "type": "object",
@@ -25482,6 +25787,11 @@
         "description": "Metadata about an individual TUF artifact.\n\nFound within a `TufRepoDescription`.",
         "type": "object",
         "properties": {
+          "board": {
+            "nullable": true,
+            "description": "Contents of the `BORD` field of a Hubris archive caboose. Only applicable to artifacts that are Hubris archives.\n\nThis field should always be `Some(_)` if `sign` is `Some(_)`, but the opposite is not true (SP images will have a `board` but not a `sign`).",
+            "type": "string"
+          },
           "hash": {
             "description": "The hash of the artifact.",
             "type": "string",
@@ -25494,6 +25804,16 @@
                 "$ref": "#/components/schemas/ArtifactId"
               }
             ]
+          },
+          "sign": {
+            "nullable": true,
+            "description": "Contents of the `SIGN` field of a Hubris archive caboose, i.e., an identifier for the set of valid signing keys. Currently only applicable to RoT image and bootloader artifacts, where it will be an LPC55 Root Key Table Hash (RKTH).",
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0
+            }
           },
           "size": {
             "description": "The size of the artifact in bytes.",
@@ -25704,22 +26024,6 @@
             "format": "int32"
           }
         }
-      },
-      "TypedUuidForAlertKind": {
-        "type": "string",
-        "format": "uuid"
-      },
-      "TypedUuidForAlertReceiverKind": {
-        "type": "string",
-        "format": "uuid"
-      },
-      "TypedUuidForInstanceKind": {
-        "type": "string",
-        "format": "uuid"
-      },
-      "TypedUuidForSupportBundleKind": {
-        "type": "string",
-        "format": "uuid"
       },
       "UninitializedSled": {
         "description": "A sled that has not been added to an initialized rack yet",
@@ -27549,25 +27853,6 @@
           }
         ]
       },
-      "DiskMetricName": {
-        "type": "string",
-        "enum": [
-          "activated",
-          "flush",
-          "read",
-          "read_bytes",
-          "write",
-          "write_bytes"
-        ]
-      },
-      "PaginationOrder": {
-        "description": "The order in which the client wants to page through the requested collection",
-        "type": "string",
-        "enum": [
-          "ascending",
-          "descending"
-        ]
-      },
       "IdSortMode": {
         "description": "Supported set of sort modes for scanning by id only.\n\nCurrently, we only support scanning in ascending order.",
         "oneOf": [
@@ -27586,6 +27871,14 @@
           "virtual_disk_space_provisioned",
           "cpus_provisioned",
           "ram_provisioned"
+        ]
+      },
+      "PaginationOrder": {
+        "description": "The order in which the client wants to page through the requested collection",
+        "type": "string",
+        "enum": [
+          "ascending",
+          "descending"
         ]
       },
       "NameSortMode": {
@@ -27721,6 +28014,13 @@
       }
     },
     {
+      "name": "system/audit-log",
+      "description": "These endpoints relate to audit logs.",
+      "externalDocs": {
+        "url": "http://docs.oxide.computer/api/system-audit-log"
+      }
+    },
+    {
       "name": "system/hardware",
       "description": "These operations pertain to hardware inventory and management. Racks are the unit of expansion of an Oxide deployment. Racks are in turn composed of sleds, switches, power supplies, and a cabled backplane.",
       "externalDocs": {
@@ -27767,6 +28067,13 @@
       "description": "Endpoints related to system health",
       "externalDocs": {
         "url": "http://docs.oxide.computer/api/system-status"
+      }
+    },
+    {
+      "name": "system/update",
+      "description": "Upload and manage system updates",
+      "externalDocs": {
+        "url": "http://docs.oxide.computer/api/system-update"
       }
     },
     {

@@ -273,7 +273,7 @@ async fn normalize_ssh_keys(
         .actor_required()
         .internal_context("loading current user's ssh keys for new Instance")?;
     let (.., authz_user) = LookupPath::new(opctx, datastore)
-        .silo_user_id(actor.actor_id())
+        .silo_user_actor(&actor)?
         .lookup_for(authz::Action::ListChildren)
         .await?;
 

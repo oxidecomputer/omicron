@@ -20,6 +20,9 @@ use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::UpdateResult;
+use omicron_uuid_kinds::BuiltInUserUuid;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::SiloGroupUuid;
 use ref_cast::RefCast;
 use uuid::Uuid;
 
@@ -84,7 +87,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
-        group_id: &Uuid,
+        group_id: &SiloGroupUuid,
     ) -> ListResultVec<db::model::SiloUser> {
         let authz_silo = opctx
             .authn
@@ -118,7 +121,7 @@ impl super::Nexus {
             .actor_required()
             .internal_context("loading current user")?;
         let (.., db_silo_user) = LookupPath::new(opctx, &self.db_datastore)
-            .silo_user_id(actor.actor_id())
+            .silo_user_actor(&actor)?
             .fetch()
             .await?;
         Ok(db_silo_user)
@@ -166,7 +169,8 @@ impl super::Nexus {
         let lookup_path = LookupPath::new(opctx, &self.db_datastore);
         let user = match user_selector {
             params::UserBuiltinSelector { user: NameOrId::Id(id) } => {
-                lookup_path.user_builtin_id(*id)
+                lookup_path
+                    .user_builtin_id(BuiltInUserUuid::from_untyped_uuid(*id))
             }
             params::UserBuiltinSelector { user: NameOrId::Name(name) } => {
                 lookup_path.user_builtin_name(Name::ref_cast(name))

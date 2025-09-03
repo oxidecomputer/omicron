@@ -18,6 +18,7 @@ use nexus_db_model::DatabaseString;
 use nexus_types::external_api::shared;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::LookupType;
+use omicron_uuid_kinds::SiloUserUuid;
 use std::sync::Arc;
 use strum::IntoEnumIterator;
 use uuid::Uuid;
@@ -39,7 +40,7 @@ pub struct ResourceBuilder<'a> {
     /// list of resources created so far
     resources: Vec<Arc<dyn DynAuthorizedResource>>,
     /// list of users created so far
-    users: Vec<(String, Uuid)>,
+    users: Vec<(String, SiloUserUuid)>,
 }
 
 impl<'a> ResourceBuilder<'a> {
@@ -102,7 +103,7 @@ impl<'a> ResourceBuilder<'a> {
         for role in T::AllowedRoles::iter() {
             let role_name = role.to_database_string();
             let username = format!("{}-{}", resource_name, role_name);
-            let user_id = Uuid::new_v4();
+            let user_id = SiloUserUuid::new_v4();
             println!("creating user: {}", &username);
             self.users.push((username.clone(), user_id));
 
@@ -125,11 +126,9 @@ impl<'a> ResourceBuilder<'a> {
             let new_role_assignments = old_role_assignments
                 .into_iter()
                 .map(|r| r.try_into().unwrap())
-                .chain(std::iter::once(shared::RoleAssignment {
-                    identity_type: shared::IdentityType::SiloUser,
-                    identity_id: user_id,
-                    role_name: role,
-                }))
+                .chain(std::iter::once(shared::RoleAssignment::for_silo_user(
+                    user_id, role,
+                )))
                 .collect::<Vec<_>>();
             datastore
                 .role_assignment_replace_visible(
@@ -152,7 +151,7 @@ impl<'a> ResourceBuilder<'a> {
 /// were created with specific roles on those resources
 pub struct ResourceSet {
     resources: Vec<Arc<dyn DynAuthorizedResource>>,
-    users: Vec<(String, Uuid)>,
+    users: Vec<(String, SiloUserUuid)>,
 }
 
 impl ResourceSet {
@@ -167,7 +166,7 @@ impl ResourceSet {
     /// Iterate the users that were created as `(username, user_id)` pairs
     pub fn users(
         &self,
-    ) -> impl std::iter::Iterator<Item = &(String, Uuid)> + '_ {
+    ) -> impl std::iter::Iterator<Item = &(String, SiloUserUuid)> + '_ {
         self.users.iter()
     }
 }
@@ -284,16 +283,18 @@ impl_dyn_authorized_resource_for_resource!(authz::AlertReceiver);
 impl_dyn_authorized_resource_for_resource!(authz::WebhookSecret);
 impl_dyn_authorized_resource_for_resource!(authz::Zpool);
 
-impl_dyn_authorized_resource_for_global!(authz::Database);
+impl_dyn_authorized_resource_for_global!(authz::AlertClassList);
 impl_dyn_authorized_resource_for_global!(authz::BlueprintConfig);
 impl_dyn_authorized_resource_for_global!(authz::ConsoleSessionList);
+impl_dyn_authorized_resource_for_global!(authz::Database);
 impl_dyn_authorized_resource_for_global!(authz::DeviceAuthRequestList);
 impl_dyn_authorized_resource_for_global!(authz::DnsConfig);
 impl_dyn_authorized_resource_for_global!(authz::IpPoolList);
+impl_dyn_authorized_resource_for_global!(authz::AuditLog);
 impl_dyn_authorized_resource_for_global!(authz::Inventory);
+impl_dyn_authorized_resource_for_global!(authz::QuiesceState);
 impl_dyn_authorized_resource_for_global!(authz::UpdateTrustRootList);
 impl_dyn_authorized_resource_for_global!(authz::TargetReleaseConfig);
-impl_dyn_authorized_resource_for_global!(authz::AlertClassList);
 
 impl DynAuthorizedResource for authz::SiloCertificateList {
     fn do_authorize<'a, 'b>(

@@ -11,8 +11,10 @@ use nexus_db_schema::schema::{device_access_token, device_auth_request};
 
 use chrono::{DateTime, Duration, Utc};
 use nexus_types::external_api::views;
-use omicron_uuid_kinds::{AccessTokenKind, GenericUuid, TypedUuid};
-use rand::{Rng, RngCore, SeedableRng, distributions::Slice, rngs::StdRng};
+use omicron_uuid_kinds::{
+    AccessTokenKind, GenericUuid, SiloUserKind, SiloUserUuid, TypedUuid,
+};
+use rand::{Rng, RngCore, SeedableRng, rngs::StdRng};
 use std::num::NonZeroU32;
 use uuid::Uuid;
 
@@ -68,7 +70,7 @@ const TOKEN_LENGTH: usize = 20;
 // and probably also the key generation in the disk creation saga.
 fn generate_token() -> String {
     let mut bytes: [u8; TOKEN_LENGTH] = [0; TOKEN_LENGTH];
-    let mut rng = StdRng::from_entropy();
+    let mut rng = StdRng::from_os_rng();
     rng.fill_bytes(&mut bytes);
     hex::encode(bytes)
 }
@@ -88,8 +90,9 @@ const USER_CODE_WORD_LENGTH: usize = 4;
 
 /// Generate a short random user code like `BQPX-FGQR`.
 fn generate_user_code() -> String {
-    let rng = StdRng::from_entropy();
-    let dist = Slice::new(&USER_CODE_ALPHABET[..]).expect("non-empty slice");
+    let rng = StdRng::from_os_rng();
+    let dist = rand::distr::slice::Choose::new(&USER_CODE_ALPHABET[..])
+        .expect("non-empty slice");
     let chars: Vec<char> = rng
         .sample_iter(dist)
         .take(USER_CODE_LENGTH)
@@ -134,7 +137,7 @@ pub struct DeviceAccessToken {
     pub token: String,
     pub client_id: Uuid,
     pub device_code: String,
-    pub silo_user_id: Uuid,
+    silo_user_id: DbTypedUuid<SiloUserKind>,
     pub time_requested: DateTime<Utc>,
     pub time_created: DateTime<Utc>,
     pub time_expires: Option<DateTime<Utc>>,
@@ -145,7 +148,7 @@ impl DeviceAccessToken {
         client_id: Uuid,
         device_code: String,
         time_requested: DateTime<Utc>,
-        silo_user_id: Uuid,
+        silo_user_id: SiloUserUuid,
         time_expires: Option<DateTime<Utc>>,
     ) -> Self {
         let now = Utc::now();
@@ -157,7 +160,7 @@ impl DeviceAccessToken {
             token: generate_token(),
             client_id,
             device_code,
-            silo_user_id,
+            silo_user_id: silo_user_id.into(),
             time_requested,
             time_created: now,
             time_expires,
@@ -171,6 +174,10 @@ impl DeviceAccessToken {
     pub fn expires(mut self, time: DateTime<Utc>) -> Self {
         self.time_expires = Some(time);
         self
+    }
+
+    pub fn silo_user_id(&self) -> SiloUserUuid {
+        self.silo_user_id.into()
     }
 }
 

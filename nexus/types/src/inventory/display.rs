@@ -19,10 +19,10 @@ use indent_write::fmt::IndentWriter;
 use itertools::Itertools;
 use nexus_sled_agent_shared::inventory::{
     BootImageHeader, BootPartitionContents, BootPartitionDetails,
-    ClearMupdateOverrideBootSuccessInventory, ConfigReconcilerInventory,
-    ConfigReconcilerInventoryResult, ConfigReconcilerInventoryStatus,
-    HostPhase2DesiredContents, OmicronSledConfig, OmicronZoneImageSource,
-    OrphanedDataset,
+    ConfigReconcilerInventory, ConfigReconcilerInventoryResult,
+    ConfigReconcilerInventoryStatus, HostPhase2DesiredContents,
+    OmicronSledConfig, OmicronZoneImageSource, OrphanedDataset,
+    RemoveMupdateOverrideBootSuccessInventory,
 };
 use omicron_common::disk::M2Slot;
 use omicron_uuid_kinds::{
@@ -47,6 +47,8 @@ pub struct CollectionDisplay<'a> {
     include_orphaned_datasets: bool,
     include_clickhouse_keeper_membership: bool,
     include_cockroach_status: bool,
+    include_ntp_status: bool,
+    include_internal_dns_status: bool,
     long_string_formatter: LongStringFormatter,
 }
 
@@ -60,6 +62,8 @@ impl<'a> CollectionDisplay<'a> {
             include_orphaned_datasets: true,
             include_clickhouse_keeper_membership: true,
             include_cockroach_status: true,
+            include_ntp_status: true,
+            include_internal_dns_status: true,
             long_string_formatter: LongStringFormatter::new(),
         }
     }
@@ -109,6 +113,24 @@ impl<'a> CollectionDisplay<'a> {
         self
     }
 
+    /// Control display of NTP timesync information (defaults to true).
+    pub fn include_ntp_status(
+        &mut self,
+        include_ntp_status: bool,
+    ) -> &mut Self {
+        self.include_ntp_status = include_ntp_status;
+        self
+    }
+
+    /// Control display of Internal DNS generation information (defaults to true).
+    pub fn include_internal_dns_status(
+        &mut self,
+        include_internal_dns_status: bool,
+    ) -> &mut Self {
+        self.include_internal_dns_status = include_internal_dns_status;
+        self
+    }
+
     /// Show long strings (defaults to false).
     pub fn show_long_strings(&mut self, show_long_strings: bool) -> &mut Self {
         self.long_string_formatter.show_long_strings = show_long_strings;
@@ -127,6 +149,8 @@ impl<'a> CollectionDisplay<'a> {
                 filter.include_keeper_membership(),
             )
             .include_cockroach_status(filter.include_cockroach_status())
+            .include_ntp_status(filter.include_ntp_status())
+            .include_internal_dns_status(filter.include_internal_dns_status())
     }
 }
 
@@ -152,6 +176,15 @@ impl fmt::Display for CollectionDisplay<'_> {
         }
         if self.include_cockroach_status {
             display_cockroach_status(&self.collection, f)?;
+        }
+        if self.include_ntp_status {
+            display_ntp_status(&self.collection.ntp_timesync, f)?;
+        }
+        if self.include_internal_dns_status {
+            display_internal_dns_status(
+                &self.collection.internal_dns_generation_status,
+                f,
+            )?;
         }
 
         if nerrors > 0 {
@@ -220,6 +253,22 @@ impl CollectionDisplayCliFilter {
     }
 
     fn include_cockroach_status(&self) -> bool {
+        match self {
+            Self::All => true,
+            Self::Sp { .. } => false,
+            Self::OrphanedDatasets => false,
+        }
+    }
+
+    fn include_ntp_status(&self) -> bool {
+        match self {
+            Self::All => true,
+            Self::Sp { .. } => false,
+            Self::OrphanedDatasets => false,
+        }
+    }
+
+    fn include_internal_dns_status(&self) -> bool {
         match self {
             Self::All => true,
             Self::Sp { .. } => false,
@@ -364,9 +413,6 @@ fn display_devices(
         writeln!(f, "    power:    {:?}", sp.power_state)?;
         writeln!(f, "    revision: {}", sp.baseboard_revision)?;
         write!(f, "    MGS slot: {:?} {}", sp.sp_type, sp.sp_slot)?;
-        if let SpType::Sled = sp.sp_type {
-            write!(f, " (cubby {})", sp.sp_slot)?;
-        }
         writeln!(f, "")?;
         writeln!(
             f,
@@ -376,30 +422,42 @@ fn display_devices(
             sp.source
         )?;
 
-        #[derive(Tabled)]
-        #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
-        struct HostPhase1FlashHashRow {
-            slot: String,
-            hash: String,
-        }
+        if sp.sp_type == SpType::Sled {
+            #[derive(Tabled)]
+            #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+            struct HostPhase1FlashHashRow {
+                slot: String,
+                hash: String,
+            }
 
-        writeln!(f, "    host phase 1 hashes:")?;
-        let host_phase1_hash_rows: Vec<_> = M2Slot::iter()
-            .filter_map(|s| {
-                collection
-                    .host_phase_1_flash_hash_for(s, baseboard_id)
-                    .map(|h| (s, h))
-            })
-            .map(|(slot, phase1)| HostPhase1FlashHashRow {
-                slot: format!("{slot:?}"),
-                hash: phase1.hash.to_string(),
-            })
-            .collect();
-        let table = tabled::Table::new(host_phase1_hash_rows)
-            .with(tabled::settings::Style::empty())
-            .with(tabled::settings::Padding::new(0, 1, 0, 0))
-            .to_string();
-        writeln!(f, "{}", textwrap::indent(&table.to_string(), "        "))?;
+            let active_slot =
+                match collection.host_phase_1_active_slot_for(baseboard_id) {
+                    Some(s) => Cow::Owned(format!("{:?}", s.slot)),
+                    None => Cow::Borrowed("unknown (not collected)"),
+                };
+            writeln!(f, "    host phase 1 active slot: {active_slot}")?;
+            writeln!(f, "    host phase 1 hashes:")?;
+            let host_phase1_hash_rows: Vec<_> = M2Slot::iter()
+                .filter_map(|s| {
+                    collection
+                        .host_phase_1_flash_hash_for(s, baseboard_id)
+                        .map(|h| (s, h))
+                })
+                .map(|(slot, phase1)| HostPhase1FlashHashRow {
+                    slot: format!("{slot:?}"),
+                    hash: phase1.hash.to_string(),
+                })
+                .collect();
+            let table = tabled::Table::new(host_phase1_hash_rows)
+                .with(tabled::settings::Style::empty())
+                .with(tabled::settings::Padding::new(0, 1, 0, 0))
+                .to_string();
+            writeln!(
+                f,
+                "{}",
+                textwrap::indent(&table.to_string(), "        ")
+            )?;
+        }
 
         #[derive(Tabled)]
         #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
@@ -677,7 +735,7 @@ fn display_sleds(
                 orphaned_datasets,
                 zones,
                 boot_partitions,
-                clear_mupdate_override,
+                remove_mupdate_override,
             } = last_reconciliation;
 
             display_boot_partition_contents(boot_partitions, &mut indented)?;
@@ -697,58 +755,44 @@ fn display_sleds(
                 indented = IndentWriter::new("    ", f);
             }
 
-            if let Some(config) = ledgered_sled_config.as_ref() {
-                display_ntp_status(
-                    config,
-                    &collection.ntp_timesync,
-                    &mut indented,
-                )?;
-
-                display_internal_dns_status(
-                    config,
-                    &collection.internal_dns_generation_status,
-                    &mut indented,
-                )?;
-            }
-
             {
                 let mut indent2 = IndentWriter::new("    ", &mut indented);
 
-                if let Some(clear_mupdate_override) = clear_mupdate_override {
-                    match &clear_mupdate_override.boot_disk_result {
-                        Ok(ClearMupdateOverrideBootSuccessInventory::Cleared) => {
+                if let Some(remove_mupdate_override) = remove_mupdate_override {
+                    match &remove_mupdate_override.boot_disk_result {
+                        Ok(RemoveMupdateOverrideBootSuccessInventory::Removed) => {
                             writeln!(
                                 indent2,
-                                "cleared mupdate override on boot disk",
+                                "removed mupdate override on boot disk",
                             )?;
                         }
                         Ok(
-                            ClearMupdateOverrideBootSuccessInventory::NoOverride,
+                            RemoveMupdateOverrideBootSuccessInventory::NoOverride,
                         ) => {
                             writeln!(
                                 indent2,
-                                "attempted to clear mupdate override \
+                                "attempted to remove mupdate override \
                                  on boot disk, but no override was set",
                             )?;
                         }
                         Err(message) => {
                             writeln!(
                                 indent2,
-                                "failed to clear mupdate override on boot disk: {}",
-                                message
+                                "failed to remove mupdate override \
+                                 on boot disk: {message}",
                             )?;
                         }
                     }
                     writeln!(
                         indent2,
-                        "clear mupdate override on non-boot disk:"
+                        "remove mupdate override on non-boot disk:"
                     )?;
 
                     let mut indent3 = IndentWriter::new("  ", &mut indent2);
                     writeln!(
                         indent3,
                         "{}",
-                        clear_mupdate_override.non_boot_message
+                        remove_mupdate_override.non_boot_message
                     )?;
                 } else {
                     match &zone_image_resolver.mupdate_override.boot_override {
@@ -858,22 +902,26 @@ fn display_sleds(
 }
 
 fn display_ntp_status(
-    ledgered_sled_config: &OmicronSledConfig,
     ntp_timesync: &IdOrdMap<TimeSync>,
     f: &mut dyn fmt::Write,
 ) -> fmt::Result {
-    let timesync = ledgered_sled_config
-        .zones
-        .keys()
-        .find_map(|zone_id| ntp_timesync.get(zone_id));
+    writeln!(f, "\nNTP STATUS")?;
+    let mut f = IndentWriter::new("    ", f);
 
-    match timesync {
-        None => writeln!(f, "no information from NTP for this sled")?,
-        Some(ts) if ts.synced => {
-            writeln!(f, "NTP reports that time is synced")?
+    let mut ntp_found = false;
+    for ts in ntp_timesync {
+        ntp_found = true;
+        let zone_id = ts.zone_id;
+        if ts.synced {
+            writeln!(f, "Zone {zone_id}: NTP reports that time is synced")?;
+        } else {
+            writeln!(f, "Zone {zone_id}: NTP reports that time is NOT synced")?;
         }
-        Some(_) => writeln!(f, "NTP reports that time is NOT synced")?,
-    };
+    }
+
+    if !ntp_found {
+        writeln!(f, "No NTP zones reported timesync information")?;
+    }
 
     Ok(())
 }
@@ -916,17 +964,26 @@ fn display_boot_partition_contents(
 }
 
 fn display_internal_dns_status(
-    ledgered_sled_config: &OmicronSledConfig,
     internal_dns_generation_status: &IdOrdMap<InternalDnsGenerationStatus>,
     f: &mut dyn fmt::Write,
 ) -> fmt::Result {
-    let internal_dns_generation_status = ledgered_sled_config
-        .zones
-        .keys()
-        .find_map(|zone_id| internal_dns_generation_status.get(zone_id));
-    if let Some(st) = internal_dns_generation_status {
-        writeln!(f, "Internal DNS generation: {}", st.generation)?
+    writeln!(f, "\nINTERNAL DNS STATUS")?;
+    let mut f = IndentWriter::new("    ", f);
+
+    let mut internal_dns_found = false;
+    for st in internal_dns_generation_status {
+        internal_dns_found = true;
+        writeln!(
+            f,
+            "Zone {}: Internal DNS generation @ {}",
+            st.zone_id, st.generation
+        )?
     }
+
+    if !internal_dns_found {
+        writeln!(f, "No Internal DNS zones found which reported a generation")?;
+    }
+
     Ok(())
 }
 
@@ -1198,6 +1255,7 @@ fn display_cockroach_status(
     f: &mut dyn fmt::Write,
 ) -> fmt::Result {
     writeln!(f, "\nCOCKROACH STATUS")?;
+    let mut f = IndentWriter::new("    ", f);
 
     // Under normal conditions, cockroach nodes will report the same data. For
     // brevity, we will map "status" -> "nodes reporting that status", to avoid
@@ -1211,21 +1269,21 @@ fn display_cockroach_status(
     for (status, nodes) in &status_to_node {
         writeln!(
             f,
-            "\n  status from nodes: {}",
+            "status from nodes: {}",
             nodes.iter().map(|n| n.to_string()).join(", ")
         )?;
 
         writeln!(
             f,
-            "\n    ranges underreplicated: {}",
+            "ranges underreplicated: {}",
             status
                 .ranges_underreplicated
                 .map(|r| r.to_string())
-                .unwrap_or_else(|| "<cOULD NOT BE PARSED>".to_string())
+                .unwrap_or_else(|| "<COULD NOT BE PARSED>".to_string())
         )?;
         writeln!(
             f,
-            "\n    live nodes: {}",
+            "live nodes: {}",
             status
                 .liveness_live_nodes
                 .map(|r| r.to_string())
@@ -1233,7 +1291,7 @@ fn display_cockroach_status(
         )?;
     }
     if status_to_node.is_empty() {
-        writeln!(f, "    no cockroach status retrieved")?;
+        writeln!(f, "no cockroach status retrieved")?;
     }
     writeln!(f)?;
 

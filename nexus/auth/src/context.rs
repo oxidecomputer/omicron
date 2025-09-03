@@ -8,10 +8,12 @@ use super::authz;
 use crate::authn::ConsoleSessionWithSiloId;
 use crate::authn::external::session_cookie::Session;
 use crate::authz::AuthorizedResource;
+use crate::probes;
 use crate::storage::Storage;
 use chrono::{DateTime, Utc};
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::ConsoleSessionUuid;
+use omicron_uuid_kinds::SiloUserUuid;
 use slog::debug;
 use slog::o;
 use slog::trace;
@@ -126,14 +128,24 @@ impl OpContext {
         let mut metadata = BTreeMap::new();
 
         let log = if let Some(actor) = authn.actor() {
-            let actor_id = actor.actor_id();
             metadata
                 .insert(String::from("authenticated"), String::from("true"));
             metadata.insert(String::from("actor"), format!("{:?}", actor));
 
-            log.new(
-                o!("authenticated" => true, "actor_id" => actor_id.to_string()),
-            )
+            match &actor {
+                authn::Actor::SiloUser { silo_user_id, silo_id } => {
+                    log.new(o!(
+                        "authenticated" => true,
+                        "silo_user_id" => silo_user_id.to_string(),
+                        "silo_id" => silo_id.to_string(),
+                    ))
+                }
+
+                authn::Actor::UserBuiltin { user_builtin_id } => log.new(o!(
+                    "authenticated" => true,
+                    "user_builtin_id" => user_builtin_id.to_string(),
+                )),
+            }
         } else {
             metadata
                 .insert(String::from("authenticated"), String::from("false"));
@@ -275,7 +287,23 @@ impl OpContext {
             "action" => ?action,
             "resource" => ?*resource
         );
+        let id = usdt::UniqueId::new();
+        probes::authz__start!(|| {
+            let request_id = self
+                .metadata
+                .get("request_id")
+                .cloned()
+                .unwrap_or_else(|| String::from("none"));
+            (
+                &id,
+                request_id,
+                format!("{:?}", self.authn.actor()),
+                format!("{action:?}"),
+                format!("{resource:?}"),
+            )
+        });
         let result = self.authz.authorize(self, action, resource.clone()).await;
+        probes::authz__done!(|| (&id, format!("{result:?}")));
         debug!(self.log, "authorize result";
             "actor" => ?self.authn.actor(),
             "action" => ?action,
@@ -356,9 +384,8 @@ impl Session for ConsoleSessionWithSiloId {
     fn id(&self) -> ConsoleSessionUuid {
         self.console_session.id()
     }
-
-    fn silo_user_id(&self) -> Uuid {
-        self.console_session.silo_user_id
+    fn silo_user_id(&self) -> SiloUserUuid {
+        self.console_session.silo_user_id()
     }
     fn silo_id(&self) -> Uuid {
         self.silo_id

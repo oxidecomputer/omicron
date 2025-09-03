@@ -150,7 +150,6 @@ impl super::Nexus {
             })
             .collect();
 
-        let service_ip_pool_ranges = request.internal_services_ip_pool_ranges;
         let tls_certificates: Vec<_> = request
             .certs
             .into_iter()
@@ -708,6 +707,7 @@ impl super::Nexus {
         } // TODO - https://github.com/oxidecomputer/omicron/issues/3277
         // record port speed
 
+        let service_ip_pool_ranges = request.internal_services_ip_pool_ranges;
         self.db_datastore
             .rack_set_initialized(
                 opctx,
@@ -740,7 +740,8 @@ impl super::Nexus {
 
         // We've potentially updated the list of DNS servers and the DNS
         // configuration for both internal and external DNS, plus the Silo
-        // certificates.  Activate the relevant background tasks.
+        // certificates and target blueprint.  Activate the relevant background
+        // tasks.
         for task in &[
             &self.background_tasks.task_internal_dns_config,
             &self.background_tasks.task_internal_dns_servers,
@@ -748,6 +749,7 @@ impl super::Nexus {
             &self.background_tasks.task_external_dns_servers,
             &self.background_tasks.task_external_endpoints,
             &self.background_tasks.task_inventory_collection,
+            &self.background_tasks.task_blueprint_loader,
         ] {
             self.background_tasks.activate(task);
         }

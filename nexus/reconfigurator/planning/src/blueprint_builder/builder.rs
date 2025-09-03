@@ -14,6 +14,10 @@ use crate::blueprint_editor::ExternalSnatNetworkingChoice;
 use crate::blueprint_editor::NoAvailableDnsSubnets;
 use crate::blueprint_editor::SledEditError;
 use crate::blueprint_editor::SledEditor;
+use crate::mgs_updates::PendingHostPhase2Changes;
+use crate::planner::NoopConvertGlobalIneligibleReason;
+use crate::planner::NoopConvertInfo;
+use crate::planner::NoopConvertSledIneligibleReason;
 use crate::planner::ZoneExpungeReason;
 use crate::planner::rng::PlannerRng;
 use anyhow::Context as _;
@@ -21,8 +25,12 @@ use anyhow::anyhow;
 use anyhow::bail;
 use clickhouse_admin_types::OXIMETER_CLUSTER;
 use id_map::IdMap;
+use iddqd::IdOrdItem;
+use iddqd::IdOrdMap;
+use iddqd::id_upcast;
 use itertools::Either;
 use nexus_inventory::now_db_precision;
+use nexus_sled_agent_shared::inventory::MupdateOverrideBootInventory;
 use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::Blueprint;
@@ -43,8 +51,10 @@ use nexus_types::deployment::OmicronZoneExternalFloatingAddr;
 use nexus_types::deployment::OmicronZoneExternalFloatingIp;
 use nexus_types::deployment::OmicronZoneExternalSnatIp;
 use nexus_types::deployment::OximeterReadMode;
+use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdates;
 use nexus_types::deployment::PlanningInput;
+use nexus_types::deployment::PlanningReport;
 use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::SledResources;
 use nexus_types::deployment::TufRepoContentsError;
@@ -64,6 +74,7 @@ use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::api::internal::shared::NetworkInterfaceKind;
 use omicron_common::disk::M2Slot;
 use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
+use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::MupdateOverrideUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
@@ -86,6 +97,8 @@ use std::net::IpAddr;
 use std::net::Ipv6Addr;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
+use swrite::SWrite;
+use swrite::swriteln;
 use thiserror::Error;
 
 use super::ClickhouseZonesThatShouldBeRunning;
@@ -137,6 +150,15 @@ pub enum Error {
     TargetReleaseMinimumGenerationMismatch {
         expected: Generation,
         actual: Generation,
+    },
+    #[error(
+        "target release minimum generation was set to {current}, \
+         but we tried to set it to the older generation {new}, indicating a \
+         possible table rollback which should not happen"
+    )]
+    TargetReleaseMinimumGenerationRollback {
+        current: Generation,
+        new: Generation,
     },
     #[error(transparent)]
     TufRepoContentsError(#[from] TufRepoContentsError),
@@ -269,6 +291,29 @@ impl From<StorageEditCounts> for SledEditCounts {
     }
 }
 
+/// A list of scalar (primitive) values which have been edited on a sled.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub struct EditedSledScalarEdits {
+    /// Whether the remove_mupdate_override field was modified.
+    pub remove_mupdate_override: bool,
+    /// Whether the debug operation to force a Sled Agent generation bump was
+    /// set.
+    pub debug_force_generation_bump: bool,
+}
+
+impl EditedSledScalarEdits {
+    pub fn zeroes() -> Self {
+        Self {
+            debug_force_generation_bump: false,
+            remove_mupdate_override: false,
+        }
+    }
+
+    pub fn has_edits(&self) -> bool {
+        self.debug_force_generation_bump || self.remove_mupdate_override
+    }
+}
+
 /// Describes operations which the BlueprintBuilder has performed to arrive
 /// at its state.
 ///
@@ -308,9 +353,22 @@ pub(crate) enum Operation {
         num_datasets_expunged: usize,
         num_zones_expunged: usize,
     },
+    SetNexusGeneration {
+        current_generation: Generation,
+        new_generation: Generation,
+    },
+    SetTargetReleaseMinimumGeneration {
+        current_generation: Generation,
+        new_generation: Generation,
+    },
     SledNoopZoneImageSourcesUpdated {
         sled_id: SledUuid,
         count: usize,
+    },
+    SledNoopHostPhase2Updated {
+        sled_id: SledUuid,
+        slot_a_updated: bool,
+        slot_b_updated: bool,
     },
 }
 
@@ -383,6 +441,41 @@ impl fmt::Display for Operation {
                      zone image source updates"
                 )
             }
+            Self::SledNoopHostPhase2Updated {
+                sled_id,
+                slot_a_updated,
+                slot_b_updated,
+            } => {
+                let slots_updated_str = match (*slot_a_updated, *slot_b_updated)
+                {
+                    (true, true) => "both slot A and slot B",
+                    (true, false) => "slot A",
+                    (false, true) => "slot B",
+                    (false, false) => "none (this shouldn't happen)",
+                };
+                write!(
+                    f,
+                    "sled {sled_id}: noop updated host phase 2 to Artifact: \
+                     {slots_updated_str}"
+                )
+            }
+            Self::SetTargetReleaseMinimumGeneration {
+                current_generation,
+                new_generation,
+            } => {
+                write!(
+                    f,
+                    "updated target release minimum generation from \
+                     {current_generation} to {new_generation}"
+                )
+            }
+            Self::SetNexusGeneration { current_generation, new_generation } => {
+                write!(
+                    f,
+                    "updated nexus generation from \
+                     {current_generation} to {new_generation}"
+                )
+            }
         }
     }
 }
@@ -411,6 +504,9 @@ pub struct BlueprintBuilder<'a> {
     /// The latest inventory collection
     collection: &'a Collection,
 
+    /// The ID that the completed blueprint will have
+    new_blueprint_id: BlueprintUuid,
+
     // These fields are used to allocate resources for sleds.
     input: &'a PlanningInput,
 
@@ -430,13 +526,15 @@ pub struct BlueprintBuilder<'a> {
     sled_editors: BTreeMap<SledUuid, SledEditor>,
     cockroachdb_setting_preserve_downgrade: CockroachDbPreserveDowngrade,
     target_release_minimum_generation: Generation,
+    nexus_generation: Generation,
+    report: Option<PlanningReport>,
 
     creator: String,
     operations: Vec<Operation>,
     comments: Vec<String>,
     pending_mgs_updates: PendingMgsUpdates,
 
-    // Random number generator for new UUIDs
+    /// Random number generator for new UUIDs
     rng: PlannerRng,
 }
 
@@ -486,14 +584,17 @@ impl<'a> BlueprintBuilder<'a> {
             .collect::<BTreeMap<_, _>>();
         let num_sleds = sleds.len();
 
+        let id = rng.next_blueprint();
+        let report = PlanningReport::new(id);
         Blueprint {
-            id: rng.next_blueprint(),
+            id,
             sleds,
             pending_mgs_updates: PendingMgsUpdates::new(),
             parent_blueprint_id: None,
             internal_dns_version: Generation::new(),
             external_dns_version: Generation::new(),
             target_release_minimum_generation: Generation::new(),
+            nexus_generation: Generation::new(),
             cockroachdb_fingerprint: String::new(),
             cockroachdb_setting_preserve_downgrade:
                 CockroachDbPreserveDowngrade::DoNotModify,
@@ -503,6 +604,7 @@ impl<'a> BlueprintBuilder<'a> {
             time_created: now_db_precision(),
             creator: creator.to_owned(),
             comment: format!("starting blueprint with {num_sleds} empty sleds"),
+            report,
         }
     }
 
@@ -514,6 +616,7 @@ impl<'a> BlueprintBuilder<'a> {
         input: &'a PlanningInput,
         inventory: &'a Collection,
         creator: &str,
+        mut rng: PlannerRng,
     ) -> anyhow::Result<BlueprintBuilder<'a>> {
         let log = log.new(o!(
             "component" => "BlueprintBuilder",
@@ -564,6 +667,7 @@ impl<'a> BlueprintBuilder<'a> {
             log,
             parent_blueprint,
             collection: inventory,
+            new_blueprint_id: rng.next_blueprint(),
             input,
             resource_allocator: OnceCell::new(),
             sled_editors,
@@ -572,15 +676,21 @@ impl<'a> BlueprintBuilder<'a> {
             pending_mgs_updates: parent_blueprint.pending_mgs_updates.clone(),
             target_release_minimum_generation: parent_blueprint
                 .target_release_minimum_generation,
+            nexus_generation: parent_blueprint.nexus_generation,
+            report: None,
             creator: creator.to_owned(),
             operations: Vec::new(),
             comments: Vec::new(),
-            rng: PlannerRng::from_entropy(),
+            rng,
         })
     }
 
     pub fn parent_blueprint(&self) -> &Blueprint {
         &self.parent_blueprint
+    }
+
+    pub fn new_blueprint_id(&self) -> BlueprintUuid {
+        self.new_blueprint_id
     }
 
     fn resource_allocator(
@@ -644,17 +754,34 @@ impl<'a> BlueprintBuilder<'a> {
         Either::Right(editor.disks(filter))
     }
 
+    pub fn current_sled_host_phase_2(
+        &self,
+        sled_id: SledUuid,
+    ) -> Result<BlueprintHostPhase2DesiredSlots, Error> {
+        let editor = self.sled_editors.get(&sled_id).ok_or_else(|| {
+            Error::Planner(anyhow!(
+                "tried to get host phase 2 for unknown sled {sled_id}"
+            ))
+        })?;
+        Ok(editor.host_phase_2())
+    }
+
     /// Assemble a final [`Blueprint`] based on the contents of the builder
     pub fn build(mut self) -> Blueprint {
-        let blueprint_id = self.rng.next_blueprint();
+        let blueprint_id = self.new_blueprint_id();
 
         // Collect the Omicron zones config for all sleds, including sleds that
         // are no longer in service and need expungement work.
         let mut sleds = BTreeMap::new();
         for (sled_id, editor) in self.sled_editors {
-            let EditedSled { config, edit_counts } = editor.finalize();
+            let EditedSled { config, edit_counts, scalar_edits } =
+                editor.finalize();
             sleds.insert(sled_id, config);
-            if edit_counts.has_nonzero_counts() {
+            if edit_counts.has_nonzero_counts() || scalar_edits.has_edits() {
+                let EditedSledScalarEdits {
+                    debug_force_generation_bump,
+                    remove_mupdate_override,
+                } = scalar_edits;
                 debug!(
                     self.log, "sled modified in new blueprint";
                     "sled_id" => %sled_id,
@@ -662,6 +789,8 @@ impl<'a> BlueprintBuilder<'a> {
                     "disk_edits" => ?edit_counts.disks,
                     "dataset_edits" => ?edit_counts.datasets,
                     "zone_edits" => ?edit_counts.zones,
+                    "debug_force_generation_bump" => debug_force_generation_bump,
+                    "remove_mupdate_override_modified" => remove_mupdate_override,
                 );
             } else {
                 debug!(
@@ -742,6 +871,7 @@ impl<'a> BlueprintBuilder<'a> {
             external_dns_version: self.input.external_dns_version(),
             target_release_minimum_generation: self
                 .target_release_minimum_generation,
+            nexus_generation: self.nexus_generation,
             cockroachdb_fingerprint: self
                 .input
                 .cockroachdb_settings()
@@ -761,6 +891,9 @@ impl<'a> BlueprintBuilder<'a> {
                 .chain(self.operations.iter().map(|op| op.to_string()))
                 .collect::<Vec<String>>()
                 .join(", "),
+            report: self
+                .report
+                .unwrap_or_else(|| PlanningReport::new(blueprint_id)),
         }
     }
 
@@ -791,12 +924,9 @@ impl<'a> BlueprintBuilder<'a> {
             .map_err(|err| Error::SledEditError { sled_id, err })
     }
 
-    /// Within tests, set an RNG for deterministic results.
-    ///
-    /// This will ensure that tests that use this builder will produce the same
-    /// results each time they are run.
-    pub fn set_rng(&mut self, rng: PlannerRng) -> &mut Self {
-        self.rng = rng;
+    /// Set the planning report for this blueprint.
+    pub fn set_report(&mut self, report: PlanningReport) -> &mut Self {
+        self.report = Some(report);
         self
     }
 
@@ -1163,6 +1293,43 @@ impl<'a> BlueprintBuilder<'a> {
         Ok(editor.get_remove_mupdate_override())
     }
 
+    /// Updates a sled's mupdate override field based on the mupdate override
+    /// provided by inventory.
+    pub(crate) fn sled_ensure_mupdate_override(
+        &mut self,
+        sled_id: SledUuid,
+        // inv_mupdate_override_info has a weird type (not Option<&T>, not &str)
+        // because this is what `Result::as_ref` returns.
+        inv_mupdate_override_info: Result<
+            &Option<MupdateOverrideBootInventory>,
+            &String,
+        >,
+        noop_info: &mut NoopConvertInfo,
+    ) -> Result<EnsureMupdateOverrideAction, Error> {
+        let editor = self.sled_editors.get_mut(&sled_id).ok_or_else(|| {
+            Error::Planner(anyhow!(
+                "tried to ensure mupdate override for unknown sled {sled_id}"
+            ))
+        })?;
+
+        // Also map the editor to the corresponding PendingMgsUpdates.
+        let sled_details = self
+            .input
+            .sled_lookup(SledFilter::InService, sled_id)
+            .map_err(|error| Error::Planner(anyhow!(error)))?;
+        let pending_mgs_update =
+            self.pending_mgs_updates.entry(&sled_details.baseboard_id);
+        let noop_sled_info = noop_info.sled_info_mut(sled_id)?;
+
+        editor
+            .ensure_mupdate_override(
+                inv_mupdate_override_info,
+                pending_mgs_update,
+                noop_sled_info,
+            )
+            .map_err(|err| Error::SledEditError { sled_id, err })
+    }
+
     fn next_internal_dns_gz_address_index(&self, sled_id: SledUuid) -> u32 {
         let used_internal_dns_gz_address_indices = self
             .current_sled_zones(
@@ -1456,6 +1623,7 @@ impl<'a> BlueprintBuilder<'a> {
             nic,
             external_tls,
             external_dns_servers: external_dns_servers.clone(),
+            nexus_generation: Generation::new(),
         });
         let filesystem_pool =
             self.sled_select_zpool(sled_id, zone_type.kind())?;
@@ -1829,6 +1997,16 @@ impl<'a> BlueprintBuilder<'a> {
         Ok(final_counts.difference_since(initial_counts))
     }
 
+    pub(crate) fn apply_pending_host_phase_2_changes(
+        &mut self,
+        changes: PendingHostPhase2Changes,
+    ) -> Result<(), Error> {
+        for (sled_id, slot, contents) in changes.into_iter() {
+            self.sled_set_host_phase_2_slot(sled_id, slot, contents)?;
+        }
+        Ok(())
+    }
+
     pub fn sled_set_host_phase_2(
         &mut self,
         sled_id: SledUuid,
@@ -1994,22 +2172,46 @@ impl<'a> BlueprintBuilder<'a> {
             .len()
     }
 
+    /// Get the value of `target_release_minimum_generation`.
+    pub fn target_release_minimum_generation(&self) -> Generation {
+        self.target_release_minimum_generation
+    }
+
     /// Given the current value of `target_release_minimum_generation`, set the
     /// new value for this blueprint.
     pub fn set_target_release_minimum_generation(
         &mut self,
-        current: Generation,
-        target_release_minimum_generation: Generation,
+        current_generation: Generation,
+        new_generation: Generation,
     ) -> Result<(), Error> {
-        if self.target_release_minimum_generation != current {
+        if self.target_release_minimum_generation != current_generation {
             return Err(Error::TargetReleaseMinimumGenerationMismatch {
-                expected: current,
+                expected: current_generation,
                 actual: self.target_release_minimum_generation,
             });
         }
-        self.target_release_minimum_generation =
-            target_release_minimum_generation;
+        self.target_release_minimum_generation = new_generation;
+        self.record_operation(Operation::SetTargetReleaseMinimumGeneration {
+            current_generation,
+            new_generation,
+        });
         Ok(())
+    }
+
+    /// Get the value of `nexus_generation`.
+    pub fn nexus_generation(&self) -> Generation {
+        self.nexus_generation
+    }
+
+    /// Given the current value of `nexus_generation`, set the new value for
+    /// this blueprint.
+    pub fn set_nexus_generation(&mut self, new_generation: Generation) {
+        let current_generation = self.nexus_generation;
+        self.nexus_generation = new_generation;
+        self.record_operation(Operation::SetNexusGeneration {
+            current_generation,
+            new_generation,
+        });
     }
 
     /// Allow a test to manually add an external DNS address, which could
@@ -2242,6 +2444,302 @@ pub(super) fn ensure_input_networking_records_appear_in_parent_blueprint(
     Ok(())
 }
 
+/// The result of an `ensure_mupdate_override` call for a particular sled.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) enum EnsureMupdateOverrideAction {
+    /// The inventory and blueprint overrides are consistent, so no action was
+    /// taken.
+    NoAction {
+        /// The mupdate override currently in place.
+        mupdate_override_id: Option<MupdateOverrideUuid>,
+    },
+    /// Inventory had an override that didn't match what was in the blueprint,
+    /// so the blueprint was updated to match the inventory.
+    BpSetOverride {
+        /// The override ID that was set.
+        inv_override: MupdateOverrideUuid,
+        /// The previous blueprint override that was removed.
+        prev_bp_override: Option<MupdateOverrideUuid>,
+        /// The zones which were updated to the install dataset, along with
+        /// their old values.
+        zones: IdOrdMap<EnsureMupdateOverrideUpdatedZone>,
+        /// The pending MGS update that was cleared, if any.
+        prev_mgs_update: Option<Box<PendingMgsUpdate>>,
+        /// The previous host phase 2 contents.
+        prev_host_phase_2: BlueprintHostPhase2DesiredSlots,
+    },
+    /// The inventory did not have an override but the blueprint did, and other
+    /// conditions were met, so the blueprint's override was cleared.
+    BpClearOverride {
+        /// The previous blueprint override that was removed.
+        prev_bp_override: MupdateOverrideUuid,
+    },
+    /// The inventory did not have an override but the blueprint did, but some
+    /// zones' image sources can't be converted over to Artifact, so the
+    /// blueprint's override was left in place.
+    BpOverrideNotCleared {
+        /// The blueprint override that was not removed.
+        bp_override: MupdateOverrideUuid,
+        /// The reason the blueprint override was not cleared.
+        reason: BpMupdateOverrideNotClearedReason,
+    },
+    /// Sled Agent encountered an error retrieving the mupdate override from the
+    /// inventory.
+    ///
+    /// In this case, the blueprint's `remove_mupdate_override` field and zone
+    /// image sources are not altered, but pending MGS and host phase 2 updates
+    /// are cleared.
+    GetOverrideError {
+        /// An error message.
+        message: String,
+        /// The current blueprint override value, left unchanged.
+        bp_override: Option<MupdateOverrideUuid>,
+        /// The pending MGS update that was cleared, if any.
+        prev_mgs_update: Option<Box<PendingMgsUpdate>>,
+        /// The previous host phase 2 contents.
+        prev_host_phase_2: BlueprintHostPhase2DesiredSlots,
+    },
+}
+
+impl EnsureMupdateOverrideAction {
+    pub fn log_to(&self, log: &slog::Logger) {
+        match self {
+            EnsureMupdateOverrideAction::NoAction {
+                mupdate_override_id: mupdate_override,
+            } => {
+                debug!(
+                    log,
+                    "no mupdate override action taken, current value left unchanged";
+                    "mupdate_override" => ?mupdate_override,
+                );
+            }
+            EnsureMupdateOverrideAction::BpSetOverride {
+                inv_override,
+                prev_bp_override,
+                zones,
+                prev_mgs_update,
+                prev_host_phase_2,
+            } => {
+                let zones_desc = zones_desc(zones);
+                let host_phase_2_desc =
+                    host_phase_2_to_current_contents_desc(prev_host_phase_2);
+
+                info!(
+                    log,
+                    "blueprint mupdate override updated to match inventory";
+                    "new_bp_override" => %inv_override,
+                    "prev_bp_override" => ?prev_bp_override,
+                    "zones" => zones_desc,
+                    "host_phase_2" => host_phase_2_desc,
+                );
+                if let Some(prev_mgs_update) = prev_mgs_update {
+                    info!(
+                        log,
+                        "previous MGS update cleared as part of updating \
+                         blueprint mupdate override to match inventory";
+                        prev_mgs_update,
+                    );
+                } else {
+                    info!(
+                        log,
+                        "no previous MGS update found as part of updating \
+                         blueprint mupdate override to match inventory",
+                    );
+                }
+            }
+            EnsureMupdateOverrideAction::BpClearOverride {
+                prev_bp_override,
+            } => {
+                info!(
+                    log,
+                    "inventory override no longer exists, blueprint override \
+                     cleared";
+                    "prev_bp_override" => %prev_bp_override,
+                )
+            }
+            EnsureMupdateOverrideAction::BpOverrideNotCleared {
+                bp_override,
+                reason,
+            } => {
+                info!(
+                    log,
+                    "inventory override no longer exists, but blueprint \
+                     override could not be cleared";
+                    "bp_override" => %bp_override,
+                    "reason" => %reason,
+                );
+            }
+            EnsureMupdateOverrideAction::GetOverrideError {
+                message,
+                bp_override,
+                prev_mgs_update,
+                prev_host_phase_2,
+            } => {
+                let host_phase_2_desc =
+                    host_phase_2_to_current_contents_desc(prev_host_phase_2);
+                error!(
+                    log,
+                    "error getting mupdate override info for sled, \
+                     not altering blueprint override, but cleared \
+                     pending host phase 2 updates if any";
+                    "message" => %message,
+                    "bp_override" => ?bp_override,
+                    "prev_host_phase_2" => %host_phase_2_desc,
+                );
+                if let Some(prev_mgs_update) = prev_mgs_update {
+                    info!(
+                        log,
+                        "previous MGS update cleared because there was an \
+                         error obtaining mupdate override info";
+                        prev_mgs_update,
+                    );
+                } else {
+                    info!(
+                        log,
+                        "no previous MGS update found, so no action taken \
+                         as part of updating blueprint because there was an \
+                         error obtaining mupdate override info",
+                    );
+                }
+            }
+        }
+    }
+}
+
+fn zones_desc(zones: &IdOrdMap<EnsureMupdateOverrideUpdatedZone>) -> String {
+    let mut zones_desc = String::new();
+    if zones.is_empty() {
+        zones_desc.push_str("(none)");
+    } else {
+        // Add a newline before the first zone -- it makes it easier
+        // to read in log output.
+        zones_desc.push('\n');
+        for zone in zones {
+            swriteln!(zones_desc, "  - {}", zone);
+        }
+    }
+    zones_desc
+}
+
+/// Return a description string that represents changing the host phase 2
+/// contents from the provided value to `CurrentContents`.
+fn host_phase_2_to_current_contents_desc(
+    host_phase_2: &BlueprintHostPhase2DesiredSlots,
+) -> String {
+    let mut host_phase_2_desc = String::from("\n");
+    let BlueprintHostPhase2DesiredSlots { slot_a, slot_b } = host_phase_2;
+    match slot_a {
+        BlueprintHostPhase2DesiredContents::CurrentContents => {
+            swriteln!(
+                host_phase_2_desc,
+                "  - host phase 2 slot A: current contents (unchanged)"
+            );
+        }
+        BlueprintHostPhase2DesiredContents::Artifact { version, hash } => {
+            swriteln!(
+                host_phase_2_desc,
+                "  - host phase 2 slot A: updated from artifact \
+                 (version {}, hash {}) to preserving current contents",
+                version,
+                hash
+            );
+        }
+    }
+    match slot_b {
+        BlueprintHostPhase2DesiredContents::CurrentContents => {
+            swriteln!(
+                host_phase_2_desc,
+                "  - host phase 2 slot B: current contents (unchanged)"
+            );
+        }
+        BlueprintHostPhase2DesiredContents::Artifact { version, hash } => {
+            swriteln!(
+                host_phase_2_desc,
+                "  - host phase 2 slot B: updated from artifact \
+                 (version {}, hash {}) to preserving current contents",
+                version,
+                hash
+            );
+        }
+    }
+
+    host_phase_2_desc
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct EnsureMupdateOverrideUpdatedZone {
+    /// The ID of the zone.
+    pub zone_id: OmicronZoneUuid,
+
+    /// The Omicron zone kind.
+    pub kind: ZoneKind,
+
+    /// The previous image source.
+    pub old_image_source: BlueprintZoneImageSource,
+
+    /// The new image source.
+    pub new_image_source: BlueprintZoneImageSource,
+}
+
+impl fmt::Display for EnsureMupdateOverrideUpdatedZone {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.old_image_source == self.new_image_source {
+            write!(
+                f,
+                "zone {} ({:?}) left unchanged, image source: {}",
+                self.zone_id, self.kind, self.old_image_source,
+            )
+        } else {
+            write!(
+                f,
+                "zone {} ({:?}) updated from {} to {}",
+                self.zone_id,
+                self.kind,
+                self.old_image_source,
+                self.new_image_source,
+            )
+        }
+    }
+}
+
+impl IdOrdItem for EnsureMupdateOverrideUpdatedZone {
+    type Key<'a> = OmicronZoneUuid;
+    fn key(&self) -> Self::Key<'_> {
+        self.zone_id
+    }
+    id_upcast!();
+}
+
+/// The reason a blueprint's mupdate override for a sled was not cleared, even
+/// though inventory no longer has the sled.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) enum BpMupdateOverrideNotClearedReason {
+    /// There is a global reason noop conversions are not possible.
+    NoopGlobalIneligible(NoopConvertGlobalIneligibleReason),
+
+    /// There is a sled-specific reason noop conversions are not possible.
+    NoopSledIneligible(NoopConvertSledIneligibleReason),
+}
+
+impl fmt::Display for BpMupdateOverrideNotClearedReason {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            BpMupdateOverrideNotClearedReason::NoopGlobalIneligible(reason) => {
+                write!(
+                    f,
+                    "no sleds can be noop-converted to Artifact: {reason}",
+                )
+            }
+            BpMupdateOverrideNotClearedReason::NoopSledIneligible(reason) => {
+                write!(
+                    f,
+                    "this sled cannot be noop-converted to Artifact: {reason}",
+                )
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 pub mod test {
     use super::*;
@@ -2283,7 +2781,6 @@ pub mod test {
     fn test_basic() {
         static TEST_NAME: &str = "blueprint_builder_test_basic";
         let logctx = test_setup_log(TEST_NAME);
-
         let mut rng = SimRngState::from_seed(TEST_NAME);
         let (mut example, blueprint1) = ExampleSystemBuilder::new_with_rng(
             &logctx.log,
@@ -2298,6 +2795,7 @@ pub mod test {
             &example.input,
             &example.collection,
             "test_basic",
+            rng.next_planner_rng(),
         )
         .expect("failed to create builder");
 
@@ -2349,6 +2847,7 @@ pub mod test {
             &input,
             &example.collection,
             "test_basic",
+            rng.next_planner_rng(),
         )
         .expect("failed to create builder");
         let new_sled_resources = &input
@@ -2466,6 +2965,7 @@ pub mod test {
     fn test_decommissioned_sleds() {
         static TEST_NAME: &str = "blueprint_builder_test_decommissioned_sleds";
         let logctx = test_setup_log(TEST_NAME);
+        let mut rng = SimRngState::from_seed(TEST_NAME);
         let (collection, input, mut blueprint1) =
             example(&logctx.log, TEST_NAME);
         verify_blueprint(&blueprint1);
@@ -2516,6 +3016,7 @@ pub mod test {
             &input,
             &collection,
             "test_decommissioned_sleds",
+            rng.next_planner_rng(),
         )
         .expect("created builder")
         .build();
@@ -2553,6 +3054,7 @@ pub mod test {
             &input,
             &collection,
             "test_decommissioned_sleds",
+            rng.next_planner_rng(),
         )
         .expect("created builder")
         .build();
@@ -2569,6 +3071,7 @@ pub mod test {
     fn test_add_physical_disks() {
         static TEST_NAME: &str = "blueprint_builder_test_add_physical_disks";
         let logctx = test_setup_log(TEST_NAME);
+        let mut rng = SimRngState::from_seed(TEST_NAME);
 
         // Start with an empty system (sleds with no zones). However, we leave
         // the disks around so that `sled_add_disks` can add them.
@@ -2588,6 +3091,7 @@ pub mod test {
                 &input,
                 &collection,
                 "test",
+                rng.next_planner_rng(),
             )
             .expect("failed to create builder");
 
@@ -2673,6 +3177,7 @@ pub mod test {
     fn test_datasets_for_zpools_and_zones() {
         static TEST_NAME: &str = "test_datasets_for_zpools_and_zones";
         let logctx = test_setup_log(TEST_NAME);
+        let mut rng = SimRngState::from_seed(TEST_NAME);
         let (collection, input, blueprint) = example(&logctx.log, TEST_NAME);
 
         // Creating the "example" blueprint should already invoke
@@ -2687,6 +3192,7 @@ pub mod test {
             &input,
             &collection,
             "test",
+            rng.next_planner_rng(),
         )
         .expect("failed to create builder");
 
@@ -2741,6 +3247,7 @@ pub mod test {
             &input,
             &collection,
             "test",
+            rng.next_planner_rng(),
         )
         .expect("failed to create builder");
 
@@ -2780,6 +3287,7 @@ pub mod test {
             &input,
             &collection,
             "test",
+            rng.next_planner_rng(),
         )
         .expect("failed to create builder");
 
@@ -2802,6 +3310,7 @@ pub mod test {
         static TEST_NAME: &str =
             "blueprint_builder_test_add_nexus_with_no_existing_nexus_zones";
         let logctx = test_setup_log(TEST_NAME);
+        let mut rng = SimRngState::from_seed(TEST_NAME);
 
         // Start with an empty system (sleds with no zones).
         let (example, parent) =
@@ -2820,6 +3329,7 @@ pub mod test {
             &input,
             &collection,
             "test",
+            rng.next_planner_rng(),
         )
         .expect("failed to create builder");
 
@@ -2847,6 +3357,7 @@ pub mod test {
     fn test_add_nexus_error_cases() {
         static TEST_NAME: &str = "blueprint_builder_test_add_nexus_error_cases";
         let logctx = test_setup_log(TEST_NAME);
+        let mut rng = SimRngState::from_seed(TEST_NAME);
         let (mut collection, mut input, mut parent) =
             example(&logctx.log, TEST_NAME);
 
@@ -2926,6 +3437,7 @@ pub mod test {
                 &input,
                 &collection,
                 "test",
+                rng.next_planner_rng(),
             )
             .expect("failed to create builder");
             builder
@@ -2946,6 +3458,7 @@ pub mod test {
                 &input,
                 &collection,
                 "test",
+                rng.next_planner_rng(),
             )
             .expect("failed to create builder");
             for _ in 0..3 {
@@ -2985,6 +3498,7 @@ pub mod test {
                 &input,
                 &collection,
                 "test",
+                rng.next_planner_rng(),
             )
             .expect("failed to create builder");
             let err = builder
@@ -3020,6 +3534,7 @@ pub mod test {
     fn test_ensure_cockroachdb() {
         static TEST_NAME: &str = "blueprint_builder_test_ensure_cockroachdb";
         let logctx = test_setup_log(TEST_NAME);
+        let mut rng = SimRngState::from_seed(TEST_NAME);
 
         // Start with an example system (no CRDB zones).
         let (example, parent) =
@@ -3060,6 +3575,7 @@ pub mod test {
             &input,
             &collection,
             "test",
+            rng.next_planner_rng(),
         )
         .expect("constructed builder");
         for _ in 0..num_sled_zpools {
@@ -3102,6 +3618,7 @@ pub mod test {
             &input,
             &collection,
             "test",
+            rng.next_planner_rng(),
         )
         .expect("constructed builder");
         for _ in 0..num_sled_zpools {
@@ -3135,6 +3652,7 @@ pub mod test {
         static TEST_NAME: &str = "builder_zone_image_source_change_diff";
         let logctx = test_setup_log(TEST_NAME);
         let log = logctx.log.clone();
+        let mut rng = SimRngState::from_seed(TEST_NAME);
 
         // Use our example system.
         let (system, blueprint1) =
@@ -3147,9 +3665,9 @@ pub mod test {
             &system.input,
             &system.collection,
             TEST_NAME,
+            rng.next_planner_rng(),
         )
         .expect("built blueprint builder");
-        blueprint_builder.set_rng(PlannerRng::from_seed((TEST_NAME, "bp2")));
 
         let sled_id = system
             .input

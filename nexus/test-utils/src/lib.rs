@@ -8,6 +8,7 @@
 use anyhow::Context;
 use anyhow::Result;
 use camino::Utf8Path;
+use camino::Utf8PathBuf;
 use chrono::Utc;
 use dropshot::ConfigLogging;
 use dropshot::ConfigLoggingLevel;
@@ -16,6 +17,7 @@ use dropshot::test_util::ClientTestContext;
 use dropshot::test_util::LogContext;
 use futures::FutureExt;
 use futures::future::BoxFuture;
+use gateway_test_utils::setup::DEFAULT_SP_SIM_CONFIG;
 use gateway_test_utils::setup::GatewayTestContext;
 use hickory_resolver::TokioResolver;
 use hickory_resolver::config::NameServerConfig;
@@ -57,6 +59,7 @@ use nexus_types::deployment::OmicronZoneExternalFloatingAddr;
 use nexus_types::deployment::OmicronZoneExternalFloatingIp;
 use nexus_types::deployment::OmicronZoneExternalSnatIp;
 use nexus_types::deployment::OximeterReadMode;
+use nexus_types::deployment::PlanningReport;
 use nexus_types::deployment::blueprint_zone_type;
 use nexus_types::external_api::views::SledState;
 use nexus_types::internal_api::params::DnsConfigParams;
@@ -302,8 +305,6 @@ pub fn load_test_config() -> NexusConfig {
     // - the CockroachDB TCP listen port be 0, and
     // - if the log will go to a file then the path must be the sentinel value
     //   "UNUSED".
-    // - each Nexus created for testing gets its own id so they don't see each
-    //   others sagas and try to recover them
     //
     // (See LogContext::new() for details.)  Given these restrictions, it may
     // seem barely worth reading a config file at all.  However, developers can
@@ -311,10 +312,8 @@ pub fn load_test_config() -> NexusConfig {
     // configuration options, we expect many of those can be usefully configured
     // (and reconfigured) for the test suite.
     let config_file_path = Utf8Path::new("tests/config.test.toml");
-    let mut config = NexusConfig::from_file(config_file_path)
-        .expect("failed to load config.test.toml");
-    config.deployment.id = OmicronZoneUuid::new_v4();
-    config
+    NexusConfig::from_file(config_file_path)
+        .expect("failed to load config.test.toml")
 }
 
 pub async fn test_setup<N: NexusServer>(
@@ -328,6 +327,7 @@ pub async fn test_setup<N: NexusServer>(
         sim::SimMode::Explicit,
         None,
         extra_sled_agents,
+        DEFAULT_SP_SIM_CONFIG.into(),
     )
     .await
 }
@@ -674,10 +674,12 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         &mut self,
         switch_location: SwitchLocation,
         port: Option<u16>,
+        sp_sim_config_file: Utf8PathBuf,
     ) {
         debug!(&self.logctx.log, "Starting Management Gateway");
         let (mgs_config, sp_sim_config) =
-            gateway_test_utils::setup::load_test_config();
+            gateway_test_utils::setup::load_test_config(sp_sim_config_file);
+
         let mgs_addr =
             port.map(|port| SocketAddrV6::new(Ipv6Addr::LOCALHOST, port, 0, 0));
         let gateway = gateway_test_utils::setup::test_setup_with_config(
@@ -744,12 +746,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                 sled_id,
                 Ipv6Addr::LOCALHOST,
                 self.dendrite.get(&switch_location).unwrap().port,
-                self.gateway
-                    .get(&switch_location)
-                    .unwrap()
-                    .client
-                    .bind_address
-                    .port(),
+                self.gateway.get(&switch_location).unwrap().port,
                 self.mgd.get(&switch_location).unwrap().port,
             )
             .unwrap();
@@ -834,61 +831,111 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             0,
         );
 
+        self.rack_init_builder.add_service_to_dns(
+            self.config.deployment.id,
+            address,
+            ServiceName::Nexus,
+        );
+        self.record_nexus_zone(self.config.clone(), address, 0);
+        self.nexus_internal = Some(nexus_internal);
+        self.nexus_internal_addr = Some(nexus_internal_addr);
+        Ok(())
+    }
+
+    pub async fn configure_second_nexus(&mut self) {
+        let log = &self.logctx.log;
+        debug!(log, "Configuring second Nexus (not to run)");
+        // Besides the Nexus that we just started, add an entry in the blueprint
+        // for the Nexus that developers can start using
+        // nexus/examples/config-second.toml.
+        //
+        // The details in its BlueprintZoneType mostly don't matter because
+        // those are mostly used for DNS (which we don't usually need here) and
+        // to tell sled agent how to start the zone (which isn't what's going on
+        // here).  But it does need to be present for it to be able to determine
+        // on startup if it needs to quiesce.
+        let second_nexus_config_path =
+            Utf8Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../examples/config-second.toml");
+        let mut second_nexus_config =
+            NexusConfig::from_file(&second_nexus_config_path).unwrap();
+        // Okay, this is particularly awful.  The system does not allow multiple
+        // zones to use the same external IP -- makes sense.  But it actually is
+        // fine here because the IP is localhost and we're using host
+        // networking, and we've already ensured that the ports will be unique.
+        // Avoid tripping up the validation by using some other IP.  This won't
+        // be used for anything.  Pick something that's not in use anywhere
+        // else.  This range is guaranteed by RFC 6666 to discard traffic.
+        second_nexus_config
+            .deployment
+            .dropshot_external
+            .dropshot
+            .bind_address
+            .set_ip("100::1".parse().unwrap());
+        let SocketAddr::V6(second_internal_address) =
+            second_nexus_config.deployment.dropshot_internal.bind_address
+        else {
+            panic!(
+                "expected IPv6 address for dropshot_internal in \
+                 nexus/examples/config-second.toml"
+            );
+        };
+        self.record_nexus_zone(second_nexus_config, second_internal_address, 1);
+    }
+
+    fn record_nexus_zone(
+        &mut self,
+        config: NexusConfig,
+        internal_address: SocketAddrV6,
+        which: usize,
+    ) {
+        let id = config.deployment.id;
         let mac = self
             .rack_init_builder
             .mac_addrs
             .next()
             .expect("ran out of MAC addresses");
-        let external_address =
-            self.config.deployment.dropshot_external.dropshot.bind_address.ip();
-        let nexus_id = self.config.deployment.id;
-        self.rack_init_builder.add_service_to_dns(
-            nexus_id,
-            address,
-            ServiceName::Nexus,
-        );
-
         self.blueprint_zones.push(BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
-            id: nexus_id,
+            id,
             filesystem_pool: ZpoolName::new_external(ZpoolUuid::new_v4()),
             zone_type: BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
-                external_dns_servers: self
-                    .config
+                external_dns_servers: config
                     .deployment
                     .external_dns_servers
                     .clone(),
                 external_ip: OmicronZoneExternalFloatingIp {
                     id: ExternalIpUuid::new_v4(),
-                    ip: external_address,
+                    ip: config
+                        .deployment
+                        .dropshot_external
+                        .dropshot
+                        .bind_address
+                        .ip(),
                 },
-                external_tls: self.config.deployment.dropshot_external.tls,
-                internal_address: address,
+                external_tls: config.deployment.dropshot_external.tls,
+                internal_address,
                 nic: NetworkInterface {
                     id: Uuid::new_v4(),
                     ip: NEXUS_OPTE_IPV4_SUBNET
-                        .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES + 1)
+                        .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES + 1 + which)
                         .unwrap()
                         .into(),
                     kind: NetworkInterfaceKind::Service {
-                        id: nexus_id.into_untyped_uuid(),
+                        id: id.into_untyped_uuid(),
                     },
                     mac,
-                    name: format!("nexus-{}", nexus_id).parse().unwrap(),
+                    name: format!("nexus-{}", id).parse().unwrap(),
                     primary: true,
                     slot: 0,
                     subnet: (*NEXUS_OPTE_IPV4_SUBNET).into(),
                     vni: Vni::SERVICES_VNI,
                     transit_ips: vec![],
                 },
+                nexus_generation: Generation::new(),
             }),
             image_source: BlueprintZoneImageSource::InstallDataset,
         });
-
-        self.nexus_internal = Some(nexus_internal);
-        self.nexus_internal_addr = Some(nexus_internal_addr);
-
-        Ok(())
     }
 
     pub async fn populate_internal_dns(&mut self) {
@@ -957,14 +1004,16 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             .blueprint_sleds
             .take()
             .expect("should have already made blueprint sled configs");
+        let id = BlueprintUuid::new_v4();
         let blueprint = Blueprint {
-            id: BlueprintUuid::new_v4(),
+            id,
             sleds,
             pending_mgs_updates: PendingMgsUpdates::new(),
             parent_blueprint_id: None,
             internal_dns_version: dns_config.generation,
             external_dns_version: Generation::new(),
             target_release_minimum_generation: Generation::new(),
+            nexus_generation: Generation::new(),
             cockroachdb_fingerprint: String::new(),
             cockroachdb_setting_preserve_downgrade:
                 CockroachDbPreserveDowngrade::DoNotModify,
@@ -976,6 +1025,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             time_created: Utc::now(),
             creator: "nexus-test-utils".to_string(),
             comment: "initial test blueprint".to_string(),
+            report: PlanningReport::new(id),
         };
 
         self.initial_blueprint_id = Some(blueprint.id);
@@ -1584,6 +1634,7 @@ enum PopulateCrdb {
 pub async fn omicron_dev_setup_with_config<N: NexusServer>(
     config: &mut NexusConfig,
     extra_sled_agents: u16,
+    gateway_config_file: Utf8PathBuf,
 ) -> Result<ControlPlaneTestContext<N>> {
     let builder =
         ControlPlaneTestContextBuilder::<N>::new("omicron-dev", config);
@@ -1610,6 +1661,8 @@ pub async fn omicron_dev_setup_with_config<N: NexusServer>(
         sim::SimMode::Auto,
         None,
         extra_sled_agents,
+        gateway_config_file,
+        true,
     )
     .await)
 }
@@ -1621,6 +1674,7 @@ pub async fn test_setup_with_config<N: NexusServer>(
     sim_mode: sim::SimMode,
     initial_cert: Option<Certificate>,
     extra_sled_agents: u16,
+    gateway_config_file: Utf8PathBuf,
 ) -> ControlPlaneTestContext<N> {
     let builder = ControlPlaneTestContextBuilder::<N>::new(test_name, config);
     setup_with_config_impl(
@@ -1629,6 +1683,8 @@ pub async fn test_setup_with_config<N: NexusServer>(
         sim_mode,
         initial_cert,
         extra_sled_agents,
+        gateway_config_file,
+        false,
     )
     .await
 }
@@ -1639,8 +1695,10 @@ async fn setup_with_config_impl<N: NexusServer>(
     sim_mode: sim::SimMode,
     initial_cert: Option<Certificate>,
     extra_sled_agents: u16,
+    gateway_config_file: Utf8PathBuf,
+    second_nexus: bool,
 ) -> ControlPlaneTestContext<N> {
-    const STEP_TIMEOUT: Duration = Duration::from_secs(60);
+    const STEP_TIMEOUT: Duration = Duration::from_secs(600);
 
     // All setups will start with CRDB and clickhouse
     builder
@@ -1665,6 +1723,7 @@ async fn setup_with_config_impl<N: NexusServer>(
     // be configured. If extra sled agents are requested, then the second sled
     // agent will be for switch1.
 
+    let mgs_config = gateway_config_file.clone();
     builder
         .init_with_steps(
             vec![
@@ -1672,7 +1731,11 @@ async fn setup_with_config_impl<N: NexusServer>(
                     "start_gateway_switch0",
                     Box::new(|builder| {
                         builder
-                            .start_gateway(SwitchLocation::Switch0, None)
+                            .start_gateway(
+                                SwitchLocation::Switch0,
+                                None,
+                                mgs_config,
+                            )
                             .boxed()
                     }),
                 ),
@@ -1712,7 +1775,11 @@ async fn setup_with_config_impl<N: NexusServer>(
                         "start_gateway_switch1",
                         Box::new(|builder| {
                             builder
-                                .start_gateway(SwitchLocation::Switch1, None)
+                                .start_gateway(
+                                    SwitchLocation::Switch1,
+                                    None,
+                                    gateway_config_file,
+                                )
                                 .boxed()
                         }),
                     ),
@@ -1771,6 +1838,20 @@ async fn setup_with_config_impl<N: NexusServer>(
             STEP_TIMEOUT,
         )
         .await;
+
+    if second_nexus {
+        builder
+            .init_with_steps(
+                vec![(
+                    "configure_second_nexus",
+                    Box::new(|builder| {
+                        builder.configure_second_nexus().boxed()
+                    }),
+                )],
+                STEP_TIMEOUT,
+            )
+            .await;
+    }
 
     // The first and second sled agents have special UUIDs, and any extra ones
     // after that are random.

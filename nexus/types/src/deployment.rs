@@ -24,6 +24,8 @@ use blueprint_display::BpTableColumn;
 use daft::Diffable;
 use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
+use iddqd::id_ord_map::Entry;
+use iddqd::id_ord_map::RefMut;
 use iddqd::id_upcast;
 use nexus_sled_agent_shared::inventory::HostPhase2DesiredContents;
 use nexus_sled_agent_shared::inventory::HostPhase2DesiredSlots;
@@ -70,9 +72,12 @@ mod clickhouse;
 pub mod execution;
 mod network_resources;
 mod planning_input;
+mod planning_report;
 mod zone_type;
 
 use crate::inventory::BaseboardId;
+use anyhow::anyhow;
+use anyhow::bail;
 pub use blueprint_diff::BlueprintDiffSummary;
 use blueprint_display::BpPendingMgsUpdates;
 pub use chicken_switches::PlannerChickenSwitches;
@@ -120,6 +125,22 @@ pub use planning_input::TargetReleaseDescription;
 pub use planning_input::TufRepoContentsError;
 pub use planning_input::TufRepoPolicy;
 pub use planning_input::ZpoolFilter;
+pub use planning_report::CockroachdbUnsafeToShutdown;
+pub use planning_report::PlanningAddStepReport;
+pub use planning_report::PlanningCockroachdbSettingsStepReport;
+pub use planning_report::PlanningDecommissionStepReport;
+pub use planning_report::PlanningExpungeStepReport;
+pub use planning_report::PlanningMgsUpdatesStepReport;
+pub use planning_report::PlanningMupdateOverrideStepReport;
+pub use planning_report::PlanningNoopImageSourceSkipSledHostPhase2Reason;
+pub use planning_report::PlanningNoopImageSourceSkipSledZonesReason;
+pub use planning_report::PlanningNoopImageSourceSkipZoneReason;
+pub use planning_report::PlanningNoopImageSourceStepReport;
+pub use planning_report::PlanningReport;
+pub use planning_report::PlanningZoneUpdatesStepReport;
+pub use planning_report::ZoneAddWaitingOn;
+pub use planning_report::ZoneUnsafeToShutdown;
+pub use planning_report::ZoneUpdatesWaitingOn;
 pub use zone_type::BlueprintZoneType;
 pub use zone_type::DurableDataset;
 pub use zone_type::blueprint_zone_type;
@@ -208,6 +229,13 @@ pub struct Blueprint {
     /// driving the system to the target release.
     pub target_release_minimum_generation: Generation,
 
+    /// The generation of the active group of Nexuses
+    ///
+    /// If a Nexus instance notices it has a nexus_generation less than
+    /// this value, it will start to quiesce in preparation for handing off
+    /// control to the newer generation (see: RFD 588).
+    pub nexus_generation: Generation,
+
     /// CockroachDB state fingerprint when this blueprint was created
     // See `nexus/db-queries/src/db/datastore/cockroachdb_settings.rs` for more
     // on this.
@@ -233,12 +261,17 @@ pub struct Blueprint {
     /// when this blueprint was generated (for debugging)
     #[daft(ignore)]
     pub time_created: chrono::DateTime<chrono::Utc>,
+
     /// identity of the component that generated the blueprint (for debugging)
     /// This would generally be the Uuid of a Nexus instance.
     pub creator: String,
+
     /// human-readable string describing why this blueprint was created
     /// (for debugging)
     pub comment: String,
+
+    /// Report on the planning session that resulted in this blueprint
+    pub report: PlanningReport,
 }
 
 impl Blueprint {
@@ -251,6 +284,7 @@ impl Blueprint {
             external_dns_version: self.external_dns_version,
             target_release_minimum_generation: self
                 .target_release_minimum_generation,
+            nexus_generation: self.nexus_generation,
             cockroachdb_fingerprint: self.cockroachdb_fingerprint.clone(),
             cockroachdb_setting_preserve_downgrade: Some(
                 self.cockroachdb_setting_preserve_downgrade,
@@ -350,6 +384,26 @@ impl Blueprint {
     /// blueprint.
     pub fn display(&self) -> BlueprintDisplay<'_> {
         BlueprintDisplay { blueprint: self }
+    }
+
+    /// Returns whether the given Nexus instance should be quiescing or quiesced
+    /// in preparation for handoff to the next generation
+    pub fn is_nexus_quiescing(
+        &self,
+        nexus_id: OmicronZoneUuid,
+    ) -> Result<bool, anyhow::Error> {
+        let zone = self
+            .all_omicron_zones(|_z| true)
+            .find(|(_sled_id, zone_config)| zone_config.id == nexus_id)
+            .ok_or_else(|| {
+                anyhow!("zone {} does not exist in blueprint", nexus_id)
+            })?
+            .1;
+        let BlueprintZoneType::Nexus(zone_config) = &zone.zone_type else {
+            bail!("zone {} is not a Nexus zone", nexus_id);
+        };
+
+        Ok(zone_config.nexus_generation < self.nexus_generation)
     }
 }
 
@@ -585,6 +639,7 @@ impl BlueprintDisplay<'_> {
                         .target_release_minimum_generation
                         .to_string(),
                 ),
+                (NEXUS_GENERATION, self.blueprint.nexus_generation.to_string()),
             ],
         )
     }
@@ -627,11 +682,13 @@ impl fmt::Display for BlueprintDisplay<'_> {
             // These six fields are handled by `make_metadata_table()`, called
             // below.
             target_release_minimum_generation: _,
+            nexus_generation: _,
             internal_dns_version: _,
             external_dns_version: _,
             time_created: _,
             creator: _,
             comment: _,
+            report,
         } = self.blueprint;
 
         writeln!(f, "blueprint  {}", id)?;
@@ -743,6 +800,8 @@ impl fmt::Display for BlueprintDisplay<'_> {
                 )
             )?;
         }
+
+        writeln!(f, "\n{report}")?;
 
         Ok(())
     }
@@ -1303,6 +1362,20 @@ impl PendingMgsUpdates {
         self.by_baseboard.get(baseboard_id)
     }
 
+    pub fn get_mut(
+        &mut self,
+        baseboard_id: &BaseboardId,
+    ) -> Option<RefMut<'_, PendingMgsUpdate>> {
+        self.by_baseboard.get_mut(baseboard_id)
+    }
+
+    pub fn entry(
+        &mut self,
+        baseboard_id: &BaseboardId,
+    ) -> Entry<'_, PendingMgsUpdate> {
+        self.by_baseboard.entry(baseboard_id)
+    }
+
     pub fn remove(
         &mut self,
         baseboard_id: &BaseboardId,
@@ -1346,6 +1419,24 @@ pub struct PendingMgsUpdate {
     /// which artifact to apply to this device
     pub artifact_hash: ArtifactHash,
     pub artifact_version: ArtifactVersion,
+}
+
+impl PendingMgsUpdate {
+    /// Get a short description of this update, suitable for display on a single
+    /// line (e.g., as the `comment` field of a blueprint).
+    pub fn description(&self) -> String {
+        let serial = &self.baseboard_id.serial_number;
+        let sp_type = self.sp_type;
+        let slot_id = self.slot_id;
+        let version = &self.artifact_version;
+        let kind = match &self.details {
+            PendingMgsUpdateDetails::Sp { .. } => "SP",
+            PendingMgsUpdateDetails::Rot { .. } => "RoT",
+            PendingMgsUpdateDetails::RotBootloader { .. } => "RoT bootloader",
+            PendingMgsUpdateDetails::HostPhase1(_) => "host phase 1",
+        };
+        format!("update {sp_type:?} {slot_id} ({serial}) {kind} to {version}")
+    }
 }
 
 impl slog::KV for PendingMgsUpdate {
@@ -1409,123 +1500,277 @@ impl PendingMgsUpdate {
 #[serde(tag = "component", rename_all = "snake_case")]
 pub enum PendingMgsUpdateDetails {
     /// the SP itself is being updated
-    Sp {
-        // implicit: component = SP_ITSELF
-        // implicit: firmware slot id = 0 (always 0 for SP itself)
-        /// expected contents of the active slot
-        expected_active_version: ArtifactVersion,
-        /// expected contents of the inactive slot
-        expected_inactive_version: ExpectedVersion,
-    },
+    Sp(PendingMgsUpdateSpDetails),
     /// the RoT is being updated
-    Rot {
-        // implicit: component = ROT
-        // implicit: firmware slot id will be the inactive slot
-        // whether we expect the "A" or "B" slot to be active
-        // and its expected version
-        expected_active_slot: ExpectedActiveRotSlot,
-        // expected version of the "A" or "B" slot (opposite to
-        // the active slot as specified above)
-        expected_inactive_version: ExpectedVersion,
-        // under normal operation, this should always match the active slot.
-        // if this field changed without the active slot changing, that might
-        // reflect a bad update.
-        //
-        /// the persistent boot preference written into the current authoritative
-        /// CFPA page (ping or pong)
-        expected_persistent_boot_preference: RotSlot,
-        // if this value changed, but not any of this other information, that could
-        // reflect an attempt to switch to the other slot.
-        //
-        /// the persistent boot preference written into the CFPA scratch page that
-        /// will become the persistent boot preference in the authoritative CFPA
-        /// page upon reboot, unless CFPA update of the authoritative page fails
-        /// for some reason.
-        expected_pending_persistent_boot_preference: Option<RotSlot>,
-        // this field is not in use yet.
-        //
-        /// override persistent preference selection for a single boot
-        expected_transient_boot_preference: Option<RotSlot>,
-    },
-    RotBootloader {
-        // implicit: component = STAGE0
-        // implicit: firmware slot id = 1 (always 1 (Stage0Next) for RoT bootloader)
-        /// expected contents of the stage 0
-        expected_stage0_version: ArtifactVersion,
-        /// expected contents of the stage 0 next
-        expected_stage0_next_version: ExpectedVersion,
-    },
+    Rot(PendingMgsUpdateRotDetails),
+    /// the RoT bootloader is being updated
+    RotBootloader(PendingMgsUpdateRotBootloaderDetails),
+    /// the host OS is being updated
+    ///
+    /// We write the phase 1 via MGS, and have a precheck condition that
+    /// sled-agent has already written the matching phase 2.
+    HostPhase1(PendingMgsUpdateHostPhase1Details),
 }
 
 impl slog::KV for PendingMgsUpdateDetails {
     fn serialize(
         &self,
-        _record: &slog::Record,
+        record: &slog::Record,
         serializer: &mut dyn slog::Serializer,
     ) -> slog::Result {
         match self {
-            PendingMgsUpdateDetails::Sp {
-                expected_active_version,
-                expected_inactive_version,
-            } => {
+            PendingMgsUpdateDetails::Sp(details) => {
                 serializer.emit_str(Key::from("component"), "sp")?;
-                serializer.emit_str(
-                    Key::from("expected_active_version"),
-                    &expected_active_version.to_string(),
-                )?;
-                serializer.emit_str(
-                    Key::from("expected_inactive_version"),
-                    &format!("{:?}", expected_inactive_version),
-                )
+                slog::KV::serialize(details, record, serializer)
             }
-            PendingMgsUpdateDetails::Rot {
-                expected_active_slot,
-                expected_inactive_version,
-                expected_persistent_boot_preference,
-                expected_pending_persistent_boot_preference,
-                expected_transient_boot_preference,
-            } => {
+            PendingMgsUpdateDetails::Rot(details) => {
                 serializer.emit_str(Key::from("component"), "rot")?;
-                serializer.emit_str(
-                    Key::from("expected_inactive_version"),
-                    &format!("{:?}", expected_inactive_version),
-                )?;
-                serializer.emit_str(
-                    Key::from("expected_active_slot"),
-                    &format!("{:?}", expected_active_slot),
-                )?;
-                serializer.emit_str(
-                    Key::from("expected_persistent_boot_preference"),
-                    &format!("{:?}", expected_persistent_boot_preference),
-                )?;
-                serializer.emit_str(
-                    Key::from("expected_pending_persistent_boot_preference"),
-                    &format!(
-                        "{:?}",
-                        expected_pending_persistent_boot_preference
-                    ),
-                )?;
-                serializer.emit_str(
-                    Key::from("expected_transient_boot_preference"),
-                    &format!("{:?}", expected_transient_boot_preference),
-                )
+                slog::KV::serialize(details, record, serializer)
             }
-            PendingMgsUpdateDetails::RotBootloader {
-                expected_stage0_version,
-                expected_stage0_next_version,
-            } => {
+            PendingMgsUpdateDetails::RotBootloader(details) => {
                 serializer
                     .emit_str(Key::from("component"), "rot_bootloader")?;
-                serializer.emit_str(
-                    Key::from("expected_stage0_version"),
-                    &expected_stage0_version.to_string(),
-                )?;
-                serializer.emit_str(
-                    Key::from("expected_stage0_next_version"),
-                    &format!("{:?}", expected_stage0_next_version),
-                )
+                slog::KV::serialize(details, record, serializer)
+            }
+            PendingMgsUpdateDetails::HostPhase1(details) => {
+                serializer.emit_str(Key::from("component"), "host_phase_1")?;
+                slog::KV::serialize(details, record, serializer)
             }
         }
+    }
+}
+
+/// Describes the SP-specific details of a PendingMgsUpdate
+#[derive(
+    Clone, Debug, Eq, PartialEq, JsonSchema, Deserialize, Serialize, Diffable,
+)]
+#[serde(rename_all = "snake_case")]
+pub struct PendingMgsUpdateSpDetails {
+    // implicit: component = SP_ITSELF
+    // implicit: firmware slot id = 0 (always 0 for SP itself)
+    /// expected contents of the active slot
+    pub expected_active_version: ArtifactVersion,
+    /// expected contents of the inactive slot
+    pub expected_inactive_version: ExpectedVersion,
+}
+
+impl slog::KV for PendingMgsUpdateSpDetails {
+    fn serialize(
+        &self,
+        _record: &slog::Record,
+        serializer: &mut dyn slog::Serializer,
+    ) -> slog::Result {
+        let Self { expected_active_version, expected_inactive_version } = self;
+        serializer.emit_str(
+            Key::from("expected_active_version"),
+            &expected_active_version.to_string(),
+        )?;
+        serializer.emit_str(
+            Key::from("expected_inactive_version"),
+            &format!("{expected_inactive_version:?}"),
+        )
+    }
+}
+
+/// Describes the RoT-specific details of a PendingMgsUpdate
+#[derive(
+    Clone, Debug, Eq, PartialEq, JsonSchema, Deserialize, Serialize, Diffable,
+)]
+#[serde(rename_all = "snake_case")]
+pub struct PendingMgsUpdateRotDetails {
+    // implicit: component = ROT
+    // implicit: firmware slot id will be the inactive slot
+    // whether we expect the "A" or "B" slot to be active
+    // and its expected version
+    pub expected_active_slot: ExpectedActiveRotSlot,
+    // expected version of the "A" or "B" slot (opposite to
+    // the active slot as specified above)
+    pub expected_inactive_version: ExpectedVersion,
+    // under normal operation, this should always match the active slot.
+    // if this field changed without the active slot changing, that might
+    // reflect a bad update.
+    //
+    /// the persistent boot preference written into the current authoritative
+    /// CFPA page (ping or pong)
+    pub expected_persistent_boot_preference: RotSlot,
+    // if this value changed, but not any of this other information, that could
+    // reflect an attempt to switch to the other slot.
+    //
+    /// the persistent boot preference written into the CFPA scratch page that
+    /// will become the persistent boot preference in the authoritative CFPA
+    /// page upon reboot, unless CFPA update of the authoritative page fails
+    /// for some reason.
+    pub expected_pending_persistent_boot_preference: Option<RotSlot>,
+    // this field is not in use yet.
+    //
+    /// override persistent preference selection for a single boot
+    pub expected_transient_boot_preference: Option<RotSlot>,
+}
+
+impl slog::KV for PendingMgsUpdateRotDetails {
+    fn serialize(
+        &self,
+        _record: &slog::Record,
+        serializer: &mut dyn slog::Serializer,
+    ) -> slog::Result {
+        let Self {
+            expected_active_slot,
+            expected_inactive_version,
+            expected_persistent_boot_preference,
+            expected_pending_persistent_boot_preference,
+            expected_transient_boot_preference,
+        } = self;
+        serializer.emit_str(
+            Key::from("expected_inactive_version"),
+            &format!("{:?}", expected_inactive_version),
+        )?;
+        serializer.emit_str(
+            Key::from("expected_active_slot"),
+            &format!("{:?}", expected_active_slot),
+        )?;
+        serializer.emit_str(
+            Key::from("expected_persistent_boot_preference"),
+            &format!("{:?}", expected_persistent_boot_preference),
+        )?;
+        serializer.emit_str(
+            Key::from("expected_pending_persistent_boot_preference"),
+            &format!("{:?}", expected_pending_persistent_boot_preference),
+        )?;
+        serializer.emit_str(
+            Key::from("expected_transient_boot_preference"),
+            &format!("{:?}", expected_transient_boot_preference),
+        )
+    }
+}
+
+/// Describes the RoT bootloader details of a PendingMgsUpdate
+#[derive(
+    Clone, Debug, Eq, PartialEq, JsonSchema, Deserialize, Serialize, Diffable,
+)]
+#[serde(rename_all = "snake_case")]
+pub struct PendingMgsUpdateRotBootloaderDetails {
+    // implicit: component = STAGE0
+    // implicit: firmware slot id = 1 (always 1 (Stage0Next) for RoT bootloader)
+    /// expected contents of the stage 0
+    pub expected_stage0_version: ArtifactVersion,
+    /// expected contents of the stage 0 next
+    pub expected_stage0_next_version: ExpectedVersion,
+}
+
+impl slog::KV for PendingMgsUpdateRotBootloaderDetails {
+    fn serialize(
+        &self,
+        _record: &slog::Record,
+        serializer: &mut dyn slog::Serializer,
+    ) -> slog::Result {
+        let Self { expected_stage0_version, expected_stage0_next_version } =
+            self;
+        serializer.emit_str(
+            Key::from("expected_stage0_version"),
+            &expected_stage0_version.to_string(),
+        )?;
+        serializer.emit_str(
+            Key::from("expected_stage0_next_version"),
+            &format!("{:?}", expected_stage0_next_version),
+        )
+    }
+}
+
+/// Describes the host-phase-1-specific details of a PendingMgsUpdate
+///
+/// For an overview of Reconfigurator-driven host OS updates, see the module
+/// comments in `nexus_mgs_updates::host_phase_1_updater`.
+#[derive(
+    Clone, Debug, Eq, PartialEq, JsonSchema, Deserialize, Serialize, Diffable,
+)]
+#[serde(rename_all = "snake_case")]
+pub struct PendingMgsUpdateHostPhase1Details {
+    /// Which slot is currently active according to the SP.
+    ///
+    /// This controls which slot will be used the next time the sled boots; it
+    /// will _usually_ match `boot_disk`, but differs in the window of time
+    /// between telling the SP to change which slot to use and the host OS
+    /// rebooting to actually use that slot.
+    pub expected_active_phase_1_slot: M2Slot,
+    /// Which slot the host OS most recently booted from.
+    pub expected_boot_disk: M2Slot,
+    /// The hash of the phase 1 slot specified by
+    /// `expected_active_phase_1_hash`.
+    ///
+    /// We should always be able to fetch this. Even if the phase 1 contents
+    /// themselves have been corrupted (very scary for the active slot!), the SP
+    /// can still hash those contents.
+    pub expected_active_phase_1_hash: ArtifactHash,
+    /// The hash of the currently-active phase 2 artifact.
+    ///
+    /// It's possible sled-agent won't be able to report this value, but that
+    /// would indicate that we don't know the version currently running. The
+    /// planner wouldn't stage an update without knowing the current version, so
+    /// if something has gone wrong in the meantime we won't proceede either.
+    pub expected_active_phase_2_hash: ArtifactHash,
+    /// The hash of the phase 1 slot specified by toggling
+    /// `expected_active_phase_1_slot` to the other slot.
+    ///
+    /// We should always be able to fetch this. Even if the phase 1 contents
+    /// of the inactive slot are entirely bogus, the SP can still hash those
+    /// contents.
+    pub expected_inactive_phase_1_hash: ArtifactHash,
+    /// The hash of the currently-inactive phase 2 artifact.
+    ///
+    /// It's entirely possible that a sled needing a host OS update has no valid
+    /// artifact in its inactive slot. However, a precondition for us performing
+    /// a phase 1 update is that `sled-agent` on the target sled has already
+    /// written the paired phase 2 artifact to the inactive slot; therefore, we
+    /// don't need to be able to represent an invalid inactive slot.
+    pub expected_inactive_phase_2_hash: ArtifactHash,
+    /// Address for contacting sled-agent to check phase 2 contents.
+    pub sled_agent_address: SocketAddrV6,
+}
+
+impl slog::KV for PendingMgsUpdateHostPhase1Details {
+    fn serialize(
+        &self,
+        _record: &slog::Record,
+        serializer: &mut dyn slog::Serializer,
+    ) -> slog::Result {
+        let Self {
+            expected_active_phase_1_slot,
+            expected_boot_disk,
+            expected_active_phase_1_hash,
+            expected_active_phase_2_hash,
+            expected_inactive_phase_1_hash,
+            expected_inactive_phase_2_hash,
+            sled_agent_address,
+        } = self;
+        serializer.emit_str(
+            Key::from("expected_active_phase_1_slot"),
+            &format!("{expected_active_phase_1_slot:?}"),
+        )?;
+        serializer.emit_str(
+            Key::from("expected_boot_disk"),
+            &format!("{expected_boot_disk:?}"),
+        )?;
+        serializer.emit_str(
+            Key::from("expected_active_phase_1_hash"),
+            &format!("{expected_active_phase_1_hash}"),
+        )?;
+        serializer.emit_str(
+            Key::from("expected_active_phase_2_hash"),
+            &format!("{expected_active_phase_2_hash}"),
+        )?;
+        serializer.emit_str(
+            Key::from("expected_inactive_phase_1_hash"),
+            &format!("{expected_inactive_phase_1_hash}"),
+        )?;
+        serializer.emit_str(
+            Key::from("expected_inactive_phase_2_hash"),
+            &format!("{expected_inactive_phase_2_hash}"),
+        )?;
+        serializer.emit_str(
+            Key::from("sled_agent_address"),
+            &sled_agent_address.to_string(),
+        )?;
+        Ok(())
     }
 }
 
@@ -1860,6 +2105,10 @@ pub struct BlueprintMetadata {
     ///
     /// See [`Blueprint::target_release_minimum_generation`].
     pub target_release_minimum_generation: Generation,
+    /// The Nexus generation number
+    ///
+    /// See [`Blueprint::nexus_generation`].
+    pub nexus_generation: Generation,
     /// CockroachDB state fingerprint when this blueprint was created
     pub cockroachdb_fingerprint: String,
     /// Whether to set `cluster.preserve_downgrade_option` and what to set it to
@@ -1954,6 +2203,7 @@ mod test {
     use super::ExpectedVersion;
     use super::PendingMgsUpdate;
     use super::PendingMgsUpdateDetails;
+    use super::PendingMgsUpdateSpDetails;
     use super::PendingMgsUpdates;
     use crate::inventory::BaseboardId;
     use gateway_client::types::SpType;
@@ -1978,12 +2228,12 @@ mod test {
             }),
             sp_type: SpType::Sled,
             slot_id: 15,
-            details: PendingMgsUpdateDetails::Sp {
+            details: PendingMgsUpdateDetails::Sp(PendingMgsUpdateSpDetails {
                 expected_active_version: "1.0.36".parse().unwrap(),
                 expected_inactive_version: ExpectedVersion::Version(
                     "1.0.36".parse().unwrap(),
                 ),
-            },
+            }),
             artifact_hash: "47266ede81e13f5f1e36623ea8dd963842606b783397e4809a9a5f0bda0f8170".parse().unwrap(),
             artifact_version: "1.0.34".parse().unwrap(),
         };

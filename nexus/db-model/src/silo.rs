@@ -100,6 +100,22 @@ pub struct Silo {
 
     /// child resource generation number, per RFD 192
     pub rcgen: Generation,
+
+    /// Store a group name that will be
+    ///
+    /// 1) automatically created (depending on the provision type of this silo)
+    ///    at silo create time.
+    /// 2) assigned a policy granting members the silo admin role
+    ///
+    /// Prior to this column existing, for api_only and jit provision types,
+    /// Nexus would create this group, and create a policy where users of the
+    /// group would have the silo admin role. It wouldn't store this information
+    /// though as groups cannot be deleted with those provision types.
+    ///
+    /// For provision types that can both create and delete groups, it's
+    /// important to store this name so that when groups are created the same
+    /// automatic policy can be created as well.
+    pub admin_group_name: Option<String>,
 }
 
 /// Form of mapped fleet roles used when serializing to the database
@@ -180,6 +196,7 @@ impl Silo {
                 .into(),
             rcgen: Generation::new(),
             mapped_fleet_roles,
+            admin_group_name: params.admin_group_name,
         })
     }
 
@@ -225,6 +242,7 @@ impl TryFrom<Silo> for views::Silo {
             discoverable: silo.discoverable,
             identity_mode,
             mapped_fleet_roles,
+            admin_group_name: silo.admin_group_name,
         })
     }
 }

@@ -368,12 +368,37 @@ pub fn get_64_subnet(
     Ipv6Subnet::<SLED_PREFIX>::new(Ipv6Addr::from(rack_network))
 }
 
+/// The IP address version.
+#[derive(Clone, Copy, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IpVersion {
+    V4,
+    V6,
+}
+
+impl IpVersion {
+    pub const fn v4() -> IpVersion {
+        IpVersion::V4
+    }
+}
+
+impl std::fmt::Display for IpVersion {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            Self::V4 => write!(f, "v4"),
+            Self::V6 => write!(f, "v6"),
+        }
+    }
+}
+
 /// An IP Range is a contiguous range of IP addresses, usually within an IP
 /// Pool.
 ///
 /// The first address in the range is guaranteed to be no greater than the last
 /// address.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, Ord, PartialOrd,
+)]
 #[serde(untagged)]
 pub enum IpRange {
     V4(Ipv4Range),
@@ -450,6 +475,24 @@ impl IpRange {
             IpRange::V6(ip6) => ip6.len(),
         }
     }
+
+    /// Return true if this is an IPv4 range, and false for IPv6.
+    pub fn is_ipv4(&self) -> bool {
+        matches!(self, IpRange::V4(_))
+    }
+
+    /// Return true if this is an IPv6 range, and false for IPv4.
+    pub fn is_ipv6(&self) -> bool {
+        matches!(self, IpRange::V6(_))
+    }
+
+    /// Return the IP version of this range.
+    pub fn version(&self) -> IpVersion {
+        match self {
+            IpRange::V4(_) => IpVersion::V4,
+            IpRange::V6(_) => IpVersion::V6,
+        }
+    }
 }
 
 impl From<IpAddr> for IpRange {
@@ -507,7 +550,16 @@ impl From<Ipv6Range> for IpRange {
 ///
 /// The first address must be less than or equal to the last address.
 #[derive(
-    Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema,
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+    PartialOrd,
+    Ord,
 )]
 #[serde(try_from = "AnyIpv4Range")]
 pub struct Ipv4Range {
@@ -571,7 +623,16 @@ impl TryFrom<AnyIpv4Range> for Ipv4Range {
 ///
 /// The first address must be less than or equal to the last address.
 #[derive(
-    Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema,
+    PartialOrd,
+    Ord,
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    Deserialize,
+    Serialize,
+    JsonSchema,
 )]
 #[serde(try_from = "AnyIpv6Range")]
 pub struct Ipv6Range {

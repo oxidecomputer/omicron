@@ -86,6 +86,7 @@ impl TestTrustRoot {
             manifest,
             vec![self.key.clone()],
             self.expiry,
+            true,
             archive_path.to_path_buf(),
         );
         assembler.set_root_role(self.root_role.clone());
@@ -445,9 +446,49 @@ async fn test_repo_upload() -> Result<()> {
         let mut description = response.recorded;
         description.sort_artifacts();
 
-        // The artifacts should be exactly the same as the 1.0.0 repo we uploaded.
+        // The artifacts should be exactly the same as the 1.0.0 repo we
+        // uploaded, other than the installinator document (which will have
+        // system version 2.0.0).
+        let mut installinator_doc_1 = None;
+        let filtered_artifacts_1 = initial_description
+            .artifacts
+            .iter()
+            .filter(|artifact| {
+                if artifact.id.kind
+                    == KnownArtifactKind::InstallinatorDocument.into()
+                {
+                    installinator_doc_1 = Some(*artifact);
+                    false
+                } else {
+                    true
+                }
+            })
+            .collect::<Vec<_>>();
+        let mut installinator_doc_2 = None;
+        let filtered_artifacts_2 = description
+            .artifacts
+            .iter()
+            .filter(|artifact| {
+                if artifact.id.kind
+                    == KnownArtifactKind::InstallinatorDocument.into()
+                {
+                    installinator_doc_2 = Some(*artifact);
+                    false
+                } else {
+                    true
+                }
+            })
+            .collect::<Vec<_>>();
+
+        let installinator_doc_1 = installinator_doc_1
+            .expect("should have found installinator document in 1.0.0");
+        assert_eq!(installinator_doc_1.id.version, "1.0.0".parse().unwrap());
+        let installinator_doc_2 = installinator_doc_2
+            .expect("should have found installinator document in 2.0.0");
+        assert_eq!(installinator_doc_2.id.version, "2.0.0".parse().unwrap());
+
         assert_eq!(
-            initial_description.artifacts, description.artifacts,
+            filtered_artifacts_1, filtered_artifacts_2,
             "artifacts for 1.0.0 and 2.0.0 should match"
         );
 
@@ -467,21 +508,21 @@ async fn test_repo_upload() -> Result<()> {
             "initial description matches fetched description"
         );
     }
-    // No artifacts changed, so the generation number should still be 2...
+    // The installinator document changed, so the generation number is bumped to
+    // 3.
     assert_eq!(
         datastore.tuf_get_generation(&opctx).await.unwrap(),
-        2u32.into()
+        3u32.into()
     );
-    // ... and the task should have nothing to do and should immediately
-    // delete the local artifacts.
+    // ... and the task will have one artifact to replicate.
     let status =
         wait_tuf_artifact_replication_step(&cptestctx.internal_client).await;
     eprintln!("{status:?}");
-    assert_eq!(status.generation, 2u32.into());
+    assert_eq!(status.generation, 3u32.into());
     assert_eq!(status.last_run_counters.list_ok, 4);
-    assert_eq!(status.last_run_counters.put_ok, 0);
-    assert_eq!(status.last_run_counters.copy_ok, 0);
-    assert_eq!(status.local_repos, 0);
+    assert_eq!(status.last_run_counters.put_ok, 3);
+    assert_eq!(status.last_run_counters.copy_ok, 1);
+    assert_eq!(status.local_repos, 1);
 
     cptestctx.teardown().await;
     Ok(())
@@ -550,7 +591,7 @@ async fn test_trust_root_operations(cptestctx: &ControlPlaneTestContext) {
         .expect("trust root list failed")
         .parsed_body()
         .expect("failed to parse list response");
-    assert_eq!(response.items, &[trust_root_view.clone()]);
+    assert_eq!(response.items, std::slice::from_ref(&trust_root_view.clone()));
 
     // GET /v1/system/update/trust-roots/{id}
     let id_url = format!("{TRUST_ROOTS_URL}/{}", trust_root_view.id);

@@ -218,6 +218,14 @@ pub fn representative() -> Representative {
         )
         .unwrap();
 
+    // Report some phase 1 active slots.
+    builder
+        .found_host_phase_1_active_slot(&sled1_bb, "fake MGS 1", M2Slot::A)
+        .unwrap();
+    builder
+        .found_host_phase_1_active_slot(&sled2_bb, "fake MGS 1", M2Slot::B)
+        .unwrap();
+
     // Report some phase 1 hashes.
     //
     // We'll report hashes for both slots for sled 1, only a hash for slot B on
@@ -645,7 +653,7 @@ pub fn representative() -> Representative {
     );
 
     builder.found_cockroach_metrics(
-        omicron_cockroach_metrics::NodeId::new("1".to_string()),
+        cockroach_admin_types::NodeId::new("1".to_string()),
         PrometheusMetrics {
             metrics: BTreeMap::from([(
                 "ranges_underreplicated".to_string(),
@@ -890,6 +898,7 @@ pub fn zone_image_resolver(
                 },
             },
         },
+        image_directory_override: None,
     };
 
     status.to_inventory()

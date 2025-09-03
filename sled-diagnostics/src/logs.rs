@@ -18,7 +18,7 @@ use illumos_utils::zfs::{
 };
 use oxlog::LogFile;
 use oxlog::SvcLogs;
-use rand::{Rng, distributions::Alphanumeric, thread_rng};
+use rand::{Rng, distr::Alphanumeric};
 use regex::Regex;
 use slog::Logger;
 use std::collections::BTreeMap;
@@ -91,7 +91,7 @@ impl DiagnosticsSnapshot {
     ) -> Result<Self, LogError> {
         let snap_name = format!(
             "{SLED_DIAGNOSTICS_SNAPSHOT_PREFIX}{}",
-            thread_rng()
+            rand::rng()
                 .sample_iter(Alphanumeric)
                 .take(12)
                 .map(char::from)
@@ -853,7 +853,7 @@ fn sort_cockroach_extra_logs(logs: &[LogFile]) -> HashMap<&str, ExtraLogs<'_>> {
 /// - service-1.log.4
 /// - service-2.stderr.log
 /// - service-2.stderr.log.2
-fn parse_extra_log(logfile: &LogFile) -> Option<ExtraLogKind> {
+fn parse_extra_log(logfile: &LogFile) -> Option<ExtraLogKind<'_>> {
     static RE: LazyLock<Regex> = LazyLock::new(|| {
         //Regex explanation:
         // ^                : start of the line

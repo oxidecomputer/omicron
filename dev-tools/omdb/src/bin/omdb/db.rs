@@ -5017,7 +5017,7 @@ async fn cmd_db_dns_diff(
         // Load the added and removed items.
         use nexus_db_schema::schema::dns_name::dsl;
 
-        let added = dsl::dns_name
+        let mut added = dsl::dns_name
             .filter(dsl::dns_zone_id.eq(zone.id))
             .filter(dsl::version_added.eq(version.version))
             .limit(i64::from(u32::from(limit)))
@@ -5027,7 +5027,7 @@ async fn cmd_db_dns_diff(
             .context("loading added names")?;
         check_limit(&added, limit, || "loading added names");
 
-        let removed = dsl::dns_name
+        let mut removed = dsl::dns_name
             .filter(dsl::dns_zone_id.eq(zone.id))
             .filter(dsl::version_removed.eq(version.version))
             .limit(i64::from(u32::from(limit)))
@@ -5042,6 +5042,11 @@ async fn cmd_db_dns_diff(
             removed.len()
         );
         println!("");
+
+        // This is kind of stupid-expensive, but there aren't a lot of records
+        // here and it's helpful for this output to be stable.
+        added.sort_by_cached_key(|k| format!("{} {:?}", k.name, k.records()));
+        removed.sort_by_cached_key(|k| format!("{} {:?}", k.name, k.records()));
 
         for a in added {
             print_name("+", &a.name, a.records().context("parsing records"));
@@ -5098,7 +5103,8 @@ async fn cmd_db_dns_names(
             }
         });
 
-        for (name, records) in names {
+        for (name, mut records) in names {
+            records.sort();
             print_name("", &name, Ok(records));
         }
     }

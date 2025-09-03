@@ -9,7 +9,7 @@ use std::net::{IpAddr, Ipv6Addr};
 use crate::Nexus;
 use nexus_db_lookup::LookupPath;
 use nexus_db_model::{
-    ByteCount, ExternalIp, InstanceState, IpAttachState, Ipv4NatEntry,
+    ByteCount, ExternalIp, InstanceState, IpAttachState, NatEntry,
     SledReservationConstraints, SledResourceVmm, VmmCpuPlatform, VmmState,
 };
 use nexus_db_queries::authz;
@@ -335,7 +335,7 @@ pub async fn instance_ip_add_nat(
     authz_instance: &authz::Instance,
     sled_uuid: Option<SledUuid>,
     target_ip: ModifyStateForExternalIp,
-) -> Result<Option<Ipv4NatEntry>, ActionError> {
+) -> Result<Option<NatEntry>, ActionError> {
     let osagactx = sagactx.user_data();
     let datastore = osagactx.datastore();
     let opctx =

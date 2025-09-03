@@ -64,6 +64,7 @@ impl<'a> BlueprintDiffSummary<'a> {
             pending_mgs_updates,
             clickhouse_cluster_config,
             target_release_minimum_generation,
+            nexus_generation,
             // Metadata fields for which changes don't reflect semantic
             // changes from one blueprint to the next.
             id: _,
@@ -76,6 +77,7 @@ impl<'a> BlueprintDiffSummary<'a> {
             oximeter_read_mode,
             creator: _,
             comment: _,
+            report: _,
         } = &self.diff;
 
         // Did we modify, add, or remove any sleds?
@@ -108,6 +110,11 @@ impl<'a> BlueprintDiffSummary<'a> {
         if target_release_minimum_generation.before
             != target_release_minimum_generation.after
         {
+            return true;
+        }
+
+        // Did the nexus generation change?
+        if nexus_generation.before != nexus_generation.after {
             return true;
         }
 
@@ -1833,6 +1840,7 @@ impl<'diff, 'b> BlueprintDiffDisplay<'diff, 'b> {
                         target_release_minimum_generation,
                         TARGET_RELEASE_MIN_GEN
                     ),
+                    diff_row!(nexus_generation, NEXUS_GENERATION),
                 ],
             ),
         ]
