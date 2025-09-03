@@ -285,7 +285,7 @@ impl DataStore {
                             warn!(
                                 log,
                                 "Cannot check schema version / Nexus access";
-                                "error" => InlineErrorChain::new(err.as_ref()),
+                                InlineErrorChain::new(err.as_ref()),
                             );
                             BackoffError::transient(
                                 "Cannot check schema version / Nexus access",
@@ -300,8 +300,10 @@ impl DataStore {
                         DatastoreSetupAction::NeedsHandoff { nexus_id } => {
                             info!(log, "Datastore is awaiting handoff");
 
-                            datastore.attempt_handoff(*nexus_id).await.map_err(
-                                |err| {
+                            datastore
+                                .attempt_handoff(*nexus_id)
+                                .await
+                                .map_err(|err| {
                                     warn!(
                                         log,
                                         "Could not handoff to new nexus";
@@ -310,8 +312,7 @@ impl DataStore {
                                     BackoffError::transient(
                                         "Could not handoff to new nexus",
                                     )
-                                },
-                            )?;
+                                })?;
 
                             // If the handoff was successful, immediately
                             // re-evaluate the schema and access policies to see
@@ -321,7 +322,7 @@ impl DataStore {
                         DatastoreSetupAction::TryLater => {
                             error!(log, "Waiting for metadata; trying later");
                             return Err(BackoffError::permanent(
-                                "Waiting for metadata; trying later"
+                                "Waiting for metadata; trying later",
                             ));
                         }
                         DatastoreSetupAction::Update => {
@@ -336,7 +337,7 @@ impl DataStore {
                                     warn!(
                                         log,
                                         "Failed to update schema version";
-                                        "error" => InlineErrorChain::new(err.as_ref())
+                                        InlineErrorChain::new(err.as_ref())
                                     );
                                     BackoffError::transient(
                                         "Failed to update schema version",
