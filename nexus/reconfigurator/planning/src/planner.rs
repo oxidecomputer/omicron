@@ -26,6 +26,7 @@ use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryResult;
 use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
 use nexus_sled_agent_shared::inventory::OmicronZoneType;
 use nexus_sled_agent_shared::inventory::ZoneKind;
+use nexus_types::deployment::planning_report::SkippedMgsUpdates;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
 use nexus_types::deployment::BlueprintZoneConfig;
@@ -195,7 +196,7 @@ impl<'a> Planner<'a> {
         let mgs_updates = if add_update_blocked_reasons.is_empty() {
             self.do_plan_mgs_updates()?
         } else {
-            PlanningMgsUpdatesStepReport::new(PendingMgsUpdates::new())
+            PlanningMgsUpdatesStepReport::new(PendingMgsUpdates::new(), SkippedMgsUpdates::new())
         };
 
         // Likewise for zone additions, unless overridden with the chicken switch.
@@ -1241,7 +1242,7 @@ impl<'a> Planner<'a> {
             } else {
                 ImpossibleUpdatePolicy::Reevaluate
             };
-        let PlannedMgsUpdates { pending_updates, pending_host_phase_2_changes } =
+        let PlannedMgsUpdates { pending_updates, pending_host_phase_2_changes, skipped_mgs_updates } =
             plan_mgs_updates(
                 &self.log,
                 &self.inventory,
@@ -1264,7 +1265,7 @@ impl<'a> Planner<'a> {
             .apply_pending_host_phase_2_changes(pending_host_phase_2_changes)?;
 
         self.blueprint.pending_mgs_updates_replace_all(pending_updates.clone());
-        Ok(PlanningMgsUpdatesStepReport::new(pending_updates))
+        Ok(PlanningMgsUpdatesStepReport::new(pending_updates, skipped_mgs_updates))
     }
 
     /// Update at most one existing zone to use a new image source.

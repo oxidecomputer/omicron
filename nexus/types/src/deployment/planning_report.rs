@@ -80,7 +80,7 @@ impl PlanningReport {
             decommission: PlanningDecommissionStepReport::new(),
             noop_image_source: PlanningNoopImageSourceStepReport::new(),
             mgs_updates: PlanningMgsUpdatesStepReport::new(
-                PendingMgsUpdates::new(),
+                PendingMgsUpdates::new(), SkippedMgsUpdates::new(),
             ),
             add: PlanningAddStepReport::new(),
             zone_updates: PlanningZoneUpdatesStepReport::new(),
@@ -560,16 +560,13 @@ impl IdOrdItem for SkippedMgsUpdate {
     Clone, Debug, Eq, PartialEq, Deserialize, Serialize, JsonSchema, Diffable,
 )]
 pub struct SkippedMgsUpdates {
-    // The IdOrdMap key is the baseboard_id. Only one outstanding MGS-managed
-    // update is allowed for a given baseboard.
-    //
-    // Note that keys aren't strings so this can't be serialized as a JSON map,
-    // but IdOrdMap serializes as an array.
+    // This may have to change to be a BtreeMap, it's causing problems to merge
+    // two IdOrMap
     pub by_baseboard: IdOrdMap<SkippedMgsUpdate>,
 }
 
 impl SkippedMgsUpdates {
-    pub fn empty() -> Self {
+    pub fn new() -> Self {
         Self { by_baseboard: IdOrdMap::new() }
     }
 }
@@ -583,17 +580,14 @@ pub struct PlanningMgsUpdatesStepReport {
     // and the reason why
     // add a comment
     //
-    // TODO-K: Maybe we want to check that all updates are in the version
-    // we want, instead of keeping track of failed ones? Because an in-flight
-    // update may have been removed from pending updates and won't be on
-    // failed updates either - No because the prechecks verify component version
-    pub failed_mgs_update: Option<SkippedMgsUpdate>,
+    // TODO-K: Maybe use SkippedMgsUpdates instead of Option
+    pub skipped_mgs_updates: SkippedMgsUpdates,
 }
 
 impl PlanningMgsUpdatesStepReport {
-    pub fn new(pending_mgs_updates: PendingMgsUpdates) -> Self {
+    pub fn new(pending_mgs_updates: PendingMgsUpdates, skipped_mgs_updates: SkippedMgsUpdates) -> Self {
         // TODO-K: actually include the failed update
-        Self { pending_mgs_updates, failed_mgs_update: None }
+        Self { pending_mgs_updates, skipped_mgs_updates }
     }
 
     pub fn is_empty(&self) -> bool {

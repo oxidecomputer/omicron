@@ -69,6 +69,7 @@ pub(crate) struct PlannedMgsUpdates {
     pub(crate) pending_host_phase_2_changes: PendingHostPhase2Changes,
 
     // TODO-K: Add skipped updates here?
+    pub(crate) skipped_mgs_updates: SkippedMgsUpdates,
 }
 
 /// Generates a new set of `PendingMgsUpdates` based on:
@@ -98,6 +99,7 @@ pub(crate) fn plan_mgs_updates(
     let mut pending_updates = PendingMgsUpdates::new();
     let mut pending_host_phase_2_changes = PendingHostPhase2Changes::empty();
     let mut boards_preferred = BTreeSet::new();
+    let skipped_mgs_updates = SkippedMgsUpdates::new();
 
     // Determine the status of all currently pending updates by comparing what
     // they were trying to do (and their preconditions) against the current
@@ -140,6 +142,7 @@ pub(crate) fn plan_mgs_updates(
                          (will remove it and re-evaluate board)";
                         update
                     );
+                    // TODO-K: Add a skipped update here?
                     boards_preferred.insert(update.baseboard_id.clone());
                 }
             },
@@ -171,9 +174,12 @@ pub(crate) fn plan_mgs_updates(
                 log,
                 "cannot issue more MGS-driven updates (no current artifacts)",
             );
+            // TODO-K: Add a skipped update here, but this is an issue because there is no specific baseboard_id
+            // skipped_mgs_updates.by_baseboard.insert_unique(SkippedMgsUpdate { baseboard_id: (), component: (), reason: () })
             return PlannedMgsUpdates {
                 pending_updates,
                 pending_host_phase_2_changes,
+                skipped_mgs_updates,
             };
         }
         TargetReleaseDescription::TufRepo(description) => description,
@@ -199,15 +205,18 @@ pub(crate) fn plan_mgs_updates(
             return PlannedMgsUpdates {
                 pending_updates,
                 pending_host_phase_2_changes,
+                skipped_mgs_updates,
             };
         }
 
         match try_make_update(log, board, inventory, current_artifacts) {
-            // TODO-K: use skipped_updates
+            // TODO-K: use skipped_updates, this is where the skipped updates are collected
             Some((update, mut host_phase_2, _skipped_updates)) => {
                 info!(log, "configuring MGS-driven update"; &update);
                 pending_updates.insert(update);
                 pending_host_phase_2_changes.append(&mut host_phase_2);
+                // TODO-K: change so that we actually add the skipped updates
+                // skipped_mgs_updates.by_baseboard.insert_unique(skipped_mgs_updates.by_baseboard);
             }
             None => {
                 info!(log, "skipping board for MGS-driven update"; board);
@@ -216,7 +225,7 @@ pub(crate) fn plan_mgs_updates(
     }
 
     info!(log, "ran out of boards for MGS-driven update");
-    PlannedMgsUpdates { pending_updates, pending_host_phase_2_changes }
+    PlannedMgsUpdates { pending_updates, pending_host_phase_2_changes, skipped_mgs_updates }
 }
 
 #[derive(Debug)]
@@ -502,7 +511,7 @@ fn try_make_update(
     inventory: &Collection,
     current_artifacts: &TufRepoDescription,
 ) -> Option<(PendingMgsUpdate, PendingHostPhase2Changes, SkippedMgsUpdates)> {
-    let mut skipped_mgs_updates = SkippedMgsUpdates::empty();
+    let mut skipped_mgs_updates = SkippedMgsUpdates::new();
     // We try MGS-driven update components in a hardcoded priority order until
     // any of them returns `Some`.  The order is described in RFD 565 section
     // "Update Sequence".
@@ -1634,6 +1643,7 @@ mod test {
             let PlannedMgsUpdates {
                 pending_updates: new_updates,
                 mut pending_host_phase_2_changes,
+                ..
             } = plan_mgs_updates(
                 log,
                 &collection,
@@ -1762,6 +1772,7 @@ mod test {
         let PlannedMgsUpdates {
             pending_updates: all_updates,
             mut pending_host_phase_2_changes,
+            ..
         } = plan_mgs_updates(
             log,
             &collection,
@@ -1806,6 +1817,7 @@ mod test {
         let PlannedMgsUpdates {
             pending_updates: all_updates,
             mut pending_host_phase_2_changes,
+            ..
         } = plan_mgs_updates(
             log,
             &collection,
@@ -1848,6 +1860,7 @@ mod test {
         let PlannedMgsUpdates {
             pending_updates: all_updates,
             mut pending_host_phase_2_changes,
+            ..
         } = plan_mgs_updates(
             log,
             &collection,
@@ -1889,6 +1902,7 @@ mod test {
         let PlannedMgsUpdates {
             pending_updates: all_updates,
             mut pending_host_phase_2_changes,
+            ..
         } = plan_mgs_updates(
             log,
             &collection,
@@ -1922,6 +1936,7 @@ mod test {
         let PlannedMgsUpdates {
             pending_updates: all_updates_done,
             pending_host_phase_2_changes,
+            ..
         } = plan_mgs_updates(
             log,
             &collection,

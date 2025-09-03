@@ -508,7 +508,7 @@ pub(super) fn try_make_update(
         },
         pending_host_phase_2_changes,
         // TODO-K: This is wrong, fix
-        SkippedMgsUpdates::empty(),
+        SkippedMgsUpdates::new(),
     ))
 }
 
