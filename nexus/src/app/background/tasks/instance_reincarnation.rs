@@ -908,6 +908,8 @@ mod test {
         // Activate the background task again. Now, only instance 2 should be
         // restarted.
         let status = assert_activation_ok!(task.activate(&opctx).await);
+        eprintln!("status: {:?}", status);
+        // ZZZ This failed with 2 != 1
         assert_eq!(status.total_instances_found(), 1);
         assert_eq!(
             status.instances_reincarnated,
