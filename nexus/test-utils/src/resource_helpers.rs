@@ -666,6 +666,7 @@ pub async fn create_instance_with(
             external_ips,
             disks,
             boot_disk: None,
+            cpu_platform: None,
             start,
             auto_restart_policy,
             anti_affinity_groups: Vec::new(),

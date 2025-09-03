@@ -5,7 +5,7 @@
 use super::InstanceIntendedState as IntendedState;
 use super::{
     ByteCount, Disk, ExternalIp, Generation, InstanceAutoRestartPolicy,
-    InstanceCpuCount, InstanceState, Vmm, VmmState,
+    InstanceCpuCount, InstanceCpuPlatform, InstanceState, Vmm, VmmState,
 };
 use crate::collection::DatastoreAttachTargetConfig;
 use crate::serde_time_delta::optional_time_delta;
@@ -67,6 +67,9 @@ pub struct Instance {
     /// The primary boot disk for this instance.
     #[diesel(column_name = boot_disk_id)]
     pub boot_disk_id: Option<Uuid>,
+
+    /// The instance's required CPU platform.
+    pub cpu_platform: Option<InstanceCpuPlatform>,
 
     #[diesel(embed)]
     pub runtime_state: InstanceRuntimeState,
@@ -139,6 +142,7 @@ impl Instance {
             // Intentionally ignore `params.boot_disk_id` here: we can't set
             // `boot_disk_id` until the referenced disk is attached.
             boot_disk_id: None,
+            cpu_platform: params.cpu_platform.map(Into::into),
 
             runtime_state,
             intended_state,
@@ -493,4 +497,6 @@ pub struct InstanceUpdate {
     pub ncpus: InstanceCpuCount,
 
     pub memory: ByteCount,
+
+    pub cpu_platform: Option<InstanceCpuPlatform>,
 }

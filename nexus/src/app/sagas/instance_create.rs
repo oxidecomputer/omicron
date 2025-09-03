@@ -1298,6 +1298,7 @@ pub mod test {
                         name: DISK_NAME.parse().unwrap(),
                     },
                 )),
+                cpu_platform: None,
                 disks: Vec::new(),
                 start: false,
                 auto_restart_policy: Default::default(),
