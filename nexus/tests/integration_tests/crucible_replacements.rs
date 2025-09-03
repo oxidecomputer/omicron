@@ -1076,6 +1076,7 @@ async fn test_racing_replacements_for_soft_deleted_disk_volume(
         activate_background_task(&internal_client, "region_replacement_driver")
             .await;
 
+    eprintln!("last_background_task {:?}", last_background_task);
     let res = match last_background_task.last {
         LastResult::Completed(last_result_completed) => {
             match serde_json::from_value::<RegionReplacementDriverStatus>(
@@ -1089,9 +1090,10 @@ async fn test_racing_replacements_for_soft_deleted_disk_volume(
 
                 Ok(v) => {
                     if !v.drive_invoked_ok.is_empty() {
+                        eprintln!("v.drive_ok: {:?}", v.drive_invoked_ok);
                         true
                     } else {
-                        eprintln!("v.drive_ok: {:?}", v.drive_invoked_ok);
+                        eprintln!("v.drive_ok: {:?} empty", v.drive_invoked_ok);
                         false
                     }
                 }
@@ -1511,7 +1513,10 @@ mod region_snapshot_replacement {
                     .unwrap();
 
                 if !volumes.is_empty() {
-                    eprintln!("Volume should be gone, try {counter} {:?}", volumes);
+                    eprintln!(
+                        "Volume should be gone, try {counter} {:?}",
+                        volumes
+                    );
                     tokio::time::sleep(std::time::Duration::from_secs(5)).await;
                     counter += 1;
                 } else {
@@ -1747,13 +1752,18 @@ mod region_snapshot_replacement {
                 "PRE2 rs_replace_request: {:?}",
                 region_snapshot_replace_request
             );
-            let res = self
+            match self
                 .datastore
                 .read_only_target_addr(&region_snapshot_replace_request)
                 .await
-                .unwrap();
-
-            eprintln!("PRE3 target that should be gone: {:?}", res);
+            {
+                Ok(res) => {
+                    eprintln!("PRE3 target that will be gone: {:?}", res);
+                }
+                Err(e) => {
+                    eprintln!("PRE3 target will be gone is error: {:?}", e);
+                }
+            }
         }
 
         pub async fn remove_disk_from_snapshot_rop(&self) {
@@ -2031,6 +2041,7 @@ async fn test_region_snapshot_replacement_step_after_rop_remove_target_gone(
     test_harness.transition_request_to_replacement_done().await;
     test_harness.transition_request_to_running().await;
 
+    eprintln!("ROP ONE");
     test_harness.pre_assert_read_only_target_gone().await;
     test_harness.create_manual_region_snapshot_replacement_step().await;
     test_harness.pre_assert_read_only_target_gone().await;
