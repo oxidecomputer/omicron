@@ -4562,6 +4562,7 @@ mod tests {
                     bp_pending_mgs_update_rot_bootloader,
                     blueprint_id
                 ),
+                query_count!(bp_pending_mgs_update_host_phase_1, blueprint_id),
             ] {
                 let count: i64 = result.unwrap();
                 counts.insert(table_name.to_string(), count);
@@ -4671,6 +4672,7 @@ mod tests {
             "bp_pending_mgs_update_sp",
             "bp_pending_mgs_update_rot",
             "bp_pending_mgs_update_rot_bootloader",
+            "bp_pending_mgs_update_host_phase_1",
             "bp_clickhouse_cluster_config",
             "bp_clickhouse_keeper_zone_id_to_node_id",
             "bp_clickhouse_server_zone_id_to_node_id",
