@@ -6,10 +6,10 @@ use raw_cpuid::{
     ApmInfo, CpuId, CpuIdDump, CpuIdResult, CpuIdWriter,
     ExtendedFeatureIdentification2, ExtendedFeatures,
     ExtendedProcessorFeatureIdentifiers, ExtendedState, ExtendedStateInfo,
-    ExtendedTopologyLevel, FeatureInfo, L1CacheTlbInfo, L2And3CacheTlbInfo,
-    MonitorMwaitInfo, PerformanceOptimizationInfo,
-    ProcessorCapacityAndFeatureInfo, ProcessorTopologyInfo, SvmFeatures,
-    ThermalPowerInfo, Tlb1gbPageInfo, Vendor, VendorInfo,
+    FeatureInfo, L1CacheTlbInfo, L2And3CacheTlbInfo, MonitorMwaitInfo,
+    PerformanceOptimizationInfo, ProcessorCapacityAndFeatureInfo,
+    ProcessorTopologyInfo, SvmFeatures, ThermalPowerInfo, Tlb1gbPageInfo,
+    Vendor, VendorInfo,
 };
 use sled_agent_client::types::CpuidEntry;
 
@@ -560,41 +560,6 @@ pub fn milan_rfd314() -> CpuIdDump {
 
     cpuid.set_extended_feature_info(Some(leaf)).expect("can set leaf 7h");
 
-    // Set up extended topology info (leaf Bh)
-    let mut levels = Vec::new();
-
-    let mut topo_level1 = ExtendedTopologyLevel::empty();
-    // EAX
-    topo_level1.set_shift_right_for_next_apic_id(1);
-    // EBX
-    topo_level1.set_processors(2);
-    // ECX
-    topo_level1.set_level_number(0);
-    // This level describes SMT. If there's no SMT enabled (single-core VM?)
-    // then this level should not be present, probably?
-    topo_level1.set_level_type(1);
-
-    levels.push(topo_level1);
-
-    let mut topo_level2 = ExtendedTopologyLevel::empty();
-    // ECX
-    topo_level2.set_level_number(1);
-    topo_level2.set_level_type(2);
-
-    levels.push(topo_level2);
-
-    let mut topo_level3 = ExtendedTopologyLevel::empty();
-    // ECX
-    topo_level3.set_level_number(2);
-    // Level type 0 indicates this level is invalid. This level is included only
-    // to be explicit about where the topology ends.
-    topo_level3.set_level_type(0);
-
-    levels.push(topo_level3);
-    cpuid
-        .set_extended_topology_info(Some(levels.as_slice()))
-        .expect("can set leaf 8000_0021h");
-
     let mut leaf = cpuid
         .get_extended_processor_and_feature_identifiers()
         .expect("baseline Milan defines leaf 8000_0001");
@@ -702,7 +667,7 @@ pub fn milan_rfd314() -> CpuIdDump {
     // This is the fabricated cache topology from Bhyve. We could be more
     // precise, for dubious benefit. This is discussed in more detail in RFD
     // 314.
-    let mut levels = vec![
+    let levels = vec![
         CpuIdResult {
             eax: 0x00000121,
             ebx: 0x0000003F,
@@ -816,7 +781,7 @@ mod test {
     // between 314 and the present day. Actual guest CPU platforms may differ as
     // we enable additional guest functionality in the future; this is not a
     // source of truth for actual guest platforms.
-    const MILAN_CPUID: [CpuidEntry; 32] = [
+    const MILAN_CPUID: [CpuidEntry; 29] = [
         cpuid_leaf!(0x0, 0x0000000D, 0x68747541, 0x444D4163, 0x69746E65),
         cpuid_leaf!(0x1, 0x00A00F11, 0x00000800, 0xF6D83203, 0x078BFBFF),
         cpuid_leaf!(0x5, 0x00000000, 0x00000000, 0x00000000, 0x00000000),
@@ -826,15 +791,6 @@ mod test {
         ),
         cpuid_subleaf!(
             0x7, 0x1, 0x00000000, 0x00000000, 0x00000000, 0x00000000
-        ),
-        cpuid_subleaf!(
-            0xB, 0x0, 0x00000001, 0x00000002, 0x00000100, 0x00000000
-        ),
-        cpuid_subleaf!(
-            0xB, 0x1, 0x00000000, 0x00000000, 0x00000201, 0x00000000
-        ),
-        cpuid_subleaf!(
-            0xB, 0x2, 0x00000000, 0x00000000, 0x00000002, 0x00000000
         ),
         cpuid_subleaf!(
             0xD, 0x0, 0x00000007, 0x00000340, 0x00000340, 0x00000000
