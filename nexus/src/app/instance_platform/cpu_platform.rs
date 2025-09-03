@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use raw_cpuid::{
-    ApmInfo, CpuId, CpuIdDump, CpuIdReader, CpuIdResult, CpuIdWriter,
+    ApmInfo, CpuId, CpuIdDump, CpuIdResult, CpuIdWriter,
     ExtendedFeatureIdentification2, ExtendedFeatures,
     ExtendedProcessorFeatureIdentifiers, ExtendedState, ExtendedStateInfo,
     ExtendedTopologyLevel, FeatureInfo, L1CacheTlbInfo, L2And3CacheTlbInfo,
@@ -769,6 +769,15 @@ pub fn dump_to_cpuid_entries(dump: CpuIdDump) -> Vec<CpuidEntry> {
 /// the functions to compute them in `raw-cpuid` might.
 #[cfg(test)]
 mod test {
+    use crate::app::instance_platform::cpu_platform::{
+        dump_to_cpuid_entries, milan_rfd314,
+    };
+    use raw_cpuid::{
+        CpuId, CpuIdReader, CpuIdResult, CpuIdWriter, L1CacheTlbInfo,
+        L2And3CacheTlbInfo, Tlb1gbPageInfo,
+    };
+    use sled_agent_client::types::CpuidEntry;
+
     macro_rules! cpuid_leaf {
         ($leaf:literal, $eax:literal, $ebx:literal, $ecx:literal, $edx:literal) => {
             CpuidEntry {
