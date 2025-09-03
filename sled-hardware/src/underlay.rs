@@ -25,7 +25,7 @@ pub enum Error {
     #[error(transparent)]
     BadAddrObj(#[from] addrobj::ParseError),
 
-    #[error("Could not determine if host is a Gimlet: {0}")]
+    #[error("Could not determine if host is an Oxide sled: {0}")]
     SystemDetection(#[source] anyhow::Error),
 
     #[error("Could not enumerate physical links: {0}")]
@@ -63,8 +63,8 @@ pub async fn find_nics(
 
 /// Return the Chelsio links on the system.
 ///
-/// For a real Gimlet, this should return the devices like `cxgbeN`. For a
-/// developer machine, or generally a non-Gimlet, this will return the
+/// For a real Oxide sled, this should return the devices like `cxgbeN`. For a
+/// developer machine, or generally a non-sled, this will return the
 /// VNICs we use to emulate those Chelsio links.
 pub async fn find_chelsio_links(
     config_data_links: &[String; 2],

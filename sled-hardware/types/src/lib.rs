@@ -45,7 +45,7 @@ impl OxideSled {
     }
 }
 
-/// Describes properties that should uniquely identify a Gimlet.
+/// Describes properties that should uniquely identify a system.
 #[derive(
     Clone,
     Debug,

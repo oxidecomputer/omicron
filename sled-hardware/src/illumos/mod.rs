@@ -76,7 +76,7 @@ enum Error {
     FirmwareLogPage(#[from] libnvme::firmware::FirmwareLogPageError),
 }
 
-/// Return true if the host system is an Oxide Gimlet.
+/// Return true if the host system is an Oxide Sled.
 pub fn is_oxide_sled() -> anyhow::Result<bool> {
     let mut device_info = DevInfo::new()?;
     let mut node_walker = device_info.walk_node();
@@ -133,7 +133,8 @@ impl HardwareSnapshot {
 
         let mut node_walker = device_info.walk_node();
 
-        // First, check the root node. If we aren't running on a Gimlet, bail.
+        // First, check the root node. If we aren't running on an Oxide sled,
+        // bail.
         let Some(root) =
             node_walker.next().transpose().map_err(Error::DevInfo)?
         else {
@@ -602,7 +603,7 @@ fn poll_blkdev_node(
 fn poll_device_tree(
     log: &Logger,
     inner: &Arc<Mutex<HardwareView>>,
-    nongimlet_observed_disks: &[UnparsedDisk],
+    nonsled_observed_disks: &[UnparsedDisk],
     tx: &broadcast::Sender<HardwareUpdate>,
 ) -> Result<(), Error> {
     // Construct a view of hardware by walking the device tree.
@@ -616,7 +617,7 @@ fn poll_device_tree(
                 if root_node.as_str() == "i86pc" {
                     // If on i86pc, generate some baseboard information before
                     // returning this error. Each sled agent has to be uniquely
-                    // identified for multiple non-gimlets to work.
+                    // identified for multiple non-sleds to work.
                     if inner.baseboard.is_none() {
                         let pc_baseboard = Baseboard::new_pc(
                             gethostname().into_string().unwrap_or_else(|_| {
@@ -637,8 +638,8 @@ fn poll_device_tree(
                 // For platforms that don't support the HardwareSnapshot
                 // functionality, sled-agent can be supplied a fixed list of
                 // UnparsedDisks. Add those to the HardwareSnapshot here if they
-                // are missing (which they will be for non-gimlets).
-                for observed_disk in nongimlet_observed_disks {
+                // are missing (which they will be for non-sleds).
+                for observed_disk in nonsled_observed_disks {
                     let identity = observed_disk.identity();
                     if !inner.disks.contains_key(identity) {
                         inner
@@ -677,11 +678,11 @@ fn poll_device_tree(
 async fn hardware_tracking_task(
     log: Logger,
     inner: Arc<Mutex<HardwareView>>,
-    nongimlet_observed_disks: Vec<UnparsedDisk>,
+    nonsled_observed_disks: Vec<UnparsedDisk>,
     tx: broadcast::Sender<HardwareUpdate>,
 ) {
     loop {
-        match poll_device_tree(&log, &inner, &nongimlet_observed_disks, &tx) {
+        match poll_device_tree(&log, &inner, &nonsled_observed_disks, &tx) {
             // We've already warned about `NotAnOxideSled` by this point,
             // so let's not spam the logs.
             Ok(_) | Err(Error::NotAnOxideSled(_)) => (),
@@ -710,12 +711,12 @@ impl HardwareManager {
     ///
     /// Arguments:
     /// - `sled_mode`: The sled's mode of operation (auto detect or force gimlet/scrimlet).
-    /// - `nongimlet_observed_disks`: For non-gimlets, inject these disks into
+    /// - `nonsled_observed_disks`: For non-sleds, inject these disks into
     ///    HardwareSnapshot objects.
     pub fn new(
         log: &Logger,
         sled_mode: SledMode,
-        nongimlet_observed_disks: Vec<UnparsedDisk>,
+        nonsled_observed_disks: Vec<UnparsedDisk>,
     ) -> Result<Self, String> {
         let log = log.new(o!("component" => "HardwareManager"));
         info!(log, "Creating HardwareManager");
@@ -762,14 +763,14 @@ impl HardwareManager {
         // This mitigates issues where the Sled Agent could try to propagate
         // an "empty" view of hardware to other consumers before the first
         // query.
-        match poll_device_tree(&log, &inner, &nongimlet_observed_disks, &tx) {
+        match poll_device_tree(&log, &inner, &nonsled_observed_disks, &tx) {
             Ok(_) => (),
-            // Allow non-gimlet devices to proceed with a "null" view of
+            // Allow non-sled devices to proceed with a "null" view of
             // hardware, otherwise they won't be able to start.
             Err(Error::NotAnOxideSled(root)) => {
                 warn!(
                     log,
-                    "Device is not a Gimlet ({root}), proceeding with null hardware view"
+                    "Device is not an Oxide sled ({root}), proceeding with null hardware view"
                 );
             }
             Err(err) => {
@@ -781,7 +782,7 @@ impl HardwareManager {
         let inner2 = inner.clone();
         let tx2 = tx.clone();
         tokio::task::spawn(async move {
-            hardware_tracking_task(log2, inner2, nongimlet_observed_disks, tx2)
+            hardware_tracking_task(log2, inner2, nonsled_observed_disks, tx2)
                 .await
         });
 
