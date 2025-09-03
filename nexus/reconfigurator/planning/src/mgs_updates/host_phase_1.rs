@@ -271,6 +271,8 @@ pub(super) fn try_make_update(
     baseboard_id: &Arc<BaseboardId>,
     inventory: &Collection,
     current_artifacts: &TufRepoDescription,
+    // TODO-K: Perhaps it's better to return a struct here instead of tuple?
+    // this way I don't have to change the SkippedMgsUpdates type to BtreeMap
 ) -> Option<(PendingMgsUpdate, PendingHostPhase2Changes, SkippedMgsUpdates)> {
     let Some(sp_info) = inventory.sps.get(baseboard_id) else {
         warn!(

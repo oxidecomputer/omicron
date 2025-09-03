@@ -26,7 +26,6 @@ use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryResult;
 use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
 use nexus_sled_agent_shared::inventory::OmicronZoneType;
 use nexus_sled_agent_shared::inventory::ZoneKind;
-use nexus_types::deployment::planning_report::SkippedMgsUpdates;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
 use nexus_types::deployment::BlueprintZoneConfig;
@@ -42,6 +41,7 @@ use nexus_types::deployment::SledDetails;
 use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::TufRepoContentsError;
 use nexus_types::deployment::ZpoolFilter;
+use nexus_types::deployment::planning_report::SkippedMgsUpdates;
 use nexus_types::deployment::{
     CockroachdbUnsafeToShutdown, PlanningAddStepReport,
     PlanningCockroachdbSettingsStepReport, PlanningDecommissionStepReport,
@@ -196,7 +196,10 @@ impl<'a> Planner<'a> {
         let mgs_updates = if add_update_blocked_reasons.is_empty() {
             self.do_plan_mgs_updates()?
         } else {
-            PlanningMgsUpdatesStepReport::new(PendingMgsUpdates::new(), SkippedMgsUpdates::new())
+            PlanningMgsUpdatesStepReport::new(
+                PendingMgsUpdates::new(),
+                SkippedMgsUpdates::new(),
+            )
         };
 
         // Likewise for zone additions, unless overridden with the chicken switch.
@@ -1242,16 +1245,19 @@ impl<'a> Planner<'a> {
             } else {
                 ImpossibleUpdatePolicy::Reevaluate
             };
-        let PlannedMgsUpdates { pending_updates, pending_host_phase_2_changes, skipped_mgs_updates } =
-            plan_mgs_updates(
-                &self.log,
-                &self.inventory,
-                &included_baseboards,
-                current_updates,
-                current_artifacts,
-                NUM_CONCURRENT_MGS_UPDATES,
-                impossible_update_policy,
-            );
+        let PlannedMgsUpdates {
+            pending_updates,
+            pending_host_phase_2_changes,
+            skipped_mgs_updates,
+        } = plan_mgs_updates(
+            &self.log,
+            &self.inventory,
+            &included_baseboards,
+            current_updates,
+            current_artifacts,
+            NUM_CONCURRENT_MGS_UPDATES,
+            impossible_update_policy,
+        );
         if pending_updates != *current_updates {
             // This will only add comments if our set of updates changed _and_
             // we have at least one update. If we went from "some updates" to
@@ -1265,7 +1271,10 @@ impl<'a> Planner<'a> {
             .apply_pending_host_phase_2_changes(pending_host_phase_2_changes)?;
 
         self.blueprint.pending_mgs_updates_replace_all(pending_updates.clone());
-        Ok(PlanningMgsUpdatesStepReport::new(pending_updates, skipped_mgs_updates))
+        Ok(PlanningMgsUpdatesStepReport::new(
+            pending_updates,
+            skipped_mgs_updates,
+        ))
     }
 
     /// Update at most one existing zone to use a new image source.

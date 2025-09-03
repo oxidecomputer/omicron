@@ -80,7 +80,8 @@ impl PlanningReport {
             decommission: PlanningDecommissionStepReport::new(),
             noop_image_source: PlanningNoopImageSourceStepReport::new(),
             mgs_updates: PlanningMgsUpdatesStepReport::new(
-                PendingMgsUpdates::new(), SkippedMgsUpdates::new(),
+                PendingMgsUpdates::new(),
+                SkippedMgsUpdates::new(),
             ),
             add: PlanningAddStepReport::new(),
             zone_updates: PlanningZoneUpdatesStepReport::new(),
@@ -478,7 +479,7 @@ impl PlanningMupdateOverrideStepReport {
     }
 }
 
-// TODO-K: Moce this to deplyment.rs
+// TODO-K: Move this to deplyment.rs
 #[derive(
     Debug,
     Deserialize,
@@ -560,14 +561,24 @@ impl IdOrdItem for SkippedMgsUpdate {
     Clone, Debug, Eq, PartialEq, Deserialize, Serialize, JsonSchema, Diffable,
 )]
 pub struct SkippedMgsUpdates {
-    // This may have to change to be a BtreeMap, it's causing problems to merge
-    // two IdOrMap
     pub by_baseboard: IdOrdMap<SkippedMgsUpdate>,
 }
 
 impl SkippedMgsUpdates {
     pub fn new() -> Self {
         Self { by_baseboard: IdOrdMap::new() }
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &SkippedMgsUpdate> {
+        self.into_iter()
+    }
+}
+
+impl<'a> IntoIterator for &'a SkippedMgsUpdates {
+    type Item = &'a SkippedMgsUpdate;
+    type IntoIter = iddqd::id_ord_map::Iter<'a, SkippedMgsUpdate>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.by_baseboard.iter()
     }
 }
 
@@ -585,7 +596,10 @@ pub struct PlanningMgsUpdatesStepReport {
 }
 
 impl PlanningMgsUpdatesStepReport {
-    pub fn new(pending_mgs_updates: PendingMgsUpdates, skipped_mgs_updates: SkippedMgsUpdates) -> Self {
+    pub fn new(
+        pending_mgs_updates: PendingMgsUpdates,
+        skipped_mgs_updates: SkippedMgsUpdates,
+    ) -> Self {
         // TODO-K: actually include the failed update
         Self { pending_mgs_updates, skipped_mgs_updates }
     }

@@ -99,7 +99,7 @@ pub(crate) fn plan_mgs_updates(
     let mut pending_updates = PendingMgsUpdates::new();
     let mut pending_host_phase_2_changes = PendingHostPhase2Changes::empty();
     let mut boards_preferred = BTreeSet::new();
-    let skipped_mgs_updates = SkippedMgsUpdates::new();
+    let mut skipped_mgs_updates = SkippedMgsUpdates::new();
 
     // Determine the status of all currently pending updates by comparing what
     // they were trying to do (and their preconditions) against the current
@@ -211,12 +211,19 @@ pub(crate) fn plan_mgs_updates(
 
         match try_make_update(log, board, inventory, current_artifacts) {
             // TODO-K: use skipped_updates, this is where the skipped updates are collected
-            Some((update, mut host_phase_2, _skipped_updates)) => {
+            Some((update, mut host_phase_2, skipped_updates)) => {
                 info!(log, "configuring MGS-driven update"; &update);
                 pending_updates.insert(update);
                 pending_host_phase_2_changes.append(&mut host_phase_2);
                 // TODO-K: change so that we actually add the skipped updates
-                // skipped_mgs_updates.by_baseboard.insert_unique(skipped_mgs_updates.by_baseboard);
+                for skipped in &skipped_updates {
+                    // TODO-K: Handle unwrap, or wrap the insert_unique method
+                    // into another helper method, the second sounds better
+                    skipped_mgs_updates
+                        .by_baseboard
+                        .insert_unique(skipped.clone())
+                        .unwrap();
+                }
             }
             None => {
                 info!(log, "skipping board for MGS-driven update"; board);
@@ -225,7 +232,11 @@ pub(crate) fn plan_mgs_updates(
     }
 
     info!(log, "ran out of boards for MGS-driven update");
-    PlannedMgsUpdates { pending_updates, pending_host_phase_2_changes, skipped_mgs_updates }
+    PlannedMgsUpdates {
+        pending_updates,
+        pending_host_phase_2_changes,
+        skipped_mgs_updates,
+    }
 }
 
 #[derive(Debug)]
@@ -515,13 +526,14 @@ fn try_make_update(
     // We try MGS-driven update components in a hardcoded priority order until
     // any of them returns `Some`.  The order is described in RFD 565 section
     // "Update Sequence".
+    //
+    // TODO-K: Will have to clean this up, the nesting will become horrible
     match try_make_update_rot_bootloader(
         log,
         baseboard_id,
         inventory,
         current_artifacts,
     ) {
-        // TODO-K: Will have to clean this up, the nesting will become horrible
         Ok(p) => {
             if let Some(update) = p
                 .or_else(|| {
@@ -551,7 +563,7 @@ fn try_make_update(
             }
         }
         Err(e) => {
-            // TODO-K: Remove unwrap
+            // TODO-K: Handle unwrap
             skipped_mgs_updates
                 .by_baseboard
                 .insert_unique(SkippedMgsUpdate {
