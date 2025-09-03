@@ -31,6 +31,7 @@ use serde::Serialize;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::fmt;
+use std::fmt::Display;
 use std::fmt::Write;
 use std::sync::Arc;
 
@@ -513,6 +514,18 @@ impl From<&'_ PendingMgsUpdateDetails> for MgsUpdateComponent {
     }
 }
 
+impl Display for MgsUpdateComponent {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            MgsUpdateComponent::HostOs => "Host OS",
+            MgsUpdateComponent::Rot => "RoT",
+            MgsUpdateComponent::RotBootloader => "RoT Bootloader",
+            MgsUpdateComponent::Sp => "SP",
+        };
+        write!(f, "{s}")
+    }
+}
+
 #[derive(
     Debug,
     Deserialize,
@@ -538,6 +551,30 @@ pub enum FailedMgsUpdateReason {
     // Include caboose of what
     CabooseMissingSign,
     // Add more
+}
+
+// TODO-K: Do I need display? or are the error bits enough
+impl Display for FailedMgsUpdateReason {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            FailedMgsUpdateReason::CabooseMissingSign => {
+                "caboose is missing sign"
+            }
+            FailedMgsUpdateReason::CabooseNotInInventory => {
+                "caboose is not in inventory"
+            }
+            FailedMgsUpdateReason::FailedVersionParse => {
+                "version could not be parsed"
+            }
+            FailedMgsUpdateReason::NoMatchingArtifactFound => {
+                "no matching artifact was found"
+            }
+            FailedMgsUpdateReason::SpNotInInventory => {
+                "corresponding SP is not in inventory"
+            }
+        };
+        write!(f, "{s}")
+    }
 }
 
 #[derive(
@@ -572,6 +609,10 @@ impl SkippedMgsUpdates {
     pub fn iter(&self) -> impl Iterator<Item = &SkippedMgsUpdate> {
         self.into_iter()
     }
+
+    pub fn is_empty(&self) -> bool {
+        self.by_baseboard.is_empty()
+    }
 }
 
 impl<'a> IntoIterator for &'a SkippedMgsUpdates {
@@ -587,11 +628,7 @@ impl<'a> IntoIterator for &'a SkippedMgsUpdates {
 )]
 pub struct PlanningMgsUpdatesStepReport {
     pub pending_mgs_updates: PendingMgsUpdates,
-    // TODO-K: keep the component here that we were unable to update
-    // and the reason why
-    // add a comment
-    //
-    // TODO-K: Maybe use SkippedMgsUpdates instead of Option
+    // TODO-K: Add a nice comment here about what is happening
     pub skipped_mgs_updates: SkippedMgsUpdates,
 }
 
@@ -612,7 +649,7 @@ impl PlanningMgsUpdatesStepReport {
 impl fmt::Display for PlanningMgsUpdatesStepReport {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         // TODO-K: implement display
-        let Self { pending_mgs_updates, .. } = self;
+        let Self { pending_mgs_updates, skipped_mgs_updates } = self;
         if !pending_mgs_updates.is_empty() {
             let n = pending_mgs_updates.len();
             let s = plural(n);
@@ -622,6 +659,18 @@ impl fmt::Display for PlanningMgsUpdatesStepReport {
                     f,
                     "  * {}: {:?}",
                     update.baseboard_id, update.details
+                )?;
+            }
+        }
+        if !skipped_mgs_updates.is_empty() {
+            let n = pending_mgs_updates.len();
+            let s = plural(n);
+            writeln!(f, "* {n} skipped MGS update{s}:")?;
+            for update in skipped_mgs_updates.iter() {
+                writeln!(
+                    f,
+                    "  * {}: {} {}",
+                    update.baseboard_id, update.component, update.reason
                 )?;
             }
         }

@@ -142,7 +142,6 @@ pub(crate) fn plan_mgs_updates(
                          (will remove it and re-evaluate board)";
                         update
                     );
-                    // TODO-K: Add a skipped update here?
                     boards_preferred.insert(update.baseboard_id.clone());
                 }
             },
@@ -170,12 +169,11 @@ pub(crate) fn plan_mgs_updates(
     // containing artifacts), then we cannot configure more updates.
     let current_artifacts = match current_artifacts {
         TargetReleaseDescription::Initial => {
+            // TODO-K: change comment to no updates needed and change to info
             warn!(
                 log,
                 "cannot issue more MGS-driven updates (no current artifacts)",
             );
-            // TODO-K: Add a skipped update here, but this is an issue because there is no specific baseboard_id
-            // skipped_mgs_updates.by_baseboard.insert_unique(SkippedMgsUpdate { baseboard_id: (), component: (), reason: () })
             return PlannedMgsUpdates {
                 pending_updates,
                 pending_host_phase_2_changes,
