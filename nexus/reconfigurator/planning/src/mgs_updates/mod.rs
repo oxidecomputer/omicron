@@ -17,6 +17,7 @@ use crate::mgs_updates::rot_bootloader::try_make_update_rot_bootloader;
 use crate::mgs_updates::sp::mgs_update_status_sp;
 use crate::mgs_updates::sp::try_make_update_sp;
 
+use gateway_client::types::SpType;
 use gateway_types::rot::RotSlot;
 use nexus_types::deployment::ExpectedActiveRotSlot;
 use nexus_types::deployment::ExpectedVersion;
@@ -37,6 +38,7 @@ use omicron_common::api::external::TufRepoDescription;
 use omicron_common::disk::M2Slot;
 use slog::{error, info, warn};
 use slog_error_chain::InlineErrorChain;
+use tufaceous_artifact::ArtifactHash;
 use std::collections::BTreeSet;
 use std::sync::Arc;
 use thiserror::Error;
@@ -212,7 +214,8 @@ pub(crate) fn plan_mgs_updates(
                 info!(log, "configuring MGS-driven update"; &update);
                 pending_updates.insert(update);
                 pending_host_phase_2_changes.append(&mut host_phase_2);
-                for skipped in &skipped_updates {
+                // TODO-K: Are the logs necessary?
+                for skipped in &skipped_updates.updates {
                     warn!(
                         log,
                         "update to {} {} has been skipped: {}",
@@ -220,7 +223,7 @@ pub(crate) fn plan_mgs_updates(
                         skipped.component,
                         skipped.reason
                     );
-                    skipped_mgs_updates.insert(skipped.clone());
+                    skipped_mgs_updates.push(skipped.clone());
                 }
             }
             None => {
@@ -519,6 +522,8 @@ fn try_make_update(
     baseboard_id: &Arc<BaseboardId>,
     inventory: &Collection,
     current_artifacts: &TufRepoDescription,
+    // TODO-K: This is wrong, there could be skipped mgs updates and no
+    // pending update
 ) -> Option<(PendingMgsUpdate, PendingHostPhase2Changes, SkippedMgsUpdates)> {
     let mut skipped_mgs_updates = SkippedMgsUpdates::new();
     // We try MGS-driven update components in a hardcoded priority order until
@@ -561,11 +566,13 @@ fn try_make_update(
             }
         }
         Err(e) => {
-            skipped_mgs_updates.insert(SkippedMgsUpdate {
+            skipped_mgs_updates.push(SkippedMgsUpdate {
                 baseboard_id: baseboard_id.clone(),
                 component: MgsUpdateComponent::RotBootloader,
                 reason: e,
             });
+            // TODO-K: remove debugging log
+            warn!(log, "HERE: {:?}", skipped_mgs_updates);
         }
     }
 
@@ -586,12 +593,33 @@ fn try_make_update(
     //     return Some((update, PendingHostPhase2Changes::empty()));
     // }
 
-    host_phase_1::try_make_update(
+    match host_phase_1::try_make_update(
         log,
         baseboard_id,
         inventory,
         current_artifacts,
-    )
+    ) {
+        Ok(p) => {
+            match p {
+                Some((u, c)) => return Some((u, c, skipped_mgs_updates)),
+                // TODO-K: This is wrong, there could be skipped updates
+                None => return None,
+            }
+        },
+        Err(e) => {
+            skipped_mgs_updates.push(SkippedMgsUpdate {
+                baseboard_id: baseboard_id.clone(),
+                component: MgsUpdateComponent::HostOs,
+                reason: e,
+            });
+            // TODO-K: remove debugging log
+            warn!(log, "HERE2: {:?}", skipped_mgs_updates);
+            // TODO-K: This is wrong there is no pending update
+            const ARTIFACT_HASH_SP_GIMLET_E: ArtifactHash =
+    ArtifactHash([1; 32]);
+            return Some((PendingMgsUpdate{sp_type: SpType::Power, baseboard_id: baseboard_id.clone(), slot_id: 22, details: PendingMgsUpdateDetails::Sp(PendingMgsUpdateSpDetails { expected_active_version: ArtifactVersion::new("100.0.0").unwrap(), expected_inactive_version: ExpectedVersion::Version(ArtifactVersion::new("100.0.0").unwrap()) }), artifact_hash: ARTIFACT_HASH_SP_GIMLET_E, artifact_version: ArtifactVersion::new("1000.0.0").unwrap()}, PendingHostPhase2Changes::empty(), skipped_mgs_updates));
+        }
+    }
 }
 
 #[cfg(test)]
@@ -620,6 +648,7 @@ mod test {
     use dropshot::ConfigLoggingLevel;
     use gateway_client::types::SpType;
     use gateway_types::rot::RotSlot;
+    use nexus_types::deployment::planning_report::SkippedMgsUpdates;
     use nexus_types::deployment::ExpectedVersion;
     use nexus_types::deployment::PendingMgsUpdateDetails;
     use nexus_types::deployment::PendingMgsUpdateRotBootloaderDetails;
@@ -627,7 +656,9 @@ mod test {
     use nexus_types::deployment::PendingMgsUpdateSpDetails;
     use nexus_types::deployment::PendingMgsUpdates;
     use nexus_types::deployment::TargetReleaseDescription;
+    use nexus_types::inventory::BaseboardId;
     use omicron_test_utils::dev::LogContext;
+    use std::sync::Arc;
     use std::collections::BTreeSet;
     use strum::IntoEnumIterator;
 
@@ -1327,20 +1358,27 @@ mod test {
 
         // Test that we don't try to update boards that aren't in
         // `current_boards`, even if they're in inventory and outdated.
+
+        // TODO-K: Remove fake boards?
+        let mut fake_boards = BTreeSet::new();
+        fake_boards.insert(Arc::new(BaseboardId{part_number: "bob".to_string(), serial_number: "ob".to_string()}));
         let collection = test_boards
             .collection_builder()
             .stage0_version_exception(SpType::Sled, 0, ARTIFACT_VERSION_1)
             .build();
-        let PlannedMgsUpdates { pending_updates: updates, .. } =
+        let PlannedMgsUpdates { pending_updates: updates, skipped_mgs_updates, .. } =
             plan_mgs_updates(
                 log,
                 &collection,
-                &BTreeSet::new(),
+                 &fake_boards,
+                //&BTreeSet::new(),
                 &PendingMgsUpdates::new(),
                 &TargetReleaseDescription::TufRepo(repo.clone()),
                 nmax_updates,
                 impossible_update_policy,
             );
+        // TODO-K: Remove this assertion, or improve
+        assert_eq!(skipped_mgs_updates, SkippedMgsUpdates::new());
         assert!(updates.is_empty());
         let PlannedMgsUpdates { pending_updates: updates, .. } =
             plan_mgs_updates(

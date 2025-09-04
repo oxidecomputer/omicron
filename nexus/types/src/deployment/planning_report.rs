@@ -15,7 +15,6 @@ use crate::inventory::BaseboardId;
 
 use daft::Diffable;
 use iddqd::IdOrdItem;
-use iddqd::IdOrdMap;
 use iddqd::id_upcast;
 use indent_write::fmt::IndentWriter;
 use omicron_common::policy::COCKROACHDB_REDUNDANCY;
@@ -492,24 +491,53 @@ impl PlanningMupdateOverrideStepReport {
     JsonSchema,
     Ord,
     Clone,
-    Copy,
 )]
 pub enum FailedMgsUpdateReason {
-    /// No artifact with the required conditions for the component was found
-    NoMatchingArtifactFound,
-    /// The component's corresponding SP was not found in the inventory
-    SpNotInInventory,
+    /// The active host phase 1 slot does not match the boot disk
+    ActiveHostPhase1SlotBootDiskMismatch,
+    /// The active host phase 1 hash was not found in inventory
+    ActiveHostPhase1HashNotInInventory,
+    /// The active host phase 1 slot was not found in inventory
+    ActiveHostPhase1SlotNotInInventory,
+    /// The component's caboose was missing a value for "sign"
+    CabooseMissingSign,
     /// The component's caboose was not found in the inventory
     CabooseNotInInventory,
     /// The version in the caboose or artifact was not able to be parsed
     FailedVersionParse,
-    /// The component's caboose was missing a value for "sign"
-    CabooseMissingSign,
+    /// The inactive host phase 1 hash was not found in inventory
+    InactiveHostPhase1HashNotInInventory,
+    /// Last reconciliation details were not found in inventory
+    LastReconciliationNotInInventory,
+    /// No artifact with the required conditions for the component was found
+    NoMatchingArtifactFound,
+    /// Sled agent info was not found in inventory
+    SledAgentInfoNotInInventory,
+    /// The component's corresponding SP was not found in the inventory
+    SpNotInInventory,
+    /// Too many artifacts with the required conditions for the component were
+    /// found
+    TooManyMatchingArtifacts,
+    /// The sled agent reported an error determining the boot disk
+    UnableToDetermineBootDisk(String),
+    /// The sled agent reported an error retrieving boot disk phase 2 image
+    /// details
+    UnableToRetrieveBootDiskPhase2Image(String),
 }
 
+// TODO-K: Keep these or the current logs or treat this more like a real error?
 impl Display for FailedMgsUpdateReason {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let s = match self {
+            FailedMgsUpdateReason::ActiveHostPhase1SlotBootDiskMismatch => {
+                "active phase 1 slot does not match boot disk"
+            }
+            FailedMgsUpdateReason::ActiveHostPhase1HashNotInInventory => {
+                "active host phase 1 hash is not in inventory"
+            }
+            FailedMgsUpdateReason::ActiveHostPhase1SlotNotInInventory => {
+                "active host phase 1 slot is not in inventory"
+            }
             FailedMgsUpdateReason::CabooseMissingSign => {
                 "caboose is missing sign"
             }
@@ -519,11 +547,32 @@ impl Display for FailedMgsUpdateReason {
             FailedMgsUpdateReason::FailedVersionParse => {
                 "version could not be parsed"
             }
+            FailedMgsUpdateReason::InactiveHostPhase1HashNotInInventory => {
+                "inactive host phase 1 hash is not in inventory"
+            }
+            FailedMgsUpdateReason::LastReconciliationNotInInventory => {
+                "sled agent last reconciliation is not in inventory"
+            }
             FailedMgsUpdateReason::NoMatchingArtifactFound => {
                 "no matching artifact was found"
             }
             FailedMgsUpdateReason::SpNotInInventory => {
                 "corresponding SP is not in inventory"
+            }
+            FailedMgsUpdateReason::SledAgentInfoNotInInventory => {
+                "sled agent info is not in inventory"
+            }
+            FailedMgsUpdateReason::TooManyMatchingArtifacts => {
+                "too many matching artifacts were found"
+            }
+            FailedMgsUpdateReason::UnableToDetermineBootDisk(err) => {
+                &format!("sled agent was unable to determine the boot disk: {}", err)
+            }
+            FailedMgsUpdateReason::UnableToRetrieveBootDiskPhase2Image(err) => {
+                &format!(
+                    "sled agent was unable to retrieve boot disk phase 2 image: {}",
+                    err
+                )
             }
         };
         write!(f, "{s}")
@@ -553,39 +602,26 @@ impl IdOrdItem for SkippedMgsUpdate {
 #[derive(
     Clone, Debug, Eq, PartialEq, Deserialize, Serialize, JsonSchema, Diffable,
 )]
+// TODO-K: DO I really need this wrapper function?
 pub struct SkippedMgsUpdates {
-    // The IdOrdMap key is the baseboard_id. We only need to know which devices
-    // were skipped, so only one skipped MGS-managed update is allowed for a
-    // given baseboard.
-    pub by_baseboard: IdOrdMap<SkippedMgsUpdate>,
+    pub updates: Vec<SkippedMgsUpdate>
 }
 
 impl SkippedMgsUpdates {
-    pub fn new() -> Self {
-        Self { by_baseboard: IdOrdMap::new() }
+        pub fn new() -> Self {
+        Self { updates: Vec::new() }
     }
-
-    pub fn iter(&self) -> impl Iterator<Item = &SkippedMgsUpdate> {
-        self.into_iter()
-    }
+    // TODO-K: I might need iter and into_iter
 
     pub fn is_empty(&self) -> bool {
-        self.by_baseboard.is_empty()
+        self.updates.is_empty()
     }
 
-    pub fn insert(
+    pub fn push(
         &mut self,
         update: SkippedMgsUpdate,
-    ) -> Option<SkippedMgsUpdate> {
-        self.by_baseboard.insert_overwrite(update)
-    }
-}
-
-impl<'a> IntoIterator for &'a SkippedMgsUpdates {
-    type Item = &'a SkippedMgsUpdate;
-    type IntoIter = iddqd::id_ord_map::Iter<'a, SkippedMgsUpdate>;
-    fn into_iter(self) -> Self::IntoIter {
-        self.by_baseboard.iter()
+    ) {
+        self.updates.push(update)
     }
 }
 
@@ -630,7 +666,7 @@ impl fmt::Display for PlanningMgsUpdatesStepReport {
             let n = pending_mgs_updates.len();
             let s = plural(n);
             writeln!(f, "* {n} skipped MGS update{s}:")?;
-            for update in skipped_mgs_updates.iter() {
+            for update in &skipped_mgs_updates.updates {
                 writeln!(
                     f,
                     "  * {} {}: {}",

@@ -7,12 +7,12 @@
 use super::MgsUpdateStatus;
 use super::MgsUpdateStatusError;
 use gateway_client::types::SpType;
+use nexus_types::deployment::planning_report::FailedMgsUpdateReason;
 use nexus_types::deployment::BlueprintArtifactVersion;
 use nexus_types::deployment::BlueprintHostPhase2DesiredContents;
 use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdateDetails;
 use nexus_types::deployment::PendingMgsUpdateHostPhase1Details;
-use nexus_types::deployment::planning_report::SkippedMgsUpdates;
 use nexus_types::inventory::BaseboardId;
 use nexus_types::inventory::Collection;
 use omicron_common::api::external::TufArtifactMeta;
@@ -271,8 +271,7 @@ pub(super) fn try_make_update(
     baseboard_id: &Arc<BaseboardId>,
     inventory: &Collection,
     current_artifacts: &TufRepoDescription,
-    // TODO-K: Return the result here like RoT bootloader
-) -> Option<(PendingMgsUpdate, PendingHostPhase2Changes, SkippedMgsUpdates)> {
+) -> Result<Option<(PendingMgsUpdate, PendingHostPhase2Changes)>, FailedMgsUpdateReason> {
     let Some(sp_info) = inventory.sps.get(baseboard_id) else {
         warn!(
             log,
@@ -280,16 +279,17 @@ pub(super) fn try_make_update(
              (missing SP info from inventory)";
             baseboard_id,
         );
-        return None;
+        return Err(FailedMgsUpdateReason::SpNotInInventory);
     };
 
     // Only configure host OS updates for sleds.
     //
     // We don't bother logging a return value of `None` for non-sleds, because
     // we will never attempt to configure an update for them (nor should we).
+    // For the same reason, we do not return an error.
     match sp_info.sp_type {
         SpType::Sled => (),
-        SpType::Power | SpType::Switch => return None,
+        SpType::Power | SpType::Switch => return Ok(None),
     }
 
     let Some(sled_agent) = inventory.sled_agents.iter().find(|sled_agent| {
@@ -301,7 +301,7 @@ pub(super) fn try_make_update(
              (missing sled-agent info from inventory)";
             baseboard_id,
         );
-        return None;
+        return Err(FailedMgsUpdateReason::SledAgentInfoNotInInventory);
     };
     let Some(last_reconciliation) = sled_agent.last_reconciliation.as_ref()
     else {
@@ -311,7 +311,7 @@ pub(super) fn try_make_update(
              (missing last reconciliation details from inventory)";
             baseboard_id,
         );
-        return None;
+        return Err(FailedMgsUpdateReason::LastReconciliationNotInInventory);
     };
     let boot_disk = match &last_reconciliation.boot_partitions.boot_disk {
         Ok(boot_disk) => *boot_disk,
@@ -325,7 +325,7 @@ pub(super) fn try_make_update(
                 baseboard_id,
                 "err" => err,
             );
-            return None;
+            return Err(FailedMgsUpdateReason::UnableToDetermineBootDisk(err.to_string()));
         }
     };
     let active_phase_2_hash =
@@ -342,7 +342,7 @@ pub(super) fn try_make_update(
                     "boot_disk" => ?boot_disk,
                     "err" => err,
                 );
-                return None;
+                return Err(FailedMgsUpdateReason::UnableToRetrieveBootDiskPhase2Image(err.to_string()));
             }
         };
 
@@ -355,7 +355,7 @@ pub(super) fn try_make_update(
              (inventory missing current active host phase 1 slot)";
             baseboard_id,
         );
-        return None;
+        return Err(FailedMgsUpdateReason::ActiveHostPhase1SlotNotInInventory);
     };
 
     // TODO-correctness What should we do if the active phase 1 slot doesn't
@@ -378,7 +378,7 @@ pub(super) fn try_make_update(
             "active_phase_1_slot" => ?active_phase_1_slot,
             "boot_disk" => ?boot_disk,
         );
-        return None;
+        return Err(FailedMgsUpdateReason::ActiveHostPhase1SlotBootDiskMismatch);
     }
 
     let Some(active_phase_1_hash) = inventory
@@ -392,7 +392,7 @@ pub(super) fn try_make_update(
             baseboard_id,
             "slot" => ?active_phase_1_slot,
         );
-        return None;
+        return Err(FailedMgsUpdateReason::ActiveHostPhase1HashNotInInventory);
     };
 
     let Some(inactive_phase_1_hash) = inventory
@@ -409,7 +409,7 @@ pub(super) fn try_make_update(
             baseboard_id,
             "slot" => ?active_phase_1_slot.toggled(),
         );
-        return None;
+        return Err(FailedMgsUpdateReason::InactiveHostPhase1HashNotInInventory);
     };
 
     let mut phase_1_artifacts = Vec::with_capacity(1);
@@ -436,7 +436,7 @@ pub(super) fn try_make_update(
                      (no phase 1 artifact)";
                     baseboard_id,
                 );
-                return None;
+                return Err(FailedMgsUpdateReason::NoMatchingArtifactFound);
             }
             (_, []) => {
                 warn!(
@@ -445,7 +445,7 @@ pub(super) fn try_make_update(
                      (no phase 2 artifact)";
                     baseboard_id,
                 );
-                return None;
+                return Err(FailedMgsUpdateReason::NoMatchingArtifactFound);
             }
             // "TUF is broken" cases: have multiple of one or the other. This
             // should be impossible unless we shipped a TUF repo with multiple
@@ -460,7 +460,7 @@ pub(super) fn try_make_update(
                     "num-phase-1-images" => phase_1_artifacts.len(),
                     "num-phase-2-images" => phase_2_artifacts.len(),
                 );
-                return None;
+                return Err(FailedMgsUpdateReason::TooManyMatchingArtifacts);
             }
         };
 
@@ -472,7 +472,7 @@ pub(super) fn try_make_update(
     // this sled will fail to boot if it were rebooted now.)
     if active_phase_2_hash == phase_2_artifact.hash {
         debug!(log, "no host OS update needed for board"; baseboard_id);
-        return None;
+        return Ok(None);
     }
 
     // Before we can proceed with the phase 1 update, we need sled-agent to
@@ -488,7 +488,7 @@ pub(super) fn try_make_update(
         phase_2_artifact,
     );
 
-    Some((
+    Ok(Some((
         PendingMgsUpdate {
             baseboard_id: baseboard_id.clone(),
             sp_type: sp_info.sp_type,
@@ -508,9 +508,7 @@ pub(super) fn try_make_update(
             artifact_version: phase_1_artifact.id.version.clone(),
         },
         pending_host_phase_2_changes,
-        // TODO-K: This is wrong, fix
-        SkippedMgsUpdates::new(),
-    ))
+    )))
 }
 
 #[cfg(test)]
