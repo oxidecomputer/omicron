@@ -213,7 +213,7 @@ pub(crate) fn plan_mgs_updates(
                 info!(log, "configuring MGS-driven update"; &update);
                 pending_updates.insert(update);
                 pending_host_phase_2_changes.append(&mut host_phase_2);
-                // TODO-K: Are the logs necessary?
+                // TODO-K: Remove these debugging logs
                 //for skipped in &skipped_updates.updates {
                 //    warn!(
                 //        log,
@@ -222,12 +222,12 @@ pub(crate) fn plan_mgs_updates(
                 //        skipped.component,
                 //        skipped.reason
                 //    );
-                //    skipped_mgs_updates.push(skipped.clone());
                 //}
                 skipped_mgs_updates.append(&mut skipped_updates);
             }
             (None, mut skipped_updates) => {
                 info!(log, "skipping board for MGS-driven update"; board);
+                // TODO-K: Remove these debugging logs
                 //for skipped in &skipped_updates.updates {
                 //    warn!(
                 //        log,
@@ -236,7 +236,6 @@ pub(crate) fn plan_mgs_updates(
                 //        skipped.component,
                 //        skipped.reason
                 //    );
-                //    skipped_mgs_updates.push(skipped.clone());
                 //}
                 skipped_mgs_updates.append(&mut skipped_updates);
             }
@@ -620,10 +619,7 @@ fn try_make_update(
             });
             // TODO-K: remove debugging log
             // warn!(log, "HERE2: {:?}", skipped_mgs_updates);
-            return (
-                None,
-                skipped_mgs_updates,
-            );
+            return (None, skipped_mgs_updates);
         }
     }
 }

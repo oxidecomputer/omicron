@@ -30,9 +30,10 @@ use serde::Serialize;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::fmt;
-use std::fmt::Display;
+//use std::fmt::Display;
 use std::fmt::Write;
 use std::sync::Arc;
+use thiserror::Error;
 
 /// A full blueprint planning report. Other than the blueprint ID, each
 /// field corresponds to a step in the update planner, i.e., a subroutine
@@ -481,6 +482,7 @@ impl PlanningMupdateOverrideStepReport {
 
 /// Describes the reason why an SP component failed to update
 #[derive(
+    Error,
     Debug,
     Deserialize,
     Serialize,
@@ -494,90 +496,49 @@ impl PlanningMupdateOverrideStepReport {
 )]
 pub enum FailedMgsUpdateReason {
     /// The active host phase 1 slot does not match the boot disk
+    #[error("active phase 1 slot does not match boot disk")]
     ActiveHostPhase1SlotBootDiskMismatch,
     /// The active host phase 1 hash was not found in inventory
+    #[error("active host phase 1 hash is not in inventory")]
     ActiveHostPhase1HashNotInInventory,
     /// The active host phase 1 slot was not found in inventory
+    #[error("active host phase 1 slot is not in inventory")]
     ActiveHostPhase1SlotNotInInventory,
     /// The component's caboose was missing a value for "sign"
+    #[error("caboose is missing sign")]
     CabooseMissingSign,
     /// The component's caboose was not found in the inventory
+    #[error("caboose is not in inventory")]
     CabooseNotInInventory,
     /// The version in the caboose or artifact was not able to be parsed
+    #[error("version could not be parsed")]
     FailedVersionParse,
     /// The inactive host phase 1 hash was not found in inventory
+    #[error("inactive host phase 1 hash is not in inventory")]
     InactiveHostPhase1HashNotInInventory,
     /// Last reconciliation details were not found in inventory
+    #[error("sled agent last reconciliation is not in inventory")]
     LastReconciliationNotInInventory,
     /// No artifact with the required conditions for the component was found
+    #[error("no matching artifact was found")]
     NoMatchingArtifactFound,
     /// Sled agent info was not found in inventory
+    #[error("sled agent info is not in inventory")]
     SledAgentInfoNotInInventory,
     /// The component's corresponding SP was not found in the inventory
+    #[error("corresponding SP is not in inventory")]
     SpNotInInventory,
     /// Too many artifacts with the required conditions for the component were
     /// found
+    #[error("too many matching artifacts were found")]
     TooManyMatchingArtifacts,
     /// The sled agent reported an error determining the boot disk
+    #[error("sled agent was unable to determine the boot disk: {0:?}")]
     UnableToDetermineBootDisk(String),
     /// The sled agent reported an error retrieving boot disk phase 2 image
     /// details
+    #[error("sled agent was unable to retrieve boot disk phase 2 image: {0:?}")]
     UnableToRetrieveBootDiskPhase2Image(String),
-}
-
-// TODO-K: Keep these or the current logs or treat this more like a real error?
-impl Display for FailedMgsUpdateReason {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let s = match self {
-            FailedMgsUpdateReason::ActiveHostPhase1SlotBootDiskMismatch => {
-                "active phase 1 slot does not match boot disk"
-            }
-            FailedMgsUpdateReason::ActiveHostPhase1HashNotInInventory => {
-                "active host phase 1 hash is not in inventory"
-            }
-            FailedMgsUpdateReason::ActiveHostPhase1SlotNotInInventory => {
-                "active host phase 1 slot is not in inventory"
-            }
-            FailedMgsUpdateReason::CabooseMissingSign => {
-                "caboose is missing sign"
-            }
-            FailedMgsUpdateReason::CabooseNotInInventory => {
-                "caboose is not in inventory"
-            }
-            FailedMgsUpdateReason::FailedVersionParse => {
-                "version could not be parsed"
-            }
-            FailedMgsUpdateReason::InactiveHostPhase1HashNotInInventory => {
-                "inactive host phase 1 hash is not in inventory"
-            }
-            FailedMgsUpdateReason::LastReconciliationNotInInventory => {
-                "sled agent last reconciliation is not in inventory"
-            }
-            FailedMgsUpdateReason::NoMatchingArtifactFound => {
-                "no matching artifact was found"
-            }
-            FailedMgsUpdateReason::SpNotInInventory => {
-                "corresponding SP is not in inventory"
-            }
-            FailedMgsUpdateReason::SledAgentInfoNotInInventory => {
-                "sled agent info is not in inventory"
-            }
-            FailedMgsUpdateReason::TooManyMatchingArtifacts => {
-                "too many matching artifacts were found"
-            }
-            FailedMgsUpdateReason::UnableToDetermineBootDisk(err) => &format!(
-                "sled agent was unable to determine the boot disk: {}",
-                err
-            ),
-            FailedMgsUpdateReason::UnableToRetrieveBootDiskPhase2Image(err) => {
-                &format!(
-                    "sled agent was unable to retrieve boot disk phase 2 image: {}",
-                    err
-                )
-            }
-        };
-        write!(f, "{s}")
-    }
 }
 
 #[derive(
@@ -603,7 +564,6 @@ impl IdOrdItem for SkippedMgsUpdate {
 #[derive(
     Clone, Debug, Eq, PartialEq, Deserialize, Serialize, JsonSchema, Diffable,
 )]
-// TODO-K: DO I really need this wrapper function?
 pub struct SkippedMgsUpdates {
     pub updates: Vec<SkippedMgsUpdate>,
 }

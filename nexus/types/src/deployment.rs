@@ -1521,7 +1521,9 @@ impl Into<MgsUpdateComponent> for PendingMgsUpdateDetails {
                 MgsUpdateComponent::RotBootloader
             }
             PendingMgsUpdateDetails::Sp { .. } => MgsUpdateComponent::Sp,
-            PendingMgsUpdateDetails::HostPhase1(_) => MgsUpdateComponent::HostOs,
+            PendingMgsUpdateDetails::HostPhase1(_) => {
+                MgsUpdateComponent::HostOs
+            }
         }
     }
 }
