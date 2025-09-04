@@ -139,6 +139,10 @@ impl TestState {
                 threshold,
                 coordinator,
             ),
+            Action::CrashNode(index) => self.action_to_events_crash_node(index),
+            Action::RestartNode { id, connection_order } => {
+                self.action_to_events_restart_node(id, connection_order)
+            }
         }
     }
 
@@ -154,6 +158,16 @@ impl TestState {
         let destination =
             selector.select(self.tq_state.bootstrap_network.keys());
 
+        // Envelopes should never be sent on the bootstrap network to crashed nodes
+        // when events are applied in `TqState::apply_event`.
+        //
+        // The rationale is that we don't mutate state here, and so we can't
+        // choose to pop the message that shouldn't be delivered off the
+        // bootstrap network. We could choose not to actually deliver it when
+        // applying the event, but that means we have events that don't actually
+        // do anything in our event log, which is quite misleading.
+        assert!(!self.tq_state.faults.crashed_nodes.contains(destination));
+
         // We pop from the back and push on the front
         let envelope = self
             .tq_state
@@ -167,14 +181,84 @@ impl TestState {
         events
     }
 
+    fn action_to_events_crash_node(&self, selector: Selector) -> Vec<Event> {
+        let mut faultable = self
+            .tq_state
+            .member_universe
+            .iter()
+            .filter(|m| !self.tq_state.faults.crashed_nodes.contains(&m))
+            .peekable();
+
+        if faultable.peek().is_none() {
+            // All nodes are down
+            return vec![];
+        }
+
+        let id = selector.select(faultable).clone();
+        vec![Event::CrashNode(id)]
+    }
+
+    fn action_to_events_restart_node(
+        &self,
+        id: Selector,
+        connection_order_indexes: Vec<Index>,
+    ) -> Vec<Event> {
+        if self.tq_state.faults.crashed_nodes.is_empty() {
+            return vec![];
+        }
+
+        // Choose the node to restart
+        let id = id.select(self.tq_state.faults.crashed_nodes.iter()).clone();
+
+        // Now order the peer connections
+
+        // First find all the peers we want to connect to.
+        let mut to_connect: Vec<_> = self
+            .tq_state
+            .member_universe
+            .iter()
+            .filter(|id| !self.tq_state.faults.crashed_nodes.contains(id))
+            .cloned()
+            .collect();
+
+        let total_connections = to_connect.len();
+
+        // Then remove them from `to_connect` and put them into `connection_order`.
+        let mut connection_order = vec![];
+        for index in connection_order_indexes {
+            if to_connect.is_empty() {
+                break;
+            }
+            let i = index.index(to_connect.len());
+            let dst = to_connect.swap_remove(i);
+            connection_order.push(dst);
+        }
+
+        // If there is anything left in `to_connect`, then just extend
+        // `connection_order` with it.
+        connection_order.extend_from_slice(&to_connect);
+
+        // Ensure we have exactly the number of connections we want
+        assert_eq!(connection_order.len(), total_connections);
+
+        vec![Event::RestartNode { id, connection_order }]
+    }
+
     fn action_to_events_load_latest_rack_secret(
         &self,
         selector: Selector,
     ) -> Vec<Event> {
         let mut events = vec![];
         if let Some(c) = self.tq_state.nexus.last_committed_config() {
-            let id = selector.select(c.members.iter()).clone();
-            events.push(Event::LoadRackSecret(id, c.epoch));
+            let mut loadable = c
+                .members
+                .iter()
+                .filter(|m| !self.tq_state.faults.crashed_nodes.contains(m))
+                .peekable();
+            if loadable.peek().is_some() {
+                let id = selector.select(loadable).clone();
+                events.push(Event::LoadRackSecret(id, c.epoch));
+            }
         }
         events
     }
@@ -205,6 +289,14 @@ impl TestState {
             return vec![];
         }
         let c = config.select(committed_configs_iter);
+        let mut loadable = c
+            .members
+            .iter()
+            .filter(|m| !self.tq_state.faults.crashed_nodes.contains(m))
+            .peekable();
+        if loadable.peek().is_none() {
+            return vec![];
+        }
         let id = id.select(c.members.iter()).clone();
         vec![Event::LoadRackSecret(id, c.epoch)]
     }
@@ -277,6 +369,7 @@ impl TestState {
         let committable: Vec<_> = latest_config
             .prepared_members
             .difference(&latest_config.committed_members)
+            .filter(|m| !self.tq_state.faults.crashed_nodes.contains(m))
             .collect();
 
         if committable.is_empty() {
@@ -703,6 +796,22 @@ pub enum Action {
         threshold: Index,
         coordinator: Selector,
     },
+
+    /// Crash a random node in the universe
+    #[weight(2)]
+    CrashNode(Selector),
+
+    /// Restart a crashed node if there is one
+    ///
+    /// We randomize the connection order, because that influences the order
+    /// that messages sent on reconnect will get delivered to the newly
+    /// connected node.
+    #[weight(2)]
+    RestartNode {
+        id: Selector,
+        #[any(size_range(MEMBER_UNIVERSE_SIZE-1..MEMBER_UNIVERSE_SIZE).lift())]
+        connection_order: Vec<Index>,
+    },
 }
 
 const MIN_CLUSTER_SIZE: usize = 3;
@@ -770,6 +879,7 @@ fn test_trust_quorum_protocol(input: TestInput) {
     let (parent_dir, _) = log_prefix_for_test(logctx.test_name());
     let event_log_path = parent_dir.join(format!("{test_name}.events.json"));
     let mut event_log = EventLog::new(&event_log_path);
+    println!("Event log path: {event_log_path}");
 
     let log = logctx.log.new(o!("component" => "tq-proptest"));
     let mut state = TestState::new(log.clone());
