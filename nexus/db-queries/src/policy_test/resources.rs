@@ -105,7 +105,7 @@ pub async fn make_resources(
     builder.new_resource(authz::Zpool::new(
         authz::FLEET,
         zpool_id,
-        LookupType::ById(zpool_id),
+        LookupType::by_id(zpool_id),
     ));
 
     make_services(&mut builder).await;

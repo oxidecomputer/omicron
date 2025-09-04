@@ -53,7 +53,6 @@ use omicron_common::policy::NEXUS_REDUNDANCY;
 use omicron_common::policy::OXIMETER_REDUNDANCY;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
-use omicron_uuid_kinds::ZpoolUuid;
 use slog::Logger;
 use slog::error;
 use slog_error_chain::InlineErrorChain;
@@ -264,7 +263,6 @@ impl PlanningInputFromDb<'_> {
             for (zpool, disk) in self.zpool_rows {
                 let sled_zpool_names =
                     zpools.entry(zpool.sled_id()).or_insert_with(BTreeMap::new);
-                let zpool_id = ZpoolUuid::from_untyped_uuid(zpool.id());
                 let disk = SledDisk {
                     disk_identity: DiskIdentity {
                         vendor: disk.vendor.clone(),
@@ -275,7 +273,7 @@ impl PlanningInputFromDb<'_> {
                     policy: disk.disk_policy.into(),
                     state: disk.disk_state.into(),
                 };
-                sled_zpool_names.insert(zpool_id, disk);
+                sled_zpool_names.insert(zpool.id(), disk);
             }
             zpools
         };

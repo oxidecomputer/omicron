@@ -60,7 +60,6 @@ use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::internal::shared::ExternalPortDiscovery;
 use omicron_common::api::internal::shared::LldpAdminStatus;
-use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SledUuid;
 use oxnet::IpNet;
 use sled_agent_client::types::AddSledRequest;
@@ -145,7 +144,7 @@ impl super::Nexus {
             .map(|dataset| {
                 db::model::CrucibleDataset::new(
                     dataset.dataset_id,
-                    dataset.zpool_id.into_untyped_uuid(),
+                    dataset.zpool_id,
                     dataset.address,
                 )
             })

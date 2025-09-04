@@ -1568,7 +1568,7 @@ mod test {
             .zpool_insert(
                 opctx,
                 Zpool::new(
-                    Uuid::new_v4(),
+                    ZpoolUuid::new_v4(),
                     sled_id,
                     id,
                     ByteCount::from(0).into(),
@@ -1576,21 +1576,20 @@ mod test {
             )
             .await
             .unwrap();
-        let zpool_id = ZpoolUuid::from_untyped_uuid(zpool.id());
 
         let dataset = datastore
             .debug_dataset_insert_if_not_exists(
                 opctx,
                 RendezvousDebugDataset::new(
                     DatasetUuid::new_v4(),
-                    zpool_id,
+                    zpool.id(),
                     blueprint_id,
                 ),
             )
             .await
             .unwrap()
             .expect("inserted new dataset");
-        (zpool_id, dataset.id())
+        (zpool.id(), dataset.id())
     }
 
     async fn make_disk_in_db(

@@ -289,7 +289,7 @@ impl<'a> LookupPath<'a> {
     }
 
     /// Select a resource of type Zpool, identified by its id
-    pub fn zpool_id(self, id: Uuid) -> Zpool<'a> {
+    pub fn zpool_id(self, id: ZpoolUuid) -> Zpool<'a> {
         Zpool::PrimaryKey(Root { lookup_root: self }, id)
     }
 
@@ -782,7 +782,7 @@ lookup_resource! {
     ancestors = [],
     lookup_by_name = false,
     soft_deletes = true,
-    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+    primary_key_columns = [ { column_name = "id", uuid_kind = ZpoolKind } ]
 }
 
 lookup_resource! {

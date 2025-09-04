@@ -11,6 +11,7 @@ use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
 use crate::db::datastore::OpContext;
 use crate::db::identity::Asset;
+use crate::db::model::DbTypedUuid;
 use crate::db::model::PhysicalDisk;
 use crate::db::model::PhysicalDiskPolicy;
 use crate::db::model::PhysicalDiskState;
@@ -38,6 +39,7 @@ use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SledUuid;
+use omicron_uuid_kinds::ZpoolKind;
 use omicron_uuid_kinds::ZpoolUuid;
 use uuid::Uuid;
 
@@ -98,7 +100,7 @@ impl DataStore {
     async fn zpool_list_all_external(
         &self,
         opctx: &OpContext,
-        pagparams: &DataPageParams<'_, Uuid>,
+        pagparams: &DataPageParams<'_, DbTypedUuid<ZpoolKind>>,
     ) -> ListResultVec<(Zpool, PhysicalDisk)> {
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
 
@@ -140,7 +142,7 @@ impl DataStore {
             let batch = self
                 .zpool_list_all_external(opctx, &p.current_pagparams())
                 .await?;
-            paginator = p.found_batch(&batch, &|(z, _)| z.id());
+            paginator = p.found_batch(&batch, &|(z, _)| z.id().into());
             zpools.extend(batch);
         }
 
@@ -151,7 +153,7 @@ impl DataStore {
     pub async fn zpool_on_decommissioned_disk_list(
         &self,
         opctx: &OpContext,
-        pagparams: &DataPageParams<'_, Uuid>,
+        pagparams: &DataPageParams<'_, DbTypedUuid<ZpoolKind>>,
     ) -> ListResultVec<Zpool> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         use nexus_db_schema::schema::physical_disk::dsl as physical_disk_dsl;

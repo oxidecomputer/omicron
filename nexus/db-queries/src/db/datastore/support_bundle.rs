@@ -628,7 +628,7 @@ mod test {
             // Create fake zpools that back our fake datasets.
             for pool in &self.pools {
                 let zpool = Zpool::new(
-                    *pool.pool.as_untyped_uuid(),
+                    pool.pool,
                     self.sled,
                     PhysicalDiskUuid::new_v4(),
                     ByteCount::from(0).into(),

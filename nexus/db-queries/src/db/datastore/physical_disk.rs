@@ -347,6 +347,7 @@ mod test {
     use omicron_common::api::external::ByteCount;
     use omicron_common::disk::{DiskIdentity, DiskVariant};
     use omicron_test_utils::dev;
+    use omicron_uuid_kinds::ZpoolUuid;
     use std::num::NonZeroU32;
 
     async fn create_test_sled(db: &DataStore) -> Sled {
@@ -769,7 +770,7 @@ mod test {
         );
 
         let zpool = Zpool::new(
-            Uuid::new_v4(),
+            ZpoolUuid::new_v4(),
             sled_id,
             disk.id(),
             ByteCount::from(0).into(),

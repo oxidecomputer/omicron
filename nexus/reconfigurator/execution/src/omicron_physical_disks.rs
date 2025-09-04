@@ -134,7 +134,7 @@ mod test {
             .zpool_insert(
                 opctx,
                 Zpool::new(
-                    Uuid::new_v4(),
+                    ZpoolUuid::new_v4(),
                     sled_id,
                     id,
                     ByteCount::from(0).into(),
