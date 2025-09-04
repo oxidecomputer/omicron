@@ -9,7 +9,7 @@ WITH
         sled.time_deleted IS NULL
         AND sled.sled_policy = 'in_service'
         AND sled.sled_state = 'active'
-        AND sled.cpu_family IN ($1,)
+        AND sled.cpu_family = ANY ($1)
       GROUP BY
         sled.id
       HAVING

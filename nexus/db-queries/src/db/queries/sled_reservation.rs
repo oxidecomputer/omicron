@@ -110,21 +110,10 @@ pub fn sled_find_targets_query(
         ",
     );
 
-    // TODO(gjc): eww. the correct way to do this is to write this as
-    //
-    // "AND sled.cpu_family = ANY ("
-    //
-    // and then just have one `param` which can be bound to a
-    // `sql_types::Array<SledCpuFamilyEnum>`
-    if let Some(families) = sled_families {
-        query.sql(" AND sled.cpu_family IN (");
-        for i in 0..families.len() {
-            if i > 0 {
-                query.sql(", ");
-            }
-            query.param();
-        }
-        query.sql(")");
+    if sled_families.is_some() {
+        query.sql(" AND sled.cpu_family = ANY (");
+        query.param();
+        query.sql(") ");
     }
 
     query.sql("GROUP BY sled.id
@@ -248,9 +237,7 @@ pub fn sled_find_targets_query(
     );
 
     if let Some(families) = sled_families {
-        for f in families {
-            query.bind::<SledCpuFamilyEnum, _>(*f);
-        }
+        query.bind::<sql_types::Array<SledCpuFamilyEnum>, _>(families.to_vec());
     }
 
     query
