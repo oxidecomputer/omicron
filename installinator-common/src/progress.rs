@@ -52,10 +52,13 @@ pub enum InstallinatorComponent {
     /// The control plane component.
     ControlPlane,
 
-    /// A component that means "both the host and the control plane", used for
-    /// writes for now. It is possible that this component will go away in the
-    /// future.
-    Both,
+    /// The measurement corpus component
+    MeasurementCorpus,
+
+    /// A component that means "all possible components (host phase 2, control
+    /// plane, and measurements)", used for writes for now. It is possible
+    /// that this component will go away in the future.
+    All,
 
     /// Future variants that might be unknown.
     #[serde(other, deserialize_with = "deserialize_ignore_any")]
@@ -194,6 +197,9 @@ pub enum WriteComponent {
     /// The control plane component.
     ControlPlane,
 
+    /// The measurement corpus
+    MeasurementCorpus,
+
     /// Future variants that might be unknown.
     #[serde(other, deserialize_with = "deserialize_ignore_any")]
     Unknown,
@@ -205,6 +211,7 @@ impl fmt::Display for WriteComponent {
             Self::HostPhase2 => f.write_str("host phase 2"),
             Self::ControlPlane => f.write_str("control plane"),
             Self::Unknown => f.write_str("unknown"),
+            Self::MeasurementCorpus => f.write_str("measurement corpus"),
         }
     }
 }
@@ -254,6 +261,8 @@ pub enum WriteError {
         #[source]
         error: Box<NestedEngineError<ControlPlaneZonesSpec>>,
     },
+    #[error("error creating directory: {error}")]
+    CreateDirError { error: std::io::Error },
 }
 
 impl From<NestedEngineError<ControlPlaneZonesSpec>> for WriteError {
@@ -302,6 +311,12 @@ pub enum ControlPlaneZonesStepId {
 
     /// Writing the zone manifest.
     ZoneManifest,
+
+    /// Writing the measurement corpus.
+    Measurement { name: String },
+
+    /// Ensure the measurement directory exists
+    CreateMeasurementDir,
 
     /// Syncing writes to disk.
     Fsync,

@@ -122,6 +122,7 @@ pub fn try_make_update_sp(
                     | KnownArtifactKind::InstallinatorDocument
                     | KnownArtifactKind::ControlPlane
                     | KnownArtifactKind::Zone
+                    | KnownArtifactKind::MeasurementCorpus
                     | KnownArtifactKind::PscRot
                     | KnownArtifactKind::SwitchRot
                     | KnownArtifactKind::GimletRotBootloader

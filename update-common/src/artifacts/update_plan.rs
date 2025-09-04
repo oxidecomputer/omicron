@@ -275,7 +275,7 @@ impl<'a> UpdatePlanBuilder<'a> {
                 )
                 .await
             }
-            KnownArtifactKind::Zone => {
+            KnownArtifactKind::Zone | KnownArtifactKind::MeasurementCorpus => {
                 // We don't currently support repos with already split-out
                 // zones.
                 self.add_unknown_artifact(artifact_id, artifact_hash, stream)
@@ -302,6 +302,7 @@ impl<'a> UpdatePlanBuilder<'a> {
             | KnownArtifactKind::InstallinatorDocument
             | KnownArtifactKind::ControlPlane
             | KnownArtifactKind::Zone
+            | KnownArtifactKind::MeasurementCorpus
             | KnownArtifactKind::PscRot
             | KnownArtifactKind::SwitchRot
             | KnownArtifactKind::GimletRotBootloader
@@ -398,6 +399,7 @@ impl<'a> UpdatePlanBuilder<'a> {
             | KnownArtifactKind::InstallinatorDocument
             | KnownArtifactKind::ControlPlane
             | KnownArtifactKind::Zone
+            | KnownArtifactKind::MeasurementCorpus
             | KnownArtifactKind::PscRot
             | KnownArtifactKind::SwitchRot
             | KnownArtifactKind::GimletSp
@@ -505,6 +507,7 @@ impl<'a> UpdatePlanBuilder<'a> {
             | KnownArtifactKind::InstallinatorDocument
             | KnownArtifactKind::ControlPlane
             | KnownArtifactKind::Zone
+            | KnownArtifactKind::MeasurementCorpus
             | KnownArtifactKind::PscSp
             | KnownArtifactKind::SwitchSp
             | KnownArtifactKind::GimletRotBootloader
@@ -1993,6 +1996,30 @@ mod tests {
                 .unwrap();
         }
 
+        // The measurement corpus can be random bytes
+        // If we do further testing we should use a fake CoRIM
+        let measurement_corpus_data = make_random_bytes();
+        let measurement_corpus_hash =
+            ArtifactHash(Sha256::digest(&measurement_corpus_data).into());
+        {
+            let kind = KnownArtifactKind::MeasurementCorpus;
+            let id = ArtifactId {
+                name: format!("{kind:?}"),
+                version: ARTIFACT_VERSION_0,
+                kind: kind.into(),
+            };
+            plan_builder
+                .add_artifact(
+                    id,
+                    measurement_corpus_hash,
+                    futures::stream::iter([Ok(Bytes::from(
+                        measurement_corpus_data,
+                    ))]),
+                )
+                .await
+                .unwrap();
+        }
+
         // For each SP image, we'll insert two artifacts: these should end up in
         // the update plan's SP image maps keyed by their "board". Normally the
         // board is read from the archive itself via hubtools; we'll inject a
@@ -2178,6 +2205,10 @@ mod tests {
                         plan.sidecar_sp.get(&id.name).unwrap().data.hash(),
                         hash_ids[0].hash
                     );
+                }
+                KnownArtifactKind::MeasurementCorpus => {
+                    assert_eq!(hash_ids.len(), 1);
+                    assert_eq!(measurement_corpus_hash, hash_ids[0].hash);
                 }
                 // These are special (we import their inner parts) and we'll
                 // check them below.

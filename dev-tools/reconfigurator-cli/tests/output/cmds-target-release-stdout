@@ -51,6 +51,7 @@ INFO added artifact, name: internal-dns, kind: zone, version: 1.0.0, hash: ffbf1
 INFO added artifact, name: ntp, kind: zone, version: 1.0.0, hash: 67593d686ed04a1709f93972b71f4ebc148a9362120f65d239943e814a9a7439, length: 1681
 INFO added artifact, name: nexus, kind: zone, version: 1.0.0, hash: 0e32b4a3e5d3668bb1d6a16fb06b74dc60b973fa479dcee0aae3adbb52bf1388, length: 1682
 INFO added artifact, name: oximeter, kind: zone, version: 1.0.0, hash: 048d8fe8cdef5b175aad714d0f148aa80ce36c9114ac15ce9d02ed3d37877a77, length: 1682
+INFO added artifact, name: fake-corpus, kind: measurement_corpus, version: 1.0.0, hash: 8a0e23157bae655fceec7376926c9758efee6511c7b7ff8355bbb49545a2257f, length: 1048576
 INFO added artifact, name: fake-psc-sp, kind: psc_sp, version: 1.0.0, hash: 89245fe2ac7e6a2ac8dfa4e7d6891a6e6df95e4141395c07c64026778f6d76d7, length: 721
 INFO added artifact, name: fake-psc-rot, kind: psc_rot_image_a, version: 1.0.0, hash: 5d8ea834dd6d42d386f1eb8a2c5f6e99b697c9958bb4ab8edf63e56003e25d8d, length: 775
 INFO added artifact, name: fake-psc-rot, kind: psc_rot_image_b, version: 1.0.0, hash: 5d8ea834dd6d42d386f1eb8a2c5f6e99b697c9958bb4ab8edf63e56003e25d8d, length: 775
@@ -59,7 +60,7 @@ INFO added artifact, name: fake-switch-sp, kind: switch_sp, version: 1.0.0, hash
 INFO added artifact, name: fake-switch-rot, kind: switch_rot_image_a, version: 1.0.0, hash: 32307d6d75c9707e8499ba4a4d379f99c0358237b6e190ff6a8024b470f62342, length: 774
 INFO added artifact, name: fake-switch-rot, kind: switch_rot_image_b, version: 1.0.0, hash: 32307d6d75c9707e8499ba4a4d379f99c0358237b6e190ff6a8024b470f62342, length: 774
 INFO added artifact, name: fake-switch-rot-bootloader, kind: switch_rot_bootloader, version: 1.0.0, hash: 70836d170abd5621f95bb4225987b27b3d3dd6168e73cd60e44309bdfeb94e98, length: 804
-INFO added artifact, name: installinator_document, kind: installinator_document, version: 1.0.0, hash: c6ae866031d1183094c92cde9d9d1fd5f18356abc81a842ce31471b473fd5582, length: 367
+INFO added artifact, name: installinator_document, kind: installinator_document, version: 1.0.0, hash: 8df658e79a02d2d45a652f257ab01f5afe758290ab8fafcfb86f5433aa57d5d7, length: 526
 set target release based on repo-1.0.0.zip
 
 
@@ -90,6 +91,7 @@ target release (generation 2): 1.0.0 (system-update-v1.0.0.zip)
     artifact: 67593d686ed04a1709f93972b71f4ebc148a9362120f65d239943e814a9a7439 zone (ntp version 1.0.0)
     artifact: 0e32b4a3e5d3668bb1d6a16fb06b74dc60b973fa479dcee0aae3adbb52bf1388 zone (nexus version 1.0.0)
     artifact: 048d8fe8cdef5b175aad714d0f148aa80ce36c9114ac15ce9d02ed3d37877a77 zone (oximeter version 1.0.0)
+    artifact: 8a0e23157bae655fceec7376926c9758efee6511c7b7ff8355bbb49545a2257f measurement_corpus (fake-corpus version 1.0.0)
     artifact: 89245fe2ac7e6a2ac8dfa4e7d6891a6e6df95e4141395c07c64026778f6d76d7 psc_sp (fake-psc-sp version 1.0.0)
     artifact: 5d8ea834dd6d42d386f1eb8a2c5f6e99b697c9958bb4ab8edf63e56003e25d8d psc_rot_image_a (fake-psc-rot version 1.0.0)
     artifact: 5d8ea834dd6d42d386f1eb8a2c5f6e99b697c9958bb4ab8edf63e56003e25d8d psc_rot_image_b (fake-psc-rot version 1.0.0)
@@ -98,7 +100,7 @@ target release (generation 2): 1.0.0 (system-update-v1.0.0.zip)
     artifact: 32307d6d75c9707e8499ba4a4d379f99c0358237b6e190ff6a8024b470f62342 switch_rot_image_a (fake-switch-rot version 1.0.0)
     artifact: 32307d6d75c9707e8499ba4a4d379f99c0358237b6e190ff6a8024b470f62342 switch_rot_image_b (fake-switch-rot version 1.0.0)
     artifact: 70836d170abd5621f95bb4225987b27b3d3dd6168e73cd60e44309bdfeb94e98 switch_rot_bootloader (fake-switch-rot-bootloader version 1.0.0)
-    artifact: c6ae866031d1183094c92cde9d9d1fd5f18356abc81a842ce31471b473fd5582 installinator_document (installinator_document version 1.0.0)
+    artifact: 8df658e79a02d2d45a652f257ab01f5afe758290ab8fafcfb86f5433aa57d5d7 installinator_document (installinator_document version 1.0.0)
 chicken switches:
     add zones with mupdate override:   false
 
@@ -168,6 +170,7 @@ target release (generation 2): 1.0.0 (system-update-v1.0.0.zip)
     artifact: 67593d686ed04a1709f93972b71f4ebc148a9362120f65d239943e814a9a7439 zone (ntp version 1.0.0)
     artifact: 0e32b4a3e5d3668bb1d6a16fb06b74dc60b973fa479dcee0aae3adbb52bf1388 zone (nexus version 1.0.0)
     artifact: 048d8fe8cdef5b175aad714d0f148aa80ce36c9114ac15ce9d02ed3d37877a77 zone (oximeter version 1.0.0)
+    artifact: 8a0e23157bae655fceec7376926c9758efee6511c7b7ff8355bbb49545a2257f measurement_corpus (fake-corpus version 1.0.0)
     artifact: 89245fe2ac7e6a2ac8dfa4e7d6891a6e6df95e4141395c07c64026778f6d76d7 psc_sp (fake-psc-sp version 1.0.0)
     artifact: 5d8ea834dd6d42d386f1eb8a2c5f6e99b697c9958bb4ab8edf63e56003e25d8d psc_rot_image_a (fake-psc-rot version 1.0.0)
     artifact: 5d8ea834dd6d42d386f1eb8a2c5f6e99b697c9958bb4ab8edf63e56003e25d8d psc_rot_image_b (fake-psc-rot version 1.0.0)
@@ -176,7 +179,7 @@ target release (generation 2): 1.0.0 (system-update-v1.0.0.zip)
     artifact: 32307d6d75c9707e8499ba4a4d379f99c0358237b6e190ff6a8024b470f62342 switch_rot_image_a (fake-switch-rot version 1.0.0)
     artifact: 32307d6d75c9707e8499ba4a4d379f99c0358237b6e190ff6a8024b470f62342 switch_rot_image_b (fake-switch-rot version 1.0.0)
     artifact: 70836d170abd5621f95bb4225987b27b3d3dd6168e73cd60e44309bdfeb94e98 switch_rot_bootloader (fake-switch-rot-bootloader version 1.0.0)
-    artifact: c6ae866031d1183094c92cde9d9d1fd5f18356abc81a842ce31471b473fd5582 installinator_document (installinator_document version 1.0.0)
+    artifact: 8df658e79a02d2d45a652f257ab01f5afe758290ab8fafcfb86f5433aa57d5d7 installinator_document (installinator_document version 1.0.0)
 chicken switches:
     add zones with mupdate override:   false
 

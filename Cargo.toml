@@ -653,6 +653,7 @@ rand_distr = "0.5.1"
 rand_seeder = "0.4.0"
 range-requests = { path = "range-requests" }
 ratatui = "0.29.0"
+rats-corim = { git = "https://github.com/oxidecomputer/rats-corim.git", branch = "main" }
 rayon = "1.10"
 rcgen = "0.12.1"
 reconfigurator-cli = { path = "dev-tools/reconfigurator-cli" }
@@ -753,10 +754,10 @@ toml_edit = "0.22.27"
 tough = { version = "0.20.0", features = [ "http" ] }
 transceiver-controller = { git = "https://github.com/oxidecomputer/transceiver-control", features = [ "api-traits" ] }
 trybuild = "1.0.106"
-tufaceous = { git = "https://github.com/oxidecomputer/tufaceous", branch = "main" }
-tufaceous-artifact = { git = "https://github.com/oxidecomputer/tufaceous", branch = "main", features = ["proptest", "schemars"] }
-tufaceous-brand-metadata = { git = "https://github.com/oxidecomputer/tufaceous", branch = "main" }
-tufaceous-lib = { git = "https://github.com/oxidecomputer/tufaceous", branch = "main" }
+tufaceous = { git = "https://github.com/oxidecomputer/tufaceous", branch = "measurement_corpus_take_2" }
+tufaceous-artifact = { git = "https://github.com/oxidecomputer/tufaceous", branch = "measurement_corpus_take_2", features = ["proptest", "schemars"] }
+tufaceous-brand-metadata = { git = "https://github.com/oxidecomputer/tufaceous", branch = "measurement_corpus_take_2" }
+tufaceous-lib = { git = "https://github.com/oxidecomputer/tufaceous", branch = "measurement_corpus_take_2" }
 tui-tree-widget = "0.23.1"
 typed-rng = { path = "typed-rng" }
 typify = "0.3.0"

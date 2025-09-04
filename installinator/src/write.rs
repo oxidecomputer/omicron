@@ -60,6 +60,9 @@ struct ArtifactDestination {
 
     // Zpool containing `control_plane_dir`, if we're on a real gimlet.
     control_plane_zpool: Option<ZpoolName>,
+
+    // Directory in which we save the measurements
+    measurement_dir: Utf8PathBuf,
 }
 
 impl ArtifactDestination {
@@ -69,11 +72,17 @@ impl ArtifactDestination {
         std::fs::create_dir_all(&control_plane_dir)
             .with_context(|| format!("error creating directories at {dir}"))?;
 
+        // for now we store the measurements within the install data set
+        let measurement_dir = control_plane_dir.join("measurements");
+        std::fs::create_dir_all(&measurement_dir)
+            .with_context(|| format!("error creating directories at {dir}"))?;
+
         Ok(Self {
             host_phase_2: dir.join(HOST_PHASE_2_FILE_NAME),
             clean_control_plane_dir: false,
             control_plane_dir,
             control_plane_zpool: None,
+            measurement_dir,
         })
     }
 }
@@ -141,6 +150,9 @@ impl WriteDestination {
                         sled_storage::dataset::INSTALL_DATASET,
                     );
 
+                    let measurement_dir =
+                        control_plane_dir.join("measurements");
+
                     match drives.entry(slot) {
                         Entry::Vacant(entry) => {
                             entry.insert(ArtifactDestination {
@@ -148,6 +160,7 @@ impl WriteDestination {
                                 clean_control_plane_dir: true,
                                 control_plane_dir,
                                 control_plane_zpool: Some(zpool_name),
+                                measurement_dir,
                             });
                         }
                         Entry::Occupied(_) => {
@@ -214,6 +227,9 @@ impl<'a> ArtifactWriter<'a> {
         host_phase_2_data: &'a BufList,
         control_plane_id: &'a ArtifactHashId,
         control_plane_zones: &'a ControlPlaneZoneImages,
+
+        measurement_corpus: &'a Vec<MeasurementToWrite>,
+
         destination: WriteDestination,
     ) -> Self {
         let drives = destination
@@ -239,6 +255,7 @@ impl<'a> ArtifactWriter<'a> {
                 control_plane_zones,
                 mupdate_id,
                 mupdate_override_uuid,
+                measurement_corpus,
             },
         }
     }
@@ -334,7 +351,8 @@ impl<'a> ArtifactWriter<'a> {
                                     *progress =
                                         DriveWriteProgress::ControlPlaneFailed;
                                 }
-                                WriteComponent::Unknown => {
+                                WriteComponent::Unknown
+                                | WriteComponent::MeasurementCorpus => {
                                     unreachable!(
                                         "we should never generate an unknown component"
                                     )
@@ -546,6 +564,8 @@ struct ArtifactsToWrite<'a> {
     control_plane_zones: &'a ControlPlaneZoneImages,
     mupdate_id: MupdateUuid,
     mupdate_override_uuid: MupdateOverrideUuid,
+
+    measurement_corpus: &'a Vec<MeasurementToWrite>,
 }
 
 impl ArtifactsToWrite<'_> {
@@ -590,9 +610,11 @@ impl ArtifactsToWrite<'_> {
             slot,
             clean_output_directory: destinations.clean_control_plane_dir,
             output_directory: &destinations.control_plane_dir,
+            measurement_directory: &destinations.measurement_dir,
             zones: self.control_plane_zones,
             host_phase_2_id: self.host_phase_2_id,
             control_plane_id: self.control_plane_id,
+            measurement_corpus: self.measurement_corpus,
             mupdate_id: self.mupdate_id,
             mupdate_override_uuid: self.mupdate_override_uuid,
         };
@@ -623,13 +645,20 @@ impl ArtifactsToWrite<'_> {
     }
 }
 
+pub(crate) struct MeasurementToWrite {
+    pub(crate) name: String,
+    pub(crate) artifact: BufList,
+}
+
 struct ControlPlaneZoneWriteContext<'a> {
     slot: M2Slot,
     clean_output_directory: bool,
     output_directory: &'a Utf8Path,
+    measurement_directory: &'a Utf8Path,
     zones: &'a ControlPlaneZoneImages,
     host_phase_2_id: &'a ArtifactHashId,
     control_plane_id: &'a ArtifactHashId,
+    measurement_corpus: &'a Vec<MeasurementToWrite>,
     mupdate_id: MupdateUuid,
     mupdate_override_uuid: MupdateOverrideUuid,
 }
@@ -765,6 +794,54 @@ impl ControlPlaneZoneWriteContext<'_> {
                             WriteComponent::ControlPlane,
                             slot,
                             data.clone().into(),
+                            &out_path,
+                            transport,
+                            &cx,
+                        )
+                        .await?;
+
+                        StepSuccess::new(transport).into()
+                    },
+                )
+                .register();
+        }
+
+        engine
+            .new_step(
+                WriteComponent::ControlPlane,
+                ControlPlaneZonesStepId::CreateMeasurementDir,
+                "Creating measurement directory".to_string(),
+                async move |_cx| {
+                    if !std::fs::exists(self.measurement_directory)
+                        .map_err(|error| WriteError::CreateDirError { error })?
+                    {
+                        std::fs::create_dir(self.measurement_directory)
+                            .map_err(|error| WriteError::CreateDirError {
+                                error,
+                            })?;
+                    }
+                    StepSuccess::new(()).into()
+                },
+            )
+            .register();
+
+        // This might make sense to move to a separate step once reconfigurator
+        // work is complete. For now, just treat this as another step in the
+        // control plane
+        for data in self.measurement_corpus {
+            let name = data.name.clone();
+            let out_path = self.measurement_directory.join(&name);
+            transport = engine
+                .new_step(
+                    WriteComponent::MeasurementCorpus,
+                    ControlPlaneZonesStepId::Measurement { name: name.clone() },
+                    format!("Writing measurement {name}"),
+                    async move |cx| {
+                        let transport = transport.into_value(cx.token()).await;
+                        write_artifact_impl(
+                            WriteComponent::MeasurementCorpus,
+                            slot,
+                            data.artifact.clone(),
                             &out_path,
                             transport,
                             &cx,
@@ -1127,10 +1204,12 @@ mod tests {
         data1: Vec<Vec<u8>>,
         #[strategy(prop::collection::vec(prop::collection::vec(any::<u8>(), 0..8192), 0..16))]
         data2: Vec<Vec<u8>>,
+        #[strategy(prop::collection::vec(prop::collection::vec(any::<u8>(), 0..8192), 0..16))]
+        data3: Vec<Vec<u8>>,
         #[strategy(WriteOps::strategy())] write_ops: WriteOps,
     ) {
         with_test_runtime(async move {
-            proptest_write_artifact_impl(data1, data2, write_ops)
+            proptest_write_artifact_impl(data1, data2, data3, write_ops)
                 .await
                 .expect("test failed");
         })
@@ -1209,6 +1288,7 @@ mod tests {
     async fn proptest_write_artifact_impl(
         data1: Vec<Vec<u8>>,
         data2: Vec<Vec<u8>>,
+        data3: Vec<Vec<u8>>,
         write_ops: WriteOps,
     ) -> Result<()> {
         let logctx = test_setup_log("test_write_artifact");
@@ -1223,6 +1303,9 @@ mod tests {
             data1.into_iter().map(Bytes::from).collect();
         let mut artifact_control_plane: BufList =
             data2.into_iter().map(Bytes::from).collect();
+
+        let artifact_measurement_corpus: BufList =
+            data3.into_iter().map(Bytes::from).collect();
 
         let host_id = ArtifactHashId {
             kind: ArtifactKind::HOST_PHASE_2,
@@ -1265,6 +1348,9 @@ mod tests {
         // Create a `WriteDestination` that points to our tempdir paths.
         let mut drives = BTreeMap::new();
 
+        let control_plane_dir = tempdir_path;
+
+        let measurement_dir = control_plane_dir.join("measurements");
         // TODO This only tests writing to a single drive; we should expand this
         // test (or maybe write a different one, given how long this one already
         // is?) that checks writing to both drives.
@@ -1273,7 +1359,8 @@ mod tests {
             ArtifactDestination {
                 host_phase_2: destination_host.clone(),
                 clean_control_plane_dir: false,
-                control_plane_dir: tempdir_path.into(),
+                control_plane_dir: control_plane_dir.into(),
+                measurement_dir,
                 control_plane_zpool: None,
             },
         );
@@ -1289,12 +1376,17 @@ mod tests {
             )],
         };
 
+        let all_corpus = vec![MeasurementToWrite {
+            artifact: artifact_measurement_corpus,
+            name: "blah".to_string(),
+        }];
         let mut writer = ArtifactWriter::new(
             MupdateUuid::new_v4(),
             &host_id,
             &artifact_host,
             &control_plane_id,
             &control_plane_zone_images,
+            &all_corpus,
             destination,
         );
 
@@ -1302,7 +1394,7 @@ mod tests {
         let log = logctx.log.clone();
         engine
             .new_step(
-                InstallinatorComponent::Both,
+                InstallinatorComponent::All,
                 InstallinatorStepId::Write,
                 "Writing",
                 async move |cx| {

@@ -363,7 +363,7 @@ mod tests {
                     last_step: StepInfoWithMetadata {
                         info: StepInfo {
                             id: InstallinatorStepId::Write,
-                            component: InstallinatorComponent::Both,
+                            component: InstallinatorComponent::All,
                             description: "Fake step".into(),
                             index: 0,
                             component_index: 0,

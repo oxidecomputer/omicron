@@ -111,11 +111,23 @@ pub(crate) enum LookupIdKind {
     Hashes { host_phase_2: ArtifactHash, control_plane: ArtifactHash },
 }
 
+#[derive(Clone, Debug)]
+pub(crate) struct MeasurementArtifact {
+    pub(crate) hash: ArtifactHash,
+    pub(crate) name: String,
+}
+
+pub(crate) struct MeasurementArtifactHashId {
+    pub(crate) hash: ArtifactHashId,
+    pub(crate) name: String,
+}
+
 /// The host phase 2 and control plane hashes to download.
 #[derive(Clone, Debug)]
 pub(crate) struct ArtifactsToDownload {
     pub(crate) host_phase_2: ArtifactHash,
     pub(crate) control_plane: ArtifactHash,
+    pub(crate) measurement_corpus: Vec<MeasurementArtifact>,
 }
 
 impl ArtifactsToDownload {
@@ -131,6 +143,20 @@ impl ArtifactsToDownload {
             kind: KnownArtifactKind::ControlPlane.into(),
             hash: self.control_plane,
         }
+    }
+
+    pub(crate) fn measurement_corpus(&self) -> Vec<MeasurementArtifactHashId> {
+        self.measurement_corpus
+            .clone()
+            .into_iter()
+            .map(|x| MeasurementArtifactHashId {
+                name: x.name,
+                hash: ArtifactHashId {
+                    kind: KnownArtifactKind::MeasurementCorpus.into(),
+                    hash: x.hash,
+                },
+            })
+            .collect()
     }
 }
 
