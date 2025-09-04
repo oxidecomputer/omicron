@@ -140,6 +140,8 @@ fn default_vpc_subnets_url() -> String {
     format!("/v1/vpc-subnets?{}&vpc=default", get_project_selector())
 }
 
+const SLEDS_URL: &'static str = "/v1/system/hardware/sleds";
+
 pub async fn create_project_and_pool(
     client: &ClientTestContext,
 ) -> views::Project {
@@ -764,6 +766,7 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
         Vec::<params::ExternalIpCreate>::new(),
         true,
         Default::default(),
+        None,
     )
     .await;
     let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
@@ -939,6 +942,7 @@ async fn test_instance_migrate_v2p_and_routes(
         Vec::<params::ExternalIpCreate>::new(),
         true,
         Default::default(),
+        None,
     )
     .await;
     let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
@@ -1079,6 +1083,388 @@ async fn test_instance_migrate_v2p_and_routes(
             .await;
         }
     }
+}
+
+#[nexus_test]
+async fn test_instance_migration_compatible_cpu_platforms(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    use nexus_db_model::Migration;
+    use omicron_common::api::internal::nexus::MigrationState;
+    async fn migration_fetch(
+        cptestctx: &ControlPlaneTestContext,
+        migration_id: Uuid,
+    ) -> Migration {
+        use async_bb8_diesel::AsyncRunQueryDsl;
+        use diesel::prelude::*;
+        use nexus_db_schema::schema::migration::dsl;
+
+        let datastore =
+            cptestctx.server.server_context().nexus.datastore().clone();
+        let db_state = dsl::migration
+            // N.B. that for the purposes of this test, we explicitly should
+            // *not* filter out migrations that are marked as deleted, as the
+            // migration record is marked as deleted once the migration completes.
+            .filter(dsl::id.eq(migration_id))
+            .select(Migration::as_select())
+            .get_results_async::<Migration>(
+                &*datastore.pool_connection_for_tests().await.unwrap(),
+            )
+            .await
+            .unwrap();
+
+        info!(&cptestctx.logctx.log, "refetched migration info from db";
+                "migration" => ?db_state);
+
+        db_state.into_iter().next().unwrap()
+    }
+
+    let client = &cptestctx.external_client;
+    let internal_client = &cptestctx.internal_client;
+    let apictx = &cptestctx.server.server_context();
+    let nexus = &apictx.nexus;
+    let instance_name = "bird-ecology";
+
+    // Set up a second sled-agent representing a sled with a Turin processor.
+    // The instance itself requires only Milan, so it should be able to migrate
+    // both directions.
+    let nexus_address =
+        cptestctx.server.get_http_server_internal_address().await;
+
+    let config = omicron_sled_agent::sim::Config::for_testing(
+        SledUuid::new_v4(),
+        omicron_sled_agent::sim::SimMode::Explicit,
+        Some(nexus_address),
+        Some(&camino::Utf8Path::new("/an/unused/update/directory")),
+        omicron_sled_agent::sim::ZpoolConfig::None,
+        nexus_sled_agent_shared::inventory::SledCpuFamily::AmdTurin,
+    );
+    let new_sled_id = config.id.clone();
+
+    let _turin_sled = start_sled_and_wait(cptestctx, config).await;
+
+    let first_sled_id = cptestctx.first_sled_id();
+
+    create_project_and_pool(&client).await;
+    let instance_url = get_instance_url(instance_name);
+
+    // Explicitly create an instance with no disks. Simulated sled agent assumes
+    // that disks are co-located with their instances.
+    let instance = nexus_test_utils::resource_helpers::create_instance_with(
+        client,
+        PROJECT_NAME,
+        instance_name,
+        &params::InstanceNetworkInterfaceAttachment::Default,
+        Vec::<params::InstanceDiskAttachment>::new(),
+        Vec::<params::ExternalIpCreate>::new(),
+        true,
+        Default::default(),
+        Some(InstanceCpuPlatform::AmdMilan),
+    )
+    .await;
+    let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
+
+    // Poke the instance into an active state.
+    instance_simulate(nexus, &instance_id).await;
+    let instance_next = instance_get(&client, &instance_url).await;
+    assert_eq!(instance_next.runtime.run_state, InstanceState::Running);
+
+    let sled_info = nexus
+        .active_instance_info(&instance_id, None)
+        .await
+        .unwrap()
+        .expect("running instance should have a sled");
+
+    let original_sled = sled_info.sled_id;
+    let dst_sled_id = if original_sled == first_sled_id {
+        new_sled_id
+    } else {
+        first_sled_id
+    };
+
+    let migrate_url =
+        format!("/instances/{}/migrate", &instance_id.to_string());
+    let instance = NexusRequest::new(
+        RequestBuilder::new(internal_client, Method::POST, &migrate_url)
+            .body(Some(&InstanceMigrateRequest {
+                dst_sled_id: dst_sled_id.into_untyped_uuid(),
+            }))
+            .expect_status(Some(StatusCode::OK)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body::<Instance>()
+    .unwrap();
+
+    let new_sled_info = nexus
+        .active_instance_info(&instance_id, None)
+        .await
+        .unwrap()
+        .expect("running instance should have a sled");
+
+    let current_sled = new_sled_info.sled_id;
+    assert_eq!(current_sled, original_sled);
+
+    // Ensure that both sled agents report that the migration is in progress.
+    let migration_id = {
+        let datastore = apictx.nexus.datastore();
+        let opctx = OpContext::for_tests(
+            cptestctx.logctx.log.new(o!()),
+            datastore.clone(),
+        );
+        let (.., authz_instance) = LookupPath::new(&opctx, datastore)
+            .instance_id(instance.identity.id)
+            .lookup_for(nexus_db_queries::authz::Action::Read)
+            .await
+            .unwrap();
+        datastore
+            .instance_refetch(&opctx, &authz_instance)
+            .await
+            .unwrap()
+            .runtime_state
+            .migration_id
+            .expect("since we've started a migration, the instance record must have a migration id!")
+    };
+    let migration = dbg!(migration_fetch(cptestctx, migration_id).await);
+    assert_eq!(migration.target_state, MigrationState::Pending.into());
+    assert_eq!(migration.source_state, MigrationState::Pending.into());
+
+    let info = nexus
+        .active_instance_info(&instance_id, None)
+        .await
+        .unwrap()
+        .expect("instance should be on a sled");
+    let src_propolis_id = info.propolis_id;
+    let dst_propolis_id =
+        info.dst_propolis_id.expect("instance should have a migration target");
+
+    // Simulate the migration. We will use `instance_single_step_on_sled` to
+    // single-step both sled-agents through the migration state machine and
+    // ensure that the migration state looks nice at each step.
+    instance_simulate_migration_source(
+        cptestctx,
+        nexus,
+        original_sled,
+        src_propolis_id,
+        migration_id,
+    )
+    .await;
+
+    // Move source to "migrating".
+    vmm_single_step_on_sled(cptestctx, nexus, original_sled, src_propolis_id)
+        .await;
+    vmm_single_step_on_sled(cptestctx, nexus, original_sled, src_propolis_id)
+        .await;
+
+    let migration = dbg!(migration_fetch(cptestctx, migration_id).await);
+    assert_eq!(migration.source_state, MigrationState::InProgress.into());
+    assert_eq!(migration.target_state, MigrationState::Pending.into());
+    let instance = instance_get(&client, &instance_url).await;
+    assert_eq!(instance.runtime.run_state, InstanceState::Migrating);
+
+    // Move target to "migrating".
+    vmm_single_step_on_sled(cptestctx, nexus, dst_sled_id, dst_propolis_id)
+        .await;
+    vmm_single_step_on_sled(cptestctx, nexus, dst_sled_id, dst_propolis_id)
+        .await;
+
+    let migration = dbg!(migration_fetch(cptestctx, migration_id).await);
+    assert_eq!(migration.source_state, MigrationState::InProgress.into());
+    assert_eq!(migration.target_state, MigrationState::InProgress.into());
+    let instance = instance_get(&client, &instance_url).await;
+    assert_eq!(instance.runtime.run_state, InstanceState::Migrating);
+
+    // Move the source to "completed"
+    vmm_simulate_on_sled(cptestctx, nexus, original_sled, src_propolis_id)
+        .await;
+
+    let migration = dbg!(migration_fetch(cptestctx, migration_id).await);
+    assert_eq!(migration.source_state, MigrationState::Completed.into());
+    assert_eq!(migration.target_state, MigrationState::InProgress.into());
+    let instance = dbg!(instance_get(&client, &instance_url).await);
+    assert_eq!(instance.runtime.run_state, InstanceState::Migrating);
+
+    // Move the target to "completed".
+    vmm_simulate_on_sled(cptestctx, nexus, dst_sled_id, dst_propolis_id).await;
+
+    instance_wait_for_state(&client, instance_id, InstanceState::Running).await;
+
+    let current_sled = nexus
+        .active_instance_info(&instance_id, None)
+        .await
+        .unwrap()
+        .expect("migrated instance should still have a sled")
+        .sled_id;
+
+    assert_eq!(current_sled, dst_sled_id);
+
+    let migration = dbg!(migration_fetch(cptestctx, migration_id).await);
+    assert_eq!(migration.target_state, MigrationState::Completed.into());
+    assert_eq!(migration.source_state, MigrationState::Completed.into());
+}
+
+// An instance that requires a Turin CPU will be placed on the Turin sled, and
+// if we're told to migrate it to a Milan sled, we'll error instead.
+#[nexus_test]
+async fn test_instance_migration_incompatible_cpu_platforms(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let internal_client = &cptestctx.internal_client;
+    let apictx = &cptestctx.server.server_context();
+    let nexus = &apictx.nexus;
+    let instance_name = "bird-ecology";
+
+    // Set up a second sled-agent representing a sled with a Turin processor.
+    // The instance will require Turin, so it will be placed here.
+    let nexus_address =
+        cptestctx.server.get_http_server_internal_address().await;
+
+    let config = omicron_sled_agent::sim::Config::for_testing(
+        SledUuid::new_v4(),
+        omicron_sled_agent::sim::SimMode::Explicit,
+        Some(nexus_address),
+        Some(&camino::Utf8Path::new("/an/unused/update/directory")),
+        omicron_sled_agent::sim::ZpoolConfig::None,
+        nexus_sled_agent_shared::inventory::SledCpuFamily::AmdTurin,
+    );
+    let turin_sled_id = config.id.clone();
+
+    let _turin_sled = start_sled_and_wait(cptestctx, config).await;
+
+    let milan_sled_id = cptestctx.first_sled_id();
+
+    create_project_and_pool(&client).await;
+    let instance_url = get_instance_url(instance_name);
+
+    // Explicitly create an instance with no disks. Simulated sled agent assumes
+    // that disks are co-located with their instances.
+    let instance = nexus_test_utils::resource_helpers::create_instance_with(
+        client,
+        PROJECT_NAME,
+        instance_name,
+        &params::InstanceNetworkInterfaceAttachment::Default,
+        Vec::<params::InstanceDiskAttachment>::new(),
+        Vec::<params::ExternalIpCreate>::new(),
+        true,
+        Default::default(),
+        Some(InstanceCpuPlatform::AmdTurin),
+    )
+    .await;
+    let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
+
+    // Poke the instance into an active state.
+    instance_simulate(nexus, &instance_id).await;
+    let instance_next = instance_get(&client, &instance_url).await;
+    assert_eq!(instance_next.runtime.run_state, InstanceState::Running);
+
+    let sled_info = nexus
+        .active_instance_info(&instance_id, None)
+        .await
+        .unwrap()
+        .expect("running instance should have a sled");
+
+    // If the Turin-requiring instance isn't on the Turin sled, either the
+    // default simulated sled is now Turin-compatible or something is very
+    // wrong.
+    assert_eq!(sled_info.sled_id, turin_sled_id);
+
+    let migrate_url =
+        format!("/instances/{}/migrate", &instance_id.to_string());
+    NexusRequest::new(
+        RequestBuilder::new(internal_client, Method::POST, &migrate_url)
+            .body(Some(&InstanceMigrateRequest {
+                dst_sled_id: milan_sled_id.into_untyped_uuid(),
+            }))
+            .expect_status(Some(http::StatusCode::INSUFFICIENT_STORAGE)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("migration should fail with 507 Insufficient Storage");
+}
+
+#[nexus_test]
+async fn test_instance_migration_unknown_sled_type(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let internal_client = &cptestctx.internal_client;
+    let apictx = &cptestctx.server.server_context();
+    let nexus = &apictx.nexus;
+    let instance_name = "bird-ecology";
+
+    // Set up a second sled-agent representing a sled with unknown processor
+    // type. We won't be able to migrate to (or from) here.
+    let nexus_address =
+        cptestctx.server.get_http_server_internal_address().await;
+
+    let config = omicron_sled_agent::sim::Config::for_testing(
+        SledUuid::new_v4(),
+        omicron_sled_agent::sim::SimMode::Explicit,
+        Some(nexus_address),
+        Some(&camino::Utf8Path::new("/an/unused/update/directory")),
+        omicron_sled_agent::sim::ZpoolConfig::None,
+        nexus_sled_agent_shared::inventory::SledCpuFamily::Unknown,
+    );
+    let new_sled_id = config.id.clone();
+
+    let _unknown_sled = start_sled_and_wait(cptestctx, config).await;
+
+    let first_sled_id = cptestctx.first_sled_id();
+
+    create_project_and_pool(&client).await;
+    let instance_url = get_instance_url(instance_name);
+
+    // Explicitly create an instance with no disks. Simulated sled agent assumes
+    // that disks are co-located with their instances.
+    let instance = nexus_test_utils::resource_helpers::create_instance_with(
+        client,
+        PROJECT_NAME,
+        instance_name,
+        &params::InstanceNetworkInterfaceAttachment::Default,
+        Vec::<params::InstanceDiskAttachment>::new(),
+        Vec::<params::ExternalIpCreate>::new(),
+        true,
+        Default::default(),
+        None,
+    )
+    .await;
+    let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
+
+    // Poke the instance into an active state.
+    instance_simulate(nexus, &instance_id).await;
+    let instance_next = instance_get(&client, &instance_url).await;
+    assert_eq!(instance_next.runtime.run_state, InstanceState::Running);
+
+    let sled_info = nexus
+        .active_instance_info(&instance_id, None)
+        .await
+        .unwrap()
+        .expect("running instance should have a sled");
+
+    let original_sled = sled_info.sled_id;
+    let dst_sled_id = if original_sled == first_sled_id {
+        new_sled_id
+    } else {
+        first_sled_id
+    };
+
+    let migrate_url =
+        format!("/instances/{}/migrate", &instance_id.to_string());
+    NexusRequest::new(
+        RequestBuilder::new(internal_client, Method::POST, &migrate_url)
+            .body(Some(&InstanceMigrateRequest {
+                dst_sled_id: dst_sled_id.into_untyped_uuid(),
+            }))
+            .expect_status(Some(http::StatusCode::INSUFFICIENT_STORAGE)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("expected migration to fail with 507 Insufficient Storage");
 }
 
 // Verifies that if a request to reboot or stop an instance fails because of a
@@ -1293,6 +1679,7 @@ async fn test_instance_failed_when_on_expunged_sled(
                 Vec::<params::ExternalIpCreate>::new(),
                 true,
                 Some(auto_restart),
+                None,
             )
             .await;
             let instance_id =
@@ -1644,6 +2031,7 @@ async fn make_forgotten_instance(
         Vec::<params::ExternalIpCreate>::new(),
         true,
         Some(auto_restart),
+        None,
     )
     .await;
     let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
@@ -1873,6 +2261,7 @@ async fn test_instance_metrics_with_migration(
         Vec::<params::ExternalIpCreate>::new(),
         true,
         Default::default(),
+        None,
     )
     .await;
     let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
@@ -3287,6 +3676,7 @@ async fn test_instance_update_network_interface_transit_ips(
         vec![],
         false,
         Default::default(),
+        None,
     )
     .await;
 
@@ -6160,6 +6550,53 @@ async fn test_cannot_provision_instance_beyond_ram_capacity(
     expect_instance_start_ok(client, configs[2].0).await;
 }
 
+async fn start_sled_and_wait(
+    cptestctx: &ControlPlaneTestContext,
+    config: omicron_sled_agent::sim::Config,
+) -> omicron_sled_agent::sim::Server {
+    let client = &cptestctx.external_client;
+
+    // List the number of sleds currently; we'll wait until this is one higher
+    // as evidence the simulated sled-agent is fully ready.
+    let items = objects_list_page_authz::<Sled>(&client, SLEDS_URL).await.items;
+
+    let initial_sled_count = items.len();
+
+    let new_sled_agent_log =
+        cptestctx.logctx.log.new(o!( "sled_id" => config.id.to_string() ));
+
+    // We have to hold on to the new simulated sled-agent otherwise it will be
+    // immediately dropped and shut down.
+    let agent = start_sled_agent_with_config(
+        new_sled_agent_log,
+        &config,
+        3,
+        &cptestctx.first_sled_agent().simulated_upstairs,
+    )
+    .await
+    .expect("can start test sled-agent");
+
+    // Wait for Nexus to report that the new sled is present..
+    poll::wait_for_condition(
+        || async {
+            let items =
+                objects_list_page_authz::<Sled>(&client, SLEDS_URL).await.items;
+
+            if items.len() == initial_sled_count + 1 {
+                Ok(())
+            } else {
+                Err(CondCheckError::<()>::NotYet)
+            }
+        },
+        &Duration::from_secs(5),
+        &Duration::from_secs(60),
+    )
+    .await
+    .unwrap();
+
+    agent
+}
+
 #[nexus_test]
 async fn test_can_start_instance_with_cpu_platform(
     cptestctx: &ControlPlaneTestContext,
@@ -6237,59 +6674,25 @@ async fn test_can_start_instance_with_cpu_platform(
     // We'd like to see the instance actually start, so add a Turin sled and try again.
 
     // There should be one sled from `#[nexus_test]`, check that first.
-    let sleds_url = "/v1/system/hardware/sleds";
     assert_eq!(
-        objects_list_page_authz::<Sled>(&client, &sleds_url).await.items.len(),
+        objects_list_page_authz::<Sled>(&client, SLEDS_URL).await.items.len(),
         1
     );
 
     let nexus_address =
         cptestctx.server.get_http_server_internal_address().await;
 
-    let fake_turin_sled_id = SledUuid::new_v4();
-    let turin_sled_agent_log = cptestctx
-        .logctx
-        .log
-        .new(o!( "sled_id" => fake_turin_sled_id.to_string() ));
-
     let config = omicron_sled_agent::sim::Config::for_testing(
-        fake_turin_sled_id,
+        SledUuid::new_v4(),
         omicron_sled_agent::sim::SimMode::Explicit,
         Some(nexus_address),
         Some(&camino::Utf8Path::new("/an/unused/update/directory")),
         omicron_sled_agent::sim::ZpoolConfig::None,
         nexus_sled_agent_shared::inventory::SledCpuFamily::AmdTurin,
     );
+    let new_sled_id = config.id.clone();
 
-    // We have to hold on to the new simulated sled-agent otherwise it will be immediately dropped
-    // and shut down.
-    let _agent = start_sled_agent_with_config(
-        turin_sled_agent_log,
-        &config,
-        3,
-        &cptestctx.first_sled_agent().simulated_upstairs,
-    )
-    .await
-    .expect("can start test sled-agent");
-
-    // Wait for Nexus to report that the new sled is present..
-    poll::wait_for_condition(
-        || async {
-            let items = objects_list_page_authz::<Sled>(&client, &sleds_url)
-                .await
-                .items;
-
-            if items.len() == 2 {
-                Ok(())
-            } else {
-                Err(CondCheckError::<()>::NotYet)
-            }
-        },
-        &Duration::from_secs(5),
-        &Duration::from_secs(60),
-    )
-    .await
-    .unwrap();
+    let _turin_sled = start_sled_and_wait(cptestctx, config).await;
 
     // Finally, start the Turin-requiring instance for real!
     expect_instance_start_ok(client, instance.identity.name.as_str()).await;
@@ -6302,7 +6705,7 @@ async fn test_can_start_instance_with_cpu_platform(
         .expect("running instance should have a sled")
         .sled_id;
 
-    assert_eq!(instance_sled, fake_turin_sled_id);
+    assert_eq!(instance_sled, new_sled_id);
 }
 
 #[nexus_test]
@@ -6833,6 +7236,7 @@ async fn test_instance_attach_several_external_ips(
         external_ip_create,
         true,
         Default::default(),
+        None,
     )
     .await;
 
@@ -6939,6 +7343,7 @@ async fn create_instance_with_pool(
         }],
         true,
         Default::default(),
+        None,
     )
     .await
 }

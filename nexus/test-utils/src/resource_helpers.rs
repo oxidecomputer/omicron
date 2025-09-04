@@ -46,6 +46,7 @@ use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Instance;
 use omicron_common::api::external::InstanceAutoRestartPolicy;
 use omicron_common::api::external::InstanceCpuCount;
+use omicron_common::api::external::InstanceCpuPlatform;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::RouteDestination;
@@ -628,6 +629,7 @@ pub async fn create_instance(
         Vec::<params::ExternalIpCreate>::new(),
         true,
         Default::default(),
+        None,
     )
     .await
 }
@@ -644,6 +646,7 @@ pub async fn create_instance_with(
     external_ips: Vec<params::ExternalIpCreate>,
     start: bool,
     auto_restart_policy: Option<InstanceAutoRestartPolicy>,
+    cpu_platform: Option<InstanceCpuPlatform>,
 ) -> Instance {
     let url = format!("/v1/instances?project={}", project_name);
 
@@ -666,7 +669,7 @@ pub async fn create_instance_with(
             external_ips,
             disks,
             boot_disk: None,
-            cpu_platform: None,
+            cpu_platform,
             start,
             auto_restart_policy,
             anti_affinity_groups: Vec::new(),

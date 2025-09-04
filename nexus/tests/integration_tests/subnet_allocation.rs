@@ -159,6 +159,7 @@ async fn test_subnet_allocation(cptestctx: &ControlPlaneTestContext) {
             Vec::<params::ExternalIpCreate>::new(),
             true,
             Default::default(),
+            None,
         )
         .await;
     }
