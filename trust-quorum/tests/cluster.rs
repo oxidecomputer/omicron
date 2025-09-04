@@ -172,7 +172,7 @@ impl TestState {
         // bootstrap network. We could choose not to actually deliver it when
         // applying the event, but that means we have events that don't actually
         // do anything in our event log, which is quite misleading.
-        assert!(!self.tq_state.faults.crashed_nodes.contains(destination));
+        assert!(!self.tq_state.crashed_nodes.contains(destination));
 
         // We pop from the back and push on the front
         let envelope = self
@@ -192,7 +192,7 @@ impl TestState {
             .tq_state
             .member_universe
             .iter()
-            .filter(|m| !self.tq_state.faults.crashed_nodes.contains(&m))
+            .filter(|m| !self.tq_state.crashed_nodes.contains(&m))
             .peekable();
 
         if faultable.peek().is_none() {
@@ -222,12 +222,12 @@ impl TestState {
         id: Selector,
         connection_order_indexes: Vec<Index>,
     ) -> Vec<Event> {
-        if self.tq_state.faults.crashed_nodes.is_empty() {
+        if self.tq_state.crashed_nodes.is_empty() {
             return vec![];
         }
 
         // Choose the node to restart
-        let id = id.select(self.tq_state.faults.crashed_nodes.iter()).clone();
+        let id = id.select(self.tq_state.crashed_nodes.iter()).clone();
 
         // Now order the peer connections
 
@@ -236,7 +236,7 @@ impl TestState {
             .tq_state
             .member_universe
             .iter()
-            .filter(|id| !self.tq_state.faults.crashed_nodes.contains(id))
+            .filter(|id| !self.tq_state.crashed_nodes.contains(id))
             .cloned()
             .collect();
 
@@ -272,7 +272,7 @@ impl TestState {
             let mut loadable = c
                 .members
                 .iter()
-                .filter(|m| !self.tq_state.faults.crashed_nodes.contains(m))
+                .filter(|m| !self.tq_state.crashed_nodes.contains(m))
                 .peekable();
             if loadable.peek().is_some() {
                 let id = selector.select(loadable).clone();
@@ -311,7 +311,7 @@ impl TestState {
         let mut loadable = c
             .members
             .iter()
-            .filter(|m| !self.tq_state.faults.crashed_nodes.contains(m))
+            .filter(|m| !self.tq_state.crashed_nodes.contains(m))
             .peekable();
         if loadable.peek().is_none() {
             return vec![];
@@ -329,12 +329,7 @@ impl TestState {
         }
 
         // If the coordinator is currently down then Nexus should abort.
-        if self
-            .tq_state
-            .faults
-            .crashed_nodes
-            .contains(&latest_config.coordinator)
-        {
+        if self.tq_state.crashed_nodes.contains(&latest_config.coordinator) {
             events.push(Event::AbortConfiguration(latest_config.epoch));
             return events;
         }
@@ -387,7 +382,7 @@ impl TestState {
         let committable: Vec<_> = latest_config
             .prepared_members
             .difference(&latest_config.committed_members)
-            .filter(|m| !self.tq_state.faults.crashed_nodes.contains(m))
+            .filter(|m| !self.tq_state.crashed_nodes.contains(m))
             .collect();
 
         if committable.is_empty() {
@@ -534,7 +529,7 @@ impl TestState {
         );
         let mut events = vec![Event::Reconfigure(nexus_config)];
 
-        if self.tq_state.faults.crashed_nodes.contains(&coordinator) {
+        if self.tq_state.crashed_nodes.contains(&coordinator) {
             // This simulates a timeout on the reply from the coordinator which
             // triggers an abort.
             events.push(Event::AbortConfiguration(epoch));
