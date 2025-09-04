@@ -89,6 +89,7 @@ impl BackgroundTask for ChickenSwitchesLoader {
 #[cfg(test)]
 mod test {
     use super::*;
+    use async_bb8_diesel::AsyncRunQueryDsl;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::{
         PlannerChickenSwitches, ReconfiguratorChickenSwitches,
@@ -107,15 +108,52 @@ mod test {
             datastore.clone(),
         );
 
+        // `#[nexus_test]` inserts an initial set of chicken switch values to
+        // disable planning in general; let's remove that value so we can test
+        // from a clean slate.
+        //
+        // Chicken switch values are supposed to form a continuous history, so
+        // there's no datastore method to delete existing values. We'll go
+        // behind its back and delete them directly.
+        {
+            use nexus_db_schema::schema::reconfigurator_chicken_switches::dsl;
+            let conn = datastore.pool_connection_for_tests().await.unwrap();
+            diesel::delete(dsl::reconfigurator_chicken_switches)
+                .execute_async(&*conn)
+                .await
+                .expect("removed nexus_test default chicken switches");
+        }
+
         let mut task = ChickenSwitchesLoader::new(datastore.clone());
+
+        // Initial state should be `NotYetLoaded`.
+        let mut rx = task.watcher();
+        assert_eq!(
+            *rx.borrow_and_update(),
+            ReconfiguratorChickenSwitchesLoaderState::NotYetLoaded
+        );
+
+        // We haven't inserted anything into the DB, so the initial activation
+        // should populate the channel with our default values.
+        let default_switches = ReconfiguratorChickenSwitchesView::default();
         let out = task.activate(&opctx).await;
-        assert_eq!(out["chicken_switches_updated"], false);
+        assert_eq!(out["chicken_switches_updated"], true);
+        assert!(rx.has_changed().unwrap());
+        assert_eq!(
+            *rx.borrow_and_update(),
+            ReconfiguratorChickenSwitchesLoaderState::Loaded(
+                default_switches.clone()
+            )
+        );
+
+        // Insert an initial set of switches.
+        let expected_switches = ReconfiguratorChickenSwitches {
+            planner_enabled: !default_switches.switches.planner_enabled,
+            planner_switches: PlannerChickenSwitches::default(),
+        };
         let switches = ReconfiguratorChickenSwitchesParam {
             version: 1,
-            switches: ReconfiguratorChickenSwitches {
-                planner_enabled: true,
-                planner_switches: PlannerChickenSwitches::default(),
-            },
+            switches: expected_switches.clone(),
         };
         datastore
             .reconfigurator_chicken_switches_insert_latest_version(
@@ -125,14 +163,31 @@ mod test {
             .unwrap();
         let out = task.activate(&opctx).await;
         assert_eq!(out["chicken_switches_updated"], true);
+        assert!(rx.has_changed().unwrap());
+        {
+            let view = match rx.borrow_and_update().clone() {
+                ReconfiguratorChickenSwitchesLoaderState::NotYetLoaded => {
+                    panic!("unexpected value")
+                }
+                ReconfiguratorChickenSwitchesLoaderState::Loaded(view) => view,
+            };
+            assert_eq!(view.version, 1);
+            assert_eq!(view.switches, expected_switches);
+        }
+
+        // Activating again should not change things.
         let out = task.activate(&opctx).await;
         assert_eq!(out["chicken_switches_updated"], false);
+        assert!(!rx.has_changed().unwrap());
+
+        // Insert a new version.
+        let expected_switches = ReconfiguratorChickenSwitches {
+            planner_enabled: !expected_switches.planner_enabled,
+            planner_switches: PlannerChickenSwitches::default(),
+        };
         let switches = ReconfiguratorChickenSwitchesParam {
             version: 2,
-            switches: ReconfiguratorChickenSwitches {
-                planner_enabled: false,
-                planner_switches: PlannerChickenSwitches::default(),
-            },
+            switches: expected_switches.clone(),
         };
         datastore
             .reconfigurator_chicken_switches_insert_latest_version(
@@ -142,5 +197,16 @@ mod test {
             .unwrap();
         let out = task.activate(&opctx).await;
         assert_eq!(out["chicken_switches_updated"], true);
+        assert!(rx.has_changed().unwrap());
+        {
+            let view = match rx.borrow_and_update().clone() {
+                ReconfiguratorChickenSwitchesLoaderState::NotYetLoaded => {
+                    panic!("unexpected value")
+                }
+                ReconfiguratorChickenSwitchesLoaderState::Loaded(view) => view,
+            };
+            assert_eq!(view.version, 2);
+            assert_eq!(view.switches, expected_switches);
+        }
     }
 }

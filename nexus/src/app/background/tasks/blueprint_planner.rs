@@ -297,7 +297,7 @@ mod test {
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::{
         PendingMgsUpdates, PlannerChickenSwitches,
-        ReconfiguratorChickenSwitches,
+        ReconfiguratorChickenSwitches, ReconfiguratorChickenSwitchesView,
     };
     use omicron_uuid_kinds::OmicronZoneUuid;
 
@@ -342,14 +342,16 @@ mod test {
 
         // Enable the planner
         let (_tx, chicken_switches_collector_rx) =
-            watch::channel(ReconfiguratorChickenSwitchesView {
-                version: 1,
-                switches: ReconfiguratorChickenSwitches {
-                    planner_enabled: true,
-                    planner_switches: PlannerChickenSwitches::default(),
+            watch::channel(ReconfiguratorChickenSwitchesLoaderState::Loaded(
+                ReconfiguratorChickenSwitchesView {
+                    version: 1,
+                    switches: ReconfiguratorChickenSwitches {
+                        planner_enabled: true,
+                        planner_switches: PlannerChickenSwitches::default(),
+                    },
+                    time_modified: now_db_precision(),
                 },
-                time_modified: now_db_precision(),
-            });
+            ));
 
         // Finally, spin up the planner background task.
         let mut planner = BlueprintPlanner::new(
