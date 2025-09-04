@@ -208,38 +208,35 @@ pub(crate) fn plan_mgs_updates(
             };
         }
 
-        match try_make_update(log, board, inventory, current_artifacts) {
-            (Some((update, mut host_phase_2)), mut skipped_updates) => {
+        let PendingMgsUpdateActions {
+            pending_update,
+            pending_host_os_phase2_changes: mut host_phase_2,
+            mut skipped_updates,
+        } = try_make_update(log, board, inventory, current_artifacts);
+
+        match pending_update {
+            Some(update) => {
                 info!(log, "configuring MGS-driven update"; &update);
                 pending_updates.insert(update);
-                pending_host_phase_2_changes.append(&mut host_phase_2);
-                // TODO-K: Remove these debugging logs
-                //for skipped in &skipped_updates.updates {
-                //    warn!(
-                //        log,
-                //        "update to {} {} has been skipped: {}",
-                //        skipped.baseboard_id,
-                //        skipped.component,
-                //        skipped.reason
-                //    );
-                //}
-                skipped_mgs_updates.append(&mut skipped_updates);
             }
-            (None, mut skipped_updates) => {
-                info!(log, "skipping board for MGS-driven update"; board);
-                // TODO-K: Remove these debugging logs
-                //for skipped in &skipped_updates.updates {
-                //    warn!(
-                //        log,
-                //        "update to {} {} has been skipped: {}",
-                //        skipped.baseboard_id,
-                //        skipped.component,
-                //        skipped.reason
-                //    );
-                //}
-                skipped_mgs_updates.append(&mut skipped_updates);
+            None => {
+                info!(log, "skipping board for MGS-driven update"; board)
             }
         }
+
+        // TODO-K: Remove debugging logs
+        //for skipped in &skipped_updates.updates {
+        //    warn!(
+        //        log,
+        //        "update to {} {} has been skipped: {}",
+        //        skipped.baseboard_id,
+        //        skipped.component,
+        //        skipped.reason
+        //    );
+        //}
+
+        pending_host_phase_2_changes.append(&mut host_phase_2);
+        skipped_mgs_updates.append(&mut skipped_updates);
     }
 
     info!(log, "ran out of boards for MGS-driven update");
@@ -523,6 +520,13 @@ fn mgs_update_status_inactive_versions(
     }
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct PendingMgsUpdateActions {
+    pending_update: Option<PendingMgsUpdate>,
+    pending_host_os_phase2_changes: PendingHostPhase2Changes,
+    skipped_updates: SkippedMgsUpdates,
+}
+
 /// Determine if the given baseboard needs any MGS-driven update (e.g., update
 /// to its SP, RoT, etc.).  If so, returns the update and a set of changes that
 /// need to be made to sled configs related to host phase 2 images (this set
@@ -532,9 +536,8 @@ fn try_make_update(
     baseboard_id: &Arc<BaseboardId>,
     inventory: &Collection,
     current_artifacts: &TufRepoDescription,
-    // TODO-K: This looks ugly, a struct should be better
-) -> (Option<(PendingMgsUpdate, PendingHostPhase2Changes)>, SkippedMgsUpdates) {
-    let mut skipped_mgs_updates = SkippedMgsUpdates::new();
+) -> PendingMgsUpdateActions {
+    let mut skipped_updates = SkippedMgsUpdates::new();
     // We try MGS-driven update components in a hardcoded priority order until
     // any of them returns `Some`.  The order is described in RFD 565 section
     // "Update Sequence".
@@ -567,14 +570,17 @@ fn try_make_update(
             {
                 // We have a non-host update; there are no pending host phase 2 changes
                 // necessary.
-                return (
-                    Some((update, PendingHostPhase2Changes::empty())),
-                    skipped_mgs_updates,
-                );
+                // TODO-K: Clean up all of the returns
+                return PendingMgsUpdateActions {
+                    pending_update: Some(update),
+                    pending_host_os_phase2_changes:
+                        PendingHostPhase2Changes::empty(),
+                    skipped_updates,
+                };
             }
         }
         Err(e) => {
-            skipped_mgs_updates.push(SkippedMgsUpdate {
+            skipped_updates.push(SkippedMgsUpdate {
                 baseboard_id: baseboard_id.clone(),
                 component: MgsUpdateComponent::RotBootloader,
                 reason: e,
@@ -608,18 +614,37 @@ fn try_make_update(
         current_artifacts,
     ) {
         Ok(p) => match p {
-            Some((u, c)) => return (Some((u, c)), skipped_mgs_updates),
-            None => return (None, skipped_mgs_updates),
+            Some((update, pending_host_os_phase2_changes)) => {
+                return PendingMgsUpdateActions {
+                    pending_update: Some(update),
+                    pending_host_os_phase2_changes,
+                    skipped_updates,
+                };
+            }
+            //  (Some((u, c)), skipped_updates),
+            None => {
+                return PendingMgsUpdateActions {
+                    pending_update: None,
+                    pending_host_os_phase2_changes:
+                        PendingHostPhase2Changes::empty(),
+                    skipped_updates,
+                };
+            }
         },
         Err(e) => {
-            skipped_mgs_updates.push(SkippedMgsUpdate {
+            skipped_updates.push(SkippedMgsUpdate {
                 baseboard_id: baseboard_id.clone(),
                 component: MgsUpdateComponent::HostOs,
                 reason: e,
             });
             // TODO-K: remove debugging log
-            // warn!(log, "HERE2: {:?}", skipped_mgs_updates);
-            return (None, skipped_mgs_updates);
+            // warn!(log, "HERE2: {:?}", skipped_updates);
+            return PendingMgsUpdateActions {
+                pending_update: None,
+                pending_host_os_phase2_changes: PendingHostPhase2Changes::empty(
+                ),
+                skipped_updates,
+            };
         }
     }
 }
