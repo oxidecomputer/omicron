@@ -740,7 +740,8 @@ impl super::Nexus {
 
         // We've potentially updated the list of DNS servers and the DNS
         // configuration for both internal and external DNS, plus the Silo
-        // certificates.  Activate the relevant background tasks.
+        // certificates and target blueprint.  Activate the relevant background
+        // tasks.
         for task in &[
             &self.background_tasks.task_internal_dns_config,
             &self.background_tasks.task_internal_dns_servers,
@@ -748,6 +749,7 @@ impl super::Nexus {
             &self.background_tasks.task_external_dns_servers,
             &self.background_tasks.task_external_endpoints,
             &self.background_tasks.task_inventory_collection,
+            &self.background_tasks.task_blueprint_loader,
         ] {
             self.background_tasks.activate(task);
         }

@@ -1967,7 +1967,7 @@ impl<'a> Planner<'a> {
         // point, for the purposes of restoring redundancy, expunging sleds,
         // etc. However, making this committment will also halt the creation of
         // new sagas temporarily, as handoff from old to new Nexuses occurs.
-        self.blueprint.set_nexus_generation(proposed_generation)?;
+        self.blueprint.set_nexus_generation(proposed_generation);
         report.set_next_generation(proposed_generation);
 
         Ok(report)

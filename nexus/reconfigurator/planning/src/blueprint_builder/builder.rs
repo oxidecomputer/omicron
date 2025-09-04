@@ -364,11 +364,11 @@ pub(crate) enum Operation {
         num_datasets_expunged: usize,
         num_zones_expunged: usize,
     },
-    SetTargetReleaseMinimumGeneration {
+    SetNexusGeneration {
         current_generation: Generation,
         new_generation: Generation,
     },
-    SetNexusGeneration {
+    SetTargetReleaseMinimumGeneration {
         current_generation: Generation,
         new_generation: Generation,
     },
@@ -2336,17 +2336,13 @@ impl<'a> BlueprintBuilder<'a> {
 
     /// Given the current value of `nexus_generation`, set the new value for
     /// this blueprint.
-    pub fn set_nexus_generation(
-        &mut self,
-        new_generation: Generation,
-    ) -> Result<(), Error> {
+    pub fn set_nexus_generation(&mut self, new_generation: Generation) {
         let current_generation = self.nexus_generation;
         self.nexus_generation = new_generation;
         self.record_operation(Operation::SetNexusGeneration {
             current_generation,
             new_generation,
         });
-        Ok(())
     }
 
     /// Allow a test to manually add an external DNS address, which could
