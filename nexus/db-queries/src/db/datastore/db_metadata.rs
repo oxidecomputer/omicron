@@ -24,6 +24,7 @@ use nexus_db_model::EARLIEST_SUPPORTED_VERSION;
 use nexus_db_model::SchemaUpgradeStep;
 use nexus_db_model::SchemaVersion;
 use nexus_types::deployment::BlueprintZoneDisposition;
+use nexus_types::deployment::BlueprintZoneType;
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
@@ -793,20 +794,27 @@ impl DataStore {
     ) -> Result<(), Error> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
 
-        // TODO: Without https://github.com/oxidecomputer/omicron/pull/8863, we
-        // treat all Nexuses as active. Some will become "not_yet", depending on
-        // the Nexus Generation, once it exists.
-        let active_nexus_zones = blueprint
-            .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
-            .filter_map(|(_sled, zone_cfg)| {
-                if zone_cfg.zone_type.is_nexus() {
-                    Some(zone_cfg)
-                } else {
-                    None
+        let mut active = vec![];
+        let mut not_yet = vec![];
+        for (_, zone) in
+            blueprint.all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+        {
+            if let BlueprintZoneType::Nexus(ref nexus) = zone.zone_type {
+                if nexus.nexus_generation == blueprint.nexus_generation {
+                    active.push(zone);
+                } else if nexus.nexus_generation > blueprint.nexus_generation {
+                    not_yet.push(zone);
                 }
-            });
-        let new_nexuses = active_nexus_zones
+            }
+        }
+
+        let active_nexuses = active
+            .into_iter()
             .map(|z| DbMetadataNexus::new(z.id, DbMetadataNexusState::Active))
+            .collect::<Vec<_>>();
+        let not_yet_nexuses = not_yet
+            .into_iter()
+            .map(|z| DbMetadataNexus::new(z.id, DbMetadataNexusState::NotYet))
             .collect::<Vec<_>>();
 
         let conn = &*self.pool_connection_authorized(&opctx).await?;
@@ -816,12 +824,13 @@ impl DataStore {
             opctx,
             blueprint.id,
             |conn| {
-                let new_nexuses = new_nexuses.clone();
+                let nexus_records =
+                    [&active_nexuses[..], &not_yet_nexuses[..]].concat();
                 async move {
                     use nexus_db_schema::schema::db_metadata_nexus::dsl;
 
                     diesel::insert_into(dsl::db_metadata_nexus)
-                        .values(new_nexuses)
+                        .values(nexus_records)
                         .on_conflict(dsl::nexus_id)
                         .do_nothing()
                         .execute_async(conn)
@@ -2069,14 +2078,19 @@ mod test {
     }
 
     fn create_test_blueprint(
-        nexus_zones: Vec<(OmicronZoneUuid, BlueprintZoneDisposition)>,
+        top_level_nexus_generation: Generation,
+        nexus_zones: Vec<(
+            OmicronZoneUuid,
+            BlueprintZoneDisposition,
+            Generation,
+        )>,
     ) -> Blueprint {
         let blueprint_id = BlueprintUuid::new_v4();
         let sled_id = SledUuid::new_v4();
 
         let zones: IdMap<BlueprintZoneConfig> = nexus_zones
             .into_iter()
-            .map(|(zone_id, disposition)| BlueprintZoneConfig {
+            .map(|(zone_id, disposition, nexus_generation)| BlueprintZoneConfig {
                 disposition,
                 id: zone_id,
                 filesystem_pool: ZpoolName::new_external(ZpoolUuid::new_v4()),
@@ -2104,7 +2118,7 @@ mod test {
                         slot: 0,
                         transit_ips: Vec::new(),
                     },
-                    nexus_generation: Generation::new(),
+                    nexus_generation,
                 }),
                 image_source: BlueprintZoneImageSource::InstallDataset,
             })
@@ -2133,7 +2147,7 @@ mod test {
             internal_dns_version: Generation::new(),
             external_dns_version: Generation::new(),
             target_release_minimum_generation: Generation::new(),
-            nexus_generation: Generation::new(),
+            nexus_generation: top_level_nexus_generation,
             cockroachdb_fingerprint: String::new(),
             cockroachdb_setting_preserve_downgrade:
                 CockroachDbPreserveDowngrade::DoNotModify,
@@ -2159,17 +2173,33 @@ mod test {
         let nexus1_id = OmicronZoneUuid::new_v4();
         let nexus2_id = OmicronZoneUuid::new_v4();
         let expunged_nexus = OmicronZoneUuid::new_v4();
-        let blueprint = create_test_blueprint(vec![
-            (nexus1_id, BlueprintZoneDisposition::InService),
-            (nexus2_id, BlueprintZoneDisposition::InService),
-            (
-                expunged_nexus,
-                BlueprintZoneDisposition::Expunged {
-                    as_of_generation: Generation::new(),
-                    ready_for_cleanup: true,
-                },
-            ),
-        ]);
+        let blueprint = create_test_blueprint(
+            Generation::new(),
+            vec![
+                // This nexus matches the top-level generation, and will be
+                // created as "active".
+                (
+                    nexus1_id,
+                    BlueprintZoneDisposition::InService,
+                    Generation::new(),
+                ),
+                // This nexus is ahead of the the top-level nexus generation,
+                // and will be created as "not yet".
+                (
+                    nexus2_id,
+                    BlueprintZoneDisposition::InService,
+                    Generation::new().next(),
+                ),
+                (
+                    expunged_nexus,
+                    BlueprintZoneDisposition::Expunged {
+                        as_of_generation: Generation::new(),
+                        ready_for_cleanup: true,
+                    },
+                    Generation::new(),
+                ),
+            ],
+        );
 
         // Insert the blueprint and make it the target
         datastore
@@ -2194,7 +2224,7 @@ mod test {
             .await
             .expect("Failed to create nexus access");
 
-        // Verify records were created with Active state
+        // Verify records were created for in-service Nexuses.
         let nexus1_access = datastore
             .database_nexus_access(nexus1_id)
             .await
@@ -2215,10 +2245,16 @@ mod test {
             "expunged nexus should not have access record"
         );
 
+        // See above for the rationale here:
+        //
+        // Nexus 1 has a generation which matches the blueprint's
+        // "nexus_generation".
+        // Nexus 2 has a higher generation number (e.g., it represents
+        // a new deployment that has not yet been activated).
         let nexus1_record = nexus1_access.unwrap();
         let nexus2_record = nexus2_access.unwrap();
         assert_eq!(nexus1_record.state(), DbMetadataNexusState::Active);
-        assert_eq!(nexus2_record.state(), DbMetadataNexusState::Active);
+        assert_eq!(nexus2_record.state(), DbMetadataNexusState::NotYet);
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -2234,10 +2270,14 @@ mod test {
 
         // Create a blueprint with one Nexus zone
         let nexus_id = OmicronZoneUuid::new_v4();
-        let blueprint = create_test_blueprint(vec![(
-            nexus_id,
-            BlueprintZoneDisposition::InService,
-        )]);
+        let blueprint = create_test_blueprint(
+            Generation::new(),
+            vec![(
+                nexus_id,
+                BlueprintZoneDisposition::InService,
+                Generation::new(),
+            )],
+        );
 
         // Insert the blueprint and make it the target
         datastore
@@ -2322,14 +2362,22 @@ mod test {
 
         // Create two different blueprints
         let nexus_id = OmicronZoneUuid::new_v4();
-        let target_blueprint = create_test_blueprint(vec![(
-            nexus_id,
-            BlueprintZoneDisposition::InService,
-        )]);
-        let non_target_blueprint = create_test_blueprint(vec![(
-            nexus_id,
-            BlueprintZoneDisposition::InService,
-        )]);
+        let target_blueprint = create_test_blueprint(
+            Generation::new(),
+            vec![(
+                nexus_id,
+                BlueprintZoneDisposition::InService,
+                Generation::new(),
+            )],
+        );
+        let non_target_blueprint = create_test_blueprint(
+            Generation::new(),
+            vec![(
+                nexus_id,
+                BlueprintZoneDisposition::InService,
+                Generation::new(),
+            )],
+        );
 
         // Insert both blueprints
         datastore
