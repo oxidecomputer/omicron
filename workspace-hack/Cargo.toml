@@ -35,7 +35,6 @@ chrono = { version = "0.4.41", features = ["serde"] }
 cipher = { version = "0.4.4", default-features = false, features = ["block-padding", "zeroize"] }
 clap = { version = "4.5.41", features = ["cargo", "derive", "env", "wrap_help"] }
 clap_builder = { version = "4.5.41", default-features = false, features = ["cargo", "color", "env", "std", "suggestions", "usage", "wrap_help"] }
-console = { version = "0.15.10" }
 crossbeam-epoch = { version = "0.9.18" }
 crossbeam-utils = { version = "0.8.21" }
 crossterm = { version = "0.28.1", features = ["event-stream", "serde"] }
@@ -172,7 +171,6 @@ chrono = { version = "0.4.41", features = ["serde"] }
 cipher = { version = "0.4.4", default-features = false, features = ["block-padding", "zeroize"] }
 clap = { version = "4.5.41", features = ["cargo", "derive", "env", "wrap_help"] }
 clap_builder = { version = "4.5.41", default-features = false, features = ["cargo", "color", "env", "std", "suggestions", "usage", "wrap_help"] }
-console = { version = "0.15.10" }
 crossbeam-epoch = { version = "0.9.18" }
 crossbeam-utils = { version = "0.8.21" }
 crossterm = { version = "0.28.1", features = ["event-stream", "serde"] }

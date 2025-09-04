@@ -8517,7 +8517,6 @@ dependencies = [
  "clang-sys",
  "clap",
  "clap_builder",
- "console 0.15.10",
  "cookie",
  "crossbeam-epoch",
  "crossbeam-utils",
