@@ -1063,9 +1063,10 @@ Debug a specific Sled
 Usage: omdb sled-agent [OPTIONS] <COMMAND>
 
 Commands:
-  zones      print information about zones
-  bootstore  print information about the local bootstore node
-  help       Print this message or the help of the given subcommand(s)
+  zones               print information about zones
+  switch-zone-policy  control the switch zone policy
+  bootstore           print information about the local bootstore node
+  help                Print this message or the help of the given subcommand(s)
 
 Options:
       --log-level <LOG_LEVEL>  log level filter [env: LOG_LEVEL=] [default: warn]
@@ -1090,7 +1091,7 @@ print information about zones
 Usage: omdb sled-agent zones [OPTIONS] <COMMAND>
 
 Commands:
-  list  Print list of all running control plane zones
+  list  print list of all running control plane zones
   help  Print this message or the help of the given subcommand(s)
 
 Options:

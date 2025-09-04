@@ -996,18 +996,27 @@ pub struct QuiesceStatus {
 /// At any given time, Nexus is always in one of these states:
 ///
 /// ```text
+/// Undetermined        (have not loaded persistent state; don't know yet)
+///   |
+///   | load persistent state and find we're not quiescing
+///   v
 /// Running             (normal operation)
 ///   |
 ///   | quiesce starts
 ///   v
-/// WaitingForSagas     (no new sagas are allowed, but some are still running)
+/// DrainingSagas       (no new sagas are allowed, but some are still running)
 ///   |
 ///   | no more sagas running
 ///   v
-/// WaitingForDb        (no sagas running; no new db connections may be
-///                      acquired by Nexus at-large, but some are still held)
+/// DrainingDb          (no sagas running; no new db connections may be
+///   |                  acquired by Nexus at-large, but some are still held)
 ///   |
 ///   | no more database connections held
+///   v
+/// RecordingQuiesce    (everything is quiesced aside from one connection being
+///   |                  used to record our final quiesced state)
+///   |
+///   | finish recording quiesce state in database
 ///   v
 /// Quiesced            (no sagas running, no database connections in use)
 /// ```
@@ -1019,56 +1028,49 @@ pub struct QuiesceStatus {
 #[serde(rename_all = "snake_case")]
 #[serde(tag = "state", content = "quiesce_details")]
 pub enum QuiesceState {
+    /// We have not yet determined based on persistent state if we're supposed
+    /// to be quiesced or not
+    Undetermined,
     /// Normal operation
     Running,
-    /// New sagas disallowed, but some are still running.
-    WaitingForSagas {
+    /// New sagas disallowed, but some are still running on some Nexus instances
+    DrainingSagas {
         time_requested: DateTime<Utc>,
         #[serde(skip)]
-        time_waiting_for_sagas: Instant,
+        time_draining_sagas: Instant,
     },
-    /// No sagas running, no new database connections may be claimed, but some
-    /// database connections are still held.
-    WaitingForDb {
+    /// No sagas running on any Nexus instances
+    ///
+    /// No new database connections may be claimed, but some database
+    /// connections are still held.
+    DrainingDb {
         time_requested: DateTime<Utc>,
         #[serde(skip)]
-        time_waiting_for_sagas: Instant,
-        duration_waiting_for_sagas: Duration,
+        time_draining_sagas: Instant,
+        duration_draining_sagas: Duration,
         #[serde(skip)]
-        time_waiting_for_db: Instant,
+        time_draining_db: Instant,
+    },
+    /// No database connections in use except to record the final "quiesced"
+    /// state
+    RecordingQuiesce {
+        time_requested: DateTime<Utc>,
+        #[serde(skip)]
+        time_draining_sagas: Instant,
+        duration_draining_sagas: Duration,
+        duration_draining_db: Duration,
+        #[serde(skip)]
+        time_recording_quiesce: Instant,
     },
     /// Nexus has no sagas running and is not using the database
     Quiesced {
         time_requested: DateTime<Utc>,
         time_quiesced: DateTime<Utc>,
-        duration_waiting_for_sagas: Duration,
-        duration_waiting_for_db: Duration,
+        duration_draining_sagas: Duration,
+        duration_draining_db: Duration,
+        duration_recording_quiesce: Duration,
         duration_total: Duration,
     },
-}
-
-impl QuiesceState {
-    pub fn running() -> QuiesceState {
-        QuiesceState::Running
-    }
-
-    pub fn quiescing(&self) -> bool {
-        match self {
-            QuiesceState::Running => false,
-            QuiesceState::WaitingForSagas { .. }
-            | QuiesceState::WaitingForDb { .. }
-            | QuiesceState::Quiesced { .. } => true,
-        }
-    }
-
-    pub fn fully_quiesced(&self) -> bool {
-        match self {
-            QuiesceState::Running
-            | QuiesceState::WaitingForSagas { .. }
-            | QuiesceState::WaitingForDb { .. } => false,
-            QuiesceState::Quiesced { .. } => true,
-        }
-    }
 }
 
 /// Describes a pending saga (for debugging why quiesce is stuck)
