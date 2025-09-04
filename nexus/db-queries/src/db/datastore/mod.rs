@@ -39,7 +39,9 @@ use omicron_common::api::external::ResourceType;
 use omicron_common::backoff::{
     BackoffError, retry_notify, retry_policy_internal_service,
 };
-use omicron_uuid_kinds::{GenericUuid, OmicronZoneUuid, SledUuid};
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::OmicronZoneUuid;
+use omicron_uuid_kinds::SledUuid;
 use slog::Logger;
 use std::net::Ipv6Addr;
 use std::num::NonZeroU32;
@@ -429,7 +431,7 @@ impl DataStore {
                 e,
                 ErrorHandler::NotFoundByLookup(
                     ResourceType::Sled,
-                    LookupType::ById(sled_id.into_untyped_uuid()),
+                    LookupType::by_id(sled_id),
                 ),
             )
         })?;
@@ -766,7 +768,7 @@ mod test {
             serial,
             TEST_MODEL.into(),
             kind,
-            sled_id.into_untyped_uuid(),
+            sled_id,
         );
         datastore
             .physical_disk_insert(opctx, physical_disk.clone())
@@ -807,7 +809,7 @@ mod test {
         let zpool_id = Uuid::new_v4();
         let zpool = Zpool::new(
             zpool_id,
-            sled_id.into_untyped_uuid(),
+            sled_id,
             physical_disk_id,
             ByteCount::from(0).into(),
         );

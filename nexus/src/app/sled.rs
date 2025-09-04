@@ -40,7 +40,7 @@ impl super::Nexus {
     pub fn sled_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
-        sled_id: &Uuid,
+        sled_id: &SledUuid,
     ) -> LookupResult<lookup::Sled<'a>> {
         nexus_networking::sled_lookup(&self.db_datastore, opctx, *sled_id)
     }
@@ -53,7 +53,7 @@ impl super::Nexus {
     pub(crate) async fn upsert_sled(
         &self,
         _opctx: &OpContext,
-        id: Uuid,
+        id: SledUuid,
         info: SledAgentInfo,
     ) -> Result<(), Error> {
         info!(self.log, "registered sled agent"; "sled_uuid" => id.to_string());
@@ -105,7 +105,7 @@ impl super::Nexus {
     pub(crate) async fn sled_expunge(
         &self,
         opctx: &OpContext,
-        sled_id: Uuid,
+        sled_id: SledUuid,
     ) -> Result<SledPolicy, Error> {
         let sled_lookup = self.sled_lookup(opctx, &sled_id)?;
         let (authz_sled,) =
@@ -128,7 +128,7 @@ impl super::Nexus {
     pub(crate) async fn sled_request_firewall_rules(
         &self,
         opctx: &OpContext,
-        id: Uuid,
+        id: SledUuid,
     ) -> Result<(), Error> {
         info!(self.log, "requesting firewall rules"; "sled_uuid" => id.to_string());
         self.plumb_service_firewall_rules(opctx, &[id]).await?;
@@ -141,7 +141,7 @@ impl super::Nexus {
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<db::model::Sled> {
         self.db_datastore
-            .sled_list(&opctx, pagparams, SledFilter::InService)
+            .sled_list(&opctx, &pagparams, SledFilter::InService)
             .await
     }
 
@@ -169,7 +169,7 @@ impl super::Nexus {
         let client = nexus_networking::sled_client_ext(
             &self.db_datastore,
             &self.opctx_alloc,
-            id.into_untyped_uuid(),
+            *id,
             &self.log,
             client,
         )
@@ -231,10 +231,11 @@ impl super::Nexus {
         ))
     }
 
+    /// Return a page of physical disks for a given sled id
     pub(crate) async fn sled_list_physical_disks(
         &self,
         opctx: &OpContext,
-        sled_id: Uuid,
+        sled_id: SledUuid,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<db::model::PhysicalDisk> {
         self.db_datastore
@@ -376,7 +377,7 @@ impl super::Nexus {
     pub(crate) async fn plumb_service_firewall_rules(
         &self,
         opctx: &OpContext,
-        sleds_filter: &[Uuid],
+        sleds_filter: &[SledUuid],
     ) -> Result<(), Error> {
         nexus_networking::plumb_service_firewall_rules(
             &self.db_datastore,
