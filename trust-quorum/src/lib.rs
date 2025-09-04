@@ -24,6 +24,8 @@ mod messages;
 mod node;
 mod node_ctx;
 mod persistent_state;
+#[allow(unused)]
+mod rack_secret_loader;
 mod validators;
 pub use configuration::Configuration;
 pub use coordinator_state::{

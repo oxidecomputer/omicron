@@ -39,7 +39,7 @@ use omicron_common::api::external::ResourceType;
 use omicron_common::backoff::{
     BackoffError, retry_notify, retry_policy_internal_service,
 };
-use omicron_uuid_kinds::{GenericUuid, SledUuid};
+use omicron_uuid_kinds::{GenericUuid, OmicronZoneUuid, SledUuid};
 use slog::Logger;
 use std::net::Ipv6Addr;
 use std::num::NonZeroU32;
@@ -195,6 +195,21 @@ pub trait RunnableQuery<U>:
 impl<U, T> RunnableQuery<U> for T where
     T: RunnableQueryNoReturn + LoadQuery<'static, DbConnection, U>
 {
+}
+
+/// Specifies whether the consumer wants to check whether they're allowed to
+/// access the database based on the `db_metadata_nexus` table.
+#[derive(Debug, Clone, Copy)]
+pub enum IdentityCheckPolicy {
+    /// The consumer wants full access to the database regardless of the current
+    /// upgrade / handoff state.  This would be used by almost all tools and
+    /// tests.
+    DontCare,
+
+    /// The consumer only wants to access the database if it's in the current
+    /// set of Nexus instances that's supposed to be able to access it.  If
+    /// possible and legal, take over access from the existing set.
+    CheckAndTakeover { nexus_id: OmicronZoneUuid },
 }
 
 pub struct DataStore {

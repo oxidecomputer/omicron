@@ -17,7 +17,7 @@ use crate::bootstrap::bootstore_setup::{
 };
 use crate::bootstrap::secret_retriever::LrtqOrHardcodedSecretRetriever;
 use crate::config::Config;
-use crate::hardware_monitor::HardwareMonitor;
+use crate::hardware_monitor::{HardwareMonitor, HardwareMonitorHandle};
 use crate::services::ServiceManager;
 use crate::sled_agent::SledAgent;
 use crate::zone_bundle::ZoneBundler;
@@ -48,10 +48,13 @@ pub struct LongRunningTaskHandles {
     /// A mechanism for interacting with the hardware device tree
     pub hardware_manager: HardwareManager,
 
-    // A handle for interacting with the bootstore
+    /// A handle for controlling the hardware monitor's behavior
+    pub hardware_monitor: HardwareMonitorHandle,
+
+    /// A handle for interacting with the bootstore
     pub bootstore: bootstore::NodeHandle,
 
-    // A reference to the object used to manage zone bundles
+    /// A reference to the object used to manage zone bundles
     pub zone_bundler: ZoneBundler,
 
     /// Resolver for zone image sources.
@@ -99,7 +102,7 @@ pub async fn spawn_all_longrunning_tasks(
     // necessary.
     let raw_disks_tx = config_reconciler.raw_disks_tx();
     upsert_synthetic_disks_if_needed(&log, &raw_disks_tx, &config).await;
-    let (sled_agent_started_tx, service_manager_ready_tx) =
+    let (hardware_monitor, sled_agent_started_tx, service_manager_ready_tx) =
         spawn_hardware_monitor(log, &hardware_manager, raw_disks_tx);
 
     // Wait for the boot disk so that we can work with any ledgers,
@@ -123,6 +126,7 @@ pub async fn spawn_all_longrunning_tasks(
         LongRunningTaskHandles {
             config_reconciler: Arc::new(config_reconciler),
             hardware_manager,
+            hardware_monitor,
             bootstore,
             zone_bundler,
             zone_image_resolver,
@@ -168,14 +172,15 @@ fn spawn_hardware_monitor(
     log: &Logger,
     hardware_manager: &HardwareManager,
     raw_disks_tx: RawDisksSender,
-) -> (oneshot::Sender<SledAgent>, oneshot::Sender<ServiceManager>) {
+) -> (
+    HardwareMonitorHandle,
+    oneshot::Sender<SledAgent>,
+    oneshot::Sender<ServiceManager>,
+) {
     info!(log, "Starting HardwareMonitor");
-    let (mut monitor, sled_agent_started_tx, service_manager_ready_tx) =
-        HardwareMonitor::new(log, hardware_manager, raw_disks_tx);
-    tokio::spawn(async move {
-        monitor.run().await;
-    });
-    (sled_agent_started_tx, service_manager_ready_tx)
+    let (monitor, sled_agent_started_tx, service_manager_ready_tx) =
+        HardwareMonitor::spawn(log, hardware_manager, raw_disks_tx);
+    (monitor, sled_agent_started_tx, service_manager_ready_tx)
 }
 
 async fn spawn_bootstore_tasks(
