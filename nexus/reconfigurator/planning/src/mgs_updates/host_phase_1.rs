@@ -7,12 +7,12 @@
 use super::MgsUpdateStatus;
 use super::MgsUpdateStatusError;
 use gateway_client::types::SpType;
-use nexus_types::deployment::planning_report::FailedMgsUpdateReason;
 use nexus_types::deployment::BlueprintArtifactVersion;
 use nexus_types::deployment::BlueprintHostPhase2DesiredContents;
 use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdateDetails;
 use nexus_types::deployment::PendingMgsUpdateHostPhase1Details;
+use nexus_types::deployment::planning_report::FailedMgsUpdateReason;
 use nexus_types::inventory::BaseboardId;
 use nexus_types::inventory::Collection;
 use omicron_common::api::external::TufArtifactMeta;
@@ -271,7 +271,10 @@ pub(super) fn try_make_update(
     baseboard_id: &Arc<BaseboardId>,
     inventory: &Collection,
     current_artifacts: &TufRepoDescription,
-) -> Result<Option<(PendingMgsUpdate, PendingHostPhase2Changes)>, FailedMgsUpdateReason> {
+) -> Result<
+    Option<(PendingMgsUpdate, PendingHostPhase2Changes)>,
+    FailedMgsUpdateReason,
+> {
     let Some(sp_info) = inventory.sps.get(baseboard_id) else {
         warn!(
             log,
@@ -325,7 +328,9 @@ pub(super) fn try_make_update(
                 baseboard_id,
                 "err" => err,
             );
-            return Err(FailedMgsUpdateReason::UnableToDetermineBootDisk(err.to_string()));
+            return Err(FailedMgsUpdateReason::UnableToDetermineBootDisk(
+                err.to_string(),
+            ));
         }
     };
     let active_phase_2_hash =
@@ -342,7 +347,11 @@ pub(super) fn try_make_update(
                     "boot_disk" => ?boot_disk,
                     "err" => err,
                 );
-                return Err(FailedMgsUpdateReason::UnableToRetrieveBootDiskPhase2Image(err.to_string()));
+                return Err(
+                    FailedMgsUpdateReason::UnableToRetrieveBootDiskPhase2Image(
+                        err.to_string(),
+                    ),
+                );
             }
         };
 
@@ -378,7 +387,9 @@ pub(super) fn try_make_update(
             "active_phase_1_slot" => ?active_phase_1_slot,
             "boot_disk" => ?boot_disk,
         );
-        return Err(FailedMgsUpdateReason::ActiveHostPhase1SlotBootDiskMismatch);
+        return Err(
+            FailedMgsUpdateReason::ActiveHostPhase1SlotBootDiskMismatch,
+        );
     }
 
     let Some(active_phase_1_hash) = inventory
@@ -409,7 +420,9 @@ pub(super) fn try_make_update(
             baseboard_id,
             "slot" => ?active_phase_1_slot.toggled(),
         );
-        return Err(FailedMgsUpdateReason::InactiveHostPhase1HashNotInInventory);
+        return Err(
+            FailedMgsUpdateReason::InactiveHostPhase1HashNotInInventory,
+        );
     };
 
     let mut phase_1_artifacts = Vec::with_capacity(1);

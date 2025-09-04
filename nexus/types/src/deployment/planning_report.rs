@@ -565,9 +565,10 @@ impl Display for FailedMgsUpdateReason {
             FailedMgsUpdateReason::TooManyMatchingArtifacts => {
                 "too many matching artifacts were found"
             }
-            FailedMgsUpdateReason::UnableToDetermineBootDisk(err) => {
-                &format!("sled agent was unable to determine the boot disk: {}", err)
-            }
+            FailedMgsUpdateReason::UnableToDetermineBootDisk(err) => &format!(
+                "sled agent was unable to determine the boot disk: {}",
+                err
+            ),
             FailedMgsUpdateReason::UnableToRetrieveBootDiskPhase2Image(err) => {
                 &format!(
                     "sled agent was unable to retrieve boot disk phase 2 image: {}",
@@ -604,11 +605,11 @@ impl IdOrdItem for SkippedMgsUpdate {
 )]
 // TODO-K: DO I really need this wrapper function?
 pub struct SkippedMgsUpdates {
-    pub updates: Vec<SkippedMgsUpdate>
+    pub updates: Vec<SkippedMgsUpdate>,
 }
 
 impl SkippedMgsUpdates {
-        pub fn new() -> Self {
+    pub fn new() -> Self {
         Self { updates: Vec::new() }
     }
     // TODO-K: I might need iter and into_iter
@@ -617,10 +618,7 @@ impl SkippedMgsUpdates {
         self.updates.is_empty()
     }
 
-    pub fn push(
-        &mut self,
-        update: SkippedMgsUpdate,
-    ) {
+    pub fn push(&mut self, update: SkippedMgsUpdate) {
         self.updates.push(update)
     }
 }
