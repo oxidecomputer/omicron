@@ -9,9 +9,9 @@ use crate::authn;
 use crate::authz;
 use crate::context::OpContext;
 use crate::db::datastore::IdentityMetadataCreateParams;
+use crate::db::model;
 use crate::db::model::Name;
 use crate::db::model::Silo;
-use crate::db::model::SiloUser;
 use crate::db::model::SiloUserPasswordHash;
 use crate::db::model::SiloUserPasswordUpdate;
 use crate::db::model::UserBuiltin;
@@ -25,6 +25,7 @@ use diesel::prelude::*;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_types::external_api::params;
+use nexus_types::external_api::views;
 use nexus_types::identity::Asset;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::CreateResult;
@@ -38,7 +39,224 @@ use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::bail_unless;
 use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::SiloUserUuid;
 use uuid::Uuid;
+
+/// The datastore crate's SiloUser is intended to provide type safety above the
+/// database model, as the same database model is used to store semantically
+/// different user types. Higher level parts of Nexus should use this type
+/// instead.
+#[derive(Debug, Clone)]
+pub enum SiloUser {
+    /// A User created via the API
+    ApiOnly(SiloUserApiOnly),
+
+    /// A User created during an authenticated SAML login
+    Jit(SiloUserJit),
+}
+
+impl SiloUser {
+    pub fn id(&self) -> SiloUserUuid {
+        match &self {
+            SiloUser::ApiOnly(u) => u.id,
+            SiloUser::Jit(u) => u.id,
+        }
+    }
+
+    pub fn silo_id(&self) -> Uuid {
+        match &self {
+            SiloUser::ApiOnly(u) => u.silo_id,
+            SiloUser::Jit(u) => u.silo_id,
+        }
+    }
+
+    pub fn external_id(&self) -> &str {
+        match &self {
+            SiloUser::ApiOnly(u) => &u.external_id,
+            SiloUser::Jit(u) => &u.external_id,
+        }
+    }
+}
+
+impl From<model::SiloUser> for SiloUser {
+    fn from(record: model::SiloUser) -> SiloUser {
+        match record.user_provision_type {
+            UserProvisionType::ApiOnly => SiloUser::ApiOnly(SiloUserApiOnly {
+                id: record.id(),
+                time_created: record.time_created(),
+                time_modified: record.time_modified(),
+                time_deleted: record.time_deleted,
+                silo_id: record.silo_id,
+                // SAFETY: there is a database constraint that prevents a user
+                // with provision type 'api_only' from having a null external id
+                external_id: record.external_id.unwrap(),
+            }),
+
+            UserProvisionType::Jit => SiloUser::Jit(SiloUserJit {
+                id: record.id(),
+                time_created: record.time_created(),
+                time_modified: record.time_modified(),
+                time_deleted: record.time_deleted,
+                silo_id: record.silo_id,
+                // SAFETY: there is a database constraint that prevents a user
+                // with provision type 'jit' from having a null external id
+                external_id: record.external_id.unwrap(),
+            }),
+        }
+    }
+}
+
+impl From<SiloUser> for model::SiloUser {
+    fn from(u: SiloUser) -> model::SiloUser {
+        match u {
+            SiloUser::ApiOnly(u) => u.into(),
+            SiloUser::Jit(u) => u.into(),
+        }
+    }
+}
+
+impl From<SiloUser> for views::User {
+    fn from(u: SiloUser) -> views::User {
+        match u {
+            SiloUser::ApiOnly(u) => u.into(),
+            SiloUser::Jit(u) => u.into(),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct SiloUserApiOnly {
+    pub id: SiloUserUuid,
+    pub time_created: chrono::DateTime<chrono::Utc>,
+    pub time_modified: chrono::DateTime<chrono::Utc>,
+    pub time_deleted: Option<chrono::DateTime<chrono::Utc>>,
+    pub silo_id: Uuid,
+
+    /// The identity provider's ID for this user.
+    pub external_id: String,
+}
+
+impl SiloUserApiOnly {
+    pub fn new(silo_id: Uuid, id: SiloUserUuid, external_id: String) -> Self {
+        Self {
+            id,
+            time_created: chrono::Utc::now(),
+            time_modified: chrono::Utc::now(),
+            time_deleted: None,
+            silo_id,
+            external_id,
+        }
+    }
+}
+
+impl From<SiloUserApiOnly> for model::SiloUser {
+    fn from(u: SiloUserApiOnly) -> model::SiloUser {
+        model::SiloUser {
+            identity: model::SiloUserIdentity {
+                id: u.id.into(),
+                time_created: u.time_created,
+                time_modified: u.time_modified,
+            },
+            time_deleted: u.time_deleted,
+            silo_id: u.silo_id,
+            external_id: Some(u.external_id),
+            user_provision_type: UserProvisionType::ApiOnly,
+        }
+    }
+}
+
+impl From<SiloUserApiOnly> for SiloUser {
+    fn from(u: SiloUserApiOnly) -> SiloUser {
+        SiloUser::ApiOnly(u)
+    }
+}
+
+impl From<SiloUserApiOnly> for views::User {
+    fn from(u: SiloUserApiOnly) -> views::User {
+        views::User {
+            id: u.id,
+            // TODO the use of external_id as display_name is temporary
+            display_name: u.external_id,
+            silo_id: u.silo_id,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct SiloUserJit {
+    pub id: SiloUserUuid,
+    pub time_created: chrono::DateTime<chrono::Utc>,
+    pub time_modified: chrono::DateTime<chrono::Utc>,
+    pub time_deleted: Option<chrono::DateTime<chrono::Utc>>,
+    pub silo_id: Uuid,
+
+    /// The identity provider's ID for this user.
+    pub external_id: String,
+}
+
+impl SiloUserJit {
+    pub fn new(silo_id: Uuid, id: SiloUserUuid, external_id: String) -> Self {
+        Self {
+            id,
+            time_created: chrono::Utc::now(),
+            time_modified: chrono::Utc::now(),
+            time_deleted: None,
+            silo_id,
+            external_id,
+        }
+    }
+}
+
+impl From<SiloUserJit> for model::SiloUser {
+    fn from(u: SiloUserJit) -> model::SiloUser {
+        model::SiloUser {
+            identity: model::SiloUserIdentity {
+                id: u.id.into(),
+                time_created: u.time_created,
+                time_modified: u.time_modified,
+            },
+            time_deleted: u.time_deleted,
+            silo_id: u.silo_id,
+            external_id: Some(u.external_id),
+            user_provision_type: UserProvisionType::Jit,
+        }
+    }
+}
+
+impl From<SiloUserJit> for SiloUser {
+    fn from(u: SiloUserJit) -> SiloUser {
+        SiloUser::Jit(u)
+    }
+}
+
+impl From<SiloUserJit> for views::User {
+    fn from(u: SiloUserJit) -> views::User {
+        views::User {
+            id: u.id,
+            // TODO the use of external_id as display_name is temporary
+            display_name: u.external_id,
+            silo_id: u.silo_id,
+        }
+    }
+}
+
+/// Different types of user have different fields that are considered unique,
+/// and therefore lookup needs to be typed as well.
+#[derive(Debug)]
+pub enum SiloUserLookup<'a> {
+    ApiOnly { external_id: &'a str },
+
+    Jit { external_id: &'a str },
+}
+
+impl<'a> SiloUserLookup<'a> {
+    pub fn user_provision_type(&self) -> UserProvisionType {
+        match &self {
+            SiloUserLookup::ApiOnly { .. } => UserProvisionType::ApiOnly,
+            SiloUserLookup::Jit { .. } => UserProvisionType::Jit,
+        }
+    }
+}
 
 impl DataStore {
     /// Create a silo user
@@ -50,13 +268,49 @@ impl DataStore {
         silo_user: SiloUser,
     ) -> CreateResult<(authz::SiloUser, SiloUser)> {
         // TODO-security This needs an authz check.
-        use nexus_db_schema::schema::silo_user::dsl;
 
-        let silo_user_external_id = silo_user.external_id.clone();
+        let silo_user_external_id = silo_user.external_id().to_string();
+        let model: model::SiloUser = silo_user.into();
+
         let conn = self.pool_connection_unauthorized().await?;
+
+        // Check the user's provision type matches the silo
+
+        let silo = {
+            use nexus_db_schema::schema::silo::dsl;
+            dsl::silo
+                .filter(dsl::id.eq(authz_silo.id()))
+                .select(Silo::as_select())
+                .get_result_async::<Silo>(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(
+                        e,
+                        ErrorHandler::NotFoundByResource(authz_silo),
+                    )
+                })?
+        };
+
+        if silo.user_provision_type != model.user_provision_type {
+            error!(
+                self.log,
+                "silo {} provision type {:?} does not match silo user {} \
+                provision type {:?}",
+                authz_silo.id(),
+                silo.user_provision_type,
+                model.id(),
+                model.user_provision_type,
+            );
+
+            return Err(Error::invalid_request(
+                "user provision type of silo does not match silo user",
+            ));
+        }
+
+        use nexus_db_schema::schema::silo_user::dsl;
         diesel::insert_into(dsl::silo_user)
-            .values(silo_user)
-            .returning(SiloUser::as_returning())
+            .values(model)
+            .returning(model::SiloUser::as_returning())
             .get_result_async(&*conn)
             .await
             .map_err(|e| {
@@ -68,14 +322,14 @@ impl DataStore {
                     ),
                 )
             })
-            .map(|db_silo_user: SiloUser| {
+            .map(|db_silo_user: model::SiloUser| {
                 let silo_user_id = db_silo_user.id();
                 let authz_silo_user = authz::SiloUser::new(
                     authz_silo.clone(),
                     silo_user_id,
                     LookupType::by_id(silo_user_id),
                 );
-                (authz_silo_user, db_silo_user)
+                (authz_silo_user, db_silo_user.into())
             })
     }
 
@@ -105,7 +359,7 @@ impl DataStore {
                         )
                         .filter(dsl::time_deleted.is_null())
                         .set(dsl::time_deleted.eq(Utc::now()))
-                        .check_if_exists::<SiloUser>(
+                        .check_if_exists::<model::SiloUser>(
                             authz_silo_user_id.into_untyped_uuid(),
                         )
                         .execute_and_check(&conn)
@@ -174,40 +428,80 @@ impl DataStore {
             })
     }
 
-    /// Given an external ID, return
-    /// - Ok(Some((authz::SiloUser, SiloUser))) if that external id refers to an
+    /// Given a silo user lookup, return
+    /// - Ok(Some((authz::SiloUser, SiloUser))) if that lookup refers to an
     ///   existing silo user
     /// - Ok(None) if it does not
     /// - Err(...) if there was an error doing this lookup.
-    pub async fn silo_user_fetch_by_external_id(
-        &self,
+    pub async fn silo_user_fetch<'a>(
+        &'a self,
         opctx: &OpContext,
         authz_silo: &authz::Silo,
-        external_id: &str,
+        silo_user_lookup: &'a SiloUserLookup<'a>,
     ) -> Result<Option<(authz::SiloUser, SiloUser)>, Error> {
         opctx.authorize(authz::Action::ListChildren, authz_silo).await?;
 
         use nexus_db_schema::schema::silo_user::dsl;
 
-        Ok(dsl::silo_user
-            .filter(dsl::silo_id.eq(authz_silo.id()))
-            .filter(dsl::external_id.eq(external_id.to_string()))
-            .filter(dsl::time_deleted.is_null())
-            .select(SiloUser::as_select())
-            .load_async::<SiloUser>(
-                &*self.pool_connection_authorized(opctx).await?,
-            )
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?
-            .pop()
-            .map(|db_silo_user| {
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        // Check the silo's provision type matches the lookup.
+
+        let silo = {
+            use nexus_db_schema::schema::silo::dsl;
+            dsl::silo
+                .filter(dsl::id.eq(authz_silo.id()))
+                .select(Silo::as_select())
+                .get_result_async::<Silo>(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(
+                        e,
+                        ErrorHandler::NotFoundByResource(authz_silo),
+                    )
+                })?
+        };
+
+        let lookup_user_provision_type = silo_user_lookup.user_provision_type();
+
+        if silo.user_provision_type != lookup_user_provision_type {
+            return Err(Error::invalid_request(format!(
+                "silo provision type {:?} does not match lookup {:?}",
+                silo.user_provision_type, lookup_user_provision_type,
+            )));
+        }
+
+        match silo_user_lookup {
+            SiloUserLookup::ApiOnly { external_id }
+            | SiloUserLookup::Jit { external_id } => {
+                let maybe_db_silo_user = dsl::silo_user
+                    .filter(dsl::silo_id.eq(authz_silo.id()))
+                    .filter(
+                        dsl::user_provision_type.eq(lookup_user_provision_type),
+                    )
+                    .filter(dsl::external_id.eq(external_id.to_string()))
+                    .filter(dsl::time_deleted.is_null())
+                    .select(model::SiloUser::as_select())
+                    .get_result_async::<model::SiloUser>(&*conn)
+                    .await
+                    .optional()
+                    .map_err(|e| {
+                        public_error_from_diesel(e, ErrorHandler::Server)
+                    })?;
+
+                let Some(db_silo_user) = maybe_db_silo_user else {
+                    return Ok(None);
+                };
+
                 let authz_silo_user = authz::SiloUser::new(
                     authz_silo.clone(),
                     db_silo_user.id(),
-                    LookupType::ByName(external_id.to_owned()),
+                    LookupType::ByName(external_id.to_string()),
                 );
-                (authz_silo_user, db_silo_user)
-            }))
+
+                Ok(Some((authz_silo_user, db_silo_user.into())))
+            }
+        }
     }
 
     pub async fn silo_users_list(
@@ -222,14 +516,33 @@ impl DataStore {
             .authorize(authz::Action::ListChildren, authz_silo_user_list)
             .await?;
 
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        let db_silo = {
+            use nexus_db_schema::schema::silo::dsl;
+            dsl::silo
+                .filter(dsl::id.eq(authz_silo_user_list.silo().id()))
+                .select(Silo::as_select())
+                .get_result_async::<Silo>(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(
+                        e,
+                        ErrorHandler::NotFoundByResource(
+                            authz_silo_user_list.silo(),
+                        ),
+                    )
+                })?
+        };
+
         paginated(silo_user, id, pagparams)
             .filter(silo_id.eq(authz_silo_user_list.silo().id()))
+            .filter(user_provision_type.eq(db_silo.user_provision_type))
             .filter(time_deleted.is_null())
-            .select(SiloUser::as_select())
-            .load_async::<SiloUser>(
-                &*self.pool_connection_authorized(opctx).await?,
-            )
+            .select(model::SiloUser::as_select())
+            .load_async::<model::SiloUser>(&*conn)
             .await
+            .map(|list| list.into_iter().map(|user| user.into()).collect())
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
@@ -259,11 +572,12 @@ impl DataStore {
                             .eq(to_db_typed_uuid(authz_silo_group.id())),
                     )),
             )
-            .select(SiloUser::as_select())
-            .load_async::<SiloUser>(
+            .select(model::SiloUser::as_select())
+            .load_async::<model::SiloUser>(
                 &*self.pool_connection_authorized(opctx).await?,
             )
             .await
+            .map(|list| list.into_iter().map(|user| user.into()).collect())
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
@@ -277,18 +591,18 @@ impl DataStore {
         opctx: &OpContext,
         db_silo: &Silo,
         authz_silo_user: &authz::SiloUser,
-        db_silo_user: &SiloUser,
+        silo_user: &SiloUserApiOnly,
         db_silo_user_password_hash: Option<SiloUserPasswordHash>,
     ) -> UpdateResult<()> {
         opctx.authorize(authz::Action::Modify, authz_silo_user).await?;
 
         // Verify that the various objects we're given actually match up.
         // Failures here reflect bugs, not bad input.
-        bail_unless!(db_silo.id() == db_silo_user.silo_id);
-        bail_unless!(db_silo_user.id() == authz_silo_user.id());
+        bail_unless!(db_silo.id() == silo_user.silo_id);
+        bail_unless!(silo_user.id == authz_silo_user.id());
         if let Some(db_silo_user_password_hash) = &db_silo_user_password_hash {
             bail_unless!(
-                db_silo_user_password_hash.silo_user_id() == db_silo_user.id()
+                db_silo_user_password_hash.silo_user_id() == silo_user.id
             );
         }
 

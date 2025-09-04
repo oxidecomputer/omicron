@@ -192,15 +192,30 @@ impl DataStore {
         let silo_admin_group_ensure_query = if let Some(ref admin_group_name) =
             new_silo_params.admin_group_name
         {
+            let silo_admin_group =
+                match new_silo_params.identity_mode.user_provision_type() {
+                    shared::UserProvisionType::ApiOnly => {
+                        db::model::SiloGroup::new_api_only_group(
+                            silo_group_id,
+                            silo_id,
+                            admin_group_name.clone(),
+                        )
+                    }
+
+                    shared::UserProvisionType::Jit => {
+                        db::model::SiloGroup::new_jit_group(
+                            silo_group_id,
+                            silo_id,
+                            admin_group_name.clone(),
+                        )
+                    }
+                };
+
             let silo_admin_group_ensure_query =
                 DataStore::silo_group_ensure_query(
                     &nexus_opctx,
                     &authz_silo,
-                    db::model::SiloGroup::new(
-                        silo_group_id,
-                        silo_id,
-                        admin_group_name.clone(),
-                    ),
+                    silo_admin_group,
                 )
                 .await?;
 
@@ -505,6 +520,10 @@ impl DataStore {
                 silo_user::dsl::silo_user
                     .filter(silo_user::dsl::silo_id.eq(id))
                     .filter(silo_user::dsl::time_deleted.is_null())
+                    .filter(
+                        silo_user::dsl::user_provision_type
+                            .eq(db_silo.user_provision_type),
+                    )
                     .select(silo_user::dsl::id),
             ),
         )
@@ -520,6 +539,10 @@ impl DataStore {
         let updated_rows = diesel::update(silo_user::dsl::silo_user)
             .filter(silo_user::dsl::silo_id.eq(id))
             .filter(silo_user::dsl::time_deleted.is_null())
+            .filter(
+                silo_user::dsl::user_provision_type
+                    .eq(db_silo.user_provision_type),
+            )
             .set(silo_user::dsl::time_deleted.eq(now))
             .execute_async(&*conn)
             .await
@@ -538,6 +561,10 @@ impl DataStore {
                         silo_group::dsl::silo_group
                             .filter(silo_group::dsl::silo_id.eq(id))
                             .filter(silo_group::dsl::time_deleted.is_null())
+                            .filter(
+                                silo_group::dsl::user_provision_type
+                                    .eq(db_silo.user_provision_type),
+                            )
                             .select(silo_group::dsl::id),
                     ),
                 )
@@ -556,6 +583,10 @@ impl DataStore {
         let updated_rows = diesel::update(silo_group::dsl::silo_group)
             .filter(silo_group::dsl::silo_id.eq(id))
             .filter(silo_group::dsl::time_deleted.is_null())
+            .filter(
+                silo_group::dsl::user_provision_type
+                    .eq(db_silo.user_provision_type),
+            )
             .set(silo_group::dsl::time_deleted.eq(now))
             .execute_async(&*conn)
             .await

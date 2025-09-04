@@ -11,7 +11,7 @@ use nexus_db_queries::authn::Reason;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
-use nexus_db_queries::db::identity::Asset;
+use nexus_db_queries::db::datastore::SiloUser;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
@@ -41,7 +41,7 @@ impl super::Nexus {
     pub(crate) async fn session_create(
         &self,
         opctx: &OpContext,
-        user: &db::model::SiloUser,
+        user: &SiloUser,
     ) -> CreateResult<db::model::ConsoleSession> {
         let session =
             db::model::ConsoleSession::new(generate_session_token(), user.id());
