@@ -51,8 +51,6 @@ use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::OmicronZoneExternalIp;
-use nexus_types::deployment::PlannerChickenSwitches;
-use nexus_types::deployment::ReconfiguratorChickenSwitches;
 use nexus_types::deployment::blueprint_zone_type;
 use nexus_types::external_api::params as external_params;
 use nexus_types::external_api::shared;
@@ -83,6 +81,7 @@ pub struct RackInit {
     pub rack_id: Uuid,
     pub rack_subnet: IpNetwork,
     pub blueprint: Blueprint,
+    pub blueprint_execution_enabled: bool,
     pub physical_disks: Vec<PhysicalDisk>,
     pub zpools: Vec<Zpool>,
     pub datasets: Vec<CrucibleDataset>,
@@ -95,35 +94,6 @@ pub struct RackInit {
     pub recovery_user_password_hash: omicron_passwords::PasswordHashString,
     pub dns_update: DnsVersionUpdateBuilder,
     pub allowed_source_ips: AllowedSourceIps,
-    pub reconfigurator_automation_config: ReconfiguratorAutomationConfig,
-}
-
-#[derive(Debug, Clone)]
-pub struct ReconfiguratorAutomationConfig {
-    execution_enabled: bool,
-    planner_enabled: bool,
-}
-
-impl ReconfiguratorAutomationConfig {
-    pub fn production() -> Self {
-        // In production, we want reconfigurator to be on by default. Executing
-        // the initial blueprint provided in `RackInit` should be a no-op (RSS
-        // has already done everything execution would do), and planning should
-        // produce blueprints with no changes (RSS produces a fully-formed
-        // blueprint), but enabling automation allows Reconfigurator to make
-        // changes in response to future operator requests (expungements,
-        // upgrades, etc.).
-        Self { execution_enabled: true, planner_enabled: true }
-    }
-
-    pub fn tests() -> Self {
-        // In tests, we disable reconfigurator automation. Enabling the planner
-        // and executor causes a lot of asynchronous churn because our test
-        // setup(s) don't produce fully-formed blueprints the way real RSS does.
-        // This is unfortunate, but cleaning up our test framework is a big task
-        // that will require a lot of rework.
-        Self { execution_enabled: false, planner_enabled: false }
-    }
 }
 
 /// Possible errors while trying to initialize rack
@@ -133,7 +103,6 @@ enum RackInitError {
     AddingNic(Error),
     BlueprintInsert(Error),
     BlueprintTargetSet(Error),
-    ReconfiguratorChickenSwitchesInsert(Error),
     NexusDatabaseAccessRecordsInsert(Error),
     DatasetInsert { err: AsyncInsertError, zpool_id: Uuid },
     PhysicalDiskInsert(Error),
@@ -184,10 +153,6 @@ impl From<RackInitError> for Error {
             RackInitError::BlueprintTargetSet(err) => {
                 err.internal_context("failed to set target Blueprint")
             }
-            RackInitError::ReconfiguratorChickenSwitchesInsert(err) => err
-                .internal_context(
-                    "failed to insert reconfigurator chicken switches",
-                ),
             RackInitError::NexusDatabaseAccessRecordsInsert(err) => err
                 .internal_context(
                     "failed to insert nexus database access records",
@@ -737,10 +702,8 @@ impl DataStore {
                         rack_init.service_ip_pool_ranges;
                     let internal_dns = rack_init.internal_dns;
                     let external_dns = rack_init.external_dns;
-                    let ReconfiguratorAutomationConfig {
-                        execution_enabled: blueprint_execution_enabled,
-                        planner_enabled: blueprint_planner_enabled,
-                    } = rack_init.reconfigurator_automation_config;
+                    let blueprint_execution_enabled =
+                        rack_init.blueprint_execution_enabled;
 
                     // Early exit if the rack has already been initialized.
                     let rack = rack_dsl::rack
@@ -833,31 +796,6 @@ impl DataStore {
                             &e,
                         );
                         err.set(RackInitError::BlueprintTargetSet(e)).unwrap();
-                        DieselError::RollbackTransaction
-                    })?;
-
-                    // Insert an initial set of "chicken switches" controlling
-                    // Reconfigurator's behavior. In production (see
-                    // `ReconfiguratorAutomationConfig::production()`), these
-                    // values enable all the expected defaults; in tests (see
-                    // `ReconfiguratorAutomationConfig::tests()`), most
-                    // automation is disabled.
-                    Self::reconfigurator_chicken_switches_insert_initial_on_connection(
-                        &conn,
-                        ReconfiguratorChickenSwitches {
-                            planner_enabled: blueprint_planner_enabled,
-                            planner_switches: PlannerChickenSwitches::default(),
-                        },
-                    )
-                    .await
-                    .map_err(|e| {
-                        error!(
-                            log,
-                            "Initializing Rack: Failed to set reconfigurator \
-                             chicken switches";
-                            &e,
-                        );
-                        err.set(RackInitError::ReconfiguratorChickenSwitchesInsert(e)).unwrap();
                         DieselError::RollbackTransaction
                     })?;
 
@@ -1184,6 +1122,7 @@ mod test {
                     comment: "test suite".to_string(),
                     report: PlanningReport::new(blueprint_id),
                 },
+                blueprint_execution_enabled: false,
                 physical_disks: vec![],
                 zpools: vec![],
                 datasets: vec![],
@@ -1232,8 +1171,6 @@ mod test {
                     "test suite".to_string(),
                 ),
                 allowed_source_ips: AllowedSourceIps::Any,
-                reconfigurator_automation_config:
-                    ReconfiguratorAutomationConfig::tests(),
             }
         }
     }

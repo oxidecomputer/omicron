@@ -22,7 +22,6 @@ use dropshot::RequestContext;
 use dropshot::ResultsPage;
 use dropshot::TypedBody;
 use http::Response;
-use nexus_db_queries::db::ReconfiguratorAutomationConfig;
 use nexus_internal_api::*;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintMetadata;
@@ -174,7 +173,7 @@ impl NexusInternalApi for NexusInternalApiImpl {
                 &opctx,
                 path.rack_id,
                 request,
-                ReconfiguratorAutomationConfig::production(),
+                true, // blueprint_execution_enabled
             )
             .await?;
 

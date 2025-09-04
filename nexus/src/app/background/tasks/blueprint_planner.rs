@@ -4,6 +4,7 @@
 
 //! Background task for automatic update planning.
 
+use super::chicken_switches::ReconfiguratorChickenSwitchesLoaderState;
 use crate::app::background::BackgroundTask;
 use chrono::Utc;
 use futures::future::BoxFuture;
@@ -13,7 +14,6 @@ use nexus_db_queries::db::DataStore;
 use nexus_reconfigurator_planning::planner::Planner;
 use nexus_reconfigurator_planning::planner::PlannerRng;
 use nexus_reconfigurator_preparation::PlanningInputFromDb;
-use nexus_types::deployment::ReconfiguratorChickenSwitchesView;
 use nexus_types::deployment::{Blueprint, BlueprintTarget};
 use nexus_types::internal_api::background::BlueprintPlannerStatus;
 use omicron_common::api::external::LookupType;
@@ -26,7 +26,7 @@ use tokio::sync::watch::{self, Receiver, Sender};
 /// Background task that runs the update planner.
 pub struct BlueprintPlanner {
     datastore: Arc<DataStore>,
-    rx_chicken_switches: Receiver<ReconfiguratorChickenSwitchesView>,
+    rx_chicken_switches: Receiver<ReconfiguratorChickenSwitchesLoaderState>,
     rx_inventory: Receiver<Option<CollectionUuid>>,
     rx_blueprint: Receiver<Option<Arc<(BlueprintTarget, Blueprint)>>>,
     tx_blueprint: Sender<Option<Arc<(BlueprintTarget, Blueprint)>>>,
@@ -35,7 +35,7 @@ pub struct BlueprintPlanner {
 impl BlueprintPlanner {
     pub fn new(
         datastore: Arc<DataStore>,
-        rx_chicken_switches: Receiver<ReconfiguratorChickenSwitchesView>,
+        rx_chicken_switches: Receiver<ReconfiguratorChickenSwitchesLoaderState>,
         rx_inventory: Receiver<Option<CollectionUuid>>,
         rx_blueprint: Receiver<Option<Arc<(BlueprintTarget, Blueprint)>>>,
     ) -> Self {
@@ -59,7 +59,23 @@ impl BlueprintPlanner {
     /// If it is different from the current target blueprint,
     /// save it and make it the current target.
     pub async fn plan(&mut self, opctx: &OpContext) -> BlueprintPlannerStatus {
-        let switches = self.rx_chicken_switches.borrow_and_update().clone();
+        // Refuse to run if we haven't had a chance to load the chicken switches
+        // from the database yet. (There might not be any in the db, which is
+        // fine! But the loading task needs to have a chance to check. It will
+        // gives a `::Loaded()` default value if it's had a chance to run but
+        // found no records.)
+        let switches = match &*self.rx_chicken_switches.borrow_and_update() {
+            ReconfiguratorChickenSwitchesLoaderState::NotYetLoaded => {
+                debug!(
+                    opctx.log,
+                    "chicken switches not yet loaded; doing nothing"
+                );
+                return BlueprintPlannerStatus::Disabled;
+            }
+            ReconfiguratorChickenSwitchesLoaderState::Loaded(switches) => {
+                switches.clone()
+            }
+        };
         if !switches.switches.planner_enabled {
             debug!(&opctx.log, "blueprint planning disabled, doing nothing");
             return BlueprintPlannerStatus::Disabled;

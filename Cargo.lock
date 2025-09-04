@@ -6328,6 +6328,7 @@ dependencies = [
  "dropshot",
  "expectorate",
  "libc",
+ "nexus-types",
  "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",

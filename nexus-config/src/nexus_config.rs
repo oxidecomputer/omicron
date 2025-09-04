@@ -10,6 +10,7 @@ use anyhow::anyhow;
 use camino::{Utf8Path, Utf8PathBuf};
 use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
+use nexus_types::deployment::ReconfiguratorChickenSwitches;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::NEXUS_TECHPORT_EXTERNAL_PORT;
 use omicron_common::address::RACK_PREFIX;
@@ -856,6 +857,12 @@ pub struct PackageConfig {
     /// Maghemite mgd daemon configuration
     #[serde(default)]
     pub mgd: HashMap<SwitchLocation, MgdConfig>,
+    /// Initial reconfigurator chicken switches
+    ///
+    /// We use this hook to disable reconfigurator automation in the test suite
+    #[serde(default)]
+    pub initial_reconfigurator_chicken_switches:
+        Option<ReconfiguratorChickenSwitches>,
     /// Background task configuration
     pub background_tasks: BackgroundTaskConfig,
     /// Default Crucible region allocation strategy

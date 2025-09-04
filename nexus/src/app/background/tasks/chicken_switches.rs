@@ -15,24 +15,32 @@ use serde_json::json;
 use std::sync::Arc;
 use tokio::sync::watch;
 
+/// Enum that allows downstream tasks to wait until this task has had a chance
+/// to read the current chicken switches from the database.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ReconfiguratorChickenSwitchesLoaderState {
+    NotYetLoaded,
+    Loaded(ReconfiguratorChickenSwitchesView),
+}
+
 /// Background task that tracks reconfigurator chicken switches from the DB
 pub struct ChickenSwitchesLoader {
     datastore: Arc<DataStore>,
-    tx: watch::Sender<ReconfiguratorChickenSwitchesView>,
-    rx: watch::Receiver<ReconfiguratorChickenSwitchesView>,
+    tx: watch::Sender<ReconfiguratorChickenSwitchesLoaderState>,
 }
 
 impl ChickenSwitchesLoader {
     pub fn new(datastore: Arc<DataStore>) -> Self {
-        let (tx, rx) =
-            watch::channel(ReconfiguratorChickenSwitchesView::default());
-        Self { datastore, tx, rx }
+        let (tx, _rx) = watch::channel(
+            ReconfiguratorChickenSwitchesLoaderState::NotYetLoaded,
+        );
+        Self { datastore, tx }
     }
 
     pub fn watcher(
         &self,
-    ) -> watch::Receiver<ReconfiguratorChickenSwitchesView> {
-        self.rx.clone()
+    ) -> watch::Receiver<ReconfiguratorChickenSwitchesLoaderState> {
+        self.tx.subscribe()
     }
 }
 
@@ -55,15 +63,21 @@ impl BackgroundTask for ChickenSwitchesLoader {
                     json!({ "error": message })
                 }
                 Ok(switches) => {
-                    let switches = switches.unwrap_or_default();
+                    let switches =
+                        ReconfiguratorChickenSwitchesLoaderState::Loaded(
+                            switches.unwrap_or_default(),
+                        );
                     let updated = self.tx.send_if_modified(|s| {
                         if *s != switches {
-                            *s = switches;
+                            *s = switches.clone();
                             return true;
                         }
                         false
                     });
-                    debug!(opctx.log, "chicken switches load complete");
+                    debug!(
+                        opctx.log, "chicken switches load complete";
+                        "switches" => ?switches,
+                    );
                     json!({ "chicken_switches_updated": updated })
                 }
             }

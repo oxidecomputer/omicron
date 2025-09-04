@@ -19,7 +19,6 @@ use nexus_db_model::InitialDnsGroup;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
-use nexus_db_queries::db::ReconfiguratorAutomationConfig;
 use nexus_db_queries::db::datastore::DnsVersionUpdateBuilder;
 use nexus_db_queries::db::datastore::RackInit;
 use nexus_db_queries::db::datastore::SledUnderlayAllocationResult;
@@ -106,7 +105,7 @@ impl super::Nexus {
         opctx: &OpContext,
         rack_id: Uuid,
         request: RackInitializationRequest,
-        reconfigurator_automation_config: ReconfiguratorAutomationConfig,
+        blueprint_execution_enabled: bool,
     ) -> Result<(), Error> {
         let log = &opctx.log;
 
@@ -718,6 +717,7 @@ impl super::Nexus {
                         .into(),
                     rack_id,
                     blueprint,
+                    blueprint_execution_enabled,
                     physical_disks,
                     zpools,
                     datasets,
@@ -733,7 +733,6 @@ impl super::Nexus {
                         .into(),
                     dns_update,
                     allowed_source_ips: request.allowed_source_ips,
-                    reconfigurator_automation_config,
                 },
             )
             .await?;

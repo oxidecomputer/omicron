@@ -28,7 +28,6 @@ use internal_api::http_entrypoints::internal_api;
 use nexus_config::NexusConfig;
 use nexus_db_model::RendezvousDebugDataset;
 use nexus_db_queries::db;
-use nexus_db_queries::db::ReconfiguratorAutomationConfig;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneType;
@@ -338,7 +337,7 @@ impl nexus_test_interface::NexusServer for Server {
                     },
                     allowed_source_ips: AllowedSourceIps::Any,
                 },
-                ReconfiguratorAutomationConfig::tests(),
+                false, // blueprint_execution_enabled
             )
             .await
             .expect("Could not initialize rack");

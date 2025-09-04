@@ -132,7 +132,6 @@ use nexus_db_model::AllSchemaVersions;
 use nexus_types::internal_api::views::HeldDbClaimInfo;
 pub use oximeter::CollectorReassignment;
 pub use rack::RackInit;
-pub use rack::ReconfiguratorAutomationConfig;
 pub use rack::SledUnderlayAllocationResult;
 pub use region::RegionAllocationFor;
 pub use region::RegionAllocationParameters;
