@@ -19,6 +19,7 @@ use nexus_db_model::InitialDnsGroup;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
+use nexus_db_queries::db::ReconfiguratorAutomationConfig;
 use nexus_db_queries::db::datastore::DnsVersionUpdateBuilder;
 use nexus_db_queries::db::datastore::RackInit;
 use nexus_db_queries::db::datastore::SledUnderlayAllocationResult;
@@ -105,6 +106,7 @@ impl super::Nexus {
         opctx: &OpContext,
         rack_id: Uuid,
         request: RackInitializationRequest,
+        reconfigurator_automation_config: ReconfiguratorAutomationConfig,
     ) -> Result<(), Error> {
         let log = &opctx.log;
 
@@ -731,6 +733,7 @@ impl super::Nexus {
                         .into(),
                     dns_update,
                     allowed_source_ips: request.allowed_source_ips,
+                    reconfigurator_automation_config,
                 },
             )
             .await?;

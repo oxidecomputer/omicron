@@ -17,8 +17,10 @@ use diesel::expression::SelectableHelper;
 use diesel::sql_types;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::public_error_from_diesel;
+use nexus_db_lookup::DbConnection;
 use nexus_db_model::ReconfiguratorChickenSwitches as DbReconfiguratorChickenSwitches;
 use nexus_db_model::SqlU32;
+use nexus_types::deployment::ReconfiguratorChickenSwitches;
 use nexus_types::deployment::ReconfiguratorChickenSwitchesParam;
 use nexus_types::deployment::ReconfiguratorChickenSwitchesView;
 use omicron_common::api::external::DataPageParams;
@@ -91,6 +93,21 @@ impl DataStore {
         Ok(latest.map(Into::into))
     }
 
+    /// Insert an initial set of chicken switches on an existing connection.
+    ///
+    /// This is called during rack initialization, and will fail if there are
+    /// any versions currently in the table.
+    pub(crate) async fn reconfigurator_chicken_switches_insert_initial_on_connection(
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        switches: ReconfiguratorChickenSwitches,
+    ) -> Result<(), Error> {
+        Self::insert_latest_version_internal(
+            conn,
+            ReconfiguratorChickenSwitchesParam { version: 1, switches },
+        )
+        .await
+    }
+
     /// Insert the current version of the chicken switches in the database
     ///
     /// Only succeeds if the prior version is the latest version currently in
@@ -101,30 +118,15 @@ impl DataStore {
         opctx: &OpContext,
         switches: ReconfiguratorChickenSwitchesParam,
     ) -> Result<(), Error> {
-        let ReconfiguratorChickenSwitchesParam { version, switches } = switches;
-        let switches = ReconfiguratorChickenSwitchesView {
-            version,
-            switches,
-            time_modified: chrono::Utc::now(),
-        };
-
         opctx
             .authorize(authz::Action::Modify, &authz::BLUEPRINT_CONFIG)
             .await?;
 
-        let num_inserted =
-            self.insert_latest_version_internal(opctx, &switches).await?;
-
-        match num_inserted {
-            0 => Err(Error::invalid_request(format!(
-                "version {} is not the most recent",
-                switches.version
-            ))),
-            1 => Ok(()),
-            // This is impossible because we are explicitly inserting only one
-            // row with a unique primary key.
-            _ => unreachable!("query inserted more than one row"),
-        }
+        Self::insert_latest_version_internal(
+            &*self.pool_connection_authorized(opctx).await?,
+            switches,
+        )
+        .await
     }
 
     /// Insert the next version of the chicken switches in the database
@@ -132,17 +134,23 @@ impl DataStore {
     /// Only succeeds if the prior version is the latest version currently
     /// in the `reconfigurator_chicken_switches` table.
     async fn insert_latest_version_internal(
-        &self,
-        opctx: &OpContext,
-        switches: &ReconfiguratorChickenSwitchesView,
-    ) -> Result<usize, Error> {
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        switches: ReconfiguratorChickenSwitchesParam,
+    ) -> Result<(), Error> {
+        let ReconfiguratorChickenSwitchesParam { version, switches } = switches;
+        let switches = ReconfiguratorChickenSwitchesView {
+            version,
+            switches,
+            time_modified: chrono::Utc::now(),
+        };
+
         if switches.version < 1 {
             return Err(Error::invalid_request(
                 "version must be greater than 0",
             ));
         }
 
-        sql_query(
+        let num_inserted = sql_query(
             r"INSERT INTO reconfigurator_chicken_switches
                 (version, planner_enabled, time_modified,
                  add_zones_with_mupdate_override)
@@ -158,9 +166,20 @@ impl DataStore {
         .bind::<sql_types::Bool, _>(
             switches.switches.planner_switches.add_zones_with_mupdate_override,
         )
-        .execute_async(&*self.pool_connection_authorized(opctx).await?)
+        .execute_async(conn)
         .await
-        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        match num_inserted {
+            0 => Err(Error::invalid_request(format!(
+                "version {} is not the most recent",
+                switches.version
+            ))),
+            1 => Ok(()),
+            // This is impossible because we are explicitly inserting only one
+            // row with a unique primary key.
+            _ => unreachable!("query inserted more than one row"),
+        }
     }
 }
 #[cfg(test)]

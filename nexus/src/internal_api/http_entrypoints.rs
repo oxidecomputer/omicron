@@ -22,6 +22,7 @@ use dropshot::RequestContext;
 use dropshot::ResultsPage;
 use dropshot::TypedBody;
 use http::Response;
+use nexus_db_queries::db::ReconfiguratorAutomationConfig;
 use nexus_internal_api::*;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintMetadata;
@@ -168,7 +169,14 @@ impl NexusInternalApi for NexusInternalApiImpl {
         let request = info.into_inner();
         let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
 
-        nexus.rack_initialize(&opctx, path.rack_id, request).await?;
+        nexus
+            .rack_initialize(
+                &opctx,
+                path.rack_id,
+                request,
+                ReconfiguratorAutomationConfig::production(),
+            )
+            .await?;
 
         Ok(HttpResponseUpdatedNoContent())
     }
