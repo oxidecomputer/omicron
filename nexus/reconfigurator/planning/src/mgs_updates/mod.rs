@@ -543,51 +543,56 @@ fn try_make_update(
     // "Update Sequence".
     //
     // TODO-K: Will have to clean this up, the nesting will become horrible
-    match try_make_update_rot_bootloader(
+    let pending_rot_bootloader = match try_make_update_rot_bootloader(
         log,
         baseboard_id,
         inventory,
         current_artifacts,
     ) {
-        Ok(p) => {
-            if let Some(update) = p
-                .or_else(|| {
-                    try_make_update_rot(
-                        log,
-                        baseboard_id,
-                        inventory,
-                        current_artifacts,
-                    )
-                })
-                .or_else(|| {
-                    try_make_update_sp(
-                        log,
-                        baseboard_id,
-                        inventory,
-                        current_artifacts,
-                    )
-                })
-            {
-                // We have a non-host update; there are no pending host phase 2 changes
-                // necessary.
-                // TODO-K: Clean up all of the returns
-                return PendingMgsUpdateActions {
-                    pending_update: Some(update),
-                    pending_host_os_phase2_changes:
-                        PendingHostPhase2Changes::empty(),
-                    skipped_updates,
-                };
-            }
-        }
+        Ok(p) => match p {
+            Some(update) => Some(PendingMgsUpdateActions {
+                pending_update: Some(update),
+                pending_host_os_phase2_changes: PendingHostPhase2Changes::empty(
+                ),
+                skipped_updates: skipped_updates.clone(),
+            }),
+            None => None,
+        },
         Err(e) => {
             skipped_updates.push(SkippedMgsUpdate {
                 baseboard_id: baseboard_id.clone(),
                 component: MgsUpdateComponent::RotBootloader,
                 reason: e,
             });
+            None
             // TODO-K: remove debugging log
             // warn!(log, "HERE: {:?}", skipped_mgs_updates);
         }
+    };
+
+    if let Some(update_actions) = pending_rot_bootloader {
+        return update_actions;
+    }
+
+    if let Some(update) =
+        try_make_update_rot(log, baseboard_id, inventory, current_artifacts)
+            .or_else(|| {
+                try_make_update_sp(
+                    log,
+                    baseboard_id,
+                    inventory,
+                    current_artifacts,
+                )
+            })
+    {
+        // We have a non-host update; there are no pending host phase 2 changes
+        // necessary.
+        // TODO-K: Clean up all of the returns
+        return PendingMgsUpdateActions {
+            pending_update: Some(update),
+            pending_host_os_phase2_changes: PendingHostPhase2Changes::empty(),
+            skipped_updates,
+        };
     }
 
     // if let Some(update) = try_make_update_rot_bootloader(
@@ -615,20 +620,20 @@ fn try_make_update(
     ) {
         Ok(p) => match p {
             Some((update, pending_host_os_phase2_changes)) => {
-                return PendingMgsUpdateActions {
+                PendingMgsUpdateActions {
                     pending_update: Some(update),
                     pending_host_os_phase2_changes,
                     skipped_updates,
-                };
+                }
             }
-            //  (Some((u, c)), skipped_updates),
             None => {
-                return PendingMgsUpdateActions {
+                // TODO-K: Add a new() method for PendingMgsUpdateActions?
+                PendingMgsUpdateActions {
                     pending_update: None,
                     pending_host_os_phase2_changes:
                         PendingHostPhase2Changes::empty(),
                     skipped_updates,
-                };
+                }
             }
         },
         Err(e) => {
@@ -639,12 +644,12 @@ fn try_make_update(
             });
             // TODO-K: remove debugging log
             // warn!(log, "HERE2: {:?}", skipped_updates);
-            return PendingMgsUpdateActions {
+            PendingMgsUpdateActions {
                 pending_update: None,
                 pending_host_os_phase2_changes: PendingHostPhase2Changes::empty(
                 ),
                 skipped_updates,
-            };
+            }
         }
     }
 }
