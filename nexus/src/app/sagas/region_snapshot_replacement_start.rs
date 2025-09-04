@@ -1536,7 +1536,6 @@ pub(crate) mod test {
         let opctx = test_opctx(cptestctx);
 
         let mut i = 1;
-        let mut failed = false;
         loop {
             let db_request = datastore
                 .get_region_snapshot_replacement_request_by_id(
@@ -1553,19 +1552,19 @@ pub(crate) mod test {
                 db_request.replacement_state,
                 RegionSnapshotReplacementState::Requested
             ) {
-                failed = true;
                 eprintln!(
                     "loop {i} Failed {:?} != Requested",
                     db_request.replacement_state
                 );
+                // 200 * 5 = 1000 seconds, at this point something is wrong.
+                if i > 200 {
+                    panic!("Failed to reach requested state after {i} tries");
+                }
                 tokio::time::sleep(std::time::Duration::from_secs(5)).await;
             } else {
                 break;
             }
             i += 1;
-        }
-        if failed {
-            panic!("Did not find expected state for replacement");
         }
     }
 
