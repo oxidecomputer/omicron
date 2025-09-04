@@ -832,7 +832,8 @@ source.packages = [
   "xcvradm.tar.gz",
   "omicron-omdb.tar.gz",
   "zone-setup.tar.gz",
-  "zone-network-install.tar.gz"
+  "zone-network-install.tar.gz",
+  "gateway-cli.tar.gz"
 ]
 output.type = "zone"
 
@@ -858,7 +859,8 @@ source.packages = [
   "sp-sim-stub.tar.gz",
   "omicron-omdb.tar.gz",
   "zone-setup.tar.gz",
-  "zone-network-install.tar.gz"
+  "zone-network-install.tar.gz",
+  "gateway-cli.tar.gz"
 ]
 output.type = "zone"
 
@@ -884,7 +886,8 @@ source.packages = [
   "sp-sim-softnpu.tar.gz",
   "omicron-omdb.tar.gz",
   "zone-setup.tar.gz",
-  "zone-network-install.tar.gz"
+  "zone-network-install.tar.gz",
+  "gateway-cli.tar.gz"
 ]
 output.type = "zone"
 
@@ -922,6 +925,15 @@ service_name = "omdb"
 only_for_targets.image = "standard"
 source.type = "local"
 source.rust.binary_names = ["omdb"]
+source.rust.release = true
+output.type = "zone"
+output.intermediate_only = true
+
+[package.gateway-cli]
+service_name = "gateway-cli"
+only_for_targets.image = "standard"
+source.type = "local"
+source.rust.binary_names = ["gateway-cli"]
 source.rust.release = true
 output.type = "zone"
 output.intermediate_only = true
