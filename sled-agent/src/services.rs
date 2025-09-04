@@ -41,7 +41,6 @@ use clickhouse_admin_types::CLICKHOUSE_SERVER_CONFIG_DIR;
 use clickhouse_admin_types::CLICKHOUSE_SERVER_CONFIG_FILE;
 use dpd_client::{Client as DpdClient, Error as DpdError, types as DpdTypes};
 use dropshot::HandlerTaskMode;
-use futures::future;
 use illumos_utils::addrobj::AddrObject;
 use illumos_utils::addrobj::IPV6_LINK_LOCAL_ADDROBJ_NAME;
 use illumos_utils::dladm::{
@@ -105,7 +104,6 @@ use sled_hardware::underlay;
 use sled_hardware_types::Baseboard;
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
-use std::mem;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
@@ -561,6 +559,9 @@ enum SwitchZoneState {
         request: SwitchZoneConfig,
         // The currently running zone
         zone: Box<RunningZone>,
+        // A background task which keeps looping until the zone's uplinks are
+        // configured.
+        worker: Option<Task>,
     },
 }
 
@@ -3279,7 +3280,7 @@ impl ServiceManager {
     async fn ensure_switch_zone_uplinks_configured_loop(
         &self,
         underlay_info: &UnderlayInfo,
-        exit_rx: Option<oneshot::Receiver<()>>,
+        mut exit_rx: oneshot::Receiver<()>,
     ) {
         // We don't really expect failures trying to initialize the switch zone
         // unless something is unhealthy. This timeout is somewhat arbitrary,
@@ -3293,13 +3294,6 @@ impl ServiceManager {
         let Some(rack_network_config) = &underlay_info.rack_network_config
         else {
             return;
-        };
-
-        // Convert the optional into a future we can poll. If we have no
-        // `exit_rx`, we construct a future that never resolves.
-        let mut exit_rx = match exit_rx {
-            Some(rx) => future::Either::Left(rx),
-            None => future::Either::Right(future::pending()),
         };
 
         loop {
@@ -3325,9 +3319,22 @@ impl ServiceManager {
 
             tokio::select! {
                 // If we've been told to stop trying, bail.
-                _ = &mut exit_rx => return,
+                _ = &mut exit_rx => {
+                    info!(
+                        self.inner.log,
+                        "instructed to give up on switch zone uplink \
+                         configuration",
+                    );
+                    return;
+                }
 
-                _ = tokio::time::sleep(RETRY_DELAY) => continue,
+                _ = tokio::time::sleep(RETRY_DELAY) => {
+                    info!(
+                        self.inner.log,
+                        "retrying switch zone uplink configuration",
+                    );
+                    continue;
+                }
             };
         }
     }
@@ -3546,9 +3553,10 @@ impl ServiceManager {
                 // the next request with our new request.
                 *request = new_request;
             }
-            (SwitchZoneState::Running { request, zone }, Some(new_request))
-                if request.addresses != new_request.addresses =>
-            {
+            (
+                SwitchZoneState::Running { request, zone, worker },
+                Some(new_request),
+            ) if request.addresses != new_request.addresses => {
                 // If the switch zone is running but we have new addresses, it
                 // means we're moving from the bootstrap to the underlay
                 // network.  We need to add an underlay address and route in the
@@ -3584,8 +3592,8 @@ impl ServiceManager {
                     );
                 }
 
-                // When the request addresses have changed this means the underlay is
-                // available now as well.
+                // When the request addresses have changed this means the
+                // underlay is available now as well.
                 if let Some(info) = self.inner.sled_info.get() {
                     info!(
                         self.inner.log,
@@ -3897,22 +3905,24 @@ impl ServiceManager {
                     }
                 }
 
-                // We also need to ensure any uplinks are configured. This goes
-                // into an infinite retry loop, which isn't great! We should fix
-                // this.
+                // We also need to ensure any uplinks are configured. Spawn a
+                // task that goes into an infinite retry loop until it succeeds.
                 if let Some(underlay_info) = underlay_info {
-                    // Explicitly drop the lock we have on
-                    // `self.inner.switch_zone`, because
-                    // `ensure_switch_zone_uplinks_configured_loop()` will
-                    // reacquire it later. This is _really really fragile_ and
-                    // very gross. We really need to rework how switch zone
-                    // initialization happens to clean this up.
-                    mem::drop(sled_zone);
-                    self.ensure_switch_zone_uplinks_configured_loop(
-                        &underlay_info,
-                        None,
-                    )
-                    .await;
+                    if let Some(old_worker) = worker.take() {
+                        old_worker.stop().await;
+                    }
+                    let me = self.clone();
+                    let (exit_tx, exit_rx) = oneshot::channel();
+                    *worker = Some(Task {
+                        exit_tx,
+                        initializer: tokio::task::spawn(async move {
+                            me.ensure_switch_zone_uplinks_configured_loop(
+                                &underlay_info,
+                                exit_rx,
+                            )
+                            .await;
+                        }),
+                    });
                 }
             }
             (SwitchZoneState::Running { .. }, Some(_)) => {
@@ -3985,6 +3995,7 @@ impl ServiceManager {
         *sled_zone = SwitchZoneState::Running {
             request: request.clone(),
             zone: Box::new(zone),
+            worker: None,
         };
         Ok(())
     }
@@ -4022,9 +4033,21 @@ impl ServiceManager {
 
             tokio::select! {
                 // If we've been told to stop trying, bail.
-                _ = &mut exit_rx => return,
+                _ = &mut exit_rx => {
+                    info!(
+                        self.inner.log,
+                        "instructed to give up on switch zone initialization",
+                    );
+                    return;
+                }
 
-                _ = tokio::time::sleep(RETRY_DELAY) => continue,
+                _ = tokio::time::sleep(RETRY_DELAY) => {
+                    info!(
+                        self.inner.log,
+                        "retrying switch zone initialization",
+                    );
+                    continue;
+                }
             };
         }
 
@@ -4033,7 +4056,7 @@ impl ServiceManager {
         if let Some(underlay_info) = underlay_info {
             self.ensure_switch_zone_uplinks_configured_loop(
                 &underlay_info,
-                Some(exit_rx),
+                exit_rx,
             )
             .await;
         }
