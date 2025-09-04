@@ -621,6 +621,10 @@ impl SkippedMgsUpdates {
     pub fn push(&mut self, update: SkippedMgsUpdate) {
         self.updates.push(update)
     }
+
+    pub fn append(&mut self, other: &mut Self) {
+        self.updates.append(&mut other.updates);
+    }
 }
 
 #[derive(

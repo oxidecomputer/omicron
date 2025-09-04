@@ -608,7 +608,7 @@ impl ExpectedUpdates {
     ) {
         let sp_type = update.sp_type;
         let sp_slot = update.slot_id;
-        let component = MgsUpdateComponent::from(&update.details);
+        let component = update.details.clone().into();
         println!("found update: {} slot {}", sp_type, sp_slot);
         let ExpectedUpdate { expected_serial, expected_artifact, .. } = self
             .updates

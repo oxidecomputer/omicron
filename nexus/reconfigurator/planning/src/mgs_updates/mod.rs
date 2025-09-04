@@ -209,34 +209,36 @@ pub(crate) fn plan_mgs_updates(
         }
 
         match try_make_update(log, board, inventory, current_artifacts) {
-            (Some((update, mut host_phase_2)), skipped_updates) => {
+            (Some((update, mut host_phase_2)), mut skipped_updates) => {
                 info!(log, "configuring MGS-driven update"; &update);
                 pending_updates.insert(update);
                 pending_host_phase_2_changes.append(&mut host_phase_2);
                 // TODO-K: Are the logs necessary?
-                for skipped in &skipped_updates.updates {
-                    warn!(
-                        log,
-                        "update to {} {} has been skipped: {}",
-                        skipped.baseboard_id,
-                        skipped.component,
-                        skipped.reason
-                    );
-                    skipped_mgs_updates.push(skipped.clone());
-                }
+                //for skipped in &skipped_updates.updates {
+                //    warn!(
+                //        log,
+                //        "update to {} {} has been skipped: {}",
+                //        skipped.baseboard_id,
+                //        skipped.component,
+                //        skipped.reason
+                //    );
+                //    skipped_mgs_updates.push(skipped.clone());
+                //}
+                skipped_mgs_updates.append(&mut skipped_updates);
             }
-            (None, skipped_updates) => {
+            (None, mut skipped_updates) => {
                 info!(log, "skipping board for MGS-driven update"; board);
-                for skipped in &skipped_updates.updates {
-                    warn!(
-                        log,
-                        "update to {} {} has been skipped: {}",
-                        skipped.baseboard_id,
-                        skipped.component,
-                        skipped.reason
-                    );
-                    skipped_mgs_updates.push(skipped.clone());
-                }
+                //for skipped in &skipped_updates.updates {
+                //    warn!(
+                //        log,
+                //        "update to {} {} has been skipped: {}",
+                //        skipped.baseboard_id,
+                //        skipped.component,
+                //        skipped.reason
+                //    );
+                //    skipped_mgs_updates.push(skipped.clone());
+                //}
+                skipped_mgs_updates.append(&mut skipped_updates);
             }
         }
     }
@@ -579,7 +581,7 @@ fn try_make_update(
                 reason: e,
             });
             // TODO-K: remove debugging log
-            warn!(log, "HERE: {:?}", skipped_mgs_updates);
+            // warn!(log, "HERE: {:?}", skipped_mgs_updates);
         }
     }
 
@@ -617,36 +619,9 @@ fn try_make_update(
                 reason: e,
             });
             // TODO-K: remove debugging log
-            warn!(log, "HERE2: {:?}", skipped_mgs_updates);
-            // TODO-K: This is wrong there is no pending update
-            //  const ARTIFACT_HASH_SP_GIMLET_E: ArtifactHash =
-            //      ArtifactHash([1; 32]);
+            // warn!(log, "HERE2: {:?}", skipped_mgs_updates);
             return (
                 None,
-                //    Some((
-                //        PendingMgsUpdate {
-                //            sp_type: SpType::Power,
-                //            baseboard_id: baseboard_id.clone(),
-                //            slot_id: 22,
-                //            details: PendingMgsUpdateDetails::Sp(
-                //                PendingMgsUpdateSpDetails {
-                //                    expected_active_version: ArtifactVersion::new(
-                //                        "100.0.0",
-                //                    )
-                //                    .unwrap(),
-                //                    expected_inactive_version:
-                //                        ExpectedVersion::Version(
-                //                            ArtifactVersion::new("100.0.0")
-                //                                .unwrap(),
-                //                        ),
-                //                },
-                //            ),
-                //            artifact_hash: ARTIFACT_HASH_SP_GIMLET_E,
-                //            artifact_version: ArtifactVersion::new("1000.0.0")
-                //                .unwrap(),
-                //        },
-                //        PendingHostPhase2Changes::empty(),
-                //    )),
                 skipped_mgs_updates,
             );
         }

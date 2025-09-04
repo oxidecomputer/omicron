@@ -1314,20 +1314,6 @@ pub enum MgsUpdateComponent {
     HostOs,
 }
 
-// TODO-K: Implement into() instead
-impl From<&'_ PendingMgsUpdateDetails> for MgsUpdateComponent {
-    fn from(value: &'_ PendingMgsUpdateDetails) -> Self {
-        match value {
-            PendingMgsUpdateDetails::Rot { .. } => Self::Rot,
-            PendingMgsUpdateDetails::RotBootloader { .. } => {
-                Self::RotBootloader
-            }
-            PendingMgsUpdateDetails::Sp { .. } => Self::Sp,
-            PendingMgsUpdateDetails::HostPhase1(_) => Self::HostOs,
-        }
-    }
-}
-
 impl Display for MgsUpdateComponent {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let s = match self {
@@ -1525,6 +1511,19 @@ pub enum PendingMgsUpdateDetails {
     /// We write the phase 1 via MGS, and have a precheck condition that
     /// sled-agent has already written the matching phase 2.
     HostPhase1(PendingMgsUpdateHostPhase1Details),
+}
+
+impl Into<MgsUpdateComponent> for PendingMgsUpdateDetails {
+    fn into(self) -> MgsUpdateComponent {
+        match self {
+            PendingMgsUpdateDetails::Rot { .. } => MgsUpdateComponent::Rot,
+            PendingMgsUpdateDetails::RotBootloader { .. } => {
+                MgsUpdateComponent::RotBootloader
+            }
+            PendingMgsUpdateDetails::Sp { .. } => MgsUpdateComponent::Sp,
+            PendingMgsUpdateDetails::HostPhase1(_) => MgsUpdateComponent::HostOs,
+        }
+    }
 }
 
 impl slog::KV for PendingMgsUpdateDetails {
