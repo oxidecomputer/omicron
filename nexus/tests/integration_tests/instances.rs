@@ -1139,7 +1139,7 @@ async fn test_instance_migration_compatible_cpu_platforms(
         omicron_sled_agent::sim::ZpoolConfig::None,
         nexus_sled_agent_shared::inventory::SledCpuFamily::AmdTurin,
     );
-    let new_sled_id = config.id.clone();
+    let new_sled_id = config.id;
 
     let _turin_sled = start_sled_and_wait(cptestctx, config).await;
 
@@ -1330,7 +1330,7 @@ async fn test_instance_migration_incompatible_cpu_platforms(
         omicron_sled_agent::sim::ZpoolConfig::None,
         nexus_sled_agent_shared::inventory::SledCpuFamily::AmdTurin,
     );
-    let turin_sled_id = config.id.clone();
+    let turin_sled_id = config.id;
 
     let _turin_sled = start_sled_and_wait(cptestctx, config).await;
 
@@ -1409,7 +1409,7 @@ async fn test_instance_migration_unknown_sled_type(
         omicron_sled_agent::sim::ZpoolConfig::None,
         nexus_sled_agent_shared::inventory::SledCpuFamily::Unknown,
     );
-    let new_sled_id = config.id.clone();
+    let new_sled_id = config.id;
 
     let _unknown_sled = start_sled_and_wait(cptestctx, config).await;
 
@@ -6690,7 +6690,7 @@ async fn test_can_start_instance_with_cpu_platform(
         omicron_sled_agent::sim::ZpoolConfig::None,
         nexus_sled_agent_shared::inventory::SledCpuFamily::AmdTurin,
     );
-    let new_sled_id = config.id.clone();
+    let new_sled_id = config.id;
 
     let _turin_sled = start_sled_and_wait(cptestctx, config).await;
 
