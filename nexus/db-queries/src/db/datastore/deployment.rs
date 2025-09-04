@@ -3266,7 +3266,8 @@ mod tests {
         );
 
         // Start tracking cumulative blueprint table coverage.
-        let mut cumulative_counts = BlueprintTableCounts::new(&datastore, blueprint1.id).await;
+        let mut cumulative_counts =
+            BlueprintTableCounts::new(&datastore, blueprint1.id).await;
 
         // Check the number of blueprint elements against our collection.
         assert_eq!(
@@ -3633,7 +3634,8 @@ mod tests {
         assert_eq!(blueprint2.internal_dns_version, new_internal_dns_version);
         assert_eq!(blueprint2.external_dns_version, new_external_dns_version);
 
-        let blueprint2_counts = BlueprintTableCounts::new(&datastore, blueprint2.id).await;
+        let blueprint2_counts =
+            BlueprintTableCounts::new(&datastore, blueprint2.id).await;
         cumulative_counts.add(&blueprint2_counts);
         {
             let mut expected_ids = [blueprint1.id, blueprint2.id];
@@ -3727,7 +3729,8 @@ mod tests {
                 .expect("failed to read collection back")
         );
 
-        let blueprint3_counts = BlueprintTableCounts::new(&datastore, blueprint3.id).await;
+        let blueprint3_counts =
+            BlueprintTableCounts::new(&datastore, blueprint3.id).await;
         cumulative_counts.add(&blueprint3_counts);
         let bp3_target = BlueprintTarget {
             target_id: blueprint3.id,
@@ -3784,7 +3787,8 @@ mod tests {
                 .expect("failed to read collection back")
         );
 
-        let blueprint4_counts = BlueprintTableCounts::new(&datastore, blueprint4.id).await;
+        let blueprint4_counts =
+            BlueprintTableCounts::new(&datastore, blueprint4.id).await;
         cumulative_counts.add(&blueprint4_counts);
         let bp4_target = BlueprintTarget {
             target_id: blueprint4.id,
@@ -3845,7 +3849,8 @@ mod tests {
                 .expect("failed to read collection back")
         );
 
-        let blueprint5_counts = BlueprintTableCounts::new(&datastore, blueprint5.id).await;
+        let blueprint5_counts =
+            BlueprintTableCounts::new(&datastore, blueprint5.id).await;
         cumulative_counts.add(&blueprint5_counts);
         let bp5_target = BlueprintTarget {
             target_id: blueprint5.id,
@@ -3876,7 +3881,8 @@ mod tests {
             .await
             .expect("failed to insert blueprint");
 
-        let blueprint6_counts = BlueprintTableCounts::new(&datastore, blueprint6.id).await;
+        let blueprint6_counts =
+            BlueprintTableCounts::new(&datastore, blueprint6.id).await;
         cumulative_counts.add(&blueprint6_counts);
         let bp6_target = BlueprintTarget {
             target_id: blueprint6.id,
