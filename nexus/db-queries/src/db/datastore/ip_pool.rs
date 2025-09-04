@@ -27,6 +27,7 @@ use crate::db::queries::ip_pool::FilterOverlappingIpRanges;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
+use diesel::result::DatabaseErrorKind;
 use diesel::result::Error as DieselError;
 use ipnetwork::IpNetwork;
 use nexus_db_errors::ErrorHandler;
@@ -85,6 +86,16 @@ impl ServiceIpPools {
         }
     }
 }
+
+// Constraint used to ensure we don't set a default IP Pool for the internal
+// silo.
+const INTERNAL_SILO_DEFAULT_CONSTRAINT: &'static str =
+    "internal_silo_has_no_default_pool";
+
+// Error message emitted when we attempt to set a default IP Pool for the
+// internal silo.
+const INTERNAL_SILO_DEFAULT_ERROR: &'static str =
+    "The internal Silo cannot have a default IP Pool";
 
 impl DataStore {
     /// List IP Pools
@@ -588,22 +599,34 @@ impl DataStore {
         let conn = self.pool_connection_authorized(opctx).await?;
 
         let result = diesel::insert_into(dsl::ip_pool_resource)
-            .values(ip_pool_resource.clone())
+            .values(ip_pool_resource)
             .get_result_async(&*conn)
             .await
             .map_err(|e| {
-                public_error_from_diesel(
-                    e,
-                    ErrorHandler::Conflict(
-                        ResourceType::IpPoolResource,
-                        &format!(
-                            "ip_pool_id: {:?}, resource_id: {:?}, resource_type: {:?}",
-                            ip_pool_resource.ip_pool_id,
-                            ip_pool_resource.resource_id,
-                            ip_pool_resource.resource_type,
+                match e {
+                    // Catch the check constraint ensuring the internal silo has
+                    // no default pool
+                    DieselError::DatabaseError(DatabaseErrorKind::CheckViolation, ref info)
+                        if info.constraint_name() == Some(INTERNAL_SILO_DEFAULT_CONSTRAINT) =>
+                    {
+                        Error::invalid_request(INTERNAL_SILO_DEFAULT_ERROR)
+                    }
+                    DieselError::DatabaseError(DatabaseErrorKind::UniqueViolation, _) => {
+                        public_error_from_diesel(
+                            e,
+                            ErrorHandler::Conflict(
+                                ResourceType::IpPoolResource,
+                                &format!(
+                                    "ip_pool_id: {}, resource_id: {}, resource_type: {:?}",
+                                    ip_pool_resource.ip_pool_id,
+                                    ip_pool_resource.resource_id,
+                                    ip_pool_resource.resource_type,
+                                ),
+                            )
                         )
-                    ),
-                )
+                    }
+                    _ => public_error_from_diesel(e, ErrorHandler::Server),
+                }
             })?;
 
         if ip_pool_resource.is_default {
@@ -885,21 +908,47 @@ impl DataStore {
                     IpPoolResourceUpdateError::FailedToUnsetDefault(err),
                 )) => public_error_from_diesel(err, ErrorHandler::Server),
                 Some(TxnError::Database(err)) => {
-                    public_error_from_diesel(err, ErrorHandler::Server)
+                    match err {
+                        // Catch the check constraint ensuring the internal silo has
+                        // no default pool
+                        DieselError::DatabaseError(
+                            DatabaseErrorKind::CheckViolation,
+                            ref info,
+                        ) if info.constraint_name()
+                            == Some(INTERNAL_SILO_DEFAULT_CONSTRAINT) =>
+                        {
+                            Error::invalid_request(INTERNAL_SILO_DEFAULT_ERROR)
+                        }
+                        _ => {
+                            public_error_from_diesel(err, ErrorHandler::Server)
+                        }
+                    }
                 }
                 None => {
-                    public_error_from_diesel(
-                        e,
-                        ErrorHandler::NotFoundByLookup(
-                            ResourceType::IpPoolResource,
-                            // TODO: would be nice to put the actual names and/or ids in
-                            // here but LookupType on each of the two silos doesn't have
-                            // a nice to_string yet or a way of composing them
-                            LookupType::ByCompositeId(
-                                "(pool, silo)".to_string(),
+                    match e {
+                        // Catch the check constraint ensuring the internal silo has
+                        // no default pool
+                        DieselError::DatabaseError(
+                            DatabaseErrorKind::CheckViolation,
+                            ref info,
+                        ) if info.constraint_name()
+                            == Some(INTERNAL_SILO_DEFAULT_CONSTRAINT) =>
+                        {
+                            Error::invalid_request(INTERNAL_SILO_DEFAULT_ERROR)
+                        }
+                        _ => public_error_from_diesel(
+                            e,
+                            ErrorHandler::NotFoundByLookup(
+                                ResourceType::IpPoolResource,
+                                // TODO: would be nice to put the actual names and/or ids in
+                                // here but LookupType on each of the two silos doesn't have
+                                // a nice to_string yet or a way of composing them
+                                LookupType::ByCompositeId(
+                                    "(pool, silo)".to_string(),
+                                ),
                             ),
                         ),
-                    )
+                    }
                 }
             })
     }
@@ -1269,12 +1318,13 @@ mod test {
     use std::num::NonZeroU32;
 
     use crate::authz;
+    use crate::db::datastore::ip_pool::INTERNAL_SILO_DEFAULT_ERROR;
     use crate::db::model::{
         IpPool, IpPoolResource, IpPoolResourceType, Project,
     };
     use crate::db::pub_test_utils::TestDatabase;
     use assert_matches::assert_matches;
-    use nexus_db_model::IpVersion;
+    use nexus_db_model::{IpPoolIdentity, IpVersion};
     use nexus_types::external_api::params;
     use nexus_types::identity::Resource;
     use omicron_common::address::{IpRange, Ipv4Range, Ipv6Range};
@@ -1283,6 +1333,7 @@ mod test {
         DataPageParams, Error, IdentityMetadataCreateParams, LookupType,
     };
     use omicron_test_utils::dev;
+    use uuid::Uuid;
 
     #[tokio::test]
     async fn test_default_ip_pools() {
@@ -1360,7 +1411,7 @@ mod test {
             is_default: false,
         };
         datastore
-            .ip_pool_link_silo(&opctx, link_body.clone())
+            .ip_pool_link_silo(&opctx, link_body)
             .await
             .expect("Failed to associate IP pool with silo");
 
@@ -1489,9 +1540,6 @@ mod test {
             assert_eq!(is_internal, Ok(false));
 
             // now link it to the current silo, and it is still not internal.
-            //
-            // We're only making the IPv4 pool the default right now. See
-            // https://github.com/oxidecomputer/omicron/issues/8884 for more.
             let silo_id = opctx.authn.silo_required().unwrap().id();
             let is_default = matches!(version, IpVersion::V4);
             let link = IpPoolResource {
@@ -1508,6 +1556,87 @@ mod test {
             let is_internal =
                 datastore.ip_pool_is_internal(&opctx, &authz_other_pool).await;
             assert_eq!(is_internal, Ok(false));
+        }
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn cannot_set_default_ip_pool_for_internal_silo() {
+        let logctx =
+            dev::test_setup_log("cannot_set_default_ip_pool_for_internal_silo");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        for ip_version in [IpVersion::V4, IpVersion::V6] {
+            // Make some new pool.
+            let params = IpPool {
+                identity: IpPoolIdentity::new(
+                    Uuid::new_v4(),
+                    IdentityMetadataCreateParams {
+                        name: format!("test-pool-{}", ip_version)
+                            .parse()
+                            .unwrap(),
+                        description: String::new(),
+                    },
+                ),
+                ip_version,
+                rcgen: 0,
+            };
+            let pool = datastore
+                .ip_pool_create(&opctx, params)
+                .await
+                .expect("Should be able to create pool");
+            assert_eq!(pool.ip_version, ip_version);
+            let authz_pool =
+                nexus_db_lookup::LookupPath::new(&opctx, datastore)
+                    .ip_pool_id(pool.id())
+                    .lookup_for(authz::Action::Read)
+                    .await
+                    .expect("Should be able to lookup new IP Pool")
+                    .0;
+
+            // Try to link it as the default.
+            let (authz_silo, ..) =
+                nexus_db_lookup::LookupPath::new(&opctx, datastore)
+                    .silo_id(nexus_types::silo::INTERNAL_SILO_ID)
+                    .lookup_for(authz::Action::Read)
+                    .await
+                    .expect("Should be able to lookup internal silo");
+            let link = IpPoolResource {
+                ip_pool_id: authz_pool.id(),
+                resource_type: IpPoolResourceType::Silo,
+                resource_id: authz_silo.id(),
+                is_default: true,
+            };
+            let Err(e) = datastore.ip_pool_link_silo(opctx, link).await else {
+                panic!(
+                    "should have failed to link IP Pool to internal silo as a default"
+                );
+            };
+            let Error::InvalidRequest { message } = &e else {
+                panic!("should have received an invalid request, got: {:?}", e);
+            };
+            assert_eq!(message.external_message(), INTERNAL_SILO_DEFAULT_ERROR);
+
+            // We can link it if it's not the default.
+            let link = IpPoolResource { is_default: false, ..link };
+            datastore.ip_pool_link_silo(opctx, link).await.expect(
+                "Should be able to link non-default pool to internal silo",
+            );
+
+            // Try to set it to the default, and ensure that this also fails.
+            let Err(e) = datastore
+                .ip_pool_set_default(opctx, &authz_pool, &authz_silo, true)
+                .await
+            else {
+                panic!("should have failed to set internal pool to default");
+            };
+            let Error::InvalidRequest { message } = &e else {
+                panic!("should have received an invalid request, got: {:?}", e);
+            };
+            assert_eq!(message.external_message(), INTERNAL_SILO_DEFAULT_ERROR);
         }
 
         db.terminate().await;

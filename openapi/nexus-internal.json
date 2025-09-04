@@ -6602,6 +6602,32 @@
           "by_baseboard"
         ]
       },
+      "PendingRecovery": {
+        "description": "Snapshot of reassignment state when a recovery pass started",
+        "type": "object",
+        "properties": {
+          "blueprint_id": {
+            "nullable": true,
+            "description": "which blueprint id we'd be fully caught up to upon completion",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TypedUuidForBlueprintKind"
+              }
+            ]
+          },
+          "generation": {
+            "description": "what `reassignment_generation` was when this recovery started",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Generation"
+              }
+            ]
+          }
+        },
+        "required": [
+          "generation"
+        ]
+      },
       "PendingSagaInfo": {
         "description": "Describes a pending saga (for debugging why quiesce is stuck)",
         "type": "object",
@@ -7778,24 +7804,13 @@
             },
             "uniqueItems": true
           },
-          "sagas_pending": {
-            "title": "IdOrdMap",
-            "description": "what sagas are currently running or known needing to be recovered\n\nThis should only be non-empty when state is `Running` or `WaitingForSagas`.  Entries here prevent transitioning from `WaitingForSagas` to `WaitingForDb`.",
-            "x-rust-type": {
-              "crate": "iddqd",
-              "parameters": [
-                {
-                  "$ref": "#/components/schemas/PendingSagaInfo"
-                }
-              ],
-              "path": "iddqd::IdOrdMap",
-              "version": "*"
-            },
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/PendingSagaInfo"
-            },
-            "uniqueItems": true
+          "sagas": {
+            "description": "information about saga quiescing",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SagaQuiesceStatus"
+              }
+            ]
           },
           "state": {
             "description": "what stage of quiescing is Nexus at",
@@ -7808,7 +7823,7 @@
         },
         "required": [
           "db_claims",
-          "sagas_pending",
+          "sagas",
           "state"
         ]
       },
@@ -8340,6 +8355,106 @@
           }
         ]
       },
+      "SagaQuiesceStatus": {
+        "type": "object",
+        "properties": {
+          "drained_blueprint_id": {
+            "nullable": true,
+            "description": "blueprint id that we're \"fully drained up to\"\n\nIf this value is non-`None`, that means that:\n\n- saga creation is disallowed - no sagas are running - we have re-assigned sagas from other Nexus instances expunged in this blueprint or earlier - we have finished recovery for all those sagas (that had been assigned to us as of the re-assignment pass for this blueprint id)\n\nThis means that the only way we can wind up running another saga is if there's a new blueprint that expunges a different Nexus zone.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TypedUuidForBlueprintKind"
+              }
+            ]
+          },
+          "first_recovery_complete": {
+            "description": "whether at least one recovery pass has successfully completed\n\nWe have to track this because we can't quiesce until we know we've recovered all outstanding sagas.",
+            "type": "boolean"
+          },
+          "new_sagas_allowed": {
+            "description": "current policy: are we allowed to *create* new sagas?\n\nThis also affects re-assigning sagas from expunged Nexus instances to ourselves.  It does **not** affect saga recovery.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SagasAllowed"
+              }
+            ]
+          },
+          "reassignment_blueprint_id": {
+            "nullable": true,
+            "description": "blueprint id associated with last successful saga reassignment\n\nSimilar to the generation number, this is used to track whether we've accounted for all sagas for all expungements up through this target blueprint.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TypedUuidForBlueprintKind"
+              }
+            ]
+          },
+          "reassignment_generation": {
+            "description": "generation number for the saga reassignment\n\nThis gets bumped whenever a saga reassignment operation completes that may have re-assigned us some sagas.  It's used to keep track of when we've recovered all sagas that could be assigned to us.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Generation"
+              }
+            ]
+          },
+          "reassignment_pending": {
+            "description": "whether there is a saga reassignment operation happening\n\nThese operatinos may assign new sagas to Nexus that must be recovered and completed before quiescing can finish.",
+            "type": "boolean"
+          },
+          "recovered_blueprint_id": {
+            "nullable": true,
+            "description": "blueprint id that saga recovery has \"caught up to\"\n\nThis means that we have finished recovering any sagas that were re-assigned to us due to expungements of other Nexus zones up through this blueprint.  Put differently: we know that we will never be assigned more sagas due to expungement unless the target blueprint changes past this one.\n\nThis does not mean that we've fully drained all sagas up through this blueprint.  There may still be sagas running.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TypedUuidForBlueprintKind"
+              }
+            ]
+          },
+          "recovered_reassignment_generation": {
+            "description": "\"saga reassignment generation number\" that was \"caught up to\" by the last recovery pass\n\nThis is used with `reassignment_generation` to help us know when we've recovered all the sagas that may have been assigned to us during a given reassignment pass.  See `reassignment_done()` for details.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Generation"
+              }
+            ]
+          },
+          "recovery_pending": {
+            "nullable": true,
+            "description": "If a recovery pass is ongoing, a snapshot of reassignment state when it started (which reflects what we'll be caught up to when it finishes)",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PendingRecovery"
+              }
+            ]
+          },
+          "sagas_pending": {
+            "title": "IdOrdMap",
+            "description": "list of sagas we need to wait to complete before quiescing\n\nThese are basically running sagas.  They may have been created in this Nexus process lifetime or created in another process and then recovered in this one.",
+            "x-rust-type": {
+              "crate": "iddqd",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/PendingSagaInfo"
+                }
+              ],
+              "path": "iddqd::IdOrdMap",
+              "version": "*"
+            },
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PendingSagaInfo"
+            },
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "first_recovery_complete",
+          "new_sagas_allowed",
+          "reassignment_generation",
+          "reassignment_pending",
+          "recovered_reassignment_generation",
+          "sagas_pending"
+        ]
+      },
       "SagaResultsPage": {
         "description": "A single page of results",
         "type": "object",
@@ -8443,6 +8558,32 @@
               "state",
               "undo_error_node_name",
               "undo_source_error"
+            ]
+          }
+        ]
+      },
+      "SagasAllowed": {
+        "description": "Policy determining whether new sagas are allowed to be started\n\nThis is used by Nexus quiesce to disallow creation of new sagas when we're trying to quiesce Nexus.",
+        "oneOf": [
+          {
+            "description": "New sagas may be started (normal condition)",
+            "type": "string",
+            "enum": [
+              "allowed"
+            ]
+          },
+          {
+            "description": "New sagas may not be started because we're quiescing or quiesced",
+            "type": "string",
+            "enum": [
+              "disallowed_quiesce"
+            ]
+          },
+          {
+            "description": "New sagas may not be started because we just started up and haven't determined if we're quiescing yet",
+            "type": "string",
+            "enum": [
+              "disallowed_unknown"
             ]
           }
         ]
