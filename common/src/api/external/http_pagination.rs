@@ -382,6 +382,15 @@ pub enum PaginatedBy<'a> {
     Name(DataPageParams<'a, Name>),
 }
 
+impl<'a> PaginatedBy<'a> {
+    pub fn limit(&self) -> NonZeroU32 {
+        match self {
+            PaginatedBy::Id(inner) => inner.limit,
+            PaginatedBy::Name(inner) => inner.limit,
+        }
+    }
+}
+
 impl<T: Clone + Debug + DeserializeOwned + JsonSchema + PartialEq + Serialize>
     ScanParams for ScanByNameOrId<T>
 {
