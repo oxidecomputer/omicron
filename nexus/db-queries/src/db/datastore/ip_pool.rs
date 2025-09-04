@@ -13,7 +13,6 @@ use crate::db::collection_insert::DatastoreCollection;
 use crate::db::datastore::SERVICE_IPV4_POOL_NAME;
 use crate::db::datastore::SERVICE_IPV6_POOL_NAME;
 use crate::db::identity::Resource;
-use crate::db::model::ExternalIp;
 use crate::db::model::IpKind;
 use crate::db::model::IpPool;
 use crate::db::model::IpPoolRange;
@@ -24,11 +23,15 @@ use crate::db::model::Name;
 use crate::db::pagination::Paginator;
 use crate::db::pagination::paginated;
 use crate::db::queries::ip_pool::FilterOverlappingIpRanges;
+use crate::db::raw_query_builder::QueryBuilder;
+use crate::db::raw_query_builder::SelectableSql;
+use crate::db::raw_query_builder::TypedSqlQuery;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
 use diesel::result::DatabaseErrorKind;
 use diesel::result::Error as DieselError;
+use diesel::sql_types;
 use ipnetwork::IpNetwork;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::OptionalError;
@@ -42,7 +45,9 @@ use nexus_db_model::InternetGatewayIpPool;
 use nexus_db_model::IpVersion;
 use nexus_db_model::Project;
 use nexus_db_model::Vpc;
+use nexus_db_schema::enums::IpKindEnum;
 use nexus_types::external_api::shared::IpRange;
+use nexus_types::silo::INTERNAL_SILO_ID;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
@@ -97,40 +102,216 @@ const INTERNAL_SILO_DEFAULT_CONSTRAINT: &'static str =
 const INTERNAL_SILO_DEFAULT_ERROR: &'static str =
     "The internal Silo cannot have a default IP Pool";
 
+// Error message emitted when a user attempts to link an IP Pool and internal
+// Silo, but the pool is already linked to an external Silo, or vice versa.
+const BAD_SILO_LINK_ERROR: &str = "IP Pools cannot be both linked to external \
+    Silos and delegated for internal Oxide usage.";
+
+// Error message emitted when a user attempts to unlink an IP Pool from a Silo
+// while the pool has external IP addresses allocated from it.
+const POOL_HAS_IPS_ERROR: &str =
+    "IP addresses from this pool are in use in the linked silo";
+
+// Error message emitted when a user attempts to unlink an IP Pool from the
+// Oxide internal Silo, without at least one other IP Pool linked to it.
+const LAST_POOL_ERROR: &str = "IP Pool delegated to Oxide internal usage \
+    cannot be unlinked without at least one other IP Pool delegated. Create \
+    and delegate at least one more IP Pool before deleting this one.";
+
+/// Helper trait for checking if an argument to a Silo <-> IP Pool linking
+/// operation refers to the Oxide internal Silo.
+trait IsInternalSilo {
+    fn is_internal_silo(&self) -> bool;
+}
+
+impl IsInternalSilo for authz::Silo {
+    fn is_internal_silo(&self) -> bool {
+        self.id() == INTERNAL_SILO_ID
+    }
+}
+
+/// Describes how IP Pools are reserved.
+#[derive(Clone, Copy)]
+enum PoolReservationType {
+    /// The pool is reserved for Oxide's internal usage.
+    Internal,
+    /// The pool is reserved for external, customer usage.
+    External,
+}
+
+// TODO-cleanup: This is essentially the `paginated` function in macro form.
+// It's extremely time-consuming to figure out the correct trait bounds which
+// allow that function to work on the result of a join query. We could try to
+// factor that out if it becomes useful, but since this is only used directly in
+// this module, it's fine as-is for now.
+macro_rules! paginated_table_like {
+    ($query:expr, $pagparams:expr) => {
+        match $pagparams {
+            ::omicron_common::api::external::http_pagination::PaginatedBy::Id(by_id) => {
+                let maybe_marker = by_id.marker.copied();
+                match by_id.direction {
+                    ::dropshot::PaginationOrder::Ascending => {
+                        if let Some(marker) = maybe_marker {
+                            $query = $query.filter(::nexus_db_schema::schema::ip_pool::id.gt(marker));
+                        }
+                        $query.order(::nexus_db_schema::schema::ip_pool::id.asc())
+                    }
+                    ::dropshot::PaginationOrder::Descending => {
+                        if let Some(marker) = maybe_marker {
+                            $query = $query.filter(::nexus_db_schema::schema::ip_pool::id.lt(marker));
+                        }
+                        $query.order(::nexus_db_schema::schema::ip_pool::id.desc())
+                    }
+                }
+            }
+            ::omicron_common::api::external::http_pagination::PaginatedBy::Name(by_name) => {
+                let maybe_marker = by_name.marker.map(|n| Name::ref_cast(n)).cloned();
+                match by_name.direction {
+                    ::dropshot::PaginationOrder::Ascending => {
+                        if let Some(marker) = maybe_marker {
+                            $query = $query.filter(::nexus_db_schema::schema::ip_pool::name.gt(marker));
+                        }
+                        $query.order(::nexus_db_schema::schema::ip_pool::name.asc())
+                    }
+                    ::dropshot::PaginationOrder::Descending => {
+                        if let Some(marker) = maybe_marker {
+                            $query = $query.filter(::nexus_db_schema::schema::ip_pool::name.lt(marker));
+                        }
+                        $query.order(::nexus_db_schema::schema::ip_pool::name.desc())
+                    }
+                }
+            }
+        }
+    };
+}
+
 impl DataStore {
+    /// List IP Pools by their reservation type and optionally IP version, paginated.
+    async fn ip_pools_list_paginated(
+        &self,
+        opctx: &OpContext,
+        reservation: PoolReservationType,
+        version: Option<IpVersion>,
+        pagparams: &PaginatedBy<'_>,
+    ) -> ListResultVec<IpPool> {
+        opctx
+            .authorize(authz::Action::ListChildren, &authz::IP_POOL_LIST)
+            .await?;
+        match reservation {
+            PoolReservationType::Internal => {
+                self.list_ip_pools_for_internal(opctx, version, pagparams).await
+            }
+            PoolReservationType::External => {
+                self.list_ip_pools_for_external(opctx, version, pagparams).await
+            }
+        }
+    }
+
+    /// List IP Pools reserved for Oxide.
+    async fn list_ip_pools_for_internal(
+        &self,
+        opctx: &OpContext,
+        version: Option<IpVersion>,
+        pagparams: &PaginatedBy<'_>,
+    ) -> ListResultVec<IpPool> {
+        use nexus_db_schema::schema::ip_pool;
+        use nexus_db_schema::schema::ip_pool_resource;
+        // IP Pools reserved for internal usage are, by definition, linked to
+        // the internal Silo. So we can do a natural join between the `ip_pool`
+        // and `ip_pool_resource` table, filtering to those pools linked to our
+        // silo.
+        let mut query = ip_pool::table
+            .inner_join(
+                ip_pool_resource::table
+                    .on(ip_pool::id.eq(ip_pool_resource::ip_pool_id)),
+            )
+            .filter(
+                ip_pool_resource::resource_type
+                    .eq(IpPoolResourceType::Silo)
+                    .and(ip_pool_resource::resource_id.eq(INTERNAL_SILO_ID)),
+            )
+            .into_boxed();
+        let query = paginated_table_like!(query, pagparams);
+        let query = match version {
+            Some(ver) => query.filter(ip_pool::ip_version.eq(ver)),
+            None => query,
+        };
+        query
+            .filter(ip_pool::time_deleted.is_null())
+            .limit(pagparams.limit().get().into())
+            .select(IpPool::as_select())
+            .get_results_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// List IP Pools reserved for external usage.
+    async fn list_ip_pools_for_external(
+        &self,
+        opctx: &OpContext,
+        version: Option<IpVersion>,
+        pagparams: &PaginatedBy<'_>,
+    ) -> ListResultVec<IpPool> {
+        use nexus_db_schema::schema::ip_pool;
+        use nexus_db_schema::schema::ip_pool_resource;
+        // IP Pools reserved for external usage are either unlinked to any Silo,
+        // or linked to a Silo other than the internal one. Use a left join to
+        // express that.
+        let mut query = ip_pool::table
+            .left_join(
+                ip_pool_resource::table.on(ip_pool::id
+                    .eq(ip_pool_resource::ip_pool_id)
+                    .and(
+                        ip_pool_resource::resource_type
+                            .eq(IpPoolResourceType::Silo),
+                    )
+                    .and(ip_pool_resource::resource_id.eq(INTERNAL_SILO_ID))),
+            )
+            .filter(ip_pool_resource::resource_id.is_null())
+            .into_boxed();
+        let query = paginated_table_like!(query, pagparams);
+        let query = match version {
+            Some(ver) => query.filter(ip_pool::ip_version.eq(ver)),
+            None => query,
+        };
+        query
+            .filter(ip_pool::time_deleted.is_null())
+            .limit(pagparams.limit().get().into())
+            .select(IpPool::as_select())
+            .get_results_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
     /// List IP Pools
     pub async fn ip_pools_list(
         &self,
         opctx: &OpContext,
         pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<IpPool> {
-        use nexus_db_schema::schema::ip_pool;
-
-        opctx
-            .authorize(authz::Action::ListChildren, &authz::IP_POOL_LIST)
-            .await?;
-        match pagparams {
-            PaginatedBy::Id(pagparams) => {
-                paginated(ip_pool::table, ip_pool::id, pagparams)
-            }
-            PaginatedBy::Name(pagparams) => paginated(
-                ip_pool::table,
-                ip_pool::name,
-                &pagparams.map_name(|n| Name::ref_cast(n)),
-            ),
-        }
-        .filter(ip_pool::name.ne(SERVICE_IPV4_POOL_NAME))
-        .filter(ip_pool::name.ne(SERVICE_IPV6_POOL_NAME))
-        .filter(ip_pool::time_deleted.is_null())
-        .select(IpPool::as_select())
-        .get_results_async(&*self.pool_connection_authorized(opctx).await?)
+        self.ip_pools_list_paginated(
+            opctx,
+            PoolReservationType::External,
+            None,
+            pagparams,
+        )
         .await
-        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     /// Look up whether the given pool is available to users in the current
     /// silo, i.e., whether there is an entry in the association table linking
     /// the pool with that silo
+    //
+    // TODO-correctness: This seems difficult to use without TOCTOU issues. It's
+    // currently used to ensure there's a link between a Silo and an IP Pool
+    // when allocating an external address for an instance in that Silo. But
+    // that works by checking that the link exists, and then in a separate
+    // query, allocating an address out of it. Suppose the silo was unlinked
+    // after this check, but before the external address allocation query ran.
+    // Then one could end up with an address from an unlinked IP Pool, which
+    // seems wrong.
+    //
+    // See https://github.com/oxidecomputer/omicron/issues/8992
     pub async fn ip_pool_fetch_link(
         &self,
         opctx: &OpContext,
@@ -219,14 +400,30 @@ impl DataStore {
             })
     }
 
+    /// List IP Pools reserved for Oxide's internal usage.
+    pub async fn ip_pools_service_list(
+        &self,
+        opctx: &OpContext,
+        version: Option<IpVersion>,
+        pagparams: &PaginatedBy<'_>,
+    ) -> ListResultVec<IpPool> {
+        self.ip_pools_list_paginated(
+            opctx,
+            PoolReservationType::Internal,
+            version,
+            pagparams,
+        )
+        .await
+    }
+
     /// Look up internal service IP Pools for both IP versions.
     ///
     /// This is useful when you need to handle resources like external IPs where
     /// the actual address might be from either IP version.
     //
-    // NOTE: It'd be better to do one roundtrip to the DB, but this is
-    // rarely-used right now. We also want to return the authz and database
-    // objects, so we need the lookup-path mechanism.
+    // TODO-remove: Use list_ip_pools_for_internal instead.
+    //
+    // See https://github.com/oxidecomputer/omicron/issues/8947.
     pub async fn ip_pools_service_lookup_both_versions(
         &self,
         opctx: &OpContext,
@@ -243,6 +440,10 @@ impl DataStore {
     /// names. There are separate IP Pools for IPv4 and IPv6 address ranges.
     ///
     /// This method may require an index by Availability Zone in the future.
+    //
+    // TODO-remove: Use list_ip_pools_for_internal instead.
+    //
+    // See https://github.com/oxidecomputer/omicron/issues/8947.
     pub async fn ip_pools_service_lookup(
         &self,
         opctx: &OpContext,
@@ -282,6 +483,9 @@ impl DataStore {
             })
     }
 
+    /// Delete an IP Pool, and any links between it an any Silos.
+    ///
+    /// This fails if there are still IP Ranges in the pool.
     pub async fn ip_pool_delete(
         &self,
         opctx: &OpContext,
@@ -351,6 +555,11 @@ impl DataStore {
 
     /// Check whether the pool is internal by checking that it exists and is
     /// associated with the internal silo
+    //
+    // TODO-remove: This should probably go away when we let operators link any
+    // IP Pools to the internal Silo. The pool belongs to them, even if they've
+    // delegated it to us. See
+    // https://github.com/oxidecomputer/omicron/issues/8947.
     pub async fn ip_pool_is_internal(
         &self,
         opctx: &OpContext,
@@ -526,6 +735,7 @@ impl DataStore {
         Ok(count)
     }
 
+    /// List Silos linked to the given IP Pool.
     pub async fn ip_pool_silo_list(
         &self,
         opctx: &OpContext,
@@ -555,6 +765,8 @@ impl DataStore {
         .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
+    /// List IP Pools linked to the given Silo.
+    ///
     /// Returns (IpPool, IpPoolResource) so we can know in the calling code
     /// whether the pool is default for the silo
     pub async fn silo_ip_pool_list(
@@ -586,20 +798,18 @@ impl DataStore {
         .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
+    /// Insert a link between an IP Pool and a Silo.
     pub async fn ip_pool_link_silo(
         &self,
         opctx: &OpContext,
         ip_pool_resource: IpPoolResource,
     ) -> CreateResult<IpPoolResource> {
-        use nexus_db_schema::schema::ip_pool_resource::dsl;
         opctx
             .authorize(authz::Action::CreateChild, &authz::IP_POOL_LIST)
             .await?;
 
         let conn = self.pool_connection_authorized(opctx).await?;
-
-        let result = diesel::insert_into(dsl::ip_pool_resource)
-            .values(ip_pool_resource)
+        let result = link_ip_pool_to_silo_query(&ip_pool_resource)
             .get_result_async(&*conn)
             .await
             .map_err(|e| {
@@ -625,6 +835,28 @@ impl DataStore {
                             )
                         )
                     }
+                    // Handle intentional errors in the query.
+                    DieselError::DatabaseError(DatabaseErrorKind::Unknown, ref info) => {
+                        let is_uuid_cast_error = |msg: &str, sentinel: &str| -> bool {
+                            let expected = format!(
+                                "could not parse \"{}\" as type uuid: uuid: \
+                                incorrect UUID length: {}",
+                                sentinel,
+                                sentinel,
+                            );
+                            msg == expected
+                        };
+                        let msg = info.message();
+                        if is_uuid_cast_error(msg, BAD_SILO_LINK_SENTINEL) {
+                            Error::invalid_request(BAD_SILO_LINK_ERROR)
+                        } else if is_uuid_cast_error(msg, IP_POOL_DELETED_SENTINEL) {
+                            Error::not_found_by_id(ResourceType::IpPool, &ip_pool_resource.ip_pool_id)
+                        } else if is_uuid_cast_error(msg, SILO_DELETED_SENTINEL) {
+                            Error::not_found_by_id(ResourceType::Silo, &ip_pool_resource.resource_id)
+                        } else {
+                            public_error_from_diesel(e, ErrorHandler::Server)
+                        }
+                    }
                     _ => public_error_from_diesel(e, ErrorHandler::Server),
                 }
             })?;
@@ -642,6 +874,11 @@ impl DataStore {
         Ok(result)
     }
 
+    // TODO-correctness: This seems like it should be in a transaction. At
+    // least, the nested-loops can mostly be re-expressed as a join between the
+    // silos, projects, vpcs, and Internet gateway tables.
+    //
+    // See https://github.com/oxidecomputer/omicron/issues/8992.
     async fn link_default_gateway(
         &self,
         opctx: &OpContext,
@@ -735,6 +972,10 @@ impl DataStore {
         Ok(())
     }
 
+    // TODO-correctness: This should probably be in a transaction, collecting
+    // all the Internet gateway IDs via a JOIN and then soft-deleting them all.
+    //
+    // See https://github.com/oxidecomputer/omicron/issues/8992.
     async fn unlink_ip_pool_gateway(
         &self,
         opctx: &OpContext,
@@ -953,100 +1194,6 @@ impl DataStore {
             })
     }
 
-    /// Ephemeral and snat IPs are associated with a silo through an instance,
-    /// so in order to see if there are any such IPs outstanding in the given
-    /// silo, we have to join IP -> Instance -> Project -> Silo
-    async fn ensure_no_instance_ips_outstanding(
-        &self,
-        opctx: &OpContext,
-        authz_pool: &authz::IpPool,
-        authz_silo: &authz::Silo,
-    ) -> Result<(), Error> {
-        use nexus_db_schema::schema::external_ip;
-        use nexus_db_schema::schema::instance;
-        use nexus_db_schema::schema::project;
-
-        let existing_ips = external_ip::table
-            .inner_join(
-                instance::table
-                    .on(external_ip::parent_id.eq(instance::id.nullable())),
-            )
-            .inner_join(project::table.on(instance::project_id.eq(project::id)))
-            .filter(external_ip::is_service.eq(false))
-            .filter(external_ip::parent_id.is_not_null())
-            .filter(external_ip::time_deleted.is_null())
-            .filter(external_ip::ip_pool_id.eq(authz_pool.id()))
-            // important, floating IPs are handled separately
-            .filter(external_ip::kind.eq(IpKind::Ephemeral).or(external_ip::kind.eq(IpKind::SNat)))
-            .filter(instance::time_deleted.is_null())
-            // we have to join through IPs to instances to projects to get the silo ID
-            .filter(project::silo_id.eq(authz_silo.id()))
-            .select(ExternalIp::as_select())
-            .limit(1)
-            .load_async::<ExternalIp>(
-                &*self.pool_connection_authorized(opctx).await?,
-            )
-            .await
-            .map_err(|e| {
-                Error::internal_error(&format!(
-                    "error checking for outstanding IPs before deleting IP pool association to resource: {:?}",
-                    e
-                ))
-            })?;
-
-        if !existing_ips.is_empty() {
-            return Err(Error::invalid_request(
-                "IP addresses from this pool are in use in the linked silo",
-            ));
-        }
-
-        Ok(())
-    }
-
-    /// Floating IPs are associated with a silo through a project, so this one
-    /// is a little simpler than ephemeral. We join IP -> Project -> Silo.
-    async fn ensure_no_floating_ips_outstanding(
-        &self,
-        opctx: &OpContext,
-        authz_pool: &authz::IpPool,
-        authz_silo: &authz::Silo,
-    ) -> Result<(), Error> {
-        use nexus_db_schema::schema::external_ip;
-        use nexus_db_schema::schema::project;
-
-        let existing_ips = external_ip::table
-            .inner_join(project::table.on(external_ip::project_id.eq(project::id.nullable())))
-            .filter(external_ip::is_service.eq(false))
-            .filter(external_ip::time_deleted.is_null())
-            // all floating IPs have a project
-            .filter(external_ip::project_id.is_not_null())
-            .filter(external_ip::ip_pool_id.eq(authz_pool.id()))
-            .filter(external_ip::kind.eq(IpKind::Floating))
-            // we have to join through IPs to projects to get the silo ID
-            .filter(project::silo_id.eq(authz_silo.id()))
-            .filter(project::time_deleted.is_null())
-            .select(ExternalIp::as_select())
-            .limit(1)
-            .load_async::<ExternalIp>(
-                &*self.pool_connection_authorized(opctx).await?,
-            )
-            .await
-            .map_err(|e| {
-                Error::internal_error(&format!(
-                    "error checking for outstanding IPs before deleting IP pool association to resource: {:?}",
-                    e
-                ))
-            })?;
-
-        if !existing_ips.is_empty() {
-            return Err(Error::invalid_request(
-                "IP addresses from this pool are in use in the linked silo",
-            ));
-        }
-
-        Ok(())
-    }
-
     /// Delete IP pool assocation with resource unless there are outstanding
     /// IPs allocated from the pool in the associated silo
     pub async fn ip_pool_unlink_silo(
@@ -1055,33 +1202,51 @@ impl DataStore {
         authz_pool: &authz::IpPool,
         authz_silo: &authz::Silo,
     ) -> DeleteResult {
-        use nexus_db_schema::schema::ip_pool_resource;
-
         opctx.authorize(authz::Action::Modify, authz_pool).await?;
         opctx.authorize(authz::Action::Modify, authz_silo).await?;
 
-        // We can only delete the association if there are no IPs allocated
-        // from this pool in the associated resource.
-        self.ensure_no_instance_ips_outstanding(opctx, authz_pool, authz_silo)
-            .await?;
-        self.ensure_no_floating_ips_outstanding(opctx, authz_pool, authz_silo)
-            .await?;
-
         let conn = self.pool_connection_authorized(opctx).await?;
+        if authz_silo.is_internal_silo() {
+            unlink_ip_pool_from_internal_silo_query(authz_pool.id())
+        } else {
+            unlink_ip_pool_from_external_silo_query(
+                authz_pool.id(),
+                authz_silo.id(),
+            )
+        }
+        .execute_async(&*conn)
+        .await
+        .map_err(|e| match e {
+            DieselError::DatabaseError(
+                DatabaseErrorKind::Unknown,
+                ref info,
+            ) => {
+                let msg = info.message();
+                // Handle intentional parsing errors.
+                if msg.contains("could not parse") {
+                    // Intentional bool-parsing error, which we use to detect
+                    // when there are still external IPs in the Silo.
+                    if msg.ends_with("invalid bool value") {
+                        Error::invalid_request(POOL_HAS_IPS_ERROR)
+                    // Intentional int-parsing error, which we use to detect
+                    // attempting to unlink the last IP Pool linked to the
+                    // internal Oxide Silo.
+                    } else if msg.contains("strconv.ParseInt")
+                        && msg.ends_with("invalid syntax")
+                    {
+                        Error::invalid_request(LAST_POOL_ERROR)
+                    } else {
+                        public_error_from_diesel(e, ErrorHandler::Server)
+                    }
+                } else {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                }
+            }
+            _ => public_error_from_diesel(e, ErrorHandler::Server),
+        })?;
 
-        diesel::delete(ip_pool_resource::table)
-            .filter(ip_pool_resource::ip_pool_id.eq(authz_pool.id()))
-            .filter(ip_pool_resource::resource_id.eq(authz_silo.id()))
-            .execute_async(&*conn)
-            .await
-            .map(|_rows_deleted| ())
-            .map_err(|e| {
-                Error::internal_error(&format!(
-                    "error deleting IP pool association to resource: {:?}",
-                    e
-                ))
-            })?;
-
+        // TODO-correctness: We probably want to do this in the same transaction
+        // as above. See https://github.com/oxidecomputer/omicron/issues/8992.
         self.unlink_ip_pool_gateway(
             opctx,
             authz_silo.id(),
@@ -1313,26 +1478,440 @@ impl DataStore {
     }
 }
 
+// Sentinel we try to cast as a UUID in the database, when linking an IP Pool to
+// a Silo of the wrong "type" -- i.e., linking to an external Silo if the Pool
+// is already linked to our internal Silo, or vice versa.
+const BAD_SILO_LINK_SENTINEL: &str = "bad-link-type";
+
+// Sentinel we try to cast as a UUID in the database when the IP Pool is
+// deleted between selecting it and trying to insert the link.
+const IP_POOL_DELETED_SENTINEL: &str = "ip-pool-deleted";
+
+// Sentinel we try to cast as a UUID in the database when the Silo is deleted
+// between selecting it and trying to insert the link.
+const SILO_DELETED_SENTINEL: &str = "silo-deleted";
+
+// Query to conditionally link an IP Pool to a Silo.
+//
+// This method returns a SQL query to conditionally insert a link between an IP
+// Pool and a Silo. It maintains the invariant that an IP Pool can be linked to
+// any number of customer silos, OR the Oxide-internal Silo, but not both. It
+// also internally checks that a previously-fetched IP Pool and Silo still exist
+// at the time the query is run.
+//
+// The full query is:
+//
+// ```sql
+// WITH
+//   -- Select the IP Pool by ID, used to ensure it still exists when we run
+//   -- this query.
+//   ip_pool AS (SELECT id FROM ip_pool WHERE id = $1 AND time_deleted IS NULL),
+//   -- Select the Silo by ID, used to ensure it still exists when we run this
+//   -- query
+//   silo AS (SELECT id FROM silo WHERE id = $2 AND time_deleted IS NULL),
+//   -- Get the ID of any Silo this pool is currently linked to. This is used to
+//   -- verify that we don't link a pool to both an internal and external silo.
+//   existing_linked_silo
+//     AS (
+//       SELECT resource_id FROM ip_pool_resource WHERE ip_pool_id = $3 AND resource_type = $4 LIMIT 1
+//     )
+// INSERT
+// INTO
+//   ip_pool_resource (ip_pool_id, resource_type, resource_id, is_default)
+// SELECT
+//   -- If the pool exists, take its ID as a string. If it does not exist, take
+//   -- the string `'ip-pool-deleted'`. Attempt to cast the result to a UUID.
+//   -- This is the "true or cast error" trick we use in many places.
+//   CAST(COALESCE(CAST(ip.id AS STRING), 'ip-pool-deleted') AS UUID),
+//   -- The resource type, always 'silo' here.
+//   $5,
+//   -- Check that we don't link a pool to both an internal and external silo.
+//   CAST(
+//     CASE
+//     -- If the Silo was actually deleted, return a const that fails to cast to
+//     -- a UUID. This is the "true or cast error" trick.
+//     WHEN s.id IS NULL THEN 'silo-deleted'
+//     -- The main check, which is true if
+//     --   1. The Silo we're trying to link and the existing link are both the
+//     --      internal Silo ID.
+//     --   2. The Silo we're trying to link and any existing link are _not_ the
+//     --      internal Silo ID.
+//     --   3. There is no existing link.
+//     -- Logically this is equivalent to checking that the pool is either
+//     -- unlinked, or linked only to the internal silo or only external silos,
+//     -- but not both.
+//     --
+//     -- In that case, use the input Silo ID.
+//     WHEN (s.id = $6 AND els.resource_id = $7)
+//     OR (s.id != $8 AND els.resource_id != $9)
+//     OR els.resource_id IS NULL
+//     THEN $10
+//     -- If the above fails, it's because we're trying to link a pool to both
+//     -- an internal and external silo. Generate an un-castable string.
+//      ELSE 'bad-link-type'
+//      END
+//        AS UUID
+//    ),
+//    $11
+// FROM
+//   (SELECT 1) AS dummy
+//   LEFT JOIN ip_pool AS ip ON true
+//   LEFT JOIN silo AS s ON true
+//   LEFT JOIN existing_linked_silo AS els ON true
+// RETURNING
+//  *
+// ```
+fn link_ip_pool_to_silo_query(
+    ip_pool_resource: &IpPoolResource,
+) -> TypedSqlQuery<SelectableSql<IpPoolResource>> {
+    let mut builder = QueryBuilder::new();
+    builder
+        .sql("WITH ip_pool AS (SELECT id FROM ip_pool WHERE id = ")
+        .param()
+        .bind::<sql_types::Uuid, _>(ip_pool_resource.ip_pool_id)
+        .sql(
+            " \
+            AND time_deleted IS NULL), \
+            silo AS (SELECT id FROM silo WHERE id = ",
+        )
+        .param()
+        .bind::<sql_types::Uuid, _>(ip_pool_resource.resource_id)
+        .sql(
+            " \
+            AND time_deleted IS NULL), \
+            existing_linked_silo AS (\
+            SELECT resource_id \
+            FROM ip_pool_resource \
+            WHERE ip_pool_id = ",
+        )
+        .param()
+        .bind::<sql_types::Uuid, _>(ip_pool_resource.ip_pool_id)
+        .sql(" AND resource_type = ")
+        .param()
+        .bind::<nexus_db_schema::enums::IpPoolResourceTypeEnum, _>(
+            ip_pool_resource.resource_type,
+        )
+        .sql(
+            " LIMIT 1) \
+            INSERT INTO ip_pool_resource (\
+                ip_pool_id, \
+                resource_type, \
+                resource_id, \
+                is_default\
+            ) SELECT CAST(COALESCE(CAST(ip.id AS STRING), '",
+        )
+        .sql(IP_POOL_DELETED_SENTINEL)
+        .sql("') AS UUID), ")
+        .param()
+        .bind::<nexus_db_schema::enums::IpPoolResourceTypeEnum, _>(
+            ip_pool_resource.resource_type,
+        )
+        .sql(", CAST(CASE ")
+        .sql("WHEN s.id IS NULL THEN '")
+        .sql(SILO_DELETED_SENTINEL)
+        .sql("' WHEN (s.id = ")
+        .param()
+        .bind::<sql_types::Uuid, _>(INTERNAL_SILO_ID)
+        .sql(" AND els.resource_id = ")
+        .param()
+        .bind::<sql_types::Uuid, _>(INTERNAL_SILO_ID)
+        .sql(") OR (s.id != ")
+        .param()
+        .bind::<sql_types::Uuid, _>(INTERNAL_SILO_ID)
+        .sql(" AND els.resource_id != ")
+        .param()
+        .bind::<sql_types::Uuid, _>(INTERNAL_SILO_ID)
+        .sql(") OR els.resource_id IS NULL THEN ")
+        .param()
+        .bind::<sql_types::Text, _>(ip_pool_resource.resource_id.to_string())
+        .sql(" ELSE '")
+        .sql(BAD_SILO_LINK_SENTINEL)
+        .sql("' END AS UUID), ")
+        .param()
+        .bind::<sql_types::Bool, _>(ip_pool_resource.is_default)
+        .sql(
+            " FROM (SELECT 1) AS dummy \
+            LEFT JOIN ip_pool AS ip ON TRUE \
+            LEFT JOIN silo AS s ON TRUE \
+            LEFT JOIN existing_linked_silo AS els ON TRUE \
+            RETURNING *",
+        );
+    builder.query()
+}
+
+// Query to conditionally unlink an IP Pool from an external / customer Silo.
+//
+// This deletes the link iff there are no outstanding instance external IPs or
+// floating IPs allocated out of the pool, to objects in the Silo.
+//
+// The full query is:
+//
+// ```
+// -- This CTE returns one row if there are any external IPs attached to
+// -- instances, in any projects in the Silo.
+// WITH instance_ips AS (
+//   SELECT 1
+//   FROM external_ip
+//   INNER JOIN instance ON external_ip.parent_id = instance.id
+//   INNER JOIN project ON instance.project_id = project.id
+//   WHERE
+//       external_ip.is_service = FALSE AND
+//       external_ip.parent_id IS NOT NULL AND
+//       external_ip.time_deleted IS NULL AND
+//       external_ip.ip_pool_id = $1 AND
+//       external_ip.kind != 'floating' AND
+//       instance.time_deleted IS NULL AND
+//       project.silo_id = $2
+//   LIMIT 1
+// ),
+// -- This CTE returns one row if there are any Floating IPs in the Silo,
+// -- whether they're attached or not.
+// floating_ips AS (
+//   SELECT 1
+//   FROM external_ip
+//   INNER JOIN project ON external_ip.project_id = project.id
+//   WHERE
+//       external_ip.is_service = FALSE AND
+//       external_ip.time_deleted IS NULL AND
+//       external_ip.project_id IS NOT NULL AND
+//       external_ip.ip_pool_id = $3 AND
+//       external_ip.kind = 'floating' AND
+//       project.silo_id = $4 AND
+//       project.time_deleted IS NULL
+//   LIMIT 1
+// )
+// -- Delete the requested link by primary key, but conditionally.
+// DELETE FROM ip_pool_resource
+// WHERE
+//   ip_pool_id = $7 AND
+//   resource_type = 'silo' AND
+//   resource_id = $8 AND
+//   -- If there are any external IPs, this generates an error casting 'eips' to
+//   -- a boolean, which we detect and handle.
+//   CAST(IF(EXISTS(
+//      SELECT 1 FROM instance_ips
+//      UNION ALL
+//      SELECT 1 FROM floating_ips
+//  ), 'eips', 'true') AS BOOL)
+// ```
+fn unlink_ip_pool_from_external_silo_query(
+    ip_pool_id: Uuid,
+    silo_id: Uuid,
+) -> TypedSqlQuery<()> {
+    let mut builder = QueryBuilder::new();
+    builder
+        .sql(
+            "WITH instance_ips AS (\
+    SELECT 1 \
+    FROM external_ip \
+    INNER JOIN instance ON external_ip.parent_id = instance.id \
+    INNER JOIN project ON instance.project_id = project.id \
+    WHERE \
+        external_ip.is_service = FALSE AND \
+        external_ip.parent_id IS NOT NULL AND \
+        external_ip.time_deleted IS NULL AND \
+        external_ip.ip_pool_id = ",
+        )
+        .param()
+        .bind::<sql_types::Uuid, _>(ip_pool_id)
+        .sql(" AND external_ip.kind != ")
+        .param()
+        .bind::<IpKindEnum, _>(IpKind::Floating)
+        .sql(" AND instance.time_deleted IS NULL AND project.silo_id = ")
+        .param()
+        .bind::<sql_types::Uuid, _>(silo_id)
+        .sql(
+            " LIMIT 1), floating_ips AS (\
+        SELECT 1 \
+        FROM external_ip \
+        INNER JOIN project ON external_ip.project_id = project.id \
+        WHERE \
+            external_ip.is_service = FALSE AND \
+            external_ip.time_deleted IS NULL AND \
+            external_ip.project_id IS NOT NULL AND \
+            external_ip.ip_pool_id = ",
+        )
+        .param()
+        .bind::<sql_types::Uuid, _>(ip_pool_id)
+        .sql(" AND external_ip.kind = ")
+        .param()
+        .bind::<IpKindEnum, _>(IpKind::Floating)
+        .sql(" AND project.silo_id = ")
+        .param()
+        .bind::<sql_types::Uuid, _>(silo_id)
+        .sql(
+            " AND project.time_deleted IS NULL LIMIT 1) \
+            DELETE FROM ip_pool_resource \
+            WHERE ip_pool_id = ",
+        )
+        .param()
+        .bind::<sql_types::Uuid, _>(ip_pool_id)
+        .sql(" AND resource_type = ")
+        .param()
+        .bind::<nexus_db_schema::enums::IpPoolResourceTypeEnum, _>(
+            IpPoolResourceType::Silo,
+        )
+        .sql(" AND resource_id = ")
+        .param()
+        .bind::<sql_types::Uuid, _>(silo_id)
+        .sql(
+            " AND \
+            CAST(IF(\
+                EXISTS(\
+                    SELECT 1 FROM instance_ips \
+                    UNION ALL \
+                    SELECT 1 FROM floating_ips\
+                ), \
+                'has-eips', \
+                'true'\
+            ) AS BOOL)",
+        );
+    builder.query()
+}
+
+// Query to conditionally unlink a pool from the internal Oxide Silo.
+//
+// In addition to checking for external IPs, this also ensures there is at least
+// one other pool linked to the Silo.
+//
+// This query is similar to the one above for unlinking an external silo, with
+// slightly different checks for external addresses. We don't need to join the
+// `instance` table, and so look only at the `external_ip` table for IPs used in
+// the provided IP Pool.
+//
+// It has one additional CTE and intentional cast error, which prevents deleting
+// the link if this is the last pool linked to the internal silo. That would
+// prevent Oxide services allocating any new addresses.
+//
+// The CTE is:
+//
+// ```sql
+// internally_linked_pools AS (
+//   SELECT 1
+//   FROM ip_pool_resource
+//   WHERE resource_type = 'silo' AND resource_id = $INTERNAL_SILO_ID
+//   LIMIT 2
+// )
+// ```
+//
+// And the cast error is:
+//
+// ```sql
+// CAST(IF(
+//   (SELECT COUNT(*) FROM internally_linked_pools) < 2,
+//   'last-pool',
+//   '1'
+// ) AS INT) = 1
+// ```
+//
+// So we're counting internally linked pools, checking that there are at least 2
+// when we attempt the deletion, and failing with an integer-cast error if not.
+fn unlink_ip_pool_from_internal_silo_query(
+    ip_pool_id: Uuid,
+) -> TypedSqlQuery<()> {
+    let mut builder = QueryBuilder::new();
+    builder
+        .sql(
+            "WITH external_ips AS (\
+        SELECT 1 \
+        FROM external_ip \
+        WHERE \
+            external_ip.is_service = TRUE AND \
+            external_ip.time_deleted IS NULL AND \
+            external_ip.ip_pool_id = ",
+        )
+        .param()
+        .bind::<sql_types::Uuid, _>(ip_pool_id)
+        .sql(
+            " LIMIT 1), \
+            internally_linked_pools AS (\
+            SELECT 1 \
+            FROM ip_pool_resource \
+            WHERE resource_type = ",
+        )
+        .param()
+        .bind::<nexus_db_schema::enums::IpPoolResourceTypeEnum, _>(
+            IpPoolResourceType::Silo,
+        )
+        .sql(" AND resource_id = ")
+        .param()
+        .bind::<sql_types::Uuid, _>(INTERNAL_SILO_ID)
+        .sql(
+            " LIMIT 2) \
+            DELETE FROM ip_pool_resource \
+            WHERE ip_pool_id = ",
+        )
+        .param()
+        .bind::<sql_types::Uuid, _>(ip_pool_id)
+        .sql(" AND resource_type = ")
+        .param()
+        .bind::<nexus_db_schema::enums::IpPoolResourceTypeEnum, _>(
+            IpPoolResourceType::Silo,
+        )
+        .sql(" AND resource_id = ")
+        .param()
+        .bind::<sql_types::Uuid, _>(INTERNAL_SILO_ID)
+        .sql(
+            " AND \
+            CAST(IF(\
+                EXISTS(SELECT 1 FROM external_ips), \
+                'has-eips', \
+                'true'\
+            ) AS BOOL)",
+        )
+        // Generate an error casting the string 'last-pool' to an int when there are
+        // fewer than 2 pools still linked to the silo.
+        .sql(
+            " AND \
+            CAST(IF(\
+                (SELECT COUNT(*) FROM internally_linked_pools) < 2, \
+                'last-pool', \
+                '1'\
+            ) AS INT) = 1",
+        );
+    builder.query()
+}
+
 #[cfg(test)]
 mod test {
+    use std::net::Ipv4Addr;
     use std::num::NonZeroU32;
 
     use crate::authz;
-    use crate::db::datastore::ip_pool::INTERNAL_SILO_DEFAULT_ERROR;
+    use crate::db::datastore::ip_pool::{
+        INTERNAL_SILO_DEFAULT_ERROR, PoolReservationType,
+        link_ip_pool_to_silo_query, unlink_ip_pool_from_external_silo_query,
+        unlink_ip_pool_from_internal_silo_query,
+    };
+    use crate::db::explain::ExplainableAsync as _;
     use crate::db::model::{
         IpPool, IpPoolResource, IpPoolResourceType, Project,
     };
+    use crate::db::pagination::Paginator;
     use crate::db::pub_test_utils::TestDatabase;
+    use crate::db::raw_query_builder::expectorate_query_contents;
     use assert_matches::assert_matches;
+    use async_bb8_diesel::AsyncRunQueryDsl as _;
+    use diesel::{
+        ExpressionMethods as _, QueryDsl as _, SelectableHelper as _,
+    };
     use nexus_db_model::{IpPoolIdentity, IpVersion};
+    use nexus_sled_agent_shared::inventory::ZoneKind;
+    use nexus_types::deployment::{
+        OmicronZoneExternalFloatingIp, OmicronZoneExternalIp,
+    };
     use nexus_types::external_api::params;
     use nexus_types::identity::Resource;
+    use nexus_types::silo::INTERNAL_SILO_ID;
     use omicron_common::address::{IpRange, Ipv4Range, Ipv6Range};
     use omicron_common::api::external::http_pagination::PaginatedBy;
     use omicron_common::api::external::{
         DataPageParams, Error, IdentityMetadataCreateParams, LookupType,
     };
     use omicron_test_utils::dev;
+    use omicron_uuid_kinds::{
+        ExternalIpUuid, GenericUuid as _, OmicronZoneUuid,
+    };
     use uuid::Uuid;
 
     #[tokio::test]
@@ -1481,10 +2060,43 @@ mod test {
         // now remove the association and we should get nothing again
         let authz_silo =
             authz::Silo::new(authz::Fleet, silo_id, LookupType::ById(silo_id));
+        let q =
+            nexus_db_schema::schema::ip_pool_resource::dsl::ip_pool_resource
+                .select(IpPoolResource::as_select())
+                .filter(
+                    nexus_db_schema::schema::ip_pool_resource::dsl::resource_id
+                        .eq(authz_silo.id()),
+                )
+                .get_results_async(
+                    &*datastore
+                        .pool_connection_authorized(opctx)
+                        .await
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+        println!("{q:#?}");
         datastore
             .ip_pool_unlink_silo(&opctx, &authz_pool1_for_silo, &authz_silo)
             .await
             .expect("Failed to unlink IP pool from silo");
+
+        let q =
+            nexus_db_schema::schema::ip_pool_resource::dsl::ip_pool_resource
+                .select(IpPoolResource::as_select())
+                .filter(
+                    nexus_db_schema::schema::ip_pool_resource::dsl::resource_id
+                        .eq(authz_silo.id()),
+                )
+                .get_results_async(
+                    &*datastore
+                        .pool_connection_authorized(opctx)
+                        .await
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+        println!("{q:#?}");
 
         // no default
         let error = datastore.ip_pools_fetch_default(&opctx).await.unwrap_err();
@@ -1930,6 +2542,528 @@ mod test {
                 version,
             );
         }
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn paginate_ip_pools_by_reservation() {
+        let logctx = dev::test_setup_log("paginate_ip_pools_by_reservation");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Insert a bunch of pools, not linked to any silo, and so reserved for
+        // customer use.
+        const N_POOLS: usize = 20;
+        let mut customer_pools = Vec::with_capacity(N_POOLS);
+        for i in 0..N_POOLS {
+            // Create the pool
+            let identity = IdentityMetadataCreateParams {
+                name: format!("ip-pool-{i}").parse().unwrap(),
+                description: "".to_string(),
+            };
+            let pool = datastore
+                .ip_pool_create(opctx, IpPool::new(&identity, IpVersion::V4))
+                .await
+                .expect("Failed to create IP pool");
+            customer_pools.push(pool);
+        }
+        customer_pools.sort_by_key(|pool| pool.id());
+
+        // Create a bunch which _are_ reserved for Oxide's usage.
+        let mut oxide_pools = Vec::with_capacity(N_POOLS);
+        for i in 0..N_POOLS {
+            // Create the pool
+            let identity = IdentityMetadataCreateParams {
+                name: format!("oxide-ip-pool-{i}").parse().unwrap(),
+                description: "".to_string(),
+            };
+            let pool = datastore
+                .ip_pool_create(opctx, IpPool::new(&identity, IpVersion::V4))
+                .await
+                .expect("Failed to create IP pool");
+
+            // Link it to the internal silo
+            let link = IpPoolResource {
+                ip_pool_id: pool.id(),
+                resource_type: IpPoolResourceType::Silo,
+                resource_id: INTERNAL_SILO_ID,
+                is_default: false,
+            };
+            datastore
+                .ip_pool_link_silo(opctx, link)
+                .await
+                .expect("Should be able to link pool to internal silo");
+            oxide_pools.push(pool);
+        }
+        assert_eq!(oxide_pools.len(), N_POOLS);
+
+        let fetch_paginated = |delegated| async move {
+            let mut found = Vec::with_capacity(N_POOLS);
+            let mut paginator = Paginator::new(
+                NonZeroU32::new(5).unwrap(),
+                dropshot::PaginationOrder::Ascending,
+            );
+            while let Some(page) = paginator.next() {
+                let batch = datastore
+                    .ip_pools_list_paginated(
+                        opctx,
+                        delegated,
+                        None,
+                        &PaginatedBy::Id(page.current_pagparams()),
+                    )
+                    .await
+                    .expect("Should be able to list pools with pagination");
+                paginator = page.found_batch(&batch, &|pool| pool.id());
+                found.extend(batch.into_iter());
+            }
+            found
+        };
+
+        // Paginate all the customer-reserved.
+        let customer_pools_found =
+            fetch_paginated(PoolReservationType::External).await;
+        assert_eq!(customer_pools.len(), customer_pools_found.len());
+        assert_eq!(customer_pools, customer_pools_found);
+
+        // Paginate all the Oxide-reserved.
+        //
+        // Note that we have 2 extra pools today, which are the builtin service
+        // pools. These will go away in the future, so we'll unfortunately need
+        // to update this test at that time. Until then, fetch those service
+        // pools explicitly and add them.
+        let oxide_reserved_found =
+            fetch_paginated(PoolReservationType::Internal).await;
+        let pools = datastore
+            .ip_pools_service_lookup_both_versions(opctx)
+            .await
+            .unwrap();
+        oxide_pools.push(pools.ipv4.db_pool);
+        oxide_pools.push(pools.ipv6.db_pool);
+        oxide_pools.sort_by_key(|pool| pool.id());
+        assert_eq!(oxide_pools.len(), oxide_reserved_found.len());
+        assert_eq!(oxide_pools, oxide_reserved_found);
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    // Ensure we have the right query contents.
+    #[tokio::test]
+    async fn expectorate_insert_ip_pool_external_silo_link() {
+        let res = IpPoolResource {
+            ip_pool_id: uuid::uuid!("aaa84fbd-85a5-4fcb-b34f-23b7e56145c7"),
+            resource_type: IpPoolResourceType::Silo,
+            resource_id: INTERNAL_SILO_ID,
+            is_default: false,
+        };
+        let query = link_ip_pool_to_silo_query(&res);
+        expectorate_query_contents(
+            &query,
+            "tests/output/ip_pool_external_silo_link.sql",
+        )
+        .await;
+    }
+
+    // Explain the SQL query inserting an IP Pool link to a customer silo
+    #[tokio::test]
+    async fn can_explain_link_ip_pool_to_silo_query() {
+        let logctx =
+            dev::test_setup_log("can_explain_link_ip_pool_to_silo_query");
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
+        let conn = pool.claim().await.unwrap();
+
+        let res = IpPoolResource {
+            ip_pool_id: uuid::uuid!("aaa84fbd-85a5-4fcb-b34f-23b7e56145c7"),
+            resource_type: IpPoolResourceType::Silo,
+            resource_id: INTERNAL_SILO_ID,
+            is_default: false,
+        };
+
+        let query = link_ip_pool_to_silo_query(&res);
+        let _ = query
+            .explain_async(&conn)
+            .await
+            .expect("Failed to explain query - is it valid SQL?");
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    // Ensure that we fail to insert a link between an external Silo and IP
+    // Pool, if the pool is already linked to the internal IP Pool.
+    #[tokio::test]
+    async fn cannot_link_pool_to_external_silo_if_linked_internally() {
+        let logctx = dev::test_setup_log(
+            "cannot_link_pool_to_external_silo_if_linked_internally",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Create the pool
+        let identity = IdentityMetadataCreateParams {
+            name: "internal-ip-pool".parse().unwrap(),
+            description: "".to_string(),
+        };
+        let ip_pool = datastore
+            .ip_pool_create(opctx, IpPool::new(&identity, IpVersion::V4))
+            .await
+            .expect("Failed to create IP pool");
+
+        // Link to the internal silo.
+        let internal_link = IpPoolResource {
+            ip_pool_id: ip_pool.id(),
+            resource_type: IpPoolResourceType::Silo,
+            resource_id: INTERNAL_SILO_ID,
+            is_default: false,
+        };
+        let _ = datastore
+            .ip_pool_link_silo(&opctx, internal_link)
+            .await
+            .expect("Should be able to link unlinked pool to internal silo");
+
+        // We should fail to link it to some other silo now.
+        let link = IpPoolResource {
+            ip_pool_id: ip_pool.id(),
+            resource_type: IpPoolResourceType::Silo,
+            resource_id: uuid::uuid!("cfb16a9d-764e-4c5d-8d0d-cf737885b84a"),
+            is_default: false,
+        };
+        let err = datastore.ip_pool_link_silo(&opctx, link).await.expect_err(
+            "Expected to fail linking an IP Pool to an external Silo \
+                when it's already linked to the internal silo",
+        );
+        println!("{err:#?}");
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    // Ensure that we fail to insert a link between the internal Silo and IP
+    // Pool, if the pool is already linked to an external IP Pool.
+    #[tokio::test]
+    async fn cannot_link_pool_to_internal_silo_if_linked_externally() {
+        let logctx = dev::test_setup_log(
+            "cannot_link_pool_to_internal_silo_if_linked_externally",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Create the pool
+        let identity = IdentityMetadataCreateParams {
+            name: "external-ip-pool".parse().unwrap(),
+            description: "".to_string(),
+        };
+        let ip_pool = datastore
+            .ip_pool_create(opctx, IpPool::new(&identity, IpVersion::V4))
+            .await
+            .expect("Failed to create IP pool");
+
+        // Link to an external silo.
+        let external_link = IpPoolResource {
+            ip_pool_id: ip_pool.id(),
+            resource_type: IpPoolResourceType::Silo,
+            resource_id: nexus_types::silo::DEFAULT_SILO_ID,
+            is_default: false,
+        };
+        let _ = datastore
+            .ip_pool_link_silo(&opctx, external_link)
+            .await
+            .expect("Should be able to link unlinked pool to default silo");
+
+        // We should fail to link it the internal silo.
+        let link = IpPoolResource {
+            ip_pool_id: ip_pool.id(),
+            resource_type: IpPoolResourceType::Silo,
+            resource_id: INTERNAL_SILO_ID,
+            is_default: false,
+        };
+        let err = datastore.ip_pool_link_silo(&opctx, link).await.expect_err(
+            "Expected to fail linking an IP Pool to the internal Silo \
+                when it's already linked to an external silo",
+        );
+        assert_matches!(err, Error::InvalidRequest { .. });
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    // Ensure that we fail to link to a silo that is deleted.
+    #[tokio::test]
+    async fn cannot_link_pool_to_deleted_silo() {
+        let logctx = dev::test_setup_log("cannot_link_pool_to_deleted_silo");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Create the pool
+        let identity = IdentityMetadataCreateParams {
+            name: "external-ip-pool".parse().unwrap(),
+            description: "".to_string(),
+        };
+        let ip_pool = datastore
+            .ip_pool_create(opctx, IpPool::new(&identity, IpVersion::V4))
+            .await
+            .expect("Failed to create IP pool");
+
+        // Delete the silo, directly to avoid a bunch of machinery.
+        use nexus_db_schema::schema::silo::dsl;
+        let c =
+            diesel::update(dsl::silo.find(nexus_types::silo::DEFAULT_SILO_ID))
+                .set(dsl::time_deleted.eq(diesel::dsl::now))
+                .execute_async(
+                    &*datastore
+                        .pool_connection_authorized(opctx)
+                        .await
+                        .unwrap(),
+                )
+                .await
+                .expect("Should be able to soft-delete silo");
+        assert_eq!(c, 1, "Should have deleted something");
+
+        // Now try link to it.
+        let external_link = IpPoolResource {
+            ip_pool_id: ip_pool.id(),
+            resource_type: IpPoolResourceType::Silo,
+            resource_id: nexus_types::silo::DEFAULT_SILO_ID,
+            is_default: false,
+        };
+        let err = datastore
+            .ip_pool_link_silo(&opctx, external_link)
+            .await
+            .expect_err("Should have failed to link IP Pool to deleted Silo");
+        assert_matches!(err, Error::ObjectNotFound { .. });
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    // Ensure that we fail to link a deleted pool to a silo.
+    #[tokio::test]
+    async fn cannot_link_silo_to_deleted_pool() {
+        let logctx = dev::test_setup_log("cannot_link_silo_to_deleted_pool");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Create the pool
+        let identity = IdentityMetadataCreateParams {
+            name: "external-ip-pool".parse().unwrap(),
+            description: "".to_string(),
+        };
+        let ip_pool = datastore
+            .ip_pool_create(opctx, IpPool::new(&identity, IpVersion::V4))
+            .await
+            .expect("Failed to create IP pool");
+
+        // Delete the pool, directly to avoid a bunch of machinery.
+        use nexus_db_schema::schema::ip_pool::dsl;
+        let c = diesel::update(dsl::ip_pool.find(ip_pool.id()))
+            .set(dsl::time_deleted.eq(diesel::dsl::now))
+            .execute_async(
+                &*datastore.pool_connection_authorized(opctx).await.unwrap(),
+            )
+            .await
+            .expect("Should be able to soft-delete IP Pool");
+        assert_eq!(c, 1, "Should have deleted something");
+
+        // Now try link to it.
+        let external_link = IpPoolResource {
+            ip_pool_id: ip_pool.id(),
+            resource_type: IpPoolResourceType::Silo,
+            resource_id: nexus_types::silo::DEFAULT_SILO_ID,
+            is_default: false,
+        };
+        let err = datastore
+            .ip_pool_link_silo(&opctx, external_link)
+            .await
+            .expect_err("Should have failed to link deleted IP Pool to Silo");
+        assert_matches!(err, Error::ObjectNotFound { .. });
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn can_explain_unlink_ip_pool_from_external_silo_query() {
+        let logctx = dev::test_setup_log(
+            "can_explain_unlink_ip_pool_from_external_silo_query",
+        );
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
+        let conn = pool.claim().await.unwrap();
+
+        let ip_pool_id = uuid::uuid!("aaa84fbd-85a5-4fcb-b34f-23b7e56145c7");
+        let silo_id = nexus_types::silo::DEFAULT_SILO_ID;
+        let query =
+            unlink_ip_pool_from_external_silo_query(ip_pool_id, silo_id);
+        let _ = query
+            .explain_async(&conn)
+            .await
+            .expect("Failed to explain query - is it valid SQL?");
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn can_explain_unlink_ip_pool_from_internal_silo_query() {
+        let logctx = dev::test_setup_log(
+            "can_explain_unlink_ip_pool_from_internal_silo_query",
+        );
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
+        let conn = pool.claim().await.unwrap();
+
+        let ip_pool_id = uuid::uuid!("aaa84fbd-85a5-4fcb-b34f-23b7e56145c7");
+        let query = unlink_ip_pool_from_internal_silo_query(ip_pool_id);
+        let _ = query
+            .explain_async(&conn)
+            .await
+            .expect("Failed to explain query - is it valid SQL?");
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn cannot_unlink_last_linked_internal_ip_pool() {
+        let logctx =
+            dev::test_setup_log("cannot_unlink_last_linked_internal_ip_pool");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Get some basic data.
+        let (authz_silo, _) =
+            nexus_db_lookup::LookupPath::new(opctx, datastore)
+                .silo_id(INTERNAL_SILO_ID)
+                .fetch()
+                .await
+                .unwrap();
+        let pools = datastore
+            .ip_pools_service_lookup_both_versions(opctx)
+            .await
+            .unwrap();
+
+        // We should be able to delete one of these.
+        let _ = datastore.ip_pool_unlink_silo(
+            opctx,
+            &pools.ipv4.authz_pool,
+            &authz_silo,
+        ).await
+            .expect("Should be able to delete internal IP Pool when more than one remains");
+
+        let pagparams = &PaginatedBy::Id(DataPageParams {
+            marker: None,
+            direction: dropshot::PaginationOrder::Ascending,
+            limit: 100.try_into().unwrap(),
+        });
+        let l = datastore
+            .ip_pools_service_list(opctx, None, &pagparams)
+            .await
+            .unwrap();
+        assert_eq!(l.len(), 1);
+
+        // We should _not_ be able to delete the other now, because there's only
+        // one left.
+        let err = datastore.ip_pool_unlink_silo(
+            opctx,
+            &pools.ipv6.authz_pool,
+            &authz_silo,
+        ).await
+            .expect_err("Should not be able to delete internal IP Pool when only one remains");
+        assert_matches!(err, Error::InvalidRequest { .. });
+
+        let l = datastore
+            .ip_pools_service_list(opctx, None, &pagparams)
+            .await
+            .unwrap();
+        assert_eq!(l.len(), 1);
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn cannot_unlink_internal_ip_pool_with_outstanding_external_ips() {
+        let logctx = dev::test_setup_log(
+            "cannot_unlink_internal_ip_pool_with_outstanding_external_ips",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Get some basic data.
+        let (authz_silo, _) =
+            nexus_db_lookup::LookupPath::new(opctx, datastore)
+                .silo_id(INTERNAL_SILO_ID)
+                .fetch()
+                .await
+                .unwrap();
+
+        // Get pool, add a range, allocate an external IP.
+        let pools = datastore
+            .ip_pools_service_lookup_both_versions(opctx)
+            .await
+            .unwrap();
+        let ip_range = IpRange::V4(Ipv4Range {
+            first: Ipv4Addr::new(1, 1, 1, 1),
+            last: Ipv4Addr::new(1, 1, 1, 10),
+        });
+        datastore
+            .ip_pool_add_range(
+                opctx,
+                &pools.ipv4.authz_pool,
+                &pools.ipv4.db_pool,
+                &ip_range,
+            )
+            .await
+            .unwrap();
+
+        // Create an IP for an Omicron zone.
+        let eip = datastore
+            .external_ip_allocate_omicron_zone(
+                opctx,
+                OmicronZoneUuid::from_untyped_uuid(uuid::uuid!(
+                    "b7b641d6-f52c-4fd5-b5a5-66ac3918c8b4"
+                )),
+                ZoneKind::BoundaryNtp,
+                OmicronZoneExternalIp::Floating(
+                    OmicronZoneExternalFloatingIp {
+                        id: ExternalIpUuid::from_untyped_uuid(uuid::uuid!(
+                            "4a7f86aa-5cab-42dd-afa5-7eee6304cb8c"
+                        )),
+                        ip: ip_range.first_address(),
+                    },
+                ),
+            )
+            .await
+            .expect("Should be able to create zone external IP");
+
+        // Should not be able to delete the IPv4 pool now, since we've got an
+        // address in use.
+        let _ = datastore.ip_pool_unlink_silo(
+            opctx,
+            &pools.ipv4.authz_pool,
+            &authz_silo,
+        ).await
+            .expect_err("Should not be able to delete internal IP Pool when an address is in use");
+
+        // Delete the address, and now we can delete the link.
+        let _ = datastore
+            .deallocate_external_ip(opctx, eip.id)
+            .await
+            .expect("Should be able to delete external IP");
+
+        // We should be able to delete one of these.
+        let _ = datastore.ip_pool_unlink_silo(
+            opctx,
+            &pools.ipv4.authz_pool,
+            &authz_silo,
+        ).await
+            .expect(
+                "Should be able to delete internal IP Pool when more than one remains, \
+                after deleting external IP address"
+            );
 
         db.terminate().await;
         logctx.cleanup_successful();

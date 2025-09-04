@@ -675,8 +675,12 @@ impl DataStore {
 
         opctx.authorize(authz::Action::CreateChild, &authz::FLEET).await?;
 
-        // We may need to populate external IP records for both IPv4 and IPv6
-        // service pools, so fetch both now.
+        // The `RackInit` request will eventually be modified to include the
+        // full details of the IP Pool(s) delegated to Oxide at RSS time. For
+        // now, we still rely on the pre-populated IP Pools. There's one for
+        // IPv4 and one for IPv6.
+        //
+        // See https://github.com/oxidecomputer/omicron/issues/8946.
         let service_ip_pools =
             self.ip_pools_service_lookup_both_versions(&opctx).await?;
 

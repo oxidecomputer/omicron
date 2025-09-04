@@ -77,7 +77,9 @@ impl From<IpVersion> for shared::IpVersion {
 /// IP pools can be external or internal. External IP pools can be associated
 /// with a silo or project so that instance IP allocation draws from that pool
 /// instead of a system pool.
-#[derive(Queryable, Insertable, Selectable, Clone, Debug, Resource)]
+#[derive(
+    Queryable, Insertable, Selectable, Clone, Debug, Resource, PartialEq,
+)]
 #[diesel(table_name = ip_pool)]
 pub struct IpPool {
     #[diesel(embed)]
