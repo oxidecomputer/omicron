@@ -519,7 +519,7 @@ mod api_impl {
 
         async fn omicron_config_put(
             _rqctx: RequestContext<Self::Context>,
-            _body: OmicronSledConfig,
+            _body: TypedBody<OmicronSledConfig>,
         ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
             unimplemented!()
         }

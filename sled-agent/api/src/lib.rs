@@ -3,7 +3,6 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::future::Future;
 use std::time::Duration;
 
 use camino::Utf8PathBuf;
@@ -325,24 +324,15 @@ pub trait SledAgentApi {
         path_params: Path<SupportBundlePathParam>,
     ) -> Result<HttpResponseDeleted, HttpError>;
 
-    // TODO: https://github.com/oxidecomputer/dropshot/pull/1415
-    fn omicron_config_put(
-        rqctx: RequestContext<Self::Context>,
-        body: OmicronSledConfig,
-    ) -> impl Future<Output = Result<HttpResponseUpdatedNoContent, HttpError>> + Send;
-
     #[endpoint {
-        operation_id = "omicron_config_put",
         method = PUT,
         path = "/omicron-config",
         versions = VERSION_ADD_NEXUS_DEBUG_PORT_TO_INVENTORY..,
     }]
-    async fn v4_omicron_config_put(
+    async fn omicron_config_put(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<OmicronSledConfig>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        Self::omicron_config_put(rqctx, body.into_inner()).await
-    }
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
     #[endpoint {
         operation_id = "omicron_config_put",
@@ -354,7 +344,7 @@ pub trait SledAgentApi {
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<v3::OmicronSledConfig>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        Self::omicron_config_put(rqctx, body.into_inner().into()).await
+        Self::omicron_config_put(rqctx, body.map(Into::into)).await
     }
 
     #[endpoint {

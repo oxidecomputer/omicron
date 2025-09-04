@@ -334,10 +334,11 @@ impl SledAgentApi for SledAgentSimImpl {
 
     async fn omicron_config_put(
         rqctx: RequestContext<Self::Context>,
-        body: OmicronSledConfig,
+        body: TypedBody<OmicronSledConfig>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let sa = rqctx.context();
-        sa.set_omicron_config(body)?;
+        let body_args = body.into_inner();
+        sa.set_omicron_config(body_args)?;
         Ok(HttpResponseUpdatedNoContent())
     }
 
