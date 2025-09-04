@@ -74,7 +74,7 @@ impl super::Nexus {
     ) -> CreateResult<db::model::IpPool> {
         let pool = db::model::IpPool::new(
             &pool_params.identity,
-            // https://github.com/oxidecomputer/omicron/issues/8881
+            // https://github.com/oxidecomputer/omicron/issues/8966
             IpVersion::V4,
         );
         self.db_datastore.ip_pool_create(opctx, pool).await
