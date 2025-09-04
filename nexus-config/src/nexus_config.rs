@@ -924,6 +924,7 @@ impl WebhookDeliveratorConfig {
 mod test {
     use super::*;
 
+    use nexus_types::deployment::PlannerChickenSwitches;
     use omicron_common::address::{
         CLICKHOUSE_TCP_PORT, Ipv6Subnet, RACK_PREFIX,
     };
@@ -1065,6 +1066,9 @@ mod test {
             address = "[::1]:12224"
             [mgd.switch0]
             address = "[::1]:4676"
+            [initial_reconfigurator_chicken_switches]
+            planner_enabled = true
+            planner_switches.add_zones_with_mupdate_override = true
             [background_tasks]
             dns_internal.period_secs_config = 1
             dns_internal.period_secs_servers = 2
@@ -1202,6 +1206,14 @@ mod test {
                                 .unwrap(),
                         }
                     )]),
+                    initial_reconfigurator_chicken_switches: Some(
+                        ReconfiguratorChickenSwitches {
+                            planner_enabled: true,
+                            planner_switches: PlannerChickenSwitches {
+                                add_zones_with_mupdate_override: true,
+                            },
+                        }
+                    ),
                     background_tasks: BackgroundTaskConfig {
                         dns_internal: DnsTasksConfig {
                             period_secs_config: Duration::from_secs(1),

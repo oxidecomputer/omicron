@@ -153,7 +153,7 @@ mod test {
         };
         let switches = ReconfiguratorChickenSwitchesParam {
             version: 1,
-            switches: expected_switches.clone(),
+            switches: expected_switches,
         };
         datastore
             .reconfigurator_chicken_switches_insert_latest_version(
@@ -187,7 +187,7 @@ mod test {
         };
         let switches = ReconfiguratorChickenSwitchesParam {
             version: 2,
-            switches: expected_switches.clone(),
+            switches: expected_switches,
         };
         datastore
             .reconfigurator_chicken_switches_insert_latest_version(
