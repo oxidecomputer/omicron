@@ -189,7 +189,7 @@ mod tests {
 
         let t1 = Utc::now();
 
-        let completion = AuditLogCompletion::Success { http_status_code: 201 };
+        let completion = AuditLogCompletion::Success { http_status_code: 201, resource_id: None };
         datastore
             .audit_log_entry_complete(opctx, &entry1, completion.into())
             .await
@@ -309,6 +309,7 @@ mod tests {
         let completion =
             AuditLogCompletionUpdate::from(AuditLogCompletion::Success {
                 http_status_code: 201,
+                resource_id: None,
             });
 
         let id1 = "1710a22e-b29b-4cfc-9e79-e8c93be187d7";

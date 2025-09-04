@@ -1596,6 +1596,7 @@ pub enum AuditLogEntryActor {
     UserBuiltin {
         #[schemars(with = "Uuid")]
         user_builtin_id: BuiltInUserUuid,
+        user_name: String,
     },
 
     SiloUser {
@@ -1603,6 +1604,7 @@ pub enum AuditLogEntryActor {
         silo_user_id: SiloUserUuid,
 
         silo_id: Uuid,
+        silo_name: String,
     },
 
     Unauthenticated,
@@ -1659,6 +1661,9 @@ pub struct AuditLogEntry {
     pub user_agent: Option<String>,
 
     pub actor: AuditLogEntryActor,
+
+    /// The ID of the created resource, if any
+    pub resource_id: Option<String>,
 
     /// How the user authenticated the request. Possible values are
     /// "session_cookie" and "access_token". Optional because it will not be

@@ -6702,6 +6702,7 @@ async fn test_instance_create_in_silo(cptestctx: &ControlPlaneTestContext) {
         nexus_db_queries::authn::Context::for_test_user(
             user_id,
             silo.identity.id,
+            "default",
             nexus_db_queries::authn::SiloAuthnPolicy::try_from(&*DEFAULT_SILO)
                 .unwrap(),
         ),

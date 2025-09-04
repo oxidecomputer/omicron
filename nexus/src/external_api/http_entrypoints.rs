@@ -928,16 +928,21 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let nexus = &apictx.context.nexus;
             let audit = nexus.audit_log_entry_init(&opctx, &rqctx).await?;
 
-            let result = async {
+            let result: Result<HttpResponseCreated<Project>, HttpError> = async {
                 let project = nexus
                     .project_create(&opctx, &new_project.into_inner())
                     .await?;
-                Ok(HttpResponseCreated(project.into()))
+                Ok(HttpResponseCreated::<Project>(project.into()))
             }
             .await;
 
+            let project_id: Option<String> = match result.as_ref() {
+                Ok(&HttpResponseCreated(ref resource)) => Some(resource.identity.id.to_string()),
+                _ => None,
+            };
+
             let _ =
-                nexus.audit_log_entry_complete(&opctx, &audit, &result).await;
+                nexus.audit_log_entry_complete(&opctx, &audit, &result, project_id).await;
             result
         };
         apictx
@@ -993,7 +998,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await;
 
             let _ =
-                nexus.audit_log_entry_complete(&opctx, &audit, &result).await;
+                nexus.audit_log_entry_complete(&opctx, &audit, &result, None).await;
             result
         };
         apictx
@@ -1881,12 +1886,17 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 let disk = nexus
                     .project_create_disk(&opctx, &project_lookup, &params)
                     .await?;
-                Ok(HttpResponseCreated(disk.into()))
+                Ok(HttpResponseCreated::<Disk>(disk.into()))
             }
             .await;
 
+            let disk_id: Option<String> = match result.as_ref() {
+                Ok(&HttpResponseCreated(ref resource)) => Some(resource.identity.id.to_string()),
+                _ => None,
+            };
+
             let _ =
-                nexus.audit_log_entry_complete(&opctx, &audit, &result).await;
+                nexus.audit_log_entry_complete(&opctx, &audit, &result, disk_id).await;
             result
         };
         apictx
@@ -1949,7 +1959,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await;
 
             let _ =
-                nexus.audit_log_entry_complete(&opctx, &audit, &result).await;
+                nexus.audit_log_entry_complete(&opctx, &audit, &result, None).await;
             result
         };
         apictx
@@ -2142,12 +2152,17 @@ impl NexusExternalApi for NexusExternalApiImpl {
                         &new_instance_params,
                     )
                     .await?;
-                Ok(HttpResponseCreated(instance.into()))
+                Ok(HttpResponseCreated::<Instance>(instance.into()))
             }
             .await;
 
+            let instance_id: Option<String> = match result.as_ref() {
+                Ok(&HttpResponseCreated(ref resource)) => Some(resource.identity.id.to_string()),
+                _ => None,
+            };
+
             let _ =
-                nexus.audit_log_entry_complete(&opctx, &audit, &result).await;
+                nexus.audit_log_entry_complete(&opctx, &audit, &result, instance_id).await;
             result
         };
         apictx
@@ -2219,7 +2234,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await;
 
             let _ =
-                nexus.audit_log_entry_complete(&opctx, &audit, &result).await;
+                nexus.audit_log_entry_complete(&opctx, &audit, &result, None).await;
             result
         };
         apictx
@@ -7981,6 +7996,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
             let audit =
                 nexus.audit_log_entry_init_unauthed(&opctx, &rqctx).await?;
+            
+            let mut session_id: Option<String> = None;
 
             let result = async {
                 let path_params = path_params.into_inner();
@@ -7992,6 +8009,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
                         &path_params.provider_name.into(),
                     )
                     .await?;
+                
+                session_id = Some(session.id.to_string());
 
                 let mut response = http_response_see_other(next_url)?;
                 {
@@ -8011,7 +8030,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await;
 
             let _ =
-                nexus.audit_log_entry_complete(&opctx, &audit, &result).await;
+                nexus.audit_log_entry_complete(&opctx, &audit, &result, session_id).await;
 
             result
         };
@@ -8051,6 +8070,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let opctx = nexus.opctx_external_authn();
             let audit =
                 nexus.audit_log_entry_init_unauthed(&opctx, &rqctx).await?;
+            
+            let mut session_id: Option<String> = None;
 
             let result = async {
                 let path = path_params.into_inner();
@@ -8063,6 +8084,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                     .await?;
 
                 let session = nexus.session_create(opctx, &user).await?;
+                session_id = Some(session.id.to_string());
                 let mut response = HttpResponseHeaders::new_unnamed(
                     HttpResponseUpdatedNoContent(),
                 );
@@ -8083,7 +8105,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             }
             .await;
             let _ =
-                nexus.audit_log_entry_complete(&opctx, &audit, &result).await;
+                nexus.audit_log_entry_complete(&opctx, &audit, &result, session_id).await;
             result
         };
         apictx
@@ -8356,7 +8378,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await;
 
             let _ =
-                nexus.audit_log_entry_complete(&opctx, &audit, &result).await;
+                nexus.audit_log_entry_complete(&opctx, &audit, &result, None).await;
             result
         };
         apictx

@@ -22,8 +22,15 @@ use uuid::Uuid;
 /// Actor information for audit log initialization. Inspired by `authn::Actor`
 #[derive(Clone, Debug)]
 pub enum AuditLogActor {
-    UserBuiltin { user_builtin_id: BuiltInUserUuid },
-    SiloUser { silo_user_id: SiloUserUuid, silo_id: Uuid },
+    UserBuiltin { 
+        user_builtin_id: BuiltInUserUuid,
+        user_name: String,
+    },
+    SiloUser { 
+        silo_user_id: SiloUserUuid, 
+        silo_id: Uuid,
+        silo_name: String,
+    },
     Unauthenticated,
 }
 
@@ -109,6 +116,7 @@ pub struct AuditLogEntryInit {
     /// Actor kind indicating builtin user, silo user, or unauthenticated
     pub actor_kind: AuditLogActorKind,
     pub actor_id: Option<Uuid>,
+    pub actor_silo_name: Option<String>,
     pub actor_silo_id: Option<Uuid>,
 
     /// API token or session cookie. Optional because it will not be defined
@@ -128,19 +136,21 @@ impl From<AuditLogEntryInitParams> for AuditLogEntryInit {
             auth_method,
         } = params;
 
-        let (actor_id, actor_silo_id, actor_kind) = match actor {
-            AuditLogActor::UserBuiltin { user_builtin_id } => (
+        let (actor_id, actor_silo_id, actor_silo_name, actor_kind) = match actor {
+            AuditLogActor::UserBuiltin { user_builtin_id, user_name } => (
                 Some(user_builtin_id.into_untyped_uuid()),
                 None,
+                Some(user_name),
                 AuditLogActorKind::UserBuiltin,
             ),
-            AuditLogActor::SiloUser { silo_user_id, silo_id } => (
+            AuditLogActor::SiloUser { silo_user_id, silo_id, silo_name } => (
                 Some(silo_user_id.into_untyped_uuid()),
                 Some(silo_id),
+                Some(silo_name),
                 AuditLogActorKind::SiloUser,
             ),
             AuditLogActor::Unauthenticated => {
-                (None, None, AuditLogActorKind::Unauthenticated)
+                (None, None, None, AuditLogActorKind::Unauthenticated)
             }
         };
 
@@ -151,6 +161,7 @@ impl From<AuditLogEntryInitParams> for AuditLogEntryInit {
             request_uri,
             operation_id,
             actor_id,
+            actor_silo_name,
             actor_silo_id,
             actor_kind,
             source_ip: source_ip.into(),
@@ -173,6 +184,7 @@ pub struct AuditLogEntry {
     pub source_ip: IpNetwork,
     pub user_agent: Option<String>,
     pub actor_id: Option<Uuid>,
+    pub actor_silo_name: Option<String>,
     pub actor_silo_id: Option<Uuid>,
     /// Actor kind indicating builtin user, silo user, or unauthenticated
     pub actor_kind: AuditLogActorKind,
@@ -191,6 +203,8 @@ pub struct AuditLogEntry {
     pub error_code: Option<String>,
     /// Always present if result is an error
     pub error_message: Option<String>,
+    /// Optional because not present for all operations
+    pub resource_id: Option<String>,
 }
 
 /// Struct that we can use as a kind of constructor arg for our actual audit
@@ -200,6 +214,7 @@ pub struct AuditLogEntry {
 pub enum AuditLogCompletion {
     Success {
         http_status_code: u16,
+        resource_id: Option<String>,
     },
     Error {
         http_status_code: u16,
@@ -225,18 +240,20 @@ pub struct AuditLogCompletionUpdate {
     pub http_status_code: Option<SqlU16>,
     pub error_code: Option<String>,
     pub error_message: Option<String>,
+    pub resource_id: Option<String>,
 }
 
 impl From<AuditLogCompletion> for AuditLogCompletionUpdate {
     fn from(completion: AuditLogCompletion) -> Self {
         let time_completed = Utc::now();
         match completion {
-            AuditLogCompletion::Success { http_status_code } => Self {
+            AuditLogCompletion::Success { http_status_code, resource_id, } => Self {
                 time_completed,
                 result_kind: AuditLogResultKind::Success,
                 http_status_code: Some(SqlU16(http_status_code)),
                 error_code: None,
                 error_message: None,
+                resource_id,
             },
             AuditLogCompletion::Error {
                 http_status_code,
@@ -248,6 +265,7 @@ impl From<AuditLogCompletion> for AuditLogCompletionUpdate {
                 http_status_code: Some(SqlU16(http_status_code)),
                 error_code,
                 error_message: Some(error_message),
+                resource_id: None,
             },
             AuditLogCompletion::Timeout => Self {
                 time_completed,
@@ -255,6 +273,7 @@ impl From<AuditLogCompletion> for AuditLogCompletionUpdate {
                 http_status_code: None,
                 error_code: None,
                 error_message: None,
+                resource_id: None,
             },
         }
     }
@@ -274,6 +293,7 @@ impl TryFrom<AuditLogEntry> for views::AuditLogEntry {
             operation_id: entry.operation_id,
             source_ip: entry.source_ip.ip(),
             user_agent: entry.user_agent,
+            resource_id: entry.resource_id,
             actor: match entry.actor_kind {
                 AuditLogActorKind::UserBuiltin => {
                     let user_builtin_id = entry.actor_id.ok_or_else(|| {
@@ -281,10 +301,16 @@ impl TryFrom<AuditLogEntry> for views::AuditLogEntry {
                             "UserBuiltin actor missing actor_id",
                         )
                     })?;
+                    let user_name = entry.actor_silo_name.ok_or_else(|| {
+                        Error::internal_error(
+                            "UserBuiltin actor missing actor_silo_name",
+                        )
+                    })?;
                     views::AuditLogEntryActor::UserBuiltin {
                         user_builtin_id: BuiltInUserUuid::from_untyped_uuid(
                             user_builtin_id,
                         ),
+                        user_name,
                     }
                 }
                 AuditLogActorKind::SiloUser => {
@@ -296,11 +322,17 @@ impl TryFrom<AuditLogEntry> for views::AuditLogEntry {
                             "SiloUser actor missing actor_silo_id",
                         )
                     })?;
+                    let silo_name = entry.actor_silo_name.ok_or_else(|| {
+                        Error::internal_error(
+                            "SiloUser actor missing actor_silo_name",
+                        )
+                    })?;
                     views::AuditLogEntryActor::SiloUser {
                         silo_user_id: SiloUserUuid::from_untyped_uuid(
                             silo_user_id,
                         ),
                         silo_id,
+                        silo_name,
                     }
                 }
                 AuditLogActorKind::Unauthenticated => {

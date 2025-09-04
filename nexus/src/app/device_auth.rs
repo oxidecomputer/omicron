@@ -226,7 +226,7 @@ impl super::Nexus {
             let now = Utc::now();
             if time_expires < now {
                 return Err(Reason::BadCredentials {
-                    actor: Actor::SiloUser { silo_user_id, silo_id },
+                    actor: Actor::SiloUser { silo_user_id, silo_id, silo_name: "unknown".parse().unwrap() },
                     source: anyhow!(
                         "token expired at {} (current time: {})",
                         time_expires,
@@ -236,7 +236,7 @@ impl super::Nexus {
             }
         }
 
-        Ok(Actor::SiloUser { silo_user_id, silo_id })
+        Ok(Actor::SiloUser { silo_user_id, silo_id, silo_name: "unknown".parse().unwrap() })
     }
 
     pub(crate) async fn device_access_token(

@@ -5864,6 +5864,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.audit_log (
     -- these are all null if the request is unauthenticated. actor_id can
     -- be present while silo ID is null if the user is built in (non-silo).
     actor_id UUID,
+    actor_silo_name STRING(63),
     actor_silo_id UUID,
     -- actor kind indicating builtin user, silo user, or unauthenticated
     actor_kind omicron.public.audit_log_actor_kind NOT NULL,
@@ -5874,6 +5875,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.audit_log (
 
     time_completed TIMESTAMPTZ,
     http_status_code INT4,
+
+    -- the ID of the created resource, if any
+    -- TODO: This could be just 'id of affected resource'
+    resource_id STRING,
 
     -- only present on errors
     error_code STRING,
@@ -5947,11 +5952,13 @@ SELECT
     source_ip,
     user_agent,
     actor_id,
+    actor_silo_name,
     actor_silo_id,
     actor_kind,
     auth_method,
     time_completed,
     http_status_code,
+    resource_id,
     error_code,
     error_message,
     result_kind

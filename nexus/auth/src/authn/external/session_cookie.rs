@@ -25,6 +25,7 @@ pub trait Session {
     fn id(&self) -> ConsoleSessionUuid;
     fn silo_user_id(&self) -> SiloUserUuid;
     fn silo_id(&self) -> Uuid;
+    fn silo_name(&self) -> &str;
     fn time_last_used(&self) -> DateTime<Utc>;
     fn time_created(&self) -> DateTime<Utc>;
 }
@@ -128,6 +129,7 @@ where
         let actor = Actor::SiloUser {
             silo_user_id: session.silo_user_id(),
             silo_id: session.silo_id(),
+            silo_name: session.silo_name().parse().unwrap(),
         };
 
         // if the session has gone unused for longer than idle_timeout, it is
@@ -220,6 +222,7 @@ mod test {
         token: String,
         silo_user_id: SiloUserUuid,
         silo_id: Uuid,
+        silo_name: &'static str,
         time_created: DateTime<Utc>,
         time_last_used: DateTime<Utc>,
     }
@@ -233,6 +236,9 @@ mod test {
         }
         fn silo_id(&self) -> Uuid {
             self.silo_id
+        }
+        fn silo_name(&self) -> &str {
+            self.silo_name
         }
         fn time_created(&self) -> DateTime<Utc> {
             self.time_created
@@ -335,6 +341,7 @@ mod test {
                 token: "abc".to_string(),
                 silo_user_id: SiloUserUuid::new_v4(),
                 silo_id: Uuid::new_v4(),
+                silo_name: "test-silo",
                 time_last_used: Utc::now() - Duration::hours(2),
                 time_created: Utc::now() - Duration::hours(2),
             }]),
@@ -361,6 +368,7 @@ mod test {
                 token: "abc".to_string(),
                 silo_user_id: SiloUserUuid::new_v4(),
                 silo_id: Uuid::new_v4(),
+                silo_name: "test-silo",
                 time_last_used: Utc::now(),
                 time_created: Utc::now() - Duration::hours(20),
             }]),
@@ -388,6 +396,7 @@ mod test {
                 token: "abc".to_string(),
                 silo_user_id: SiloUserUuid::new_v4(),
                 silo_id: Uuid::new_v4(),
+                silo_name: "test-silo",
                 time_last_used,
                 time_created: Utc::now(),
             }]),
