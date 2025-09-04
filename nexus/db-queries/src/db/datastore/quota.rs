@@ -34,6 +34,10 @@ impl DataStore {
         let silo_id = authz_silo.id();
         use nexus_db_schema::schema::silo_quotas::dsl;
 
+        if quotas.cpus < 0 {
+            return Err(Error::invalid_request("cpus quota must be >= 0"));
+        }
+
         diesel::insert_into(dsl::silo_quotas)
             .values(quotas)
             .execute_async(conn)
