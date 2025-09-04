@@ -176,7 +176,11 @@ impl TqState {
 
     pub fn send_envelopes_from(&mut self, id: &PlatformId) {
         let (_, ctx) = self.sut.nodes.get_mut(id).expect("node exists");
-        for envelope in ctx.drain_envelopes() {
+        // Only send envelopes to alive nodes
+        for envelope in ctx
+            .drain_envelopes()
+            .filter(|e| !self.faults.crashed_nodes.contains(&e.to))
+        {
             let msgs =
                 self.bootstrap_network.entry(envelope.to.clone()).or_default();
             msgs.push(envelope);
@@ -219,6 +223,12 @@ impl TqState {
             }
             Event::Reconfigure(nexus_config) => {
                 self.apply_event_reconfigure(nexus_config)
+            }
+            Event::CrashNode(id) => {
+                self.apply_event_crash_node(id);
+            }
+            Event::RestartNode { id, connection_order } => {
+                self.apply_event_restart_node(id, connection_order);
             }
         }
     }
@@ -327,6 +337,70 @@ impl TqState {
         self.underlay_network.push(reply);
     }
 
+    fn apply_event_crash_node(&mut self, id: PlatformId) {
+        // We clear all the crashed node's destination messages
+        self.bootstrap_network.remove(&id);
+
+        // Keep track of the crashed node
+        self.faults.crashed_nodes.insert(id.clone());
+
+        // We get to define the semantics of the network with regards to an
+        // inflight message sourced from a crashed node. We have two choices:
+        // drop the message or let it be eventually delivered to the desination
+        // if the destination node doesn't crash before delivery. We choose
+        // the latter mostly for efficiency: we don't want to have to loop over
+        // every destination in the bootstrap network and filter messages.
+        //
+        // However, we do still have to call `node.on_disconnect()` at all
+        // connected nodes, so do that now. For simplicity, we do this at every
+        // alive node in the same step.
+        for (_, (node, ctx)) in self
+            .sut
+            .nodes
+            .iter_mut()
+            .filter(|(id, _)| !self.faults.crashed_nodes.contains(id))
+        {
+            node.on_disconnect(ctx, id.clone());
+        }
+    }
+
+    fn apply_event_restart_node(
+        &mut self,
+        id: PlatformId,
+        connection_order: Vec<PlatformId>,
+    ) {
+        // We need to clear the mutable state of the `Node`. We do this by
+        // creating a new `Node` and passing in the existing context which
+        // contains the persistent state.
+        {
+            let (node, ctx) = self.sut.nodes.get_mut(&id).expect("node exists");
+            ctx.clear_mutable_state();
+            *node = Node::new(&self.log, ctx);
+        }
+
+        // We now need to connect to each node in the order given in
+        // `connection_order`. We do this by calling `on_connect` at the
+        // restarted node and the node in `connection_order`;
+        for peer in connection_order {
+            let (peer_node, peer_ctx) =
+                self.sut.nodes.get_mut(&peer).expect("node exists");
+            // Inform the peer of the connection
+            peer_node.on_connect(peer_ctx, id.clone());
+            // Send any messages output as a result of the connection
+            send_envelopes(
+                peer_ctx,
+                &mut self.bootstrap_network,
+                &mut self.faults,
+            );
+
+            let (node, ctx) = self.sut.nodes.get_mut(&id).expect("node exists");
+            // Inform the restarted node of the connection
+            node.on_connect(ctx, peer);
+            // Send any messages output as a result of the connection
+            send_envelopes(ctx, &mut self.bootstrap_network, &self.faults);
+        }
+    }
+
     fn apply_event_deliver_nexus_reply(&mut self, recorded_reply: NexusReply) {
         let mut latest_config = self.nexus.latest_config_mut();
         let reply = self.underlay_network.pop().expect("reply exists");
@@ -404,7 +478,7 @@ impl TqState {
         }
 
         // Send any messages as a result of handling this message
-        send_envelopes(ctx, &mut self.bootstrap_network);
+        send_envelopes(ctx, &mut self.bootstrap_network, &self.faults);
 
         // Remove any destinations with zero messages in-flight
         self.bootstrap_network.retain(|_, msgs| !msgs.is_empty());
@@ -462,8 +536,11 @@ impl TqState {
 fn send_envelopes(
     ctx: &mut NodeCtx,
     bootstrap_network: &mut BTreeMap<PlatformId, Vec<Envelope>>,
+    faults: &Faults,
 ) {
-    for envelope in ctx.drain_envelopes() {
+    for envelope in
+        ctx.drain_envelopes().filter(|e| !faults.crashed_nodes.contains(&e.to))
+    {
         let envelopes =
             bootstrap_network.entry(envelope.to.clone()).or_default();
         envelopes.push(envelope);

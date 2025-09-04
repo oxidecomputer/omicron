@@ -33,6 +33,11 @@ pub enum Event {
     DeliverNexusReply(NexusReply),
     CommitConfiguration(PlatformId),
     Reconfigure(NexusConfig),
+    CrashNode(PlatformId),
+    RestartNode {
+        id: PlatformId,
+        connection_order: Vec<PlatformId>,
+    },
 }
 
 impl Event {
@@ -50,6 +55,12 @@ impl Event {
             Self::ClearSecrets(id) => vec![id.clone()],
             Self::CommitConfiguration(id) => vec![id.clone()],
             Self::Reconfigure(_) => vec![],
+            Self::CrashNode(id) => vec![id.clone()],
+            Self::RestartNode { id, connection_order } => {
+                let mut nodes = connection_order.clone();
+                nodes.push(id.clone());
+                nodes
+            }
         }
     }
 }
