@@ -68,7 +68,10 @@ pub struct Instance {
     #[diesel(column_name = boot_disk_id)]
     pub boot_disk_id: Option<Uuid>,
 
-    /// The instance's required CPU platform.
+    /// The instance's required CPU platform. If this is `None`, Nexus will not
+    /// constrain placement decisions by CPU platform. Instead, after selecting
+    /// a sled by any other constraints the instance will be incarnated with the
+    /// most general CPU platform supported by the selected sled.
     pub cpu_platform: Option<InstanceCpuPlatform>,
 
     #[diesel(embed)]
