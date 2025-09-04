@@ -399,6 +399,9 @@ mod tests {
         let raw_url = format!(
             "https://raw.githubusercontent.com/oxidecomputer/crucible/{part}/openapi/crucible-pantry.json",
         );
+
+        // If this fails, then whatever test needed it fails too.
+        // Should we retry this? ZZZ
         let raw_json =
             reqwest::blocking::get(&raw_url).unwrap().text().unwrap();
         serde_json::from_str(&raw_json).unwrap()
