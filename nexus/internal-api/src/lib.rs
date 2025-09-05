@@ -489,31 +489,31 @@ pub trait NexusInternalApi {
         blueprint: TypedBody<Blueprint>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
-    /// Get the current set of chicken switches
+    /// Get the current reconfigurator configuration
     #[endpoint {
         method = GET,
-        path = "/deployment/chicken-switches"
+        path = "/deployment/reconfigurator-config"
     }]
-    async fn reconfigurator_chicken_switches_show_current(
+    async fn reconfigurator_config_show_current(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<ReconfiguratorConfigView>, HttpError>;
 
-    /// Get the chicken switches at `version` if it exists
+    /// Get the reconfigurator config at `version` if it exists
     #[endpoint {
         method = GET,
-        path = "/deployment/chicken-switches/{version}"
+        path = "/deployment/reconfigurator-config/{version}"
     }]
-    async fn reconfigurator_chicken_switches_show(
+    async fn reconfigurator_config_show(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<VersionPathParam>,
     ) -> Result<HttpResponseOk<ReconfiguratorConfigView>, HttpError>;
 
-    /// Update the chicken switches at the latest versions
+    /// Update the reconfigurator config at the latest versions
     #[endpoint {
         method = POST,
-        path = "/deployment/chicken-switches"
+        path = "/deployment/reconfigurator-config"
     }]
-    async fn reconfigurator_chicken_switches_set(
+    async fn reconfigurator_config_set(
         rqctx: RequestContext<Self::Context>,
         switches: TypedBody<ReconfiguratorConfigParam>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;

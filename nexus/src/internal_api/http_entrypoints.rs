@@ -871,7 +871,7 @@ impl NexusInternalApi for NexusInternalApiImpl {
             .await
     }
 
-    async fn reconfigurator_chicken_switches_show_current(
+    async fn reconfigurator_config_show_current(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<ReconfiguratorConfigView>, HttpError> {
         let apictx = &rqctx.context().context;
@@ -896,7 +896,7 @@ impl NexusInternalApi for NexusInternalApiImpl {
             .await
     }
 
-    async fn reconfigurator_chicken_switches_show(
+    async fn reconfigurator_config_show(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<VersionPathParam>,
     ) -> Result<HttpResponseOk<ReconfiguratorConfigView>, HttpError> {
@@ -925,7 +925,7 @@ impl NexusInternalApi for NexusInternalApiImpl {
             .await
     }
 
-    async fn reconfigurator_chicken_switches_set(
+    async fn reconfigurator_config_set(
         rqctx: RequestContext<Self::Context>,
         switches: TypedBody<ReconfiguratorConfigParam>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {

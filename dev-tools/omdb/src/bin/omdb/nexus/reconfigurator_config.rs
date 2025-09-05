@@ -132,10 +132,10 @@ async fn reconfigurator_config_show(
 ) -> Result<(), anyhow::Error> {
     let res = match args.version {
         ReconfiguratorConfigVersionOrCurrent::Current => {
-            client.reconfigurator_chicken_switches_show_current().await
+            client.reconfigurator_config_show_current().await
         }
         ReconfiguratorConfigVersionOrCurrent::Version(version) => {
-            client.reconfigurator_chicken_switches_show(version).await
+            client.reconfigurator_config_show(version).await
         }
     };
 
@@ -166,7 +166,7 @@ async fn reconfigurator_config_set(
     _destruction_token: DestructiveOperationToken,
 ) -> Result<(), anyhow::Error> {
     let (current_config, new_config) =
-        match client.reconfigurator_chicken_switches_show_current().await {
+        match client.reconfigurator_config_show_current().await {
             Ok(config) => {
                 let Some(next_version) = config.version.checked_add(1) else {
                     eprintln!(
@@ -208,7 +208,7 @@ async fn reconfigurator_config_set(
             }
         };
 
-    client.reconfigurator_chicken_switches_set(&new_config).await?;
+    client.reconfigurator_config_set(&new_config).await?;
     println!(
         "reconfigurator config updated to version {}:",
         new_config.version
