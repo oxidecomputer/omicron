@@ -10,6 +10,7 @@ use anyhow::anyhow;
 use camino::{Utf8Path, Utf8PathBuf};
 use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
+use nexus_types::deployment::ReconfiguratorChickenSwitches;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::NEXUS_TECHPORT_EXTERNAL_PORT;
 use omicron_common::address::RACK_PREFIX;
@@ -856,6 +857,12 @@ pub struct PackageConfig {
     /// Maghemite mgd daemon configuration
     #[serde(default)]
     pub mgd: HashMap<SwitchLocation, MgdConfig>,
+    /// Initial reconfigurator chicken switches
+    ///
+    /// We use this hook to disable reconfigurator automation in the test suite
+    #[serde(default)]
+    pub initial_reconfigurator_chicken_switches:
+        Option<ReconfiguratorChickenSwitches>,
     /// Background task configuration
     pub background_tasks: BackgroundTaskConfig,
     /// Default Crucible region allocation strategy
@@ -917,6 +924,7 @@ impl WebhookDeliveratorConfig {
 mod test {
     use super::*;
 
+    use nexus_types::deployment::PlannerChickenSwitches;
     use omicron_common::address::{
         CLICKHOUSE_TCP_PORT, Ipv6Subnet, RACK_PREFIX,
     };
@@ -1058,6 +1066,9 @@ mod test {
             address = "[::1]:12224"
             [mgd.switch0]
             address = "[::1]:4676"
+            [initial_reconfigurator_chicken_switches]
+            planner_enabled = true
+            planner_switches.add_zones_with_mupdate_override = true
             [background_tasks]
             dns_internal.period_secs_config = 1
             dns_internal.period_secs_servers = 2
@@ -1195,6 +1206,14 @@ mod test {
                                 .unwrap(),
                         }
                     )]),
+                    initial_reconfigurator_chicken_switches: Some(
+                        ReconfiguratorChickenSwitches {
+                            planner_enabled: true,
+                            planner_switches: PlannerChickenSwitches {
+                                add_zones_with_mupdate_override: true,
+                            },
+                        }
+                    ),
                     background_tasks: BackgroundTaskConfig {
                         dns_internal: DnsTasksConfig {
                             period_secs_config: Duration::from_secs(1),

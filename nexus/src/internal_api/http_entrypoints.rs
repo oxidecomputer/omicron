@@ -168,7 +168,14 @@ impl NexusInternalApi for NexusInternalApiImpl {
         let request = info.into_inner();
         let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
 
-        nexus.rack_initialize(&opctx, path.rack_id, request).await?;
+        nexus
+            .rack_initialize(
+                &opctx,
+                path.rack_id,
+                request,
+                true, // blueprint_execution_enabled
+            )
+            .await?;
 
         Ok(HttpResponseUpdatedNoContent())
     }

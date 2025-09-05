@@ -81,6 +81,7 @@ pub struct RackInit {
     pub rack_id: Uuid,
     pub rack_subnet: IpNetwork,
     pub blueprint: Blueprint,
+    pub blueprint_execution_enabled: bool,
     pub physical_disks: Vec<PhysicalDisk>,
     pub zpools: Vec<Zpool>,
     pub datasets: Vec<CrucibleDataset>,
@@ -102,6 +103,7 @@ enum RackInitError {
     AddingNic(Error),
     BlueprintInsert(Error),
     BlueprintTargetSet(Error),
+    NexusDatabaseAccessRecordsInsert(Error),
     DatasetInsert { err: AsyncInsertError, zpool_id: Uuid },
     PhysicalDiskInsert(Error),
     ZpoolInsert(Error),
@@ -149,8 +151,12 @@ impl From<RackInitError> for Error {
                 err.internal_context("failed to insert Blueprint")
             }
             RackInitError::BlueprintTargetSet(err) => {
-                err.internal_context("failed to insert set target Blueprint")
+                err.internal_context("failed to set target Blueprint")
             }
+            RackInitError::NexusDatabaseAccessRecordsInsert(err) => err
+                .internal_context(
+                    "failed to insert nexus database access records",
+                ),
             RackInitError::RackUpdate { err, rack_id } => {
                 public_error_from_diesel(
                     err,
@@ -696,6 +702,8 @@ impl DataStore {
                         rack_init.service_ip_pool_ranges;
                     let internal_dns = rack_init.internal_dns;
                     let external_dns = rack_init.external_dns;
+                    let blueprint_execution_enabled =
+                        rack_init.blueprint_execution_enabled;
 
                     // Early exit if the rack has already been initialized.
                     let rack = rack_dsl::rack
@@ -769,16 +777,13 @@ impl DataStore {
                         DieselError::RollbackTransaction
                     })?;
 
-                    // Mark the RSS-generated blueprint as the current target,
-                    // DISABLED. We may change this to enabled in the future
-                    // when more of Reconfigurator is automated, but for now we
-                    // require a support operation to enable it.
+                    // Make that initial blueprint the target.
                     Self::blueprint_target_set_current_on_connection(
                         &conn,
                         opctx,
                         BlueprintTarget {
                             target_id: blueprint.id,
-                            enabled: false,
+                            enabled: blueprint_execution_enabled,
                             time_made_target: Utc::now(),
                         },
                     )
@@ -806,7 +811,7 @@ impl DataStore {
                                 }
                             }).collect(),
                     ).await.map_err(|e| {
-                        err.set(RackInitError::BlueprintTargetSet(e)).unwrap();
+                        err.set(RackInitError::NexusDatabaseAccessRecordsInsert(e)).unwrap();
                         DieselError::RollbackTransaction
                     })?;
 
@@ -1106,6 +1111,7 @@ mod test {
                     comment: "test suite".to_string(),
                     report: PlanningReport::new(blueprint_id),
                 },
+                blueprint_execution_enabled: false,
                 physical_disks: vec![],
                 zpools: vec![],
                 datasets: vec![],

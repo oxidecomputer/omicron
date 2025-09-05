@@ -89,6 +89,7 @@ impl BackgroundTask for ChickenSwitchesLoader {
 #[cfg(test)]
 mod test {
     use super::*;
+    use async_bb8_diesel::AsyncRunQueryDsl;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::{
         PlannerChickenSwitches, ReconfiguratorChickenSwitches,
@@ -106,6 +107,22 @@ mod test {
             cptestctx.logctx.log.clone(),
             datastore.clone(),
         );
+
+        // `#[nexus_test]` inserts an initial set of chicken switch values to
+        // disable planning in general; let's remove that value so we can test
+        // from a clean slate.
+        //
+        // Chicken switch values are supposed to form a continuous history, so
+        // there's no datastore method to delete existing values. We'll go
+        // behind its back and delete them directly.
+        {
+            use nexus_db_schema::schema::reconfigurator_chicken_switches::dsl;
+            let conn = datastore.pool_connection_for_tests().await.unwrap();
+            diesel::delete(dsl::reconfigurator_chicken_switches)
+                .execute_async(&*conn)
+                .await
+                .expect("removed nexus_test default chicken switches");
+        }
 
         let mut task = ChickenSwitchesLoader::new(datastore.clone());
 

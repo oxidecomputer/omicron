@@ -105,6 +105,7 @@ impl super::Nexus {
         opctx: &OpContext,
         rack_id: Uuid,
         request: RackInitializationRequest,
+        blueprint_execution_enabled: bool,
     ) -> Result<(), Error> {
         let log = &opctx.log;
 
@@ -716,6 +717,7 @@ impl super::Nexus {
                         .into(),
                     rack_id,
                     blueprint,
+                    blueprint_execution_enabled,
                     physical_disks,
                     zpools,
                     datasets,

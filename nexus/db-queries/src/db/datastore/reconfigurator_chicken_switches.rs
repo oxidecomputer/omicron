@@ -17,6 +17,7 @@ use diesel::expression::SelectableHelper;
 use diesel::sql_types;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::public_error_from_diesel;
+use nexus_db_lookup::DbConnection;
 use nexus_db_model::ReconfiguratorChickenSwitches as DbReconfiguratorChickenSwitches;
 use nexus_db_model::SqlU32;
 use nexus_types::deployment::ReconfiguratorChickenSwitchesParam;
@@ -112,8 +113,11 @@ impl DataStore {
             .authorize(authz::Action::Modify, &authz::BLUEPRINT_CONFIG)
             .await?;
 
-        let num_inserted =
-            self.insert_latest_version_internal(opctx, &switches).await?;
+        let num_inserted = Self::insert_latest_version_internal(
+            &*self.pool_connection_authorized(opctx).await?,
+            &switches,
+        )
+        .await?;
 
         match num_inserted {
             0 => Err(Error::invalid_request(format!(
@@ -132,8 +136,7 @@ impl DataStore {
     /// Only succeeds if the prior version is the latest version currently
     /// in the `reconfigurator_chicken_switches` table.
     async fn insert_latest_version_internal(
-        &self,
-        opctx: &OpContext,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
         switches: &ReconfiguratorChickenSwitchesView,
     ) -> Result<usize, Error> {
         if switches.version < 1 {
@@ -158,7 +161,7 @@ impl DataStore {
         .bind::<sql_types::Bool, _>(
             switches.switches.planner_switches.add_zones_with_mupdate_override,
         )
-        .execute_async(&*self.pool_connection_authorized(opctx).await?)
+        .execute_async(conn)
         .await
         .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
