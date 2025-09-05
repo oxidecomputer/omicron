@@ -15,24 +15,32 @@ use serde_json::json;
 use std::sync::Arc;
 use tokio::sync::watch;
 
+/// Enum that allows downstream tasks to know whether this task has had a chance
+/// to read the current chicken switches from the database.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ReconfiguratorChickenSwitchesLoaderState {
+    NotYetLoaded,
+    Loaded(ReconfiguratorChickenSwitchesView),
+}
+
 /// Background task that tracks reconfigurator chicken switches from the DB
 pub struct ChickenSwitchesLoader {
     datastore: Arc<DataStore>,
-    tx: watch::Sender<ReconfiguratorChickenSwitchesView>,
-    rx: watch::Receiver<ReconfiguratorChickenSwitchesView>,
+    tx: watch::Sender<ReconfiguratorChickenSwitchesLoaderState>,
 }
 
 impl ChickenSwitchesLoader {
     pub fn new(datastore: Arc<DataStore>) -> Self {
-        let (tx, rx) =
-            watch::channel(ReconfiguratorChickenSwitchesView::default());
-        Self { datastore, tx, rx }
+        let (tx, _rx) = watch::channel(
+            ReconfiguratorChickenSwitchesLoaderState::NotYetLoaded,
+        );
+        Self { datastore, tx }
     }
 
     pub fn watcher(
         &self,
-    ) -> watch::Receiver<ReconfiguratorChickenSwitchesView> {
-        self.rx.clone()
+    ) -> watch::Receiver<ReconfiguratorChickenSwitchesLoaderState> {
+        self.tx.subscribe()
     }
 }
 
@@ -55,15 +63,21 @@ impl BackgroundTask for ChickenSwitchesLoader {
                     json!({ "error": message })
                 }
                 Ok(switches) => {
-                    let switches = switches.unwrap_or_default();
+                    let switches =
+                        ReconfiguratorChickenSwitchesLoaderState::Loaded(
+                            switches.unwrap_or_default(),
+                        );
                     let updated = self.tx.send_if_modified(|s| {
                         if *s != switches {
-                            *s = switches;
+                            *s = switches.clone();
                             return true;
                         }
                         false
                     });
-                    debug!(opctx.log, "chicken switches load complete");
+                    debug!(
+                        opctx.log, "chicken switches load complete";
+                        "switches" => ?switches,
+                    );
                     json!({ "chicken_switches_updated": updated })
                 }
             }
@@ -94,14 +108,35 @@ mod test {
         );
 
         let mut task = ChickenSwitchesLoader::new(datastore.clone());
+
+        // Initial state should be `NotYetLoaded`.
+        let mut rx = task.watcher();
+        assert_eq!(
+            *rx.borrow_and_update(),
+            ReconfiguratorChickenSwitchesLoaderState::NotYetLoaded
+        );
+
+        // We haven't inserted anything into the DB, so the initial activation
+        // should populate the channel with our default values.
+        let default_switches = ReconfiguratorChickenSwitchesView::default();
         let out = task.activate(&opctx).await;
-        assert_eq!(out["chicken_switches_updated"], false);
+        assert_eq!(out["chicken_switches_updated"], true);
+        assert!(rx.has_changed().unwrap());
+        assert_eq!(
+            *rx.borrow_and_update(),
+            ReconfiguratorChickenSwitchesLoaderState::Loaded(
+                default_switches.clone()
+            )
+        );
+
+        // Insert an initial set of switches.
+        let expected_switches = ReconfiguratorChickenSwitches {
+            planner_enabled: !default_switches.switches.planner_enabled,
+            planner_switches: PlannerChickenSwitches::default(),
+        };
         let switches = ReconfiguratorChickenSwitchesParam {
             version: 1,
-            switches: ReconfiguratorChickenSwitches {
-                planner_enabled: true,
-                planner_switches: PlannerChickenSwitches::default(),
-            },
+            switches: expected_switches,
         };
         datastore
             .reconfigurator_chicken_switches_insert_latest_version(
@@ -111,14 +146,31 @@ mod test {
             .unwrap();
         let out = task.activate(&opctx).await;
         assert_eq!(out["chicken_switches_updated"], true);
+        assert!(rx.has_changed().unwrap());
+        {
+            let view = match rx.borrow_and_update().clone() {
+                ReconfiguratorChickenSwitchesLoaderState::NotYetLoaded => {
+                    panic!("unexpected value")
+                }
+                ReconfiguratorChickenSwitchesLoaderState::Loaded(view) => view,
+            };
+            assert_eq!(view.version, 1);
+            assert_eq!(view.switches, expected_switches);
+        }
+
+        // Activating again should not change things.
         let out = task.activate(&opctx).await;
         assert_eq!(out["chicken_switches_updated"], false);
+        assert!(!rx.has_changed().unwrap());
+
+        // Insert a new version.
+        let expected_switches = ReconfiguratorChickenSwitches {
+            planner_enabled: !expected_switches.planner_enabled,
+            planner_switches: PlannerChickenSwitches::default(),
+        };
         let switches = ReconfiguratorChickenSwitchesParam {
             version: 2,
-            switches: ReconfiguratorChickenSwitches {
-                planner_enabled: false,
-                planner_switches: PlannerChickenSwitches::default(),
-            },
+            switches: expected_switches,
         };
         datastore
             .reconfigurator_chicken_switches_insert_latest_version(
@@ -128,5 +180,16 @@ mod test {
             .unwrap();
         let out = task.activate(&opctx).await;
         assert_eq!(out["chicken_switches_updated"], true);
+        assert!(rx.has_changed().unwrap());
+        {
+            let view = match rx.borrow_and_update().clone() {
+                ReconfiguratorChickenSwitchesLoaderState::NotYetLoaded => {
+                    panic!("unexpected value")
+                }
+                ReconfiguratorChickenSwitchesLoaderState::Loaded(view) => view,
+            };
+            assert_eq!(view.version, 2);
+            assert_eq!(view.switches, expected_switches);
+        }
     }
 }
