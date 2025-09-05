@@ -42,11 +42,11 @@ impl TestState {
         TestState { tq_state: TqState::new(log), skipped_actions: 0 }
     }
 
-    fn initial_config_event(
+    fn initial_config_events(
         &self,
         config: GeneratedConfiguration,
         down_nodes: BTreeSet<usize>,
-    ) -> Event {
+    ) -> Vec<Event> {
         // `tq_state` doesn't create the member universe until the first event is
         // applied. We duplicate it here so we can create that initial config
         // event.
@@ -65,6 +65,11 @@ impl TestState {
         let coordinator =
             members.first().cloned().expect("at least one member");
         let last_committed_epoch = None;
+        let crashed_nodes: BTreeSet<_> = down_nodes
+            .into_iter()
+            .map(|index| member_universe[index].clone())
+            .collect();
+        let should_abort = crashed_nodes.contains(&coordinator);
         let config = NexusConfig::new(
             epoch,
             last_committed_epoch,
@@ -72,15 +77,16 @@ impl TestState {
             members,
             threshold,
         );
-        let crashed_nodes = down_nodes
-            .into_iter()
-            .map(|index| member_universe[index].clone())
-            .collect();
-        Event::InitialSetup {
+        let mut events = vec![Event::InitialSetup {
             member_universe_size: MEMBER_UNIVERSE_SIZE,
             config,
             crashed_nodes,
+        }];
+
+        if should_abort {
+            events.push(Event::AbortConfiguration(epoch));
         }
+        events
     }
 
     // Execute the proptest generated actions
@@ -195,7 +201,20 @@ impl TestState {
         }
 
         let id = selector.select(faultable).clone();
-        vec![Event::CrashNode(id)]
+        let latest_config = self.tq_state.nexus.latest_config();
+        if id == latest_config.coordinator
+            && latest_config.op == NexusOp::Preparing
+        {
+            // The `AbortConfiguration` simulates Nexus polling and timing
+            // out or receiving an error response on node restart because the
+            // configuration was lost.
+            vec![
+                Event::CrashNode(id.clone()),
+                Event::AbortConfiguration(latest_config.epoch),
+            ]
+        } else {
+            vec![Event::CrashNode(id.clone())]
+        }
     }
 
     fn action_to_events_restart_node(
@@ -309,8 +328,7 @@ impl TestState {
             return events;
         }
 
-        // If the coordinator has crashed then Nexus should abort.
-        // Crashing is not actually implemented yet, but it will be.
+        // If the coordinator is currently down then Nexus should abort.
         if self
             .tq_state
             .faults
@@ -346,9 +364,9 @@ impl TestState {
         //
         // In a real system this request would go over the network, but would
         // end up at the same place.
-        let cs = coordinator
-            .get_coordinator_state()
-            .expect("coordinator is coordinating");
+        let cs = coordinator.get_coordinator_state().unwrap_or_else(|| {
+            panic!("coordinator is coordinating: {}", ctx.platform_id())
+        });
 
         // Put the reply on the network
         events.push(Event::SendNexusReplyOnUnderlay(
@@ -510,11 +528,18 @@ impl TestState {
         let nexus_config = NexusConfig::new(
             epoch,
             last_committed_epoch,
-            coordinator,
+            coordinator.clone(),
             new_members,
             threshold,
         );
-        vec![Event::Reconfigure(nexus_config)]
+        let mut events = vec![Event::Reconfigure(nexus_config)];
+
+        if self.tq_state.faults.crashed_nodes.contains(&coordinator) {
+            // This simulates a timeout on the reply from the coordinator which
+            // triggers an abort.
+            events.push(Event::AbortConfiguration(epoch));
+        }
+        events
     }
 
     /// At every point during the running of the test, invariants over the system
@@ -885,10 +910,12 @@ fn test_trust_quorum_protocol(input: TestInput) {
     let mut state = TestState::new(log.clone());
 
     // Perform the initial setup
-    let event = state
-        .initial_config_event(input.initial_config, input.initial_down_nodes);
-    event_log.record(&event);
-    state.tq_state.apply_event(event);
+    let events = state
+        .initial_config_events(input.initial_config, input.initial_down_nodes);
+    for event in events {
+        event_log.record(&event);
+        state.tq_state.apply_event(event);
+    }
 
     // Start executing the actions
     state.run_actions(input.actions, &mut event_log)?;
