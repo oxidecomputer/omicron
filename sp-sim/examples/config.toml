@@ -6,6 +6,7 @@
 serial_number = "SimSidecar0"
 manufacturing_root_cert_seed = "01de01de01de01de01de01de01de01de01de01de01de01de01de01de01de01de"
 device_id_cert_seed = "01de000000000000000000000000000000000000000000000000000000000000"
+authorized_keys = "../smf/switch_zone_setup/support_authorized_keys"
 
 [[simulated_sps.sidecar.network_config]]
 [simulated_sps.sidecar.network_config.simulated]

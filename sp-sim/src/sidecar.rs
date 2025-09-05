@@ -19,7 +19,7 @@ use crate::server::SimSpHandler;
 use crate::server::UdpServer;
 use crate::update::BaseboardKind;
 use crate::update::SimSpUpdate;
-use anyhow::Result;
+use anyhow::{Context, Result};
 use async_trait::async_trait;
 use futures::Future;
 use futures::future;
@@ -32,11 +32,15 @@ use gateway_messages::DumpCompression;
 use gateway_messages::DumpError;
 use gateway_messages::DumpSegment;
 use gateway_messages::DumpTask;
+use gateway_messages::EcdsaSha2Nistp256Challenge;
 use gateway_messages::IgnitionCommand;
 use gateway_messages::IgnitionState;
 use gateway_messages::MgsError;
 use gateway_messages::MgsRequest;
 use gateway_messages::MgsResponse;
+use gateway_messages::MonorailComponentAction;
+use gateway_messages::MonorailComponentActionResponse;
+use gateway_messages::MonorailError;
 use gateway_messages::PowerState;
 use gateway_messages::RotBootInfo;
 use gateway_messages::RotRequest;
@@ -46,6 +50,8 @@ use gateway_messages::SpError;
 use gateway_messages::SpPort;
 use gateway_messages::SpStateV2;
 use gateway_messages::StartupOptions;
+use gateway_messages::UnlockChallenge;
+use gateway_messages::UnlockResponse;
 use gateway_messages::ignition;
 use gateway_messages::ignition::IgnitionError;
 use gateway_messages::ignition::LinkEvents;
@@ -54,10 +60,14 @@ use gateway_messages::sp_impl::DeviceDescription;
 use gateway_messages::sp_impl::Sender;
 use gateway_messages::sp_impl::SpHandler;
 use gateway_types::component::SpState;
+use rand::TryRngCore;
+use rand::rngs::OsRng;
 use slog::Logger;
 use slog::debug;
 use slog::info;
 use slog::warn;
+use ssh_key::AuthorizedKeys;
+use ssh_key::PublicKey;
 use std::collections::HashMap;
 use std::iter;
 use std::net::SocketAddrV6;
@@ -65,6 +75,8 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
 use tokio::select;
 use tokio::sync::Mutex as TokioMutex;
 use tokio::sync::mpsc;
@@ -72,7 +84,10 @@ use tokio::sync::oneshot;
 use tokio::sync::watch;
 use tokio::task;
 use tokio::task::JoinHandle;
+use zerocopy::IntoBytes;
 
+const CHALLENGE_EXPIRATION_TIME_SECS: u64 = 10;
+const MAX_UNLOCK_TIME_SECS: u32 = 600;
 pub const SIM_SIDECAR_BOARD: &str = "SimSidecarSp";
 
 pub struct Sidecar {
@@ -206,6 +221,20 @@ impl Sidecar {
 
         let (commands, commands_rx) = mpsc::unbounded_channel();
 
+        let trusted_keys = match &sidecar.authorized_keys {
+            None => Vec::new(),
+            Some(authorized_keys) => AuthorizedKeys::read_file(authorized_keys)
+                .with_context(|| {
+                    format!(
+                        "failed to read authorized keys from {}",
+                        authorized_keys.display()
+                    )
+                })?
+                .into_iter()
+                .map(|entry| entry.public_key().clone())
+                .collect(),
+        };
+
         if let Some(network_config) = &sidecar.common.network_config {
             // bind to our two local "KSZ" ports
             let servers = future::try_join(
@@ -276,6 +305,7 @@ impl Sidecar {
                 sidecar.common.old_rot_state,
                 update_state,
                 Arc::clone(&power_state_changes),
+                trusted_keys,
             );
             let inner_task =
                 task::spawn(async move { inner.run().await.unwrap() });
@@ -348,6 +378,7 @@ impl Inner {
         old_rot_state: bool,
         update_state: SimSpUpdate,
         power_state_changes: Arc<AtomicUsize>,
+        trusted_keys: Vec<PublicKey>,
     ) -> (Self, Arc<TokioMutex<Handler>>, watch::Receiver<usize>) {
         let [udp0, udp1] = servers;
         let handler = Arc::new(TokioMutex::new(Handler::new(
@@ -358,6 +389,7 @@ impl Inner {
             old_rot_state,
             update_state,
             power_state_changes,
+            trusted_keys,
         )));
         let responses_sent_count = watch::Sender::new(0);
         let responses_sent_count_rx = responses_sent_count.subscribe();
@@ -512,9 +544,15 @@ struct Handler {
     should_fail_to_respond_signal: Option<Box<dyn FnOnce() + Send>>,
     old_rot_state: bool,
     sp_dumps: HashMap<[u8; 16], u32>,
+
+    // To simulate tech port unlock, we must store the set of trusted keys and
+    // the latest challenge together with the time at which it was issued.
+    trusted_keys: Vec<PublicKey>,
+    last_challenge: Option<(UnlockChallenge, u64)>,
 }
 
 impl Handler {
+    #[allow(clippy::too_many_arguments)]
     fn new(
         serial_number: String,
         components: Vec<SpComponentConfig>,
@@ -523,6 +561,7 @@ impl Handler {
         old_rot_state: bool,
         update_state: SimSpUpdate,
         power_state_changes: Arc<AtomicUsize>,
+        trusted_keys: Vec<PublicKey>,
     ) -> Self {
         let mut leaked_component_device_strings =
             Vec::with_capacity(components.len());
@@ -555,6 +594,8 @@ impl Handler {
             should_fail_to_respond_signal: None,
             old_rot_state,
             sp_dumps,
+            trusted_keys,
+            last_challenge: None,
         }
     }
 
@@ -1061,13 +1102,102 @@ impl SpHandler for Handler {
         component: SpComponent,
         action: ComponentAction,
     ) -> Result<ComponentActionResponse, SpError> {
-        warn!(
-            &self.log, "asked to perform component action (not supported for sim components)";
-            "sender" => ?sender,
-            "component" => ?component,
-            "action" => ?action,
-        );
-        Err(SpError::RequestUnsupportedForComponent)
+        match action {
+            ComponentAction::Monorail(
+                MonorailComponentAction::RequestChallenge,
+            ) => {
+                // Emulate a `LifecycleState::Release` device and issue
+                // an ECDSA challenge.
+                let (challenge, time) = get_ecdsa_challenge()?;
+                let challenge = UnlockChallenge::EcdsaSha2Nistp256(challenge);
+                self.last_challenge = Some((challenge, time));
+                Ok(ComponentActionResponse::Monorail(
+                    MonorailComponentActionResponse::RequestChallenge(
+                        challenge,
+                    ),
+                ))
+            }
+            ComponentAction::Monorail(MonorailComponentAction::Unlock {
+                challenge,
+                response,
+                time_sec,
+            }) => self
+                .unlock(sender.vid, challenge, response, time_sec)
+                .map_err(SpError::Monorail)
+                .map(|()| ComponentActionResponse::Ack),
+            ComponentAction::Monorail(MonorailComponentAction::Lock) => {
+                Ok(ComponentActionResponse::Ack)
+            }
+            ComponentAction::Led(_) => {
+                warn!(
+                    &self.log, "asked to perform LED component action (not supported for sim components)";
+                    "sender" => ?sender,
+                    "component" => ?component,
+                    "action" => ?action,
+                );
+                Err(SpError::RequestUnsupportedForComponent)
+            }
+        }
+    }
+
+    /// Pretends to unlock the tech port if the challenge and response are compatible
+    fn unlock(
+        &mut self,
+        _vid: Self::VLanId,
+        challenge: UnlockChallenge,
+        response: UnlockResponse,
+        time_sec: u32,
+    ) -> Result<(), MonorailError> {
+        if time_sec > MAX_UNLOCK_TIME_SECS {
+            warn!(&self.log, "unlock time too long"; "time_sec" => time_sec);
+            return Err(MonorailError::TimeIsTooLong);
+        }
+
+        // Callers only get one attempt per challenge; if they fail to authorize
+        // the unlock, they have to ask for a new challenge.
+        let Some((last_challenge, challenge_time)) = self.last_challenge.take()
+        else {
+            warn!(&self.log, "no challenge for monorail unlock");
+            return Err(MonorailError::UnlockAuthFailed);
+        };
+
+        if challenge != last_challenge {
+            warn!(&self.log, "wrong challenge for monorail unlock");
+            return Err(MonorailError::UnlockAuthFailed);
+        }
+
+        if now() >= challenge_time + CHALLENGE_EXPIRATION_TIME_SECS {
+            warn!(&self.log, "challenge expired");
+            return Err(MonorailError::UnlockAuthFailed);
+        }
+
+        // Check that the response is valid for our current challenge
+        // and trusted keys.
+        match (challenge, response) {
+            (
+                UnlockChallenge::Trivial { timestamp: ts1 },
+                UnlockResponse::Trivial { timestamp: ts2 },
+            ) if ts1 == ts2 => Ok(()),
+            (
+                UnlockChallenge::EcdsaSha2Nistp256(data),
+                UnlockResponse::EcdsaSha2Nistp256 {
+                    key,
+                    signer_nonce,
+                    signature,
+                },
+            ) => verify_signature(
+                &self.log,
+                &self.trusted_keys,
+                &data,
+                &key,
+                &signer_nonce,
+                &signature,
+            ),
+            _ => Err(MonorailError::UnlockAuthFailed),
+        }?;
+        debug!(&self.log, "unlock auth succeeded");
+
+        Ok(())
     }
 
     fn get_startup_options(&mut self) -> Result<StartupOptions, SpError> {
@@ -1453,4 +1583,90 @@ impl FakeIgnition {
 
         Ok(())
     }
+}
+
+/// The current Unix time, i.e., seconds since the epoch.
+fn now() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("should be able to get Unix time")
+        .as_secs()
+}
+
+/// Generate a fresh ECDSA tech port unlock challenge.
+fn get_ecdsa_challenge() -> Result<(EcdsaSha2Nistp256Challenge, u64), SpError> {
+    // Get a nonce from the OS RNG.
+    let mut nonce = [0u8; 32];
+    OsRng.try_fill_bytes(&mut nonce).expect("OS out of entropy");
+
+    // Get the current time from the OS clock.
+    let now = now();
+
+    Ok((
+        EcdsaSha2Nistp256Challenge {
+            hw_id: [0; _],       // fake
+            sw_id: [0, 0, 0, 1], // placeholder
+            time: now.to_le_bytes(),
+            nonce,
+        },
+        now,
+    ))
+}
+
+fn verify_signature(
+    log: &Logger,
+    trusted_keys: &[PublicKey],
+    data: &EcdsaSha2Nistp256Challenge,
+    key: &[u8; 65],
+    signer_nonce: &[u8; 8],
+    signature: &[u8; 64],
+) -> Result<(), MonorailError> {
+    if !trusted_keys.iter().any(|t| {
+        t.key_data().ecdsa().expect("must be ECDSA key").as_sec1_bytes() == key
+    }) {
+        warn!(log, "wrong key for tech port unlock");
+        return Err(MonorailError::UnlockAuthFailed);
+    }
+
+    let sig = p256::ecdsa::Signature::from_bytes(signature.as_slice().into())
+        .map_err(|_| MonorailError::UnlockAuthFailed)?;
+
+    let v = p256::ecdsa::VerifyingKey::from_encoded_point(
+        &p256::EncodedPoint::from_bytes(key)
+            .map_err(|_| MonorailError::UnlockAuthFailed)?,
+    )
+    .map_err(|_| MonorailError::UnlockAuthFailed)?;
+
+    // Build an SSH signature blob to be verified
+    //
+    // See https://github.com/openssh/openssh-portable/blob/master/PROTOCOL.sshsig
+    // for the signature blob format
+    #[rustfmt::skip]
+    let mut buf = vec![
+        // MAGIC_PREAMBLE
+        b'S', b'S', b'H', b'S', b'I', b'G',
+
+        // namespace
+        0, 0, 0, 15, // length
+        b'm', b'o', b'n', b'o', b'r', b'a', b'i', b'l', b'-',
+        b'u', b'n', b'l', b'o', b'c', b'k',
+
+        // reserved
+        0, 0, 0, 0,
+
+        // hash type
+        0, 0, 0, 6, // length
+        b's', b'h', b'a', b'2', b'5', b'6',
+    ];
+
+    let mut hasher = sha2::Sha256::new();
+    use sha2::Digest;
+    hasher.update(data.as_bytes());
+    hasher.update(signer_nonce);
+    let hash = hasher.finalize();
+    buf.extend_from_slice(&(hash.len() as u32).to_be_bytes());
+    buf.extend_from_slice(&hash);
+
+    use p256::ecdsa::signature::Verifier;
+    v.verify(&buf, &sig).map_err(|_| MonorailError::UnlockAuthFailed)
 }

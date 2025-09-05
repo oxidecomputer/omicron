@@ -435,6 +435,7 @@ dns-service-client = { path = "clients/dns-service-client" }
 dpd-client = { git = "https://github.com/oxidecomputer/dendrite", rev = "8314881e372d7bbb4a4ee2da051ecdc34f66c534" }
 dropshot = { version = "0.16.4", features = [ "usdt-probes" ] }
 dyn-clone = "1.0.20"
+ecdsa = { version = "0.16.9", features = ["pem", "signing", "std", "verifying"] }
 either = "1.15.0"
 ereport-types = { path = "ereport/types" }
 expectorate = "1.2.0"
@@ -457,9 +458,9 @@ gateway-client = { path = "clients/gateway-client" }
 # compatibility, but will mean that faux-mgs might be missing new
 # functionality.)
 #
-gateway-ereport-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "77e316c812aa057b9714d0d99c4a7bdd36d45be2", default-features = false, features = ["debug-impls"] }
-gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "77e316c812aa057b9714d0d99c4a7bdd36d45be2", default-features = false, features = ["std"] }
-gateway-sp-comms = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "77e316c812aa057b9714d0d99c4a7bdd36d45be2" }
+gateway-ereport-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "c80fb4f23108691dea43239b55a14f5e47f161b7", default-features = false, features = ["debug-impls"] }
+gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "c80fb4f23108691dea43239b55a14f5e47f161b7", default-features = false, features = ["std"] }
+gateway-sp-comms = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "c80fb4f23108691dea43239b55a14f5e47f161b7" }
 gateway-test-utils = { path = "gateway-test-utils" }
 gateway-types = { path = "gateway-types" }
 gethostname = "0.5.0"
@@ -678,7 +679,7 @@ semver = { version = "1.0.26", features = ["std", "serde"] }
 serde = { version = "1.0", default-features = false, features = [ "derive", "rc" ] }
 serde_cbor = "0.11.2"
 serde_human_bytes = { git = "https://github.com/oxidecomputer/serde_human_bytes", branch = "main" }
-serde_json = "1.0.142"
+serde_json = "1.0.143"
 serde_tokenstream = "0.2"
 serde_urlencoded = "0.7.1"
 serde_with = { version = "3.14.0", default-features = false, features = ["alloc", "macros"] }
@@ -719,6 +720,7 @@ sp-sim = { path = "sp-sim" }
 sprockets-tls = { git = "https://github.com/oxidecomputer/sprockets.git", rev = "6d31fa63217c6a51061dc4afa1ebe175a0021981" }
 sqlformat = "0.3.5"
 sqlparser = { version = "0.45.0", features = [ "visitor" ] }
+ssh-key = "0.6.7"
 static_assertions = "1.1.0"
 # Please do not change the Steno version to a Git dependency.  It makes it
 # harder than expected to make breaking changes (even if you specify a specific
