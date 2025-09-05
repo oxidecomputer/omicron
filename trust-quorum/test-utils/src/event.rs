@@ -27,6 +27,8 @@ pub enum Event {
     /// Since replay is deterministic, we actually know what this value is,
     /// even though a prior event may not have yet sent the message.
     DeliverEnvelope(Envelope),
+    LoadRackSecret(PlatformId, Epoch),
+    ClearSecrets(PlatformId),
     /// Pull a `NexusReply` off the underlay network and update the `NexusState`
     DeliverNexusReply(NexusReply),
     CommitConfiguration(PlatformId),
@@ -44,6 +46,8 @@ impl Event {
             Self::SendNexusReplyOnUnderlay(_) => vec![],
             Self::DeliverEnvelope(envelope) => vec![envelope.to.clone()],
             Self::DeliverNexusReply(_) => vec![],
+            Self::LoadRackSecret(id, _) => vec![id.clone()],
+            Self::ClearSecrets(id) => vec![id.clone()],
             Self::CommitConfiguration(id) => vec![id.clone()],
             Self::Reconfigure(_) => vec![],
         }
