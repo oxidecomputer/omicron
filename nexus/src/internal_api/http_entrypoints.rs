@@ -879,14 +879,11 @@ impl NexusInternalApi for NexusInternalApiImpl {
             let datastore = &apictx.nexus.datastore();
             let opctx =
                 crate::context::op_context_for_internal_api(&rqctx).await;
-            match datastore
-                .reconfigurator_config_get_latest(&opctx)
-                .await?
-            {
+            match datastore.reconfigurator_config_get_latest(&opctx).await? {
                 Some(switches) => Ok(HttpResponseOk(switches)),
                 None => Err(HttpError::for_not_found(
                     None,
-                    "No chicken switches in database".into(),
+                    "No config in database".into(),
                 )),
             }
         };
@@ -906,16 +903,11 @@ impl NexusInternalApi for NexusInternalApiImpl {
             let opctx =
                 crate::context::op_context_for_internal_api(&rqctx).await;
             let version = path_params.into_inner().version;
-            match datastore
-                .reconfigurator_config_get(&opctx, version)
-                .await?
-            {
+            match datastore.reconfigurator_config_get(&opctx, version).await? {
                 Some(switches) => Ok(HttpResponseOk(switches)),
                 None => Err(HttpError::for_not_found(
                     None,
-                    format!(
-                        "No chicken switches in database at version {version}"
-                    ),
+                    format!("No config in database at version {version}"),
                 )),
             }
         };
