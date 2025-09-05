@@ -1626,7 +1626,6 @@ pub(crate) mod test {
             .unwrap()
             .unwrap();
 
-        eprintln!("Before unwind, check clean slate");
         verify_clean_slate(
             &cptestctx,
             &disk_test,
@@ -1635,7 +1634,6 @@ pub(crate) mod test {
         )
         .await;
 
-        eprintln!("Now calling unwind, what happens here");
         crate::app::sagas::test_helpers::action_failure_can_unwind::<
             SagaRegionSnapshotReplacementStart,
             _,
