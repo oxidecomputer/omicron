@@ -206,7 +206,7 @@ impl PlanningInput {
     }
 
     pub fn chicken_switches(&self) -> &PlannerConfig {
-        &self.policy.chicken_switches
+        &self.policy.planner_config
     }
 
     pub fn service_ip_pool_ranges(&self) -> &[IpRange] {
@@ -1011,8 +1011,8 @@ pub struct Policy {
     /// their image sources. See RFD 565 §9.
     pub old_repo: TufRepoPolicy,
 
-    /// Runtime chicken switches (feature flags) to control planner behavior.
-    pub chicken_switches: PlannerConfig,
+    /// Runtime configuration (feature flags) to control planner behavior.
+    pub planner_config: PlannerConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -1280,7 +1280,7 @@ impl PlanningInputBuilder {
                 oximeter_read_policy: OximeterReadPolicy::new(1),
                 tuf_repo: TufRepoPolicy::initial(),
                 old_repo: TufRepoPolicy::initial(),
-                chicken_switches: PlannerConfig::default(),
+                planner_config: PlannerConfig::default(),
             },
             internal_dns_version: Generation::new(),
             external_dns_version: Generation::new(),

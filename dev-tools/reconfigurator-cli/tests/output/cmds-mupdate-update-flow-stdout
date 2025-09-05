@@ -2182,13 +2182,13 @@ external DNS:
 
 
 
-> # Test that the add-zones-with-mupdate-override chicken switch works as
+> # Test that the add-zones-with-mupdate-override planner config works as
 > # expected. We do this by:
 > # * setting the mupdate override on a sled
 > # * adding a new sled
 > #
-> # With the chicken switch disabled (the current state), the planner will
-> # not proceed with adding new zones. But with the chicken switch enabled,
+> # With the option disabled (the current state), the planner will
+> # not proceed with adding new zones. But with the option enabled,
 > # new zones will be added.
 > sled-set serial0 mupdate-override c8fba912-63ae-473a-9115-0495d10fb3bc
 set sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 mupdate override: unset -> c8fba912-63ae-473a-9115-0495d10fb3bc
@@ -2334,8 +2334,8 @@ external DNS:
 
 
 > # This *will* generate the datasets and internal NTP zone on the new sled.
-> set chicken-switches --add-zones-with-mupdate-override true
-chicken switches updated:
+> set planner-config --add-zones-with-mupdate-override true
+planner config updated:
 *   add zones with mupdate override:   false -> true
 
 

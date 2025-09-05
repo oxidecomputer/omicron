@@ -250,7 +250,7 @@ impl PlanningInputFromDb<'_> {
             oximeter_read_policy: self.oximeter_read_policy.clone(),
             tuf_repo: self.tuf_repo.clone(),
             old_repo: self.old_repo.clone(),
-            chicken_switches: self.chicken_switches,
+            planner_config: self.chicken_switches,
         };
         let mut builder = PlanningInputBuilder::new(
             policy,
