@@ -1684,11 +1684,11 @@ EXECUTING COMMAND: omdb ["nexus", "chicken-switches", "show", "current"]
 termination: Exited(0)
 ---------------------------------------------
 stdout:
-Reconfigurator chicken switches:
+Reconfigurator config:
     version: 1
     modified time: <REDACTED_TIMESTAMP>
     planner enabled: false
-    planner switches:
+    planner config:
         add zones with mupdate override:   false
 ---------------------------------------------
 stderr:
@@ -1698,9 +1698,9 @@ EXECUTING COMMAND: omdb ["-w", "nexus", "chicken-switches", "set", "--planner-en
 termination: Exited(0)
 ---------------------------------------------
 stdout:
-chicken switches updated to version 2:
+reconfigurator config updated to version 2:
 *   planner enabled:   false -> true
-    planner switches:
+    planner config:
         add zones with mupdate override:   false (unchanged)
 ---------------------------------------------
 stderr:
@@ -1710,9 +1710,9 @@ EXECUTING COMMAND: omdb ["-w", "nexus", "chicken-switches", "set", "--add-zones-
 termination: Exited(0)
 ---------------------------------------------
 stdout:
-chicken switches updated to version 3:
+reconfigurator config updated to version 3:
     planner enabled:   true (unchanged)
-    planner switches:
+    planner config:
     *   add zones with mupdate override:   false -> true
 ---------------------------------------------
 stderr:
@@ -1722,11 +1722,11 @@ EXECUTING COMMAND: omdb ["nexus", "chicken-switches", "show", "current"]
 termination: Exited(0)
 ---------------------------------------------
 stdout:
-Reconfigurator chicken switches:
+Reconfigurator config:
     version: 3
     modified time: <REDACTED_TIMESTAMP>
     planner enabled: true
-    planner switches:
+    planner config:
         add zones with mupdate override:   true
 ---------------------------------------------
 stderr:
