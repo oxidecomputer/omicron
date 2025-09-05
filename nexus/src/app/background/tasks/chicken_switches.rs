@@ -15,7 +15,7 @@ use serde_json::json;
 use std::sync::Arc;
 use tokio::sync::watch;
 
-/// Enum that allows downstream tasks to wait until this task has had a chance
+/// Enum that allows downstream tasks to know whether this task has had a chance
 /// to read the current chicken switches from the database.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ReconfiguratorChickenSwitchesLoaderState {

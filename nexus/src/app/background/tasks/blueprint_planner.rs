@@ -61,9 +61,7 @@ impl BlueprintPlanner {
     pub async fn plan(&mut self, opctx: &OpContext) -> BlueprintPlannerStatus {
         // Refuse to run if we haven't had a chance to load the chicken switches
         // from the database yet. (There might not be any in the db, which is
-        // fine! But the loading task needs to have a chance to check. It will
-        // gives a `::Loaded()` default value if it's had a chance to run but
-        // found no records.)
+        // fine! But the loading task needs to have a chance to check.)
         let switches = match &*self.rx_chicken_switches.borrow_and_update() {
             ReconfiguratorChickenSwitchesLoaderState::NotYetLoaded => {
                 debug!(
