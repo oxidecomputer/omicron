@@ -2085,7 +2085,7 @@ async fn cmd_db_disk_info(
         propolis_zone: String,
         volume_id: String,
         disk_state: String,
-        pantry_address: String,
+        import_address: String,
     }
 
     // The rows describing the downstairs regions for this disk/volume
@@ -2114,6 +2114,7 @@ async fn cmd_db_disk_info(
         bail!("no disk: {} found", args.uuid);
     };
 
+    println!("Found disk: {:?}", disk);
     // For information about where this disk is attached.
     let mut rows = Vec::new();
 
@@ -2157,8 +2158,8 @@ async fn cmd_db_disk_info(
                 .await
                 .context("failed to look up sled")?;
 
-            let pantry_address = match disk.pantry_address {
-                Some(ref pa) => format!("{:?}", pa.clone()),
+            let import_address = match disk.pantry_address {
+                Some(ref pa) => format!("{}", pa.clone()),
                 None => format!("-"),
             };
             UpstairsRow {
@@ -2168,11 +2169,11 @@ async fn cmd_db_disk_info(
                 propolis_zone: format!("oxz_propolis-server_{}", propolis_id),
                 volume_id: disk.volume_id().to_string(),
                 disk_state: disk.runtime_state.disk_state.to_string(),
-                pantry_address,
+                import_address,
             }
         } else {
-            let pantry_address = match disk.pantry_address {
-                Some(ref pa) => format!("{:?}", pa.clone()),
+            let import_address = match disk.pantry_address {
+                Some(ref pa) => format!("{}", pa.clone()),
                 None => format!("-"),
             };
             UpstairsRow {
@@ -2182,14 +2183,14 @@ async fn cmd_db_disk_info(
                 propolis_zone: NO_ACTIVE_PROPOLIS_MSG.to_string(),
                 volume_id: disk.volume_id().to_string(),
                 disk_state: disk.runtime_state.disk_state.to_string(),
-                pantry_address,
+                import_address,
             }
         }
     } else {
         // If the disk is not attached to anything, just print empty
         // fields.
-        let pantry_address = match disk.pantry_address {
-            Some(ref pa) => format!("{:?}", pa.clone()),
+        let import_address = match disk.pantry_address {
+            Some(ref pa) => format!("{}", pa.clone()),
             None => format!("-"),
         };
         UpstairsRow {
@@ -2199,7 +2200,7 @@ async fn cmd_db_disk_info(
             propolis_zone: "-".to_string(),
             volume_id: disk.volume_id().to_string(),
             disk_state: disk.runtime_state.disk_state.to_string(),
-            pantry_address,
+            import_address,
         }
     };
     rows.push(usr);
