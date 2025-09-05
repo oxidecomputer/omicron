@@ -521,11 +521,56 @@ fn mgs_update_status_inactive_versions(
     }
 }
 
+// TODO-K: I should use planned MGS updates
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct PendingMgsUpdateActions {
     pending_update: Option<PendingMgsUpdate>,
     pending_host_os_phase2_changes: PendingHostPhase2Changes,
     skipped_updates: SkippedMgsUpdates,
+}
+
+impl PendingMgsUpdateActions {
+    fn new() -> PendingMgsUpdateActions {
+        PendingMgsUpdateActions {
+            pending_update: None,
+            pending_host_os_phase2_changes: PendingHostPhase2Changes::empty(),
+            skipped_updates: SkippedMgsUpdates::new(),
+        }
+    }
+
+    fn set_pending_update(
+        &mut self,
+        pending_update: PendingMgsUpdate,
+    ) -> &mut Self {
+        self.pending_update = Some(pending_update);
+        self
+    }
+
+    fn set_pending_host_os_phase2_changes(
+        &mut self,
+        pending_host_os_phase2_changes: PendingHostPhase2Changes,
+    ) -> &mut Self {
+        self.pending_host_os_phase2_changes = pending_host_os_phase2_changes;
+        self
+    }
+
+    fn set_skipped_updates(
+        &mut self,
+        skipped_updates: SkippedMgsUpdates,
+    ) -> &mut Self {
+        self.skipped_updates = skipped_updates;
+        self
+    }
+
+    fn build(&self) -> Self {
+        PendingMgsUpdateActions {
+            pending_update: self.pending_update.clone(),
+            pending_host_os_phase2_changes: self
+                .pending_host_os_phase2_changes
+                .clone(),
+            skipped_updates: self.skipped_updates.clone(),
+        }
+    }
 }
 
 /// Determine if the given baseboard needs any MGS-driven update (e.g., update
@@ -587,15 +632,21 @@ fn try_make_update(
     if let Some(update_actions) =
         attempts.into_iter().find_map(|(component, attempt)| {
             match attempt() {
-                Ok(Some(update)) => Some(PendingMgsUpdateActions {
-                    pending_update: Some(update),
+                // There is a pending update, record it along with any previous
+                // failed updates
+                Ok(Some(update)) => {
                     // We have a non-host update; there are no pending host
                     // phase 2 changes necessary.
-                    pending_host_os_phase2_changes:
-                        PendingHostPhase2Changes::empty(),
-                    skipped_updates: skipped_updates.clone(),
-                }),
+                    let pending_actions = PendingMgsUpdateActions::new()
+                        .set_pending_update(update)
+                        .set_skipped_updates(skipped_updates.clone())
+                        .build();
+                    Some(pending_actions)
+                }
+                // We don't have any pending actions, the component is already
+                // at the expected version
                 Ok(None) => None,
+                // There was a failure, skip the update and record it
                 Err(e) => {
                     skipped_updates.push(SkippedMgsUpdate {
                         baseboard_id: baseboard_id.clone(),
@@ -617,30 +668,28 @@ fn try_make_update(
         current_artifacts,
     ) {
         Ok(Some((update, pending_host_os_phase2_changes))) => {
-            // TODO-K: create a new() function for this
-            PendingMgsUpdateActions {
-                pending_update: Some(update),
-                pending_host_os_phase2_changes,
-                skipped_updates,
-            }
+            PendingMgsUpdateActions::new()
+                .set_pending_update(update)
+                .set_pending_host_os_phase2_changes(
+                    pending_host_os_phase2_changes,
+                )
+                .set_skipped_updates(skipped_updates)
+                .build()
         }
-        Ok(None) => PendingMgsUpdateActions {
-            pending_update: None,
-            pending_host_os_phase2_changes: PendingHostPhase2Changes::empty(),
-            skipped_updates,
-        },
+        // The Host OS is already at the desired version, we only need to pass
+        // along any previous skipped updates
+        Ok(None) => PendingMgsUpdateActions::new()
+            .set_skipped_updates(skipped_updates)
+            .build(),
         Err(e) => {
             skipped_updates.push(SkippedMgsUpdate {
                 baseboard_id: baseboard_id.clone(),
                 component: MgsUpdateComponent::HostOs,
                 reason: e,
             });
-            PendingMgsUpdateActions {
-                pending_update: None,
-                pending_host_os_phase2_changes: PendingHostPhase2Changes::empty(
-                ),
-                skipped_updates,
-            }
+            PendingMgsUpdateActions::new()
+                .set_skipped_updates(skipped_updates)
+                .build()
         }
     }
 }
