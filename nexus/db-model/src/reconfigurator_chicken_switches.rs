@@ -18,10 +18,10 @@ pub struct ReconfiguratorChickenSwitches {
     pub add_zones_with_mupdate_override: bool,
 }
 
-impl From<deployment::ReconfiguratorChickenSwitchesView>
+impl From<deployment::ReconfiguratorConfigView>
     for ReconfiguratorChickenSwitches
 {
-    fn from(value: deployment::ReconfiguratorChickenSwitchesView) -> Self {
+    fn from(value: deployment::ReconfiguratorConfigView) -> Self {
         Self {
             version: value.version.into(),
             planner_enabled: value.switches.planner_enabled,
@@ -35,14 +35,14 @@ impl From<deployment::ReconfiguratorChickenSwitchesView>
 }
 
 impl From<ReconfiguratorChickenSwitches>
-    for deployment::ReconfiguratorChickenSwitchesView
+    for deployment::ReconfiguratorConfigView
 {
     fn from(value: ReconfiguratorChickenSwitches) -> Self {
         Self {
             version: value.version.into(),
-            switches: deployment::ReconfiguratorChickenSwitches {
+            switches: deployment::ReconfiguratorConfig {
                 planner_enabled: value.planner_enabled,
-                planner_switches: deployment::PlannerChickenSwitches {
+                planner_switches: deployment::PlannerConfig {
                     add_zones_with_mupdate_override: value
                         .add_zones_with_mupdate_override,
                 },

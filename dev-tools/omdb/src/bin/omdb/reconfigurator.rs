@@ -24,9 +24,9 @@ use nexus_db_queries::db::datastore::SQL_BATCH_SIZE;
 use nexus_db_queries::db::pagination::Paginator;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintMetadata;
-use nexus_types::deployment::PlannerChickenSwitches;
-use nexus_types::deployment::ReconfiguratorChickenSwitches;
-use nexus_types::deployment::ReconfiguratorChickenSwitchesView;
+use nexus_types::deployment::PlannerConfig;
+use nexus_types::deployment::ReconfiguratorConfig;
+use nexus_types::deployment::ReconfiguratorConfigView;
 use nexus_types::deployment::UnstableReconfiguratorState;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::LookupType;
@@ -412,15 +412,13 @@ async fn cmd_reconfigurator_chicken_switches_history(
     let rows: Vec<_> = history
         .into_iter()
         .map(|s| {
-            let ReconfiguratorChickenSwitchesView {
+            let ReconfiguratorConfigView {
                 version,
                 switches:
-                    ReconfiguratorChickenSwitches {
+                    ReconfiguratorConfig {
                         planner_enabled,
                         planner_switches:
-                            PlannerChickenSwitches {
-                                add_zones_with_mupdate_override,
-                            },
+                            PlannerConfig { add_zones_with_mupdate_override },
                     },
                 time_modified,
             } = s;

@@ -10,7 +10,7 @@ use futures::FutureExt;
 use futures::future::BoxFuture;
 use nexus_auth::context::OpContext;
 use nexus_db_queries::db::DataStore;
-use nexus_types::deployment::ReconfiguratorChickenSwitchesView;
+use nexus_types::deployment::ReconfiguratorConfigView;
 use serde_json::json;
 use std::sync::Arc;
 use tokio::sync::watch;
@@ -20,7 +20,7 @@ use tokio::sync::watch;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ReconfiguratorChickenSwitchesLoaderState {
     NotYetLoaded,
-    Loaded(ReconfiguratorChickenSwitchesView),
+    Loaded(ReconfiguratorConfigView),
 }
 
 /// Background task that tracks reconfigurator chicken switches from the DB
@@ -92,8 +92,7 @@ mod test {
     use async_bb8_diesel::AsyncRunQueryDsl;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::{
-        PlannerChickenSwitches, ReconfiguratorChickenSwitches,
-        ReconfiguratorChickenSwitchesParam,
+        PlannerConfig, ReconfiguratorConfig, ReconfiguratorConfigParam,
     };
 
     type ControlPlaneTestContext =
@@ -135,7 +134,7 @@ mod test {
 
         // We haven't inserted anything into the DB, so the initial activation
         // should populate the channel with our default values.
-        let default_switches = ReconfiguratorChickenSwitchesView::default();
+        let default_switches = ReconfiguratorConfigView::default();
         let out = task.activate(&opctx).await;
         assert_eq!(out["chicken_switches_updated"], true);
         assert!(rx.has_changed().unwrap());
@@ -147,11 +146,11 @@ mod test {
         );
 
         // Insert an initial set of switches.
-        let expected_switches = ReconfiguratorChickenSwitches {
+        let expected_switches = ReconfiguratorConfig {
             planner_enabled: !default_switches.switches.planner_enabled,
-            planner_switches: PlannerChickenSwitches::default(),
+            planner_switches: PlannerConfig::default(),
         };
-        let switches = ReconfiguratorChickenSwitchesParam {
+        let switches = ReconfiguratorConfigParam {
             version: 1,
             switches: expected_switches,
         };
@@ -181,11 +180,11 @@ mod test {
         assert!(!rx.has_changed().unwrap());
 
         // Insert a new version.
-        let expected_switches = ReconfiguratorChickenSwitches {
+        let expected_switches = ReconfiguratorConfig {
             planner_enabled: !expected_switches.planner_enabled,
-            planner_switches: PlannerChickenSwitches::default(),
+            planner_switches: PlannerConfig::default(),
         };
-        let switches = ReconfiguratorChickenSwitchesParam {
+        let switches = ReconfiguratorConfigParam {
             version: 2,
             switches: expected_switches,
         };

@@ -20,8 +20,8 @@ use nexus_db_errors::public_error_from_diesel;
 use nexus_db_lookup::DbConnection;
 use nexus_db_model::ReconfiguratorChickenSwitches as DbReconfiguratorChickenSwitches;
 use nexus_db_model::SqlU32;
-use nexus_types::deployment::ReconfiguratorChickenSwitchesParam;
-use nexus_types::deployment::ReconfiguratorChickenSwitchesView;
+use nexus_types::deployment::ReconfiguratorConfigParam;
+use nexus_types::deployment::ReconfiguratorConfigView;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
@@ -31,7 +31,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, SqlU32>,
-    ) -> ListResultVec<ReconfiguratorChickenSwitchesView> {
+    ) -> ListResultVec<ReconfiguratorConfigView> {
         use nexus_db_schema::schema::reconfigurator_chicken_switches;
 
         opctx
@@ -48,16 +48,13 @@ impl DataStore {
         .await
         .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
-        Ok(switches
-            .into_iter()
-            .map(ReconfiguratorChickenSwitchesView::from)
-            .collect())
+        Ok(switches.into_iter().map(ReconfiguratorConfigView::from).collect())
     }
 
     pub async fn reconfigurator_chicken_switches_get_latest(
         &self,
         opctx: &OpContext,
-    ) -> Result<Option<ReconfiguratorChickenSwitchesView>, Error> {
+    ) -> Result<Option<ReconfiguratorConfigView>, Error> {
         opctx.authorize(authz::Action::Read, &authz::BLUEPRINT_CONFIG).await?;
         let conn = self.pool_connection_authorized(opctx).await?;
         use nexus_db_schema::schema::reconfigurator_chicken_switches::dsl;
@@ -76,7 +73,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         version: u32,
-    ) -> Result<Option<ReconfiguratorChickenSwitchesView>, Error> {
+    ) -> Result<Option<ReconfiguratorConfigView>, Error> {
         opctx.authorize(authz::Action::Read, &authz::BLUEPRINT_CONFIG).await?;
         let conn = self.pool_connection_authorized(opctx).await?;
         use nexus_db_schema::schema::reconfigurator_chicken_switches::dsl;
@@ -100,10 +97,10 @@ impl DataStore {
     pub async fn reconfigurator_chicken_switches_insert_latest_version(
         &self,
         opctx: &OpContext,
-        switches: ReconfiguratorChickenSwitchesParam,
+        switches: ReconfiguratorConfigParam,
     ) -> Result<(), Error> {
-        let ReconfiguratorChickenSwitchesParam { version, switches } = switches;
-        let switches = ReconfiguratorChickenSwitchesView {
+        let ReconfiguratorConfigParam { version, switches } = switches;
+        let switches = ReconfiguratorConfigView {
             version,
             switches,
             time_modified: chrono::Utc::now(),
@@ -137,7 +134,7 @@ impl DataStore {
     /// in the `reconfigurator_chicken_switches` table.
     async fn insert_latest_version_internal(
         conn: &async_bb8_diesel::Connection<DbConnection>,
-        switches: &ReconfiguratorChickenSwitchesView,
+        switches: &ReconfiguratorConfigView,
     ) -> Result<usize, Error> {
         if switches.version < 1 {
             return Err(Error::invalid_request(
@@ -170,9 +167,7 @@ impl DataStore {
 mod tests {
     use super::*;
     use crate::db::pub_test_utils::TestDatabase;
-    use nexus_types::deployment::{
-        PlannerChickenSwitches, ReconfiguratorChickenSwitches,
-    };
+    use nexus_types::deployment::{PlannerConfig, ReconfiguratorConfig};
     use omicron_test_utils::dev;
 
     #[tokio::test]
@@ -196,11 +191,11 @@ mod tests {
         );
 
         // Fail to insert a swtiches with version 0
-        let mut switches = ReconfiguratorChickenSwitchesParam {
+        let mut switches = ReconfiguratorConfigParam {
             version: 0,
-            switches: ReconfiguratorChickenSwitches {
+            switches: ReconfiguratorConfig {
                 planner_enabled: false,
-                planner_switches: PlannerChickenSwitches::default(),
+                planner_switches: PlannerConfig::default(),
             },
         };
 

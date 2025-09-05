@@ -294,8 +294,8 @@ mod test {
     use nexus_inventory::now_db_precision;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::{
-        PendingMgsUpdates, PlannerChickenSwitches,
-        ReconfiguratorChickenSwitches, ReconfiguratorChickenSwitchesView,
+        PendingMgsUpdates, PlannerConfig, ReconfiguratorConfig,
+        ReconfiguratorConfigView,
     };
     use omicron_uuid_kinds::OmicronZoneUuid;
 
@@ -341,11 +341,11 @@ mod test {
         // Enable the planner
         let (_tx, chicken_switches_collector_rx) =
             watch::channel(ReconfiguratorChickenSwitchesLoaderState::Loaded(
-                ReconfiguratorChickenSwitchesView {
+                ReconfiguratorConfigView {
                     version: 1,
-                    switches: ReconfiguratorChickenSwitches {
+                    switches: ReconfiguratorConfig {
                         planner_enabled: true,
-                        planner_switches: PlannerChickenSwitches::default(),
+                        planner_switches: PlannerConfig::default(),
                     },
                     time_modified: now_db_precision(),
                 },

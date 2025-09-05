@@ -27,7 +27,7 @@ use nexus_db_queries::db;
 use nexus_mgs_updates::ArtifactCache;
 use nexus_mgs_updates::MgsUpdateDriver;
 use nexus_types::deployment::PendingMgsUpdates;
-use nexus_types::deployment::ReconfiguratorChickenSwitchesParam;
+use nexus_types::deployment::ReconfiguratorConfigParam;
 use omicron_common::address::DENDRITE_PORT;
 use omicron_common::address::MGD_PORT;
 use omicron_common::address::MGS_PORT;
@@ -554,7 +554,7 @@ impl Nexus {
                 task_config.pkg.initial_reconfigurator_chicken_switches
             {
                 let switches =
-                    ReconfiguratorChickenSwitchesParam { version: 1, switches };
+                    ReconfiguratorConfigParam { version: 1, switches };
                 if let Err(err) = db_datastore
                     .reconfigurator_chicken_switches_insert_latest_version(
                         &background_ctx,

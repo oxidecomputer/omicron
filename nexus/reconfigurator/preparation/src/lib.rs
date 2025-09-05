@@ -23,7 +23,7 @@ use nexus_types::deployment::CockroachDbSettings;
 use nexus_types::deployment::OmicronZoneExternalIp;
 use nexus_types::deployment::OmicronZoneNic;
 use nexus_types::deployment::OximeterReadPolicy;
-use nexus_types::deployment::PlannerChickenSwitches;
+use nexus_types::deployment::PlannerConfig;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::PlanningInputBuilder;
 use nexus_types::deployment::Policy;
@@ -85,7 +85,7 @@ pub struct PlanningInputFromDb<'a> {
     pub oximeter_read_policy: OximeterReadPolicy,
     pub tuf_repo: TufRepoPolicy,
     pub old_repo: TufRepoPolicy,
-    pub chicken_switches: PlannerChickenSwitches,
+    pub chicken_switches: PlannerConfig,
     pub log: &'a Logger,
 }
 
@@ -93,7 +93,7 @@ impl PlanningInputFromDb<'_> {
     pub async fn assemble(
         opctx: &OpContext,
         datastore: &DataStore,
-        chicken_switches: PlannerChickenSwitches,
+        chicken_switches: PlannerConfig,
     ) -> Result<PlanningInput, Error> {
         opctx.check_complex_operations_allowed()?;
         // Note we list *all* rows here including the ones for decommissioned
@@ -390,7 +390,7 @@ pub async fn reconfigurator_state_load(
     let chicken_switches = datastore
         .reconfigurator_chicken_switches_get_latest(opctx)
         .await?
-        .map_or_else(PlannerChickenSwitches::default, |switches| {
+        .map_or_else(PlannerConfig::default, |switches| {
             switches.switches.planner_switches
         });
     let planning_input =

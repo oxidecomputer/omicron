@@ -12,9 +12,9 @@ use clap::Subcommand;
 use daft::Diffable;
 use http::StatusCode;
 use indent_write::io::IndentWriter;
-use nexus_types::deployment::PlannerChickenSwitches;
-use nexus_types::deployment::ReconfiguratorChickenSwitches;
-use nexus_types::deployment::ReconfiguratorChickenSwitchesParam;
+use nexus_types::deployment::PlannerConfig;
+use nexus_types::deployment::ReconfiguratorConfig;
+use nexus_types::deployment::ReconfiguratorConfigParam;
 use std::io;
 use std::io::Write;
 use std::num::ParseIntError;
@@ -57,15 +57,12 @@ pub struct ChickenSwitchesOpts {
 impl ChickenSwitchesOpts {
     /// Returns an updated `ReconfiguratorChickenSwitchesParam` regardless of
     /// whether any switches were modified.
-    fn update(
-        &self,
-        current: &ReconfiguratorChickenSwitches,
-    ) -> ReconfiguratorChickenSwitches {
-        ReconfiguratorChickenSwitches {
+    fn update(&self, current: &ReconfiguratorConfig) -> ReconfiguratorConfig {
+        ReconfiguratorConfig {
             planner_enabled: self
                 .planner_enabled
                 .unwrap_or(current.planner_enabled),
-            planner_switches: PlannerChickenSwitches {
+            planner_switches: PlannerConfig {
                 add_zones_with_mupdate_override: self
                     .add_zones_with_mupdate_override
                     .unwrap_or(
@@ -81,11 +78,11 @@ impl ChickenSwitchesOpts {
     /// switches were modified, or `None` if no changes were made.
     fn update_if_modified(
         &self,
-        current: &ReconfiguratorChickenSwitches,
+        current: &ReconfiguratorConfig,
         next_version: u32,
-    ) -> Option<ReconfiguratorChickenSwitchesParam> {
+    ) -> Option<ReconfiguratorConfigParam> {
         let new = self.update(current);
-        (&new != current).then(|| ReconfiguratorChickenSwitchesParam {
+        (&new != current).then(|| ReconfiguratorConfigParam {
             version: next_version,
             switches: new,
         })
@@ -200,10 +197,10 @@ async fn chicken_switches_set(
         }
         Err(err) => {
             if err.status() == Some(StatusCode::NOT_FOUND) {
-                let default_switches = ReconfiguratorChickenSwitches::default();
+                let default_switches = ReconfiguratorConfig::default();
                 // In this initial case, the operator expects that we always set
                 // switches.
-                let new_switches = ReconfiguratorChickenSwitchesParam {
+                let new_switches = ReconfiguratorConfigParam {
                     version: 1,
                     switches: args.switches.update(&default_switches),
                 };

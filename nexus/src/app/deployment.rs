@@ -13,7 +13,7 @@ use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintMetadata;
 use nexus_types::deployment::BlueprintTarget;
 use nexus_types::deployment::BlueprintTargetSet;
-use nexus_types::deployment::PlannerChickenSwitches;
+use nexus_types::deployment::PlannerConfig;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::internal_api::views::UpdateStatus;
 use nexus_types::inventory::Collection;
@@ -135,7 +135,7 @@ impl super::Nexus {
             .db_datastore
             .reconfigurator_chicken_switches_get_latest(opctx)
             .await?
-            .map_or_else(PlannerChickenSwitches::default, |switches| {
+            .map_or_else(PlannerConfig::default, |switches| {
                 switches.switches.planner_switches
             });
 

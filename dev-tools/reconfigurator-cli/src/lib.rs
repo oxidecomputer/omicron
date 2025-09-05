@@ -36,7 +36,7 @@ use nexus_types::deployment::execution::blueprint_internal_dns_config;
 use nexus_types::deployment::{Blueprint, UnstableReconfiguratorState};
 use nexus_types::deployment::{BlueprintArtifactVersion, PendingMgsUpdate};
 use nexus_types::deployment::{
-    BlueprintHostPhase2DesiredContents, PlannerChickenSwitches,
+    BlueprintHostPhase2DesiredContents, PlannerConfig,
 };
 use nexus_types::deployment::{BlueprintZoneDisposition, ExpectedVersion};
 use nexus_types::deployment::{
@@ -1212,9 +1212,9 @@ pub struct ChickenSwitchesOpts {
 impl ChickenSwitchesOpts {
     fn update_if_modified(
         &self,
-        current: &PlannerChickenSwitches,
-    ) -> Option<PlannerChickenSwitches> {
-        let new = PlannerChickenSwitches {
+        current: &PlannerConfig,
+    ) -> Option<PlannerConfig> {
+        let new = PlannerConfig {
             add_zones_with_mupdate_override: self
                 .add_zones_with_mupdate_override
                 .unwrap_or(current.add_zones_with_mupdate_override),

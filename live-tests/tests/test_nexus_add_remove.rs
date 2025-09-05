@@ -20,7 +20,7 @@ use nexus_reconfigurator_planning::planner::PlannerRng;
 use nexus_reconfigurator_preparation::PlanningInputFromDb;
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::BlueprintZoneDisposition;
-use nexus_types::deployment::PlannerChickenSwitches;
+use nexus_types::deployment::PlannerConfig;
 use nexus_types::deployment::SledFilter;
 use omicron_common::address::NEXUS_INTERNAL_PORT;
 use omicron_test_utils::dev::poll::CondCheckError;
@@ -50,9 +50,7 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
         .reconfigurator_chicken_switches_get_latest(opctx)
         .await
         .expect("obtained latest chicken switches")
-        .map_or_else(PlannerChickenSwitches::default, |cs| {
-            cs.switches.planner_switches
-        });
+        .map_or_else(PlannerConfig::default, |cs| cs.switches.planner_switches);
     let planning_input =
         PlanningInputFromDb::assemble(&opctx, &datastore, chicken_switches)
             .await

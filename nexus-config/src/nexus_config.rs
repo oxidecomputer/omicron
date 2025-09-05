@@ -10,7 +10,7 @@ use anyhow::anyhow;
 use camino::{Utf8Path, Utf8PathBuf};
 use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
-use nexus_types::deployment::ReconfiguratorChickenSwitches;
+use nexus_types::deployment::ReconfiguratorConfig;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::NEXUS_TECHPORT_EXTERNAL_PORT;
 use omicron_common::address::RACK_PREFIX;
@@ -861,8 +861,7 @@ pub struct PackageConfig {
     ///
     /// We use this hook to disable reconfigurator automation in the test suite
     #[serde(default)]
-    pub initial_reconfigurator_chicken_switches:
-        Option<ReconfiguratorChickenSwitches>,
+    pub initial_reconfigurator_chicken_switches: Option<ReconfiguratorConfig>,
     /// Background task configuration
     pub background_tasks: BackgroundTaskConfig,
     /// Default Crucible region allocation strategy
@@ -924,7 +923,7 @@ impl WebhookDeliveratorConfig {
 mod test {
     use super::*;
 
-    use nexus_types::deployment::PlannerChickenSwitches;
+    use nexus_types::deployment::PlannerConfig;
     use omicron_common::address::{
         CLICKHOUSE_TCP_PORT, Ipv6Subnet, RACK_PREFIX,
     };
@@ -1207,9 +1206,9 @@ mod test {
                         }
                     )]),
                     initial_reconfigurator_chicken_switches: Some(
-                        ReconfiguratorChickenSwitches {
+                        ReconfiguratorConfig {
                             planner_enabled: true,
-                            planner_switches: PlannerChickenSwitches {
+                            planner_switches: PlannerConfig {
                                 add_zones_with_mupdate_override: true,
                             },
                         }

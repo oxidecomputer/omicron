@@ -59,9 +59,9 @@ use nexus_types::deployment::OmicronZoneExternalFloatingAddr;
 use nexus_types::deployment::OmicronZoneExternalFloatingIp;
 use nexus_types::deployment::OmicronZoneExternalSnatIp;
 use nexus_types::deployment::OximeterReadMode;
-use nexus_types::deployment::PlannerChickenSwitches;
+use nexus_types::deployment::PlannerConfig;
 use nexus_types::deployment::PlanningReport;
-use nexus_types::deployment::ReconfiguratorChickenSwitches;
+use nexus_types::deployment::ReconfiguratorConfig;
 use nexus_types::deployment::blueprint_zone_type;
 use nexus_types::external_api::views::SledState;
 use nexus_types::internal_api::params::DnsConfigParams;
@@ -805,9 +805,9 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
 
         // In tests, disable blueprint planning.
         self.config.pkg.initial_reconfigurator_chicken_switches =
-            Some(ReconfiguratorChickenSwitches {
+            Some(ReconfiguratorConfig {
                 planner_enabled: false,
-                planner_switches: PlannerChickenSwitches::default(),
+                planner_switches: PlannerConfig::default(),
             });
         self.config.deployment.internal_dns = InternalDns::FromAddress {
             address: self

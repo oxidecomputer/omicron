@@ -9,7 +9,7 @@ use super::BlueprintZoneConfig;
 use super::BlueprintZoneImageSource;
 use super::CockroachDbPreserveDowngrade;
 use super::PendingMgsUpdates;
-use super::PlannerChickenSwitches;
+use super::PlannerConfig;
 
 use daft::Diffable;
 use indent_write::fmt::IndentWriter;
@@ -54,7 +54,7 @@ pub struct PlanningReport {
     pub blueprint_id: BlueprintUuid,
 
     /// The set of "chicken switches" in effect for this planning run.
-    pub chicken_switches: PlannerChickenSwitches,
+    pub chicken_switches: PlannerConfig,
 
     // Step reports.
     pub expunge: PlanningExpungeStepReport,
@@ -70,7 +70,7 @@ impl PlanningReport {
     pub fn new(blueprint_id: BlueprintUuid) -> Self {
         Self {
             blueprint_id,
-            chicken_switches: PlannerChickenSwitches::default(),
+            chicken_switches: PlannerConfig::default(),
             expunge: PlanningExpungeStepReport::new(),
             decommission: PlanningDecommissionStepReport::new(),
             noop_image_source: PlanningNoopImageSourceStepReport::new(),
@@ -115,7 +115,7 @@ impl fmt::Display for PlanningReport {
                 cockroachdb_settings,
             } = self;
             writeln!(f, "planning report for blueprint {blueprint_id}:")?;
-            if *chicken_switches != PlannerChickenSwitches::default() {
+            if *chicken_switches != PlannerConfig::default() {
                 writeln!(
                     f,
                     "chicken switches:\n{}",
