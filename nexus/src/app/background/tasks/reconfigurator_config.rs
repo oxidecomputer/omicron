@@ -114,9 +114,9 @@ mod test {
         // there's no datastore method to delete existing values. We'll go
         // behind its back and delete them directly.
         {
-            use nexus_db_schema::schema::reconfigurator_chicken_switches::dsl;
+            use nexus_db_schema::schema::reconfigurator_config::dsl;
             let conn = datastore.pool_connection_for_tests().await.unwrap();
-            diesel::delete(dsl::reconfigurator_chicken_switches)
+            diesel::delete(dsl::reconfigurator_config)
                 .execute_async(&*conn)
                 .await
                 .expect("removed nexus_test default reconfigurator config");

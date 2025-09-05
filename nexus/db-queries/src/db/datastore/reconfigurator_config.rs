@@ -32,15 +32,15 @@ impl DataStore {
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, SqlU32>,
     ) -> ListResultVec<ReconfiguratorConfigView> {
-        use nexus_db_schema::schema::reconfigurator_chicken_switches;
+        use nexus_db_schema::schema::reconfigurator_config;
 
         opctx
             .authorize(authz::Action::ListChildren, &authz::BLUEPRINT_CONFIG)
             .await?;
 
         let switches = paginated(
-            reconfigurator_chicken_switches::table,
-            reconfigurator_chicken_switches::version,
+            reconfigurator_config::table,
+            reconfigurator_config::version,
             pagparams,
         )
         .select(DbReconfiguratorConfig::as_select())
@@ -57,9 +57,9 @@ impl DataStore {
     ) -> Result<Option<ReconfiguratorConfigView>, Error> {
         opctx.authorize(authz::Action::Read, &authz::BLUEPRINT_CONFIG).await?;
         let conn = self.pool_connection_authorized(opctx).await?;
-        use nexus_db_schema::schema::reconfigurator_chicken_switches::dsl;
+        use nexus_db_schema::schema::reconfigurator_config::dsl;
 
-        let latest = dsl::reconfigurator_chicken_switches
+        let latest = dsl::reconfigurator_config
             .order_by(dsl::version.desc())
             .first_async::<DbReconfiguratorConfig>(&*conn)
             .await
@@ -76,9 +76,9 @@ impl DataStore {
     ) -> Result<Option<ReconfiguratorConfigView>, Error> {
         opctx.authorize(authz::Action::Read, &authz::BLUEPRINT_CONFIG).await?;
         let conn = self.pool_connection_authorized(opctx).await?;
-        use nexus_db_schema::schema::reconfigurator_chicken_switches::dsl;
+        use nexus_db_schema::schema::reconfigurator_config::dsl;
 
-        let latest = dsl::reconfigurator_chicken_switches
+        let latest = dsl::reconfigurator_config
             .filter(dsl::version.eq(SqlU32::new(version)))
             .select(DbReconfiguratorConfig::as_select())
             .get_result_async(&*conn)
@@ -92,7 +92,7 @@ impl DataStore {
     /// Insert the current version of the config in the database
     ///
     /// Only succeeds if the prior version is the latest version currently in
-    /// the `reconfigurator_chicken_switches` table. If there are no versions
+    /// the `reconfigurator_config` table. If there are no versions
     /// currently in the table, then the current swtiches must be at version 1.
     pub async fn reconfigurator_config_insert_latest_version(
         &self,
@@ -131,7 +131,7 @@ impl DataStore {
     /// Insert the next version of the config in the database
     ///
     /// Only succeeds if the prior version is the latest version currently
-    /// in the `reconfigurator_chicken_switches` table.
+    /// in the `reconfigurator_config` table.
     async fn insert_latest_version_internal(
         conn: &async_bb8_diesel::Connection<DbConnection>,
         switches: &ReconfiguratorConfigView,
@@ -143,13 +143,13 @@ impl DataStore {
         }
 
         sql_query(
-            r"INSERT INTO reconfigurator_chicken_switches
+            r"INSERT INTO reconfigurator_config
                 (version, planner_enabled, time_modified,
                  add_zones_with_mupdate_override)
               SELECT $1, $2, $3, $4
               WHERE $1 - 1 IN (
                   SELECT COALESCE(MAX(version), 0)
-                  FROM reconfigurator_chicken_switches
+                  FROM reconfigurator_config
               )",
         )
         .bind::<sql_types::BigInt, SqlU32>(switches.version.into())

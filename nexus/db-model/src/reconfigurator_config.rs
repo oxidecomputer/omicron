@@ -6,11 +6,11 @@
 
 use crate::SqlU32;
 use chrono::{DateTime, Utc};
-use nexus_db_schema::schema::reconfigurator_chicken_switches;
+use nexus_db_schema::schema::reconfigurator_config;
 use nexus_types::deployment;
 
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
-#[diesel(table_name = reconfigurator_chicken_switches)]
+#[diesel(table_name = reconfigurator_config)]
 pub struct ReconfiguratorConfig {
     pub version: SqlU32,
     pub planner_enabled: bool,
