@@ -205,7 +205,7 @@ impl PlanningInput {
         &self.policy.old_repo
     }
 
-    pub fn chicken_switches(&self) -> &PlannerConfig {
+    pub fn planner_config(&self) -> &PlannerConfig {
         &self.policy.planner_config
     }
 

@@ -1526,7 +1526,7 @@ mod test {
                 oximeter_read_policy: OximeterReadPolicy::new(1),
                 tuf_repo: TufRepoPolicy::initial(),
                 old_repo: TufRepoPolicy::initial(),
-                chicken_switches: PlannerConfig::default(),
+                planner_config: PlannerConfig::default(),
                 log,
             }
             .build()

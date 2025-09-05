@@ -85,7 +85,7 @@ pub struct PlanningInputFromDb<'a> {
     pub oximeter_read_policy: OximeterReadPolicy,
     pub tuf_repo: TufRepoPolicy,
     pub old_repo: TufRepoPolicy,
-    pub chicken_switches: PlannerConfig,
+    pub planner_config: PlannerConfig,
     pub log: &'a Logger,
 }
 
@@ -93,7 +93,7 @@ impl PlanningInputFromDb<'_> {
     pub async fn assemble(
         opctx: &OpContext,
         datastore: &DataStore,
-        chicken_switches: PlannerConfig,
+        planner_config: PlannerConfig,
     ) -> Result<PlanningInput, Error> {
         opctx.check_complex_operations_allowed()?;
         // Note we list *all* rows here including the ones for decommissioned
@@ -224,7 +224,7 @@ impl PlanningInputFromDb<'_> {
             oximeter_read_policy,
             tuf_repo,
             old_repo,
-            chicken_switches,
+            planner_config,
         }
         .build()
         .internal_context("assembling planning_input")?;
@@ -250,7 +250,7 @@ impl PlanningInputFromDb<'_> {
             oximeter_read_policy: self.oximeter_read_policy.clone(),
             tuf_repo: self.tuf_repo.clone(),
             old_repo: self.old_repo.clone(),
-            planner_config: self.chicken_switches,
+            planner_config: self.planner_config,
         };
         let mut builder = PlanningInputBuilder::new(
             policy,
@@ -387,15 +387,12 @@ pub async fn reconfigurator_state_load(
     datastore: &DataStore,
 ) -> Result<UnstableReconfiguratorState, anyhow::Error> {
     opctx.check_complex_operations_allowed()?;
-    let chicken_switches = datastore
+    let planner_config = datastore
         .reconfigurator_config_get_latest(opctx)
         .await?
-        .map_or_else(PlannerConfig::default, |switches| {
-            switches.config.planner_config
-        });
+        .map_or_else(PlannerConfig::default, |c| c.config.planner_config);
     let planning_input =
-        PlanningInputFromDb::assemble(opctx, datastore, chicken_switches)
-            .await?;
+        PlanningInputFromDb::assemble(opctx, datastore, planner_config).await?;
     let collection_ids = datastore
         .inventory_collections()
         .await
