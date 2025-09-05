@@ -46,13 +46,13 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
     let opctx = lc.opctx();
     let datastore = lc.datastore();
 
-    let chicken_switches = datastore
+    let planner_config = datastore
         .reconfigurator_config_get_latest(opctx)
         .await
-        .expect("obtained latest chicken switches")
-        .map_or_else(PlannerConfig::default, |cs| cs.config.planner_config);
+        .expect("obtained latest reconfigurator config")
+        .map_or_else(PlannerConfig::default, |c| c.config.planner_config);
     let planning_input =
-        PlanningInputFromDb::assemble(&opctx, &datastore, chicken_switches)
+        PlanningInputFromDb::assemble(&opctx, &datastore, planner_config)
             .await
             .expect("planning input");
     let collection = datastore
@@ -270,7 +270,7 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
     // Now run through the planner.
     info!(log, "running through planner");
     let planning_input =
-        PlanningInputFromDb::assemble(&opctx, &datastore, chicken_switches)
+        PlanningInputFromDb::assemble(&opctx, &datastore, planner_config)
             .await
             .expect("planning input");
     let (_, parent_blueprint) = datastore
