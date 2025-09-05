@@ -579,12 +579,9 @@ fn try_make_update(
     // We try MGS-driven update components in a hardcoded priority order until
     // any of them returns `Some`.  The order is described in RFD 565 section
     // "Update Sequence".
-    let attempts: [(
-        MgsUpdateComponent,
-        Box<
-            dyn Fn() -> Result<Option<PendingMgsUpdate>, FailedMgsUpdateReason>,
-        >,
-    ); 3] = [
+    type UpdateResult = Result<Option<PendingMgsUpdate>, FailedMgsUpdateReason>;
+    type UpdateFn<'a> = Box<dyn Fn() -> UpdateResult + 'a>;
+    let attempts: [(MgsUpdateComponent, UpdateFn); 3] = [
         (
             MgsUpdateComponent::RotBootloader,
             Box::new(|| {
