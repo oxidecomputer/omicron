@@ -80,7 +80,9 @@ pub fn try_make_update_sp(
              (missing active caboose from inventory)";
             baseboard_id,
         );
-        return Err(FailedMgsUpdateReason::CabooseNotInInventory);
+        return Err(FailedMgsUpdateReason::CabooseNotInInventory(
+            CabooseWhich::SpSlot0,
+        ));
     };
 
     let Ok(expected_active_version) = active_caboose.caboose.version.parse()

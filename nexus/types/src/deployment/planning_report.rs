@@ -12,6 +12,7 @@ use super::PendingMgsUpdates;
 use super::PlannerChickenSwitches;
 use crate::deployment::MgsUpdateComponent;
 use crate::inventory::BaseboardId;
+use crate::inventory::CabooseWhich;
 
 use daft::Diffable;
 use iddqd::IdOrdItem;
@@ -505,12 +506,11 @@ pub enum FailedMgsUpdateReason {
     #[error("active host phase 1 slot is not in inventory")]
     ActiveHostPhase1SlotNotInInventory,
     /// The component's caboose was missing a value for "sign"
-    #[error("caboose is missing sign")]
-    CabooseMissingSign,
+    #[error("caboose for {0:?} is missing sign")]
+    CabooseMissingSign(CabooseWhich),
     /// The component's caboose was not found in the inventory
-    #[error("caboose is not in inventory")]
-    // TODO-K: add CabooseWhich
-    CabooseNotInInventory,
+    #[error("caboose for {0:?} is not in inventory")]
+    CabooseNotInInventory(CabooseWhich),
     /// The version in the caboose or artifact was not able to be parsed
     #[error("version could not be parsed")]
     FailedVersionParse,
@@ -576,7 +576,6 @@ impl SkippedMgsUpdates {
     pub fn new() -> Self {
         Self { updates: Vec::new() }
     }
-    // TODO-K: I might need iter and into_iter
 
     pub fn is_empty(&self) -> bool {
         self.updates.is_empty()

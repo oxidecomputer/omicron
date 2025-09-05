@@ -469,6 +469,7 @@ pub struct HostPhase1FlashHash {
     Ord,
     Deserialize,
     Serialize,
+    JsonSchema,
 )]
 pub enum CabooseWhich {
     SpSlot0,

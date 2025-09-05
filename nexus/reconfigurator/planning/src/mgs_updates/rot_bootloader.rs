@@ -81,7 +81,9 @@ pub fn try_make_update_rot_bootloader(
              (missing stage0 caboose from inventory)";
             baseboard_id,
         );
-        return Err(FailedMgsUpdateReason::CabooseNotInInventory);
+        return Err(FailedMgsUpdateReason::CabooseNotInInventory(
+            CabooseWhich::Stage0,
+        ));
     };
 
     let Ok(expected_stage0_version) = stage0_caboose.caboose.version.parse()
@@ -104,7 +106,9 @@ pub fn try_make_update_rot_bootloader(
              (missing sign in stage0 caboose from inventory)";
             baseboard_id
         );
-        return Err(FailedMgsUpdateReason::CabooseMissingSign);
+        return Err(FailedMgsUpdateReason::CabooseMissingSign(
+            CabooseWhich::Stage0,
+        ));
     };
 
     let matching_artifacts: Vec<_> = current_artifacts

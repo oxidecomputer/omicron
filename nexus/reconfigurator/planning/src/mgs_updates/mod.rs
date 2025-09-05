@@ -144,7 +144,6 @@ pub(crate) fn plan_mgs_updates(
     let mut pending_updates = PendingMgsUpdates::new();
     let mut pending_host_phase_2_changes = PendingHostPhase2Changes::empty();
     let mut boards_preferred = BTreeSet::new();
-    // TODO-K: Do I need this here?
     let mut skipped_mgs_updates = SkippedMgsUpdates::new();
 
     // Determine the status of all currently pending updates by comparing what

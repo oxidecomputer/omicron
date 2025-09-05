@@ -129,8 +129,9 @@ pub fn try_make_update_rot(
 
     let active_slot = rot_state.active_slot;
 
-    let Some(active_caboose) = inventory
-        .caboose_for(CabooseWhich::from_rot_slot(active_slot), baseboard_id)
+    let active_caboose_which = CabooseWhich::from_rot_slot(active_slot);
+    let Some(active_caboose) =
+        inventory.caboose_for(active_caboose_which, baseboard_id)
     else {
         warn!(
             log,
@@ -138,7 +139,9 @@ pub fn try_make_update_rot(
              (missing active slot {active_slot} caboose from inventory)";
             baseboard_id,
         );
-        return Err(FailedMgsUpdateReason::CabooseNotInInventory);
+        return Err(FailedMgsUpdateReason::CabooseNotInInventory(
+            active_caboose_which,
+        ));
     };
 
     let Ok(expected_active_version) = active_caboose.caboose.version.parse()
@@ -161,7 +164,9 @@ pub fn try_make_update_rot(
              (missing sign in caboose from inventory)";
             baseboard_id
         );
-        return Err(FailedMgsUpdateReason::CabooseMissingSign);
+        return Err(FailedMgsUpdateReason::CabooseMissingSign(
+            active_caboose_which,
+        ));
     };
 
     let matching_artifacts: Vec<_> = current_artifacts
