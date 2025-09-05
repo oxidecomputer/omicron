@@ -26,7 +26,7 @@ use tokio::sync::watch::{self, Receiver, Sender};
 /// Background task that runs the update planner.
 pub struct BlueprintPlanner {
     datastore: Arc<DataStore>,
-    rx_chicken_switches: Receiver<ReconfiguratorConfigLoaderState>,
+    rx_config: Receiver<ReconfiguratorConfigLoaderState>,
     rx_inventory: Receiver<Option<CollectionUuid>>,
     rx_blueprint: Receiver<Option<Arc<(BlueprintTarget, Blueprint)>>>,
     tx_blueprint: Sender<Option<Arc<(BlueprintTarget, Blueprint)>>>,
@@ -35,14 +35,14 @@ pub struct BlueprintPlanner {
 impl BlueprintPlanner {
     pub fn new(
         datastore: Arc<DataStore>,
-        rx_chicken_switches: Receiver<ReconfiguratorConfigLoaderState>,
+        rx_config: Receiver<ReconfiguratorConfigLoaderState>,
         rx_inventory: Receiver<Option<CollectionUuid>>,
         rx_blueprint: Receiver<Option<Arc<(BlueprintTarget, Blueprint)>>>,
     ) -> Self {
         let (tx_blueprint, _) = watch::channel(None);
         Self {
             datastore,
-            rx_chicken_switches,
+            rx_config,
             rx_inventory,
             rx_blueprint,
             tx_blueprint,
@@ -59,22 +59,22 @@ impl BlueprintPlanner {
     /// If it is different from the current target blueprint,
     /// save it and make it the current target.
     pub async fn plan(&mut self, opctx: &OpContext) -> BlueprintPlannerStatus {
-        // Refuse to run if we haven't had a chance to load the chicken switches
-        // from the database yet. (There might not be any in the db, which is
-        // fine! But the loading task needs to have a chance to check.)
-        let switches = match &*self.rx_chicken_switches.borrow_and_update() {
+        // Refuse to run if we haven't had a chance to load our config from the
+        // database yet. (There might not be a config, which is fine! But the
+        // loading task needs to have a chance to check.)
+        let config = match &*self.rx_config.borrow_and_update() {
             ReconfiguratorConfigLoaderState::NotYetLoaded => {
                 debug!(
                     opctx.log,
-                    "chicken switches not yet loaded; doing nothing"
+                    "reconfigurator config not yet loaded; doing nothing"
                 );
                 return BlueprintPlannerStatus::Disabled;
             }
-            ReconfiguratorConfigLoaderState::Loaded(switches) => {
-                switches.clone()
+            ReconfiguratorConfigLoaderState::Loaded(config) => {
+                config.clone()
             }
         };
-        if !switches.config.planner_enabled {
+        if !config.config.planner_enabled {
             debug!(&opctx.log, "blueprint planning disabled, doing nothing");
             return BlueprintPlannerStatus::Disabled;
         }
@@ -131,7 +131,7 @@ impl BlueprintPlanner {
         let input = match PlanningInputFromDb::assemble(
             opctx,
             &self.datastore,
-            switches.config.planner_config,
+            config.config.planner_config,
         )
         .await
         {
@@ -339,7 +339,7 @@ mod test {
         collector.activate(&opctx).await;
 
         // Enable the planner
-        let (_tx, chicken_switches_collector_rx) =
+        let (_tx, rx_config_loader) =
             watch::channel(ReconfiguratorConfigLoaderState::Loaded(
                 ReconfiguratorConfigView {
                     version: 1,
@@ -354,7 +354,7 @@ mod test {
         // Finally, spin up the planner background task.
         let mut planner = BlueprintPlanner::new(
             datastore.clone(),
-            chicken_switches_collector_rx,
+            rx_config_loader,
             rx_collector,
             rx_loader.clone(),
         );
