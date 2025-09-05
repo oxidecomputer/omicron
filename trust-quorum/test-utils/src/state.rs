@@ -91,10 +91,7 @@ impl TqState {
     pub fn send_reconfigure_msg(&mut self) {
         let (coordinator, msg) = self.nexus.reconfigure_msg_for_latest_config();
         let epoch_to_config = msg.epoch;
-        if self.faults.crashed_nodes.contains(coordinator) {
-            // We must abort the configuration. This mimics a timeout.
-            self.nexus.abort_reconfiguration();
-        } else {
+        if !self.faults.crashed_nodes.contains(coordinator) {
             let (node, ctx) = self
                 .sut
                 .nodes
@@ -369,6 +366,9 @@ impl TqState {
         id: PlatformId,
         connection_order: Vec<PlatformId>,
     ) {
+        // The node is no longer crashed.
+        self.faults.crashed_nodes.remove(&id);
+
         // We need to clear the mutable state of the `Node`. We do this by
         // creating a new `Node` and passing in the existing context which
         // contains the persistent state.
