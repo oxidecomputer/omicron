@@ -502,9 +502,6 @@ INFO skipped noop image source check on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0
 INFO skipped noop image source check on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, reason: remove_mupdate_override is set in the blueprint (203fa72c-85c1-466a-8ed3-338ee029530d)
 generated blueprint a5a8f242-ffa5-473c-8efd-2acf2dc0b736 based on parent blueprint d60afc57-f15d-476c-bd0f-b1071e2bb976
 planning report for blueprint a5a8f242-ffa5-473c-8efd-2acf2dc0b736:
-chicken switches:
-    add zones with mupdate override:   false
-
 * zone adds waiting on blockers
 * zone adds and updates are blocked:
   - current target release generation (2) is lower than minimum required by blueprint (3)
@@ -777,9 +774,6 @@ INFO skipped noop image source check on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0
 INFO skipped noop image source check on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, reason: remove_mupdate_override is set in the blueprint (203fa72c-85c1-466a-8ed3-338ee029530d)
 generated blueprint 626487fa-7139-45ec-8416-902271fc730b based on parent blueprint a5a8f242-ffa5-473c-8efd-2acf2dc0b736
 planning report for blueprint 626487fa-7139-45ec-8416-902271fc730b:
-chicken switches:
-    add zones with mupdate override:   false
-
 * zone adds waiting on blockers
 * zone adds and updates are blocked:
   - sleds have remove mupdate override set in blueprint: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, d81c6a84-79b8-4958-ae41-ea46c9b19763
@@ -902,9 +896,6 @@ INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noo
 INFO skipped noop image source check on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, reason: remove_mupdate_override is set in the blueprint (1c0ce176-6dc8-4a90-adea-d4a8000751da)
 generated blueprint c1a0d242-9160-40f4-96ae-61f8f40a0b1b based on parent blueprint 626487fa-7139-45ec-8416-902271fc730b
 planning report for blueprint c1a0d242-9160-40f4-96ae-61f8f40a0b1b:
-chicken switches:
-    add zones with mupdate override:   false
-
 * noop converting 6/6 install-dataset zones to artifact store on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
 * zone adds waiting on blockers
 * zone adds and updates are blocked:
@@ -1091,9 +1082,6 @@ INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noo
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
 generated blueprint afb09faf-a586-4483-9289-04d4f1d8ba23 based on parent blueprint c1a0d242-9160-40f4-96ae-61f8f40a0b1b
 planning report for blueprint afb09faf-a586-4483-9289-04d4f1d8ba23:
-chicken switches:
-    add zones with mupdate override:   false
-
 * skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 6 zones are already from artifacts
 * zone adds waiting on blockers
 * zone adds and updates are blocked:
@@ -1269,9 +1257,6 @@ parent:    c1a0d242-9160-40f4-96ae-61f8f40a0b1b
  PENDING MGS-MANAGED UPDATES: 0
 
 planning report for blueprint afb09faf-a586-4483-9289-04d4f1d8ba23:
-chicken switches:
-    add zones with mupdate override:   false
-
 * skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 6 zones are already from artifacts
 * zone adds waiting on blockers
 * zone adds and updates are blocked:
@@ -1410,9 +1395,6 @@ INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noo
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
 generated blueprint ce365dff-2cdb-4f35-a186-b15e20e1e700 based on parent blueprint afb09faf-a586-4483-9289-04d4f1d8ba23
 planning report for blueprint ce365dff-2cdb-4f35-a186-b15e20e1e700:
-chicken switches:
-    add zones with mupdate override:   false
-
 * skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 6 zones are already from artifacts
 * noop converting 6/6 install-dataset zones to artifact store on sled d81c6a84-79b8-4958-ae41-ea46c9b19763
 * zone adds waiting on blockers
@@ -1588,9 +1570,6 @@ parent:    afb09faf-a586-4483-9289-04d4f1d8ba23
  PENDING MGS-MANAGED UPDATES: 0
 
 planning report for blueprint ce365dff-2cdb-4f35-a186-b15e20e1e700:
-chicken switches:
-    add zones with mupdate override:   false
-
 * skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 6 zones are already from artifacts
 * noop converting 6/6 install-dataset zones to artifact store on sled d81c6a84-79b8-4958-ae41-ea46c9b19763
 * zone adds waiting on blockers
@@ -1708,9 +1687,6 @@ INFO configuring MGS-driven update, artifact_version: 2.0.0, artifact_hash: 8f89
 INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint 8f2d1f39-7c88-4701-aa43-56bf281b28c1 based on parent blueprint ce365dff-2cdb-4f35-a186-b15e20e1e700
 planning report for blueprint 8f2d1f39-7c88-4701-aa43-56bf281b28c1:
-chicken switches:
-    add zones with mupdate override:   false
-
 * skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 6 zones are already from artifacts
 * skipping noop zone image source check on sled d81c6a84-79b8-4958-ae41-ea46c9b19763: all 6 zones are already from artifacts
 * 1 pending MGS update:
@@ -1891,9 +1867,6 @@ parent:    ce365dff-2cdb-4f35-a186-b15e20e1e700
 
 
 planning report for blueprint 8f2d1f39-7c88-4701-aa43-56bf281b28c1:
-chicken switches:
-    add zones with mupdate override:   false
-
 * skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 6 zones are already from artifacts
 * skipping noop zone image source check on sled d81c6a84-79b8-4958-ae41-ea46c9b19763: all 6 zones are already from artifacts
 * 1 pending MGS update:
@@ -2018,9 +1991,6 @@ INFO ran out of boards for MGS-driven update
 INFO some zones not yet up-to-date, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, zones_currently_updating: [ZoneCurrentlyUpdating { zone_id: 0c71b3b2-6ceb-4e8f-b020-b08675e83038 (service), zone_kind: Nexus, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("0e32b4a3e5d3668bb1d6a16fb06b74dc60b973fa479dcee0aae3adbb52bf1388") }, inv_image_source: InstallDataset } }, ZoneCurrentlyUpdating { zone_id: 427ec88f-f467-42fa-9bbb-66a91a36103c (service), zone_kind: InternalDns, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("ffbf1373f7ee08dddd74c53ed2a94e7c4c572a982d3a9bc94000c6956b700c6a") }, inv_image_source: InstallDataset } }, ZoneCurrentlyUpdating { zone_id: 5199c033-4cf9-4ab6-8ae7-566bd7606363 (service), zone_kind: Crucible, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("6f17cf65fb5a5bec5542dd07c03cd0acc01e59130f02c532c8d848ecae810047") }, inv_image_source: InstallDataset } }, ZoneCurrentlyUpdating { zone_id: 6444f8a5-6465-4f0b-a549-1993c113569c (service), zone_kind: InternalNtp, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("67593d686ed04a1709f93972b71f4ebc148a9362120f65d239943e814a9a7439") }, inv_image_source: InstallDataset } }, ZoneCurrentlyUpdating { zone_id: 803bfb63-c246-41db-b0da-d3b87ddfc63d (service), zone_kind: ExternalDns, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("ccca13ed19b8731f9adaf0d6203b02ea3b9ede4fa426b9fac0a07ce95440046d") }, inv_image_source: InstallDataset } }, ZoneCurrentlyUpdating { zone_id: ba4994a8-23f9-4b1a-a84f-a08d74591389 (service), zone_kind: CruciblePantry, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("21f0ada306859c23917361f2e0b9235806c32607ec689c7e8cf16bb898bc5a02") }, inv_image_source: InstallDataset } }]
 generated blueprint 12d602a6-5ab4-487a-b94e-eb30cdf30300 based on parent blueprint 8f2d1f39-7c88-4701-aa43-56bf281b28c1
 planning report for blueprint 12d602a6-5ab4-487a-b94e-eb30cdf30300:
-chicken switches:
-    add zones with mupdate override:   false
-
 * skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 6 zones are already from artifacts
 * skipping noop zone image source check on sled d81c6a84-79b8-4958-ae41-ea46c9b19763: all 6 zones are already from artifacts
 * noop converting host phase 2 slot B to Artifact on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
@@ -2256,9 +2226,6 @@ INFO performed noop zone image source checks on sled, sled_id: d81c6a84-79b8-495
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 generated blueprint 61a93ea3-c872-48e0-aace-e86b0c52b839 based on parent blueprint 12d602a6-5ab4-487a-b94e-eb30cdf30300
 planning report for blueprint 61a93ea3-c872-48e0-aace-e86b0c52b839:
-chicken switches:
-    add zones with mupdate override:   false
-
 * skipping noop zone image source check on sled c3bc4c6d-fdde-4fc4-8493-89d2a1e5ee6b: all 0 zones are already from artifacts
 * skipping noop zone image source check on sled d81c6a84-79b8-4958-ae41-ea46c9b19763: all 6 zones are already from artifacts
 * zone adds waiting on blockers
@@ -2384,6 +2351,9 @@ INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noo
 INFO altered physical disks, sled_id: c3bc4c6d-fdde-4fc4-8493-89d2a1e5ee6b, sled_edits: SledEditCounts { disks: EditCounts { added: 10, updated: 0, expunged: 0, removed: 0 }, datasets: EditCounts { added: 20, updated: 0, expunged: 0, removed: 0 }, zones: EditCounts { added: 0, updated: 0, expunged: 0, removed: 0 } }
 generated blueprint 27e755bc-dc10-4647-853c-f89bb3a15a2c based on parent blueprint 61a93ea3-c872-48e0-aace-e86b0c52b839
 planning report for blueprint 27e755bc-dc10-4647-853c-f89bb3a15a2c:
+chicken switches:
+    add zones with mupdate override:   true
+
 * skipping noop zone image source check on sled c3bc4c6d-fdde-4fc4-8493-89d2a1e5ee6b: all 0 zones are already from artifacts
 * skipping noop zone image source check on sled d81c6a84-79b8-4958-ae41-ea46c9b19763: all 6 zones are already from artifacts
 * zone adds and updates are blocked:

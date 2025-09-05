@@ -248,6 +248,10 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
         &["nexus", "blueprints", "diff", &initial_blueprint_id],
         // chicken switches: show and set
         &["nexus", "chicken-switches", "show", "current"],
+        // NOTE: Enabling the planner here _may_ cause Nexus to start creating
+        // new blueprints; any commands whose output is only stable if the set
+        // of blueprints is stable must come before this command to avoid being
+        // racy.
         &[
             "-w",
             "nexus",
@@ -262,7 +266,7 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
             "chicken-switches",
             "set",
             "--add-zones-with-mupdate-override",
-            "false",
+            "true",
         ],
         // After the set commands above, we should see chicken switches
         // populated.
