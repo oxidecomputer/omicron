@@ -129,18 +129,16 @@ impl super::Nexus {
     ) -> Result<PlanningContext, Error> {
         let creator = self.id.to_string();
         let datastore = self.datastore();
-        // Load up the chicken switches from the db directly (rather than from,
+        // Load up the planner config from the db directly (rather than from,
         // say, the background task) to ensure we get the latest state.
-        let chicken_switches = self
+        let planner_config = self
             .db_datastore
             .reconfigurator_config_get_latest(opctx)
             .await?
-            .map_or_else(PlannerConfig::default, |switches| {
-                switches.config.planner_config
-            });
+            .map_or_else(PlannerConfig::default, |c| c.config.planner_config);
 
         let planning_input =
-            PlanningInputFromDb::assemble(opctx, datastore, chicken_switches)
+            PlanningInputFromDb::assemble(opctx, datastore, planner_config)
                 .await?;
 
         // The choice of which inventory collection to use here is not
