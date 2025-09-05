@@ -436,7 +436,12 @@ mod test {
             OmicronZoneUuid::new_v4(),
             Activator::new(),
             dummy_tx,
-            NexusQuiesceHandle::new(&opctx.log, datastore.clone()),
+            NexusQuiesceHandle::new(
+                &opctx.log,
+                datastore.clone(),
+                OmicronZoneUuid::new_v4(),
+                rx_loader.clone(),
+            ),
         );
         let value = executor.activate(&opctx).await;
         let value = value.as_object().expect("response is not a JSON object");

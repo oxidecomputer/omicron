@@ -334,7 +334,12 @@ impl Nexus {
             sec_store,
         ));
 
-        let quiesce = NexusQuiesceHandle::new(&log, db_datastore.clone());
+        let quiesce = NexusQuiesceHandle::new(
+            &log,
+            db_datastore.clone(),
+            config.deployment.id.into(),
+            rx_loader,
+        );
 
         // It's a bit of a red flag to use an unbounded channel.
         //
