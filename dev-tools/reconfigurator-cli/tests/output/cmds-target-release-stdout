@@ -2538,7 +2538,7 @@ chicken switches:
     add zones with mupdate override:   false
 
 * discretionary zones placed:
-  * 1 zone on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: external_dns
+  * external_dns zone on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c from source artifact: version 1.0.0
 * zone updates waiting on discretionary zones
 
 
@@ -2962,7 +2962,7 @@ chicken switches:
     add zones with mupdate override:   false
 
 * discretionary zones placed:
-  * 1 zone on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: internal_dns
+  * internal_dns zone on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c from source artifact: version 1.0.0
 * zone updates waiting on discretionary zones
 
 
@@ -3251,7 +3251,7 @@ chicken switches:
     add zones with mupdate override:   false
 
 * discretionary zones placed:
-  * 1 zone on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: crucible_pantry
+  * crucible_pantry zone on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c from source artifact: version 1.0.0
 * zone updates waiting on discretionary zones
 
 
@@ -3913,7 +3913,7 @@ chicken switches:
     add zones with mupdate override:   false
 
 * discretionary zones placed:
-  * 1 zone on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: internal_dns
+  * internal_dns zone on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 from source artifact: version 1.0.0
 * zone updates waiting on discretionary zones
 
 
@@ -4580,7 +4580,7 @@ chicken switches:
     add zones with mupdate override:   false
 
 * discretionary zones placed:
-  * 1 zone on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: external_dns
+  * external_dns zone on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 from source artifact: version 1.0.0
 * zone updates waiting on discretionary zones
 
 
@@ -4860,7 +4860,7 @@ chicken switches:
     add zones with mupdate override:   false
 
 * discretionary zones placed:
-  * 1 zone on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: crucible_pantry
+  * crucible_pantry zone on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 from source artifact: version 1.0.0
 * zone updates waiting on discretionary zones
 
 
@@ -5373,7 +5373,7 @@ chicken switches:
     add zones with mupdate override:   false
 
 * discretionary zones placed:
-  * 1 zone on sled d81c6a84-79b8-4958-ae41-ea46c9b19763: crucible_pantry
+  * crucible_pantry zone on sled d81c6a84-79b8-4958-ae41-ea46c9b19763 from source artifact: version 1.0.0
 * zone updates waiting on discretionary zones
 
 
@@ -5759,7 +5759,7 @@ chicken switches:
     add zones with mupdate override:   false
 
 * discretionary zones placed:
-  * 1 zone on sled d81c6a84-79b8-4958-ae41-ea46c9b19763: internal_dns
+  * internal_dns zone on sled d81c6a84-79b8-4958-ae41-ea46c9b19763 from source artifact: version 1.0.0
 * zone updates waiting on discretionary zones
 
 
@@ -6432,7 +6432,7 @@ chicken switches:
     add zones with mupdate override:   false
 
 * discretionary zones placed:
-  * 1 zone on sled d81c6a84-79b8-4958-ae41-ea46c9b19763: external_dns
+  * external_dns zone on sled d81c6a84-79b8-4958-ae41-ea46c9b19763 from source artifact: version 1.0.0
 * zone updates waiting on discretionary zones
 
 
@@ -6793,7 +6793,7 @@ chicken switches:
     add zones with mupdate override:   false
 
 * discretionary zones placed:
-  * 1 zone on sled d81c6a84-79b8-4958-ae41-ea46c9b19763: external_dns
+  * external_dns zone on sled d81c6a84-79b8-4958-ae41-ea46c9b19763 from source artifact: version 1.0.0
 * zone updates waiting on discretionary zones
 
 
