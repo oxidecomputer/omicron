@@ -32,9 +32,9 @@ impl super::Nexus {
     ) -> LookupResult<QuiesceStatus> {
         opctx.authorize(authz::Action::Read, &authz::QUIESCE_STATE).await?;
         let state = self.quiesce.state();
-        let sagas_pending = self.quiesce.sagas().sagas_pending();
+        let sagas = self.quiesce.sagas().status();
         let db_claims = self.datastore().claims_held();
-        Ok(QuiesceStatus { state, sagas_pending, db_claims })
+        Ok(QuiesceStatus { state, sagas, db_claims })
     }
 }
 
@@ -283,7 +283,7 @@ mod test {
         assert!(duration_total >= duration_draining_db);
         assert!(duration_total >= duration_recording_quiesce);
         assert!(duration_total <= (after - before).to_std().unwrap());
-        assert!(status.sagas_pending.is_empty());
+        assert!(status.sagas.sagas_pending.is_empty());
         assert!(status.db_claims.is_empty());
     }
 
@@ -357,7 +357,9 @@ mod test {
             quiesce_status.state,
             QuiesceState::DrainingSagas { .. }
         );
-        assert!(quiesce_status.sagas_pending.contains_key(&demo_saga.saga_id));
+        assert!(
+            quiesce_status.sagas.sagas_pending.contains_key(&demo_saga.saga_id)
+        );
         // We should see at least one held database claim from the one we took
         // above.
         assert!(!quiesce_status.db_claims.is_empty());
@@ -421,7 +423,7 @@ mod test {
                 if !matches!(rv.state, QuiesceState::DrainingDb { .. }) {
                     return Err(CondCheckError::<NexusClientError>::NotYet);
                 }
-                assert!(rv.sagas_pending.is_empty());
+                assert!(rv.sagas.sagas_pending.is_empty());
                 // The database claim we took is still held.
                 assert!(!rv.db_claims.is_empty());
                 Ok(())

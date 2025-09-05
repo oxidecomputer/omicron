@@ -1073,7 +1073,11 @@ CREATE TABLE IF NOT EXISTS omicron.public.silo_quotas (
     time_modified TIMESTAMPTZ NOT NULL,
     cpus INT8 NOT NULL,
     memory_bytes INT8 NOT NULL,
-    storage_bytes INT8 NOT NULL
+    storage_bytes INT8 NOT NULL,
+
+    CONSTRAINT cpus_not_negative CHECK (cpus >= 0),
+    CONSTRAINT memory_not_negative CHECK (memory_bytes >= 0),
+    CONSTRAINT storage_not_negative CHECK (storage_bytes >= 0)
 );
 
 /**
@@ -2110,7 +2114,17 @@ CREATE TABLE IF NOT EXISTS omicron.public.ip_pool_resource (
 
     -- resource_type is redundant because resource IDs are globally unique, but
     -- logically it belongs here
-    PRIMARY KEY (ip_pool_id, resource_type, resource_id)
+    PRIMARY KEY (ip_pool_id, resource_type, resource_id),
+
+    -- Check that there are no default pools for the internal silo
+    CONSTRAINT internal_silo_has_no_default_pool CHECK (
+        NOT (
+            resource_type = 'silo' AND
+            resource_id = '001de000-5110-4000-8000-000000000001' AND
+            is_default
+        )
+    )
+
 );
 
 -- a given resource can only have one default ip pool
@@ -2123,6 +2137,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS one_default_ip_pool_per_resource ON omicron.pu
 CREATE INDEX IF NOT EXISTS ip_pool_resource_id ON omicron.public.ip_pool_resource (
     resource_id
 );
+
 CREATE INDEX IF NOT EXISTS ip_pool_resource_ip_pool_id ON omicron.public.ip_pool_resource (
     ip_pool_id
 );
@@ -6602,7 +6617,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '186.0.0', NULL)
+    (TRUE, NOW(), NOW(), '188.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
