@@ -2114,7 +2114,6 @@ async fn cmd_db_disk_info(
         bail!("no disk: {} found", args.uuid);
     };
 
-    println!("Found disk: {:?}", disk);
     // For information about where this disk is attached.
     let mut rows = Vec::new();
 
