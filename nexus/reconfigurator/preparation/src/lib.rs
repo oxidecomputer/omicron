@@ -391,7 +391,7 @@ pub async fn reconfigurator_state_load(
         .reconfigurator_chicken_switches_get_latest(opctx)
         .await?
         .map_or_else(PlannerConfig::default, |switches| {
-            switches.switches.planner_switches
+            switches.config.planner_config
         });
     let planning_input =
         PlanningInputFromDb::assemble(opctx, datastore, chicken_switches)

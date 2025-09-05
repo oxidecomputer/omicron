@@ -547,25 +547,22 @@ impl Nexus {
             };
 
             // Before starting our background tasks, inject an initial set of
-            // reconfigurator chicken switches if we're configured with one.
+            // reconfigurator configuration if we're configured with one.
             // This is only provided by the test suite, where we have an initial
-            // set of switches to disable automatic blueprint planning.
-            if let Some(switches) =
-                task_config.pkg.initial_reconfigurator_chicken_switches
+            // config to disable automatic blueprint planning.
+            if let Some(config) = task_config.pkg.initial_reconfigurator_config
             {
-                let switches =
-                    ReconfiguratorConfigParam { version: 1, switches };
+                let config = ReconfiguratorConfigParam { version: 1, config };
                 if let Err(err) = db_datastore
                     .reconfigurator_chicken_switches_insert_latest_version(
                         &background_ctx,
-                        switches,
+                        config,
                     )
                     .await
                 {
                     error!(
                         task_log,
-                        "failed to insert initial reconfigurator \
-                         chicken switches";
+                        "failed to insert initial reconfigurator config";
                         InlineErrorChain::new(&err),
                     );
                 }

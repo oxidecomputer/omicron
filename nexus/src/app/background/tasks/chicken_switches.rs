@@ -147,13 +147,11 @@ mod test {
 
         // Insert an initial set of switches.
         let expected_switches = ReconfiguratorConfig {
-            planner_enabled: !default_switches.switches.planner_enabled,
-            planner_switches: PlannerConfig::default(),
+            planner_enabled: !default_switches.config.planner_enabled,
+            planner_config: PlannerConfig::default(),
         };
-        let switches = ReconfiguratorConfigParam {
-            version: 1,
-            switches: expected_switches,
-        };
+        let switches =
+            ReconfiguratorConfigParam { version: 1, config: expected_switches };
         datastore
             .reconfigurator_chicken_switches_insert_latest_version(
                 &opctx, switches,
@@ -171,7 +169,7 @@ mod test {
                 ReconfiguratorChickenSwitchesLoaderState::Loaded(view) => view,
             };
             assert_eq!(view.version, 1);
-            assert_eq!(view.switches, expected_switches);
+            assert_eq!(view.config, expected_switches);
         }
 
         // Activating again should not change things.
@@ -182,12 +180,10 @@ mod test {
         // Insert a new version.
         let expected_switches = ReconfiguratorConfig {
             planner_enabled: !expected_switches.planner_enabled,
-            planner_switches: PlannerConfig::default(),
+            planner_config: PlannerConfig::default(),
         };
-        let switches = ReconfiguratorConfigParam {
-            version: 2,
-            switches: expected_switches,
-        };
+        let switches =
+            ReconfiguratorConfigParam { version: 2, config: expected_switches };
         datastore
             .reconfigurator_chicken_switches_insert_latest_version(
                 &opctx, switches,
@@ -205,7 +201,7 @@ mod test {
                 ReconfiguratorChickenSwitchesLoaderState::Loaded(view) => view,
             };
             assert_eq!(view.version, 2);
-            assert_eq!(view.switches, expected_switches);
+            assert_eq!(view.config, expected_switches);
         }
     }
 }

@@ -57,7 +57,7 @@ async fn test_quiesce(cptestctx: &ControlPlaneTestContext) {
         .reconfigurator_chicken_switches_get_latest(&opctx)
         .await
         .expect("obtained latest chicken switches")
-        .map_or_else(PlannerConfig::default, |cs| cs.switches.planner_switches);
+        .map_or_else(PlannerConfig::default, |cs| cs.config.planner_config);
     let planning_input =
         PlanningInputFromDb::assemble(&opctx, &datastore, chicken_switches)
             .await

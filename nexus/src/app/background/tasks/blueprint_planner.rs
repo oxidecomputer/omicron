@@ -74,7 +74,7 @@ impl BlueprintPlanner {
                 switches.clone()
             }
         };
-        if !switches.switches.planner_enabled {
+        if !switches.config.planner_enabled {
             debug!(&opctx.log, "blueprint planning disabled, doing nothing");
             return BlueprintPlannerStatus::Disabled;
         }
@@ -131,7 +131,7 @@ impl BlueprintPlanner {
         let input = match PlanningInputFromDb::assemble(
             opctx,
             &self.datastore,
-            switches.switches.planner_switches,
+            switches.config.planner_config,
         )
         .await
         {
@@ -343,9 +343,9 @@ mod test {
             watch::channel(ReconfiguratorChickenSwitchesLoaderState::Loaded(
                 ReconfiguratorConfigView {
                     version: 1,
-                    switches: ReconfiguratorConfig {
+                    config: ReconfiguratorConfig {
                         planner_enabled: true,
-                        planner_switches: PlannerConfig::default(),
+                        planner_config: PlannerConfig::default(),
                     },
                     time_modified: now_db_precision(),
                 },

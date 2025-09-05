@@ -40,7 +40,7 @@ macro_rules! diff_row {
 )]
 pub struct ReconfiguratorConfigParam {
     pub version: u32,
-    pub switches: ReconfiguratorConfig,
+    pub config: ReconfiguratorConfig,
 }
 
 impl Default for ReconfiguratorConfigParam {
@@ -48,7 +48,7 @@ impl Default for ReconfiguratorConfigParam {
         Self {
             // The first supported version is 1.
             version: 1,
-            switches: ReconfiguratorConfig::default(),
+            config: ReconfiguratorConfig::default(),
         }
     }
 }
@@ -56,7 +56,7 @@ impl Default for ReconfiguratorConfigParam {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ReconfiguratorConfigView {
     pub version: u32,
-    pub switches: ReconfiguratorConfig,
+    pub config: ReconfiguratorConfig,
     pub time_modified: DateTime<Utc>,
 }
 
@@ -69,11 +69,11 @@ impl ReconfiguratorConfigView {
 impl Default for ReconfiguratorConfigView {
     fn default() -> Self {
         // Use the default values from `ReconfiguratorConfigParam`.
-        let ReconfiguratorConfigParam { version, switches } =
+        let ReconfiguratorConfigParam { version, config } =
             ReconfiguratorConfigParam::default();
         Self {
             version,
-            switches,
+            config,
             time_modified: Utc.with_ymd_and_hms(1970, 1, 1, 0, 1, 1).unwrap(),
         }
     }
@@ -87,7 +87,7 @@ pub struct ReconfiguratorConfigViewDisplay<'a> {
 impl fmt::Display for ReconfiguratorConfigViewDisplay<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let Self {
-            view: ReconfiguratorConfigView { version, switches, time_modified },
+            view: ReconfiguratorConfigView { version, config, time_modified },
         } = self;
         writeln!(f, "version: {version}")?;
         writeln!(
@@ -97,7 +97,7 @@ impl fmt::Display for ReconfiguratorConfigViewDisplay<'_> {
         )?;
         // No need for a newline here because .display() adds its own newline at
         // the end.
-        write!(f, "{}", switches.display())?;
+        write!(f, "{}", config.display())?;
 
         Ok(())
     }
@@ -116,40 +116,37 @@ impl fmt::Display for ReconfiguratorConfigViewDisplay<'_> {
 )]
 pub struct ReconfiguratorConfig {
     pub planner_enabled: bool,
-    pub planner_switches: PlannerConfig,
+    pub planner_config: PlannerConfig,
 }
 
 impl ReconfiguratorConfig {
     pub fn display(&self) -> ReconfiguratorConfigDisplay<'_> {
-        ReconfiguratorConfigDisplay { switches: self }
+        ReconfiguratorConfigDisplay { config: self }
     }
 }
 
 impl Default for ReconfiguratorConfig {
     fn default() -> Self {
-        Self {
-            planner_enabled: true,
-            planner_switches: PlannerConfig::default(),
-        }
+        Self { planner_enabled: true, planner_config: PlannerConfig::default() }
     }
 }
 
 #[derive(Clone, Debug)]
 pub struct ReconfiguratorConfigDisplay<'a> {
-    switches: &'a ReconfiguratorConfig,
+    config: &'a ReconfiguratorConfig,
 }
 
 impl fmt::Display for ReconfiguratorConfigDisplay<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let Self {
-            switches: ReconfiguratorConfig { planner_enabled, planner_switches },
+            config: ReconfiguratorConfig { planner_enabled, planner_config },
         } = self;
         writeln!(f, "planner enabled: {}", planner_enabled)?;
-        writeln!(f, "planner switches:")?;
-        // planner_switches does its own indentation, so it's not necessary to
+        writeln!(f, "planner config:")?;
+        // planner_config does its own indentation, so it's not necessary to
         // use IndentWriter here -- and it adds its own newlines so we don't
         // need to add any more.
-        write!(f, "{}", planner_switches.display())?;
+        write!(f, "{}", planner_config.display())?;
 
         Ok(())
     }
@@ -167,7 +164,7 @@ pub struct ReconfiguratorConfigDiffDisplay<'a, 'b> {
 
 impl fmt::Display for ReconfiguratorConfigDiffDisplay<'_, '_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let ReconfiguratorConfigDiff { planner_enabled, planner_switches } =
+        let ReconfiguratorConfigDiff { planner_enabled, planner_config } =
             self.diff;
 
         let list = KvList::new(
@@ -178,8 +175,8 @@ impl fmt::Display for ReconfiguratorConfigDiffDisplay<'_, '_> {
         write!(f, "{list}")?;
 
         let mut indented = IndentWriter::new("    ", f);
-        writeln!(indented, "planner switches:")?;
-        write!(indented, "{}", planner_switches.display())?;
+        writeln!(indented, "planner config:")?;
+        write!(indented, "{}", planner_config.display())?;
 
         Ok(())
     }
@@ -200,24 +197,21 @@ pub struct PlannerConfig {
     /// Whether to add zones even if a mupdate override is present.
     ///
     /// Once Nexus-driven update is active on a customer system, we must not add
-    /// new zones while the system is recovering from a MUPdate. But that would
-    /// require customers to upload a TUF repo before adding a new sled, even
-    /// though Nexus-driven update is not active (as of r16).
+    /// new zones while the system is recovering from a MUPdate.
     ///
-    /// This switch, which is currently on by default, allows us to add zones
-    /// even if we've detected a recent MUPdate on the system. We will want to
-    /// turn it off as part of enabling Nexus-driven update.
+    /// This setting, which is off by default, allows us to add zones
+    /// even if we've detected a recent MUPdate on the system.
     pub add_zones_with_mupdate_override: bool,
 }
 
 impl PlannerConfig {
     pub fn display(&self) -> PlannerConfigDisplay<'_> {
-        PlannerConfigDisplay { switches: self }
+        PlannerConfigDisplay { config: self }
     }
 }
 
 // Allow the clippy::derivable_impls lint: spell out the default values for
-// these chicken switches for clarity.
+// these config values for clarity.
 #[expect(clippy::derivable_impls)]
 impl Default for PlannerConfig {
     fn default() -> Self {
@@ -242,14 +236,13 @@ impl slog::KV for PlannerConfig {
 }
 
 pub struct PlannerConfigDisplay<'a> {
-    switches: &'a PlannerConfig,
+    config: &'a PlannerConfig,
 }
 
 impl<'a> fmt::Display for PlannerConfigDisplay<'a> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let Self {
-            switches: PlannerConfig { add_zones_with_mupdate_override },
-        } = self;
+        let Self { config: PlannerConfig { add_zones_with_mupdate_override } } =
+            self;
         let list = KvList::new(
             None,
             vec![KvPair::new_unchanged(

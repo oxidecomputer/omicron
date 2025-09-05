@@ -99,10 +99,10 @@ impl DataStore {
         opctx: &OpContext,
         switches: ReconfiguratorConfigParam,
     ) -> Result<(), Error> {
-        let ReconfiguratorConfigParam { version, switches } = switches;
+        let ReconfiguratorConfigParam { version, config: switches } = switches;
         let switches = ReconfiguratorConfigView {
             version,
-            switches,
+            config: switches,
             time_modified: chrono::Utc::now(),
         };
 
@@ -153,10 +153,10 @@ impl DataStore {
               )",
         )
         .bind::<sql_types::BigInt, SqlU32>(switches.version.into())
-        .bind::<sql_types::Bool, _>(switches.switches.planner_enabled)
+        .bind::<sql_types::Bool, _>(switches.config.planner_enabled)
         .bind::<sql_types::Timestamptz, _>(switches.time_modified)
         .bind::<sql_types::Bool, _>(
-            switches.switches.planner_switches.add_zones_with_mupdate_override,
+            switches.config.planner_config.add_zones_with_mupdate_override,
         )
         .execute_async(conn)
         .await
@@ -193,9 +193,9 @@ mod tests {
         // Fail to insert a swtiches with version 0
         let mut switches = ReconfiguratorConfigParam {
             version: 0,
-            switches: ReconfiguratorConfig {
+            config: ReconfiguratorConfig {
                 planner_enabled: false,
-                planner_switches: PlannerConfig::default(),
+                planner_config: PlannerConfig::default(),
             },
         };
 
@@ -271,7 +271,7 @@ mod tests {
 
         // Inserting version 4 should work
         switches.version = 4;
-        switches.switches.planner_enabled = true;
+        switches.config.planner_enabled = true;
         assert!(
             datastore
                 .reconfigurator_chicken_switches_insert_latest_version(
@@ -288,7 +288,7 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(switches.version, read.version);
-        assert_eq!(switches.switches, read.switches);
+        assert_eq!(switches.config, read.config);
 
         // Getting version 4 should work
         let read = datastore
@@ -297,7 +297,7 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(switches.version, read.version);
-        assert_eq!(switches.switches, read.switches);
+        assert_eq!(switches.config, read.config);
 
         // Getting version 5 should fail, as it doesn't exist
         assert!(
@@ -320,9 +320,9 @@ mod tests {
             let switches = &history[i - 1];
             assert_eq!(switches.version, i as u32);
             if i != 4 {
-                assert_eq!(switches.switches.planner_enabled, false);
+                assert_eq!(switches.config.planner_enabled, false);
             } else {
-                assert_eq!(switches.switches.planner_enabled, true);
+                assert_eq!(switches.config.planner_enabled, true);
             }
         }
 

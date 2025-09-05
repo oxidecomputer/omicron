@@ -414,10 +414,10 @@ async fn cmd_reconfigurator_chicken_switches_history(
         .map(|s| {
             let ReconfiguratorConfigView {
                 version,
-                switches:
+                config:
                     ReconfiguratorConfig {
                         planner_enabled,
-                        planner_switches:
+                        planner_config:
                             PlannerConfig { add_zones_with_mupdate_override },
                     },
                 time_modified,

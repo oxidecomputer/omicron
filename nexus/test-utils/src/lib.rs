@@ -804,10 +804,10 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         debug!(log, "Starting Nexus (internal API)");
 
         // In tests, disable blueprint planning.
-        self.config.pkg.initial_reconfigurator_chicken_switches =
+        self.config.pkg.initial_reconfigurator_config =
             Some(ReconfiguratorConfig {
                 planner_enabled: false,
-                planner_switches: PlannerConfig::default(),
+                planner_config: PlannerConfig::default(),
             });
         self.config.deployment.internal_dns = InternalDns::FromAddress {
             address: self

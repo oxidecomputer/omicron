@@ -861,7 +861,7 @@ pub struct PackageConfig {
     ///
     /// We use this hook to disable reconfigurator automation in the test suite
     #[serde(default)]
-    pub initial_reconfigurator_chicken_switches: Option<ReconfiguratorConfig>,
+    pub initial_reconfigurator_config: Option<ReconfiguratorConfig>,
     /// Background task configuration
     pub background_tasks: BackgroundTaskConfig,
     /// Default Crucible region allocation strategy
@@ -1205,14 +1205,12 @@ mod test {
                                 .unwrap(),
                         }
                     )]),
-                    initial_reconfigurator_chicken_switches: Some(
-                        ReconfiguratorConfig {
-                            planner_enabled: true,
-                            planner_switches: PlannerConfig {
-                                add_zones_with_mupdate_override: true,
-                            },
-                        }
-                    ),
+                    initial_reconfigurator_config: Some(ReconfiguratorConfig {
+                        planner_enabled: true,
+                        planner_config: PlannerConfig {
+                            add_zones_with_mupdate_override: true,
+                        },
+                    }),
                     background_tasks: BackgroundTaskConfig {
                         dns_internal: DnsTasksConfig {
                             period_secs_config: Duration::from_secs(1),

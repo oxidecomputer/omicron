@@ -62,13 +62,11 @@ impl ChickenSwitchesOpts {
             planner_enabled: self
                 .planner_enabled
                 .unwrap_or(current.planner_enabled),
-            planner_switches: PlannerConfig {
+            planner_config: PlannerConfig {
                 add_zones_with_mupdate_override: self
                     .add_zones_with_mupdate_override
                     .unwrap_or(
-                        current
-                            .planner_switches
-                            .add_zones_with_mupdate_override,
+                        current.planner_config.add_zones_with_mupdate_override,
                     ),
             },
         }
@@ -84,7 +82,7 @@ impl ChickenSwitchesOpts {
         let new = self.update(current);
         (&new != current).then(|| ReconfiguratorConfigParam {
             version: next_version,
-            switches: new,
+            config: new,
         })
     }
 }
@@ -202,7 +200,7 @@ async fn chicken_switches_set(
                 // switches.
                 let new_switches = ReconfiguratorConfigParam {
                     version: 1,
-                    switches: args.switches.update(&default_switches),
+                    config: args.switches.update(&default_switches),
                 };
                 (None, new_switches)
             } else {
@@ -220,16 +218,13 @@ async fn chicken_switches_set(
             // indentation, so more isn't required.
             print!(
                 "{}",
-                current_switches
-                    .switches
-                    .diff(&new_switches.switches)
-                    .display(),
+                current_switches.switches.diff(&new_switches.config).display(),
             );
         }
         None => {
             let stdout = io::stdout();
             let mut indented = IndentWriter::new("    ", stdout.lock());
-            write!(indented, "{}", new_switches.switches.display()).unwrap();
+            write!(indented, "{}", new_switches.config.display()).unwrap();
         }
     }
 

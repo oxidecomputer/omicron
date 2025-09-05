@@ -24,11 +24,11 @@ impl From<deployment::ReconfiguratorConfigView>
     fn from(value: deployment::ReconfiguratorConfigView) -> Self {
         Self {
             version: value.version.into(),
-            planner_enabled: value.switches.planner_enabled,
+            planner_enabled: value.config.planner_enabled,
             time_modified: value.time_modified,
             add_zones_with_mupdate_override: value
-                .switches
-                .planner_switches
+                .config
+                .planner_config
                 .add_zones_with_mupdate_override,
         }
     }
@@ -40,9 +40,9 @@ impl From<ReconfiguratorChickenSwitches>
     fn from(value: ReconfiguratorChickenSwitches) -> Self {
         Self {
             version: value.version.into(),
-            switches: deployment::ReconfiguratorConfig {
+            config: deployment::ReconfiguratorConfig {
                 planner_enabled: value.planner_enabled,
-                planner_switches: deployment::PlannerConfig {
+                planner_config: deployment::PlannerConfig {
                     add_zones_with_mupdate_override: value
                         .add_zones_with_mupdate_override,
                 },
