@@ -2198,6 +2198,13 @@ pub(crate) mod test {
     use typed_rng::TypedUuidRng;
     use uuid::Uuid;
 
+    const ROT_SIGN_GIMLET: &str =
+        "1111111111111111111111111111111111111111111111111111111111111111";
+    const ROT_SIGN_PSC: &str =
+        "2222222222222222222222222222222222222222222222222222222222222222";
+    const ROT_SIGN_SWITCH: &str =
+        "3333333333333333333333333333333333333333333333333333333333333333";
+
     // Generate a ClickhousePolicy ignoring fields we don't care about for
     /// planner tests
     fn clickhouse_policy(mode: ClickhouseMode) -> ClickhousePolicy {
@@ -5620,6 +5627,56 @@ pub(crate) mod test {
         };
     }
 
+    // TODO-K: Maybe instead of this I could simulate the SP components are
+    // already in the expected version
+    //
+    // Looks like I need to run the planner a few more times, unless I'm not
+    // simulating host OS updates properly
+    //
+    // From the logs:
+    // 17:19:03.675Z DEBG update_crucible_pantry: host phase 2 desired contents set to Artifact already
+    //     hash = 0000000000000000000000000000000000000000000000000000000000000000
+    //     sled_id = fbaebf9a-5127-4909-bb95-0ba583f9ada9
+    //     slot = b
+    //     version = version 1.0.0-freeform
+    // 17:19:03.675Z INFO update_crucible_pantry (host_phase_1): MGS-driven update not yet completed (will keep it)
+    //     artifact_hash = 0000000000000000000000000000000000000000000000000000000000000000
+    //     artifact_version = 1.0.0-freeform
+    //     expected_active_phase_1_hash = 0101010101010101010101010101010101010101010101010101010101010101
+    //     expected_active_phase_1_slot = A
+    //     expected_active_phase_2_hash = 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
+    //     expected_boot_disk = A
+    //     expected_inactive_phase_1_hash = 0202020202020202020202020202020202020202020202020202020202020202
+    //     expected_inactive_phase_2_hash = 0000000000000000000000000000000000000000000000000000000000000000
+    //     part_number = model0
+    //     serial_number = serial0
+    //     sled_agent_address = [fd00:1122:3344:101::1]:12345
+    //     sp_slot = 0
+    //     sp_type = Sled
+    // 17:19:03.675Z INFO update_crucible_pantry: reached maximum number of pending MGS-driven updates
+    //     max = 1
+    //
+    // TODO-K: Probably just merge the two function/macro into 1
+    fn sp_component_artifact(
+        name: &str,
+        kind: ArtifactKind,
+        board: Option<&str>,
+        sign: Option<Vec<u8>>,
+        version: &ArtifactVersion,
+    ) -> TufArtifactMeta {
+        TufArtifactMeta {
+            id: ArtifactId {
+                name: name.to_string(),
+                version: version.clone(),
+                kind,
+            },
+            hash: ArtifactHash([0; 32]),
+            size: 0, // unused here
+            board: board.map(|s| s.to_string()),
+            sign,
+        }
+    }
+
     // TODO-K: Include MGS artifacts for zone update testing
     fn create_artifacts_at_version(
         version: &ArtifactVersion,
@@ -5638,6 +5695,125 @@ pub(crate) mod test {
             fake_zone_artifact!(InternalNtp, version.clone()),
             fake_zone_artifact!(Nexus, version.clone()),
             fake_zone_artifact!(Oximeter, version.clone()),
+            sp_component_artifact(
+                "host-os-phase-1",
+                ArtifactKind::HOST_PHASE_1,
+                None,
+                None,
+                version,
+            ),
+            sp_component_artifact(
+                "host-os-phase-2",
+                ArtifactKind::HOST_PHASE_2,
+                None,
+                None,
+                version,
+            ),
+            sp_component_artifact(
+                "gimlet-d",
+                KnownArtifactKind::GimletSp.into(),
+                Some("gimlet-d"),
+                None,
+                version,
+            ),
+            sp_component_artifact(
+                "gimlet-e",
+                KnownArtifactKind::GimletSp.into(),
+                Some("gimlet-e"),
+                None,
+                version,
+            ),
+            sp_component_artifact(
+                "sidecar-b",
+                KnownArtifactKind::SwitchSp.into(),
+                Some("sidecar-b"),
+                None,
+                version,
+            ),
+            sp_component_artifact(
+                "sidecar-c",
+                KnownArtifactKind::SwitchSp.into(),
+                Some("sidecar-c"),
+                None,
+                version,
+            ),
+            sp_component_artifact(
+                "psc-b",
+                KnownArtifactKind::PscSp.into(),
+                Some("psc-b"),
+                None,
+                version,
+            ),
+            sp_component_artifact(
+                "psc-c",
+                KnownArtifactKind::PscSp.into(),
+                Some("psc-c"),
+                None,
+                version,
+            ),
+            sp_component_artifact(
+                "oxide-rot-1-fake-key",
+                ArtifactKind::GIMLET_ROT_IMAGE_A,
+                Some("oxide-rot-1"),
+                Some(ROT_SIGN_GIMLET.into()),
+                version,
+            ),
+            sp_component_artifact(
+                "oxide-rot-1-fake-key",
+                ArtifactKind::GIMLET_ROT_IMAGE_B,
+                Some("oxide-rot-1"),
+                Some(ROT_SIGN_GIMLET.into()),
+                version,
+            ),
+            sp_component_artifact(
+                "oxide-rot-1-fake-key",
+                ArtifactKind::PSC_ROT_IMAGE_A,
+                Some("oxide-rot-1"),
+                Some(ROT_SIGN_PSC.into()),
+                version,
+            ),
+            sp_component_artifact(
+                "oxide-rot-1-fake-key",
+                ArtifactKind::PSC_ROT_IMAGE_B,
+                Some("oxide-rot-1"),
+                Some(ROT_SIGN_PSC.into()),
+                version,
+            ),
+            sp_component_artifact(
+                "oxide-rot-1-fake-key",
+                ArtifactKind::SWITCH_ROT_IMAGE_A,
+                Some("oxide-rot-1"),
+                Some(ROT_SIGN_SWITCH.into()),
+                version,
+            ),
+            sp_component_artifact(
+                "oxide-rot-1-fake-key",
+                ArtifactKind::SWITCH_ROT_IMAGE_B,
+                Some("oxide-rot-1"),
+                Some(ROT_SIGN_SWITCH.into()),
+                version,
+            ),
+            sp_component_artifact(
+                "bootloader-fake-key",
+                ArtifactKind::GIMLET_ROT_STAGE0,
+                Some("oxide-rot-1"),
+                Some(ROT_SIGN_GIMLET.into()),
+                version,
+            ),
+            sp_component_artifact(
+                "bootloader-fake-key",
+                ArtifactKind::PSC_ROT_STAGE0,
+                Some("oxide-rot-1"),
+                Some(ROT_SIGN_PSC.into()),
+                version,
+            ),
+            sp_component_artifact(
+                "bootloader-fake-key",
+                ArtifactKind::SWITCH_ROT_STAGE0,
+                Some("oxide-rot-1"),
+                Some(ROT_SIGN_SWITCH.into()),
+                version,
+            ),
         ]
     }
 
