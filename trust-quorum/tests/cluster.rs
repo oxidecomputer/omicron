@@ -209,11 +209,11 @@ impl TestState {
             // out or receiving an error response on node restart because the
             // configuration was lost.
             vec![
-                Event::CrashNode(id.clone()),
+                Event::CrashNode(id),
                 Event::AbortConfiguration(latest_config.epoch),
             ]
         } else {
-            vec![Event::CrashNode(id.clone())]
+            vec![Event::CrashNode(id)]
         }
     }
 
