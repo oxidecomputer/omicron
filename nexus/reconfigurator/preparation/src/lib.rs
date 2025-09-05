@@ -86,6 +86,8 @@ pub struct PlanningInputFromDb<'a> {
     pub tuf_repo: TufRepoPolicy,
     pub old_repo: TufRepoPolicy,
     pub chicken_switches: PlannerChickenSwitches,
+    pub active_nexus_zones: Vec<OmicronZoneUuid>,
+    pub not_yet_nexus_zones: Vec<OmicronZoneUuid>,
     pub log: &'a Logger,
 }
 
@@ -202,6 +204,21 @@ impl PlanningInputFromDb<'_> {
             .await
             .internal_context("fetching oximeter read policy")?;
 
+        let active_nexus_zones = datastore
+            .get_active_db_metadata_nexus(opctx)
+            .await
+            .internal_context("fetching active nexuses")?
+            .into_iter()
+            .map(|z| z.nexus_id())
+            .collect::<Vec<_>>();
+        let not_yet_nexus_zones = datastore
+            .get_not_yet_db_metadata_nexus(opctx)
+            .await
+            .internal_context("fetching 'not yet' nexuses")?
+            .into_iter()
+            .map(|z| z.nexus_id())
+            .collect::<Vec<_>>();
+
         let planning_input = PlanningInputFromDb {
             sled_rows: &sled_rows,
             zpool_rows: &zpool_rows,
@@ -225,6 +242,8 @@ impl PlanningInputFromDb<'_> {
             tuf_repo,
             old_repo,
             chicken_switches,
+            active_nexus_zones,
+            not_yet_nexus_zones,
         }
         .build()
         .internal_context("assembling planning_input")?;
@@ -257,6 +276,12 @@ impl PlanningInputFromDb<'_> {
             self.internal_dns_version.into(),
             self.external_dns_version.into(),
             self.cockroachdb_settings.clone(),
+        );
+        builder.add_active_nexuses(
+            self.active_nexus_zones.clone().into_iter().collect(),
+        );
+        builder.add_not_yet_nexuses(
+            self.not_yet_nexus_zones.clone().into_iter().collect(),
         );
 
         let mut zpools_by_sled_id = {

@@ -21,6 +21,7 @@ use nexus_types::deployment::blueprint_zone_type;
 use omicron_common::address::DnsSubnet;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX;
+use omicron_common::api::external::Generation;
 use omicron_common::disk::DatasetKind;
 use omicron_common::disk::M2Slot;
 use omicron_uuid_kinds::MupdateOverrideUuid;
@@ -37,6 +38,7 @@ pub(crate) fn perform_all_blueprint_only_checks(blippy: &mut Blippy<'_>) {
     check_dataset_zpool_uniqueness(blippy);
     check_datasets(blippy);
     check_mupdate_override(blippy);
+    check_nexus_generation_consistency(blippy);
 }
 
 fn check_underlay_ips(blippy: &mut Blippy<'_>) {
@@ -629,6 +631,55 @@ fn check_mupdate_override_host_phase_2_contents(
             );
         }
         BlueprintHostPhase2DesiredContents::CurrentContents => {}
+    }
+}
+
+fn check_nexus_generation_consistency(blippy: &mut Blippy<'_>) {
+    use std::collections::HashMap;
+
+    // Map from generation -> (sled_id, image_source, zone)
+    let mut generation_info: HashMap<
+        Generation,
+        Vec<(SledUuid, BlueprintZoneImageSource, &BlueprintZoneConfig)>,
+    > = HashMap::new();
+
+    // Collect all Nexus zones and their generations
+    for (sled_id, zone) in blippy
+        .blueprint()
+        .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+    {
+        if let BlueprintZoneType::Nexus(nexus) = &zone.zone_type {
+            generation_info.entry(nexus.nexus_generation).or_default().push((
+                sled_id,
+                zone.image_source.clone(),
+                zone,
+            ));
+        }
+    }
+
+    // Check each generation for image source consistency
+    for (generation, zones_with_gen) in generation_info {
+        if zones_with_gen.len() < 2 {
+            continue; // Only one zone with this generation, no consistency issue
+        }
+
+        // Take the first zone as the reference
+        let (ref_sled_id, ref_image_source, ref_zone) = &zones_with_gen[0];
+
+        // Compare all other zones to the reference
+        for (_sled_id, image_source, zone) in &zones_with_gen[1..] {
+            if image_source != ref_image_source {
+                blippy.push_sled_note(
+                    *ref_sled_id,
+                    Severity::Fatal,
+                    SledKind::NexusZoneGenerationImageSourceMismatch {
+                        zone1: (*ref_zone).clone(),
+                        zone2: (*zone).clone(),
+                        generation,
+                    },
+                );
+            }
+        }
     }
 }
 
@@ -1804,6 +1855,107 @@ mod tests {
                 kind: Kind::Sled { sled_id, kind: host_phase_2_b_kind },
             },
         ];
+
+        let report =
+            Blippy::new(&blueprint).into_report(BlippyReportSortKey::Kind);
+        eprintln!("{}", report.display());
+        assert_eq!(report.notes(), &expected_notes);
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn test_nexus_generation_consistency() {
+        static TEST_NAME: &str = "test_nexus_generation_consistency";
+        let logctx = test_setup_log(TEST_NAME);
+        let (_, mut blueprint) =
+            ExampleSystemBuilder::new(&logctx.log, TEST_NAME)
+                .nsleds(3)
+                .nexus_count(3)
+                .build();
+
+        // Find the Nexus zones
+        let ((sled1, zone1_id), (sled2, zone2_id)) = {
+            let nexus_zones: Vec<_> = blueprint
+                .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+                .filter_map(|(sled_id, zone)| {
+                    if matches!(zone.zone_type, BlueprintZoneType::Nexus(_)) {
+                        Some((sled_id, zone))
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+
+            // Should have exactly 3 Nexus zones
+            assert_eq!(nexus_zones.len(), 3);
+
+            // Modify two zones to have the same generation but different image sources
+            let (sled1, zone1) = nexus_zones[0];
+            let (sled2, zone2) = nexus_zones[1];
+
+            ((sled1, zone1.id), (sled2, zone2.id))
+        };
+
+        let generation = Generation::new();
+
+        let zone1 = {
+            // Find the zones in the blueprint and modify them
+            let mut zone1_config = blueprint
+                .sleds
+                .get_mut(&sled1)
+                .unwrap()
+                .zones
+                .get_mut(&zone1_id)
+                .unwrap();
+
+            match &mut zone1_config.zone_type {
+                BlueprintZoneType::Nexus(nexus) => {
+                    nexus.nexus_generation = generation;
+                }
+                _ => unreachable!("this is a Nexus zone"),
+            }
+            zone1_config.image_source =
+                BlueprintZoneImageSource::InstallDataset;
+            zone1_config.clone()
+        };
+
+        let zone2 = {
+            let mut zone2_config = blueprint
+                .sleds
+                .get_mut(&sled2)
+                .unwrap()
+                .zones
+                .get_mut(&zone2_id)
+                .unwrap();
+
+            match &mut zone2_config.zone_type {
+                BlueprintZoneType::Nexus(nexus) => {
+                    nexus.nexus_generation = generation;
+                }
+                _ => unreachable!("this is a Nexus zone"),
+            }
+            zone2_config.image_source = BlueprintZoneImageSource::Artifact {
+                version: BlueprintArtifactVersion::Available {
+                    version: "1.0.0".parse().unwrap(),
+                },
+                hash: ArtifactHash([0; 32]),
+            };
+            zone2_config.clone()
+        };
+
+        // Run blippy checks
+        let expected_notes = [Note {
+            severity: Severity::Fatal,
+            kind: Kind::Sled {
+                sled_id: sled1,
+                kind: SledKind::NexusZoneGenerationImageSourceMismatch {
+                    zone1,
+                    zone2,
+                    generation,
+                },
+            },
+        }];
 
         let report =
             Blippy::new(&blueprint).into_report(BlippyReportSortKey::Kind);

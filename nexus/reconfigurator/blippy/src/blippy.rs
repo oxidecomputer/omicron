@@ -14,6 +14,7 @@ use nexus_types::inventory::ZpoolName;
 use omicron_common::address::DnsSubnet;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX;
+use omicron_common::api::external::Generation;
 use omicron_common::api::external::MacAddr;
 use omicron_common::disk::DatasetKind;
 use omicron_common::disk::M2Slot;
@@ -192,6 +193,12 @@ pub enum SledKind {
         slot: M2Slot,
         version: BlueprintArtifactVersion,
         hash: ArtifactHash,
+    },
+    /// Nexus zones with the same generation have different image sources.
+    NexusZoneGenerationImageSourceMismatch {
+        zone1: BlueprintZoneConfig,
+        zone2: BlueprintZoneConfig,
+        generation: Generation,
     },
 }
 
@@ -413,6 +420,18 @@ impl fmt::Display for SledKind {
                     "sled has remove_mupdate_override set ({mupdate_override_id}), \
                      but host phase 2 slot {slot} image source is set to Artifact \
                      (version {version}, hash {hash})",
+                )
+            }
+            SledKind::NexusZoneGenerationImageSourceMismatch {
+                zone1,
+                zone2,
+                generation,
+            } => {
+                write!(
+                    f,
+                    "Nexus zones {} and {} both have generation {generation} but \
+                     different image sources ({:?} vs {:?})",
+                    zone1.id, zone2.id, zone1.image_source, zone2.image_source,
                 )
             }
         }

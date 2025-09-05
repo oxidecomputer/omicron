@@ -56,6 +56,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use slog::Key;
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::fmt;
 use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
@@ -126,12 +127,14 @@ pub use planning_input::TufRepoContentsError;
 pub use planning_input::TufRepoPolicy;
 pub use planning_input::ZpoolFilter;
 pub use planning_report::CockroachdbUnsafeToShutdown;
+pub use planning_report::NexusGenerationBumpWaitingOn;
 pub use planning_report::PlanningAddStepReport;
 pub use planning_report::PlanningCockroachdbSettingsStepReport;
 pub use planning_report::PlanningDecommissionStepReport;
 pub use planning_report::PlanningExpungeStepReport;
 pub use planning_report::PlanningMgsUpdatesStepReport;
 pub use planning_report::PlanningMupdateOverrideStepReport;
+pub use planning_report::PlanningNexusGenerationBumpReport;
 pub use planning_report::PlanningNoopImageSourceSkipSledHostPhase2Reason;
 pub use planning_report::PlanningNoopImageSourceSkipSledZonesReason;
 pub use planning_report::PlanningNoopImageSourceSkipZoneReason;
@@ -404,6 +407,27 @@ impl Blueprint {
         };
 
         Ok(zone_config.nexus_generation < self.nexus_generation)
+    }
+
+    /// Given a set of Nexus zone UUIDs, returns the "nexus generation"
+    /// of the first one found in the blueprint.
+    pub fn find_generation_for_nexus(
+        &self,
+        nexus_zones: &BTreeSet<OmicronZoneUuid>,
+    ) -> Option<Generation> {
+        self.all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+            .find_map(|(_, blueprint_zone)| {
+                if nexus_zones.contains(&blueprint_zone.id) {
+                    match &blueprint_zone.zone_type {
+                        BlueprintZoneType::Nexus(nexus_zone) => {
+                            Some(nexus_zone.nexus_generation)
+                        }
+                        _ => None,
+                    }
+                } else {
+                    None
+                }
+            })
     }
 }
 
