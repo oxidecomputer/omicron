@@ -53,13 +53,13 @@ async fn test_quiesce(cptestctx: &ControlPlaneTestContext) {
     .await
     .expect("initial inventory collection");
 
-    let chicken_switches = datastore
+    let planner_config = datastore
         .reconfigurator_config_get_latest(&opctx)
         .await
-        .expect("obtained latest chicken switches")
-        .map_or_else(PlannerConfig::default, |cs| cs.config.planner_config);
+        .expect("obtained latest reconfigurator config")
+        .map_or_else(PlannerConfig::default, |c| c.config.planner_config);
     let planning_input =
-        PlanningInputFromDb::assemble(&opctx, &datastore, chicken_switches)
+        PlanningInputFromDb::assemble(&opctx, &datastore, planner_config)
             .await
             .expect("planning input");
     let target_blueprint = nexus

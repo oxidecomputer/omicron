@@ -4,7 +4,7 @@
 
 //! Background task for automatic update planning.
 
-use super::chicken_switches::ReconfiguratorChickenSwitchesLoaderState;
+use super::reconfigurator_config::ReconfiguratorConfigLoaderState;
 use crate::app::background::BackgroundTask;
 use chrono::Utc;
 use futures::future::BoxFuture;
@@ -26,7 +26,7 @@ use tokio::sync::watch::{self, Receiver, Sender};
 /// Background task that runs the update planner.
 pub struct BlueprintPlanner {
     datastore: Arc<DataStore>,
-    rx_chicken_switches: Receiver<ReconfiguratorChickenSwitchesLoaderState>,
+    rx_chicken_switches: Receiver<ReconfiguratorConfigLoaderState>,
     rx_inventory: Receiver<Option<CollectionUuid>>,
     rx_blueprint: Receiver<Option<Arc<(BlueprintTarget, Blueprint)>>>,
     tx_blueprint: Sender<Option<Arc<(BlueprintTarget, Blueprint)>>>,
@@ -35,7 +35,7 @@ pub struct BlueprintPlanner {
 impl BlueprintPlanner {
     pub fn new(
         datastore: Arc<DataStore>,
-        rx_chicken_switches: Receiver<ReconfiguratorChickenSwitchesLoaderState>,
+        rx_chicken_switches: Receiver<ReconfiguratorConfigLoaderState>,
         rx_inventory: Receiver<Option<CollectionUuid>>,
         rx_blueprint: Receiver<Option<Arc<(BlueprintTarget, Blueprint)>>>,
     ) -> Self {
@@ -63,14 +63,14 @@ impl BlueprintPlanner {
         // from the database yet. (There might not be any in the db, which is
         // fine! But the loading task needs to have a chance to check.)
         let switches = match &*self.rx_chicken_switches.borrow_and_update() {
-            ReconfiguratorChickenSwitchesLoaderState::NotYetLoaded => {
+            ReconfiguratorConfigLoaderState::NotYetLoaded => {
                 debug!(
                     opctx.log,
                     "chicken switches not yet loaded; doing nothing"
                 );
                 return BlueprintPlannerStatus::Disabled;
             }
-            ReconfiguratorChickenSwitchesLoaderState::Loaded(switches) => {
+            ReconfiguratorConfigLoaderState::Loaded(switches) => {
                 switches.clone()
             }
         };
@@ -340,7 +340,7 @@ mod test {
 
         // Enable the planner
         let (_tx, chicken_switches_collector_rx) =
-            watch::channel(ReconfiguratorChickenSwitchesLoaderState::Loaded(
+            watch::channel(ReconfiguratorConfigLoaderState::Loaded(
                 ReconfiguratorConfigView {
                     version: 1,
                     config: ReconfiguratorConfig {
