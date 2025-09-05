@@ -574,43 +574,67 @@ fn try_make_update(
         return update_actions;
     }
 
-    if let Some(update) =
-        try_make_update_rot(log, baseboard_id, inventory, current_artifacts)
-            .or_else(|| {
-                try_make_update_sp(
-                    log,
-                    baseboard_id,
-                    inventory,
-                    current_artifacts,
-                )
-            })
-    {
-        // We have a non-host update; there are no pending host phase 2 changes
-        // necessary.
-        // TODO-K: Clean up all of the returns
-        return PendingMgsUpdateActions {
-            pending_update: Some(update),
-            pending_host_os_phase2_changes: PendingHostPhase2Changes::empty(),
-            skipped_updates,
-        };
+    let pending_rot = match try_make_update_rot(
+        log,
+        baseboard_id,
+        inventory,
+        current_artifacts,
+    ) {
+        Ok(p) => match p {
+            Some(update) => Some(PendingMgsUpdateActions {
+                pending_update: Some(update),
+                pending_host_os_phase2_changes: PendingHostPhase2Changes::empty(
+                ),
+                skipped_updates: skipped_updates.clone(),
+            }),
+            None => None,
+        },
+        Err(e) => {
+            skipped_updates.push(SkippedMgsUpdate {
+                baseboard_id: baseboard_id.clone(),
+                component: MgsUpdateComponent::Rot,
+                reason: e,
+            });
+            None
+            // TODO-K: remove debugging log
+            // warn!(log, "HERE: {:?}", skipped_mgs_updates);
+        }
+    };
+
+    if let Some(update_actions) = pending_rot {
+        return update_actions;
     }
 
-    // if let Some(update) = try_make_update_rot_bootloader(
-    //     log,
-    //     baseboard_id,
-    //     inventory,
-    //     current_artifacts,
-    // )
-    // .or_else(|| {
-    //     try_make_update_rot(log, baseboard_id, inventory, current_artifacts)
-    // })
-    // .or_else(|| {
-    //     try_make_update_sp(log, baseboard_id, inventory, current_artifacts)
-    // }) {
-    //     // We have a non-host update; there are no pending host phase 2 changes
-    //     // necessary.
-    //     return Some((update, PendingHostPhase2Changes::empty()));
-    // }
+    let pending_sp = match try_make_update_sp(
+        log,
+        baseboard_id,
+        inventory,
+        current_artifacts,
+    ) {
+        Ok(p) => match p {
+            Some(update) => Some(PendingMgsUpdateActions {
+                pending_update: Some(update),
+                pending_host_os_phase2_changes: PendingHostPhase2Changes::empty(
+                ),
+                skipped_updates: skipped_updates.clone(),
+            }),
+            None => None,
+        },
+        Err(e) => {
+            skipped_updates.push(SkippedMgsUpdate {
+                baseboard_id: baseboard_id.clone(),
+                component: MgsUpdateComponent::Sp,
+                reason: e,
+            });
+            None
+            // TODO-K: remove debugging log
+            // warn!(log, "HERE: {:?}", skipped_mgs_updates);
+        }
+    };
+
+    if let Some(update_actions) = pending_sp {
+        return update_actions;
+    }
 
     match host_phase_1::try_make_update(
         log,
@@ -642,8 +666,6 @@ fn try_make_update(
                 component: MgsUpdateComponent::HostOs,
                 reason: e,
             });
-            // TODO-K: remove debugging log
-            // warn!(log, "HERE2: {:?}", skipped_updates);
             PendingMgsUpdateActions {
                 pending_update: None,
                 pending_host_os_phase2_changes: PendingHostPhase2Changes::empty(

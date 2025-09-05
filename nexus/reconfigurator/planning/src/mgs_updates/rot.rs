@@ -13,6 +13,7 @@ use nexus_types::deployment::ExpectedVersion;
 use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdateDetails;
 use nexus_types::deployment::PendingMgsUpdateRotDetails;
+use nexus_types::deployment::planning_report::FailedMgsUpdateReason;
 use nexus_types::inventory::BaseboardId;
 use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::Collection;
@@ -105,7 +106,7 @@ pub fn try_make_update_rot(
     baseboard_id: &Arc<BaseboardId>,
     inventory: &Collection,
     current_artifacts: &TufRepoDescription,
-) -> Option<PendingMgsUpdate> {
+) -> Result<Option<PendingMgsUpdate>, FailedMgsUpdateReason> {
     let Some(sp_info) = inventory.sps.get(baseboard_id) else {
         warn!(
             log,
@@ -113,7 +114,7 @@ pub fn try_make_update_rot(
              (missing SP info from inventory)";
             baseboard_id
         );
-        return None;
+        return Err(FailedMgsUpdateReason::SpNotInInventory);
     };
 
     let Some(rot_state) = inventory.rots.get(baseboard_id) else {
@@ -123,7 +124,7 @@ pub fn try_make_update_rot(
              (missing RoT state from inventory)";
             baseboard_id
         );
-        return None;
+        return Err(FailedMgsUpdateReason::RotStateNotInInventory);
     };
 
     let active_slot = rot_state.active_slot;
@@ -137,7 +138,7 @@ pub fn try_make_update_rot(
              (missing active slot {active_slot} caboose from inventory)";
             baseboard_id,
         );
-        return None;
+        return Err(FailedMgsUpdateReason::CabooseNotInInventory);
     };
 
     let Ok(expected_active_version) = active_caboose.caboose.version.parse()
@@ -149,7 +150,7 @@ pub fn try_make_update_rot(
             baseboard_id,
             "found_version" => &active_caboose.caboose.version,
         );
-        return None;
+        return Err(FailedMgsUpdateReason::FailedVersionParse);
     };
 
     let board = &active_caboose.caboose.board;
@@ -160,7 +161,7 @@ pub fn try_make_update_rot(
              (missing sign in caboose from inventory)";
             baseboard_id
         );
-        return None;
+        return Err(FailedMgsUpdateReason::CabooseMissingSign);
     };
 
     let matching_artifacts: Vec<_> = current_artifacts
@@ -224,7 +225,7 @@ pub fn try_make_update_rot(
             "cannot configure RoT update for board (no matching artifact)";
             baseboard_id,
         );
-        return None;
+        return Err(FailedMgsUpdateReason::NoMatchingArtifactFound);
     }
 
     if matching_artifacts.len() > 1 {
@@ -241,7 +242,7 @@ pub fn try_make_update_rot(
     // needed.
     if artifact.id.version == expected_active_version {
         debug!(log, "no RoT update needed for board"; baseboard_id);
-        return None;
+        return Ok(None);
     }
 
     let expected_active_slot = ExpectedActiveRotSlot {
@@ -267,11 +268,11 @@ pub fn try_make_update_rot(
                  (found inactive slot contents but version was not valid)";
                 baseboard_id
             );
-            return None;
+            return Err(FailedMgsUpdateReason::FailedVersionParse);
         }
     };
 
-    Some(PendingMgsUpdate {
+    Ok(Some(PendingMgsUpdate {
         baseboard_id: baseboard_id.clone(),
         sp_type: sp_info.sp_type,
         slot_id: sp_info.sp_slot,
@@ -287,5 +288,5 @@ pub fn try_make_update_rot(
         }),
         artifact_hash: artifact.hash,
         artifact_version: artifact.id.version.clone(),
-    })
+    }))
 }

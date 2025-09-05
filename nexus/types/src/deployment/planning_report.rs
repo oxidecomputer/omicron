@@ -509,6 +509,7 @@ pub enum FailedMgsUpdateReason {
     CabooseMissingSign,
     /// The component's caboose was not found in the inventory
     #[error("caboose is not in inventory")]
+    // TODO-K: add CabooseWhich
     CabooseNotInInventory,
     /// The version in the caboose or artifact was not able to be parsed
     #[error("version could not be parsed")]
@@ -522,6 +523,9 @@ pub enum FailedMgsUpdateReason {
     /// No artifact with the required conditions for the component was found
     #[error("no matching artifact was found")]
     NoMatchingArtifactFound,
+    /// RoT state was not found in inventory
+    #[error("rot state is not in inventory")]
+    RotStateNotInInventory,
     /// Sled agent info was not found in inventory
     #[error("sled agent info is not in inventory")]
     SledAgentInfoNotInInventory,

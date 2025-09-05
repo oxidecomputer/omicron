@@ -11,6 +11,7 @@ use nexus_types::deployment::ExpectedVersion;
 use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdateDetails;
 use nexus_types::deployment::PendingMgsUpdateSpDetails;
+use nexus_types::deployment::planning_report::FailedMgsUpdateReason;
 use nexus_types::inventory::BaseboardId;
 use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::Collection;
@@ -59,7 +60,7 @@ pub fn try_make_update_sp(
     baseboard_id: &Arc<BaseboardId>,
     inventory: &Collection,
     current_artifacts: &TufRepoDescription,
-) -> Option<PendingMgsUpdate> {
+) -> Result<Option<PendingMgsUpdate>, FailedMgsUpdateReason> {
     let Some(sp_info) = inventory.sps.get(baseboard_id) else {
         warn!(
             log,
@@ -67,7 +68,7 @@ pub fn try_make_update_sp(
              (missing SP info from inventory)";
             baseboard_id
         );
-        return None;
+        return Err(FailedMgsUpdateReason::SpNotInInventory);
     };
 
     let Some(active_caboose) =
@@ -79,7 +80,7 @@ pub fn try_make_update_sp(
              (missing active caboose from inventory)";
             baseboard_id,
         );
-        return None;
+        return Err(FailedMgsUpdateReason::CabooseNotInInventory);
     };
 
     let Ok(expected_active_version) = active_caboose.caboose.version.parse()
@@ -91,7 +92,7 @@ pub fn try_make_update_sp(
             baseboard_id,
             "found_version" => &active_caboose.caboose.version,
         );
-        return None;
+        return Err(FailedMgsUpdateReason::FailedVersionParse);
     };
 
     let board = &active_caboose.caboose.board;
@@ -137,7 +138,7 @@ pub fn try_make_update_sp(
             "cannot configure SP update for board (no matching artifact)";
             baseboard_id,
         );
-        return None;
+        return Err(FailedMgsUpdateReason::NoMatchingArtifactFound);
     }
 
     if matching_artifacts.len() > 1 {
@@ -153,7 +154,7 @@ pub fn try_make_update_sp(
     // needed.
     if artifact.id.version == expected_active_version {
         debug!(log, "no SP update needed for board"; baseboard_id);
-        return None;
+        return Ok(None);
     }
 
     // Begin configuring an update.
@@ -171,11 +172,11 @@ pub fn try_make_update_sp(
                  (found inactive slot contents but version was not valid)";
                 baseboard_id
             );
-            return None;
+            return Err(FailedMgsUpdateReason::FailedVersionParse);
         }
     };
 
-    Some(PendingMgsUpdate {
+    Ok(Some(PendingMgsUpdate {
         baseboard_id: baseboard_id.clone(),
         sp_type: sp_info.sp_type,
         slot_id: sp_info.sp_slot,
@@ -185,5 +186,5 @@ pub fn try_make_update_sp(
         }),
         artifact_hash: artifact.hash,
         artifact_version: artifact.id.version.clone(),
-    })
+    }))
 }
