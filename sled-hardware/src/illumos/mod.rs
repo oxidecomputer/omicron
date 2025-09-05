@@ -143,7 +143,8 @@ impl HardwareSnapshot {
             )));
         };
         let root_node = root.node_name();
-        let Some(sled_type) = OxideSled::try_from_root_node_name(&root_node) else {
+        let Some(sled_type) = OxideSled::try_from_root_node_name(&root_node)
+        else {
             return Err(Error::NotAnOxideSled(root_node));
         };
 
@@ -174,7 +175,13 @@ impl HardwareSnapshot {
         while let Some(node) =
             node_walker.next().transpose().map_err(Error::DevInfo)?
         {
-            poll_blkdev_node(&log, sled_type, &mut disks, node, boot_storage_unit)?;
+            poll_blkdev_node(
+                &log,
+                sled_type,
+                &mut disks,
+                node,
+                boot_storage_unit,
+            )?;
         }
 
         Ok(Self { tofino, disks, baseboard })
@@ -294,7 +301,7 @@ impl HardwareView {
             }
         }
 
-        use HardwareUpdate::{DiskRemoved, DiskAdded, DiskUpdated};
+        use HardwareUpdate::{DiskAdded, DiskRemoved, DiskUpdated};
         for disk in removed {
             updates.push(DiskRemoved(disk));
         }
@@ -321,7 +328,11 @@ fn slot_to_disk_variant(sled: OxideSled, slot: i64) -> Option<DiskVariant> {
     }
 }
 
-fn slot_is_boot_disk(sled: OxideSled, slot: i64, boot_storage_unit: BootStorageUnit) -> bool {
+fn slot_is_boot_disk(
+    sled: OxideSled,
+    slot: i64,
+    boot_storage_unit: BootStorageUnit,
+) -> bool {
     let slots = sled.bootdisk_slots();
     match boot_storage_unit {
         BootStorageUnit::A => slots[0] == slot,

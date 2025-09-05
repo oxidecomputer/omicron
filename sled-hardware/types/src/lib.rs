@@ -2,9 +2,9 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::ops::RangeInclusive;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use std::ops::RangeInclusive;
 
 pub mod underlay;
 
@@ -40,7 +40,7 @@ impl OxideSled {
 
     pub fn bootdisk_slots(&self) -> [i64; 2] {
         match self {
-            Self::Gimlet | Self::Cosmo => [ 0x11, 0x12 ],
+            Self::Gimlet | Self::Cosmo => [0x11, 0x12],
         }
     }
 }
@@ -90,11 +90,7 @@ impl Baseboard {
         Self::Gimlet { identifier, model, revision }
     }
 
-    pub fn new_cosmo(
-        identifier: String,
-        model: String,
-        revision: u32,
-    ) -> Self {
+    pub fn new_cosmo(identifier: String, model: String, revision: u32) -> Self {
         Self::Cosmo { identifier, model, revision }
     }
 

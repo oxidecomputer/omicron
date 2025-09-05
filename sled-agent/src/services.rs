@@ -2979,7 +2979,8 @@ impl ServiceManager {
                         Error::Underlay(underlay::Error::SystemDetection(e))
                     })?;
 
-                    let maghemite_interfaces: Vec<AddrObject> = if is_oxide_sled {
+                    let maghemite_interfaces: Vec<AddrObject> = if is_oxide_sled
+                    {
                         (0..32)
                             .map(|i| {
                                 // See the `tfport_name` function
