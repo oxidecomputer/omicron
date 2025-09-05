@@ -537,6 +537,77 @@ impl TestState {
         events
     }
 
+    // At the end of the test, we look at the last configuration. If Nexus
+    // is still preparing or has committed the last configuration then we
+    // attempt to guarantee that all nodes in the configuration commit and that
+    // we can load the identical rack secrets at all of them. If the latest
+    // configuration has aborted, we will start a new reconfiguration and drive
+    // it to completion.
+    fn ensure_liveness(
+        &mut self,
+        event_log: &mut EventLog,
+    ) -> Result<(), TestCaseError> {
+        let latest_config = self.tq_state.nexus.latest_config().clone();
+        match latest_config.op {
+            NexusOp::Committed | NexusOp::Preparing => {
+                let crashed: Vec<_> = latest_config
+                    .members
+                    .iter()
+                    .filter(|&id| self.tq_state.crashed_nodes.contains(id))
+                    .cloned()
+                    .collect();
+
+                // Restart all crashed nodes
+                for id in crashed {
+                    // We aren't trying to randomize the connection order to
+                    // test safety due to interleavings here. We just are trying
+                    // to drive the system to an equlibrium state.
+                    let to_connect: Vec<_> = self
+                        .tq_state
+                        .member_universe
+                        .iter()
+                        .filter(|id| !self.tq_state.crashed_nodes.contains(id))
+                        .cloned()
+                        .collect();
+                    let event =
+                        Event::RestartNode { id, connection_order: to_connect };
+                    event_log.record(&event);
+                    let affected_nodes = event.affected_nodes();
+                    self.tq_state.apply_event(event);
+                    self.check_invariants(affected_nodes)?;
+                }
+
+                // Deliver all messages until there are no more to deliver
+                loop {
+                    let Some((id, envelopes)) =
+                        self.tq_state.bootstrap_network.first_key_value()
+                    else {
+                        break;
+                    };
+
+                    let envelope = envelopes
+                        .last()
+                        .unwrap_or_else(|| panic!("envelope exists at {id}"))
+                        .clone();
+                    let event = Event::DeliverEnvelope(envelope);
+                    event_log.record(&event);
+                    let affected_nodes = event.affected_nodes();
+                    self.tq_state.apply_event(event);
+                    self.check_invariants(affected_nodes)?;
+                }
+
+                // TODO: Load and compare rack secrets
+                // TODO: This test should fail sometimes because some nodes will
+                // require a `PrepareAndCommit` from Nexus to get the latest configuration
+                // and be able to load shares. We'll implement that before opening the PR
+            }
+            NexusOp::Aborted => {
+                // TODO: Start a reconfiguration and drive that to completion
+            }
+        }
+        Ok(())
+    }
+
     /// At every point during the running of the test, invariants over the system
     /// must hold.
     ///
@@ -915,15 +986,9 @@ fn test_trust_quorum_protocol(input: TestInput) {
     // Start executing the actions
     state.run_actions(input.actions, &mut event_log)?;
 
-    let alive_nodes: BTreeSet<_> = state
-        .tq_state
-        .member_universe
-        .iter()
-        .filter(|m| !state.tq_state.crashed_nodes.contains(m))
-        .collect();
-
-    println!("alive nodes = {:?}\n", alive_nodes);
-    println!("crashed nodes = {:?}\n\n", state.tq_state.crashed_nodes);
+    // Ensure all nodes in the latest configuration can load the same rack
+    // secrets once they are up and there are no more messages to deliver.
+    state.ensure_liveness(&mut event_log)?;
 
     info!(
         log,
