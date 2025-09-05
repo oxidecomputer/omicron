@@ -238,7 +238,7 @@ impl<'a> Planner<'a> {
 
         Ok(PlanningReport {
             blueprint_id: self.blueprint.new_blueprint_id(),
-            chicken_switches: *self.input.chicken_switches(),
+            planner_config: *self.input.chicken_switches(),
             expunge,
             decommission,
             noop_image_source,

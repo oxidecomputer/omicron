@@ -2351,7 +2351,7 @@ INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noo
 INFO altered physical disks, sled_id: c3bc4c6d-fdde-4fc4-8493-89d2a1e5ee6b, sled_edits: SledEditCounts { disks: EditCounts { added: 10, updated: 0, expunged: 0, removed: 0 }, datasets: EditCounts { added: 20, updated: 0, expunged: 0, removed: 0 }, zones: EditCounts { added: 0, updated: 0, expunged: 0, removed: 0 } }
 generated blueprint 27e755bc-dc10-4647-853c-f89bb3a15a2c based on parent blueprint 61a93ea3-c872-48e0-aace-e86b0c52b839
 planning report for blueprint 27e755bc-dc10-4647-853c-f89bb3a15a2c:
-chicken switches:
+planner config:
     add zones with mupdate override:   true
 
 * skipping noop zone image source check on sled c3bc4c6d-fdde-4fc4-8493-89d2a1e5ee6b: all 0 zones are already from artifacts
@@ -2359,7 +2359,7 @@ chicken switches:
 * zone adds and updates are blocked:
   - current target release generation (4) is lower than minimum required by blueprint (5)
   - sleds have remove mupdate override set in blueprint: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
-* adding zones despite being blocked, as specified by the `add_zones_with_mupdate_override` chicken switch
+* adding zones despite being blocked, as specified by the `add_zones_with_mupdate_override` planner config option
 * discretionary zone placement waiting for NTP zones on sleds: c3bc4c6d-fdde-4fc4-8493-89d2a1e5ee6b
 * missing NTP zone on sled c3bc4c6d-fdde-4fc4-8493-89d2a1e5ee6b
 * zone updates waiting on zone add blockers
