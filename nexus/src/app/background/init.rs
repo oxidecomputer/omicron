@@ -488,7 +488,7 @@ impl BackgroundTasksInitializer {
         driver.register(TaskDefinition {
             name: "reconfigurator_config_watcher",
             description: "watch db for reconfigurator config changes",
-            period: config.blueprints.period_secs_load_chicken_switches,
+            period: config.blueprints.period_secs_load_reconfigurator_config,
             task_impl: Box::new(reconfigurator_config_loader),
             opctx: opctx.child(BTreeMap::new()),
             watchers: vec![],

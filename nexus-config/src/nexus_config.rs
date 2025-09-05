@@ -616,9 +616,9 @@ pub struct BlueprintTasksConfig {
     pub period_secs_collect_crdb_node_ids: Duration,
 
     /// period (in seconds) for periodic activations of the background task that
-    /// reads chicken switches from the database
+    /// reads the reconfigurator config from the database
     #[serde_as(as = "DurationSeconds<u64>")]
-    pub period_secs_load_chicken_switches: Duration,
+    pub period_secs_load_reconfigurator_config: Duration,
 }
 
 #[serde_as]
@@ -857,7 +857,7 @@ pub struct PackageConfig {
     /// Maghemite mgd daemon configuration
     #[serde(default)]
     pub mgd: HashMap<SwitchLocation, MgdConfig>,
-    /// Initial reconfigurator chicken switches
+    /// Initial reconfigurator config
     ///
     /// We use this hook to disable reconfigurator automation in the test suite
     #[serde(default)]
@@ -1065,7 +1065,7 @@ mod test {
             address = "[::1]:12224"
             [mgd.switch0]
             address = "[::1]:4676"
-            [initial_reconfigurator_chicken_switches]
+            [initial_reconfigurator_config]
             planner_enabled = true
             planner_switches.add_zones_with_mupdate_override = true
             [background_tasks]
@@ -1093,7 +1093,7 @@ mod test {
             blueprints.period_secs_execute = 60
             blueprints.period_secs_rendezvous = 300
             blueprints.period_secs_collect_crdb_node_ids = 180
-            blueprints.period_secs_load_chicken_switches= 5
+            blueprints.period_secs_load_reconfigurator_config = 5
             sync_service_zone_nat.period_secs = 30
             switch_port_settings_manager.period_secs = 30
             region_replacement.period_secs = 30
@@ -1265,7 +1265,7 @@ mod test {
                             period_secs_collect_crdb_node_ids:
                                 Duration::from_secs(180),
                             period_secs_rendezvous: Duration::from_secs(300),
-                            period_secs_load_chicken_switches:
+                            period_secs_load_reconfigurator_config:
                                 Duration::from_secs(5)
                         },
                         sync_service_zone_nat: SyncServiceZoneNatConfig {
@@ -1415,7 +1415,7 @@ mod test {
             blueprints.period_secs_execute = 60
             blueprints.period_secs_rendezvous = 300
             blueprints.period_secs_collect_crdb_node_ids = 180
-            blueprints.period_secs_load_chicken_switches= 5
+            blueprints.period_secs_load_reconfigurator_config = 5
             sync_service_zone_nat.period_secs = 30
             switch_port_settings_manager.period_secs = 30
             region_replacement.period_secs = 30

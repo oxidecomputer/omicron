@@ -268,10 +268,6 @@ task: "blueprint_rendezvous"
     owned rendezvous tables that other subsystems consume
 
 
-task: "chicken_switches_watcher"
-    watch db for chicken switch changes
-
-
 task: "crdb_node_id_collector"
     Collects node IDs of running CockroachDB zones
 
@@ -355,6 +351,10 @@ task: "physical_disk_adoption"
 
 task: "read_only_region_replacement_start"
     detect if read-only regions need replacement and begin the process
+
+
+task: "reconfigurator_config_watcher"
+    watch db for reconfigurator config changes
 
 
 task: "region_replacement"
@@ -550,12 +550,6 @@ task: "blueprint_rendezvous"
         num_already_exist:    0
         num_not_in_inventory: 0
 
-task: "chicken_switches_watcher"
-  configured period: every <REDACTED_DURATION>s
-  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
-    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-warning: unknown background task: "chicken_switches_watcher" (don't know how to interpret details: Object {"chicken_switches_updated": Bool(false)})
-
 task: "crdb_node_id_collector"
   configured period: every <REDACTED_DURATION>m
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
@@ -660,6 +654,12 @@ task: "read_only_region_replacement_start"
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     total requests created ok: 0
     errors: 0
+
+task: "reconfigurator_config_watcher"
+  configured period: every <REDACTED_DURATION>s
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+warning: unknown background task: "reconfigurator_config_watcher" (don't know how to interpret details: Object {"config_updated": Bool(false)})
 
 task: "region_replacement"
   configured period: every <REDACTED_DURATION>days <REDACTED_DURATION>h <REDACTED_DURATION>m <REDACTED_DURATION>s
@@ -1068,12 +1068,6 @@ task: "blueprint_rendezvous"
         num_already_exist:    0
         num_not_in_inventory: 0
 
-task: "chicken_switches_watcher"
-  configured period: every <REDACTED_DURATION>s
-  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
-    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-warning: unknown background task: "chicken_switches_watcher" (don't know how to interpret details: Object {"chicken_switches_updated": Bool(false)})
-
 task: "crdb_node_id_collector"
   configured period: every <REDACTED_DURATION>m
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
@@ -1178,6 +1172,12 @@ task: "read_only_region_replacement_start"
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     total requests created ok: 0
     errors: 0
+
+task: "reconfigurator_config_watcher"
+  configured period: every <REDACTED_DURATION>s
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+warning: unknown background task: "reconfigurator_config_watcher" (don't know how to interpret details: Object {"config_updated": Bool(false)})
 
 task: "region_replacement"
   configured period: every <REDACTED_DURATION>days <REDACTED_DURATION>h <REDACTED_DURATION>m <REDACTED_DURATION>s
