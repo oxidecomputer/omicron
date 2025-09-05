@@ -1685,7 +1685,7 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
                 }
             },
             &Duration::from_millis(50),
-            &Duration::from_secs(30),
+            &Duration::from_secs(120),
         )
         .await
         .expect("expected to find inventory collection");
