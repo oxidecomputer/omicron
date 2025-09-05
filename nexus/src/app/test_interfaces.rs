@@ -103,7 +103,7 @@ impl TestInterfaces for super::Nexus {
             return Ok(None);
         };
 
-        let sled_id = SledUuid::from_untyped_uuid(vmm.sled_id);
+        let sled_id = vmm.sled_id();
         Ok(Some(InstanceSledAgentInfo {
             propolis_id: PropolisUuid::from_untyped_uuid(vmm.id),
             sled_id,

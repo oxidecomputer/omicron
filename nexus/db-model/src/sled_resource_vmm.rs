@@ -61,4 +61,16 @@ impl SledResourceVmm {
             resources,
         }
     }
+
+    pub fn id(&self) -> PropolisUuid {
+        self.id.into()
+    }
+
+    pub fn sled_id(&self) -> SledUuid {
+        self.sled_id.into()
+    }
+
+    pub fn instance_id(&self) -> Option<InstanceUuid> {
+        self.instance_id.map(|x| x.into())
+    }
 }

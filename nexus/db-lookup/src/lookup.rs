@@ -284,7 +284,7 @@ impl<'a> LookupPath<'a> {
     }
 
     /// Select a resource of type Sled, identified by its id
-    pub fn sled_id(self, id: Uuid) -> Sled<'a> {
+    pub fn sled_id(self, id: SledUuid) -> Sled<'a> {
         Sled::PrimaryKey(Root { lookup_root: self }, id)
     }
 
@@ -774,7 +774,7 @@ lookup_resource! {
     ancestors = [],
     lookup_by_name = false,
     soft_deletes = true,
-    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+    primary_key_columns = [ { column_name = "id", uuid_kind = SledKind } ]
 }
 
 lookup_resource! {

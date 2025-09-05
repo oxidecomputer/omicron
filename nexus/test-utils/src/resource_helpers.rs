@@ -1564,14 +1564,14 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
                 model: disk_identity.model.clone(),
                 variant:
                     nexus_types::external_api::params::PhysicalDiskKind::U2,
-                sled_id: sled_id.into_untyped_uuid(),
+                sled_id,
             };
 
         let zpool_request =
             nexus_types::internal_api::params::ZpoolPutRequest {
                 id: zpool.id.into_untyped_uuid(),
                 physical_disk_id,
-                sled_id: sled_id.into_untyped_uuid(),
+                sled_id,
             };
 
         // Find the sled on which we're adding a zpool

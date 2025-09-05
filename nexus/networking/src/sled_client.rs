@@ -10,16 +10,16 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::LookupResult;
+use omicron_uuid_kinds::SledUuid;
 use sled_agent_client::Client as SledAgentClient;
 use slog::Logger;
 use slog::o;
 use std::net::SocketAddrV6;
-use uuid::Uuid;
 
 pub fn sled_lookup<'a>(
     datastore: &'a DataStore,
     opctx: &'a OpContext,
-    sled_id: Uuid,
+    sled_id: SledUuid,
 ) -> LookupResult<lookup::Sled<'a>> {
     let sled = LookupPath::new(opctx, datastore).sled_id(sled_id);
     Ok(sled)
@@ -33,7 +33,7 @@ pub fn default_reqwest_client_builder() -> reqwest::ClientBuilder {
 pub async fn sled_client(
     datastore: &DataStore,
     lookup_opctx: &OpContext,
-    sled_id: Uuid,
+    sled_id: SledUuid,
     log: &Logger,
 ) -> Result<SledAgentClient, Error> {
     let client = default_reqwest_client_builder().build().unwrap();
@@ -43,7 +43,7 @@ pub async fn sled_client(
 pub async fn sled_client_ext(
     datastore: &DataStore,
     lookup_opctx: &OpContext,
-    sled_id: Uuid,
+    sled_id: SledUuid,
     log: &Logger,
     client: reqwest::Client,
 ) -> Result<SledAgentClient, Error> {
@@ -54,7 +54,7 @@ pub async fn sled_client_ext(
 }
 
 pub fn sled_client_from_address(
-    sled_id: Uuid,
+    sled_id: SledUuid,
     address: SocketAddrV6,
     log: &Logger,
 ) -> SledAgentClient {
@@ -63,7 +63,7 @@ pub fn sled_client_from_address(
 }
 
 pub fn sled_client_from_address_ext(
-    sled_id: Uuid,
+    sled_id: SledUuid,
     address: SocketAddrV6,
     log: &Logger,
     client: reqwest::Client,

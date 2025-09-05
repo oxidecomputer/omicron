@@ -119,7 +119,7 @@ async fn test_physical_disk_create_list_delete(
     // Inject a disk into the database, observe it in the external API
     let nexus = &cptestctx.server.server_context().nexus;
     let datastore = nexus.datastore();
-    let sled_id = Uuid::from_str(&SLED_AGENT_UUID).unwrap();
+    let sled_id = SledUuid::from_str(&SLED_AGENT_UUID).unwrap();
     let physical_disk = DbPhysicalDisk::new(
         PhysicalDiskUuid::new_v4(),
         "v".into(),

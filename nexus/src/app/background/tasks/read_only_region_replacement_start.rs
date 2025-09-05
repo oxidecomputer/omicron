@@ -324,7 +324,7 @@ mod test {
         datastore
             .physical_disk_update_policy(
                 &opctx,
-                db_zpool.physical_disk_id.into(),
+                db_zpool.physical_disk_id(),
                 PhysicalDiskPolicy::Expunged,
             )
             .await

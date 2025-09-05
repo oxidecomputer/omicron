@@ -11,6 +11,8 @@ use db_macros::Asset;
 use nexus_db_schema::schema::{crucible_dataset, zpool};
 use omicron_uuid_kinds::PhysicalDiskKind;
 use omicron_uuid_kinds::PhysicalDiskUuid;
+use omicron_uuid_kinds::SledKind;
+use omicron_uuid_kinds::SledUuid;
 use uuid::Uuid;
 
 /// Database representation of a Pool.
@@ -26,7 +28,7 @@ pub struct Zpool {
     rcgen: Generation,
 
     // Sled to which this Zpool belongs.
-    pub sled_id: Uuid,
+    pub sled_id: DbTypedUuid<SledKind>,
 
     // The physical disk to which this Zpool is attached.
     pub physical_disk_id: DbTypedUuid<PhysicalDiskKind>,
@@ -49,7 +51,7 @@ pub struct Zpool {
 impl Zpool {
     pub fn new(
         id: Uuid,
-        sled_id: Uuid,
+        sled_id: SledUuid,
         physical_disk_id: PhysicalDiskUuid,
         control_plane_storage_buffer: ByteCount,
     ) -> Self {
@@ -57,7 +59,7 @@ impl Zpool {
             identity: ZpoolIdentity::new(id),
             time_deleted: None,
             rcgen: Generation::new(),
-            sled_id,
+            sled_id: sled_id.into(),
             physical_disk_id: physical_disk_id.into(),
             control_plane_storage_buffer,
         }
@@ -69,6 +71,14 @@ impl Zpool {
 
     pub fn control_plane_storage_buffer(&self) -> ByteCount {
         self.control_plane_storage_buffer
+    }
+
+    pub fn sled_id(&self) -> SledUuid {
+        self.sled_id.into()
+    }
+
+    pub fn physical_disk_id(&self) -> PhysicalDiskUuid {
+        self.physical_disk_id.into()
     }
 }
 

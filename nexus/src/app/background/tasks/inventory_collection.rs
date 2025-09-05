@@ -278,6 +278,7 @@ mod test {
     use omicron_common::api::external::ByteCount;
     use omicron_common::api::external::LookupType;
     use omicron_uuid_kinds::CollectionUuid;
+    use omicron_uuid_kinds::SledUuid;
     use std::collections::BTreeSet;
     use std::net::Ipv6Addr;
     use std::net::SocketAddrV6;
@@ -430,7 +431,7 @@ mod test {
         let mut sleds = Vec::new();
         for i in 0..64 {
             let sled = SledUpdate::new(
-                Uuid::new_v4(),
+                SledUuid::new_v4(),
                 SocketAddrV6::new(Ipv6Addr::LOCALHOST, 1200 + i, 0, 0),
                 1200 + i,
                 SledBaseboard {
@@ -471,7 +472,7 @@ mod test {
         let authz_sled = authz::Sled::new(
             authz::FLEET,
             expunged_sled_id,
-            LookupType::ById(expunged_sled_id),
+            LookupType::by_id(expunged_sled_id),
         );
         datastore
             .sled_set_policy_to_expunged(&opctx, &authz_sled)

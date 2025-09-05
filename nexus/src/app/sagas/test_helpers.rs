@@ -228,7 +228,7 @@ pub(super) async fn instance_fetch_vmm_and_sled_ids(
         .expect("can only fetch VMM and sled IDs for an active instance");
 
     let vmm_id = PropolisUuid::from_untyped_uuid(vmm.id);
-    let sled_id = SledUuid::from_untyped_uuid(vmm.sled_id);
+    let sled_id = vmm.sled_id();
     VmmAndSledIds { vmm_id, sled_id }
 }
 

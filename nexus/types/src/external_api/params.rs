@@ -17,8 +17,7 @@ use omicron_common::api::external::{
     RouteDestination, RouteTarget, UserId,
 };
 use omicron_common::disk::DiskVariant;
-use omicron_uuid_kinds::SiloGroupUuid;
-use omicron_uuid_kinds::SiloUserUuid;
+use omicron_uuid_kinds::*;
 use oxnet::{IpNet, Ipv4Net, Ipv6Net};
 use parse_display::Display;
 use schemars::JsonSchema;
@@ -110,7 +109,7 @@ id_path_param!(TufTrustRootPath, trust_root_id, "trust root");
 // TODO: The hardware resources should be represented by its UUID or a hardware
 // ID that can be used to deterministically generate the UUID.
 id_path_param!(RackPath, rack_id, "rack");
-id_path_param!(SledPath, sled_id, "sled");
+id_path_param!(SledPath, sled_id, "sled", SledUuid);
 id_path_param!(SwitchPath, switch_id, "switch");
 id_path_param!(PhysicalDiskPath, disk_id, "physical disk");
 
@@ -120,7 +119,8 @@ id_path_param!(BlueprintPath, blueprint_id, "blueprint");
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct SledSelector {
     /// ID of the sled
-    pub sled: Uuid,
+    #[schemars(with = "Uuid")]
+    pub sled: SledUuid,
 }
 
 /// Parameters for `sled_set_provision_policy`.
@@ -2404,7 +2404,8 @@ pub struct SetTargetReleaseParams {
 pub struct ProbeCreate {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
-    pub sled: Uuid,
+    #[schemars(with = "Uuid")]
+    pub sled: SledUuid,
     pub ip_pool: Option<NameOrId>,
 }
 

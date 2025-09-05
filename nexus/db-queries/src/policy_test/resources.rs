@@ -9,7 +9,6 @@ use super::resource_builder::ResourceSet;
 use nexus_auth::authz;
 use omicron_common::api::external::LookupType;
 use omicron_uuid_kinds::AccessTokenKind;
-use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SiloGroupUuid;
 use omicron_uuid_kinds::SiloUserUuid;
@@ -99,7 +98,7 @@ pub async fn make_resources(
     builder.new_resource(authz::Sled::new(
         authz::FLEET,
         sled_id,
-        LookupType::ById(sled_id),
+        LookupType::by_id(sled_id),
     ));
 
     let zpool_id = "aaaaaaaa-1233-af7d-9220-afe1d8090900".parse().unwrap();
@@ -116,7 +115,7 @@ pub async fn make_resources(
     builder.new_resource(authz::PhysicalDisk::new(
         authz::FLEET,
         physical_disk_id,
-        LookupType::ById(physical_disk_id.into_untyped_uuid()),
+        LookupType::by_id(physical_disk_id),
     ));
 
     let support_bundle_id: SupportBundleUuid =
@@ -124,7 +123,7 @@ pub async fn make_resources(
     builder.new_resource(authz::SupportBundle::new(
         authz::FLEET,
         support_bundle_id,
-        LookupType::ById(support_bundle_id.into_untyped_uuid()),
+        LookupType::by_id(support_bundle_id),
     ));
 
     let device_user_code = String::from("a-device-user-code");
@@ -139,7 +138,7 @@ pub async fn make_resources(
     builder.new_resource(authz::DeviceAccessToken::new(
         authz::FLEET,
         device_access_token_id,
-        LookupType::ById(device_access_token_id.into_untyped_uuid()),
+        LookupType::by_id(device_access_token_id),
     ));
 
     let blueprint_id = "b9e923f6-caf3-4c83-96f9-8ffe8c627dd2".parse().unwrap();
@@ -153,7 +152,7 @@ pub async fn make_resources(
     builder.new_resource(authz::TufRepo::new(
         authz::FLEET,
         tuf_repo_id,
-        LookupType::ById(tuf_repo_id.into_untyped_uuid()),
+        LookupType::by_id(tuf_repo_id),
     ));
 
     let tuf_artifact_id =
@@ -161,7 +160,7 @@ pub async fn make_resources(
     builder.new_resource(authz::TufArtifact::new(
         authz::FLEET,
         tuf_artifact_id,
-        LookupType::ById(tuf_artifact_id.into_untyped_uuid()),
+        LookupType::by_id(tuf_artifact_id),
     ));
 
     let tuf_trust_root_id =
@@ -169,7 +168,7 @@ pub async fn make_resources(
     builder.new_resource(authz::TufTrustRoot::new(
         authz::FLEET,
         tuf_trust_root_id,
-        LookupType::ById(tuf_trust_root_id.into_untyped_uuid()),
+        LookupType::by_id(tuf_trust_root_id),
     ));
 
     let address_lot_id =
@@ -185,7 +184,7 @@ pub async fn make_resources(
     builder.new_resource(authz::LoopbackAddress::new(
         authz::FLEET,
         loopback_address_id,
-        LookupType::ById(loopback_address_id.into_untyped_uuid()),
+        LookupType::by_id(loopback_address_id),
     ));
 
     let webhook_alert_id =
@@ -193,7 +192,7 @@ pub async fn make_resources(
     builder.new_resource(authz::Alert::new(
         authz::FLEET,
         webhook_alert_id,
-        LookupType::ById(webhook_alert_id.into_untyped_uuid()),
+        LookupType::by_id(webhook_alert_id),
     ));
 
     make_webhook_rx(&mut builder).await;
@@ -433,7 +432,7 @@ async fn make_webhook_rx(builder: &mut ResourceBuilder<'_>) {
     builder.new_resource(authz::WebhookSecret::new(
         webhook_rx,
         webhook_secret_id,
-        LookupType::ById(webhook_secret_id.into_untyped_uuid()),
+        LookupType::by_id(webhook_secret_id),
     ));
 }
 

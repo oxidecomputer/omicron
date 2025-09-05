@@ -311,7 +311,7 @@ mod test {
         // Create a fake sled that holds our fake zpool.
         let sled_id = SledUuid::new_v4();
         let sled = SledUpdate::new(
-            *sled_id.as_untyped_uuid(),
+            sled_id,
             "[::1]:0".parse().unwrap(),
             0,
             SledBaseboard {
@@ -335,7 +335,7 @@ mod test {
         let zpool_id = ZpoolUuid::new_v4();
         let zpool = Zpool::new(
             *zpool_id.as_untyped_uuid(),
-            *sled_id.as_untyped_uuid(),
+            sled_id,
             PhysicalDiskUuid::new_v4(),
             ByteCount::from(0).into(),
         );

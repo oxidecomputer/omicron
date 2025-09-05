@@ -6446,7 +6446,7 @@ async fn test_proper_region_sled_redundancy(
                         .unwrap()
                 };
 
-                zpool.sled_id
+                zpool.sled_id()
             };
 
             assert!(

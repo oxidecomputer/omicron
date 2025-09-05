@@ -44,10 +44,7 @@ use omicron_common::api::{
         RepairProgress, RepairStartInfo, SledVmmState,
     },
 };
-use omicron_uuid_kinds::{
-    DemoSagaUuid, DownstairsKind, PropolisUuid, SledUuid, TypedUuid,
-    UpstairsKind, UpstairsRepairKind, VolumeUuid,
-};
+use omicron_uuid_kinds::*;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -797,7 +794,8 @@ pub struct SwitchPathParam {
 /// Path parameters for Instance requests (internal API)
 #[derive(Deserialize, JsonSchema)]
 pub struct InstancePathParam {
-    pub instance_id: Uuid,
+    #[schemars(with = "Uuid")]
+    pub instance_id: InstanceUuid,
 }
 
 /// Path parameters for VMM requests (internal API)
@@ -879,7 +877,8 @@ pub struct SledId {
 /// Path parameters for probes
 #[derive(Deserialize, JsonSchema)]
 pub struct ProbePathParam {
-    pub sled: Uuid,
+    #[schemars(with = "Uuid")]
+    pub sled: SledUuid,
 }
 
 #[derive(Deserialize, JsonSchema)]

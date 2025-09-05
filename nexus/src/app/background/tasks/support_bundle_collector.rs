@@ -74,11 +74,7 @@ const TEMPDIR: &str = "/var/tmp";
 const CHUNK_SIZE: NonZeroU64 = NonZeroU64::new(1024 * 1024 * 1024).unwrap();
 
 fn authz_support_bundle_from_id(id: SupportBundleUuid) -> authz::SupportBundle {
-    authz::SupportBundle::new(
-        authz::FLEET,
-        id,
-        LookupType::ById(id.into_untyped_uuid()),
-    )
+    authz::SupportBundle::new(authz::FLEET, id, LookupType::by_id(id))
 }
 
 // Specifies the data to be collected within the Support Bundle.
@@ -151,7 +147,7 @@ impl SupportBundleCollector {
         let sled_client = nexus_networking::sled_client(
             &self.datastore,
             &opctx,
-            sled_id.into_untyped_uuid(),
+            sled_id,
             &opctx.log,
         )
         .await?;
@@ -574,7 +570,7 @@ impl BundleCollection {
         let sled_client = nexus_networking::sled_client(
             &self.datastore,
             &self.opctx,
-            sled_id.into_untyped_uuid(),
+            sled_id,
             &self.log,
         )
         .await?;
@@ -1573,7 +1569,7 @@ mod test {
                 opctx,
                 Zpool::new(
                     Uuid::new_v4(),
-                    sled_id.into_untyped_uuid(),
+                    sled_id,
                     id,
                     ByteCount::from(0).into(),
                 ),
@@ -1610,7 +1606,7 @@ mod test {
             format!("s-{i})"),
             "m".into(),
             PhysicalDiskKind::U2,
-            sled_id.into_untyped_uuid(),
+            sled_id,
         );
         datastore
             .physical_disk_insert(&opctx, physical_disk.clone())

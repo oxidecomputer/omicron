@@ -12,7 +12,6 @@ use futures::stream;
 use iddqd::IdOrdMap;
 use nexus_db_queries::context::OpContext;
 use nexus_types::deployment::BlueprintSledConfig;
-use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SledUuid;
 use slog::info;
 use slog::warn;
@@ -51,7 +50,7 @@ pub(crate) async fn deploy_sled_configs(
             };
 
             let client = nexus_networking::sled_client_from_address(
-                sled_id.into_untyped_uuid(),
+                *sled_id,
                 db_sled.sled_agent_address(),
                 &log,
             );

@@ -1313,7 +1313,7 @@ authz_resource! {
 authz_resource! {
     name = "Sled",
     parent = "Fleet",
-    primary_key = Uuid,
+    primary_key = { uuid_kind = SledKind },
     roles_allowed = false,
     polar_snippet = FleetChild,
 }

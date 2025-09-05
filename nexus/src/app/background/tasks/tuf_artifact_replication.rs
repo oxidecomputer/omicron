@@ -73,6 +73,7 @@ use nexus_db_queries::db::{
 };
 use nexus_networking::sled_client_from_address;
 use nexus_types::deployment::SledFilter;
+use nexus_types::identity::Asset;
 use nexus_types::internal_api::background::{
     TufArtifactReplicationCounters, TufArtifactReplicationOperation,
     TufArtifactReplicationRequest, TufArtifactReplicationStatus,
@@ -573,9 +574,9 @@ impl ArtifactReplication {
             .await?
             .into_iter()
             .map(|sled| Sled {
-                id: SledUuid::from_untyped_uuid(sled.identity.id),
+                id: sled.id(),
                 client: sled_client_from_address(
-                    sled.identity.id,
+                    sled.id(),
                     sled.address(),
                     &opctx.log,
                 ),

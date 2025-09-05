@@ -206,7 +206,7 @@ mod tests {
             format!("s-{i})"),
             "m".into(),
             PhysicalDiskKind::U2,
-            sled_id.into_untyped_uuid(),
+            sled_id,
         );
         datastore
             .physical_disk_insert(&opctx, physical_disk.clone())
@@ -226,7 +226,7 @@ mod tests {
                 opctx,
                 Zpool::new(
                     Uuid::new_v4(),
-                    sled_id.into_untyped_uuid(),
+                    sled_id,
                     id,
                     ByteCount::from(0).into(),
                 ),
@@ -287,9 +287,7 @@ mod tests {
 
     impl TestFixture {
         async fn setup(datastore: &Arc<DataStore>, opctx: &OpContext) -> Self {
-            let sled_id = SledUuid::from_untyped_uuid(
-                Uuid::from_str(&SLED_AGENT_UUID).unwrap(),
-            );
+            let sled_id = SledUuid::from_str(&SLED_AGENT_UUID).unwrap();
 
             let disk_id = make_disk_in_db(datastore, opctx, 0, sled_id).await;
             let (zpool_id, dataset_id, region_id) =

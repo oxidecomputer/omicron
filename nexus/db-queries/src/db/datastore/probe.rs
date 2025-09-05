@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 use crate::authz;
 use crate::context::OpContext;
 use crate::db;
@@ -13,6 +17,7 @@ use nexus_db_lookup::LookupPath;
 use nexus_db_model::IncompleteNetworkInterface;
 use nexus_db_model::Probe;
 use nexus_db_model::VpcSubnet;
+use nexus_db_model::to_db_typed_uuid;
 use nexus_types::external_api::shared::ProbeInfo;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::CreateResult;
@@ -26,6 +31,7 @@ use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::internal::shared::NetworkInterface;
+use omicron_uuid_kinds::SledUuid;
 use ref_cast::RefCast;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -113,7 +119,7 @@ impl super::DataStore {
             result.push(ProbeInfo {
                 id: probe.id(),
                 name: probe.name().clone(),
-                sled: probe.sled,
+                sled: probe.sled(),
                 interface,
                 external_ips,
             })
@@ -156,7 +162,7 @@ impl super::DataStore {
         Ok(ProbeInfo {
             id: probe.id(),
             name: probe.name().clone(),
-            sled: probe.sled,
+            sled: probe.sled(),
             interface,
             external_ips,
         })
@@ -166,7 +172,7 @@ impl super::DataStore {
     /// determining what probes they should be running.
     pub async fn probe_list_for_sled(
         &self,
-        sled: Uuid,
+        sled_id: SledUuid,
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<ProbeInfo> {
@@ -176,7 +182,7 @@ impl super::DataStore {
 
         let probes = paginated(dsl::probe, dsl::id, pagparams)
             .filter(dsl::time_deleted.is_null())
-            .filter(dsl::sled.eq(sled))
+            .filter(dsl::sled.eq(to_db_typed_uuid(sled_id)))
             .select(Probe::as_select())
             .load_async(&*conn)
             .await

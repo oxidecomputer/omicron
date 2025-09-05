@@ -328,6 +328,7 @@ mod test {
     use omicron_common::api::external::InstanceAutoRestartPolicy;
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::InstanceUuid;
+    use omicron_uuid_kinds::SledUuid;
     use std::time::Duration;
 
     type ControlPlaneTestContext =
@@ -434,7 +435,7 @@ mod test {
                     time_created: Utc::now(),
                     time_deleted: None,
                     instance_id: authz_instance.id(),
-                    sled_id: Uuid::new_v4(),
+                    sled_id: SledUuid::new_v4().into(),
                     propolis_ip: "10.1.9.42".parse().unwrap(),
                     propolis_port: 420.into(),
                     runtime: VmmRuntimeState {

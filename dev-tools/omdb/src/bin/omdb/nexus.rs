@@ -3848,7 +3848,7 @@ async fn cmd_nexus_sled_expunge_with_datastore(
 
     // First, we need to look up the sled so we know its serial number.
     let (_authz_sled, sled) = LookupPath::new(opctx, datastore)
-        .sled_id(args.sled_id.into_untyped_uuid())
+        .sled_id(args.sled_id)
         .fetch()
         .await
         .with_context(|| format!("failed to find sled {}", args.sled_id))?;

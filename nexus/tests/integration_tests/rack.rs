@@ -24,7 +24,6 @@ use nexus_types::external_api::views::Rack;
 use nexus_types::internal_api::params::SledAgentInfo;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Generation;
-use omicron_uuid_kinds::GenericUuid;
 use std::time::Duration;
 use uuid::Uuid;
 
@@ -230,7 +229,7 @@ async fn test_sled_add(cptestctx: &ControlPlaneTestContext) {
     nexus
         .datastore()
         .sled_upsert(SledUpdate::new(
-            sled_id.into_untyped_uuid(),
+            sled_id,
             "[::1]:0".parse().unwrap(),
             0,
             SledBaseboard {

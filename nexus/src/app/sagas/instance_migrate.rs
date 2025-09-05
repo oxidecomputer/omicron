@@ -220,7 +220,7 @@ async fn sim_allocate_propolis_ip(
     allocate_vmm_ipv6(
         &opctx,
         sagactx.user_data().datastore(),
-        SledUuid::from_untyped_uuid(params.migrate_params.dst_sled_id),
+        params.migrate_params.dst_sled_id,
     )
     .await
 }
@@ -638,15 +638,13 @@ mod tests {
         let state = test_helpers::instance_fetch(cptestctx, instance_id).await;
         let vmm = state.vmm().as_ref().unwrap();
         let dst_sled_id = cptestctx
-            .find_sled_agent(vmm.sled_id)
+            .find_sled_agent(vmm.sled_id())
             .expect("need at least one other sled");
         let params = Params {
             serialized_authn: authn::saga::Serialized::for_opctx(&opctx),
             instance: state.instance().clone(),
             src_vmm: vmm.clone(),
-            migrate_params: InstanceMigrateRequest {
-                dst_sled_id: dst_sled_id.into_untyped_uuid(),
-            },
+            migrate_params: InstanceMigrateRequest { dst_sled_id },
         };
 
         nexus
@@ -697,7 +695,7 @@ mod tests {
                         .expect("instance should have a vmm before migrating");
 
                     let dst_sled_id = cptestctx
-                        .find_sled_agent(old_vmm.sled_id)
+                        .find_sled_agent(old_vmm.sled_id())
                         .expect("need at least one other sled");
 
                     info!(log, "setting up new migration saga";
@@ -711,9 +709,7 @@ mod tests {
                         ),
                         instance: old_instance.clone(),
                         src_vmm: old_vmm.clone(),
-                        migrate_params: InstanceMigrateRequest {
-                            dst_sled_id: dst_sled_id.into_untyped_uuid(),
-                        },
+                        migrate_params: InstanceMigrateRequest { dst_sled_id },
                     }
                 }
             })

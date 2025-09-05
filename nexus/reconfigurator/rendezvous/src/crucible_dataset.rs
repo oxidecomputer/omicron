@@ -189,7 +189,7 @@ mod tests {
             // the DB.
             datastore
                 .sled_upsert(SledUpdate::new(
-                    sled_id.into_untyped_uuid(),
+                    sled_id,
                     "[::1]:0".parse().unwrap(),
                     0,
                     SledBaseboard {
@@ -214,7 +214,7 @@ mod tests {
                     opctx,
                     Zpool::new(
                         zpool_id.into_untyped_uuid(),
-                        sled_id.into_untyped_uuid(),
+                        sled_id,
                         disk_id,
                         ByteCount::from(0).into(),
                     ),

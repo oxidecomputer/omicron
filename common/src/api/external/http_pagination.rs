@@ -260,7 +260,7 @@ impl ScanParams for ScanByName {
 /// Query parameters for pagination by id only
 pub type PaginatedById<Selector = ()> =
     PaginationParams<ScanById<Selector>, PageSelectorById<Selector>>;
-/// Page selector for pagination by name only
+/// Page selector for pagination by id only
 pub type PageSelectorById<Selector = ()> =
     PageSelector<ScanById<Selector>, Uuid>;
 /// Scan parameters for resources that support scanning by id only

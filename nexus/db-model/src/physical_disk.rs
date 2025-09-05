@@ -5,13 +5,16 @@
 use super::{
     Generation, PhysicalDiskKind, PhysicalDiskPolicy, PhysicalDiskState,
 };
+use crate::DbTypedUuid;
 use crate::collection::DatastoreCollectionConfig;
 use chrono::{DateTime, Utc};
 use db_macros::Asset;
 use nexus_db_schema::schema::{physical_disk, zpool};
 use nexus_types::{external_api::views, identity::Asset};
+use omicron_uuid_kinds::PhysicalDiskKind as PhysicalDiskUuidKind;
 use omicron_uuid_kinds::PhysicalDiskUuid;
-use uuid::Uuid;
+use omicron_uuid_kinds::SledKind;
+use omicron_uuid_kinds::SledUuid;
 
 /// Physical disk attached to sled.
 #[derive(Queryable, Insertable, Debug, Clone, Selectable, Asset)]
@@ -28,7 +31,7 @@ pub struct PhysicalDisk {
     pub model: String,
 
     pub variant: PhysicalDiskKind,
-    pub sled_id: Uuid,
+    pub sled_id: DbTypedUuid<SledKind>,
     pub disk_policy: PhysicalDiskPolicy,
     pub disk_state: PhysicalDiskState,
 }
@@ -41,7 +44,7 @@ impl PhysicalDisk {
         serial: String,
         model: String,
         variant: PhysicalDiskKind,
-        sled_id: Uuid,
+        sled_id: SledUuid,
     ) -> Self {
         Self {
             identity: PhysicalDiskIdentity::new(id),
@@ -51,7 +54,7 @@ impl PhysicalDisk {
             serial,
             model,
             variant,
-            sled_id,
+            sled_id: sled_id.into(),
             disk_policy: PhysicalDiskPolicy::InService,
             disk_state: PhysicalDiskState::Active,
         }
@@ -64,6 +67,10 @@ impl PhysicalDisk {
     pub fn time_deleted(&self) -> Option<DateTime<Utc>> {
         self.time_deleted
     }
+
+    pub fn sled_id(&self) -> SledUuid {
+        self.sled_id.into()
+    }
 }
 
 impl From<PhysicalDisk> for views::PhysicalDisk {
@@ -72,7 +79,7 @@ impl From<PhysicalDisk> for views::PhysicalDisk {
             identity: disk.identity(),
             policy: disk.disk_policy.into(),
             state: disk.disk_state.into(),
-            sled_id: Some(disk.sled_id),
+            sled_id: Some(disk.sled_id.into()),
             vendor: disk.vendor,
             serial: disk.serial,
             model: disk.model,
@@ -82,7 +89,7 @@ impl From<PhysicalDisk> for views::PhysicalDisk {
 }
 
 impl DatastoreCollectionConfig<super::Zpool> for PhysicalDisk {
-    type CollectionId = Uuid;
+    type CollectionId = DbTypedUuid<PhysicalDiskUuidKind>;
     type GenerationNumberColumn = physical_disk::dsl::rcgen;
     type CollectionTimeDeletedColumn = physical_disk::dsl::time_deleted;
     type CollectionIdColumn = zpool::dsl::sled_id;

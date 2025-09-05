@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 use nexus_db_lookup::lookup;
 use nexus_db_model::Probe;
 use nexus_db_queries::authz;
@@ -10,6 +14,7 @@ use omicron_common::api::external::{
     CreateResult, DataPageParams, DeleteResult, ListResultVec, LookupResult,
     NameOrId, http_pagination::PaginatedBy,
 };
+use omicron_uuid_kinds::SledUuid;
 use uuid::Uuid;
 
 impl super::Nexus {
@@ -31,7 +36,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
-        sled: Uuid,
+        sled: SledUuid,
     ) -> ListResultVec<ProbeInfo> {
         self.db_datastore.probe_list_for_sled(sled, opctx, pagparams).await
     }
