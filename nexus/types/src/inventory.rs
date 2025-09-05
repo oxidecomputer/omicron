@@ -471,6 +471,7 @@ pub struct HostPhase1FlashHash {
     Serialize,
     JsonSchema,
 )]
+#[serde(rename_all = "snake_case")]
 pub enum CabooseWhich {
     SpSlot0,
     SpSlot1,

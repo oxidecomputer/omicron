@@ -495,6 +495,8 @@ impl PlanningMupdateOverrideStepReport {
     Ord,
     Clone,
 )]
+#[serde(rename_all = "snake_case")]
+#[serde(tag = "type", content = "value")]
 pub enum FailedMgsUpdateReason {
     /// The active host phase 1 slot does not match the boot disk
     #[error("active phase 1 slot does not match boot disk")]

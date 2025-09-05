@@ -1307,6 +1307,7 @@ impl fmt::Display for BlueprintHostPhase2DesiredContents {
     Clone,
     Copy,
 )]
+#[serde(rename_all = "snake_case")]
 pub enum MgsUpdateComponent {
     Sp,
     Rot,
