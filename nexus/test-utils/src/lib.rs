@@ -188,6 +188,7 @@ pub struct ControlPlaneTestContext<N> {
     pub initial_blueprint_id: BlueprintUuid,
     pub silo_name: Name,
     pub user_name: UserId,
+    pub password: String,
 }
 
 impl<N: NexusServer> ControlPlaneTestContext<N> {
@@ -452,6 +453,7 @@ pub struct ControlPlaneTestContextBuilder<'a, N: NexusServer> {
 
     pub silo_name: Option<Name>,
     pub user_name: Option<UserId>,
+    pub password: Option<String>,
 
     pub simulated_upstairs: Arc<sim::SimulatedUpstairs>,
 }
@@ -501,6 +503,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             blueprint_sleds: None,
             silo_name: None,
             user_name: None,
+            password: None,
             simulated_upstairs: Arc::new(sim::SimulatedUpstairs::new(
                 simulated_upstairs_log,
             )),
@@ -1045,6 +1048,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         self.internal_client = Some(testctx_internal);
         self.silo_name = Some(silo_name);
         self.user_name = Some(user_name);
+        self.password = Some(TEST_SUITE_PASSWORD.to_string());
         self.server = Some(server);
     }
 
@@ -1418,6 +1422,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             initial_blueprint_id: self.initial_blueprint_id.unwrap(),
             silo_name: self.silo_name.unwrap(),
             user_name: self.user_name.unwrap(),
+            password: self.password.unwrap(),
         }
     }
 

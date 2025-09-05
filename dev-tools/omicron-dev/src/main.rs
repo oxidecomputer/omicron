@@ -153,6 +153,7 @@ impl RunAllArgs {
             "omicron-dev: privileged user name:  {}",
             cptestctx.user_name.as_ref(),
         );
+        println!("omicron-dev: privileged password:   {}", cptestctx.password);
 
         // Wait for a signal.
         let caught_signal = signal_stream.next().await;
