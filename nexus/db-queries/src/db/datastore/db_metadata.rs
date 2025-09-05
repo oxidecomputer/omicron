@@ -2458,7 +2458,7 @@ mod test {
         let conn = datastore.pool_connection_unauthorized().await.unwrap();
         datastore
             .initialize_nexus_access_from_blueprint_on_connection(
-                &*conn,
+                &conn,
                 vec![nexus1_id, nexus2_id],
             )
             .await
@@ -2546,7 +2546,7 @@ mod test {
         let conn = datastore.pool_connection_unauthorized().await.unwrap();
         datastore
             .initialize_nexus_access_from_blueprint_on_connection(
-                &*conn,
+                &conn,
                 vec![nexus1_id],
             )
             .await
