@@ -73,6 +73,50 @@ pub(crate) struct PlannedMgsUpdates {
     pub(crate) skipped_mgs_updates: SkippedMgsUpdates,
 }
 
+impl PlannedMgsUpdates {
+    fn new() -> Self {
+        Self {
+            pending_updates: PendingMgsUpdates::new(),
+            pending_host_phase_2_changes: PendingHostPhase2Changes::empty(),
+            skipped_mgs_updates: SkippedMgsUpdates::new(),
+        }
+    }
+
+    fn set_pending_update(
+        &mut self,
+        pending_update: PendingMgsUpdate,
+    ) -> &mut Self {
+        self.pending_updates.insert(pending_update);
+        self
+    }
+
+    fn set_pending_host_os_phase2_changes(
+        &mut self,
+        pending_host_os_phase2_changes: PendingHostPhase2Changes,
+    ) -> &mut Self {
+        self.pending_host_phase_2_changes = pending_host_os_phase2_changes;
+        self
+    }
+
+    fn set_skipped_updates(
+        &mut self,
+        skipped_updates: SkippedMgsUpdates,
+    ) -> &mut Self {
+        self.skipped_mgs_updates = skipped_updates;
+        self
+    }
+
+    fn build(&self) -> Self {
+        Self {
+            pending_updates: self.pending_updates.clone(),
+            pending_host_phase_2_changes: self
+                .pending_host_phase_2_changes
+                .clone(),
+            skipped_mgs_updates: self.skipped_mgs_updates.clone(),
+        }
+    }
+}
+
 /// Generates a new set of `PendingMgsUpdates` based on:
 ///
 /// * `inventory`: the latest inventory
@@ -209,20 +253,20 @@ pub(crate) fn plan_mgs_updates(
             };
         }
 
-        let PendingMgsUpdateActions {
-            pending_update,
-            pending_host_os_phase2_changes: mut host_phase_2,
-            mut skipped_updates,
+        let PlannedMgsUpdates {
+            pending_updates: update,
+            pending_host_phase_2_changes: mut host_phase_2,
+            skipped_mgs_updates: mut skipped_updates,
         } = try_make_update(log, board, inventory, current_artifacts);
 
-        match pending_update {
-            Some(update) => {
-                info!(log, "configuring MGS-driven update"; &update);
-                pending_updates.insert(update);
-            }
-            None => {
-                info!(log, "skipping board for MGS-driven update"; board)
-            }
+        if !update.is_empty() {
+            // We can safely unwrap because we just created the update with the
+            // baseboard_id in try_make_update above
+            let update = update.get(&board).unwrap();
+            info!(log, "configuring MGS-driven update"; update);
+            pending_updates.insert(update.clone());
+        } else {
+            info!(log, "skipping board for MGS-driven update"; board)
         }
 
         // TODO-K: Remove debugging logs
@@ -521,58 +565,6 @@ fn mgs_update_status_inactive_versions(
     }
 }
 
-// TODO-K: I should use planned MGS updates
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct PendingMgsUpdateActions {
-    pending_update: Option<PendingMgsUpdate>,
-    pending_host_os_phase2_changes: PendingHostPhase2Changes,
-    skipped_updates: SkippedMgsUpdates,
-}
-
-impl PendingMgsUpdateActions {
-    fn new() -> PendingMgsUpdateActions {
-        PendingMgsUpdateActions {
-            pending_update: None,
-            pending_host_os_phase2_changes: PendingHostPhase2Changes::empty(),
-            skipped_updates: SkippedMgsUpdates::new(),
-        }
-    }
-
-    fn set_pending_update(
-        &mut self,
-        pending_update: PendingMgsUpdate,
-    ) -> &mut Self {
-        self.pending_update = Some(pending_update);
-        self
-    }
-
-    fn set_pending_host_os_phase2_changes(
-        &mut self,
-        pending_host_os_phase2_changes: PendingHostPhase2Changes,
-    ) -> &mut Self {
-        self.pending_host_os_phase2_changes = pending_host_os_phase2_changes;
-        self
-    }
-
-    fn set_skipped_updates(
-        &mut self,
-        skipped_updates: SkippedMgsUpdates,
-    ) -> &mut Self {
-        self.skipped_updates = skipped_updates;
-        self
-    }
-
-    fn build(&self) -> Self {
-        PendingMgsUpdateActions {
-            pending_update: self.pending_update.clone(),
-            pending_host_os_phase2_changes: self
-                .pending_host_os_phase2_changes
-                .clone(),
-            skipped_updates: self.skipped_updates.clone(),
-        }
-    }
-}
-
 /// Determine if the given baseboard needs any MGS-driven update (e.g., update
 /// to its SP, RoT, etc.).  If so, returns the update and a set of changes that
 /// need to be made to sled configs related to host phase 2 images (this set
@@ -582,7 +574,7 @@ fn try_make_update(
     baseboard_id: &Arc<BaseboardId>,
     inventory: &Collection,
     current_artifacts: &TufRepoDescription,
-) -> PendingMgsUpdateActions {
+) -> PlannedMgsUpdates {
     let mut skipped_updates = SkippedMgsUpdates::new();
 
     // We try MGS-driven update components in a hardcoded priority order until
@@ -637,7 +629,7 @@ fn try_make_update(
                 Ok(Some(update)) => {
                     // We have a non-host update; there are no pending host
                     // phase 2 changes necessary.
-                    let pending_actions = PendingMgsUpdateActions::new()
+                    let pending_actions = PlannedMgsUpdates::new()
                         .set_pending_update(update)
                         .set_skipped_updates(skipped_updates.clone())
                         .build();
@@ -668,7 +660,7 @@ fn try_make_update(
         current_artifacts,
     ) {
         Ok(Some((update, pending_host_os_phase2_changes))) => {
-            PendingMgsUpdateActions::new()
+            PlannedMgsUpdates::new()
                 .set_pending_update(update)
                 .set_pending_host_os_phase2_changes(
                     pending_host_os_phase2_changes,
@@ -678,7 +670,7 @@ fn try_make_update(
         }
         // The Host OS is already at the desired version, we only need to pass
         // along any previous skipped updates
-        Ok(None) => PendingMgsUpdateActions::new()
+        Ok(None) => PlannedMgsUpdates::new()
             .set_skipped_updates(skipped_updates)
             .build(),
         Err(e) => {
@@ -687,7 +679,7 @@ fn try_make_update(
                 component: MgsUpdateComponent::HostOs,
                 reason: e,
             });
-            PendingMgsUpdateActions::new()
+            PlannedMgsUpdates::new()
                 .set_skipped_updates(skipped_updates)
                 .build()
         }
