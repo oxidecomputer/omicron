@@ -11,6 +11,7 @@ use prop::sample::Index;
 use proptest::collection::{btree_set, size_range};
 use proptest::prelude::*;
 use proptest::sample::Selector;
+use secrecy::ExposeSecret;
 use slog::{Logger, info, o};
 use std::collections::BTreeSet;
 use test_strategy::{Arbitrary, proptest};
@@ -549,7 +550,7 @@ impl TestState {
     ) -> Result<(), TestCaseError> {
         let latest_config = self.tq_state.nexus.latest_config().clone();
         match latest_config.op {
-            NexusOp::Committed | NexusOp::Preparing => {
+            NexusOp::Committed => {
                 let crashed: Vec<_> = latest_config
                     .members
                     .iter()
@@ -571,41 +572,102 @@ impl TestState {
                         .collect();
                     let event =
                         Event::RestartNode { id, connection_order: to_connect };
-                    event_log.record(&event);
-                    let affected_nodes = event.affected_nodes();
-                    self.tq_state.apply_event(event);
-                    self.check_invariants(affected_nodes)?;
+                    self.record_and_apply_event(event, event_log)?;
                 }
+                // Deliver all envelopes related to node restart
+                self.deliver_all_envelopes(event_log)?;
 
-                // Deliver all messages until there are no more to deliver
-                loop {
-                    let Some((id, envelopes)) =
-                        self.tq_state.bootstrap_network.first_key_value()
+                // Trigger loading of rack secrets
+                for id in &latest_config.members {
+                    let event =
+                        Event::LoadRackSecret(id.clone(), latest_config.epoch);
+                    self.record_and_apply_event(event, event_log)?;
+                }
+                // Deliver all envelopes as a result of loading rack secrets
+                self.deliver_all_envelopes(event_log)?;
+
+                // Compare all rack secrets
+                // At this point all the rack secrets should be available.
+                let mut members = latest_config.members.iter();
+                let id = members.next().unwrap();
+                let (node, ctx) =
+                    self.tq_state.sut.nodes.get_mut(id).expect("node exists");
+                let Ok(Some(rs)) =
+                    node.load_rack_secret(ctx, latest_config.epoch)
+                else {
+                    panic!(
+                        "rack secret not loaded for {} at epoch {}",
+                        ctx.platform_id(),
+                        latest_config.epoch
+                    );
+                };
+
+                for id in &latest_config.members {
+                    let (node, ctx) = self
+                        .tq_state
+                        .sut
+                        .nodes
+                        .get_mut(id)
+                        .expect("node exists");
+                    let Ok(Some(rs2)) =
+                        node.load_rack_secret(ctx, latest_config.epoch)
                     else {
-                        break;
+                        panic!(
+                            "rack secret not loaded for {} at epoch {}",
+                            ctx.platform_id(),
+                            latest_config.epoch
+                        );
                     };
-
-                    let envelope = envelopes
-                        .last()
-                        .unwrap_or_else(|| panic!("envelope exists at {id}"))
-                        .clone();
-                    let event = Event::DeliverEnvelope(envelope);
-                    event_log.record(&event);
-                    let affected_nodes = event.affected_nodes();
-                    self.tq_state.apply_event(event);
-                    self.check_invariants(affected_nodes)?;
+                    assert_eq!(rs.expose_secret(), rs2.expose_secret());
                 }
 
-                // TODO: Load and compare rack secrets
                 // TODO: This test should fail sometimes because some nodes will
                 // require a `PrepareAndCommit` from Nexus to get the latest configuration
                 // and be able to load shares. We'll implement that before opening the PR
+            }
+            NexusOp::Preparing => {
+                // TODO: Commit the current configuration and drive to completion
             }
             NexusOp::Aborted => {
                 // TODO: Start a reconfiguration and drive that to completion
             }
         }
         Ok(())
+    }
+
+    /// Create and apply `DeliverEnvelope` events until all messages get delivered.
+    ///
+    /// Each delivered envelope can result in new envelopes on the bootstrap
+    /// network and so we loop until the system comes to equilibrium.
+    fn deliver_all_envelopes(
+        &mut self,
+        event_log: &mut EventLog,
+    ) -> Result<(), TestCaseError> {
+        loop {
+            let Some((id, envelopes)) =
+                self.tq_state.bootstrap_network.first_key_value()
+            else {
+                return Ok(());
+            };
+
+            let envelope = envelopes
+                .last()
+                .unwrap_or_else(|| panic!("envelope exists at {id}"))
+                .clone();
+            let event = Event::DeliverEnvelope(envelope);
+            self.record_and_apply_event(event, event_log)?;
+        }
+    }
+
+    fn record_and_apply_event(
+        &mut self,
+        event: Event,
+        event_log: &mut EventLog,
+    ) -> Result<(), TestCaseError> {
+        event_log.record(&event);
+        let affected_nodes = event.affected_nodes();
+        self.tq_state.apply_event(event);
+        self.check_invariants(affected_nodes)
     }
 
     /// At every point during the running of the test, invariants over the system
@@ -961,7 +1023,9 @@ pub struct TestInput {
     actions: Vec<Action>,
 }
 
-#[proptest(cases = MAX_TEST_CASES)]
+// No need to shrink with tqdb available. It's very unlikely to be successful
+// anyway.
+#[proptest(cases = MAX_TEST_CASES, max_shrink_iters = 0)]
 fn test_trust_quorum_protocol(input: TestInput) {
     // We add a uuid so that we can match log files and event traces
     // across multiple proptest runs.
