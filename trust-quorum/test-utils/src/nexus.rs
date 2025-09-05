@@ -126,13 +126,6 @@ impl NexusState {
         (&config.coordinator, config.to_reconfigure_msg(self.rack_id))
     }
 
-    /// Abort the latest reconfiguration attempt
-    pub fn abort_reconfiguration(&mut self) {
-        let config = self.configs.iter().last().expect("at least one config");
-        // Can only abort while preparing
-        assert_eq!(config.op, NexusOp::Preparing);
-    }
-
     pub fn latest_config(&self) -> &NexusConfig {
         self.configs.iter().last().expect("at least one config")
     }
