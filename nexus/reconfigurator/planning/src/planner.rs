@@ -5620,6 +5620,7 @@ pub(crate) mod test {
         };
     }
 
+    // TODO-K: Include MGS artifacts for zone update testing
     fn create_artifacts_at_version(
         version: &ArtifactVersion,
     ) -> Vec<TufArtifactMeta> {

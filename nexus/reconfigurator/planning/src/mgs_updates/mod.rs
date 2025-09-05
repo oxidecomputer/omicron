@@ -709,12 +709,15 @@ mod test {
     use gateway_client::types::SpType;
     use gateway_types::rot::RotSlot;
     use nexus_types::deployment::ExpectedVersion;
+    use nexus_types::deployment::MgsUpdateComponent;
     use nexus_types::deployment::PendingMgsUpdateDetails;
     use nexus_types::deployment::PendingMgsUpdateRotBootloaderDetails;
     use nexus_types::deployment::PendingMgsUpdateRotDetails;
     use nexus_types::deployment::PendingMgsUpdateSpDetails;
     use nexus_types::deployment::PendingMgsUpdates;
     use nexus_types::deployment::TargetReleaseDescription;
+    use nexus_types::deployment::planning_report::FailedMgsUpdateReason;
+    use nexus_types::deployment::planning_report::SkippedMgsUpdate;
     use nexus_types::deployment::planning_report::SkippedMgsUpdates;
     use nexus_types::inventory::BaseboardId;
     use omicron_test_utils::dev::LogContext;
@@ -1418,13 +1421,14 @@ mod test {
 
         // Test that we don't try to update boards that aren't in
         // `current_boards`, even if they're in inventory and outdated.
-
-        // TODO-K: Remove fake boards?
+        //
+        // TODO-K: Remove fake boards and find a better way to test this
         let mut fake_boards = BTreeSet::new();
-        fake_boards.insert(Arc::new(BaseboardId {
+        let fake_board = Arc::new(BaseboardId {
             part_number: "bob".to_string(),
             serial_number: "ob".to_string(),
-        }));
+        });
+        fake_boards.insert(fake_board.clone());
         let collection = test_boards
             .collection_builder()
             .stage0_version_exception(SpType::Sled, 0, ARTIFACT_VERSION_1)
@@ -1443,8 +1447,29 @@ mod test {
             nmax_updates,
             impossible_update_policy,
         );
-        // TODO-K: Remove this assertion, or improve
-        assert_eq!(skipped_mgs_updates, SkippedMgsUpdates::new());
+        // TODO-K: Find a better way to test functionality
+        let mut expected_skipped_updates = SkippedMgsUpdates::new();
+        expected_skipped_updates.push(SkippedMgsUpdate {
+            baseboard_id: fake_board.clone(),
+            component: MgsUpdateComponent::RotBootloader,
+            reason: FailedMgsUpdateReason::SpNotInInventory,
+        });
+        expected_skipped_updates.push(SkippedMgsUpdate {
+            baseboard_id: fake_board.clone(),
+            component: MgsUpdateComponent::Rot,
+            reason: FailedMgsUpdateReason::SpNotInInventory,
+        });
+        expected_skipped_updates.push(SkippedMgsUpdate {
+            baseboard_id: fake_board.clone(),
+            component: MgsUpdateComponent::Sp,
+            reason: FailedMgsUpdateReason::SpNotInInventory,
+        });
+        expected_skipped_updates.push(SkippedMgsUpdate {
+            baseboard_id: fake_board,
+            component: MgsUpdateComponent::HostOs,
+            reason: FailedMgsUpdateReason::SpNotInInventory,
+        });
+        assert_eq!(skipped_mgs_updates, expected_skipped_updates);
         assert!(updates.is_empty());
         let PlannedMgsUpdates { pending_updates: updates, .. } =
             plan_mgs_updates(

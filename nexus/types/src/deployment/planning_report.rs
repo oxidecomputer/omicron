@@ -628,7 +628,7 @@ impl fmt::Display for PlanningMgsUpdatesStepReport {
             }
         }
         if !skipped_mgs_updates.is_empty() {
-            let n = pending_mgs_updates.len();
+            let n = skipped_mgs_updates.updates.len();
             let s = plural(n);
             writeln!(f, "* {n} skipped MGS update{s}:")?;
             for update in &skipped_mgs_updates.updates {
