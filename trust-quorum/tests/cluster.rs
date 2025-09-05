@@ -915,6 +915,16 @@ fn test_trust_quorum_protocol(input: TestInput) {
     // Start executing the actions
     state.run_actions(input.actions, &mut event_log)?;
 
+    let alive_nodes: BTreeSet<_> = state
+        .tq_state
+        .member_universe
+        .iter()
+        .filter(|m| !state.tq_state.crashed_nodes.contains(m))
+        .collect();
+
+    println!("alive nodes = {:?}\n", alive_nodes);
+    println!("crashed nodes = {:?}\n\n", state.tq_state.crashed_nodes);
+
     info!(
         log,
         "Test complete";
