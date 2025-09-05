@@ -486,7 +486,7 @@ mod region_replacement {
                     }
                 },
                 &std::time::Duration::from_millis(50),
-                &std::time::Duration::from_secs(260), // 60 was not enough ZZZ
+                &std::time::Duration::from_secs(260), // 60 was not enough
             )
             .await
             .expect("request transitioned to expected state");
