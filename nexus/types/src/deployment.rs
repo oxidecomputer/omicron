@@ -56,6 +56,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use slog::Key;
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::fmt;
 use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
@@ -406,6 +407,27 @@ impl Blueprint {
         };
 
         Ok(zone_config.nexus_generation < self.nexus_generation)
+    }
+
+    /// Given a set of Nexus zone UUIDs, returns the "nexus generation"
+    /// of the first one found in the blueprint.
+    pub fn find_generation_for_nexus(
+        &self,
+        nexus_zones: &BTreeSet<OmicronZoneUuid>,
+    ) -> Option<Generation> {
+        self.all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+            .find_map(|(_, blueprint_zone)| {
+                if nexus_zones.contains(&blueprint_zone.id) {
+                    match &blueprint_zone.zone_type {
+                        BlueprintZoneType::Nexus(nexus_zone) => {
+                            Some(nexus_zone.nexus_generation)
+                        }
+                        _ => None,
+                    }
+                } else {
+                    None
+                }
+            })
     }
 }
 

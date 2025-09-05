@@ -2116,20 +2116,7 @@ impl<'a> Planner<'a> {
         // Look up the active Nexus zone in the blueprint to get its generation
         self.blueprint
             .parent_blueprint()
-            .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
-            .find_map(|(_, blueprint_zone)| {
-                if self.input.active_nexus_zones().contains(&blueprint_zone.id)
-                {
-                    match &blueprint_zone.zone_type {
-                        BlueprintZoneType::Nexus(nexus_zone) => {
-                            Some(nexus_zone.nexus_generation)
-                        }
-                        _ => None,
-                    }
-                } else {
-                    None
-                }
-            })
+            .find_generation_for_nexus(self.input.active_nexus_zones())
     }
 
     /// Return `true` iff we believe a zone can safely be shut down; e.g., any

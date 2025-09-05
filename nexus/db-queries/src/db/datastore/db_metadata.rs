@@ -26,6 +26,7 @@ use nexus_db_model::SchemaVersion;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneType;
 use omicron_common::api::external::Error;
+use omicron_common::api::external::InternalContext;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use semver::Version;
@@ -794,15 +795,41 @@ impl DataStore {
     ) -> Result<(), Error> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
 
+        // We need to determine the generation of the currently running set of
+        // Nexuses. This is usually the same as "blueprint.nexus_generation",
+        // but can lag behind it if we are one of those Nexuses running after
+        // quiescing has started.
+        //
+        // NOTE: This doesn't actually need to be within a transaction.
+        // If this code is executing from a Nexus that got this far, we must be
+        // running code from one of these active Nexuses. Even if one of the
+        // other Nexuses quiesces after we make this query, it will have the
+        // same "nexus_generation" value as our still-active Nexus.
+        let active_nexus_zones = self
+            .get_active_db_metadata_nexus(opctx)
+            .await
+            .internal_context("fetching active nexuses")?
+            .into_iter()
+            .map(|z| z.nexus_id())
+            .collect::<std::collections::BTreeSet<_>>();
+        let active_generation = blueprint
+            .find_generation_for_nexus(&active_nexus_zones)
+            .ok_or_else(|| {
+                Error::internal_error(
+                    "No Nexuses with active \
+                db_metadata_nexus records found in blueprint",
+                )
+            })?;
+
         let mut active = vec![];
         let mut not_yet = vec![];
         for (_, zone) in
             blueprint.all_omicron_zones(BlueprintZoneDisposition::is_in_service)
         {
             if let BlueprintZoneType::Nexus(ref nexus) = zone.zone_type {
-                if nexus.nexus_generation == blueprint.nexus_generation {
+                if nexus.nexus_generation == active_generation {
                     active.push(zone);
-                } else if nexus.nexus_generation > blueprint.nexus_generation {
+                } else if nexus.nexus_generation > active_generation {
                     not_yet.push(zone);
                 }
             }
@@ -2168,16 +2195,26 @@ mod test {
         let datastore = db.datastore();
         let opctx = db.opctx();
 
-        // Create a blueprint with two in-service Nexus zones,
-        // and one expunged Nexus.
+        // Create a blueprint with in-service Nexus zones, and one expunged
+        // Nexus.
         let nexus1_id = OmicronZoneUuid::new_v4();
         let nexus2_id = OmicronZoneUuid::new_v4();
         let expunged_nexus = OmicronZoneUuid::new_v4();
+
+        // Our currently-running Nexus must already have a record
+        datastore
+            .database_nexus_access_insert(
+                nexus1_id,
+                DbMetadataNexusState::Active,
+            )
+            .await
+            .unwrap();
+
         let blueprint = create_test_blueprint(
             Generation::new(),
             vec![
-                // This nexus matches the top-level generation, and will be
-                // created as "active".
+                // This nexus matches the top-level generation, and already
+                // exists as "active".
                 (
                     nexus1_id,
                     BlueprintZoneDisposition::InService,
@@ -2247,14 +2284,127 @@ mod test {
 
         // See above for the rationale here:
         //
-        // Nexus 1 has a generation which matches the blueprint's
-        // "nexus_generation".
+        // Nexus 1 already existed, and was active.
         // Nexus 2 has a higher generation number (e.g., it represents
         // a new deployment that has not yet been activated).
+        // The expunged Nexus was ignored.
         let nexus1_record = nexus1_access.unwrap();
         let nexus2_record = nexus2_access.unwrap();
         assert_eq!(nexus1_record.state(), DbMetadataNexusState::Active);
         assert_eq!(nexus2_record.state(), DbMetadataNexusState::NotYet);
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_database_nexus_access_create_during_quiesce() {
+        let logctx = dev::test_setup_log(
+            "test_database_nexus_access_create_during_quiesce",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let datastore = db.datastore();
+        let opctx = db.opctx();
+
+        // Create a blueprint with in-service Nexus zones, and one expunged
+        // Nexus.
+        let nexus1_id = OmicronZoneUuid::new_v4();
+        let nexus2_id = OmicronZoneUuid::new_v4();
+        let nexus3_id = OmicronZoneUuid::new_v4();
+
+        // Our currently-running Nexus must already have a record
+        datastore
+            .database_nexus_access_insert(
+                nexus1_id,
+                DbMetadataNexusState::Active,
+            )
+            .await
+            .unwrap();
+
+        let blueprint = create_test_blueprint(
+            // NOTE: This is using a "Generation = 2", implying that all
+            // nexuses using "Generation = 1" should start quiescing.
+            Generation::new().next(),
+            vec![
+                // This Nexus already exists as active - even though it's
+                // quiescing currently.
+                (
+                    nexus1_id,
+                    BlueprintZoneDisposition::InService,
+                    Generation::new(),
+                ),
+                // This Nexus matches the the top-level nexus generation,
+                // and will be created as "not yet", because "nexus1" is still
+                // running.
+                (
+                    nexus2_id,
+                    BlueprintZoneDisposition::InService,
+                    Generation::new().next(),
+                ),
+                // This Nexus will quiesce soon after starting, but can still be
+                // created as active.
+                (
+                    nexus3_id,
+                    BlueprintZoneDisposition::InService,
+                    Generation::new(),
+                ),
+            ],
+        );
+
+        // Insert the blueprint and make it the target
+        datastore
+            .blueprint_insert(&opctx, &blueprint)
+            .await
+            .expect("Failed to insert blueprint");
+        datastore
+            .blueprint_target_set_current(
+                &opctx,
+                BlueprintTarget {
+                    target_id: blueprint.id,
+                    enabled: false,
+                    time_made_target: chrono::Utc::now(),
+                },
+            )
+            .await
+            .expect("Failed to set blueprint target");
+
+        // Create nexus access records
+        datastore
+            .database_nexus_access_create(&opctx, &blueprint)
+            .await
+            .expect("Failed to create nexus access");
+
+        // Verify records were created for in-service Nexuses.
+        let nexus1_access = datastore
+            .database_nexus_access(nexus1_id)
+            .await
+            .expect("Failed to get nexus1 access");
+        let nexus2_access = datastore
+            .database_nexus_access(nexus2_id)
+            .await
+            .expect("Failed to get nexus2 access");
+        let nexus3_access = datastore
+            .database_nexus_access(nexus3_id)
+            .await
+            .expect("Failed to get nexus3 access");
+
+        assert!(nexus1_access.is_some(), "nexus1 should have access record");
+        assert!(nexus2_access.is_some(), "nexus2 should have access record");
+        assert!(nexus2_access.is_some(), "nexus3 should have access record");
+
+        // See above for the rationale here:
+        //
+        // Nexus 1 already existed, and was active.
+        // Nexus 2 has a higher generation number (e.g., it represents
+        // a new deployment that has not yet been activated).
+        // Nexus 3 is getting a new record, but using the old generation number.
+        // It'll be treated as active.
+        let nexus1_record = nexus1_access.unwrap();
+        let nexus2_record = nexus2_access.unwrap();
+        let nexus3_record = nexus3_access.unwrap();
+        assert_eq!(nexus1_record.state(), DbMetadataNexusState::Active);
+        assert_eq!(nexus2_record.state(), DbMetadataNexusState::NotYet);
+        assert_eq!(nexus3_record.state(), DbMetadataNexusState::Active);
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -2268,15 +2418,23 @@ mod test {
         let datastore = db.datastore();
         let opctx = db.opctx();
 
-        // Create a blueprint with one Nexus zone
-        let nexus_id = OmicronZoneUuid::new_v4();
+        // Create a blueprint with a couple Nexus zones
+        let nexus1_id = OmicronZoneUuid::new_v4();
+        let nexus2_id = OmicronZoneUuid::new_v4();
         let blueprint = create_test_blueprint(
             Generation::new(),
-            vec![(
-                nexus_id,
-                BlueprintZoneDisposition::InService,
-                Generation::new(),
-            )],
+            vec![
+                (
+                    nexus1_id,
+                    BlueprintZoneDisposition::InService,
+                    Generation::new(),
+                ),
+                (
+                    nexus2_id,
+                    BlueprintZoneDisposition::InService,
+                    Generation::new(),
+                ),
+            ],
         );
 
         // Insert the blueprint and make it the target
@@ -2297,10 +2455,14 @@ mod test {
             .expect("Failed to set blueprint target");
 
         // Create nexus access records (first time)
+        let conn = datastore.pool_connection_unauthorized().await.unwrap();
         datastore
-            .database_nexus_access_create(&opctx, &blueprint)
+            .initialize_nexus_access_from_blueprint_on_connection(
+                &*conn,
+                vec![nexus1_id, nexus2_id],
+            )
             .await
-            .expect("Failed to create nexus access (first time)");
+            .unwrap();
 
         // Verify record was created
         async fn confirm_state(
@@ -2316,27 +2478,30 @@ mod test {
             assert_eq!(state.state(), expected_state);
         }
 
-        confirm_state(datastore, nexus_id, DbMetadataNexusState::Active).await;
+        confirm_state(datastore, nexus1_id, DbMetadataNexusState::Active).await;
+        confirm_state(datastore, nexus2_id, DbMetadataNexusState::Active).await;
 
         // Creating the record again: not an error.
         datastore
             .database_nexus_access_create(&opctx, &blueprint)
             .await
             .expect("Failed to create nexus access (first time)");
-        confirm_state(datastore, nexus_id, DbMetadataNexusState::Active).await;
+        confirm_state(datastore, nexus1_id, DbMetadataNexusState::Active).await;
+        confirm_state(datastore, nexus2_id, DbMetadataNexusState::Active).await;
 
         // Manually make the record "Quiesced".
         use nexus_db_schema::schema::db_metadata_nexus::dsl;
         diesel::update(dsl::db_metadata_nexus)
-            .filter(dsl::nexus_id.eq(nexus_id.into_untyped_uuid()))
+            .filter(dsl::nexus_id.eq(nexus1_id.into_untyped_uuid()))
             .set(dsl::state.eq(DbMetadataNexusState::Quiesced))
             .execute_async(
                 &*datastore.pool_connection_unauthorized().await.unwrap(),
             )
             .await
             .expect("Failed to update record");
-        confirm_state(datastore, nexus_id, DbMetadataNexusState::Quiesced)
+        confirm_state(datastore, nexus1_id, DbMetadataNexusState::Quiesced)
             .await;
+        confirm_state(datastore, nexus2_id, DbMetadataNexusState::Active).await;
 
         // Create nexus access records another time - should be idempotent,
         // but should be "on-conflict, ignore".
@@ -2344,8 +2509,9 @@ mod test {
             .database_nexus_access_create(&opctx, &blueprint)
             .await
             .expect("Failed to create nexus access (second time)");
-        confirm_state(datastore, nexus_id, DbMetadataNexusState::Quiesced)
+        confirm_state(datastore, nexus1_id, DbMetadataNexusState::Quiesced)
             .await;
+        confirm_state(datastore, nexus2_id, DbMetadataNexusState::Active).await;
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -2360,24 +2526,31 @@ mod test {
         let datastore = db.datastore();
         let opctx = db.opctx();
 
-        // Create two different blueprints
-        let nexus_id = OmicronZoneUuid::new_v4();
-        let target_blueprint = create_test_blueprint(
-            Generation::new(),
-            vec![(
-                nexus_id,
-                BlueprintZoneDisposition::InService,
-                Generation::new(),
-            )],
-        );
-        let non_target_blueprint = create_test_blueprint(
-            Generation::new(),
-            vec![(
-                nexus_id,
-                BlueprintZoneDisposition::InService,
-                Generation::new(),
-            )],
-        );
+        // Create two different blueprints, each with two Nexuses.
+        //
+        // One of these Nexuses will have a "db_metadata_nexus" record
+        // for bootstrapping, the other won't exist (yet).
+        let nexus1_id = OmicronZoneUuid::new_v4();
+        let nexus2_id = OmicronZoneUuid::new_v4();
+        let both_nexuses = vec![
+            (nexus1_id, BlueprintZoneDisposition::InService, Generation::new()),
+            (nexus2_id, BlueprintZoneDisposition::InService, Generation::new()),
+        ];
+
+        let target_blueprint =
+            create_test_blueprint(Generation::new(), both_nexuses.clone());
+        let non_target_blueprint =
+            create_test_blueprint(Generation::new(), both_nexuses);
+
+        // Initialize the "db_metadata_nexus" record for one of the Nexuses
+        let conn = datastore.pool_connection_unauthorized().await.unwrap();
+        datastore
+            .initialize_nexus_access_from_blueprint_on_connection(
+                &*conn,
+                vec![nexus1_id],
+            )
+            .await
+            .unwrap();
 
         // Insert both blueprints
         datastore
@@ -2413,9 +2586,9 @@ mod test {
             "Creating nexus access with wrong target blueprint should fail"
         );
 
-        // Verify no records were created for the nexus
+        // Verify no records were created for the second nexus
         let access = datastore
-            .database_nexus_access(nexus_id)
+            .database_nexus_access(nexus2_id)
             .await
             .expect("Failed to get nexus access");
         assert!(
@@ -2432,7 +2605,7 @@ mod test {
             );
 
         let access_after_correct = datastore
-            .database_nexus_access(nexus_id)
+            .database_nexus_access(nexus2_id)
             .await
             .expect("Failed to get nexus access after correct blueprint");
         assert!(
