@@ -26,6 +26,21 @@ async fn test_nexus_boots_before_cockroach() {
 
     let log = builder.logctx.log.new(o!("component" => "test"));
 
+    builder
+        .start_gateway(
+            SwitchLocation::Switch0,
+            Some(MGS_PORT),
+            DEFAULT_SP_SIM_CONFIG.into(),
+        )
+        .await;
+    builder
+        .start_gateway(
+            SwitchLocation::Switch1,
+            None,
+            DEFAULT_SP_SIM_CONFIG.into(),
+        )
+        .await;
+
     builder.start_dendrite(SwitchLocation::Switch0).await;
     builder.start_dendrite(SwitchLocation::Switch1).await;
     builder.start_mgd(SwitchLocation::Switch0).await;
@@ -188,6 +203,10 @@ async fn nexus_schema_test_setup(
     builder.start_crdb(populate).await;
     builder.start_internal_dns().await;
     builder.start_external_dns().await;
+
+    let sp_conf: camino::Utf8PathBuf = DEFAULT_SP_SIM_CONFIG.into();
+    builder.start_gateway(SwitchLocation::Switch0, None, sp_conf.clone()).await;
+    builder.start_gateway(SwitchLocation::Switch1, None, sp_conf).await;
     builder.start_dendrite(SwitchLocation::Switch0).await;
     builder.start_dendrite(SwitchLocation::Switch1).await;
     builder.start_mgd(SwitchLocation::Switch0).await;

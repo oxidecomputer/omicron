@@ -802,9 +802,12 @@ mod test {
         create_default_ip_pool, create_project, object_create,
     };
     use nexus_test_utils_macros::nexus_test;
+    use nexus_types::identity::Resource;
     use omicron_common::api::external::{
-        ByteCount, IdentityMetadataCreateParams, InstanceCpuCount,
+        ByteCount, DataPageParams, IdentityMetadataCreateParams,
+        InstanceCpuCount, Name,
     };
+    use omicron_common::api::internal::shared::SwitchLocation;
     use uuid::Uuid;
 
     use super::*;
@@ -839,7 +842,7 @@ mod test {
                 user_data: b"#cloud-config".to_vec(),
                 ssh_public_keys: Some(Vec::new()),
                 network_interfaces:
-                    params::InstanceNetworkInterfaceAttachment::None,
+                    params::InstanceNetworkInterfaceAttachment::Default,
                 external_ips: vec![],
                 disks: vec![],
                 boot_disk: None,
@@ -888,6 +891,207 @@ mod test {
             .state;
 
         assert_eq!(vmm_state, nexus_db_model::VmmState::Running);
+    }
+
+    #[tokio::test]
+    async fn should_start_with_dead_switch() {
+        let mut cptestctx = nexus_test_utils::test_setup::<crate::Server>(
+            "should_start_with_dead_switch",
+            3,
+        )
+        .await;
+
+        let client = &cptestctx.external_client;
+        let nexus = &cptestctx.server.server_context().nexus;
+        let _project_id = setup_test_project(&client).await;
+        let opctx = test_helpers::test_opctx(&cptestctx);
+        let instance = create_instance(&client).await;
+        let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
+        let db_instance = test_helpers::instance_fetch(&cptestctx, instance_id)
+            .await
+            .instance()
+            .clone();
+
+        let datastore =
+            cptestctx.server.server_context().nexus.datastore().clone();
+
+        let mut uplink0_params = params::SwitchPortSettingsCreate::new(
+            IdentityMetadataCreateParams {
+                name: "test-uplink0".parse().unwrap(),
+                description: "test uplink".into(),
+            },
+        );
+
+        uplink0_params.routes = vec![params::RouteConfig {
+            link_name: "phy0".parse().unwrap(),
+            routes: vec![params::Route {
+                dst: "0.0.0.0/0".parse().unwrap(),
+                gw: "1.1.1.1".parse().unwrap(),
+                vid: None,
+                rib_priority: None,
+            }],
+        }];
+
+        let mut uplink1_params = params::SwitchPortSettingsCreate::new(
+            IdentityMetadataCreateParams {
+                name: "test-uplink1".parse().unwrap(),
+                description: "test uplink".into(),
+            },
+        );
+
+        uplink1_params.routes = vec![params::RouteConfig {
+            link_name: "phy0".parse().unwrap(),
+            routes: vec![params::Route {
+                dst: "0.0.0.0/0".parse().unwrap(),
+                gw: "2.2.2.2".parse().unwrap(),
+                vid: None,
+                rib_priority: None,
+            }],
+        }];
+
+        let uplink0_settings = datastore
+            .switch_port_settings_create(&opctx, &uplink0_params, None)
+            .await
+            .expect("should be able to create configuration for uplink0");
+
+        let uplink1_settings = datastore
+            .switch_port_settings_create(&opctx, &uplink1_params, None)
+            .await
+            .expect("should be able to create configuration for uplink1");
+
+        let rack_id = datastore
+            .rack_list(&opctx, &DataPageParams::max_page())
+            .await
+            .unwrap()
+            .pop()
+            .unwrap()
+            .identity
+            .id;
+
+        let uplink0 = datastore
+            .switch_port_get_id(
+                &opctx,
+                rack_id,
+                Name::try_from("switch0".to_string()).unwrap().into(),
+                Name::try_from("qsfp0".to_string()).unwrap().into(),
+            )
+            .await
+            .expect("there should be a switch port for switch0");
+
+        let uplink1 = datastore
+            .switch_port_get_id(
+                &opctx,
+                rack_id,
+                Name::try_from("switch1".to_string()).unwrap().into(),
+                Name::try_from("qsfp0".to_string()).unwrap().into(),
+            )
+            .await
+            .expect("there should be a switch port for switch1");
+
+        datastore
+            .switch_port_set_settings_id(
+                &opctx,
+                uplink0,
+                Some(uplink0_settings.settings.id()),
+                db::datastore::UpdatePrecondition::DontCare,
+            )
+            .await
+            .expect("unable to update switch0 settings");
+
+        datastore
+            .switch_port_set_settings_id(
+                &opctx,
+                uplink1,
+                Some(uplink1_settings.settings.id()),
+                db::datastore::UpdatePrecondition::DontCare,
+            )
+            .await
+            .expect("unable to update switch1 settings");
+
+        let switch0_dpd = cptestctx
+            .dendrite
+            .get_mut(&SwitchLocation::Switch0)
+            .expect("there should be at least one dendrite running");
+
+        switch0_dpd
+            .child
+            .as_mut()
+            .expect("child process should be present")
+            .kill()
+            .await
+            .expect("child process should be killed");
+
+        let log = &opctx.log;
+
+        let port = switch0_dpd.port;
+
+        let client_state = dpd_client::ClientState {
+            tag: String::from("nexus"),
+            log: log.new(o!(
+                "component" => "DpdClient"
+            )),
+        };
+
+        let addr = std::net::Ipv6Addr::LOCALHOST;
+
+        let switch_0_dpd_client = dpd_client::Client::new(
+            &format!("http://[{addr}]:{port}"),
+            client_state,
+        );
+
+        // calls to switch0's dpd should fail
+        assert!(switch_0_dpd_client.dpd_uptime().await.is_err());
+
+        let params = Params {
+            serialized_authn: authn::saga::Serialized::for_opctx(&opctx),
+            db_instance,
+            reason: Reason::User,
+        };
+
+        let dag = create_saga_dag::<SagaInstanceStart>(params).unwrap();
+        test_helpers::actions_succeed_idempotently(nexus, dag).await;
+
+        test_helpers::instance_simulate(&cptestctx, &instance_id).await;
+        let vmm_state = test_helpers::instance_fetch(&cptestctx, instance_id)
+            .await
+            .vmm()
+            .as_ref()
+            .expect("running instance should have a vmm")
+            .runtime
+            .state;
+
+        assert_eq!(vmm_state, nexus_db_model::VmmState::Running);
+
+        let port = cptestctx
+            .dendrite
+            .get(&SwitchLocation::Switch1)
+            .expect("two dendrites should be present in test context")
+            .port;
+
+        let client_state = dpd_client::ClientState {
+            tag: String::from("nexus"),
+            log: log.new(o!(
+                "component" => "DpdClient"
+            )),
+        };
+
+        let addr = std::net::Ipv6Addr::LOCALHOST;
+
+        let dpd_client = dpd_client::Client::new(
+            &format!("http://[{addr}]:{port}"),
+            client_state,
+        );
+
+        // Check to ensure that the nat entry for the address has made it onto the switch
+        let nat_entries = dpd_client
+            .nat_ipv4_list(&std::net::Ipv4Addr::new(10, 0, 0, 0), None, None)
+            .await
+            .unwrap()
+            .items
+            .clone();
+
+        assert_eq!(nat_entries.len(), 1);
+        cptestctx.teardown().await;
     }
 
     #[nexus_test(server = crate::Server)]

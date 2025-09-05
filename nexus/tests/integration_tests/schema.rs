@@ -5,6 +5,7 @@
 use camino::Utf8PathBuf;
 use dropshot::test_util::LogContext;
 use futures::future::BoxFuture;
+use gateway_test_utils::setup::DEFAULT_SP_SIM_CONFIG;
 use nexus_config::NexusConfig;
 use nexus_config::SchemaConfig;
 use nexus_db_lookup::DataStoreConnection;
@@ -55,6 +56,9 @@ async fn test_setup<'a>(
     builder.config.pkg.schema = Some(SchemaConfig { schema_dir });
     builder.start_internal_dns().await;
     builder.start_external_dns().await;
+    let sp_conf: Utf8PathBuf = DEFAULT_SP_SIM_CONFIG.into();
+    builder.start_gateway(SwitchLocation::Switch0, None, sp_conf.clone()).await;
+    builder.start_gateway(SwitchLocation::Switch1, None, sp_conf).await;
     builder.start_dendrite(SwitchLocation::Switch0).await;
     builder.start_dendrite(SwitchLocation::Switch1).await;
     builder.start_mgd(SwitchLocation::Switch0).await;

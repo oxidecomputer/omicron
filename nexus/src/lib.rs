@@ -311,10 +311,16 @@ impl nexus_test_interface::NexusServer for Server {
                     external_dns_zone_name: external_dns_zone_name.to_owned(),
                     recovery_silo,
                     external_port_count: ExternalPortDiscovery::Static(
-                        HashMap::from([(
-                            SwitchLocation::Switch0,
-                            vec!["qsfp0".parse().unwrap()],
-                        )]),
+                        HashMap::from([
+                            (
+                                SwitchLocation::Switch0,
+                                vec!["qsfp0".parse().unwrap()],
+                            ),
+                            (
+                                SwitchLocation::Switch1,
+                                vec!["qsfp0".parse().unwrap()],
+                            ),
+                        ]),
                     ),
                     rack_network_config: RackNetworkConfig {
                         rack_subnet: "fd00:1122:3344:0100::/56"

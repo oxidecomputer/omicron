@@ -28,7 +28,6 @@ use nexus_mgs_updates::ArtifactCache;
 use nexus_mgs_updates::MgsUpdateDriver;
 use nexus_types::deployment::PendingMgsUpdates;
 use nexus_types::quiesce::SagaQuiesceHandle;
-use omicron_common::address::DENDRITE_PORT;
 use omicron_common::address::MGD_PORT;
 use omicron_common::address::MGS_PORT;
 use omicron_common::api::external::ByteCount;
@@ -1113,12 +1112,20 @@ pub(crate) async fn dpd_clients(
     resolver: &internal_dns_resolver::Resolver,
     log: &slog::Logger,
 ) -> Result<HashMap<SwitchLocation, dpd_client::Client>, String> {
-    let mappings = switch_zone_address_mappings(resolver, log).await?;
-    let clients: HashMap<SwitchLocation, dpd_client::Client> = mappings
-        .iter()
-        .map(|(location, addr)| {
-            let port = DENDRITE_PORT;
+    let dpd_socketaddrs = match resolver
+        .lookup_all_socket_v6(ServiceName::Dendrite)
+        .await
+    {
+        Ok(addrs) => addrs,
+        Err(e) => {
+            error!(log, "failed to resolve addresses for Dendrite services"; "error" => %e);
+            return Err(e.to_string());
+        }
+    };
 
+    let clients: Vec<(SocketAddrV6, dpd_client::Client)> = dpd_socketaddrs
+        .iter()
+        .map(|socket_addr| {
             let client_state = dpd_client::ClientState {
                 tag: String::from("nexus"),
                 log: log.new(o!(
@@ -1126,14 +1133,45 @@ pub(crate) async fn dpd_clients(
                 )),
             };
 
-            let dpd_client = dpd_client::Client::new(
-                &format!("http://[{addr}]:{port}"),
+            let client = dpd_client::Client::new(
+                &format!("http://{socket_addr}"),
                 client_state,
             );
-            (*location, dpd_client)
+
+            (*socket_addr, client)
         })
         .collect();
-    Ok(clients)
+
+    let mut mappings: HashMap<SwitchLocation, dpd_client::Client> =
+        HashMap::new();
+
+    for (addr, client) in clients {
+        let switch_slot = match client.switch_identifiers().await {
+            Ok(response) => response.slot,
+            Err(e) => {
+                error!(
+                    log,
+                    "failed to determine switch slot for dendrite";
+                    "error" => %e,
+                    "addr" => %addr,
+                );
+                continue;
+            }
+        };
+
+        let location = match switch_slot {
+            0 => SwitchLocation::Switch0,
+            1 => SwitchLocation::Switch1,
+            _ => {
+                warn!(log, "unexpected value for switch slot: {switch_slot}");
+                continue;
+            }
+        };
+
+        mappings.insert(location, client);
+    }
+
+    Ok(mappings)
 }
 
 // We currently ignore the rack_id argument here, as the shared

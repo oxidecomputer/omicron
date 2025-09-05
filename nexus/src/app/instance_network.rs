@@ -738,15 +738,16 @@ async fn notify_dendrite_nat_state(
     // instance allocator context.
     let boundary_switches = boundary_switches(datastore, opctx_alloc).await?;
 
+    let clients = super::dpd_clients(resolver, log).await.map_err(|e| {
+        Error::internal_error(&format!("failed to get dpd clients: {e}"))
+    })?;
+
     let mut errors = vec![];
     for switch in &boundary_switches {
         debug!(log, "notifying dendrite of updates";
                     "instance_id" => ?instance_id,
                     "switch" => switch.to_string());
 
-        let clients = super::dpd_clients(resolver, log).await.map_err(|e| {
-            Error::internal_error(&format!("failed to get dpd clients: {e}"))
-        })?;
         let client_result = clients.get(switch).ok_or_else(|| {
             Error::internal_error(&format!(
                 "unable to find dendrite client for {switch}"
