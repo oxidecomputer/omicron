@@ -133,7 +133,7 @@ impl super::Nexus {
         // say, the background task) to ensure we get the latest state.
         let chicken_switches = self
             .db_datastore
-            .reconfigurator_chicken_switches_get_latest(opctx)
+            .reconfigurator_config_get_latest(opctx)
             .await?
             .map_or_else(PlannerConfig::default, |switches| {
                 switches.config.planner_config

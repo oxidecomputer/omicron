@@ -388,7 +388,7 @@ pub async fn reconfigurator_state_load(
 ) -> Result<UnstableReconfiguratorState, anyhow::Error> {
     opctx.check_complex_operations_allowed()?;
     let chicken_switches = datastore
-        .reconfigurator_chicken_switches_get_latest(opctx)
+        .reconfigurator_config_get_latest(opctx)
         .await?
         .map_or_else(PlannerConfig::default, |switches| {
             switches.config.planner_config

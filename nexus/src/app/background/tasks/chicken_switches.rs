@@ -52,7 +52,7 @@ impl BackgroundTask for ChickenSwitchesLoader {
         async {
             match self
                 .datastore
-                .reconfigurator_chicken_switches_get_latest(opctx)
+                .reconfigurator_config_get_latest(opctx)
                 .await
                 .context("failed to load chicken switches")
             {
@@ -153,7 +153,7 @@ mod test {
         let switches =
             ReconfiguratorConfigParam { version: 1, config: expected_switches };
         datastore
-            .reconfigurator_chicken_switches_insert_latest_version(
+            .reconfigurator_config_insert_latest_version(
                 &opctx, switches,
             )
             .await
@@ -185,7 +185,7 @@ mod test {
         let switches =
             ReconfiguratorConfigParam { version: 2, config: expected_switches };
         datastore
-            .reconfigurator_chicken_switches_insert_latest_version(
+            .reconfigurator_config_insert_latest_version(
                 &opctx, switches,
             )
             .await

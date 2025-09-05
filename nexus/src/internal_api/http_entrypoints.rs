@@ -880,7 +880,7 @@ impl NexusInternalApi for NexusInternalApiImpl {
             let opctx =
                 crate::context::op_context_for_internal_api(&rqctx).await;
             match datastore
-                .reconfigurator_chicken_switches_get_latest(&opctx)
+                .reconfigurator_config_get_latest(&opctx)
                 .await?
             {
                 Some(switches) => Ok(HttpResponseOk(switches)),
@@ -907,7 +907,7 @@ impl NexusInternalApi for NexusInternalApiImpl {
                 crate::context::op_context_for_internal_api(&rqctx).await;
             let version = path_params.into_inner().version;
             match datastore
-                .reconfigurator_chicken_switches_get(&opctx, version)
+                .reconfigurator_config_get(&opctx, version)
                 .await?
             {
                 Some(switches) => Ok(HttpResponseOk(switches)),
@@ -936,7 +936,7 @@ impl NexusInternalApi for NexusInternalApiImpl {
                 crate::context::op_context_for_internal_api(&rqctx).await;
 
             datastore
-                .reconfigurator_chicken_switches_insert_latest_version(
+                .reconfigurator_config_insert_latest_version(
                     &opctx,
                     switches.into_inner(),
                 )

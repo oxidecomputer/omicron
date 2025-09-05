@@ -554,7 +554,7 @@ impl Nexus {
             {
                 let config = ReconfiguratorConfigParam { version: 1, config };
                 if let Err(err) = db_datastore
-                    .reconfigurator_chicken_switches_insert_latest_version(
+                    .reconfigurator_config_insert_latest_version(
                         &background_ctx,
                         config,
                     )

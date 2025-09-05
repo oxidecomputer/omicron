@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Queries related to reconfigurator chicken switches
+//! Queries related to reconfigurator runtime configuration
 
 use super::DataStore;
 use crate::authz;
@@ -18,7 +18,7 @@ use diesel::sql_types;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_lookup::DbConnection;
-use nexus_db_model::ReconfiguratorChickenSwitches as DbReconfiguratorChickenSwitches;
+use nexus_db_model::ReconfiguratorConfig as DbReconfiguratorConfig;
 use nexus_db_model::SqlU32;
 use nexus_types::deployment::ReconfiguratorConfigParam;
 use nexus_types::deployment::ReconfiguratorConfigView;
@@ -27,7 +27,7 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 
 impl DataStore {
-    pub async fn reconfigurator_chicken_switches_list(
+    pub async fn reconfigurator_config_list(
         &self,
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, SqlU32>,
@@ -43,7 +43,7 @@ impl DataStore {
             reconfigurator_chicken_switches::version,
             pagparams,
         )
-        .select(DbReconfiguratorChickenSwitches::as_select())
+        .select(DbReconfiguratorConfig::as_select())
         .get_results_async(&*self.pool_connection_authorized(opctx).await?)
         .await
         .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
@@ -51,7 +51,7 @@ impl DataStore {
         Ok(switches.into_iter().map(ReconfiguratorConfigView::from).collect())
     }
 
-    pub async fn reconfigurator_chicken_switches_get_latest(
+    pub async fn reconfigurator_config_get_latest(
         &self,
         opctx: &OpContext,
     ) -> Result<Option<ReconfiguratorConfigView>, Error> {
@@ -61,7 +61,7 @@ impl DataStore {
 
         let latest = dsl::reconfigurator_chicken_switches
             .order_by(dsl::version.desc())
-            .first_async::<DbReconfiguratorChickenSwitches>(&*conn)
+            .first_async::<DbReconfiguratorConfig>(&*conn)
             .await
             .optional()
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
@@ -69,7 +69,7 @@ impl DataStore {
         Ok(latest.map(Into::into))
     }
 
-    pub async fn reconfigurator_chicken_switches_get(
+    pub async fn reconfigurator_config_get(
         &self,
         opctx: &OpContext,
         version: u32,
@@ -80,7 +80,7 @@ impl DataStore {
 
         let latest = dsl::reconfigurator_chicken_switches
             .filter(dsl::version.eq(SqlU32::new(version)))
-            .select(DbReconfiguratorChickenSwitches::as_select())
+            .select(DbReconfiguratorConfig::as_select())
             .get_result_async(&*conn)
             .await
             .optional()
@@ -89,12 +89,12 @@ impl DataStore {
         Ok(latest.map(Into::into))
     }
 
-    /// Insert the current version of the chicken switches in the database
+    /// Insert the current version of the config in the database
     ///
     /// Only succeeds if the prior version is the latest version currently in
     /// the `reconfigurator_chicken_switches` table. If there are no versions
     /// currently in the table, then the current swtiches must be at version 1.
-    pub async fn reconfigurator_chicken_switches_insert_latest_version(
+    pub async fn reconfigurator_config_insert_latest_version(
         &self,
         opctx: &OpContext,
         switches: ReconfiguratorConfigParam,
@@ -128,7 +128,7 @@ impl DataStore {
         }
     }
 
-    /// Insert the next version of the chicken switches in the database
+    /// Insert the next version of the config in the database
     ///
     /// Only succeeds if the prior version is the latest version currently
     /// in the `reconfigurator_chicken_switches` table.
@@ -171,9 +171,8 @@ mod tests {
     use omicron_test_utils::dev;
 
     #[tokio::test]
-    async fn test_reconfigurator_chicken_switches_basic() {
-        let logctx =
-            dev::test_setup_log("test_reconfigurator_chicken_switches_basic");
+    async fn test_reconfigurator_config_basic() {
+        let logctx = dev::test_setup_log("test_reconfigurator_config_basic");
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
@@ -181,10 +180,7 @@ mod tests {
 
         assert!(
             datastore
-                .reconfigurator_chicken_switches_list(
-                    opctx,
-                    &DataPageParams::max_page()
-                )
+                .reconfigurator_config_list(opctx, &DataPageParams::max_page())
                 .await
                 .unwrap()
                 .is_empty()
@@ -201,9 +197,7 @@ mod tests {
 
         assert!(
             datastore
-                .reconfigurator_chicken_switches_insert_latest_version(
-                    opctx, switches
-                )
+                .reconfigurator_config_insert_latest_version(opctx, switches)
                 .await
                 .unwrap_err()
                 .to_string()
@@ -214,9 +208,7 @@ mod tests {
         switches.version = 2;
         assert!(
             datastore
-                .reconfigurator_chicken_switches_insert_latest_version(
-                    opctx, switches
-                )
+                .reconfigurator_config_insert_latest_version(opctx, switches)
                 .await
                 .unwrap_err()
                 .to_string()
@@ -227,9 +219,7 @@ mod tests {
         switches.version = 1;
         assert!(
             datastore
-                .reconfigurator_chicken_switches_insert_latest_version(
-                    opctx, switches
-                )
+                .reconfigurator_config_insert_latest_version(opctx, switches)
                 .await
                 .is_ok()
         );
@@ -238,9 +228,7 @@ mod tests {
         switches.version = 2;
         assert!(
             datastore
-                .reconfigurator_chicken_switches_insert_latest_version(
-                    opctx, switches
-                )
+                .reconfigurator_config_insert_latest_version(opctx, switches)
                 .await
                 .is_ok()
         );
@@ -249,9 +237,7 @@ mod tests {
         switches.version = 4;
         assert!(
             datastore
-                .reconfigurator_chicken_switches_insert_latest_version(
-                    opctx, switches
-                )
+                .reconfigurator_config_insert_latest_version(opctx, switches)
                 .await
                 .unwrap_err()
                 .to_string()
@@ -262,9 +248,7 @@ mod tests {
         switches.version = 3;
         assert!(
             datastore
-                .reconfigurator_chicken_switches_insert_latest_version(
-                    opctx, switches
-                )
+                .reconfigurator_config_insert_latest_version(opctx, switches)
                 .await
                 .is_ok()
         );
@@ -274,16 +258,14 @@ mod tests {
         switches.config.planner_enabled = true;
         assert!(
             datastore
-                .reconfigurator_chicken_switches_insert_latest_version(
-                    opctx, switches
-                )
+                .reconfigurator_config_insert_latest_version(opctx, switches)
                 .await
                 .is_ok()
         );
 
         // Getting the latest version should return version 4
         let read = datastore
-            .reconfigurator_chicken_switches_get_latest(opctx)
+            .reconfigurator_config_get_latest(opctx)
             .await
             .unwrap()
             .unwrap();
@@ -292,7 +274,7 @@ mod tests {
 
         // Getting version 4 should work
         let read = datastore
-            .reconfigurator_chicken_switches_get(opctx, 4)
+            .reconfigurator_config_get(opctx, 4)
             .await
             .unwrap()
             .unwrap();
@@ -302,17 +284,14 @@ mod tests {
         // Getting version 5 should fail, as it doesn't exist
         assert!(
             datastore
-                .reconfigurator_chicken_switches_get(opctx, 5)
+                .reconfigurator_config_get(opctx, 5)
                 .await
                 .unwrap()
                 .is_none()
         );
 
         let history = datastore
-            .reconfigurator_chicken_switches_list(
-                opctx,
-                &DataPageParams::max_page(),
-            )
+            .reconfigurator_config_list(opctx, &DataPageParams::max_page())
             .await
             .unwrap();
 

@@ -393,7 +393,7 @@ async fn cmd_reconfigurator_config_history(
             break;
         }
         let batch = datastore
-            .reconfigurator_chicken_switches_list(opctx, &p.current_pagparams())
+            .reconfigurator_config_list(opctx, &p.current_pagparams())
             .await
             .context("batch of reconfigurator configs")?;
         paginator = p.found_batch(&batch, &|b| SqlU32::new(b.version));

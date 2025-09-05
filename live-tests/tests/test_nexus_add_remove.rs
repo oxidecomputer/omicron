@@ -47,7 +47,7 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
     let datastore = lc.datastore();
 
     let chicken_switches = datastore
-        .reconfigurator_chicken_switches_get_latest(opctx)
+        .reconfigurator_config_get_latest(opctx)
         .await
         .expect("obtained latest chicken switches")
         .map_or_else(PlannerConfig::default, |cs| cs.config.planner_config);

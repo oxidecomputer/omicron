@@ -11,7 +11,7 @@ use nexus_types::deployment;
 
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
 #[diesel(table_name = reconfigurator_chicken_switches)]
-pub struct ReconfiguratorChickenSwitches {
+pub struct ReconfiguratorConfig {
     pub version: SqlU32,
     pub planner_enabled: bool,
     pub time_modified: DateTime<Utc>,
@@ -19,7 +19,7 @@ pub struct ReconfiguratorChickenSwitches {
 }
 
 impl From<deployment::ReconfiguratorConfigView>
-    for ReconfiguratorChickenSwitches
+    for ReconfiguratorConfig
 {
     fn from(value: deployment::ReconfiguratorConfigView) -> Self {
         Self {
@@ -34,10 +34,10 @@ impl From<deployment::ReconfiguratorConfigView>
     }
 }
 
-impl From<ReconfiguratorChickenSwitches>
+impl From<ReconfiguratorConfig>
     for deployment::ReconfiguratorConfigView
 {
-    fn from(value: ReconfiguratorChickenSwitches) -> Self {
+    fn from(value: ReconfiguratorConfig) -> Self {
         Self {
             version: value.version.into(),
             config: deployment::ReconfiguratorConfig {
