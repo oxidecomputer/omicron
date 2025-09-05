@@ -31,15 +31,12 @@ pub struct ReconfiguratorConfigLoader {
 
 impl ReconfiguratorConfigLoader {
     pub fn new(datastore: Arc<DataStore>) -> Self {
-        let (tx, _rx) = watch::channel(
-            ReconfiguratorConfigLoaderState::NotYetLoaded,
-        );
+        let (tx, _rx) =
+            watch::channel(ReconfiguratorConfigLoaderState::NotYetLoaded);
         Self { datastore, tx }
     }
 
-    pub fn watcher(
-        &self,
-    ) -> watch::Receiver<ReconfiguratorConfigLoaderState> {
+    pub fn watcher(&self) -> watch::Receiver<ReconfiguratorConfigLoaderState> {
         self.tx.subscribe()
     }
 }
@@ -63,10 +60,9 @@ impl BackgroundTask for ReconfiguratorConfigLoader {
                     json!({ "error": message })
                 }
                 Ok(switches) => {
-                    let switches =
-                        ReconfiguratorConfigLoaderState::Loaded(
-                            switches.unwrap_or_default(),
-                        );
+                    let switches = ReconfiguratorConfigLoaderState::Loaded(
+                        switches.unwrap_or_default(),
+                    );
                     let updated = self.tx.send_if_modified(|s| {
                         if *s != switches {
                             *s = switches.clone();
@@ -139,9 +135,7 @@ mod test {
         assert!(rx.has_changed().unwrap());
         assert_eq!(
             *rx.borrow_and_update(),
-            ReconfiguratorConfigLoaderState::Loaded(
-                default_switches.clone()
-            )
+            ReconfiguratorConfigLoaderState::Loaded(default_switches.clone())
         );
 
         // Insert an initial set of switches.
@@ -152,9 +146,7 @@ mod test {
         let switches =
             ReconfiguratorConfigParam { version: 1, config: expected_switches };
         datastore
-            .reconfigurator_config_insert_latest_version(
-                &opctx, switches,
-            )
+            .reconfigurator_config_insert_latest_version(&opctx, switches)
             .await
             .unwrap();
         let out = task.activate(&opctx).await;
@@ -184,9 +176,7 @@ mod test {
         let switches =
             ReconfiguratorConfigParam { version: 2, config: expected_switches };
         datastore
-            .reconfigurator_config_insert_latest_version(
-                &opctx, switches,
-            )
+            .reconfigurator_config_insert_latest_version(&opctx, switches)
             .await
             .unwrap();
         let out = task.activate(&opctx).await;

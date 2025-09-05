@@ -2709,10 +2709,7 @@ fn cmd_set(
                 let diff = current.diff(&new);
                 format!("planner config updated:\n{}", diff.display())
             } else {
-                format!(
-                    "no changes to planner config:\n{}",
-                    current.display()
-                )
+                format!("no changes to planner config:\n{}", current.display())
             }
         }
         SetArgs::IgnoreImpossibleMgsUpdatesSince { since } => {

@@ -40,13 +40,7 @@ impl BlueprintPlanner {
         rx_blueprint: Receiver<Option<Arc<(BlueprintTarget, Blueprint)>>>,
     ) -> Self {
         let (tx_blueprint, _) = watch::channel(None);
-        Self {
-            datastore,
-            rx_config,
-            rx_inventory,
-            rx_blueprint,
-            tx_blueprint,
-        }
+        Self { datastore, rx_config, rx_inventory, rx_blueprint, tx_blueprint }
     }
 
     pub fn watcher(
@@ -70,9 +64,7 @@ impl BlueprintPlanner {
                 );
                 return BlueprintPlannerStatus::Disabled;
             }
-            ReconfiguratorConfigLoaderState::Loaded(config) => {
-                config.clone()
-            }
+            ReconfiguratorConfigLoaderState::Loaded(config) => config.clone(),
         };
         if !config.config.planner_enabled {
             debug!(&opctx.log, "blueprint planning disabled, doing nothing");
@@ -339,17 +331,16 @@ mod test {
         collector.activate(&opctx).await;
 
         // Enable the planner
-        let (_tx, rx_config_loader) =
-            watch::channel(ReconfiguratorConfigLoaderState::Loaded(
-                ReconfiguratorConfigView {
-                    version: 1,
-                    config: ReconfiguratorConfig {
-                        planner_enabled: true,
-                        planner_config: PlannerConfig::default(),
-                    },
-                    time_modified: now_db_precision(),
+        let (_tx, rx_config_loader) = watch::channel(
+            ReconfiguratorConfigLoaderState::Loaded(ReconfiguratorConfigView {
+                version: 1,
+                config: ReconfiguratorConfig {
+                    planner_enabled: true,
+                    planner_config: PlannerConfig::default(),
                 },
-            ));
+                time_modified: now_db_precision(),
+            }),
+        );
 
         // Finally, spin up the planner background task.
         let mut planner = BlueprintPlanner::new(

@@ -18,9 +18,7 @@ pub struct ReconfiguratorConfig {
     pub add_zones_with_mupdate_override: bool,
 }
 
-impl From<deployment::ReconfiguratorConfigView>
-    for ReconfiguratorConfig
-{
+impl From<deployment::ReconfiguratorConfigView> for ReconfiguratorConfig {
     fn from(value: deployment::ReconfiguratorConfigView) -> Self {
         Self {
             version: value.version.into(),
@@ -34,9 +32,7 @@ impl From<deployment::ReconfiguratorConfigView>
     }
 }
 
-impl From<ReconfiguratorConfig>
-    for deployment::ReconfiguratorConfigView
-{
+impl From<ReconfiguratorConfig> for deployment::ReconfiguratorConfigView {
     fn from(value: ReconfiguratorConfig) -> Self {
         Self {
             version: value.version.into(),

@@ -116,11 +116,7 @@ impl fmt::Display for PlanningReport {
             } = self;
             writeln!(f, "planning report for blueprint {blueprint_id}:")?;
             if *planner_config != PlannerConfig::default() {
-                writeln!(
-                    f,
-                    "planner config:\n{}",
-                    planner_config.display()
-                )?;
+                writeln!(f, "planner config:\n{}", planner_config.display())?;
             }
             expunge.fmt(f)?;
             decommission.fmt(f)?;
