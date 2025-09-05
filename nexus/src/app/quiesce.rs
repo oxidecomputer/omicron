@@ -258,8 +258,6 @@ mod test {
         after: DateTime<Utc>,
         status: QuiesceStatus,
     ) {
-        // ZZZ debug app::quiesce::test::test_quiesce_full
-        eprintln!("status: {:?}", status);
         let QuiesceState::Quiesced {
             time_requested,
             time_quiesced,
