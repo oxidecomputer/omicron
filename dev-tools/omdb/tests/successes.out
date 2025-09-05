@@ -1680,7 +1680,7 @@ stderr:
 note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
 Error: `blueprint2_id` was not specified and blueprint1 has no parent
 =============================================
-EXECUTING COMMAND: omdb ["nexus", "chicken-switches", "show", "current"]
+EXECUTING COMMAND: omdb ["nexus", "reconfigurator-config", "show", "current"]
 termination: Exited(0)
 ---------------------------------------------
 stdout:
@@ -1694,7 +1694,7 @@ Reconfigurator config:
 stderr:
 note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
 =============================================
-EXECUTING COMMAND: omdb ["-w", "nexus", "chicken-switches", "set", "--planner-enabled", "true"]
+EXECUTING COMMAND: omdb ["-w", "nexus", "reconfigurator-config", "set", "--planner-enabled", "true"]
 termination: Exited(0)
 ---------------------------------------------
 stdout:
@@ -1706,7 +1706,7 @@ reconfigurator config updated to version 2:
 stderr:
 note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
 =============================================
-EXECUTING COMMAND: omdb ["-w", "nexus", "chicken-switches", "set", "--add-zones-with-mupdate-override", "true"]
+EXECUTING COMMAND: omdb ["-w", "nexus", "reconfigurator-config", "set", "--add-zones-with-mupdate-override", "true"]
 termination: Exited(0)
 ---------------------------------------------
 stdout:
@@ -1718,7 +1718,7 @@ reconfigurator config updated to version 3:
 stderr:
 note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
 =============================================
-EXECUTING COMMAND: omdb ["nexus", "chicken-switches", "show", "current"]
+EXECUTING COMMAND: omdb ["nexus", "reconfigurator-config", "show", "current"]
 termination: Exited(0)
 ---------------------------------------------
 stdout:

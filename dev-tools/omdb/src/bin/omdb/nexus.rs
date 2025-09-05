@@ -133,8 +133,6 @@ enum NexusCommands {
     BackgroundTasks(BackgroundTasksArgs),
     /// interact with blueprints
     Blueprints(BlueprintsArgs),
-    /// interact with reconfigurator chicken switches
-    ChickenSwitches(ReconfiguratorConfigArgs),
     /// interact with clickhouse policy
     ClickhousePolicy(ClickhousePolicyArgs),
     /// print information about pending MGS updates
@@ -143,6 +141,8 @@ enum NexusCommands {
     OximeterReadPolicy(OximeterReadPolicyArgs),
     /// view or modify the quiesce status
     Quiesce(QuiesceArgs),
+    /// interact with reconfigurator config
+    ReconfiguratorConfig(ReconfiguratorConfigArgs),
     /// view sagas, create and complete demo sagas
     Sagas(SagasArgs),
     /// interact with sleds
@@ -698,10 +698,6 @@ impl NexusArgs {
                 cmd_nexus_blueprints_import(&client, token, args).await
             }
 
-            NexusCommands::ChickenSwitches(args) => {
-                cmd_nexus_reconfigurator_config(&omdb, &client, args).await
-            }
-
             NexusCommands::ClickhousePolicy(ClickhousePolicyArgs {
                 command,
             }) => match command {
@@ -731,6 +727,10 @@ impl NexusArgs {
 
             NexusCommands::Quiesce(args) => {
                 cmd_nexus_quiesce(&omdb, &client, args).await
+            }
+
+            NexusCommands::ReconfiguratorConfig(args) => {
+                cmd_nexus_reconfigurator_config(&omdb, &client, args).await
             }
 
             NexusCommands::Sagas(SagasArgs { command }) => {

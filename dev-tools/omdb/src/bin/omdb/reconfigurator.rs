@@ -59,8 +59,8 @@ enum ReconfiguratorCommands {
     Archive(ExportArgs),
     /// Show recent history of blueprints
     History(HistoryArgs),
-    /// Show the recent history of chicken switch settings
-    ChickenSwitchesHistory(ChickenSwitchesHistoryArgs),
+    /// Show the recent history of configuration values
+    ConfigHistory(ConfigHistoryArgs),
 }
 
 #[derive(Debug, Args, Clone)]
@@ -70,7 +70,7 @@ struct ExportArgs {
 }
 
 #[derive(Debug, Args, Clone)]
-struct ChickenSwitchesHistoryArgs {
+struct ConfigHistoryArgs {
     /// how far back in the history to show (number of targets)
     #[clap(long, default_value_t = 128)]
     limit: u32,
@@ -126,8 +126,8 @@ impl ReconfiguratorArgs {
                         )
                         .await
                     }
-                    ReconfiguratorCommands::ChickenSwitchesHistory(args) => {
-                        cmd_reconfigurator_chicken_switches_history(
+                    ReconfiguratorCommands::ConfigHistory(args) => {
+                        cmd_reconfigurator_config_history(
                             &opctx, &datastore, args,
                         )
                         .await
@@ -375,11 +375,11 @@ async fn cmd_reconfigurator_history(
 
     Ok(())
 }
-/// Show recent history of chicken switches
-async fn cmd_reconfigurator_chicken_switches_history(
+/// Show recent history of config settings
+async fn cmd_reconfigurator_config_history(
     opctx: &OpContext,
     datastore: &DataStore,
-    history_args: &ChickenSwitchesHistoryArgs,
+    history_args: &ConfigHistoryArgs,
 ) -> anyhow::Result<()> {
     let mut history = vec![];
     let limit = history_args.limit;
@@ -395,7 +395,7 @@ async fn cmd_reconfigurator_chicken_switches_history(
         let batch = datastore
             .reconfigurator_chicken_switches_list(opctx, &p.current_pagparams())
             .await
-            .context("batch of chicken switches")?;
+            .context("batch of reconfigurator configs")?;
         paginator = p.found_batch(&batch, &|b| SqlU32::new(b.version));
         history.extend(batch.into_iter());
     }
