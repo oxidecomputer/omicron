@@ -28,6 +28,7 @@ use nexus_types::deployment::PendingMgsUpdateRotDetails;
 use nexus_types::deployment::PendingMgsUpdateSpDetails;
 use nexus_types::deployment::PendingMgsUpdates;
 use nexus_types::deployment::TargetReleaseDescription;
+use nexus_types::deployment::planning_report::FailedMgsUpdateReason;
 use nexus_types::deployment::planning_report::SkippedMgsUpdate;
 use nexus_types::deployment::planning_report::SkippedMgsUpdates;
 use nexus_types::inventory::BaseboardId;
@@ -538,101 +539,74 @@ fn try_make_update(
     current_artifacts: &TufRepoDescription,
 ) -> PendingMgsUpdateActions {
     let mut skipped_updates = SkippedMgsUpdates::new();
+
     // We try MGS-driven update components in a hardcoded priority order until
     // any of them returns `Some`.  The order is described in RFD 565 section
     // "Update Sequence".
-    //
-    // TODO-K: Will have to clean this up, the nesting will become horrible
-    let pending_rot_bootloader = match try_make_update_rot_bootloader(
-        log,
-        baseboard_id,
-        inventory,
-        current_artifacts,
-    ) {
-        Ok(p) => match p {
-            Some(update) => Some(PendingMgsUpdateActions {
-                pending_update: Some(update),
-                pending_host_os_phase2_changes: PendingHostPhase2Changes::empty(
-                ),
-                skipped_updates: skipped_updates.clone(),
+    let attempts: [(
+        MgsUpdateComponent,
+        Box<
+            dyn Fn() -> Result<Option<PendingMgsUpdate>, FailedMgsUpdateReason>,
+        >,
+    ); 3] = [
+        (
+            MgsUpdateComponent::RotBootloader,
+            Box::new(|| {
+                try_make_update_rot_bootloader(
+                    log,
+                    baseboard_id,
+                    inventory,
+                    current_artifacts,
+                )
             }),
-            None => None,
-        },
-        Err(e) => {
-            skipped_updates.push(SkippedMgsUpdate {
-                baseboard_id: baseboard_id.clone(),
-                component: MgsUpdateComponent::RotBootloader,
-                reason: e,
-            });
-            None
-            // TODO-K: remove debugging log
-            // warn!(log, "HERE: {:?}", skipped_mgs_updates);
-        }
-    };
-
-    if let Some(update_actions) = pending_rot_bootloader {
-        return update_actions;
-    }
-
-    let pending_rot = match try_make_update_rot(
-        log,
-        baseboard_id,
-        inventory,
-        current_artifacts,
-    ) {
-        Ok(p) => match p {
-            Some(update) => Some(PendingMgsUpdateActions {
-                pending_update: Some(update),
-                pending_host_os_phase2_changes: PendingHostPhase2Changes::empty(
-                ),
-                skipped_updates: skipped_updates.clone(),
+        ),
+        (
+            MgsUpdateComponent::Rot,
+            Box::new(|| {
+                try_make_update_rot(
+                    log,
+                    baseboard_id,
+                    inventory,
+                    current_artifacts,
+                )
             }),
-            None => None,
-        },
-        Err(e) => {
-            skipped_updates.push(SkippedMgsUpdate {
-                baseboard_id: baseboard_id.clone(),
-                component: MgsUpdateComponent::Rot,
-                reason: e,
-            });
-            None
-            // TODO-K: remove debugging log
-            // warn!(log, "HERE: {:?}", skipped_mgs_updates);
-        }
-    };
-
-    if let Some(update_actions) = pending_rot {
-        return update_actions;
-    }
-
-    let pending_sp = match try_make_update_sp(
-        log,
-        baseboard_id,
-        inventory,
-        current_artifacts,
-    ) {
-        Ok(p) => match p {
-            Some(update) => Some(PendingMgsUpdateActions {
-                pending_update: Some(update),
-                pending_host_os_phase2_changes: PendingHostPhase2Changes::empty(
-                ),
-                skipped_updates: skipped_updates.clone(),
+        ),
+        (
+            MgsUpdateComponent::Sp,
+            Box::new(|| {
+                try_make_update_sp(
+                    log,
+                    baseboard_id,
+                    inventory,
+                    current_artifacts,
+                )
             }),
-            None => None,
-        },
-        Err(e) => {
-            skipped_updates.push(SkippedMgsUpdate {
-                baseboard_id: baseboard_id.clone(),
-                component: MgsUpdateComponent::Sp,
-                reason: e,
-            });
-            None
-            // TODO-K: remove debugging log
-            // warn!(log, "HERE: {:?}", skipped_mgs_updates);
-        }
-    };
+        ),
+    ];
 
-    if let Some(update_actions) = pending_sp {
+    if let Some(update_actions) =
+        attempts.into_iter().find_map(|(component, attempt)| {
+            match attempt() {
+                Ok(Some(update)) => Some(PendingMgsUpdateActions {
+                    pending_update: Some(update),
+                    // We have a non-host update; there are no pending host
+                    // phase 2 changes necessary.
+                    pending_host_os_phase2_changes:
+                        PendingHostPhase2Changes::empty(),
+                    skipped_updates: skipped_updates.clone(),
+                }),
+                Ok(None) => None,
+                Err(e) => {
+                    skipped_updates.push(SkippedMgsUpdate {
+                        baseboard_id: baseboard_id.clone(),
+                        component,
+                        reason: e,
+                    });
+                    None
+                }
+            }
+        })
+    {
         return update_actions;
     }
 
@@ -642,23 +616,18 @@ fn try_make_update(
         inventory,
         current_artifacts,
     ) {
-        Ok(p) => match p {
-            Some((update, pending_host_os_phase2_changes)) => {
-                PendingMgsUpdateActions {
-                    pending_update: Some(update),
-                    pending_host_os_phase2_changes,
-                    skipped_updates,
-                }
+        Ok(Some((update, pending_host_os_phase2_changes))) => {
+            // TODO-K: create a new() function for this
+            PendingMgsUpdateActions {
+                pending_update: Some(update),
+                pending_host_os_phase2_changes,
+                skipped_updates,
             }
-            None => {
-                // TODO-K: Add a new() method for PendingMgsUpdateActions?
-                PendingMgsUpdateActions {
-                    pending_update: None,
-                    pending_host_os_phase2_changes:
-                        PendingHostPhase2Changes::empty(),
-                    skipped_updates,
-                }
-            }
+        }
+        Ok(None) => PendingMgsUpdateActions {
+            pending_update: None,
+            pending_host_os_phase2_changes: PendingHostPhase2Changes::empty(),
+            skipped_updates,
         },
         Err(e) => {
             skipped_updates.push(SkippedMgsUpdate {
