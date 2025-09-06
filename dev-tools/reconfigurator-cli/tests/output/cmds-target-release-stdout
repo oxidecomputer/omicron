@@ -218,7 +218,7 @@ generated blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1 based on parent bluepri
 planning report for blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1:
 * 1 pending MGS update:
   * model0:serial0: RotBootloader(PendingMgsUpdateRotBootloaderDetails { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: NoValidVersion })
-* zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+* zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
 
 
 > blueprint-diff latest
@@ -276,7 +276,7 @@ generated blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4 based on parent bluepri
 planning report for blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4:
 * 1 pending MGS update:
   * model0:serial0: RotBootloader(PendingMgsUpdateRotBootloaderDetails { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: NoValidVersion })
-* zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+* zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
 
 
 > blueprint-diff latest
@@ -336,7 +336,7 @@ generated blueprint af934083-59b5-4bf6-8966-6fb5292c29e1 based on parent bluepri
 planning report for blueprint af934083-59b5-4bf6-8966-6fb5292c29e1:
 * 1 pending MGS update:
   * model0:serial0: Rot(PendingMgsUpdateRotDetails { expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: NoValidVersion, expected_persistent_boot_preference: A, expected_pending_persistent_boot_preference: None, expected_transient_boot_preference: None })
-* zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+* zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
 
 
 > blueprint-diff latest
@@ -405,7 +405,7 @@ generated blueprint df06bb57-ad42-4431-9206-abff322896c7 based on parent bluepri
 planning report for blueprint df06bb57-ad42-4431-9206-abff322896c7:
 * 1 pending MGS update:
   * model0:serial0: Sp(PendingMgsUpdateSpDetails { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: NoValidVersion })
-* zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+* zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
 
 
 > blueprint-diff latest
@@ -475,7 +475,7 @@ generated blueprint 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba based on parent bluepri
 planning report for blueprint 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba:
 * 1 pending MGS update:
   * model0:serial0: HostPhase1(PendingMgsUpdateHostPhase1Details { expected_active_phase_1_slot: A, expected_boot_disk: A, expected_active_phase_1_hash: ArtifactHash("0101010101010101010101010101010101010101010101010101010101010101"), expected_active_phase_2_hash: ArtifactHash("0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a"), expected_inactive_phase_1_hash: ArtifactHash("0202020202020202020202020202020202020202020202020202020202020202"), expected_inactive_phase_2_hash: ArtifactHash("f3dd0c7a1bd4500ea0d8bcf67581f576d47752b2f1998a4cb0f0c3155c483008"), sled_agent_address: [fd00:1122:3344:101::1]:12345 })
-* zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+* zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
 
 
 > blueprint-diff latest
@@ -594,7 +594,7 @@ generated blueprint 9034c710-3e57-45f3-99e5-4316145e87ac based on parent bluepri
 planning report for blueprint 9034c710-3e57-45f3-99e5-4316145e87ac:
 * 1 pending MGS update:
   * model0:serial0: HostPhase1(PendingMgsUpdateHostPhase1Details { expected_active_phase_1_slot: A, expected_boot_disk: A, expected_active_phase_1_hash: ArtifactHash("0101010101010101010101010101010101010101010101010101010101010101"), expected_active_phase_2_hash: ArtifactHash("0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a"), expected_inactive_phase_1_hash: ArtifactHash("0202020202020202020202020202020202020202020202020202020202020202"), expected_inactive_phase_2_hash: ArtifactHash("f3dd0c7a1bd4500ea0d8bcf67581f576d47752b2f1998a4cb0f0c3155c483008"), sled_agent_address: [fd00:1122:3344:101::1]:12345 })
-* zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+* zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
 
 
 > blueprint-diff latest
@@ -653,7 +653,7 @@ generated blueprint d60afc57-f15d-476c-bd0f-b1071e2bb976 based on parent bluepri
 planning report for blueprint d60afc57-f15d-476c-bd0f-b1071e2bb976:
 * 1 pending MGS update:
   * model0:serial0: HostPhase1(PendingMgsUpdateHostPhase1Details { expected_active_phase_1_slot: A, expected_boot_disk: A, expected_active_phase_1_hash: ArtifactHash("0101010101010101010101010101010101010101010101010101010101010101"), expected_active_phase_2_hash: ArtifactHash("0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a"), expected_inactive_phase_1_hash: ArtifactHash("0202020202020202020202020202020202020202020202020202020202020202"), expected_inactive_phase_2_hash: ArtifactHash("f3dd0c7a1bd4500ea0d8bcf67581f576d47752b2f1998a4cb0f0c3155c483008"), sled_agent_address: [fd00:1122:3344:101::1]:12345 })
-* zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+* zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
 
 
 > blueprint-diff latest
@@ -711,7 +711,7 @@ generated blueprint a5a8f242-ffa5-473c-8efd-2acf2dc0b736 based on parent bluepri
 planning report for blueprint a5a8f242-ffa5-473c-8efd-2acf2dc0b736:
 * 1 pending MGS update:
   * model0:serial0: HostPhase1(PendingMgsUpdateHostPhase1Details { expected_active_phase_1_slot: A, expected_boot_disk: A, expected_active_phase_1_hash: ArtifactHash("0101010101010101010101010101010101010101010101010101010101010101"), expected_active_phase_2_hash: ArtifactHash("0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a"), expected_inactive_phase_1_hash: ArtifactHash("0202020202020202020202020202020202020202020202020202020202020202"), expected_inactive_phase_2_hash: ArtifactHash("f3dd0c7a1bd4500ea0d8bcf67581f576d47752b2f1998a4cb0f0c3155c483008"), sled_agent_address: [fd00:1122:3344:101::1]:12345 })
-* zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+* zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
 
 
 > blueprint-diff latest
@@ -771,7 +771,7 @@ generated blueprint 626487fa-7139-45ec-8416-902271fc730b based on parent bluepri
 planning report for blueprint 626487fa-7139-45ec-8416-902271fc730b:
 * 1 pending MGS update:
   * model1:serial1: RotBootloader(PendingMgsUpdateRotBootloaderDetails { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: NoValidVersion })
-* zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+* zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
 
 
 > blueprint-diff latest
@@ -842,7 +842,7 @@ generated blueprint c1a0d242-9160-40f4-96ae-61f8f40a0b1b based on parent bluepri
 planning report for blueprint c1a0d242-9160-40f4-96ae-61f8f40a0b1b:
 * 1 pending MGS update:
   * model1:serial1: RotBootloader(PendingMgsUpdateRotBootloaderDetails { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: Version(ArtifactVersion("0.5.0")) })
-* zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+* zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
 
 
 > blueprint-diff latest
@@ -908,7 +908,7 @@ generated blueprint afb09faf-a586-4483-9289-04d4f1d8ba23 based on parent bluepri
 planning report for blueprint afb09faf-a586-4483-9289-04d4f1d8ba23:
 * 1 pending MGS update:
   * model1:serial1: Rot(PendingMgsUpdateRotDetails { expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: NoValidVersion, expected_persistent_boot_preference: A, expected_pending_persistent_boot_preference: None, expected_transient_boot_preference: None })
-* zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+* zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
 
 
 > blueprint-diff latest
@@ -978,7 +978,7 @@ generated blueprint ce365dff-2cdb-4f35-a186-b15e20e1e700 based on parent bluepri
 planning report for blueprint ce365dff-2cdb-4f35-a186-b15e20e1e700:
 * 1 pending MGS update:
   * model1:serial1: Rot(PendingMgsUpdateRotDetails { expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: Version(ArtifactVersion("0.5.0")), expected_persistent_boot_preference: A, expected_pending_persistent_boot_preference: None, expected_transient_boot_preference: None })
-* zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+* zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
 
 
 > blueprint-diff latest
@@ -1044,7 +1044,7 @@ generated blueprint 8f2d1f39-7c88-4701-aa43-56bf281b28c1 based on parent bluepri
 planning report for blueprint 8f2d1f39-7c88-4701-aa43-56bf281b28c1:
 * 1 pending MGS update:
   * model1:serial1: Sp(PendingMgsUpdateSpDetails { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: NoValidVersion })
-* zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+* zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
 
 
 > blueprint-diff latest
@@ -1113,7 +1113,7 @@ generated blueprint 12d602a6-5ab4-487a-b94e-eb30cdf30300 based on parent bluepri
 planning report for blueprint 12d602a6-5ab4-487a-b94e-eb30cdf30300:
 * 1 pending MGS update:
   * model1:serial1: Sp(PendingMgsUpdateSpDetails { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: Version(ArtifactVersion("0.5.0")) })
-* zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+* zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
 
 
 > blueprint-diff latest
@@ -1180,7 +1180,7 @@ generated blueprint 61a93ea3-c872-48e0-aace-e86b0c52b839 based on parent bluepri
 planning report for blueprint 61a93ea3-c872-48e0-aace-e86b0c52b839:
 * 1 pending MGS update:
   * model1:serial1: HostPhase1(PendingMgsUpdateHostPhase1Details { expected_active_phase_1_slot: A, expected_boot_disk: A, expected_active_phase_1_hash: ArtifactHash("0101010101010101010101010101010101010101010101010101010101010101"), expected_active_phase_2_hash: ArtifactHash("0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a"), expected_inactive_phase_1_hash: ArtifactHash("0202020202020202020202020202020202020202020202020202020202020202"), expected_inactive_phase_2_hash: ArtifactHash("f3dd0c7a1bd4500ea0d8bcf67581f576d47752b2f1998a4cb0f0c3155c483008"), sled_agent_address: [fd00:1122:3344:102::1]:12345 })
-* zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+* zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
 
 
 > blueprint-diff latest
@@ -1314,7 +1314,7 @@ generated blueprint 27e755bc-dc10-4647-853c-f89bb3a15a2c based on parent bluepri
 planning report for blueprint 27e755bc-dc10-4647-853c-f89bb3a15a2c:
 * 1 pending MGS update:
   * model1:serial1: HostPhase1(PendingMgsUpdateHostPhase1Details { expected_active_phase_1_slot: A, expected_boot_disk: A, expected_active_phase_1_hash: ArtifactHash("0101010101010101010101010101010101010101010101010101010101010101"), expected_active_phase_2_hash: ArtifactHash("0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a"), expected_inactive_phase_1_hash: ArtifactHash("ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"), expected_inactive_phase_2_hash: ArtifactHash("f3dd0c7a1bd4500ea0d8bcf67581f576d47752b2f1998a4cb0f0c3155c483008"), sled_agent_address: [fd00:1122:3344:102::1]:12345 })
-* zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+* zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
 
 
 > blueprint-diff latest
@@ -1386,7 +1386,7 @@ generated blueprint 9f89efdf-a23e-4137-b7cc-79f4a91cbe1f based on parent bluepri
 planning report for blueprint 9f89efdf-a23e-4137-b7cc-79f4a91cbe1f:
 * 1 pending MGS update:
   * model2:serial2: RotBootloader(PendingMgsUpdateRotBootloaderDetails { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: NoValidVersion })
-* zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+* zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
 
 
 > blueprint-diff latest
@@ -1451,7 +1451,7 @@ generated blueprint 9a9e6c32-5a84-4020-a159-33dceff18d35 based on parent bluepri
 planning report for blueprint 9a9e6c32-5a84-4020-a159-33dceff18d35:
 * 1 pending MGS update:
   * model2:serial2: Rot(PendingMgsUpdateRotDetails { expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: NoValidVersion, expected_persistent_boot_preference: A, expected_pending_persistent_boot_preference: None, expected_transient_boot_preference: None })
-* zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+* zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
 
 
 > blueprint-diff latest
@@ -1520,7 +1520,7 @@ generated blueprint 13cfdd24-52ba-4e94-8c83-02e3a48fc746 based on parent bluepri
 planning report for blueprint 13cfdd24-52ba-4e94-8c83-02e3a48fc746:
 * 1 pending MGS update:
   * model2:serial2: Rot(PendingMgsUpdateRotDetails { expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: Version(ArtifactVersion("1.0.0")), expected_persistent_boot_preference: B, expected_pending_persistent_boot_preference: None, expected_transient_boot_preference: None })
-* zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+* zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
 
 
 > blueprint-diff latest
@@ -1591,7 +1591,7 @@ generated blueprint b82656b0-a9be-433d-83d0-e2bdf371777a based on parent bluepri
 planning report for blueprint b82656b0-a9be-433d-83d0-e2bdf371777a:
 * 1 pending MGS update:
   * model2:serial2: Rot(PendingMgsUpdateRotDetails { expected_active_slot: ExpectedActiveRotSlot { slot: B, version: ArtifactVersion("1.1.0") }, expected_inactive_version: Version(ArtifactVersion("0.0.2")), expected_persistent_boot_preference: B, expected_pending_persistent_boot_preference: Some(B), expected_transient_boot_preference: None })
-* zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+* zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
 
 
 > blueprint-diff latest
@@ -1659,7 +1659,7 @@ generated blueprint 31c84831-be52-4630-bc3f-128d72cd8f22 based on parent bluepri
 planning report for blueprint 31c84831-be52-4630-bc3f-128d72cd8f22:
 * 1 pending MGS update:
   * model2:serial2: Rot(PendingMgsUpdateRotDetails { expected_active_slot: ExpectedActiveRotSlot { slot: B, version: ArtifactVersion("1.1.0") }, expected_inactive_version: Version(ArtifactVersion("0.0.2")), expected_persistent_boot_preference: B, expected_pending_persistent_boot_preference: None, expected_transient_boot_preference: Some(B) })
-* zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+* zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
 
 
 > blueprint-diff latest
@@ -1725,7 +1725,7 @@ generated blueprint 778e3f3a-58b1-4a5e-acff-d23c5d7124c2 based on parent bluepri
 planning report for blueprint 778e3f3a-58b1-4a5e-acff-d23c5d7124c2:
 * 1 pending MGS update:
   * model2:serial2: Sp(PendingMgsUpdateSpDetails { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: NoValidVersion })
-* zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+* zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
 
 
 > blueprint-diff latest
@@ -1790,7 +1790,7 @@ generated blueprint 386a7ec3-7c2e-43cf-8f00-999e91e1d5e6 based on parent bluepri
 planning report for blueprint 386a7ec3-7c2e-43cf-8f00-999e91e1d5e6:
 * 1 pending MGS update:
   * model2:serial2: HostPhase1(PendingMgsUpdateHostPhase1Details { expected_active_phase_1_slot: A, expected_boot_disk: A, expected_active_phase_1_hash: ArtifactHash("0101010101010101010101010101010101010101010101010101010101010101"), expected_active_phase_2_hash: ArtifactHash("0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a"), expected_inactive_phase_1_hash: ArtifactHash("0202020202020202020202020202020202020202020202020202020202020202"), expected_inactive_phase_2_hash: ArtifactHash("f3dd0c7a1bd4500ea0d8bcf67581f576d47752b2f1998a4cb0f0c3155c483008"), sled_agent_address: [fd00:1122:3344:103::1]:12345 })
-* zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+* zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
 
 
 > blueprint-diff latest
