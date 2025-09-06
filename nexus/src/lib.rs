@@ -337,6 +337,7 @@ impl nexus_test_interface::NexusServer for Server {
                     },
                     allowed_source_ips: AllowedSourceIps::Any,
                 },
+                false, // blueprint_execution_enabled
             )
             .await
             .expect("Could not initialize rack");

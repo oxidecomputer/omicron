@@ -166,7 +166,7 @@ where
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
     .await
-    .unwrap()
+    .unwrap_or_else(|err| panic!("Error creating object with {path}: {err}"))
     .parsed_body::<HttpErrorResponseBody>()
     .unwrap()
 }
