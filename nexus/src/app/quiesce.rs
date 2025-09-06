@@ -23,6 +23,7 @@ use omicron_common::api::external::UpdateResult;
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use slog::Logger;
+use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
@@ -181,21 +182,45 @@ async fn do_quiesce(quiesce: NexusQuiesceHandle) {
     loop {
         // Grab the most recently loaded blueprint.  As usual, we clone to avoid
         // locking the watch channel for the lifetime of this value.
-        let Some(_target, current_blueprint) =
-            quiesce.latest_blueprint.borrow().clone()
+        let Some(current_blueprint): Option<Blueprint> = quiesce
+            .latest_blueprint
+            .borrow()
+            .as_deref()
+            .map(|(_target, blueprint)| blueprint)
+            .cloned()
         else {
             // XXX-dap log
+            // XXX-dap need to sleep here, but we won't.  Could we use
+            // wait_until() it's non-None?
             continue;
         };
 
         // Determine our own Nexus generation number.
-        let my_generation = todo!(); // XXX-dap
+        //
+        // This doesn't change across iterations of the loop.  But we need a
+        // blueprint to figure it out, and we don't have one until we're in this
+        // loop.
+        let Some(my_generation) = current_blueprint
+            .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+            .find_map(|(_sled_id, zone)| {
+                if let BlueprintZoneType::Nexus(nexus) = &zone.zone_type {
+                    (zone.id == my_nexus_id).then_some(nexus.nexus_generation)
+                } else {
+                    None
+                }
+            })
+        else {
+            // XXX-dap log, and also need to sleep here
+            continue;
+        };
 
         // Wait up to a second for sagas to become drained as of this blueprint.
-        let Ok(try_wait) = tokio::time::timeout(
+        let Ok(_) = tokio::time::timeout(
             POLL_TIMEOUT,
             saga_quiesce.wait_for_drained_blueprint(current_blueprint.id),
-        ) else {
+        )
+        .await
+        else {
             // We're still not drained as of this blueprint.  But the
             // current target blueprint could have changed.  So take another
             // lap.
@@ -204,36 +229,48 @@ async fn do_quiesce(quiesce: NexusQuiesceHandle) {
 
         // We're drained up through this blueprint.  First, update our record to
         // reflect that, if we haven't already.
-        let try_update = datastore
-            .nexus_metadata_update_drained_blueprint(
-                my_nexus_id,
-                current_blueprint.id,
-            )
-            .await;
-        if let Err(error) = try_update {
-            // Take another lap.
-            // XXX-dap log error
-            continue;
-        };
+        match last_recorded_blueprint_id {
+            Some(blueprint_id) if blueprint_id == current_blueprint.id => (),
+            _ => {
+                let try_update = datastore
+                    .database_nexus_access_update_blueprint(
+                        my_nexus_id,
+                        Some(current_blueprint.id),
+                    )
+                    .await;
+                match try_update {
+                    Err(error) => {
+                        // Take another lap.
+                        // XXX-dap log error
+                        continue;
+                    }
+                    Ok(0) => (),
+                    Ok(count) => {
+                        // XXX-dap log
+                    }
+                }
 
-        last_recorded_blueprint_id = Some(current_blueprint.id);
+                last_recorded_blueprint_id = Some(current_blueprint.id);
+            }
+        };
 
         // Now, see if everybody else is drained up to the same point, or if any
         // of them is already quiesced.  (That means *they* already saw that we
         // were all drained up to the same point, which is good enough for us to
         // proceed.)
-        let other_nexus_ids = current_blueprint
+        let other_nexus_ids: BTreeSet<OmicronZoneUuid> = current_blueprint
             .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
             .filter_map(|(_sled_id, zone)| {
-                if let BlueprintZoneType::Nexus(nexus) = zone.zone_type {
-                    (nexus.nexus_generation == my_generation).then(zone.id)
+                if let BlueprintZoneType::Nexus(nexus) = &zone.zone_type {
+                    (nexus.nexus_generation == my_generation).then_some(zone.id)
                 } else {
                     None
                 }
-            });
+            })
+            .collect();
         assert!(!other_nexus_ids.is_empty());
         let Ok(other_records): Result<Vec<DbMetadataNexus>, _> =
-            datastore.nexus_metadata_load(other_nexus_ids).await
+            datastore.database_nexus_access_all(&other_nexus_ids).await
         else {
             // XXX-dap log error
             continue;
@@ -247,9 +284,14 @@ async fn do_quiesce(quiesce: NexusQuiesceHandle) {
             break;
         }
 
-        if other_records.iter().all(|r| r.last_drained_blueprint_id)
-            == last_recorded_blueprint_id
-        {
+        if other_records.len() < other_nexus_ids.len() {
+            // XXX-dap log
+            continue;
+        }
+
+        if other_records.iter().all(|r| {
+            r.last_drained_blueprint_id() == last_recorded_blueprint_id
+        }) {
             // XXX-dap log
             break;
         }
@@ -301,11 +343,18 @@ async fn do_quiesce(quiesce: NexusQuiesceHandle) {
     });
 
     // XXX-dap write that this fixes omicron#8971.
-    while let Err(error) =
-        datastore.nexus_metadata_update_quiesced(my_nexus_id).await
-    {
-        // XXX-dap log and sleep
-        let _ = tokio::time::sleep(POLL_TIMEOUT).await;
+    loop {
+        match datastore.database_nexus_access_update_quiesced(my_nexus_id).await
+        {
+            Ok(count) => {
+                // XXX-dap log and proceed
+                break;
+            }
+            Err(error) => {
+                // XXX-dap log, sleep and try again
+                tokio::time::sleep(POLL_TIMEOUT).await;
+            }
+        }
     }
 
     quiesce.state.send_modify(|q| {

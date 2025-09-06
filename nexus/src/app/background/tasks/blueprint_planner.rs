@@ -313,7 +313,9 @@ mod test {
         );
 
         // Spin up the blueprint loader background task.
-        let mut loader = TargetBlueprintLoader::new(datastore.clone());
+        let (tx_loader, _) = watch::channel(None);
+        let mut loader =
+            TargetBlueprintLoader::new(datastore.clone(), tx_loader);
         let mut rx_loader = loader.watcher();
         loader.activate(&opctx).await;
         let (_initial_target, initial_blueprint) = &*rx_loader

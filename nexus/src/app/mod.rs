@@ -334,11 +334,12 @@ impl Nexus {
             sec_store,
         ));
 
+        let (blueprint_load_tx, blueprint_load_rx) = watch::channel(None);
         let quiesce = NexusQuiesceHandle::new(
             &log,
             db_datastore.clone(),
             config.deployment.id.into(),
-            rx_loader,
+            blueprint_load_rx,
         );
 
         // It's a bit of a red flag to use an unbounded channel.
@@ -606,6 +607,7 @@ impl Nexus {
                     },
                     tuf_artifact_replication_rx,
                     mgs_updates_tx,
+                    blueprint_load_tx,
                 },
             );
 

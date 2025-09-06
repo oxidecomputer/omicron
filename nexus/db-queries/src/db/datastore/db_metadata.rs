@@ -25,10 +25,12 @@ use nexus_db_model::SchemaUpgradeStep;
 use nexus_db_model::SchemaVersion;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use omicron_common::api::external::Error;
+use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use semver::Version;
 use slog::{Logger, error, info, o};
+use std::collections::BTreeSet;
 use std::ops::Bound;
 use std::str::FromStr;
 
@@ -681,6 +683,73 @@ impl DataStore {
             "Applied subcomponent of schema upgrade";
         );
         Ok(())
+    }
+
+    /// Returns information about access for all of the given Nexus ids
+    ///
+    /// This set is assumed to be pretty small.
+    // XXX-dap provide OpContext and do authz check
+    pub async fn database_nexus_access_all(
+        &self,
+        nexus_ids: &BTreeSet<OmicronZoneUuid>,
+    ) -> Result<Vec<DbMetadataNexus>, Error> {
+        use nexus_db_schema::schema::db_metadata_nexus::dsl;
+
+        let db_nexus_ids: BTreeSet<_> = nexus_ids
+            .iter()
+            .cloned()
+            .map(nexus_db_model::to_db_typed_uuid)
+            .collect();
+        dsl::db_metadata_nexus
+            .filter(dsl::nexus_id.eq_any(db_nexus_ids))
+            .load_async(&*self.pool_connection_unauthorized().await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// Updates the "last_drained_blueprint_id" for the given Nexus id
+    pub async fn database_nexus_access_update_blueprint(
+        &self,
+        nexus_id: OmicronZoneUuid,
+        blueprint_id: Option<BlueprintUuid>,
+    ) -> Result<usize, Error> {
+        use nexus_db_schema::schema::db_metadata_nexus::dsl;
+
+        let nexus_id = nexus_db_model::to_db_typed_uuid(nexus_id);
+        let blueprint_id = blueprint_id.map(nexus_db_model::to_db_typed_uuid);
+
+        // XXX-dap accept OpContext, do authz check
+        let conn = self.pool_connection_unauthorized().await?;
+        let count = diesel::update(dsl::db_metadata_nexus)
+            .filter(dsl::nexus_id.eq(nexus_id))
+            // To be conservative, we'll only update this value if the record is
+            // currently active.  There's no reason it should ever not be active
+            // if we're calling this function and if there were an easy way to
+            // return an error in that case, we'd just do that.
+            .filter(dsl::state.eq(DbMetadataNexusState::Active))
+            .set(dsl::last_drained_blueprint_id.eq(blueprint_id))
+            .execute_async(&*conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+        Ok(count)
+    }
+
+    /// Updates the "last_drained_blueprint_id" for the given Nexus id
+    pub async fn database_nexus_access_update_quiesced(
+        &self,
+        nexus_id: OmicronZoneUuid,
+    ) -> Result<usize, Error> {
+        use nexus_db_schema::schema::db_metadata_nexus::dsl;
+
+        let nexus_id = nexus_db_model::to_db_typed_uuid(nexus_id);
+        let conn = self.pool.claim_quiesced().await?;
+        let count = diesel::update(dsl::db_metadata_nexus)
+            .filter(dsl::nexus_id.eq(nexus_id))
+            .set(dsl::state.eq(DbMetadataNexusState::Quiesced))
+            .execute_async(&*conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+        Ok(count)
     }
 
     // Returns the access this Nexus has to the database
