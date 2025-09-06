@@ -157,7 +157,7 @@ impl HardwareSnapshot {
                 "boot-storage-unit",
             ],
         )?;
-        let baseboard = Baseboard::new_gimlet(
+        let baseboard = Baseboard::new_sled(
             string_from_property(&properties[0])?,
             string_from_property(&properties[1])?,
             u32_from_property(&properties[2])?,

@@ -2842,6 +2842,7 @@ impl ServiceManager {
 
                     match baseboard {
                         Baseboard::Gimlet { identifier, model, .. }
+                        | Baseboard::Cosmo { identifier, model, .. }
                         | Baseboard::Pc { identifier, model, .. } => {
                             lldpd_config = lldpd_config
                                 .add_property(

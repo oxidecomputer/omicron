@@ -479,7 +479,7 @@ impl WicketdApi for WicketdApiImpl {
                 switch_baseboard = sp.state.as_ref().map(|state| {
                     // TODO-correctness `new_gimlet` isn't the right name: this is a
                     // sidecar baseboard.
-                    Baseboard::new_gimlet(
+                    Baseboard::new_sled(
                         state.serial_number.clone(),
                         state.model.clone(),
                         state.revision,

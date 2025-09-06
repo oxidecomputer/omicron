@@ -1096,6 +1096,34 @@
           {
             "type": "object",
             "properties": {
+              "identifier": {
+                "type": "string"
+              },
+              "model": {
+                "type": "string"
+              },
+              "revision": {
+                "type": "integer",
+                "format": "uint32",
+                "minimum": 0
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "cosmo"
+                ]
+              }
+            },
+            "required": [
+              "identifier",
+              "model",
+              "revision",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
               "type": {
                 "type": "string",
                 "enum": [

@@ -66,6 +66,7 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
+    //(4, COMSO)
     (3, ADD_SWITCH_ZONE_OPERATOR_POLICY),
     (2, REMOVE_DESTROY_ORPHANED_DATASETS_CHICKEN_SWITCH),
     (1, INITIAL),

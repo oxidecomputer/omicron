@@ -137,7 +137,7 @@ impl CurrentRssConfig {
                     );
                     return None;
                 };
-                let baseboard = Baseboard::new_gimlet(
+                let baseboard = Baseboard::new_sled(
                     state.serial_number.clone(),
                     state.model.clone(),
                     state.revision,

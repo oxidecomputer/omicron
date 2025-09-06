@@ -40,7 +40,13 @@ impl From<types::Baseboard> for sled_hardware_types::Baseboard {
     fn from(value: types::Baseboard) -> Self {
         match value {
             types::Baseboard::Gimlet { identifier, model, revision } => {
-                sled_hardware_types::Baseboard::new_gimlet(
+                sled_hardware_types::Baseboard::new_sled(
+                    identifier, model, revision,
+                )
+            }
+            types::Baseboard::Cosmo { identifier, model, revision } => {
+                // XXX this is wrong
+                sled_hardware_types::Baseboard::new_sled(
                     identifier, model, revision,
                 )
             }
@@ -62,6 +68,12 @@ impl From<sled_hardware_types::Baseboard> for types::Baseboard {
                 model,
                 revision,
             } => types::Baseboard::Gimlet { identifier, model, revision },
+            sled_hardware_types::Baseboard::Cosmo {
+                identifier,
+                model,
+                revision,
+            } => types::Baseboard::Cosmo { identifier, model, revision },
+
             sled_hardware_types::Baseboard::Unknown => {
                 types::Baseboard::Unknown
             }

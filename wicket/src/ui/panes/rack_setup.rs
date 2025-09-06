@@ -1280,6 +1280,7 @@ fn rss_config_text<'a>(
             .map(|desc| {
                 let identifier = match &desc.baseboard {
                     Baseboard::Gimlet { identifier, .. } => identifier,
+                    Baseboard::Cosmo { identifier, .. } => identifier,
                     Baseboard::Pc { identifier, .. } => identifier,
                     Baseboard::Unknown => "unknown",
                 };

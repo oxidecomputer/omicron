@@ -24,19 +24,25 @@ pub mod underlay;
 pub enum Baseboard {
     Gimlet { identifier: String, model: String, revision: u32 },
 
+    Cosmo { identifier: String, model: String, revision: u32 },
+
     Unknown,
 
     Pc { identifier: String, model: String },
 }
 
+pub fn model_is_cosmo(model: &str) -> bool {
+    model == "913-0000023"
+}
+
 impl Baseboard {
     #[allow(dead_code)]
-    pub fn new_gimlet(
-        identifier: String,
-        model: String,
-        revision: u32,
-    ) -> Self {
-        Self::Gimlet { identifier, model, revision }
+    pub fn new_sled(identifier: String, model: String, revision: u32) -> Self {
+        if model_is_cosmo(&model) {
+            Self::Cosmo { identifier, model, revision }
+        } else {
+            Self::Gimlet { identifier, model, revision }
+        }
     }
 
     pub fn new_pc(identifier: String, model: String) -> Self {
@@ -52,6 +58,7 @@ impl Baseboard {
     pub fn type_string(&self) -> &str {
         match &self {
             Self::Gimlet { .. } => "gimlet",
+            Self::Cosmo { .. } => "cosmo",
             Self::Pc { .. } => "pc",
             Self::Unknown => "unknown",
         }
@@ -60,6 +67,7 @@ impl Baseboard {
     pub fn identifier(&self) -> &str {
         match &self {
             Self::Gimlet { identifier, .. } => &identifier,
+            Self::Cosmo { identifier, .. } => &identifier,
             Self::Pc { identifier, .. } => &identifier,
             Self::Unknown => "unknown",
         }
@@ -68,6 +76,7 @@ impl Baseboard {
     pub fn model(&self) -> &str {
         match self {
             Self::Gimlet { model, .. } => &model,
+            Self::Cosmo { model, .. } => &model,
             Self::Pc { model, .. } => &model,
             Self::Unknown => "unknown",
         }
@@ -76,6 +85,7 @@ impl Baseboard {
     pub fn revision(&self) -> u32 {
         match self {
             Self::Gimlet { revision, .. } => *revision,
+            Self::Cosmo { revision, .. } => *revision,
             Self::Pc { .. } => 0,
             Self::Unknown => 0,
         }
@@ -87,6 +97,9 @@ impl std::fmt::Display for Baseboard {
         match self {
             Baseboard::Gimlet { identifier, model, revision } => {
                 write!(f, "gimlet-{identifier}-{model}-{revision}")
+            }
+            Baseboard::Cosmo { identifier, model, revision } => {
+                write!(f, "cosmo-{identifier}-{model}-{revision}")
             }
             Baseboard::Unknown => write!(f, "unknown"),
             Baseboard::Pc { identifier, model } => {

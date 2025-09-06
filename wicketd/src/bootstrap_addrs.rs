@@ -93,7 +93,14 @@ async fn scan_for_peers(
                             identifier,
                             model,
                             revision,
-                        } => Baseboard::new_gimlet(identifier, model, revision),
+                        } => Baseboard::new_sled(identifier, model, revision),
+                        // XXX this is wrong
+                        bootstrap_agent_client::types::Baseboard::Cosmo {
+                            identifier,
+                            model,
+                            revision,
+                        } => Baseboard::new_sled(identifier, model, revision),
+
                         bootstrap_agent_client::types::Baseboard::Unknown => {
                             Baseboard::unknown()
                         }

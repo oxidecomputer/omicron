@@ -636,6 +636,15 @@ impl CollectionBuilder {
                     },
                 ))
             }
+            Baseboard::Cosmo { identifier, model, revision: _ } => {
+                Some(Self::normalize_item(
+                    &mut self.baseboards,
+                    BaseboardId {
+                        serial_number: identifier,
+                        part_number: model,
+                    },
+                ))
+            }
             Baseboard::Unknown => {
                 self.found_error(InventoryError::from(anyhow!(
                     "sled {sled_id}: reported unknown baseboard",

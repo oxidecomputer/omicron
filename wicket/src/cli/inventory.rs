@@ -105,6 +105,7 @@ fn print_bootstrap_sled_data(
 
     let identifier = match &desc.baseboard {
         Baseboard::Gimlet { identifier, .. } => identifier.clone(),
+        Baseboard::Cosmo { identifier, .. } => identifier.clone(),
         Baseboard::Pc { identifier, .. } => identifier.clone(),
         Baseboard::Unknown => "unknown".to_string(),
     };
