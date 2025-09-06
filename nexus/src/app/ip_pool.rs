@@ -72,11 +72,14 @@ impl super::Nexus {
         opctx: &OpContext,
         pool_params: &params::IpPoolCreate,
     ) -> CreateResult<db::model::IpPool> {
-        let pool = db::model::IpPool::new(
-            &pool_params.identity,
-            // https://github.com/oxidecomputer/omicron/issues/8881
-            IpVersion::V4,
-        );
+        // https://github.com/oxidecomputer/omicron/issues/8966
+        let ip_version = pool_params.ip_version.into();
+        if matches!(ip_version, IpVersion::V6) {
+            return Err(Error::invalid_request(
+                "IPv6 pools are not yet supported",
+            ));
+        }
+        let pool = db::model::IpPool::new(&pool_params.identity, ip_version);
         self.db_datastore.ip_pool_create(opctx, pool).await
     }
 
