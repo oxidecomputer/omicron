@@ -22,7 +22,6 @@ use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::UpdateResult;
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
-use slog::Logger;
 use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::time::Duration;
@@ -51,10 +50,10 @@ impl super::Nexus {
 /// Describes the configuration and state around quiescing Nexus
 #[derive(Clone)]
 pub struct NexusQuiesceHandle {
-    log: Logger,
     datastore: Arc<DataStore>,
     my_nexus_id: OmicronZoneUuid,
     sagas: SagaQuiesceHandle,
+    quiesce_opctx: Arc<OpContext>,
     latest_blueprint:
         watch::Receiver<Option<Arc<(BlueprintTarget, Blueprint)>>>,
     state: watch::Sender<QuiesceState>,
@@ -62,22 +61,22 @@ pub struct NexusQuiesceHandle {
 
 impl NexusQuiesceHandle {
     pub fn new(
-        log: &Logger,
         datastore: Arc<DataStore>,
         my_nexus_id: OmicronZoneUuid,
         latest_blueprint: watch::Receiver<
             Option<Arc<(BlueprintTarget, Blueprint)>>,
         >,
+        quiesce_opctx: OpContext,
     ) -> NexusQuiesceHandle {
-        let my_log = log.new(o!("component" => "NexusQuiesceHandle"));
-        let saga_quiesce_log = log.new(o!("component" => "SagaQuiesceHandle"));
+        let saga_quiesce_log =
+            quiesce_opctx.log.new(o!("component" => "SagaQuiesceHandle"));
         let sagas = SagaQuiesceHandle::new(saga_quiesce_log);
         let (state, _) = watch::channel(QuiesceState::Undetermined);
         NexusQuiesceHandle {
-            log: my_log,
             datastore,
             my_nexus_id,
             sagas,
+            quiesce_opctx: Arc::new(quiesce_opctx),
             latest_blueprint,
             state,
         }
@@ -100,16 +99,17 @@ impl NexusQuiesceHandle {
             QuiesceState::Running
         };
 
+        let log = &self.quiesce_opctx.log;
         let changed = self.state.send_if_modified(|q| {
             match q {
                 QuiesceState::Undetermined => {
-                    info!(&self.log, "initial state"; "state" => ?new_state);
+                    info!(log, "initial state"; "state" => ?new_state);
                     *q = new_state;
                     true
                 }
                 QuiesceState::Running => {
                     if quiescing {
-                        info!(&self.log, "quiesce starting");
+                        info!(log, "quiesce starting");
                         *q = new_state;
                         true
                     } else {
@@ -143,6 +143,7 @@ async fn do_quiesce(quiesce: NexusQuiesceHandle) {
     let saga_quiesce = quiesce.sagas.clone();
     let datastore = quiesce.datastore.clone();
     let my_nexus_id = quiesce.my_nexus_id;
+    let quiesce_opctx = &quiesce.quiesce_opctx;
 
     assert_matches!(
         *quiesce.state.borrow(),
@@ -234,6 +235,7 @@ async fn do_quiesce(quiesce: NexusQuiesceHandle) {
             _ => {
                 let try_update = datastore
                     .database_nexus_access_update_blueprint(
+                        quiesce_opctx,
                         my_nexus_id,
                         Some(current_blueprint.id),
                     )
@@ -269,8 +271,9 @@ async fn do_quiesce(quiesce: NexusQuiesceHandle) {
             })
             .collect();
         assert!(!other_nexus_ids.is_empty());
-        let Ok(other_records): Result<Vec<DbMetadataNexus>, _> =
-            datastore.database_nexus_access_all(&other_nexus_ids).await
+        let Ok(other_records): Result<Vec<DbMetadataNexus>, _> = datastore
+            .database_nexus_access_all(&quiesce_opctx, &other_nexus_ids)
+            .await
         else {
             // XXX-dap log error
             continue;
@@ -475,6 +478,8 @@ mod test {
         assert!(status.db_claims.is_empty());
     }
 
+    /// Exercise trivial case of app-level quiesce in an environment with just
+    /// one Nexus
     #[nexus_test(server = crate::Server)]
     async fn test_quiesce_easy(cptestctx: &ControlPlaneTestContext) {
         let log = &cptestctx.logctx.log;
@@ -485,8 +490,8 @@ mod test {
         let nexus_client =
             nexus_client::Client::new(&nexus_internal_url, log.clone());
 
-        // If we quiesce Nexus while it's not doing anything, that should
-        // complete quickly.
+        // If we quiesce the only Nexus while it's not doing anything, that
+        // should complete quickly.
         let before = Utc::now();
         let _ = nexus_client
             .quiesce_start()
@@ -498,6 +503,8 @@ mod test {
         verify_quiesced(before, after, rv);
     }
 
+    /// Exercise non-trivial app-level quiesce in an environment with just one
+    /// Nexus
     #[nexus_test(server = crate::Server)]
     async fn test_quiesce_full(cptestctx: &ControlPlaneTestContext) {
         let log = &cptestctx.logctx.log;
@@ -658,5 +665,14 @@ mod test {
             error.status().expect("status code"),
             StatusCode::SERVICE_UNAVAILABLE
         );
+    }
+
+    /// Test Nexus quiesce with multiple different Nexus instances
+    ///
+    /// Unlike the tests above, this is not an "app-level" test.  There's not a
+    /// full Nexus here.  We're testing with just a `NexusQuiesceHandle` and the
+    /// few things that it requires (e.g., the datastore).
+    #[tokio::test]
+    async fn test_quiesce_multi() {
     }
 }

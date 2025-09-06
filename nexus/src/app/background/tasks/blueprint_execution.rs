@@ -433,10 +433,10 @@ mod test {
             Activator::new(),
             dummy_tx,
             NexusQuiesceHandle::new(
-                &opctx.log,
                 datastore.clone(),
                 OmicronZoneUuid::new_v4(),
                 blueprint_rx,
+                opctx.child(BTreeMap::new()),
             ),
         );
 

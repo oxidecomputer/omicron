@@ -688,9 +688,9 @@ impl DataStore {
     /// Returns information about access for all of the given Nexus ids
     ///
     /// This set is assumed to be pretty small.
-    // XXX-dap provide OpContext and do authz check
     pub async fn database_nexus_access_all(
         &self,
+        opctx: &OpContext,
         nexus_ids: &BTreeSet<OmicronZoneUuid>,
     ) -> Result<Vec<DbMetadataNexus>, Error> {
         use nexus_db_schema::schema::db_metadata_nexus::dsl;
@@ -702,7 +702,7 @@ impl DataStore {
             .collect();
         dsl::db_metadata_nexus
             .filter(dsl::nexus_id.eq_any(db_nexus_ids))
-            .load_async(&*self.pool_connection_unauthorized().await?)
+            .load_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
@@ -710,6 +710,7 @@ impl DataStore {
     /// Updates the "last_drained_blueprint_id" for the given Nexus id
     pub async fn database_nexus_access_update_blueprint(
         &self,
+        opctx: &OpContext,
         nexus_id: OmicronZoneUuid,
         blueprint_id: Option<BlueprintUuid>,
     ) -> Result<usize, Error> {
@@ -718,8 +719,7 @@ impl DataStore {
         let nexus_id = nexus_db_model::to_db_typed_uuid(nexus_id);
         let blueprint_id = blueprint_id.map(nexus_db_model::to_db_typed_uuid);
 
-        // XXX-dap accept OpContext, do authz check
-        let conn = self.pool_connection_unauthorized().await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
         let count = diesel::update(dsl::db_metadata_nexus)
             .filter(dsl::nexus_id.eq(nexus_id))
             // To be conservative, we'll only update this value if the record is
@@ -739,10 +739,16 @@ impl DataStore {
         &self,
         nexus_id: OmicronZoneUuid,
     ) -> Result<usize, Error> {
+        // A traditional authz check is not possible here because we've quiesced
+        // the DataStore, so no further connections are ordinarily available.
+        // (We use the lower-level pool interface to bypass that.)
+        let conn = self.pool.claim_quiesced().await?;
+
+        // XXX-dap could use a separate user here who only has this one
+        // privilege.
         use nexus_db_schema::schema::db_metadata_nexus::dsl;
 
         let nexus_id = nexus_db_model::to_db_typed_uuid(nexus_id);
-        let conn = self.pool.claim_quiesced().await?;
         let count = diesel::update(dsl::db_metadata_nexus)
             .filter(dsl::nexus_id.eq(nexus_id))
             .set(dsl::state.eq(DbMetadataNexusState::Quiesced))

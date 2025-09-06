@@ -298,6 +298,7 @@ mod test {
         ReconfiguratorChickenSwitches, ReconfiguratorChickenSwitchesView,
     };
     use omicron_uuid_kinds::OmicronZoneUuid;
+    use std::collections::BTreeMap;
 
     type ControlPlaneTestContext =
         nexus_test_utils::ControlPlaneTestContext<crate::Server>;
@@ -439,10 +440,10 @@ mod test {
             Activator::new(),
             dummy_tx,
             NexusQuiesceHandle::new(
-                &opctx.log,
                 datastore.clone(),
                 OmicronZoneUuid::new_v4(),
                 rx_loader.clone(),
+                opctx.child(BTreeMap::new()),
             ),
         );
         let value = executor.activate(&opctx).await;
