@@ -382,7 +382,6 @@ mod region_replacement {
 
         pub async fn delete_the_disk(&self) {
             let disk_url = get_disk_url("disk");
-            eprintln!("Delete this disk: {:?}", disk_url);
             NexusRequest::object_delete(&self.client, &disk_url)
                 .authn_as(AuthnMode::PrivilegedUser)
                 .execute()
