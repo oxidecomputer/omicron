@@ -830,6 +830,19 @@ impl Drop for SetTrueOnDrop {
     }
 }
 
+#[derive(Clone)]
+enum InternalHostType {
+    Gimlet,
+    Cosmo,
+}
+
+fn should_sled_continue(host_type: InternalHostType) -> bool {
+    match host_type {
+        InternalHostType::Cosmo => false,
+        InternalHostType::Gimlet => true,
+    }
+}
+
 #[derive(Debug)]
 struct UpdateDriver {}
 
@@ -1221,10 +1234,41 @@ impl UpdateDriver {
         ipr_start_receiver: IprStartReceiver,
     ) {
         let mut host_registrar = engine.for_component(UpdateComponent::Host);
+
+        // We can't update cosmo sleds at the moment, just skip this step for now
+        let host_type = host_registrar
+            .new_step(
+                UpdateStepId::DownloadingInstallinator,
+                "Checking host type",
+                async |_cx| {
+                    let state = update_cx
+                        .mgs_client
+                        .sp_get(update_cx.sp.type_, update_cx.sp.slot)
+                        .await
+                        .map(|response| response.into_inner())
+                        // XXX fix this error
+                        .map_err(|error| {
+                            UpdateTerminalError::UpdatePowerStateFailed {
+                                error,
+                            }
+                        })?;
+
+                    if sled_hardware_types::model_is_cosmo(&state.model) {
+                        StepSuccess::new(InternalHostType::Cosmo).into()
+                    } else {
+                        StepSuccess::new(InternalHostType::Gimlet).into()
+                    }
+                },
+            )
+            .register();
+
+        let host_type = host_type.into_shared();
+
         let image_id_handle = self.register_trampoline_phase1_steps(
             update_cx,
             &mut host_registrar,
             plan,
+            host_type.clone(),
         );
 
         let start_handle = host_registrar
@@ -1287,6 +1331,7 @@ impl UpdateDriver {
             &mut host_registrar,
             plan,
             slots_to_update,
+            host_type.clone(),
         );
     }
 
@@ -1298,6 +1343,7 @@ impl UpdateDriver {
         update_cx: &'a UpdateContext,
         registrar: &mut ComponentRegistrar<'_, 'a>,
         plan: &'a UpdatePlan,
+        host_type: SharedStepHandle<InternalHostType>,
     ) -> StepHandle<HostPhase2RecoveryImageId> {
         // We arbitrarily choose to store the trampoline phase 1 in host boot
         // slot 0. We put this in a set for compatibility with the later step
@@ -1312,6 +1358,7 @@ impl UpdateDriver {
             &plan.trampoline_phase_1,
             "trampoline",
             StepHandle::ready(trampoline_phase_1_boot_slots).into_shared(),
+            host_type.clone(),
         );
 
         // Wait (if necessary) for the trampoline phase 2 upload to MGS to
@@ -1488,6 +1535,7 @@ impl UpdateDriver {
         registrar: &mut ComponentRegistrar<'engine, 'a>,
         plan: &'a UpdatePlan,
         slots_to_update: StepHandle<BTreeSet<u16>>,
+        host_type: SharedStepHandle<InternalHostType>,
     ) {
         // Installinator is done - set the stage for the real host to boot.
 
@@ -1500,6 +1548,7 @@ impl UpdateDriver {
             &plan.host_phase_1,
             "host",
             slots_to_update.clone(),
+            host_type.clone(),
         );
 
         // Clear the installinator image ID; failing to do this is _not_ fatal,
@@ -1609,7 +1658,24 @@ impl UpdateDriver {
         artifact: &'a ArtifactIdData,
         kind: &str, // "host" or "trampoline"
         slots_to_update: SharedStepHandle<BTreeSet<u16>>,
+        host_type: SharedStepHandle<InternalHostType>,
     ) {
+        registrar
+            .new_step(
+                // XXX this is wrong
+                UpdateStepId::SetHostPowerState { state: PowerState::A2 },
+                "Checking host type",
+                async |cx| {
+                    let host_type = host_type.into_value(cx.token()).await;
+                    if should_sled_continue(host_type) {
+                        StepSuccess::new(()).into()
+                    } else {
+                        Err(UpdateTerminalError::CosmoHost)
+                    }
+                },
+            )
+            .register();
+
         registrar
             .new_step(
                 UpdateStepId::SetHostPowerState { state: PowerState::A2 },

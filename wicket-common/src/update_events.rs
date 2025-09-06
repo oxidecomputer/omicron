@@ -219,6 +219,8 @@ pub enum UpdateTerminalError {
         #[source]
         error: anyhow::Error,
     },
+    #[error("Can't update Cosmo")]
+    CosmoHost,
 }
 
 impl update_engine::AsError for UpdateTerminalError {

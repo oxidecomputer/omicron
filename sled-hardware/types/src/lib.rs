@@ -29,6 +29,10 @@ pub enum Baseboard {
     Pc { identifier: String, model: String },
 }
 
+pub fn model_is_cosmo(model: &str) -> bool {
+    model == "913-0000023"
+}
+
 impl Baseboard {
     #[allow(dead_code)]
     pub fn new_gimlet(
