@@ -1544,7 +1544,6 @@ pub(crate) mod test {
                 .await
                 .unwrap();
 
-            // Will these also change on unwind?
             assert_eq!(db_request.new_region_id, None);
             assert_eq!(db_request.operating_saga_id, None);
 
