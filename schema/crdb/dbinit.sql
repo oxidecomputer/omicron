@@ -4432,7 +4432,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_internal_dns (
  *
  * See https://github.com/oxidecomputer/omicron/issues/8253 for more details.
  */
-CREATE TABLE IF NOT EXISTS omicron.public.reconfigurator_chicken_switches (
+CREATE TABLE IF NOT EXISTS omicron.public.reconfigurator_config (
     -- Monotonically increasing version for all bp_targets
     version INT8 PRIMARY KEY,
 
@@ -6617,7 +6617,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '188.0.0', NULL)
+    (TRUE, NOW(), NOW(), '189.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

@@ -6,43 +6,39 @@
 
 use crate::SqlU32;
 use chrono::{DateTime, Utc};
-use nexus_db_schema::schema::reconfigurator_chicken_switches;
+use nexus_db_schema::schema::reconfigurator_config;
 use nexus_types::deployment;
 
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
-#[diesel(table_name = reconfigurator_chicken_switches)]
-pub struct ReconfiguratorChickenSwitches {
+#[diesel(table_name = reconfigurator_config)]
+pub struct ReconfiguratorConfig {
     pub version: SqlU32,
     pub planner_enabled: bool,
     pub time_modified: DateTime<Utc>,
     pub add_zones_with_mupdate_override: bool,
 }
 
-impl From<deployment::ReconfiguratorChickenSwitchesView>
-    for ReconfiguratorChickenSwitches
-{
-    fn from(value: deployment::ReconfiguratorChickenSwitchesView) -> Self {
+impl From<deployment::ReconfiguratorConfigView> for ReconfiguratorConfig {
+    fn from(value: deployment::ReconfiguratorConfigView) -> Self {
         Self {
             version: value.version.into(),
-            planner_enabled: value.switches.planner_enabled,
+            planner_enabled: value.config.planner_enabled,
             time_modified: value.time_modified,
             add_zones_with_mupdate_override: value
-                .switches
-                .planner_switches
+                .config
+                .planner_config
                 .add_zones_with_mupdate_override,
         }
     }
 }
 
-impl From<ReconfiguratorChickenSwitches>
-    for deployment::ReconfiguratorChickenSwitchesView
-{
-    fn from(value: ReconfiguratorChickenSwitches) -> Self {
+impl From<ReconfiguratorConfig> for deployment::ReconfiguratorConfigView {
+    fn from(value: ReconfiguratorConfig) -> Self {
         Self {
             version: value.version.into(),
-            switches: deployment::ReconfiguratorChickenSwitches {
+            config: deployment::ReconfiguratorConfig {
                 planner_enabled: value.planner_enabled,
-                planner_switches: deployment::PlannerChickenSwitches {
+                planner_config: deployment::PlannerConfig {
                     add_zones_with_mupdate_override: value
                         .add_zones_with_mupdate_override,
                 },

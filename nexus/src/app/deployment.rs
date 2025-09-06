@@ -13,7 +13,7 @@ use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintMetadata;
 use nexus_types::deployment::BlueprintTarget;
 use nexus_types::deployment::BlueprintTargetSet;
-use nexus_types::deployment::PlannerChickenSwitches;
+use nexus_types::deployment::PlannerConfig;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::internal_api::views::UpdateStatus;
 use nexus_types::inventory::Collection;
@@ -129,18 +129,16 @@ impl super::Nexus {
     ) -> Result<PlanningContext, Error> {
         let creator = self.id.to_string();
         let datastore = self.datastore();
-        // Load up the chicken switches from the db directly (rather than from,
+        // Load up the planner config from the db directly (rather than from,
         // say, the background task) to ensure we get the latest state.
-        let chicken_switches = self
+        let planner_config = self
             .db_datastore
-            .reconfigurator_chicken_switches_get_latest(opctx)
+            .reconfigurator_config_get_latest(opctx)
             .await?
-            .map_or_else(PlannerChickenSwitches::default, |switches| {
-                switches.switches.planner_switches
-            });
+            .map_or_else(PlannerConfig::default, |c| c.config.planner_config);
 
         let planning_input =
-            PlanningInputFromDb::assemble(opctx, datastore, chicken_switches)
+            PlanningInputFromDb::assemble(opctx, datastore, planner_config)
                 .await?;
 
         // The choice of which inventory collection to use here is not

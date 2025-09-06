@@ -11,7 +11,7 @@ use nexus_reconfigurator_preparation::PlanningInputFromDb;
 use nexus_test_interface::NexusServer;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::deployment::BlueprintTargetSet;
-use nexus_types::deployment::PlannerChickenSwitches;
+use nexus_types::deployment::PlannerConfig;
 use omicron_common::api::external::Error;
 use omicron_test_utils::dev::poll::CondCheckError;
 use omicron_test_utils::dev::poll::wait_for_condition;
@@ -53,15 +53,13 @@ async fn test_quiesce(cptestctx: &ControlPlaneTestContext) {
     .await
     .expect("initial inventory collection");
 
-    let chicken_switches = datastore
-        .reconfigurator_chicken_switches_get_latest(&opctx)
+    let planner_config = datastore
+        .reconfigurator_config_get_latest(&opctx)
         .await
-        .expect("obtained latest chicken switches")
-        .map_or_else(PlannerChickenSwitches::default, |cs| {
-            cs.switches.planner_switches
-        });
+        .expect("obtained latest reconfigurator config")
+        .map_or_else(PlannerConfig::default, |c| c.config.planner_config);
     let planning_input =
-        PlanningInputFromDb::assemble(&opctx, &datastore, chicken_switches)
+        PlanningInputFromDb::assemble(&opctx, &datastore, planner_config)
             .await
             .expect("planning input");
     let target_blueprint = nexus

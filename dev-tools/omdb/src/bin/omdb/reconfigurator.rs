@@ -24,9 +24,9 @@ use nexus_db_queries::db::datastore::SQL_BATCH_SIZE;
 use nexus_db_queries::db::pagination::Paginator;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintMetadata;
-use nexus_types::deployment::PlannerChickenSwitches;
-use nexus_types::deployment::ReconfiguratorChickenSwitches;
-use nexus_types::deployment::ReconfiguratorChickenSwitchesView;
+use nexus_types::deployment::PlannerConfig;
+use nexus_types::deployment::ReconfiguratorConfig;
+use nexus_types::deployment::ReconfiguratorConfigView;
 use nexus_types::deployment::UnstableReconfiguratorState;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::LookupType;
@@ -59,8 +59,8 @@ enum ReconfiguratorCommands {
     Archive(ExportArgs),
     /// Show recent history of blueprints
     History(HistoryArgs),
-    /// Show the recent history of chicken switch settings
-    ChickenSwitchesHistory(ChickenSwitchesHistoryArgs),
+    /// Show the recent history of configuration values
+    ConfigHistory(ConfigHistoryArgs),
 }
 
 #[derive(Debug, Args, Clone)]
@@ -70,7 +70,7 @@ struct ExportArgs {
 }
 
 #[derive(Debug, Args, Clone)]
-struct ChickenSwitchesHistoryArgs {
+struct ConfigHistoryArgs {
     /// how far back in the history to show (number of targets)
     #[clap(long, default_value_t = 128)]
     limit: u32,
@@ -126,8 +126,8 @@ impl ReconfiguratorArgs {
                         )
                         .await
                     }
-                    ReconfiguratorCommands::ChickenSwitchesHistory(args) => {
-                        cmd_reconfigurator_chicken_switches_history(
+                    ReconfiguratorCommands::ConfigHistory(args) => {
+                        cmd_reconfigurator_config_history(
                             &opctx, &datastore, args,
                         )
                         .await
@@ -375,11 +375,11 @@ async fn cmd_reconfigurator_history(
 
     Ok(())
 }
-/// Show recent history of chicken switches
-async fn cmd_reconfigurator_chicken_switches_history(
+/// Show recent history of config settings
+async fn cmd_reconfigurator_config_history(
     opctx: &OpContext,
     datastore: &DataStore,
-    history_args: &ChickenSwitchesHistoryArgs,
+    history_args: &ConfigHistoryArgs,
 ) -> anyhow::Result<()> {
     let mut history = vec![];
     let limit = history_args.limit;
@@ -393,9 +393,9 @@ async fn cmd_reconfigurator_chicken_switches_history(
             break;
         }
         let batch = datastore
-            .reconfigurator_chicken_switches_list(opctx, &p.current_pagparams())
+            .reconfigurator_config_list(opctx, &p.current_pagparams())
             .await
-            .context("batch of chicken switches")?;
+            .context("batch of reconfigurator configs")?;
         paginator = p.found_batch(&batch, &|b| SqlU32::new(b.version));
         history.extend(batch.into_iter());
     }
@@ -412,15 +412,13 @@ async fn cmd_reconfigurator_chicken_switches_history(
     let rows: Vec<_> = history
         .into_iter()
         .map(|s| {
-            let ReconfiguratorChickenSwitchesView {
+            let ReconfiguratorConfigView {
                 version,
-                switches:
-                    ReconfiguratorChickenSwitches {
+                config:
+                    ReconfiguratorConfig {
                         planner_enabled,
-                        planner_switches:
-                            PlannerChickenSwitches {
-                                add_zones_with_mupdate_override,
-                            },
+                        planner_config:
+                            PlannerConfig { add_zones_with_mupdate_override },
                     },
                 time_modified,
             } = s;

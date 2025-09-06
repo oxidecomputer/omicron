@@ -72,22 +72,6 @@ enum BootstoreCommands {
     Status,
 }
 
-#[derive(Debug, Args)]
-struct DestroyOrphansArgs {
-    #[command(subcommand)]
-    command: DestroyOrphansCommands,
-}
-
-#[derive(Debug, Subcommand)]
-enum DestroyOrphansCommands {
-    /// Get the current chicken switch setting
-    Get,
-    /// Enable the current chicken switch setting
-    Enable,
-    /// Disable the current chicken switch setting
-    Disable,
-}
-
 impl SledAgentArgs {
     /// Run a `omdb sled-agent` subcommand.
     pub(crate) async fn run_cmd(

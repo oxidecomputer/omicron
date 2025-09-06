@@ -1918,7 +1918,7 @@ table! {
 }
 
 table! {
-    reconfigurator_chicken_switches (version) {
+    reconfigurator_config (version) {
         version -> Int8,
         planner_enabled -> Bool,
         time_modified -> Timestamptz,
