@@ -285,8 +285,34 @@ impl SagaQuiesceHandle {
     ///
     /// Note that new sagas can still be assigned to this Nexus, resulting in it
     /// no longer being fully drained.
-    pub async fn wait_for_drained(&self) {
+    #[cfg(test)]
+    async fn wait_for_drained(&self) {
         let _ = self.inner.subscribe().wait_for(|q| q.is_fully_drained()).await;
+    }
+
+    /// Wait for sagas to become drained as of this blueprint id
+    ///
+    /// This is cancel-safe.
+    ///
+    /// It's possible this will never happen.  This is generally to be invoked
+    /// with a timeout or in a select on some other conditions.
+    ///
+    /// Note that when this returns, `self.fully_drained_blueprint()` could
+    /// already be a different blueprint.
+    pub async fn wait_for_drained_blueprint(
+        &self,
+        blueprint_id: BlueprintUuid,
+    ) {
+        let _ = self
+            .inner
+            .subscribe()
+            .wait_for(|q| {
+                matches!(
+                    q.drained_blueprint_id,
+                    Some(id) if id == blueprint_id
+                )
+            })
+            .await;
     }
 
     /// Wait for the initial determination to be made about whether sagas are

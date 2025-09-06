@@ -157,8 +157,7 @@ pub struct ExampleSystem {
     pub system: SystemDescription,
     pub input: PlanningInput,
     pub collection: Collection,
-    /// The initial blueprint that was used to describe the system. This
-    /// blueprint has sleds but no zones.
+    /// The initial blueprint that was used to describe the system.
     pub initial_blueprint: Blueprint,
 }
 

@@ -6,16 +6,25 @@
 
 use assert_matches::assert_matches;
 use chrono::Utc;
+use nexus_db_model::DbMetadataNexus;
+use nexus_db_model::DbMetadataNexusState;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
+use nexus_types::deployment::Blueprint;
+use nexus_types::deployment::BlueprintTarget;
+use nexus_types::deployment::BlueprintZoneDisposition;
+use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::internal_api::views::QuiesceState;
 use nexus_types::internal_api::views::QuiesceStatus;
 use nexus_types::quiesce::SagaQuiesceHandle;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::UpdateResult;
-use slog::Logger;
+use omicron_uuid_kinds::BlueprintUuid;
+use omicron_uuid_kinds::OmicronZoneUuid;
+use std::collections::BTreeSet;
 use std::sync::Arc;
+use std::time::Duration;
 use std::time::Instant;
 use tokio::sync::watch;
 
@@ -41,19 +50,36 @@ impl super::Nexus {
 /// Describes the configuration and state around quiescing Nexus
 #[derive(Clone)]
 pub struct NexusQuiesceHandle {
-    log: Logger,
     datastore: Arc<DataStore>,
+    my_nexus_id: OmicronZoneUuid,
     sagas: SagaQuiesceHandle,
+    quiesce_opctx: Arc<OpContext>,
+    latest_blueprint:
+        watch::Receiver<Option<Arc<(BlueprintTarget, Blueprint)>>>,
     state: watch::Sender<QuiesceState>,
 }
 
 impl NexusQuiesceHandle {
-    pub fn new(log: &Logger, datastore: Arc<DataStore>) -> NexusQuiesceHandle {
-        let my_log = log.new(o!("component" => "NexusQuiesceHandle"));
-        let saga_quiesce_log = log.new(o!("component" => "SagaQuiesceHandle"));
+    pub fn new(
+        datastore: Arc<DataStore>,
+        my_nexus_id: OmicronZoneUuid,
+        latest_blueprint: watch::Receiver<
+            Option<Arc<(BlueprintTarget, Blueprint)>>,
+        >,
+        quiesce_opctx: OpContext,
+    ) -> NexusQuiesceHandle {
+        let saga_quiesce_log =
+            quiesce_opctx.log.new(o!("component" => "SagaQuiesceHandle"));
         let sagas = SagaQuiesceHandle::new(saga_quiesce_log);
         let (state, _) = watch::channel(QuiesceState::Undetermined);
-        NexusQuiesceHandle { log: my_log, datastore, sagas, state }
+        NexusQuiesceHandle {
+            datastore,
+            my_nexus_id,
+            sagas,
+            quiesce_opctx: Arc::new(quiesce_opctx),
+            latest_blueprint,
+            state,
+        }
     }
 
     pub fn sagas(&self) -> SagaQuiesceHandle {
@@ -73,16 +99,17 @@ impl NexusQuiesceHandle {
             QuiesceState::Running
         };
 
+        let log = &self.quiesce_opctx.log;
         let changed = self.state.send_if_modified(|q| {
             match q {
                 QuiesceState::Undetermined => {
-                    info!(&self.log, "initial state"; "state" => ?new_state);
+                    info!(log, "initial state"; "state" => ?new_state);
                     *q = new_state;
                     true
                 }
                 QuiesceState::Running => {
                     if quiescing {
-                        info!(&self.log, "quiesce starting");
+                        info!(log, "quiesce starting");
                         *q = new_state;
                         true
                     } else {
@@ -115,28 +142,170 @@ impl NexusQuiesceHandle {
 async fn do_quiesce(quiesce: NexusQuiesceHandle) {
     let saga_quiesce = quiesce.sagas.clone();
     let datastore = quiesce.datastore.clone();
+    let my_nexus_id = quiesce.my_nexus_id;
+    let quiesce_opctx = &quiesce.quiesce_opctx;
 
-    // NOTE: This sequence will change as we implement RFD 588.
-    // We will need to use the datastore to report our saga drain status and
-    // also to see when other Nexus instances have finished draining their
-    // sagas.  For now, this implementation begins quiescing its database as
-    // soon as its sagas are locally drained.
     assert_matches!(
         *quiesce.state.borrow(),
         QuiesceState::DrainingSagas { .. }
     );
 
-    // TODO per RFD 588, this is where we will enter a loop, pausing either on
-    // timeout or when our local quiesce state changes.  At each pause: if we
-    // need to update our db_metadata_nexus record, do so.  Then load the
-    // current blueprint and check the records for all nexus instances.  This
-    // work is covered by a combination of oxidecomputer/omicron#8859,
-    // oxidecomputer/omicron#8857, and oxidecomputer/omicron#8796.
+    // We've recorded that we should be quiescing.  This will prevent new sagas
+    // from starting.  However, we can still wind up running new sagas if a
+    // blueprint execution re-assigns us saga from an expunged Nexus.
     //
-    // For now, we skip the cross-Nexus coordination and simply wait for our own
-    // Nexus to finish what it's doing.
-    saga_quiesce.wait_for_drained().await;
+    // So here's the plan: we keep track of the blueprint id as of which we have
+    // fully drained.  That means that we've processed all Nexus expungements up
+    // to that blueprint, _and_ we've recovered all sagas assigned to us, _and
+    // finished running them all.  When this blueprint id changes (because we've
+    // processed re-assignments for a new blueprint), we'll do two things:
+    //
+    // (1) update our `db_metadata_nexus` record to reflect the change
+    //
+    // (2) check the `db_metadata_nexus` records of the other active Nexus
+    //     instances to see if they've drained as of the same blueprint.  If so,
+    //     then all of the active Nexus instances have finished all sagas in the
+    //     system and we can proceed to quiesce the database.
+    //
+    // If the other Nexus instances aren't drained up through the same
+    // blueprint, we'll check again shortly.
+    //
+    // One obvious case that's not handled here is that it's possible that other
+    // Nexus instances are drained as of a *subsequent* blueprint than the one
+    // we're looking for.  That's no problem.  We'll check again with the latest
+    // blueprint on the next lap.  For this to converge, we have to assume
+    // blueprints aren't changing faster than we're checking.  That's a pretty
+    // safe assumption here.  They shouldn't be changing at all at this point
+    // unless reacting to something unrelated to the upgrade (e.g., a sled
+    // expungement), and we are checking awfully frequently, too.
+    const POLL_TIMEOUT: Duration = Duration::from_secs(1);
+    let mut last_recorded_blueprint_id: Option<BlueprintUuid> = None;
+    loop {
+        // Grab the most recently loaded blueprint.  As usual, we clone to avoid
+        // locking the watch channel for the lifetime of this value.
+        let Some(current_blueprint): Option<Blueprint> = quiesce
+            .latest_blueprint
+            .borrow()
+            .as_deref()
+            .map(|(_target, blueprint)| blueprint)
+            .cloned()
+        else {
+            // XXX-dap log
+            // XXX-dap need to sleep here, but we won't.  Could we use
+            // wait_until() it's non-None?
+            continue;
+        };
 
+        // Determine our own Nexus generation number.
+        //
+        // This doesn't change across iterations of the loop.  But we need a
+        // blueprint to figure it out, and we don't have one until we're in this
+        // loop.
+        let Some(my_generation) = current_blueprint
+            .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+            .find_map(|(_sled_id, zone)| {
+                if let BlueprintZoneType::Nexus(nexus) = &zone.zone_type {
+                    (zone.id == my_nexus_id).then_some(nexus.nexus_generation)
+                } else {
+                    None
+                }
+            })
+        else {
+            // XXX-dap log, and also need to sleep here
+            continue;
+        };
+
+        // Wait up to a second for sagas to become drained as of this blueprint.
+        let Ok(_) = tokio::time::timeout(
+            POLL_TIMEOUT,
+            saga_quiesce.wait_for_drained_blueprint(current_blueprint.id),
+        )
+        .await
+        else {
+            // We're still not drained as of this blueprint.  But the
+            // current target blueprint could have changed.  So take another
+            // lap.
+            continue;
+        };
+
+        // We're drained up through this blueprint.  First, update our record to
+        // reflect that, if we haven't already.
+        match last_recorded_blueprint_id {
+            Some(blueprint_id) if blueprint_id == current_blueprint.id => (),
+            _ => {
+                let try_update = datastore
+                    .database_nexus_access_update_blueprint(
+                        quiesce_opctx,
+                        my_nexus_id,
+                        Some(current_blueprint.id),
+                    )
+                    .await;
+                match try_update {
+                    Err(error) => {
+                        // Take another lap.
+                        // XXX-dap log error
+                        continue;
+                    }
+                    Ok(0) => (),
+                    Ok(count) => {
+                        // XXX-dap log
+                    }
+                }
+
+                last_recorded_blueprint_id = Some(current_blueprint.id);
+            }
+        };
+
+        // Now, see if everybody else is drained up to the same point, or if any
+        // of them is already quiesced.  (That means *they* already saw that we
+        // were all drained up to the same point, which is good enough for us to
+        // proceed.)
+        let other_nexus_ids: BTreeSet<OmicronZoneUuid> = current_blueprint
+            .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+            .filter_map(|(_sled_id, zone)| {
+                if let BlueprintZoneType::Nexus(nexus) = &zone.zone_type {
+                    (nexus.nexus_generation == my_generation).then_some(zone.id)
+                } else {
+                    None
+                }
+            })
+            .collect();
+        assert!(!other_nexus_ids.is_empty());
+        let Ok(other_records): Result<Vec<DbMetadataNexus>, _> = datastore
+            .database_nexus_access_all(&quiesce_opctx, &other_nexus_ids)
+            .await
+        else {
+            // XXX-dap log error
+            continue;
+        };
+
+        if other_records
+            .iter()
+            .any(|r| r.state() == DbMetadataNexusState::Quiesced)
+        {
+            // XXX-dap log
+            break;
+        }
+
+        if other_records.len() < other_nexus_ids.len() {
+            // XXX-dap log
+            continue;
+        }
+
+        if other_records.iter().all(|r| {
+            r.last_drained_blueprint_id() == last_recorded_blueprint_id
+        }) {
+            // XXX-dap log
+            break;
+        }
+
+        // XXX-dap log take another lap
+    }
+
+    // We're ready to hand off.
+    //
+    // XXX-dap write down that this fixes oxidecomputer/omicron#8859,
+    // oxidecomputer/omicron#8857, and oxidecomputer/omicron#8796
     quiesce.state.send_modify(|q| {
         let QuiesceState::DrainingSagas {
             time_requested,
@@ -176,8 +345,20 @@ async fn do_quiesce(quiesce: NexusQuiesceHandle) {
         };
     });
 
-    // TODO per RFD 588, this is where we will enter a loop trying to update our
-    // database record for the last time.  See oxidecomputer/omicron#8971.
+    // XXX-dap write that this fixes omicron#8971.
+    loop {
+        match datastore.database_nexus_access_update_quiesced(my_nexus_id).await
+        {
+            Ok(count) => {
+                // XXX-dap log and proceed
+                break;
+            }
+            Err(error) => {
+                // XXX-dap log, sleep and try again
+                tokio::time::sleep(POLL_TIMEOUT).await;
+            }
+        }
+    }
 
     quiesce.state.send_modify(|q| {
         let QuiesceState::RecordingQuiesce {
@@ -201,10 +382,22 @@ async fn do_quiesce(quiesce: NexusQuiesceHandle) {
             duration_total: finished - time_draining_sagas,
         };
     });
+
+    // We're done!  Thank you for service, Nexus `$nexus_id`.
+    //
+    // At this point, although most of the rest of Nexus is still running (e.g.,
+    // background tasks) and it can even receive HTTP requests, everything that
+    // tries to use the database will fail.  That's just about everything.
+    //
+    // This process will hang around until the new Nexus instances expunge this
+    // one.  This is useful, since debugging tools and tests can still query
+    // this Nexus for its quiesce state.
 }
 
 #[cfg(test)]
 mod test {
+    use crate::app::quiesce::NexusQuiesceHandle;
+    use crate::app::sagas::test_helpers::test_opctx;
     use assert_matches::assert_matches;
     use async_bb8_diesel::AsyncRunQueryDsl;
     use chrono::DateTime;
@@ -214,12 +407,23 @@ mod test {
     use http::StatusCode;
     use nexus_client::types::QuiesceState;
     use nexus_client::types::QuiesceStatus;
+    use nexus_db_model::DbMetadataNexusState;
     use nexus_test_interface::NexusServer;
+    use nexus_test_utils::db::TestDatabase;
     use nexus_test_utils_macros::nexus_test;
+    use nexus_types::deployment::BlueprintTarget;
+    use nexus_types::deployment::BlueprintTargetSet;
+    use nexus_types::deployment::BlueprintZoneDisposition;
+    use nexus_types::quiesce::SagaReassignmentDone;
     use omicron_test_utils::dev::poll::CondCheckError;
     use omicron_test_utils::dev::poll::wait_for_condition;
+    use omicron_test_utils::dev::test_setup_log;
     use slog::Logger;
+    use std::collections::BTreeMap;
+    use std::collections::BTreeSet;
+    use std::sync::Arc;
     use std::time::Duration;
+    use tokio::sync::watch;
 
     type ControlPlaneTestContext =
         nexus_test_utils::ControlPlaneTestContext<crate::Server>;
@@ -287,6 +491,27 @@ mod test {
         assert!(status.db_claims.is_empty());
     }
 
+    async fn enable_blueprint_execution(cptestctx: &ControlPlaneTestContext) {
+        let opctx = test_opctx(&cptestctx);
+        let nexus = &cptestctx.server.server_context().nexus;
+        nexus
+            .blueprint_target_set_enabled(
+                &opctx,
+                BlueprintTargetSet {
+                    target_id: nexus
+                        .blueprint_target_view(&opctx)
+                        .await
+                        .expect("current blueprint target")
+                        .target_id,
+                    enabled: true,
+                },
+            )
+            .await
+            .expect("enable blueprint execution");
+    }
+
+    /// Exercise trivial case of app-level quiesce in an environment with just
+    /// one Nexus
     #[nexus_test(server = crate::Server)]
     async fn test_quiesce_easy(cptestctx: &ControlPlaneTestContext) {
         let log = &cptestctx.logctx.log;
@@ -297,8 +522,12 @@ mod test {
         let nexus_client =
             nexus_client::Client::new(&nexus_internal_url, log.clone());
 
-        // If we quiesce Nexus while it's not doing anything, that should
-        // complete quickly.
+        // We need to enable blueprint execution in order to complete a saga
+        // assignment pass, which is required for quiescing to work.
+        enable_blueprint_execution(&cptestctx).await;
+
+        // If we quiesce the only Nexus while it's not doing anything, that
+        // should complete quickly.
         let before = Utc::now();
         let _ = nexus_client
             .quiesce_start()
@@ -310,6 +539,8 @@ mod test {
         verify_quiesced(before, after, rv);
     }
 
+    /// Exercise non-trivial app-level quiesce in an environment with just one
+    /// Nexus
     #[nexus_test(server = crate::Server)]
     async fn test_quiesce_full(cptestctx: &ControlPlaneTestContext) {
         let log = &cptestctx.logctx.log;
@@ -319,6 +550,10 @@ mod test {
         );
         let nexus_client =
             nexus_client::Client::new(&nexus_internal_url, log.clone());
+
+        // We need to enable blueprint execution in order to complete a saga
+        // assignment pass, which is required for quiescing to work.
+        enable_blueprint_execution(&cptestctx).await;
 
         // Kick off a demo saga that will block quiescing.
         let demo_saga = nexus_client
@@ -470,5 +705,177 @@ mod test {
             error.status().expect("status code"),
             StatusCode::SERVICE_UNAVAILABLE
         );
+    }
+
+    /// Test Nexus quiesce with multiple different Nexus instances
+    ///
+    /// Unlike the tests above, this is not an "app-level" test.  There's not a
+    /// full Nexus here.  We're testing with just a `NexusQuiesceHandle` and the
+    /// few things that it requires (e.g., the datastore).
+    #[tokio::test]
+    async fn test_quiesce_multi() {
+        use nexus_types::internal_api::views::QuiesceState;
+
+        let logctx = test_setup_log("test_quiesce_multi");
+        let testdb = TestDatabase::new_with_datastore(&logctx.log).await;
+        let opctx = testdb.opctx();
+        let datastore = testdb.datastore();
+
+        // Set up.  We need:
+        //
+        // - a datastore
+        // - a blueprint that includes several Nexus instances
+        // - a watch Receiver to provide this blueprint to the
+        //   NexusQuiesceHandle
+        // - the datastore needs to be initialized with the Nexus access records
+        //   for the Nexus instances in the blueprint
+
+        let (_collection, _input, blueprint) =
+            nexus_reconfigurator_planning::example::example(
+                &logctx.log,
+                "test_quiesce_multi",
+            );
+        let nexus_ids = blueprint
+            .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+            .filter_map(|(_sled_id, z)| z.zone_type.is_nexus().then_some(z.id))
+            .collect::<Vec<_>>();
+        // The example system creates three sleds.  Each sled gets a Nexus zone.
+        assert_eq!(
+            nexus_ids.len(),
+            3,
+            "Example system configuration has been changed.  \
+             Please update this test."
+        );
+
+        let mut nexus_id_iter = nexus_ids.iter();
+        let nexus_id1 = *nexus_id_iter.next().expect("at least one Nexus id");
+        let nexus_id2 = *nexus_id_iter.next().expect("at least two Nexus ids");
+        let nexus_id3 =
+            *nexus_id_iter.next().expect("at least three Nexus ids");
+
+        // Fake up enough of what the blueprint loader produces.
+        let bp_target = BlueprintTarget {
+            target_id: blueprint.id,
+            enabled: false,
+            time_made_target: Utc::now(),
+        };
+        let blueprint_id = blueprint.id;
+        let (_, blueprint_rx) =
+            watch::channel(Some(Arc::new((bp_target, blueprint))));
+
+        // Insert active records for the Nexus instances.
+        let conn =
+            datastore.pool_connection_for_tests().await.expect("db conn");
+        datastore
+            .initialize_nexus_access_from_blueprint_on_connection(
+                &conn,
+                nexus_ids.into_iter().collect(),
+            )
+            .await
+            .expect("initialize Nexus database access records");
+        drop(conn);
+
+        // Initialize our quiesce handles.
+        let nexus_qq1 = NexusQuiesceHandle::new(
+            datastore.clone(),
+            nexus_id1,
+            blueprint_rx.clone(),
+            opctx.child(BTreeMap::new()),
+        );
+        let nexus_qq2 = NexusQuiesceHandle::new(
+            datastore.clone(),
+            nexus_id2,
+            blueprint_rx.clone(),
+            opctx.child(BTreeMap::new()),
+        );
+        let nexus_qq3 = NexusQuiesceHandle::new(
+            datastore.clone(),
+            nexus_id3,
+            blueprint_rx.clone(),
+            opctx.child(BTreeMap::new()),
+        );
+
+        let handles = [&nexus_qq1, &nexus_qq2, &nexus_qq3];
+
+        // First, they're not quiescing.
+        for qq in &handles {
+            let state = qq.state();
+            assert_matches!(state, QuiesceState::Undetermined);
+        }
+
+        // Mark them all not-quiescing.
+        for qq in &handles {
+            qq.set_quiescing(false);
+            let state = qq.state();
+            assert_matches!(state, QuiesceState::Running);
+        }
+
+        // XXX-dap start a saga in one of them.  Then verify they stay draining
+        // for a while.
+
+        for qq in &handles {
+            // Have them all pretend to have finished a reassignment pass for our
+            // blueprint.
+            qq.sagas()
+                .reassign_sagas(async || {
+                    (
+                        (),
+                        SagaReassignmentDone::ReassignedAllAsOf(
+                            blueprint_id,
+                            false,
+                        ),
+                    )
+                })
+                .await;
+
+            // Have them all pretend to do saga recovery, too.
+            qq.sagas().recover(async |_| ((), true)).await;
+        }
+
+        // Start quiescing them all.
+        for qq in &handles {
+            qq.set_quiescing(true);
+            let state = qq.state();
+            assert_matches!(state, QuiesceState::DrainingSagas { .. });
+        }
+
+        // They should all proceed to quiesce, but asynchronously.
+        wait_for_condition(
+            || async {
+                for qq in &handles {
+                    if let QuiesceState::Quiesced { .. } = qq.state() {
+                        // XXX-dap TODO-cleanup
+                        continue;
+                    }
+
+                    return Err(CondCheckError::<()>::NotYet);
+                }
+
+                Ok(())
+            },
+            &Duration::from_millis(250),
+            &Duration::from_secs(15),
+        )
+        .await
+        .expect("did not quiesce within timeout");
+
+        // Their records now should all say that they're quiesced.
+        // XXX-dap cannot verify this because the datastore is quiesced!
+        // XXX-dap this highlights that all three handles are quiescing the same
+        // datastore, which is not right!
+        // let records = datastore
+        //     .database_nexus_access_all(
+        //         &opctx,
+        //         &BTreeSet::from([nexus_id1, nexus_id2, nexus_id3]),
+        //     )
+        //     .await
+        //     .expect("reading access records");
+        // assert_eq!(records.len(), 3);
+        // assert!(
+        //     records.iter().all(|r| r.state() == DbMetadataNexusState::Quiesced)
+        // );
+
+        testdb.terminate().await;
+        logctx.cleanup_successful();
     }
 }
