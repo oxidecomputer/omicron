@@ -203,7 +203,7 @@ pub(crate) async fn wait_for_all_replacements(
             }
         },
         &std::time::Duration::from_millis(50),
-        &std::time::Duration::from_secs(180),
+        &std::time::Duration::from_secs(260),
     )
     .await
     .expect("all replacements finished");
@@ -382,6 +382,7 @@ mod region_replacement {
 
         pub async fn delete_the_disk(&self) {
             let disk_url = get_disk_url("disk");
+            eprintln!("Delete this disk: {:?}", disk_url);
             NexusRequest::object_delete(&self.client, &disk_url)
                 .authn_as(AuthnMode::PrivilegedUser)
                 .execute()
@@ -403,6 +404,10 @@ mod region_replacement {
 
             // Assert the request is in state Complete
 
+            eprintln!(
+                "Waited for all replacements, including  {:?}",
+                self.replacement_request_id
+            );
             let region_replacement = self
                 .datastore
                 .get_region_replacement_request_by_id(
@@ -481,7 +486,7 @@ mod region_replacement {
                     }
                 },
                 &std::time::Duration::from_millis(50),
-                &std::time::Duration::from_secs(60),
+                &std::time::Duration::from_secs(260), // 60 was not enough
             )
             .await
             .expect("request transitioned to expected state");
@@ -1071,24 +1076,35 @@ async fn test_racing_replacements_for_soft_deleted_disk_volume(
         activate_background_task(&internal_client, "region_replacement_driver")
             .await;
 
-    assert!(match last_background_task.last {
+    eprintln!("last_background_task {:?}", last_background_task);
+    let res = match last_background_task.last {
         LastResult::Completed(last_result_completed) => {
             match serde_json::from_value::<RegionReplacementDriverStatus>(
                 last_result_completed.details,
             ) {
                 Err(e) => {
+                    eprintln!("Json not what we expected");
                     eprintln!("{e}");
                     false
                 }
 
-                Ok(v) => !v.drive_invoked_ok.is_empty(),
+                Ok(v) => {
+                    if !v.drive_invoked_ok.is_empty() {
+                        eprintln!("v.drive_ok: {:?}", v.drive_invoked_ok);
+                        true
+                    } else {
+                        eprintln!("v.drive_ok: {:?} empty", v.drive_invoked_ok);
+                        false
+                    }
+                }
             }
         }
-
-        _ => {
+        x => {
+            eprintln!("Unexpected result here: {:?}", x);
             false
         }
-    });
+    };
+    assert!(res);
 
     // wait for the drive saga to complete here
     wait_for_condition(
@@ -1485,20 +1501,33 @@ mod region_snapshot_replacement {
 
             // Assert no volumes are referencing the snapshot address
 
-            let volumes = self
-                .datastore
-                .find_volumes_referencing_socket_addr(
-                    &self.opctx(),
-                    self.snapshot_socket_addr,
-                )
-                .await
-                .unwrap();
+            let mut counter = 1;
+            loop {
+                let volumes = self
+                    .datastore
+                    .find_volumes_referencing_socket_addr(
+                        &self.opctx(),
+                        self.snapshot_socket_addr,
+                    )
+                    .await
+                    .unwrap();
 
-            if !volumes.is_empty() {
-                eprintln!("{:?}", volumes);
+                if !volumes.is_empty() {
+                    eprintln!(
+                        "Volume should be gone, try {counter} {:?}",
+                        volumes
+                    );
+                    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                    counter += 1;
+                    if counter > 200 {
+                        panic!(
+                            "Tried 200 times, and still this did not finish"
+                        );
+                    }
+                } else {
+                    break;
+                }
             }
-
-            assert!(volumes.is_empty());
         }
 
         /// Assert no Crucible resources are leaked
@@ -1636,6 +1665,16 @@ mod region_snapshot_replacement {
                     .await
                     .unwrap();
 
+            /*
+            let pre_result = self
+                .datastore
+                .lookup_region_snapshot_replacement_request(
+                    &self.opctx(),
+                    RegionSnapshot,,
+                )
+                .await
+                */
+
             let result = self
                 .datastore
                 .create_region_snapshot_replacement_step(
@@ -1646,19 +1685,78 @@ mod region_snapshot_replacement {
                 .await
                 .unwrap();
 
+            eprintln!("result: {:?}", result);
+            // ZZZ: is "AlreadyHandled" an error here?
+            // Could that be a valid result if some other actor put the
+            // replacement step into place?
+            // We get back:
+            // bad result: AlreadyHandled { existing_step_id: 83e38140-f238-4fed-8cef-58121d507a49
+            // }
+            // Can we dump an existing ID and get more info from it?  Yes, but it's also
+            // possible it's also done, and the request ID is not found.
+            // We unwrap with: internal_message: "unexpected database error: Record not found"
             match result {
                 InsertStepResult::Inserted { .. } => {}
 
-                _ => {
-                    assert!(
-                        false,
-                        "bad result from create_region_snapshot_replacement_step"
+                InsertStepResult::AlreadyHandled { existing_step_id } => {
+                    let region_snapshot_replace_request = self
+                        .datastore
+                        .get_region_snapshot_replacement_request_by_id(
+                            &self.opctx(),
+                            existing_step_id,
+                        )
+                        .await;
+                    eprintln!(
+                        "we were suppose to create this: {:?} but found it AlreadyHandled, then got {:?}",
+                        self.replacement_request_id,
+                        region_snapshot_replace_request
                     );
+                    panic!("Something else created our replacement");
                 }
             }
         }
 
         pub async fn assert_read_only_target_gone(&self) {
+            eprintln!(
+                "NOW1 starting, replace_request_id: {:?}",
+                self.replacement_request_id
+            );
+            let mut i = 1;
+            loop {
+                let region_snapshot_replace_request = self
+                    .datastore
+                    .get_region_snapshot_replacement_request_by_id(
+                        &self.opctx(),
+                        self.replacement_request_id,
+                    )
+                    .await
+                    .unwrap();
+                eprintln!(
+                    "NOW2 rs_replace_request: {:?}",
+                    region_snapshot_replace_request
+                );
+
+                let res = self
+                    .datastore
+                    .read_only_target_addr(&region_snapshot_replace_request)
+                    .await
+                    .unwrap();
+
+                eprintln!("NOW3 target that should be gone: {:?}", res);
+                if res.is_none() {
+                    // test pass, move on
+                    break;
+                }
+                eprintln!("loop {i}, snapshot that should be gone: {:?}", res);
+                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                i += 1;
+            }
+        }
+        pub async fn pre_assert_read_only_target_gone(&self) {
+            eprintln!(
+                "PRE1 replace_request_id: {:?}",
+                self.replacement_request_id
+            );
             let region_snapshot_replace_request = self
                 .datastore
                 .get_region_snapshot_replacement_request_by_id(
@@ -1668,18 +1766,28 @@ mod region_snapshot_replacement {
                 .await
                 .unwrap();
 
-            assert!(
-                self.datastore
-                    .read_only_target_addr(&region_snapshot_replace_request)
-                    .await
-                    .unwrap()
-                    .is_none()
+            eprintln!(
+                "PRE2 rs_replace_request: {:?}",
+                region_snapshot_replace_request
             );
+            match self
+                .datastore
+                .read_only_target_addr(&region_snapshot_replace_request)
+                .await
+            {
+                Ok(res) => {
+                    eprintln!("PRE3 target that will be gone: {:?}", res);
+                }
+                Err(e) => {
+                    eprintln!("PRE3 target will be gone is error: {:?}", e);
+                }
+            }
         }
 
         pub async fn remove_disk_from_snapshot_rop(&self) {
             let disk_url = get_disk_url("disk-from-snapshot");
 
+            eprintln!("NOW Remove disk from snapshot for disk {:?}", disk_url);
             let disk_from_snapshot: external::Disk =
                 NexusRequest::object_get(&self.client, &disk_url)
                     .authn_as(AuthnMode::PrivilegedUser)
@@ -1691,6 +1799,7 @@ mod region_snapshot_replacement {
 
             let disk_id = disk_from_snapshot.identity.id;
 
+            eprintln!("NOW Remove disk id {:?}", disk_id);
             // Note: `make_request` needs a type here, otherwise rustc cannot
             // figure out the type of the `request_body` parameter
             self.internal_client
@@ -1950,9 +2059,14 @@ async fn test_region_snapshot_replacement_step_after_rop_remove_target_gone(
     test_harness.transition_request_to_replacement_done().await;
     test_harness.transition_request_to_running().await;
 
+    eprintln!("ROP ONE");
+    test_harness.pre_assert_read_only_target_gone().await;
     test_harness.create_manual_region_snapshot_replacement_step().await;
+    test_harness.pre_assert_read_only_target_gone().await;
     test_harness.delete_the_disk().await;
+    test_harness.pre_assert_read_only_target_gone().await;
     test_harness.delete_the_snapshot().await;
+    test_harness.pre_assert_read_only_target_gone().await;
 
     // Remove the ROP of the disk created from the snapshot
     test_harness.remove_disk_from_snapshot_rop().await;

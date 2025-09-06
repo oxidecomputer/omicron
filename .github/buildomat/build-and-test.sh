@@ -128,9 +128,13 @@ ptime -m cargo build -Z unstable-options --timings=json \
 #
 # We apply our own timeout to ensure that we get a normal failure on timeout
 # rather than a buildomat timeout.  See oxidecomputer/buildomat#8.
-#
+# To avoid too many tests running at the same time, we choose a test threads
+# 2 less (negative 2) than the default.  This avoids many test flakes where
+# the test would have worked but the system was too overloaded and tests
+# take longer than their default timeouts.
 banner test
-ptime -m timeout 2h cargo nextest run --profile ci --locked --verbose
+ptime -m timeout 2h cargo nextest run --profile ci --locked --verbose \
+    --test-threads -2
 
 #
 # https://github.com/nextest-rs/nextest/issues/16

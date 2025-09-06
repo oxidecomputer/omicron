@@ -282,6 +282,11 @@ mod test {
         assert!(duration_total >= duration_draining_sagas);
         assert!(duration_total >= duration_draining_db);
         assert!(duration_total >= duration_recording_quiesce);
+        eprintln!(
+            "dt: {:?} <= {after} - {before} which evaluates to: {:?}",
+            duration_total,
+            (after - before).to_std().unwrap()
+        );
         assert!(duration_total <= (after - before).to_std().unwrap());
         assert!(status.sagas.sagas_pending.is_empty());
         assert!(status.db_claims.is_empty());

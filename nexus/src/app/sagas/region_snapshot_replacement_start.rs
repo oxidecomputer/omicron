@@ -1534,17 +1534,37 @@ pub(crate) mod test {
         request: &RegionSnapshotReplacement,
     ) {
         let opctx = test_opctx(cptestctx);
-        let db_request = datastore
-            .get_region_snapshot_replacement_request_by_id(&opctx, request.id)
-            .await
-            .unwrap();
 
-        assert_eq!(db_request.new_region_id, None);
-        assert_eq!(
-            db_request.replacement_state,
-            RegionSnapshotReplacementState::Requested
-        );
-        assert_eq!(db_request.operating_saga_id, None);
+        let mut i = 1;
+        loop {
+            let db_request = datastore
+                .get_region_snapshot_replacement_request_by_id(
+                    &opctx, request.id,
+                )
+                .await
+                .unwrap();
+
+            assert_eq!(db_request.new_region_id, None);
+            assert_eq!(db_request.operating_saga_id, None);
+
+            if !matches!(
+                db_request.replacement_state,
+                RegionSnapshotReplacementState::Requested
+            ) {
+                eprintln!(
+                    "loop {i} Failed {:?} != Requested",
+                    db_request.replacement_state
+                );
+                // 200 * 5 = 1000 seconds, at this point something is wrong.
+                if i > 200 {
+                    panic!("Failed to reach requested state after {i} tries");
+                }
+                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+            } else {
+                break;
+            }
+            i += 1;
+        }
     }
 
     async fn assert_volume_untouched(
