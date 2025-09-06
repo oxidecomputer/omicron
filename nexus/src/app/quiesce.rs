@@ -282,6 +282,7 @@ mod test {
         assert!(duration_total >= duration_draining_sagas);
         assert!(duration_total >= duration_draining_db);
         assert!(duration_total >= duration_recording_quiesce);
+        // Add additional debug information trying to find a test flake
         eprintln!(
             "dt: {:?} <= {after} - {before} which evaluates to: {:?}",
             duration_total,
