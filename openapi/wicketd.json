@@ -7273,6 +7273,34 @@
               "id": {
                 "type": "string",
                 "enum": [
+                  "fetch_host_type"
+                ]
+              }
+            },
+            "required": [
+              "id"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "enum": [
+                  "check_host_type"
+                ]
+              }
+            },
+            "required": [
+              "id"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "enum": [
                   "downloading_installinator"
                 ]
               }
