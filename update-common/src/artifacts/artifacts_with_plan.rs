@@ -451,7 +451,8 @@ mod tests {
             assert!(expected_kinds.remove(&remove.into()));
         }
         for add in [
-            ArtifactKind::HOST_PHASE_1,
+            ArtifactKind::GIMLET_HOST_PHASE_1,
+            ArtifactKind::COSMO_HOST_PHASE_1,
             ArtifactKind::HOST_PHASE_2,
             ArtifactKind::TRAMPOLINE_PHASE_1,
             ArtifactKind::TRAMPOLINE_PHASE_2,
