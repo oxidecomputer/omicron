@@ -1659,16 +1659,6 @@ mod region_snapshot_replacement {
                     .await
                     .unwrap();
 
-            /*
-            let pre_result = self
-                .datastore
-                .lookup_region_snapshot_replacement_request(
-                    &self.opctx(),
-                    RegionSnapshot,,
-                )
-                .await
-                */
-
             let result = self
                 .datastore
                 .create_region_snapshot_replacement_step(
@@ -1679,7 +1669,6 @@ mod region_snapshot_replacement {
                 .await
                 .unwrap();
 
-            eprintln!("result: {:?}", result);
             // ZZZ: is "AlreadyHandled" an error here?
             // Could that be a valid result if some other actor put the
             // replacement step into place?
