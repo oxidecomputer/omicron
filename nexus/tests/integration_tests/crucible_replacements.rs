@@ -403,10 +403,6 @@ mod region_replacement {
 
             // Assert the request is in state Complete
 
-            eprintln!(
-                "Waited for all replacements, including  {:?}",
-                self.replacement_request_id
-            );
             let region_replacement = self
                 .datastore
                 .get_region_replacement_request_by_id(
