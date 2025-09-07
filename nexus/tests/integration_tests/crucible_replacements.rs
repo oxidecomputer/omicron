@@ -1071,7 +1071,6 @@ async fn test_racing_replacements_for_soft_deleted_disk_volume(
         activate_background_task(&internal_client, "region_replacement_driver")
             .await;
 
-    eprintln!("last_background_task {:?}", last_background_task);
     let res = match last_background_task.last {
         LastResult::Completed(last_result_completed) => {
             match serde_json::from_value::<RegionReplacementDriverStatus>(
