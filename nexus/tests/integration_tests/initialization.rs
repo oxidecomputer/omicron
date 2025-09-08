@@ -109,7 +109,7 @@ async fn test_nexus_boots_before_dendrite() {
     builder
         .start_gateway(
             SwitchLocation::Switch0,
-            Some(MGS_PORT),
+            None,
             DEFAULT_SP_SIM_CONFIG.into(),
         )
         .await;

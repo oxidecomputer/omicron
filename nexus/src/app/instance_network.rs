@@ -423,7 +423,7 @@ pub(crate) async fn instance_ensure_dpd_config(
     {
         warn!(
             log,
-            "error encountered when notifying dendrite, NAT entry creation may be delayed";
+            "error encountered when notifying dendrite";
             "error" => %e
         )
     };
