@@ -30,6 +30,7 @@ use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::PropolisUuid;
 use omicron_uuid_kinds::SledUuid;
+use omicron_uuid_kinds::ZpoolUuid;
 use sled_agent_client::Client as SledAgentClient;
 use std::net::SocketAddrV6;
 use std::sync::Arc;
@@ -359,7 +360,7 @@ impl super::Nexus {
     pub(crate) async fn upsert_crucible_dataset(
         &self,
         id: DatasetUuid,
-        zpool_id: Uuid,
+        zpool_id: ZpoolUuid,
         address: SocketAddrV6,
     ) -> Result<(), Error> {
         info!(

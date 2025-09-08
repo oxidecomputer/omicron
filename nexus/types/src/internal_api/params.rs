@@ -96,7 +96,8 @@ pub struct PhysicalDiskPutRequest {
 /// plane.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct ZpoolPutRequest {
-    pub id: Uuid,
+    #[schemars(with = "Uuid")]
+    pub id: ZpoolUuid,
 
     #[schemars(with = "Uuid")]
     pub sled_id: SledUuid,

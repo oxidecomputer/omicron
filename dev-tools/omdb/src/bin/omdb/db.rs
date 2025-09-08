@@ -1643,7 +1643,7 @@ struct CrucibleDatasetRow {
     // dataset fields
     id: DatasetUuid,
     time_deleted: String,
-    pool_id: Uuid,
+    pool_id: ZpoolUuid,
     address: String,
     size_used: i64,
     no_provision: bool,
@@ -1679,20 +1679,19 @@ async fn get_crucible_dataset_rows(
         bail!("no latest inventory found!");
     };
 
-    let mut zpool_total_size: HashMap<Uuid, i64> = HashMap::new();
+    let mut zpool_total_size: HashMap<ZpoolUuid, i64> = HashMap::new();
 
     for sled_agent in latest_collection.sled_agents {
         for zpool in sled_agent.zpools {
-            zpool_total_size
-                .insert(zpool.id.into_untyped_uuid(), zpool.total_size.into());
+            zpool_total_size.insert(zpool.id, zpool.total_size.into());
         }
     }
 
-    let zpools: HashMap<Uuid, Zpool> = datastore
+    let zpools: HashMap<ZpoolUuid, Zpool> = datastore
         .zpool_list_all_external_batched(opctx)
         .await?
         .into_iter()
-        .map(|(zpool, _)| (zpool.id().into_untyped_uuid(), zpool))
+        .map(|(zpool, _)| (zpool.id(), zpool))
         .collect();
 
     let mut result: Vec<CrucibleDatasetRow> =
@@ -1700,13 +1699,13 @@ async fn get_crucible_dataset_rows(
 
     for d in crucible_datasets {
         let control_plane_storage_buffer: Option<i64> = match zpools
-            .get(&d.pool_id)
+            .get(&d.pool_id())
         {
             Some(zpool) => Some(zpool.control_plane_storage_buffer().into()),
             None => None,
         };
 
-        let pool_total_size = zpool_total_size.get(&d.pool_id);
+        let pool_total_size = zpool_total_size.get(&d.pool_id());
 
         result.push(CrucibleDatasetRow {
             // dataset fields
@@ -1715,7 +1714,7 @@ async fn get_crucible_dataset_rows(
                 Some(t) => t.to_string(),
                 None => String::from(""),
             },
-            pool_id: d.pool_id,
+            pool_id: d.pool_id(),
             address: d.address().to_string(),
             size_used: d.size_used,
             no_provision: d.no_provision(),
@@ -2200,7 +2199,7 @@ async fn cmd_db_disk_info(
 
     let mut rows = Vec::with_capacity(3);
     for (dataset, region) in regions {
-        let my_pool_id = dataset.pool_id;
+        let my_pool_id = dataset.pool_id();
         let (_, my_zpool) = LookupPath::new(opctx, datastore)
             .zpool_id(my_pool_id)
             .fetch()
@@ -2219,7 +2218,7 @@ async fn cmd_db_disk_info(
             host_serial: my_sled.serial_number().to_string(),
             region: region.id().to_string(),
             dataset: dataset.id().to_string(),
-            physical_disk: my_zpool.physical_disk_id.to_string(),
+            physical_disk: my_zpool.physical_disk_id().to_string(),
         });
     }
 
@@ -2311,7 +2310,7 @@ async fn cmd_db_disk_physical(
         }
 
         let datasets = query
-            .filter(dataset_dsl::pool_id.eq(zp.id()))
+            .filter(dataset_dsl::pool_id.eq(to_db_typed_uuid(zp.id())))
             .select(CrucibleDataset::as_select())
             .load_async(&*conn)
             .await
@@ -2739,7 +2738,7 @@ async fn cmd_db_snapshot_info(
     } else {
         let mut rows = Vec::with_capacity(3);
         for (dataset, region) in regions {
-            let my_pool_id = dataset.pool_id;
+            let my_pool_id = dataset.pool_id();
             let (_, my_zpool) = LookupPath::new(opctx, datastore)
                 .zpool_id(my_pool_id)
                 .fetch()
@@ -2758,7 +2757,7 @@ async fn cmd_db_snapshot_info(
                 host_serial: my_sled.serial_number().to_string(),
                 region: region.id().to_string(),
                 dataset: dataset.id().to_string(),
-                physical_disk: my_zpool.physical_disk_id.to_string(),
+                physical_disk: my_zpool.physical_disk_id().to_string(),
             });
         }
 
@@ -2779,7 +2778,7 @@ async fn cmd_db_snapshot_info(
 
     let mut rows = Vec::with_capacity(3);
     for (dataset, region) in regions {
-        let my_pool_id = dataset.pool_id;
+        let my_pool_id = dataset.pool_id();
         let (_, my_zpool) = LookupPath::new(opctx, datastore)
             .zpool_id(my_pool_id)
             .fetch()
@@ -2798,7 +2797,7 @@ async fn cmd_db_snapshot_info(
             host_serial: my_sled.serial_number().to_string(),
             region: region.id().to_string(),
             dataset: dataset.id().to_string(),
-            physical_disk: my_zpool.physical_disk_id.to_string(),
+            physical_disk: my_zpool.physical_disk_id().to_string(),
         });
     }
 
@@ -3832,7 +3831,7 @@ async fn cmd_db_dry_run_region_allocation(
         pub dataset_id: DatasetUuid,
         pub size_used: i64,
 
-        pub pool_id: Uuid,
+        pub pool_id: ZpoolUuid,
 
         #[tabled(display_with = "option_impl_display")]
         pub total_size: Option<i64>,
@@ -3852,17 +3851,16 @@ async fn cmd_db_dry_run_region_allocation(
         );
     };
 
-    let mut zpool_total_size: HashMap<Uuid, i64> = HashMap::new();
+    let mut zpool_total_size: HashMap<ZpoolUuid, i64> = HashMap::new();
 
     for sled_agent in latest_collection.sled_agents {
         for zpool in sled_agent.zpools {
-            zpool_total_size
-                .insert(zpool.id.into_untyped_uuid(), zpool.total_size.into());
+            zpool_total_size.insert(zpool.id, zpool.total_size.into());
         }
     }
 
     for (dataset, region) in datasets_and_regions {
-        let pool_id = dataset.pool_id.into_untyped_uuid();
+        let pool_id = dataset.pool_id();
         let total_size = zpool_total_size.get(&pool_id);
         rows.push(Row {
             region_id: region.id(),
@@ -7700,19 +7698,18 @@ async fn cmd_db_zpool_list(
         bail!("no latest inventory found!");
     };
 
-    let mut zpool_total_size: HashMap<Uuid, i64> = HashMap::new();
+    let mut zpool_total_size: HashMap<ZpoolUuid, i64> = HashMap::new();
 
     for sled_agent in latest_collection.sled_agents {
         for zpool in sled_agent.zpools {
-            zpool_total_size
-                .insert(zpool.id.into_untyped_uuid(), zpool.total_size.into());
+            zpool_total_size.insert(zpool.id, zpool.total_size.into());
         }
     }
 
     #[derive(Tabled)]
     #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
     struct ZpoolRow {
-        id: Uuid,
+        id: ZpoolUuid,
         time_deleted: String,
         sled_id: SledUuid,
         physical_disk_id: PhysicalDiskUuid,
@@ -7724,7 +7721,7 @@ async fn cmd_db_zpool_list(
     let rows: Vec<ZpoolRow> = zpools
         .into_iter()
         .map(|(p, _)| {
-            let zpool_id = p.id().into_untyped_uuid();
+            let zpool_id = p.id();
             Ok(ZpoolRow {
                 id: zpool_id,
                 time_deleted: match p.time_deleted() {

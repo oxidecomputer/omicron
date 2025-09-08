@@ -46,8 +46,6 @@ use omicron_common::api::internal::shared::{
 use omicron_common::disk::DatasetKind;
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::DatasetUuid;
-use omicron_uuid_kinds::GenericUuid as _;
-use omicron_uuid_kinds::ZpoolUuid;
 use oximeter::types::ProducerRegistry;
 use oximeter_producer::Server as ProducerServer;
 use slog::Logger;
@@ -412,7 +410,7 @@ impl nexus_test_interface::NexusServer for Server {
                         &opctx,
                         RendezvousDebugDataset::new(
                             dataset_id,
-                            ZpoolUuid::from_untyped_uuid(zpool_id),
+                            zpool_id,
                             BlueprintUuid::new_v4(),
                         ),
                     )

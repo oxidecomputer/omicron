@@ -37,7 +37,6 @@ use nexus_types::internal_api::background::*;
 use omicron_common::api::external;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_test_utils::dev::poll::{CondCheckError, wait_for_condition};
-use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::VolumeUuid;
 use slog::Logger;
 use slog::info;
@@ -251,11 +250,11 @@ async fn test_region_replacement_does_not_create_freed_region(
     let (dataset, _) = &disk_allocated_regions[0];
     let zpool = disk_test
         .zpools()
-        .find(|x| *x.id.as_untyped_uuid() == dataset.pool_id)
+        .find(|x| x.id == dataset.pool_id())
         .expect("Expected at least one zpool");
 
     let (_, db_zpool) = LookupPath::new(&opctx, datastore)
-        .zpool_id(zpool.id.into_untyped_uuid())
+        .zpool_id(zpool.id)
         .fetch()
         .await
         .unwrap();
@@ -783,11 +782,11 @@ async fn test_racing_replacements_for_soft_deleted_disk_volume(
     let (dataset, region) = &disk_allocated_regions[0];
     let zpool = disk_test
         .zpools()
-        .find(|x| *x.id.as_untyped_uuid() == dataset.pool_id)
+        .find(|x| x.id == dataset.pool_id())
         .expect("Expected at least one zpool");
 
     let (_, db_zpool) = LookupPath::new(&opctx, datastore)
-        .zpool_id(zpool.id.into_untyped_uuid())
+        .zpool_id(zpool.id)
         .fetch()
         .await
         .unwrap();
@@ -2016,11 +2015,11 @@ async fn test_replacement_sanity(cptestctx: &ControlPlaneTestContext) {
 
     let zpool = disk_test
         .zpools()
-        .find(|x| *x.id.as_untyped_uuid() == dataset.pool_id)
+        .find(|x| x.id == dataset.pool_id())
         .expect("Expected at least one zpool");
 
     let (_, db_zpool) = LookupPath::new(&opctx, datastore)
-        .zpool_id(zpool.id.into_untyped_uuid())
+        .zpool_id(zpool.id)
         .fetch()
         .await
         .unwrap();
@@ -2138,11 +2137,11 @@ async fn test_region_replacement_triple_sanity(
 
         let zpool = disk_test
             .zpools()
-            .find(|x| *x.id.as_untyped_uuid() == dataset.pool_id)
+            .find(|x| x.id == dataset.pool_id())
             .expect("Expected at least one zpool");
 
         let (_, db_zpool) = LookupPath::new(&opctx, datastore)
-            .zpool_id(zpool.id.into_untyped_uuid())
+            .zpool_id(zpool.id)
             .fetch()
             .await
             .unwrap();
@@ -2265,11 +2264,11 @@ async fn test_region_replacement_triple_sanity_2(
 
         let zpool = disk_test
             .zpools()
-            .find(|x| *x.id.as_untyped_uuid() == dataset.pool_id)
+            .find(|x| x.id == dataset.pool_id())
             .expect("Expected at least one zpool");
 
         let (_, db_zpool) = LookupPath::new(&opctx, datastore)
-            .zpool_id(zpool.id.into_untyped_uuid())
+            .zpool_id(zpool.id)
             .fetch()
             .await
             .unwrap();
@@ -2297,11 +2296,11 @@ async fn test_region_replacement_triple_sanity_2(
 
         let zpool = disk_test
             .zpools()
-            .find(|x| *x.id.as_untyped_uuid() == dataset.pool_id)
+            .find(|x| x.id == dataset.pool_id())
             .expect("Expected at least one zpool");
 
         let (_, db_zpool) = LookupPath::new(&opctx, datastore)
-            .zpool_id(zpool.id.into_untyped_uuid())
+            .zpool_id(zpool.id)
             .fetch()
             .await
             .unwrap();
@@ -2556,7 +2555,7 @@ async fn test_read_only_replacement_sanity(
     assert!(region.read_only());
 
     let (_, db_zpool) = LookupPath::new(&opctx, datastore)
-        .zpool_id(dataset.pool_id.into_untyped_uuid())
+        .zpool_id(dataset.pool_id())
         .fetch()
         .await
         .unwrap();

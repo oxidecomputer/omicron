@@ -71,6 +71,7 @@ use omicron_common::bail_unless;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SiloUserUuid;
 use omicron_uuid_kinds::SledUuid;
+use omicron_uuid_kinds::ZpoolUuid;
 use slog_error_chain::InlineErrorChain;
 use std::sync::{Arc, OnceLock};
 use uuid::Uuid;
@@ -104,7 +105,7 @@ enum RackInitError {
     BlueprintInsert(Error),
     BlueprintTargetSet(Error),
     NexusDatabaseAccessRecordsInsert(Error),
-    DatasetInsert { err: AsyncInsertError, zpool_id: Uuid },
+    DatasetInsert { err: AsyncInsertError, zpool_id: ZpoolUuid },
     PhysicalDiskInsert(Error),
     ZpoolInsert(Error),
     RackUpdate { err: DieselError, rack_id: Uuid },
@@ -135,7 +136,7 @@ impl From<RackInitError> for Error {
             RackInitError::DatasetInsert { err, zpool_id } => match err {
                 AsyncInsertError::CollectionNotFound => Error::ObjectNotFound {
                     type_name: ResourceType::Zpool,
-                    lookup_type: LookupType::ById(zpool_id),
+                    lookup_type: LookupType::by_id(zpool_id),
                 },
                 AsyncInsertError::DatabaseError(e) => {
                     public_error_from_diesel(e, ErrorHandler::Server)
@@ -861,9 +862,9 @@ impl DataStore {
 
                     for dataset in datasets {
                         use nexus_db_schema::schema::crucible_dataset::dsl;
-                        let zpool_id = dataset.pool_id;
+                        let zpool_id = dataset.pool_id();
                         Zpool::insert_resource(
-                            zpool_id,
+                            zpool_id.into(),
                             diesel::insert_into(dsl::crucible_dataset)
                                 .values(dataset.clone())
                                 .on_conflict(dsl::id)

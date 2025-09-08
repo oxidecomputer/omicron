@@ -78,9 +78,10 @@ impl DataStore {
         use nexus_db_schema::schema::crucible_dataset::dsl;
 
         let dataset_id = dataset.id();
-        let zpool_id = dataset.pool_id;
+        let zpool_id = dataset.pool_id();
+
         Zpool::insert_resource(
-            zpool_id,
+            zpool_id.into(),
             diesel::insert_into(dsl::crucible_dataset)
                 .values(dataset)
                 .on_conflict(dsl::id)
@@ -98,7 +99,7 @@ impl DataStore {
             AsyncInsertError::CollectionNotFound => {
                 TransactionError::CustomError(Error::ObjectNotFound {
                     type_name: ResourceType::Zpool,
-                    lookup_type: LookupType::ById(zpool_id),
+                    lookup_type: LookupType::by_id(zpool_id),
                 })
             }
             AsyncInsertError::DatabaseError(e) => {
@@ -127,9 +128,10 @@ impl DataStore {
     ) -> CreateResult<Option<CrucibleDataset>> {
         use nexus_db_schema::schema::crucible_dataset::dsl;
 
-        let zpool_id = dataset.pool_id;
+        let zpool_id = dataset.pool_id();
+
         Zpool::insert_resource(
-            zpool_id,
+            zpool_id.into(),
             diesel::insert_into(dsl::crucible_dataset)
                 .values(dataset)
                 .on_conflict(dsl::id)
@@ -142,7 +144,7 @@ impl DataStore {
         .map_err(|e| match e {
             AsyncInsertError::CollectionNotFound => Error::ObjectNotFound {
                 type_name: ResourceType::Zpool,
-                lookup_type: LookupType::ById(zpool_id),
+                lookup_type: LookupType::by_id(zpool_id),
             },
             AsyncInsertError::DatabaseError(e) => {
                 public_error_from_diesel(e, ErrorHandler::Server)
@@ -224,7 +226,7 @@ impl DataStore {
             use nexus_db_schema::schema::zpool::dsl;
 
             dsl::zpool
-                .filter(dsl::id.eq(dataset.pool_id))
+                .filter(dsl::id.eq(to_db_typed_uuid(dataset.pool_id())))
                 .select(Zpool::as_select())
                 .first_async::<Zpool>(&*conn)
                 .await
@@ -334,7 +336,7 @@ mod test {
         // Create a fake zpool that backs our fake datasets.
         let zpool_id = ZpoolUuid::new_v4();
         let zpool = Zpool::new(
-            *zpool_id.as_untyped_uuid(),
+            zpool_id,
             sled_id,
             PhysicalDiskUuid::new_v4(),
             ByteCount::from(0).into(),
@@ -366,7 +368,7 @@ mod test {
         let dataset1 = datastore
             .crucible_dataset_insert_if_not_exists(CrucibleDataset::new(
                 DatasetUuid::new_v4(),
-                *zpool_id.as_untyped_uuid(),
+                zpool_id,
                 "[::1]:0".parse().unwrap(),
             ))
             .await
@@ -388,7 +390,7 @@ mod test {
         let insert_again_result = datastore
             .crucible_dataset_insert_if_not_exists(CrucibleDataset::new(
                 dataset1.id(),
-                *zpool_id.as_untyped_uuid(),
+                zpool_id,
                 "[::1]:12345".parse().unwrap(),
             ))
             .await
@@ -403,7 +405,7 @@ mod test {
         let dataset2 = datastore
             .crucible_dataset_upsert(CrucibleDataset::new(
                 DatasetUuid::new_v4(),
-                *zpool_id.as_untyped_uuid(),
+                zpool_id,
                 "[::1]:0".parse().unwrap(),
             ))
             .await
@@ -420,7 +422,7 @@ mod test {
         let insert_again_result = datastore
             .crucible_dataset_insert_if_not_exists(CrucibleDataset::new(
                 dataset1.id(),
-                *zpool_id.as_untyped_uuid(),
+                zpool_id,
                 "[::1]:12345".parse().unwrap(),
             ))
             .await
