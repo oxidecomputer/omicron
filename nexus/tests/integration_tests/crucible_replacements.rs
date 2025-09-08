@@ -1669,15 +1669,6 @@ mod region_snapshot_replacement {
                 .await
                 .unwrap();
 
-            // ZZZ: is "AlreadyHandled" an error here?
-            // Could that be a valid result if some other actor put the
-            // replacement step into place?
-            // We get back:
-            // bad result: AlreadyHandled { existing_step_id: 83e38140-f238-4fed-8cef-58121d507a49
-            // }
-            // Can we dump an existing ID and get more info from it?  Yes, but it's also
-            // possible it's also done, and the request ID is not found.
-            // We unwrap with: internal_message: "unexpected database error: Record not found"
             match result {
                 InsertStepResult::Inserted { .. } => {}
 
