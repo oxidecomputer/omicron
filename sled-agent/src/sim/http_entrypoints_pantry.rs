@@ -400,7 +400,7 @@ mod tests {
             "https://raw.githubusercontent.com/oxidecomputer/crucible/{part}/openapi/crucible-pantry.json",
         );
 
-        // The default timeout of 30 seconds was sometimes failing under
+        // The default timeout of 30 seconds was sometimes not enough
         // heavy load.
         let raw_json = reqwest::blocking::Client::builder()
             .timeout(std::time::Duration::from_secs(120))
