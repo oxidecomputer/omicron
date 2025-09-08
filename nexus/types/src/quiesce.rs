@@ -787,6 +787,7 @@ impl Drop for NewlyPendingSagaRef {
                          not recorded, and the saga is not still pending"
                     )
                 });
+                q.latch_blueprint_if_drained();
             });
         }
     }
