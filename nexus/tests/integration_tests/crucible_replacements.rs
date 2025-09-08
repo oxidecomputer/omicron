@@ -1692,7 +1692,7 @@ mod region_snapshot_replacement {
 
         pub async fn assert_read_only_target_gone(&self) {
             eprintln!(
-                "NOW1 starting, replace_request_id: {:?}",
+                "Starting, replace_request_id: {:?}",
                 self.replacement_request_id
             );
             let mut i = 1;
@@ -1706,7 +1706,7 @@ mod region_snapshot_replacement {
                     .await
                     .unwrap();
                 eprintln!(
-                    "NOW2 rs_replace_request: {:?}",
+                    "In loop {i} with rs_replace_request: {:?}",
                     region_snapshot_replace_request
                 );
 
@@ -1716,7 +1716,7 @@ mod region_snapshot_replacement {
                     .await
                     .unwrap();
 
-                eprintln!("NOW3 target that should be gone: {:?}", res);
+                eprintln!("In loop {i} target that should be gone: {:?}", res);
                 if res.is_none() {
                     // test pass, move on
                     break;
@@ -1724,37 +1724,6 @@ mod region_snapshot_replacement {
                 eprintln!("loop {i}, snapshot that should be gone: {:?}", res);
                 tokio::time::sleep(std::time::Duration::from_secs(5)).await;
                 i += 1;
-            }
-        }
-        pub async fn pre_assert_read_only_target_gone(&self) {
-            eprintln!(
-                "PRE1 replace_request_id: {:?}",
-                self.replacement_request_id
-            );
-            let region_snapshot_replace_request = self
-                .datastore
-                .get_region_snapshot_replacement_request_by_id(
-                    &self.opctx(),
-                    self.replacement_request_id,
-                )
-                .await
-                .unwrap();
-
-            eprintln!(
-                "PRE2 rs_replace_request: {:?}",
-                region_snapshot_replace_request
-            );
-            match self
-                .datastore
-                .read_only_target_addr(&region_snapshot_replace_request)
-                .await
-            {
-                Ok(res) => {
-                    eprintln!("PRE3 target that will be gone: {:?}", res);
-                }
-                Err(e) => {
-                    eprintln!("PRE3 target will be gone is error: {:?}", e);
-                }
             }
         }
 
@@ -2033,14 +2002,9 @@ async fn test_region_snapshot_replacement_step_after_rop_remove_target_gone(
     test_harness.transition_request_to_replacement_done().await;
     test_harness.transition_request_to_running().await;
 
-    eprintln!("ROP ONE");
-    test_harness.pre_assert_read_only_target_gone().await;
     test_harness.create_manual_region_snapshot_replacement_step().await;
-    test_harness.pre_assert_read_only_target_gone().await;
     test_harness.delete_the_disk().await;
-    test_harness.pre_assert_read_only_target_gone().await;
     test_harness.delete_the_snapshot().await;
-    test_harness.pre_assert_read_only_target_gone().await;
 
     // Remove the ROP of the disk created from the snapshot
     test_harness.remove_disk_from_snapshot_rop().await;
