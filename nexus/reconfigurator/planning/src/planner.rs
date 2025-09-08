@@ -7784,11 +7784,12 @@ pub(crate) mod test {
             let new_bp =
                 bp_generator.plan_new_blueprint("test_blocked_by_non_nexus");
             // The blueprint should have a report showing what's blocked
-            assert!(new_bp.report.nexus_generation_bump.waiting_on.is_some());
             assert!(
                 matches!(
-                    new_bp.report.nexus_generation_bump.waiting_on,
-                    Some(NexusGenerationBumpWaitingOn::NonNexusZoneUpdate)
+                    new_bp.report.nexus_generation_bump,
+                    PlanningNexusGenerationBumpReport::WaitingOn(
+                        NexusGenerationBumpWaitingOn::NonNexusZoneUpdate
+                    ),
                 ),
                 "Unexpected Nexus Generation report: {:?}",
                 new_bp.report.nexus_generation_bump
@@ -7831,10 +7832,10 @@ pub(crate) mod test {
             assert_eq!(summary.total_zones_modified(), 0);
             assert!(
                 matches!(
-                    new_bp.report.nexus_generation_bump.waiting_on,
-                    Some(
+                    new_bp.report.nexus_generation_bump,
+                    PlanningNexusGenerationBumpReport::WaitingOn(
                         NexusGenerationBumpWaitingOn::NexusDatabasePropagation
-                    )
+                    ),
                 ),
                 "Unexpected Nexus Generation report: {:?}",
                 new_bp.report.nexus_generation_bump
@@ -7883,8 +7884,10 @@ pub(crate) mod test {
             assert_eq!(summary.total_zones_modified(), 0);
             assert!(
                 matches!(
-                    new_bp.report.nexus_generation_bump.waiting_on,
-                    Some(NexusGenerationBumpWaitingOn::ZonePropagation)
+                    new_bp.report.nexus_generation_bump,
+                    PlanningNexusGenerationBumpReport::WaitingOn(
+                        NexusGenerationBumpWaitingOn::ZonePropagation
+                    ),
                 ),
                 "Unexpected Nexus Generation report: {:?}",
                 new_bp.report.nexus_generation_bump
@@ -7912,10 +7915,10 @@ pub(crate) mod test {
 
             assert!(
                 matches!(
-                    new_bp.report.nexus_generation_bump.waiting_on,
-                    Some(
+                    new_bp.report.nexus_generation_bump,
+                    PlanningNexusGenerationBumpReport::WaitingOn(
                         NexusGenerationBumpWaitingOn::NexusDatabasePropagation
-                    )
+                    ),
                 ),
                 "Unexpected Nexus Generation report: {:?}",
                 new_bp.report.nexus_generation_bump
@@ -7931,9 +7934,12 @@ pub(crate) mod test {
         let new_bp = bp_generator.plan_new_blueprint("update_generation");
         // Finally, the top-level Nexus generation should get bumped.
         assert!(
-            new_bp.report.nexus_generation_bump.waiting_on.is_none(),
+            matches!(
+                new_bp.report.nexus_generation_bump,
+                PlanningNexusGenerationBumpReport::NothingToReport
+            ),
             "Unexpected nexus generation report: {:?}",
-            new_bp.report.nexus_generation_bump.waiting_on
+            new_bp.report.nexus_generation_bump
         );
         assert_eq!(new_bp.nexus_generation, new_generation);
         bp_generator.blueprint = new_bp;

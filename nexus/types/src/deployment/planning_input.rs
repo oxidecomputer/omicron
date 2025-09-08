@@ -127,8 +127,8 @@ pub struct PlanningInput {
 
     /// IDs of the currently running Nexus zones
     ///
-    /// This is used to identify which Nexus is currently executing the planning
-    /// operation, which is needed for safe shutdown decisions during handoff.
+    /// This is used to determine which Nexus instances are currently in
+    /// control, which is needed for safe shutdown decisions during handoff.
     active_nexus_zones: BTreeSet<OmicronZoneUuid>,
 
     /// IDs of the about-to-be-running Nexus zones
@@ -1349,14 +1349,14 @@ impl PlanningInputBuilder {
         }
     }
 
-    pub fn add_active_nexuses(
+    pub fn set_active_nexuses(
         &mut self,
         active_nexus_zones: BTreeSet<OmicronZoneUuid>,
     ) {
         self.active_nexus_zones = active_nexus_zones;
     }
 
-    pub fn add_not_yet_nexuses(
+    pub fn set_not_yet_nexuses(
         &mut self,
         not_yet_nexus_zones: BTreeSet<OmicronZoneUuid>,
     ) {

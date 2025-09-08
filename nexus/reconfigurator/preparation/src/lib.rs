@@ -284,10 +284,10 @@ impl PlanningInputFromDb<'_> {
             self.external_dns_version.into(),
             self.cockroachdb_settings.clone(),
         );
-        builder.add_active_nexuses(
+        builder.set_active_nexuses(
             self.active_nexus_zones.clone().into_iter().collect(),
         );
-        builder.add_not_yet_nexuses(
+        builder.set_not_yet_nexuses(
             self.not_yet_nexus_zones.clone().into_iter().collect(),
         );
 

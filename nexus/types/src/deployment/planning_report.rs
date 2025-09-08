@@ -1073,49 +1073,52 @@ impl fmt::Display for ZoneUnsafeToShutdown {
 #[derive(
     Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Diffable, JsonSchema,
 )]
-pub struct PlanningNexusGenerationBumpReport {
-    /// What are we waiting on to increase the generation number?
-    pub waiting_on: Option<NexusGenerationBumpWaitingOn>,
+#[serde(tag = "component", rename_all = "snake_case", content = "value")]
+pub enum PlanningNexusGenerationBumpReport {
+    /// We have no reason to bump the Nexus generation number.
+    NothingToReport,
 
-    pub next_generation: Option<Generation>,
+    /// We are waiting on some condition before we can bump the
+    /// Nexus generation.
+    WaitingOn(NexusGenerationBumpWaitingOn),
+
+    /// We are bumping the Nexus generation number to this value.
+    BumpingGeneration(Generation),
 }
 
 impl PlanningNexusGenerationBumpReport {
     pub fn new() -> Self {
-        Self { waiting_on: None, next_generation: None }
+        Self::NothingToReport
     }
 
     pub fn is_empty(&self) -> bool {
-        self.waiting_on.is_none() && self.next_generation.is_none()
+        matches!(self, Self::NothingToReport)
     }
 
     pub fn set_waiting_on(&mut self, why: NexusGenerationBumpWaitingOn) {
-        self.waiting_on = Some(why);
+        *self = Self::WaitingOn(why);
     }
 
     pub fn set_next_generation(&mut self, next_generation: Generation) {
-        self.next_generation = Some(next_generation);
+        *self = Self::BumpingGeneration(next_generation);
     }
 }
 
 impl fmt::Display for PlanningNexusGenerationBumpReport {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let PlanningNexusGenerationBumpReport { waiting_on, next_generation } =
-            self;
-
-        match (waiting_on, next_generation) {
-            (Some(why), _) => {
+        match self {
+            Self::WaitingOn(why) => {
                 writeln!(
                     f,
                     "* waiting to update top-level nexus_generation: {}",
                     why.as_str()
                 )?;
             }
-            (None, Some(gen)) => {
+            Self::BumpingGeneration(gen) => {
                 writeln!(f, "* updating top-level nexus_generation to: {gen}")?;
             }
             // Nothing to report
-            (None, None) => (),
+            Self::NothingToReport => (),
         }
         Ok(())
     }
