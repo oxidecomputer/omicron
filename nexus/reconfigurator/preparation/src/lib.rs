@@ -6,6 +6,7 @@
 
 use anyhow::Context;
 use futures::StreamExt;
+use nexus_db_model::DbMetadataNexusState;
 use nexus_db_model::DnsGroup;
 use nexus_db_model::Generation;
 use nexus_db_queries::context::OpContext;
@@ -204,20 +205,26 @@ impl PlanningInputFromDb<'_> {
             .await
             .internal_context("fetching oximeter read policy")?;
 
-        let active_nexus_zones = datastore
-            .get_active_db_metadata_nexus(opctx)
-            .await
-            .internal_context("fetching active nexuses")?
-            .into_iter()
-            .map(|z| z.nexus_id())
-            .collect::<Vec<_>>();
-        let not_yet_nexus_zones = datastore
-            .get_not_yet_db_metadata_nexus(opctx)
-            .await
-            .internal_context("fetching 'not yet' nexuses")?
-            .into_iter()
-            .map(|z| z.nexus_id())
-            .collect::<Vec<_>>();
+        let (active_nexus_zones, not_yet_nexus_zones): (Vec<_>, Vec<_>) =
+            datastore
+                .get_db_metadata_nexus_in_state(
+                    opctx,
+                    &[
+                        DbMetadataNexusState::Active,
+                        DbMetadataNexusState::NotYet,
+                    ],
+                )
+                .await
+                .internal_context("fetching db_metdata_nexus records")?
+                .into_iter()
+                .partition(|nexus| {
+                    nexus.state() == DbMetadataNexusState::Active
+                });
+
+        let active_nexus_zones =
+            active_nexus_zones.into_iter().map(|n| n.nexus_id()).collect();
+        let not_yet_nexus_zones =
+            not_yet_nexus_zones.into_iter().map(|n| n.nexus_id()).collect();
 
         let planning_input = PlanningInputFromDb {
             sled_rows: &sled_rows,

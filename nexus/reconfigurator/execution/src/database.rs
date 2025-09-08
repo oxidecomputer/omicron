@@ -5,6 +5,7 @@
 //! Manages deployment of records into the database.
 
 use anyhow::anyhow;
+use nexus_db_model::DbMetadataNexusState;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::Blueprint;
@@ -23,7 +24,7 @@ pub(crate) async fn deploy_db_metadata_nexus_records(
     // can lag behind it if we are one of those Nexuses running after quiescing
     // has started.
     let active_nexus_zones = datastore
-        .get_active_db_metadata_nexus(opctx)
+        .get_db_metadata_nexus_in_state(opctx, &[DbMetadataNexusState::Active])
         .await?
         .into_iter()
         .map(|z| z.nexus_id())

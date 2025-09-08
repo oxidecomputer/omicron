@@ -313,6 +313,7 @@ mod test {
     use internal_dns_types::names::BOUNDARY_NTP_DNS_NAME;
     use internal_dns_types::names::DNS_ZONE;
     use internal_dns_types::names::ServiceName;
+    use nexus_db_model::DbMetadataNexusState;
     use nexus_db_model::DnsGroup;
     use nexus_db_model::Silo;
     use nexus_db_queries::authn;
@@ -1503,7 +1504,10 @@ mod test {
         let ip_pool_range_rows =
             fetch_all_service_ip_pool_ranges(&datastore, &opctx).await;
         let active_nexus_zones = datastore
-            .get_active_db_metadata_nexus(&opctx)
+            .get_db_metadata_nexus_in_state(
+                &opctx,
+                &[DbMetadataNexusState::Active],
+            )
             .await
             .internal_context("fetching active nexuses")
             .unwrap()
