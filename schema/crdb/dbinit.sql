@@ -638,7 +638,8 @@ CREATE TYPE IF NOT EXISTS omicron.public.dataset_kind AS ENUM (
   'zone_root',
   'zone',
   'debug',
-  'update'
+  'update',
+  'local_storage'
 );
 
 /*
@@ -6732,6 +6733,41 @@ ON omicron.public.host_ereport (
 ) WHERE
     time_deleted IS NULL;
 
+CREATE TABLE IF NOT EXISTS omicron.public.local_storage_dataset (
+    /* Identity metadata (asset) */
+    id UUID PRIMARY KEY,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ,
+    rcgen INT NOT NULL,
+
+    /* FK into the Pool table */
+    pool_id UUID NOT NULL,
+
+    /*
+     * An upper bound on the amount of space that might be in-use
+     *
+     * This field is owned by Nexus. When a new row is inserted during the
+     * Reconfigurator rendezvous process, this field is set to 0. Reconfigurator
+     * otherwise ignores this field. It's updated by Nexus as vmm allocations
+     * and deletions are performed using this dataset.
+     */
+    size_used INT NOT NULL,
+
+    /* Do not consider this dataset during local storage allocation */
+    no_provision BOOL NOT NULL
+);
+
+/* Create an index on the size usage for any Crucible dataset */
+CREATE INDEX IF NOT EXISTS lookup_local_storage_dataset_by_size_used ON
+    omicron.public.local_storage_dataset (size_used)
+  WHERE time_deleted IS NULL;
+
+/* Create an index on the zpool id */
+CREATE INDEX IF NOT EXISTS lookup_local_storage_dataset_by_zpool ON
+    omicron.public.local_storage_dataset (pool_id, id)
+  WHERE time_deleted IS NULL;
+
 -- Metadata for the schema itself.
 --
 -- This table may be read by Nexuses with different notions of "what the schema should be".
@@ -6792,7 +6828,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '199.0.0', NULL)
+    (TRUE, NOW(), NOW(), '200.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

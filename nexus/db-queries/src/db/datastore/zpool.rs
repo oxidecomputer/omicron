@@ -217,6 +217,7 @@ impl DataStore {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
         let now = Utc::now();
         use nexus_db_schema::schema::crucible_dataset::dsl as dataset_dsl;
+        use nexus_db_schema::schema::local_storage_dataset::dsl as local_storage_dsl;
         use nexus_db_schema::schema::zpool::dsl as zpool_dsl;
 
         let zpool_id = *zpool_id.as_untyped_uuid();
@@ -230,7 +231,8 @@ impl DataStore {
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
-        // Verify that there are no regions nor region snapshots using this dataset
+        // Verify that there are no regions nor region snapshots using this
+        // dataset
         use nexus_db_schema::schema::region::dsl as region_dsl;
         let region_count = region_dsl::region
             .filter(region_dsl::dataset_id.eq_any(dataset_ids.clone()))
@@ -257,11 +259,21 @@ impl DataStore {
             )));
         }
 
-        // Ensure the datasets are deleted
+        // Ensure the crucible datasets are deleted
         diesel::update(dataset_dsl::crucible_dataset)
             .filter(dataset_dsl::time_deleted.is_null())
             .filter(dataset_dsl::pool_id.eq(zpool_id))
             .set(dataset_dsl::time_deleted.eq(now))
+            .execute_async(conn)
+            .await
+            .map(|_rows_modified| ())
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        // Ensure the local storage datasets are deleted
+        diesel::update(local_storage_dsl::local_storage_dataset)
+            .filter(local_storage_dsl::time_deleted.is_null())
+            .filter(local_storage_dsl::pool_id.eq(zpool_id))
+            .set(local_storage_dsl::time_deleted.eq(now))
             .execute_async(conn)
             .await
             .map(|_rows_modified| ())

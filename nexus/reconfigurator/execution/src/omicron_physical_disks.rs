@@ -76,6 +76,7 @@ mod test {
     use diesel::ExpressionMethods;
     use diesel::QueryDsl;
     use nexus_db_model::CrucibleDataset;
+    use nexus_db_model::LocalStorageDataset;
     use nexus_db_model::PhysicalDisk;
     use nexus_db_model::PhysicalDiskKind;
     use nexus_db_model::PhysicalDiskPolicy;
@@ -178,6 +179,14 @@ mod test {
             .execute_async(&*conn)
             .await
             .unwrap();
+
+        datastore
+            .local_storage_dataset_insert_if_not_exists(
+                LocalStorageDataset::new(DatasetUuid::new_v4(), zpool.id()),
+            )
+            .await
+            .unwrap()
+            .unwrap();
     }
 
     async fn get_pools(
@@ -209,6 +218,22 @@ mod test {
 
         use nexus_db_schema::schema::crucible_dataset::dsl;
         dsl::crucible_dataset
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::pool_id.eq(id.into_untyped_uuid()))
+            .select(dsl::id)
+            .load_async(&*conn)
+            .await
+            .unwrap()
+    }
+
+    async fn get_local_storage_datasets(
+        datastore: &DataStore,
+        id: ZpoolUuid,
+    ) -> Vec<Uuid> {
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+
+        use nexus_db_schema::schema::local_storage_dataset::dsl;
+        dsl::local_storage_dataset
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::pool_id.eq(id.into_untyped_uuid()))
             .select(dsl::id)
@@ -325,6 +350,8 @@ mod test {
         assert_eq!(datasets.len(), 1);
         let regions = get_regions(&datastore, datasets[0]).await;
         assert_eq!(regions.len(), 1);
+        let datasets = get_local_storage_datasets(&datastore, pools[0]).await;
+        assert_eq!(datasets.len(), 1);
 
         // Similarly, the "other disk" should still exist.
         let pools = get_pools(&datastore, other_disk).await;
@@ -333,5 +360,7 @@ mod test {
         assert_eq!(datasets.len(), 1);
         let regions = get_regions(&datastore, datasets[0]).await;
         assert_eq!(regions.len(), 1);
+        let datasets = get_local_storage_datasets(&datastore, pools[0]).await;
+        assert_eq!(datasets.len(), 1);
     }
 }

@@ -3142,11 +3142,11 @@ pub mod test {
                     }
                 );
                 // Each disk addition should also result in a debug + zone root
-                // dataset addition.
+                // + local storage dataset addition.
                 assert_eq!(
                     edits.datasets,
                     EditCounts {
-                        added: 2 * usize::from(SledBuilder::DEFAULT_NPOOLS),
+                        added: 3 * usize::from(SledBuilder::DEFAULT_NPOOLS),
                         updated: 0,
                         expunged: 0,
                         removed: 0

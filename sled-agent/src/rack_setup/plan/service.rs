@@ -335,7 +335,8 @@ impl Plan {
         // Set up storage early, as it'll be necessary for placement of
         // many subsequent services.
         //
-        // Our policy at RSS time is currently "adopt all the U.2 disks we can see".
+        // Our policy at RSS time is currently "adopt all the U.2 disks we can
+        // see".
         for sled_info in sled_info.iter_mut() {
             sled_info.request.disks = sled_info
                 .inventory
@@ -356,7 +357,8 @@ impl Plan {
                 .map(|disk| ZpoolName::new_external(disk.pool_id))
                 .collect();
 
-            // Add all non-discretionary datasets, self-provisioned on the U.2, to the blueprint.
+            // Add all non-discretionary datasets, self-provisioned on the U.2,
+            // to the blueprint.
             for zpool in &sled_info.u2_zpools {
                 for intrinsic_dataset in
                     sled_storage::dataset::U2_EXPECTED_DATASETS
@@ -387,6 +389,21 @@ impl Plan {
                     };
                     sled_info.request.datasets.insert(config.id, config);
                 }
+
+                // LocalStorage isn't in the U2_EXPECTED_DATASETS list, add it
+                // here. XXX does RSS blueprint have to be blippy clean? Isn't
+                // the plan to RSS only enough to run Nexus and have it use
+                // blueprints to make the rest true?
+                let config = DatasetConfig {
+                    id: DatasetUuid::new_v4(),
+                    name: DatasetName::new(*zpool, DatasetKind::LocalStorage),
+                    inner: SharedDatasetConfig {
+                        compression: CompressionAlgorithm::Off,
+                        quota: None,
+                        reservation: None,
+                    },
+                };
+                sled_info.request.datasets.insert(config.id, config);
             }
         }
 
@@ -1414,7 +1431,7 @@ mod tests {
             + COCKROACHDB_REDUNDANCY
             + SINGLE_NODE_CLICKHOUSE_REDUNDANCY
             + dns_ips.len()
-            + DISK_COUNT * 3; // (Debug, Root, Crucible)
+            + DISK_COUNT * 4; // (Debug, Root, Local Storage, Crucible)
         assert_eq!(
             sled_config.datasets.len(),
             expected_dataset_count,

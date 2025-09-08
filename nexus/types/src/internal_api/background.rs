@@ -506,28 +506,29 @@ pub struct BlueprintRendezvousStatus {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BlueprintRendezvousStats {
     pub debug_dataset: DebugDatasetsRendezvousStats,
-    pub crucible_dataset: CrucibleDatasetsRendezvousStats,
+    pub crucible_dataset: DatasetsRendezvousStats,
+    pub local_storage_dataset: DatasetsRendezvousStats,
 }
 
 #[derive(
     Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize,
 )]
-pub struct CrucibleDatasetsRendezvousStats {
-    /// Number of new Crucible datasets recorded.
+pub struct DatasetsRendezvousStats {
+    /// Number of new datasets recorded.
     ///
-    /// This is a count of in-service Crucible datasets that were also present
-    /// in inventory and newly-inserted into `crucible_dataset`.
+    /// This is a count of in-service datasets that were also present in
+    /// inventory and newly-inserted into the associated table.
     pub num_inserted: usize,
-    /// Number of Crucible datasets that would have been inserted, except
-    /// records for them already existed.
+    /// Number of datasets that would have been inserted, except records for
+    /// them already existed.
     pub num_already_exist: usize,
-    /// Number of Crucible datasets that the current blueprint says are
-    /// in-service, but we did not attempt to insert them because they're not
-    /// present in the latest inventory collection.
+    /// Number of datasets that the current blueprint says are in-service, but
+    /// we did not attempt to insert them because they're not present in the
+    /// latest inventory collection.
     pub num_not_in_inventory: usize,
 }
 
-impl slog::KV for CrucibleDatasetsRendezvousStats {
+impl slog::KV for DatasetsRendezvousStats {
     fn serialize(
         &self,
         _record: &slog::Record,

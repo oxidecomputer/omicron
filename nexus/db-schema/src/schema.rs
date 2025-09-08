@@ -2792,3 +2792,22 @@ table! {
         result_kind -> crate::enums::AuditLogResultKindEnum,
     }
 }
+
+table! {
+    local_storage_dataset (id) {
+        id -> Uuid,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        rcgen -> Int8,
+
+        pool_id -> Uuid,
+
+        size_used -> Int8,
+
+        no_provision -> Bool,
+    }
+}
+
+allow_tables_to_appear_in_same_query!(zpool, local_storage_dataset);
+allow_tables_to_appear_in_same_query!(physical_disk, local_storage_dataset);

@@ -884,7 +884,7 @@ impl DataStore {
                     for dataset in datasets {
                         use nexus_db_schema::schema::crucible_dataset::dsl;
                         let zpool_id = dataset.pool_id();
-                        Zpool::insert_resource(
+                        let _: CrucibleDataset = Zpool::insert_resource(
                             zpool_id.into(),
                             diesel::insert_into(dsl::crucible_dataset)
                                 .values(dataset.clone())
