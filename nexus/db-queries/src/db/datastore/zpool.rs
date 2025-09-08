@@ -63,9 +63,9 @@ impl DataStore {
 
         use nexus_db_schema::schema::zpool::dsl;
 
-        let sled_id = zpool.sled_id;
+        let sled_id = zpool.sled_id();
         let pool = Sled::insert_resource(
-            sled_id,
+            sled_id.into(),
             diesel::insert_into(dsl::zpool)
                 .values(zpool.clone())
                 .on_conflict(dsl::id)
@@ -80,7 +80,7 @@ impl DataStore {
         .map_err(|e| match e {
             AsyncInsertError::CollectionNotFound => Error::ObjectNotFound {
                 type_name: ResourceType::Sled,
-                lookup_type: LookupType::ById(sled_id),
+                lookup_type: LookupType::by_id(sled_id),
             },
             AsyncInsertError::DatabaseError(e) => public_error_from_diesel(
                 e,

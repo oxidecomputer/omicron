@@ -263,7 +263,7 @@ async fn test_region_replacement_does_not_create_freed_region(
     datastore
         .physical_disk_update_policy(
             &opctx,
-            db_zpool.physical_disk_id.into(),
+            db_zpool.physical_disk_id(),
             PhysicalDiskPolicy::Expunged,
         )
         .await
@@ -795,7 +795,7 @@ async fn test_racing_replacements_for_soft_deleted_disk_volume(
     datastore
         .physical_disk_update_policy(
             &opctx,
-            db_zpool.physical_disk_id.into(),
+            db_zpool.physical_disk_id(),
             PhysicalDiskPolicy::Expunged,
         )
         .await
@@ -2028,7 +2028,7 @@ async fn test_replacement_sanity(cptestctx: &ControlPlaneTestContext) {
     datastore
         .physical_disk_update_policy(
             &opctx,
-            db_zpool.physical_disk_id.into(),
+            db_zpool.physical_disk_id(),
             PhysicalDiskPolicy::Expunged,
         )
         .await
@@ -2150,7 +2150,7 @@ async fn test_region_replacement_triple_sanity(
         datastore
             .physical_disk_update_policy(
                 &opctx,
-                db_zpool.physical_disk_id.into(),
+                db_zpool.physical_disk_id(),
                 PhysicalDiskPolicy::Expunged,
             )
             .await
@@ -2274,12 +2274,12 @@ async fn test_region_replacement_triple_sanity_2(
             .await
             .unwrap();
 
-        info!(log, "expunging physical disk {}", db_zpool.physical_disk_id);
+        info!(log, "expunging physical disk {}", db_zpool.physical_disk_id());
 
         datastore
             .physical_disk_update_policy(
                 &opctx,
-                db_zpool.physical_disk_id.into(),
+                db_zpool.physical_disk_id(),
                 PhysicalDiskPolicy::Expunged,
             )
             .await
@@ -2306,12 +2306,12 @@ async fn test_region_replacement_triple_sanity_2(
             .await
             .unwrap();
 
-        info!(log, "expunging physical disk {}", db_zpool.physical_disk_id);
+        info!(log, "expunging physical disk {}", db_zpool.physical_disk_id());
 
         datastore
             .physical_disk_update_policy(
                 &opctx,
-                db_zpool.physical_disk_id.into(),
+                db_zpool.physical_disk_id(),
                 PhysicalDiskPolicy::Expunged,
             )
             .await
@@ -2564,7 +2564,7 @@ async fn test_read_only_replacement_sanity(
     datastore
         .physical_disk_update_policy(
             &opctx,
-            db_zpool.physical_disk_id.into(),
+            db_zpool.physical_disk_id(),
             PhysicalDiskPolicy::Expunged,
         )
         .await

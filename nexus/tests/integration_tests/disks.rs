@@ -2299,7 +2299,7 @@ async fn test_no_halt_disk_delete_one_region_on_expunged_agent(
     datastore
         .physical_disk_update_policy(
             &opctx,
-            db_zpool.physical_disk_id.into(),
+            db_zpool.physical_disk_id(),
             PhysicalDiskPolicy::Expunged,
         )
         .await

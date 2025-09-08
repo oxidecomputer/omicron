@@ -25,6 +25,7 @@ use omicron_common::api::internal::nexus::SledVmmState;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PropolisUuid;
+use omicron_uuid_kinds::SledUuid;
 use oximeter::types::ProducerRegistry;
 use parallel_task_set::ParallelTaskSet;
 use sled_agent_client::Client as SledAgentClient;
@@ -305,7 +306,8 @@ impl VirtualMachine {
             silo_id: project.silo_id,
             project_id: project.id(),
             vmm_id: vmm.id,
-            sled_agent_id: sled.id(),
+            // XXX oximeter cannot do typed uuids?
+            sled_agent_id: sled.id().into_untyped_uuid(),
             sled_agent_ip: (*addr.ip()).into(),
             sled_agent_port: addr.port(),
         }
@@ -458,7 +460,7 @@ impl BackgroundTask for InstanceWatcher {
             // allows reusing pooled TCP connections. Therefore, we will order
             // the database query by sled ID, and reuse the same sled-agent
             // client as long as we are talking to the same sled.
-            let mut curr_client: Option<(Uuid, SledAgentClient)> = None;
+            let mut curr_client: Option<(SledUuid, SledAgentClient)> = None;
             let mut instances = VecDeque::new();
             let mut total: usize = 0;
             loop {
@@ -481,7 +483,7 @@ impl BackgroundTask for InstanceWatcher {
                                 return serde_json::json!({ "error": e.to_string() });
                             }
                         };
-                        paginator = Some(p.found_batch(&batch, &|(sled, _, vmm, _)| (sled.id(), vmm.id)));
+                        paginator = Some(p.found_batch(&batch, &|(sled, _, vmm, _)| (sled.id().into_untyped_uuid(), vmm.id)));
                         instances = batch.into();
                     }
                 }

@@ -399,7 +399,7 @@ mod test {
             };
             let bogus_repo_depot_port = 0;
             let update = SledUpdate::new(
-                sled_id.into_untyped_uuid(),
+                *sled_id,
                 addr,
                 bogus_repo_depot_port,
                 SledBaseboard {
@@ -526,7 +526,7 @@ mod test {
             let pool_id = dataset.dataset.pool_name.id();
             let zpool = Zpool::new(
                 pool_id.into_untyped_uuid(),
-                sled_id.into_untyped_uuid(),
+                sled_id,
                 PhysicalDiskUuid::new_v4(),
                 external::ByteCount::from(0).into(),
             );
