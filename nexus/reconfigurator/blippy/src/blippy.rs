@@ -19,6 +19,7 @@ use omicron_common::api::external::MacAddr;
 use omicron_common::disk::DatasetKind;
 use omicron_common::disk::M2Slot;
 use omicron_uuid_kinds::MupdateOverrideUuid;
+use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use std::collections::BTreeSet;
@@ -52,43 +53,66 @@ impl fmt::Display for Severity {
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Kind {
+    Blueprint(BlueprintKind),
     Sled { sled_id: SledUuid, kind: SledKind },
 }
 
 impl Kind {
     pub fn display_component(&self) -> impl fmt::Display + '_ {
         enum Component<'a> {
+            Blueprint,
             Sled(&'a SledUuid),
         }
 
         impl fmt::Display for Component<'_> {
             fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                 match self {
+                    Component::Blueprint => write!(f, "blueprint"),
                     Component::Sled(id) => write!(f, "sled {id}"),
                 }
             }
         }
 
         match self {
+            Kind::Blueprint { .. } => Component::Blueprint,
             Kind::Sled { sled_id, .. } => Component::Sled(sled_id),
         }
     }
 
     pub fn display_subkind(&self) -> impl fmt::Display + '_ {
         enum Subkind<'a> {
+            Blueprint(&'a BlueprintKind),
             Sled(&'a SledKind),
         }
 
         impl fmt::Display for Subkind<'_> {
             fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                 match self {
+                    Subkind::Blueprint(kind) => write!(f, "{kind}"),
                     Subkind::Sled(kind) => write!(f, "{kind}"),
                 }
             }
         }
 
         match self {
+            Kind::Blueprint(kind) => Subkind::Blueprint(kind),
             Kind::Sled { kind, .. } => Subkind::Sled(kind),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub enum BlueprintKind {
+    /// No zones exist in the blueprint using the active Nexus generation
+    NoZonesWithActiveNexusGeneration(Generation),
+}
+
+impl fmt::Display for BlueprintKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            BlueprintKind::NoZonesWithActiveNexusGeneration(gen) => {
+                write!(f, "No zones with active nexus generation @ {gen}",)
+            }
         }
     }
 }
@@ -193,6 +217,13 @@ pub enum SledKind {
         slot: M2Slot,
         version: BlueprintArtifactVersion,
         hash: ArtifactHash,
+    },
+    /// A Nexus zone exists which is too new, relative to the "active
+    /// generation".
+    NexusZoneGenerationTooNew {
+        active_generation: Generation,
+        zone_generation: Generation,
+        id: OmicronZoneUuid,
     },
     /// Nexus zones with the same generation have different image sources.
     NexusZoneGenerationImageSourceMismatch {
@@ -422,6 +453,17 @@ impl fmt::Display for SledKind {
                      (version {version}, hash {hash})",
                 )
             }
+            SledKind::NexusZoneGenerationTooNew {
+                active_generation,
+                zone_generation,
+                id,
+            } => {
+                write!(
+                    f,
+                    "Nexus zone {id} has a generation {zone_generation}, which \
+                     is too new relative to the active generation {active_generation}"
+                )
+            }
             SledKind::NexusZoneGenerationImageSourceMismatch {
                 zone1,
                 zone2,
@@ -490,6 +532,14 @@ impl<'a> Blippy<'a> {
 
     pub fn blueprint(&self) -> &'a Blueprint {
         self.blueprint
+    }
+
+    pub(crate) fn push_blueprint_note(
+        &mut self,
+        severity: Severity,
+        kind: BlueprintKind,
+    ) {
+        self.notes.push(Note { severity, kind: Kind::Blueprint(kind) });
     }
 
     pub(crate) fn push_sled_note(

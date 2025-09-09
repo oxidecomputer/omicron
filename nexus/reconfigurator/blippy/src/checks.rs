@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::blippy::Blippy;
+use crate::blippy::BlueprintKind;
 use crate::blippy::Severity;
 use crate::blippy::SledKind;
 use nexus_sled_agent_shared::inventory::ZoneKind;
@@ -657,14 +658,37 @@ fn check_nexus_generation_consistency(blippy: &mut Blippy<'_>) {
         }
     }
 
-    // Check each generation for image source consistency
-    for (generation, zones_with_gen) in generation_info {
-        if zones_with_gen.len() < 2 {
-            continue; // Only one zone with this generation, no consistency issue
-        }
+    // Check that the top-level Nexus generation is consistent with the images
+    let active_gen = blippy.blueprint().nexus_generation;
+    if generation_info.get(&active_gen).is_none() {
+        blippy.push_blueprint_note(
+            Severity::Fatal,
+            BlueprintKind::NoZonesWithActiveNexusGeneration(active_gen),
+        );
+        return;
+    };
 
+    // Check each generation for image source consistency
+    for (generation, zones_with_gen) in &generation_info {
         // Take the first zone as the reference
         let (ref_sled_id, ref_image_source, ref_zone) = &zones_with_gen[0];
+
+        if *generation > active_gen.next() {
+            blippy.push_sled_note(
+                *ref_sled_id,
+                Severity::Fatal,
+                SledKind::NexusZoneGenerationTooNew {
+                    active_generation: active_gen,
+                    zone_generation: *generation,
+                    id: ref_zone.id,
+                },
+            );
+        }
+
+        if zones_with_gen.len() < 2 {
+            // Only one zone with this generation, no consistency issue
+            continue;
+        }
 
         // Compare all other zones to the reference
         for (_sled_id, image_source, zone) in &zones_with_gen[1..] {
@@ -675,7 +699,7 @@ fn check_nexus_generation_consistency(blippy: &mut Blippy<'_>) {
                     SledKind::NexusZoneGenerationImageSourceMismatch {
                         zone1: (*ref_zone).clone(),
                         zone2: (*zone).clone(),
-                        generation,
+                        generation: *generation,
                     },
                 );
             }
@@ -1362,6 +1386,7 @@ mod tests {
                     }
                     _ => (),
                 },
+                _ => panic!("Unexpected note: {note:?}"),
             }
         }
 
@@ -1865,8 +1890,35 @@ mod tests {
     }
 
     #[test]
-    fn test_nexus_generation_consistency() {
-        static TEST_NAME: &str = "test_nexus_generation_consistency";
+    fn test_nexus_generation_no_nexus() {
+        static TEST_NAME: &str = "test_nexus_generation_no_nexus";
+        let logctx = test_setup_log(TEST_NAME);
+        let (_, blueprint) = ExampleSystemBuilder::new(&logctx.log, TEST_NAME)
+            .nsleds(1)
+            .nexus_count(0)
+            .build();
+
+        // Run blippy checks
+        let expected_notes = [Note {
+            severity: Severity::Fatal,
+            kind: Kind::Blueprint(
+                BlueprintKind::NoZonesWithActiveNexusGeneration(
+                    blueprint.nexus_generation,
+                ),
+            ),
+        }];
+
+        let report =
+            Blippy::new(&blueprint).into_report(BlippyReportSortKey::Kind);
+        eprintln!("{}", report.display());
+        assert_eq!(report.notes(), &expected_notes);
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn test_nexus_generation_image_consistency() {
+        static TEST_NAME: &str = "test_nexus_generation_image_consistency";
         let logctx = test_setup_log(TEST_NAME);
         let (_, mut blueprint) =
             ExampleSystemBuilder::new(&logctx.log, TEST_NAME)

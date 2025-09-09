@@ -1638,32 +1638,6 @@ impl<'a> BlueprintBuilder<'a> {
             return Err(Error::NoNexusZonesInParentBlueprint);
         };
 
-        // Validate that the determined generation matches the top-level current
-        // blueprint generation
-        let current_blueprint_gen = self.parent_blueprint.nexus_generation;
-        if same_image_nexus_generation.is_some() {
-            // Existing image - should either match the currently-used Nexus
-            // generation, or be part of a "generation + 1".
-            let matches_current_nexus = current_blueprint_gen == gen;
-            let matches_next_nexus = current_blueprint_gen.next() == gen;
-
-            if !matches_current_nexus && !matches_next_nexus {
-                return Err(Error::OldImageNexusGenerationMismatch {
-                    expected: current_blueprint_gen,
-                    actual: gen,
-                });
-            }
-        } else {
-            // New image source - should be current blueprint generation + 1
-            let expected_gen = current_blueprint_gen.next();
-            if gen != expected_gen {
-                return Err(Error::NewImageNexusGenerationMismatch {
-                    expected: expected_gen,
-                    actual: gen,
-                });
-            }
-        }
-
         Ok(gen)
     }
 
