@@ -7933,15 +7933,18 @@ pub(crate) mod test {
         // ✔ The new Nexus Zones are in inventory.
         let new_bp = bp_generator.plan_new_blueprint("update_generation");
         // Finally, the top-level Nexus generation should get bumped.
-        assert!(
-            matches!(
+        let PlanningNexusGenerationBumpReport::BumpingGeneration(
+            observed_next_gen,
+        ) = &new_bp.report.nexus_generation_bump
+        else {
+            panic!(
+                "Unexpected nexus generation report: {:?}",
                 new_bp.report.nexus_generation_bump,
-                PlanningNexusGenerationBumpReport::NothingToReport
-            ),
-            "Unexpected nexus generation report: {:?}",
-            new_bp.report.nexus_generation_bump
-        );
+            );
+        };
+
         assert_eq!(new_bp.nexus_generation, new_generation);
+        assert_eq!(*observed_next_gen, new_generation);
         bp_generator.blueprint = new_bp;
 
         // Check: After the generation bump, further planning should make no changes
