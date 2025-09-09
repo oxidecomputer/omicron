@@ -124,6 +124,12 @@ impl HostPhase2TestContext {
                 bind_address: "[::1]:0".parse().unwrap(),
                 ..Default::default()
             })
+            .version_policy(dropshot::VersionPolicy::Dynamic(Box::new(
+                dropshot::ClientSpecifiesVersionInHeader::new(
+                    omicron_common::api::VERSION_HEADER,
+                    sled_agent_api::VERSION_ADD_SWITCH_ZONE_OPERATOR_POLICY,
+                ),
+            )))
             .start()
             .context("failed to create dropshot server")?
         };
@@ -816,6 +822,20 @@ mod api_impl {
         async fn chicken_switch_destroy_orphaned_datasets_put(
             _request_context: RequestContext<Self::Context>,
             _body: TypedBody<ChickenSwitchDestroyOrphanedDatasets>,
+        ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+            unimplemented!()
+        }
+
+        async fn debug_operator_switch_zone_policy_get(
+            _request_context: RequestContext<Self::Context>,
+        ) -> Result<HttpResponseOk<OperatorSwitchZonePolicy>, HttpError>
+        {
+            unimplemented!()
+        }
+
+        async fn debug_operator_switch_zone_policy_put(
+            _request_context: RequestContext<Self::Context>,
+            _body: TypedBody<OperatorSwitchZonePolicy>,
         ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
             unimplemented!()
         }

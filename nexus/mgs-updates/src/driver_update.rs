@@ -667,13 +667,14 @@ fn post_update_timeout(update: &PendingMgsUpdate) -> Duration {
             }
         }
         PendingMgsUpdateDetails::Rot { .. } => {
-            // Resetting the RoT should be quick (a few seconds).
-            Duration::from_secs(60)
+            // Resetting the RoT should be quick (a few seconds), but we wait
+            // for boot info after the reset.
+            Duration::from_secs(90)
         }
         PendingMgsUpdateDetails::RotBootloader { .. } => {
             // Resetting the bootloader requires multiple RoT resets; give this
             // a longer timeout.
-            Duration::from_secs(180)
+            Duration::from_secs(210)
         }
         PendingMgsUpdateDetails::HostPhase1(..) => {
             // Resetting a sled takes several minutes (mostly DRAM training);
@@ -726,6 +727,7 @@ async fn wait_for_update_done(
             // * non-empty transient_boot_preference (RoT only)
             // * failure to fetch inventory from sled-agent (host OS only)
             // * failure to determine an active slot artifact
+            // * failure to communicate with the RoT
             //
             // We have no reason to think these won't converge, so we proceed
             // with waiting.
@@ -741,6 +743,7 @@ async fn wait_for_update_done(
             | Err(PrecheckError::MismatchedHostOsActiveSlot { .. })
             | Err(PrecheckError::DeterminingActiveArtifact { .. })
             | Err(PrecheckError::DeterminingHostOsBootDisk { .. })
+            | Err(PrecheckError::RotCommunicationFailed { .. })
             | Ok(PrecheckStatus::ReadyForUpdate) => {
                 if before.elapsed() >= timeout {
                     return Err(UpdateWaitError::Timeout(timeout));
@@ -755,8 +758,7 @@ async fn wait_for_update_done(
                 | PrecheckError::WrongActiveVersion { .. }
                 | PrecheckError::WrongActiveArtifact { .. }
                 | PrecheckError::WrongHostOsBootDisk { .. }
-                | PrecheckError::InvalidHostPhase1Slot { .. }
-                | PrecheckError::RotCommunicationFailed { .. }),
+                | PrecheckError::InvalidHostPhase1Slot { .. }),
             ) => {
                 // Stop trying to make this update happen.  It's not going to
                 // happen.

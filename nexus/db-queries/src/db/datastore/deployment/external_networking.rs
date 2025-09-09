@@ -18,6 +18,7 @@ use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::OmicronZoneExternalIp;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadataCreateParams;
+use omicron_common::api::external::IpVersion;
 use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::api::internal::shared::NetworkInterfaceKind;
 use omicron_uuid_kinds::GenericUuid;
@@ -36,10 +37,11 @@ impl DataStore {
         opctx: &OpContext,
         zones_to_allocate: impl Iterator<Item = &BlueprintZoneConfig>,
     ) -> Result<(), Error> {
-        // Looking up the service pool ID requires an opctx; we'll do this once
-        // up front and reuse the pool ID (which never changes) in the loop
-        // below.
-        let (_, pool) = self.ip_pools_service_lookup(opctx).await?;
+        // Looking up the service pool IDs requires an opctx; we'll do this at
+        // most once inside the loop below, when we first encounter an address
+        // of the same IP version.
+        let mut v4_pool = None;
+        let mut v6_pool = None;
 
         for z in zones_to_allocate {
             let Some((external_ip, nic)) = z.zone_type.external_networking()
@@ -55,10 +57,29 @@ impl DataStore {
                 "nic" => format!("{nic:?}"),
             ));
 
+            // Get existing pool or look it up and cache it.
+            let version = external_ip.ip_version();
+            let pool_ref = match version {
+                IpVersion::V4 => &mut v4_pool,
+                IpVersion::V6 => &mut v6_pool,
+            };
+            let pool = match pool_ref {
+                Some(p) => p,
+                None => {
+                    let new = self
+                        .ip_pools_service_lookup(opctx, version.into())
+                        .await?
+                        .1;
+                    *pool_ref = Some(new);
+                    pool_ref.as_ref().unwrap()
+                }
+            };
+
+            // Actually ensure the IP address.
             let kind = z.zone_type.kind();
             self.ensure_external_service_ip(
                 conn,
-                &pool,
+                pool,
                 kind,
                 z.id,
                 external_ip,
@@ -433,6 +454,7 @@ mod tests {
     use omicron_common::address::NEXUS_OPTE_IPV4_SUBNET;
     use omicron_common::address::NTP_OPTE_IPV4_SUBNET;
     use omicron_common::address::NUM_SOURCE_NAT_PORTS;
+    use omicron_common::api::external::Generation;
     use omicron_common::api::external::MacAddr;
     use omicron_common::api::external::Vni;
     use omicron_common::zpool_name::ZpoolName;
@@ -592,12 +614,17 @@ mod tests {
             opctx: &OpContext,
             datastore: &DataStore,
         ) {
-            let (ip_pool, _) = datastore
-                .ip_pools_service_lookup(&opctx)
+            let (ip_pool, db_pool) = datastore
+                .ip_pools_service_lookup(&opctx, IpVersion::V4.into())
                 .await
                 .expect("failed to find service IP pool");
             datastore
-                .ip_pool_add_range(&opctx, &ip_pool, &self.external_ips_range)
+                .ip_pool_add_range(
+                    &opctx,
+                    &ip_pool,
+                    &db_pool,
+                    &self.external_ips_range,
+                )
                 .await
                 .expect("failed to expand service IP pool");
         }
@@ -617,6 +644,7 @@ mod tests {
                             nic: self.nexus_nic.clone(),
                             external_tls: false,
                             external_dns_servers: Vec::new(),
+                            nexus_generation: Generation::new(),
                         },
                     ),
                     image_source: BlueprintZoneImageSource::InstallDataset,

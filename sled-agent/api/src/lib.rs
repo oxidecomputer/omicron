@@ -66,6 +66,8 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
+    (3, ADD_SWITCH_ZONE_OPERATOR_POLICY),
+    (2, REMOVE_DESTROY_ORPHANED_DATASETS_CHICKEN_SWITCH),
     (1, INITIAL),
 ]);
 
@@ -707,6 +709,7 @@ pub trait SledAgentApi {
     #[endpoint {
         method = GET,
         path = "/chicken-switch/destroy-orphaned-datasets",
+        versions = ..VERSION_REMOVE_DESTROY_ORPHANED_DATASETS_CHICKEN_SWITCH,
     }]
     async fn chicken_switch_destroy_orphaned_datasets_get(
         request_context: RequestContext<Self::Context>,
@@ -718,10 +721,44 @@ pub trait SledAgentApi {
     #[endpoint {
         method = PUT,
         path = "/chicken-switch/destroy-orphaned-datasets",
+        // This should have been removed in
+        // `VERSION_REMOVE_DESTROY_ORPHANED_DATASETS_CHICKEN_SWITCH`, but was
+        // overlooked. This removes it as of the next version instead.
+        versions = ..VERSION_ADD_SWITCH_ZONE_OPERATOR_POLICY,
     }]
     async fn chicken_switch_destroy_orphaned_datasets_put(
         request_context: RequestContext<Self::Context>,
         body: TypedBody<ChickenSwitchDestroyOrphanedDatasets>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// A debugging endpoint only used by `omdb` that allows us to test
+    /// restarting the switch zone without restarting sled-agent. See
+    /// <https://github.com/oxidecomputer/omicron/issues/8480> for context.
+    #[endpoint {
+        method = GET,
+        path = "/debug/switch-zone-policy",
+        versions = VERSION_ADD_SWITCH_ZONE_OPERATOR_POLICY..,
+    }]
+    async fn debug_operator_switch_zone_policy_get(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<OperatorSwitchZonePolicy>, HttpError>;
+
+    /// A debugging endpoint only used by `omdb` that allows us to test
+    /// restarting the switch zone without restarting sled-agent. See
+    /// <https://github.com/oxidecomputer/omicron/issues/8480> for context.
+    ///
+    /// Setting the switch zone policy is asynchronous and inherently racy with
+    /// the standard process of starting the switch zone. If the switch zone is
+    /// in the process of being started or stopped when this policy is changed,
+    /// the new policy may not take effect until that transition completes.
+    #[endpoint {
+        method = PUT,
+        path = "/debug/switch-zone-policy",
+        versions = VERSION_ADD_SWITCH_ZONE_OPERATOR_POLICY..,
+    }]
+    async fn debug_operator_switch_zone_policy_put(
+        request_context: RequestContext<Self::Context>,
+        body: TypedBody<OperatorSwitchZonePolicy>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 }
 
@@ -945,4 +982,25 @@ pub struct VmmIssueDiskSnapshotRequestResponse {
 #[derive(Deserialize, JsonSchema)]
 pub struct VpcPathParam {
     pub vpc_id: Uuid,
+}
+
+/// Policy allowing an operator (via `omdb`) to control whether the switch zone
+/// is started or stopped.
+///
+/// This is an _extremely_ dicey operation in general; a stopped switch zone
+/// leaves the rack inoperable! We are only adding this as a workaround and test
+/// tool for handling sidecar resets; see
+/// <https://github.com/oxidecomputer/omicron/issues/8480> for background.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, JsonSchema,
+)]
+#[serde(tag = "policy", rename_all = "snake_case")]
+pub enum OperatorSwitchZonePolicy {
+    /// Start the switch zone if a switch is present.
+    ///
+    /// This is the default policy.
+    StartIfSwitchPresent,
+
+    /// Even if a switch zone is present, stop the switch zone.
+    StopDespiteSwitchPresence,
 }

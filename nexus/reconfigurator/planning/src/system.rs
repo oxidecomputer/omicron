@@ -34,7 +34,7 @@ use nexus_types::deployment::CockroachDbClusterVersion;
 use nexus_types::deployment::CockroachDbSettings;
 use nexus_types::deployment::ExpectedVersion;
 use nexus_types::deployment::OximeterReadPolicy;
-use nexus_types::deployment::PlannerChickenSwitches;
+use nexus_types::deployment::PlannerConfig;
 use nexus_types::deployment::PlanningInputBuilder;
 use nexus_types::deployment::Policy;
 use nexus_types::deployment::SledDetails;
@@ -63,6 +63,7 @@ use omicron_common::api::external::Generation;
 use omicron_common::disk::DiskIdentity;
 use omicron_common::disk::DiskVariant;
 use omicron_common::disk::M2Slot;
+use omicron_common::policy::CRUCIBLE_PANTRY_REDUNDANCY;
 use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
 use omicron_common::policy::NEXUS_REDUNDANCY;
 use omicron_uuid_kinds::MupdateOverrideUuid;
@@ -122,7 +123,7 @@ pub struct SystemDescription {
     oximeter_read_policy: OximeterReadPolicy,
     tuf_repo: TufRepoPolicy,
     old_repo: TufRepoPolicy,
-    chicken_switches: PlannerChickenSwitches,
+    planner_config: PlannerConfig,
     ignore_impossible_mgs_updates_since: DateTime<Utc>,
 }
 
@@ -163,6 +164,7 @@ impl SystemDescription {
         // Policy defaults
         let target_nexus_zone_count = NEXUS_REDUNDANCY;
         let target_internal_dns_zone_count = INTERNAL_DNS_REDUNDANCY;
+        let target_crucible_pantry_zone_count = CRUCIBLE_PANTRY_REDUNDANCY;
 
         // TODO-cleanup These are wrong, but we don't currently set up any
         // of these zones in our fake system, so this prevents downstream test
@@ -171,7 +173,6 @@ impl SystemDescription {
         let target_boundary_ntp_zone_count = 0;
         let target_cockroachdb_zone_count = 0;
         let target_oximeter_zone_count = 0;
-        let target_crucible_pantry_zone_count = 0;
 
         let target_cockroachdb_cluster_version =
             CockroachDbClusterVersion::POLICY;
@@ -205,8 +206,7 @@ impl SystemDescription {
             oximeter_read_policy: OximeterReadPolicy::new(1),
             tuf_repo: TufRepoPolicy::initial(),
             old_repo: TufRepoPolicy::initial(),
-            chicken_switches:
-                PlannerChickenSwitches::default_for_system_description(),
+            planner_config: PlannerConfig::default(),
             ignore_impossible_mgs_updates_since: Utc::now(),
         }
     }
@@ -461,8 +461,17 @@ impl SystemDescription {
                 completed_at: Utc::now(),
                 ran_for: Duration::from_secs(5),
             };
-        sled.inventory_sled_agent.last_reconciliation =
-            Some(ConfigReconcilerInventory::debug_assume_success(sled_config));
+        match sled.inventory_sled_agent.last_reconciliation.as_mut() {
+            Some(last_reconciliation) => {
+                last_reconciliation.debug_update_assume_success(sled_config);
+            }
+            None => {
+                sled.inventory_sled_agent.last_reconciliation =
+                    Some(ConfigReconcilerInventory::debug_assume_success(
+                        sled_config,
+                    ));
+            }
+        };
 
         Ok(self)
     }
@@ -615,11 +624,10 @@ impl SystemDescription {
     pub fn sled_update_rot_versions(
         &mut self,
         sled_id: SledUuid,
-        slot_a_version: Option<ExpectedVersion>,
-        slot_b_version: Option<ExpectedVersion>,
+        overrides: RotStateOverrides,
     ) -> anyhow::Result<&mut Self> {
         let sled = self.get_sled_mut(sled_id)?;
-        sled.set_rot_versions(slot_a_version, slot_b_version);
+        sled.set_rot_versions(overrides);
         Ok(self)
     }
 
@@ -750,19 +758,19 @@ impl SystemDescription {
         self.tuf_repo = tuf_repo;
     }
 
-    /// Get the planner's chicken switches.
-    pub fn get_chicken_switches(&self) -> PlannerChickenSwitches {
-        self.chicken_switches
+    /// Get the planner's configuration.
+    pub fn get_planner_config(&self) -> PlannerConfig {
+        self.planner_config
     }
 
-    /// Set the planner's chicken switches.
+    /// Set the planner's configuration.
     ///
     /// Returns the previous value.
-    pub fn set_chicken_switches(
+    pub fn set_planner_config(
         &mut self,
-        switches: PlannerChickenSwitches,
-    ) -> PlannerChickenSwitches {
-        mem::replace(&mut self.chicken_switches, switches)
+        config: PlannerConfig,
+    ) -> PlannerConfig {
+        mem::replace(&mut self.planner_config, config)
     }
 
     pub fn set_target_release(
@@ -1013,7 +1021,7 @@ impl SystemDescription {
             oximeter_read_policy: self.oximeter_read_policy.clone(),
             tuf_repo: self.tuf_repo.clone(),
             old_repo: self.old_repo.clone(),
-            chicken_switches: self.chicken_switches,
+            planner_config: self.planner_config,
         };
         let mut builder = PlanningInputBuilder::new(
             policy,
@@ -1687,14 +1695,57 @@ impl Sled {
 
     /// Update the reported RoT versions
     ///
-    /// If either field is `None`, that field is _unchanged_.
+    /// If any of the overrides are `None`, that field is _unchanged_.
     // Note that this means there's no way to _unset_ the version.
-    fn set_rot_versions(
-        &mut self,
-        slot_a_version: Option<ExpectedVersion>,
-        slot_b_version: Option<ExpectedVersion>,
-    ) {
-        if let Some(slot_a_version) = slot_a_version {
+    fn set_rot_versions(&mut self, overrides: RotStateOverrides) {
+        let RotStateOverrides {
+            active_slot_override,
+            slot_a_version_override,
+            slot_b_version_override,
+            persistent_boot_preference_override,
+            pending_persistent_boot_preference_override,
+            transient_boot_preference_override,
+        } = overrides;
+
+        if let Some((_slot, sp_state)) = self.inventory_sp.as_mut() {
+            match &mut sp_state.rot {
+                RotState::V3 {
+                    active,
+                    persistent_boot_preference,
+                    pending_persistent_boot_preference,
+                    transient_boot_preference,
+                    ..
+                } => {
+                    if let Some(active_slot_override) = active_slot_override {
+                        *active = active_slot_override;
+                    }
+                    if let Some(persistent_boot_preference_override) =
+                        persistent_boot_preference_override
+                    {
+                        *persistent_boot_preference =
+                            persistent_boot_preference_override;
+                    }
+
+                    if let Some(pending_persistent_boot_preference_override) =
+                        pending_persistent_boot_preference_override
+                    {
+                        *pending_persistent_boot_preference =
+                            pending_persistent_boot_preference_override;
+                    }
+
+                    if let Some(transient_boot_preference_override) =
+                        transient_boot_preference_override
+                    {
+                        *transient_boot_preference =
+                            transient_boot_preference_override;
+                    }
+                }
+                // We will only support RotState::V3
+                _ => unreachable!(),
+            };
+        }
+
+        if let Some(slot_a_version) = slot_a_version_override {
             match slot_a_version {
                 ExpectedVersion::NoValidVersion => {
                     self.rot_slot_a_caboose = None;
@@ -1714,7 +1765,7 @@ impl Sled {
             }
         }
 
-        if let Some(slot_b_version) = slot_b_version {
+        if let Some(slot_b_version) = slot_b_version_override {
             match slot_b_version {
                 ExpectedVersion::NoValidVersion => {
                     self.rot_slot_b_caboose = None;
@@ -1854,6 +1905,17 @@ impl Sled {
         );
         prev.map(|prev| prev.map(|prev| prev.mupdate_override_id))
     }
+}
+
+/// Settings that can be overriden in a simulated sled's RotState
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RotStateOverrides {
+    pub active_slot_override: Option<RotSlot>,
+    pub slot_a_version_override: Option<ExpectedVersion>,
+    pub slot_b_version_override: Option<ExpectedVersion>,
+    pub persistent_boot_preference_override: Option<RotSlot>,
+    pub pending_persistent_boot_preference_override: Option<Option<RotSlot>>,
+    pub transient_boot_preference_override: Option<Option<RotSlot>>,
 }
 
 /// The visibility of a sled in the inventory.

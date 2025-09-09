@@ -4,8 +4,8 @@
 
 //! omdb commands that query or update specific Nexus instances
 
-mod chicken_switches;
 mod quiesce;
+mod reconfigurator_config;
 mod update_status;
 
 use crate::Omdb;
@@ -19,8 +19,6 @@ use crate::helpers::should_colorize;
 use anyhow::Context as _;
 use anyhow::bail;
 use camino::Utf8PathBuf;
-use chicken_switches::ChickenSwitchesArgs;
-use chicken_switches::cmd_nexus_chicken_switches;
 use chrono::DateTime;
 use chrono::SecondsFormat;
 use chrono::Utc;
@@ -82,6 +80,8 @@ use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
 use quiesce::QuiesceArgs;
 use quiesce::cmd_nexus_quiesce;
+use reconfigurator_config::ReconfiguratorConfigArgs;
+use reconfigurator_config::cmd_nexus_reconfigurator_config;
 use serde::Deserialize;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
@@ -133,8 +133,6 @@ enum NexusCommands {
     BackgroundTasks(BackgroundTasksArgs),
     /// interact with blueprints
     Blueprints(BlueprintsArgs),
-    /// interact with reconfigurator chicken switches
-    ChickenSwitches(ChickenSwitchesArgs),
     /// interact with clickhouse policy
     ClickhousePolicy(ClickhousePolicyArgs),
     /// print information about pending MGS updates
@@ -143,6 +141,8 @@ enum NexusCommands {
     OximeterReadPolicy(OximeterReadPolicyArgs),
     /// view or modify the quiesce status
     Quiesce(QuiesceArgs),
+    /// interact with reconfigurator config
+    ReconfiguratorConfig(ReconfiguratorConfigArgs),
     /// view sagas, create and complete demo sagas
     Sagas(SagasArgs),
     /// interact with sleds
@@ -698,10 +698,6 @@ impl NexusArgs {
                 cmd_nexus_blueprints_import(&client, token, args).await
             }
 
-            NexusCommands::ChickenSwitches(args) => {
-                cmd_nexus_chicken_switches(&omdb, &client, args).await
-            }
-
             NexusCommands::ClickhousePolicy(ClickhousePolicyArgs {
                 command,
             }) => match command {
@@ -731,6 +727,10 @@ impl NexusArgs {
 
             NexusCommands::Quiesce(args) => {
                 cmd_nexus_quiesce(&omdb, &client, args).await
+            }
+
+            NexusCommands::ReconfiguratorConfig(args) => {
+                cmd_nexus_reconfigurator_config(&omdb, &client, args).await
             }
 
             NexusCommands::Sagas(SagasArgs { command }) => {
@@ -3848,7 +3848,7 @@ async fn cmd_nexus_sled_expunge_with_datastore(
 
     // First, we need to look up the sled so we know its serial number.
     let (_authz_sled, sled) = LookupPath::new(opctx, datastore)
-        .sled_id(args.sled_id.into_untyped_uuid())
+        .sled_id(args.sled_id)
         .fetch()
         .await
         .with_context(|| format!("failed to find sled {}", args.sled_id))?;
@@ -4072,7 +4072,7 @@ async fn cmd_nexus_support_bundles_list(
         user_comment: String,
     }
     let rows = support_bundles.into_iter().map(|sb| SupportBundleInfo {
-        id: *sb.id,
+        id: sb.id,
         time_created: sb.time_created,
         reason_for_creation: sb.reason_for_creation,
         reason_for_failure: sb

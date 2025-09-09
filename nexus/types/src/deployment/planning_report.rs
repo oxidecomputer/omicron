@@ -9,9 +9,10 @@ use super::BlueprintZoneConfig;
 use super::BlueprintZoneImageSource;
 use super::CockroachDbPreserveDowngrade;
 use super::PendingMgsUpdates;
-use super::PlannerChickenSwitches;
+use super::PlannerConfig;
 
 use daft::Diffable;
+use indent_write::fmt::IndentWriter;
 use omicron_common::policy::COCKROACHDB_REDUNDANCY;
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::MupdateOverrideUuid;
@@ -26,6 +27,7 @@ use serde::Serialize;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::fmt;
+use std::fmt::Write;
 
 /// A full blueprint planning report. Other than the blueprint ID, each
 /// field corresponds to a step in the update planner, i.e., a subroutine
@@ -51,8 +53,8 @@ pub struct PlanningReport {
     /// The blueprint produced by the planning run this report describes.
     pub blueprint_id: BlueprintUuid,
 
-    /// The set of "chicken switches" in effect for this planning run.
-    pub chicken_switches: PlannerChickenSwitches,
+    /// The configuration in effect for this planning run.
+    pub planner_config: PlannerConfig,
 
     // Step reports.
     pub expunge: PlanningExpungeStepReport,
@@ -68,7 +70,7 @@ impl PlanningReport {
     pub fn new(blueprint_id: BlueprintUuid) -> Self {
         Self {
             blueprint_id,
-            chicken_switches: PlannerChickenSwitches::default(),
+            planner_config: PlannerConfig::default(),
             expunge: PlanningExpungeStepReport::new(),
             decommission: PlanningDecommissionStepReport::new(),
             noop_image_source: PlanningNoopImageSourceStepReport::new(),
@@ -103,7 +105,7 @@ impl fmt::Display for PlanningReport {
         } else {
             let Self {
                 blueprint_id,
-                chicken_switches,
+                planner_config,
                 expunge,
                 decommission,
                 noop_image_source,
@@ -113,12 +115,8 @@ impl fmt::Display for PlanningReport {
                 cockroachdb_settings,
             } = self;
             writeln!(f, "planning report for blueprint {blueprint_id}:")?;
-            if *chicken_switches != PlannerChickenSwitches::default() {
-                writeln!(
-                    f,
-                    "chicken switches:\n{}",
-                    chicken_switches.display()
-                )?;
+            if *planner_config != PlannerConfig::default() {
+                writeln!(f, "planner config:\n{}", planner_config.display())?;
             }
             expunge.fmt(f)?;
             decommission.fmt(f)?;
@@ -204,14 +202,16 @@ impl fmt::Display for PlanningDecommissionStepReport {
     }
 }
 
-/// How many of the total install-dataset zones were noop-converted to use
-/// the artifact store on a particular sled.
+/// How many of the total install-dataset zones and/or host phase 2 slots were
+/// noop-converted to use the artifact store on a particular sled.
 #[derive(
     Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Diffable, JsonSchema,
 )]
-pub struct PlanningNoopImageSourceConvertedZones {
+pub struct PlanningNoopImageSourceConverted {
     pub num_eligible: usize,
     pub num_dataset: usize,
+    pub host_phase_2_slot_a_eligible: bool,
+    pub host_phase_2_slot_b_eligible: bool,
 }
 
 #[derive(
@@ -219,37 +219,48 @@ pub struct PlanningNoopImageSourceConvertedZones {
 )]
 pub struct PlanningNoopImageSourceStepReport {
     pub no_target_release: bool,
-    pub skipped_sleds:
-        BTreeMap<SledUuid, PlanningNoopImageSourceSkipSledReason>,
+    pub skipped_sled_zones:
+        BTreeMap<SledUuid, PlanningNoopImageSourceSkipSledZonesReason>,
+    pub skipped_sled_host_phase_2:
+        BTreeMap<SledUuid, PlanningNoopImageSourceSkipSledHostPhase2Reason>,
     pub skipped_zones:
         BTreeMap<OmicronZoneUuid, PlanningNoopImageSourceSkipZoneReason>,
-    pub converted_zones:
-        BTreeMap<SledUuid, PlanningNoopImageSourceConvertedZones>,
+    pub converted: BTreeMap<SledUuid, PlanningNoopImageSourceConverted>,
 }
 
 impl PlanningNoopImageSourceStepReport {
     pub fn new() -> Self {
         Self {
             no_target_release: false,
-            skipped_sleds: BTreeMap::new(),
+            skipped_sled_zones: BTreeMap::new(),
+            skipped_sled_host_phase_2: BTreeMap::new(),
             skipped_zones: BTreeMap::new(),
-            converted_zones: BTreeMap::new(),
+            converted: BTreeMap::new(),
         }
     }
 
     pub fn is_empty(&self) -> bool {
         !self.no_target_release
-            && self.skipped_sleds.is_empty()
+            && self.skipped_sled_zones.is_empty()
+            && self.skipped_sled_host_phase_2.is_empty()
             && self.skipped_zones.is_empty()
-            && self.converted_zones.is_empty()
+            && self.converted.is_empty()
     }
 
-    pub fn skip_sled(
+    pub fn skip_sled_zones(
         &mut self,
         sled_id: SledUuid,
-        reason: PlanningNoopImageSourceSkipSledReason,
+        reason: PlanningNoopImageSourceSkipSledZonesReason,
     ) {
-        self.skipped_sleds.insert(sled_id, reason);
+        self.skipped_sled_zones.insert(sled_id, reason);
+    }
+
+    pub fn skip_sled_host_phase_2(
+        &mut self,
+        sled_id: SledUuid,
+        reason: PlanningNoopImageSourceSkipSledHostPhase2Reason,
+    ) {
+        self.skipped_sled_host_phase_2.insert(sled_id, reason);
     }
 
     pub fn skip_zone(
@@ -260,15 +271,22 @@ impl PlanningNoopImageSourceStepReport {
         self.skipped_zones.insert(zone_id, reason);
     }
 
-    pub fn converted_zones(
+    pub fn converted(
         &mut self,
         sled_id: SledUuid,
         num_eligible: usize,
         num_dataset: usize,
+        host_phase_2_slot_a_eligible: bool,
+        host_phase_2_slot_b_eligible: bool,
     ) {
-        self.converted_zones.insert(
+        self.converted.insert(
             sled_id,
-            PlanningNoopImageSourceConvertedZones { num_eligible, num_dataset },
+            PlanningNoopImageSourceConverted {
+                num_eligible,
+                num_dataset,
+                host_phase_2_slot_a_eligible,
+                host_phase_2_slot_b_eligible,
+            },
         );
     }
 }
@@ -277,9 +295,10 @@ impl fmt::Display for PlanningNoopImageSourceStepReport {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let Self {
             no_target_release,
-            skipped_sleds,
+            skipped_sled_zones,
+            skipped_sled_host_phase_2,
             skipped_zones: _,
-            converted_zones,
+            converted,
         } = self;
 
         if *no_target_release {
@@ -289,23 +308,46 @@ impl fmt::Display for PlanningNoopImageSourceStepReport {
             );
         }
 
-        for (sled_id, reason) in skipped_sleds.iter() {
+        for (sled_id, reason) in skipped_sled_zones.iter() {
             writeln!(
                 f,
-                "* skipping noop image source check on sled {sled_id}: {reason}"
+                "* skipping noop zone image source check on sled {sled_id}: {reason}"
+            )?;
+        }
+        for (sled_id, reason) in skipped_sled_host_phase_2.iter() {
+            writeln!(
+                f,
+                "* skipping noop host phase 2 desired contents check on sled {sled_id}: {reason}"
             )?;
         }
 
         for (
             sled_id,
-            PlanningNoopImageSourceConvertedZones { num_eligible, num_dataset },
-        ) in converted_zones.iter()
+            PlanningNoopImageSourceConverted {
+                num_eligible,
+                num_dataset,
+                host_phase_2_slot_a_eligible,
+                host_phase_2_slot_b_eligible,
+            },
+        ) in converted.iter()
         {
             if *num_eligible > 0 && *num_dataset > 0 {
                 writeln!(
                     f,
                     "* noop converting {num_eligible}/{num_dataset} install-dataset zones \
                        to artifact store on sled {sled_id}",
+                )?;
+            }
+            if *host_phase_2_slot_a_eligible {
+                writeln!(
+                    f,
+                    "* noop converting host phase 2 slot A to Artifact on sled {sled_id}"
+                )?;
+            }
+            if *host_phase_2_slot_b_eligible {
+                writeln!(
+                    f,
+                    "* noop converting host phase 2 slot B to Artifact on sled {sled_id}"
                 )?;
             }
         }
@@ -318,14 +360,14 @@ impl fmt::Display for PlanningNoopImageSourceStepReport {
     Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Diffable, JsonSchema,
 )]
 #[serde(rename_all = "snake_case", tag = "type")]
-pub enum PlanningNoopImageSourceSkipSledReason {
+pub enum PlanningNoopImageSourceSkipSledZonesReason {
     AllZonesAlreadyArtifact { num_total: usize },
     SledNotInInventory,
     ErrorRetrievingZoneManifest { error: String },
     RemoveMupdateOverride { id: MupdateOverrideUuid },
 }
 
-impl fmt::Display for PlanningNoopImageSourceSkipSledReason {
+impl fmt::Display for PlanningNoopImageSourceSkipSledZonesReason {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::AllZonesAlreadyArtifact { num_total } => {
@@ -346,6 +388,28 @@ impl fmt::Display for PlanningNoopImageSourceSkipSledReason {
                     f,
                     "blueprint has get_remove_mupdate_override set for sled: {id}",
                 )
+            }
+        }
+    }
+}
+
+#[derive(
+    Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Diffable, JsonSchema,
+)]
+#[serde(rename_all = "snake_case", tag = "type")]
+pub enum PlanningNoopImageSourceSkipSledHostPhase2Reason {
+    BothSlotsAlreadyArtifact,
+    SledNotInInventory,
+}
+
+impl fmt::Display for PlanningNoopImageSourceSkipSledHostPhase2Reason {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::BothSlotsAlreadyArtifact => {
+                write!(f, "both host phase 2 slots are already from artifacts")
+            }
+            Self::SledNotInInventory => {
+                write!(f, "sled not present in latest inventory collection")
             }
         }
     }
@@ -465,14 +529,15 @@ pub struct PlanningAddSufficientZonesExist {
 )]
 #[serde(rename_all = "snake_case", tag = "type")]
 pub enum ZoneAddWaitingOn {
-    /// Waiting on one or more MUPdate overrides to clear.
-    MupdateOverrides,
+    /// Waiting on one or more blockers (typically MUPdate-related reasons) to
+    /// clear.
+    Blockers,
 }
 
 impl ZoneAddWaitingOn {
     pub fn as_str(&self) -> &'static str {
         match self {
-            Self::MupdateOverrides => "MUPdate overrides",
+            Self::Blockers => "blockers",
         }
     }
 }
@@ -484,10 +549,14 @@ pub struct PlanningAddStepReport {
     /// What are we waiting on to start zone additions?
     pub waiting_on: Option<ZoneAddWaitingOn>,
 
-    /// Are there any outstanding MUPdate overrides?
-    pub has_mupdate_override: bool,
+    /// Reasons why zone adds and any updates are blocked.
+    ///
+    /// This is typically a list of MUPdate-related reasons.
+    pub add_update_blocked_reasons: Vec<String>,
 
-    /// The value of the homonymous chicken switch.
+    /// The value of the homonymous planner config. (What this really means is
+    /// that zone adds happen despite being blocked by one or more
+    /// MUPdate-related reasons.)
     pub add_zones_with_mupdate_override: bool,
 
     pub sleds_without_ntp_zones_in_inventory: BTreeSet<SledUuid>,
@@ -514,7 +583,7 @@ impl PlanningAddStepReport {
     pub fn new() -> Self {
         Self {
             waiting_on: None,
-            has_mupdate_override: true,
+            add_update_blocked_reasons: Vec::new(),
             add_zones_with_mupdate_override: false,
             sleds_without_ntp_zones_in_inventory: BTreeSet::new(),
             sleds_without_zpools_for_ntp_zones: BTreeSet::new(),
@@ -536,6 +605,7 @@ impl PlanningAddStepReport {
 
     pub fn is_empty(&self) -> bool {
         self.waiting_on.is_none()
+            && self.add_update_blocked_reasons.is_empty()
             && self.sleds_without_ntp_zones_in_inventory.is_empty()
             && self.sleds_without_zpools_for_ntp_zones.is_empty()
             && self.sleds_waiting_for_ntp_zone.is_empty()
@@ -598,10 +668,10 @@ impl PlanningAddStepReport {
 }
 
 impl fmt::Display for PlanningAddStepReport {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, mut f: &mut fmt::Formatter) -> fmt::Result {
         let Self {
             waiting_on,
-            has_mupdate_override,
+            add_update_blocked_reasons,
             add_zones_with_mupdate_override,
             sleds_without_ntp_zones_in_inventory,
             sleds_without_zpools_for_ntp_zones,
@@ -615,19 +685,29 @@ impl fmt::Display for PlanningAddStepReport {
         } = self;
 
         if let Some(waiting_on) = waiting_on {
-            writeln!(f, "* waiting on {}", waiting_on.as_str())?;
+            writeln!(f, "* zone adds waiting on {}", waiting_on.as_str())?;
         }
 
-        if *has_mupdate_override {
-            writeln!(f, "* MUPdate overrides exist")?;
+        if !add_update_blocked_reasons.is_empty() {
+            // If zone adds are blocked on a set of reasons, zone updates are
+            // blocked on the same reason. Make that clear by saying "zone adds
+            // and updates are blocked" rather than just "zone adds are
+            // blocked".
+            writeln!(f, "* zone adds and updates are blocked:")?;
+            for reason in add_update_blocked_reasons {
+                let mut indent_writer =
+                    IndentWriter::new_skip_initial("    ", f);
+                writeln!(indent_writer, "  - {}", reason)?;
+                f = indent_writer.into_inner();
+            }
         }
 
         if *add_zones_with_mupdate_override {
             writeln!(
                 f,
-                "* adding zones despite MUPdate override, \
+                "* adding zones despite being blocked, \
                    as specified by the `add_zones_with_mupdate_override` \
-                   chicken switch"
+                   planner config option"
             )?;
         }
 
@@ -892,8 +972,8 @@ pub enum ZoneUpdatesWaitingOn {
     /// Waiting on updates to RoT / SP / Host OS / etc.
     PendingMgsUpdates,
 
-    /// Waiting on one or more MUPdate overrides to clear.
-    MupdateOverrides,
+    /// Waiting on the same set of blockers zone adds are waiting on.
+    ZoneAddBlockers,
 }
 
 impl ZoneUpdatesWaitingOn {
@@ -903,7 +983,7 @@ impl ZoneUpdatesWaitingOn {
             Self::PendingMgsUpdates => {
                 "pending MGS updates (RoT / SP / Host OS / etc.)"
             }
-            Self::MupdateOverrides => "MUPdate overrides",
+            Self::ZoneAddBlockers => "zone add blockers",
         }
     }
 }

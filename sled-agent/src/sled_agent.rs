@@ -8,6 +8,7 @@ use crate::artifact_store::ArtifactStore;
 use crate::bootstrap::config::BOOTSTRAP_AGENT_RACK_INIT_PORT;
 use crate::bootstrap::early_networking::EarlyNetworkSetupError;
 use crate::config::Config;
+use crate::hardware_monitor::HardwareMonitorHandle;
 use crate::instance_manager::InstanceManager;
 use crate::long_running_tasks::LongRunningTaskHandles;
 use crate::metrics::{MetricsManager, MetricsRequestQueue};
@@ -362,6 +363,9 @@ struct SledAgentInner {
     // A handle to the bootstore.
     bootstore: bootstore::NodeHandle,
 
+    // A handle to the hardware monitor.
+    hardware_monitor: HardwareMonitorHandle,
+
     // Object handling production of metrics for oximeter.
     _metrics_manager: MetricsManager,
 
@@ -672,6 +676,9 @@ impl SledAgent {
                 rack_network_config,
                 zone_bundler: long_running_task_handles.zone_bundler.clone(),
                 bootstore: long_running_task_handles.bootstore.clone(),
+                hardware_monitor: long_running_task_handles
+                    .hardware_monitor
+                    .clone(),
                 _metrics_manager: metrics_manager,
                 repo_depot,
             }),
@@ -723,6 +730,10 @@ impl SledAgent {
 
     pub fn sprockets(&self) -> SprocketsConfig {
         self.sprockets.clone()
+    }
+
+    pub(crate) fn hardware_monitor(&self) -> &HardwareMonitorHandle {
+        &self.inner.hardware_monitor
     }
 
     /// Trigger a request to Nexus informing it that the current sled exists,
@@ -822,19 +833,6 @@ impl SledAgent {
         config: OmicronSledConfig,
     ) -> Result<Result<(), LedgerNewConfigError>, LedgerTaskError> {
         self.inner.config_reconciler.set_sled_config(config).await
-    }
-
-    /// Get the status of the "destroy orphaned datasets" chicken switch.
-    pub(crate) fn chicken_switch_destroy_orphaned_datasets(&self) -> bool {
-        self.inner.config_reconciler.will_destroy_orphans()
-    }
-
-    /// Set the status of the "destroy orphaned datasets" chicken switch.
-    pub(crate) fn set_chicken_switch_destroy_orphaned_datasets(
-        &self,
-        destroy_orphans: bool,
-    ) {
-        self.inner.config_reconciler.set_destroy_orphans(destroy_orphans);
     }
 
     /// Returns whether or not the sled believes itself to be a scrimlet

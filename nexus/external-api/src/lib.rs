@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 use std::collections::BTreeMap;
 
 use anyhow::anyhow;
@@ -227,7 +231,13 @@ const PUT_UPDATE_REPOSITORY_MAX_BYTES: usize = 4 * GIB;
                 external_docs = {
                     url = "http://docs.oxide.computer/api/system-silos"
                 }
-            }
+            },
+            "system/update" = {
+                description = "Upload and manage system updates",
+                external_docs = {
+                    url = "http://docs.oxide.computer/api/system-update"
+                }
+            },
         }
     }
 }]
@@ -2958,7 +2968,7 @@ pub trait NexusExternalApi {
     #[endpoint {
         method = PUT,
         path = "/v1/system/update/repository",
-        tags = ["experimental"], // ["system/update"],
+        tags = ["system/update"],
         request_body_max_bytes = PUT_UPDATE_REPOSITORY_MAX_BYTES,
     }]
     async fn system_update_put_repository(
@@ -2971,7 +2981,7 @@ pub trait NexusExternalApi {
     #[endpoint {
         method = GET,
         path = "/v1/system/update/repository/{system_version}",
-        tags = ["experimental"], // ["system/update"],
+        tags = ["system/update"],
     }]
     async fn system_update_get_repository(
         rqctx: RequestContext<Self::Context>,
@@ -2987,7 +2997,7 @@ pub trait NexusExternalApi {
     #[endpoint {
         method = GET,
         path = "/v1/system/update/trust-roots",
-        tags = ["experimental"], // ["system/update"],
+        tags = ["system/update"],
     }]
     async fn system_update_trust_root_list(
         rqctx: RequestContext<Self::Context>,
@@ -2998,7 +3008,7 @@ pub trait NexusExternalApi {
     #[endpoint {
         method = POST,
         path = "/v1/system/update/trust-roots",
-        tags = ["experimental"], // ["system/update"],
+        tags = ["system/update"],
     }]
     async fn system_update_trust_root_create(
         rqctx: RequestContext<Self::Context>,
@@ -3009,7 +3019,7 @@ pub trait NexusExternalApi {
     #[endpoint {
         method = GET,
         path = "/v1/system/update/trust-roots/{trust_root_id}",
-        tags = ["experimental"], // ["system/update"],
+        tags = ["system/update"],
     }]
     async fn system_update_trust_root_view(
         rqctx: RequestContext<Self::Context>,
@@ -3024,7 +3034,7 @@ pub trait NexusExternalApi {
     #[endpoint {
         method = DELETE,
         path = "/v1/system/update/trust-roots/{trust_root_id}",
-        tags = ["experimental"], // ["system/update"],
+        tags = ["system/update"],
     }]
     async fn system_update_trust_root_delete(
         rqctx: RequestContext<Self::Context>,
@@ -3041,7 +3051,7 @@ pub trait NexusExternalApi {
     #[endpoint {
         method = GET,
         path = "/v1/system/update/target-release",
-        tags = ["experimental"], // "system/update"
+        tags = ["system/update"],
     }]
     async fn target_release_view(
         rqctx: RequestContext<Self::Context>,
@@ -3055,7 +3065,7 @@ pub trait NexusExternalApi {
     #[endpoint {
         method = PUT,
         path = "/v1/system/update/target-release",
-        tags = ["experimental"], // "system/update"
+        tags = ["system/update"],
     }]
     async fn target_release_update(
         rqctx: RequestContext<Self::Context>,

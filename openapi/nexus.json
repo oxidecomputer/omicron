@@ -10906,7 +10906,7 @@
     "/v1/system/update/repository": {
       "put": {
         "tags": [
-          "experimental"
+          "system/update"
         ],
         "summary": "Upload system release repository",
         "description": "System release repositories are verified by the updates trust store.",
@@ -10956,7 +10956,7 @@
     "/v1/system/update/repository/{system_version}": {
       "get": {
         "tags": [
-          "experimental"
+          "system/update"
         ],
         "summary": "Fetch system release repository description by version",
         "operationId": "system_update_get_repository",
@@ -10995,7 +10995,7 @@
     "/v1/system/update/target-release": {
       "get": {
         "tags": [
-          "experimental"
+          "system/update"
         ],
         "summary": "Get the current target release of the rack's system software",
         "description": "This may not correspond to the actual software running on the rack at the time of request; it is instead the release that the rack reconfigurator should be moving towards as a goal state. After some number of planning and execution phases, the software running on the rack should eventually correspond to the release described here.",
@@ -11021,7 +11021,7 @@
       },
       "put": {
         "tags": [
-          "experimental"
+          "system/update"
         ],
         "summary": "Set the current target release of the rack's system software",
         "description": "The rack reconfigurator will treat the software specified here as a goal state for the rack's software, and attempt to asynchronously update to that release.",
@@ -11059,7 +11059,7 @@
     "/v1/system/update/trust-roots": {
       "get": {
         "tags": [
-          "experimental"
+          "system/update"
         ],
         "summary": "List root roles in the updates trust store",
         "description": "A root role is a JSON document describing the cryptographic keys that are trusted to sign system release repositories, as described by The Update Framework. Uploading a repository requires its metadata to be signed by keys trusted by the trust store.",
@@ -11117,7 +11117,7 @@
       },
       "post": {
         "tags": [
-          "experimental"
+          "system/update"
         ],
         "summary": "Add trusted root role to updates trust store",
         "operationId": "system_update_trust_root_create",
@@ -11152,7 +11152,7 @@
     "/v1/system/update/trust-roots/{trust_root_id}": {
       "get": {
         "tags": [
-          "experimental"
+          "system/update"
         ],
         "summary": "Fetch trusted root role",
         "operationId": "system_update_trust_root_view",
@@ -11189,7 +11189,7 @@
       },
       "delete": {
         "tags": [
-          "experimental"
+          "system/update"
         ],
         "summary": "Delete trusted root role",
         "description": "Note that this method does not currently check for any uploaded system release repositories that would become untrusted after deleting the root role.",
@@ -13826,7 +13826,8 @@
                 "type": "object",
                 "properties": {
                   "id": {
-                    "$ref": "#/components/schemas/TypedUuidForInstanceKind"
+                    "type": "string",
+                    "format": "uuid"
                   },
                   "name": {
                     "$ref": "#/components/schemas/Name"
@@ -13993,11 +13994,8 @@
           },
           "alert_id": {
             "description": "The UUID of the event.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/TypedUuidForAlertKind"
-              }
-            ]
+            "type": "string",
+            "format": "uuid"
           },
           "attempts": {
             "description": "Individual attempts to deliver this webhook event, and their outcomes.",
@@ -14014,11 +14012,8 @@
           },
           "receiver_id": {
             "description": "The UUID of the alert receiver that this event was delivered to.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/TypedUuidForAlertReceiverKind"
-              }
-            ]
+            "type": "string",
+            "format": "uuid"
           },
           "state": {
             "description": "The state of this delivery.",
@@ -14514,7 +14509,8 @@
                 "type": "object",
                 "properties": {
                   "id": {
-                    "$ref": "#/components/schemas/TypedUuidForInstanceKind"
+                    "type": "string",
+                    "format": "uuid"
                   },
                   "name": {
                     "$ref": "#/components/schemas/Name"
@@ -21191,6 +21187,14 @@
             "type": "string",
             "format": "uuid"
           },
+          "ip_version": {
+            "description": "The IP version for the pool.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/IpVersion"
+              }
+            ]
+          },
           "name": {
             "description": "unique, mutable, user-controlled identifier for each resource",
             "allOf": [
@@ -21213,6 +21217,7 @@
         "required": [
           "description",
           "id",
+          "ip_version",
           "name",
           "time_created",
           "time_modified"
@@ -21224,6 +21229,15 @@
         "properties": {
           "description": {
             "type": "string"
+          },
+          "ip_version": {
+            "description": "The IP version of the pool.\n\nThe default is IPv4.",
+            "default": "v4",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/IpVersion"
+              }
+            ]
           },
           "name": {
             "$ref": "#/components/schemas/Name"
@@ -21393,28 +21407,23 @@
         }
       },
       "IpPoolUtilization": {
+        "description": "The utilization of IP addresses in a pool.\n\nNote that both the count of remaining addresses and the total capacity are integers, reported as floating point numbers. This accommodates allocations larger than a 64-bit integer, which is common with IPv6 address spaces. With very large IP Pools (> 2**53 addresses), integer precision will be lost, in exchange for representing the entire range. In such a case the pool still has many available addresses.",
         "type": "object",
         "properties": {
-          "ipv4": {
-            "description": "Number of allocated and total available IPv4 addresses in pool",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Ipv4Utilization"
-              }
-            ]
+          "capacity": {
+            "description": "The total number of addresses in the pool.",
+            "type": "number",
+            "format": "double"
           },
-          "ipv6": {
-            "description": "Number of allocated and total available IPv6 addresses in pool",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Ipv6Utilization"
-              }
-            ]
+          "remaining": {
+            "description": "The number of remaining addresses in the pool.",
+            "type": "number",
+            "format": "double"
           }
         },
         "required": [
-          "ipv4",
-          "ipv6"
+          "capacity",
+          "remaining"
         ]
       },
       "IpRange": {
@@ -21435,6 +21444,14 @@
               }
             ]
           }
+        ]
+      },
+      "IpVersion": {
+        "description": "The IP address version.",
+        "type": "string",
+        "enum": [
+          "v4",
+          "v6"
         ]
       },
       "Ipv4Net": {
@@ -21467,27 +21484,6 @@
           "last"
         ]
       },
-      "Ipv4Utilization": {
-        "type": "object",
-        "properties": {
-          "allocated": {
-            "description": "The number of IPv4 addresses allocated from this pool",
-            "type": "integer",
-            "format": "uint32",
-            "minimum": 0
-          },
-          "capacity": {
-            "description": "The total number of IPv4 addresses in the pool, i.e., the sum of the lengths of the IPv4 ranges. Unlike IPv6 capacity, can be a 32-bit integer because there are only 2^32 IPv4 addresses.",
-            "type": "integer",
-            "format": "uint32",
-            "minimum": 0
-          }
-        },
-        "required": [
-          "allocated",
-          "capacity"
-        ]
-      },
       "Ipv6Net": {
         "example": "fd12:3456::/64",
         "title": "An IPv6 subnet",
@@ -21516,25 +21512,6 @@
         "required": [
           "first",
           "last"
-        ]
-      },
-      "Ipv6Utilization": {
-        "type": "object",
-        "properties": {
-          "allocated": {
-            "description": "The number of IPv6 addresses allocated from this pool. A 128-bit integer string to match the capacity field.",
-            "type": "string",
-            "format": "uint128"
-          },
-          "capacity": {
-            "description": "The total number of IPv6 addresses in the pool, i.e., the sum of the lengths of the IPv6 ranges. An IPv6 range can contain up to 2^128 addresses, so we represent this value in JSON as a numeric string with a custom \"uint128\" format.",
-            "type": "string",
-            "format": "uint128"
-          }
-        },
-        "required": [
-          "allocated",
-          "capacity"
         ]
       },
       "L4PortRange": {
@@ -23570,6 +23547,11 @@
         "description": "View of a Silo\n\nA Silo is the highest level unit of isolation.",
         "type": "object",
         "properties": {
+          "admin_group_name": {
+            "nullable": true,
+            "description": "Optionally, silos can have a group name that is automatically granted the silo admin role.",
+            "type": "string"
+          },
           "description": {
             "description": "human-readable free-form text about a resource",
             "type": "string"
@@ -24585,7 +24567,8 @@
         "type": "object",
         "properties": {
           "id": {
-            "$ref": "#/components/schemas/TypedUuidForSupportBundleKind"
+            "type": "string",
+            "format": "uuid"
           },
           "reason_for_creation": {
             "type": "string"
@@ -25994,22 +25977,6 @@
             "format": "int32"
           }
         }
-      },
-      "TypedUuidForAlertKind": {
-        "type": "string",
-        "format": "uuid"
-      },
-      "TypedUuidForAlertReceiverKind": {
-        "type": "string",
-        "format": "uuid"
-      },
-      "TypedUuidForInstanceKind": {
-        "type": "string",
-        "format": "uuid"
-      },
-      "TypedUuidForSupportBundleKind": {
-        "type": "string",
-        "format": "uuid"
       },
       "UninitializedSled": {
         "description": "A sled that has not been added to an initialized rack yet",
@@ -28053,6 +28020,13 @@
       "description": "Endpoints related to system health",
       "externalDocs": {
         "url": "http://docs.oxide.computer/api/system-status"
+      }
+    },
+    {
+      "name": "system/update",
+      "description": "Upload and manage system updates",
+      "externalDocs": {
+        "url": "http://docs.oxide.computer/api/system-update"
       }
     },
     {

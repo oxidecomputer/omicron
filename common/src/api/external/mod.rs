@@ -9,6 +9,7 @@
 
 mod error;
 pub mod http_pagination;
+pub use crate::address::IpVersion;
 pub use crate::api::internal::shared::AllowedSourceIps;
 pub use crate::api::internal::shared::SwitchLocation;
 use crate::update::ArtifactId;
@@ -23,6 +24,7 @@ pub use error::*;
 use futures::stream::BoxStream;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
+use omicron_uuid_kinds::SledUuid;
 use oxnet::IpNet;
 use oxnet::Ipv4Net;
 use parse_display::Display;
@@ -1300,7 +1302,12 @@ pub enum AffinityGroupMember {
     ///
     /// Instances can belong to up to 16 affinity groups.
     // See: INSTANCE_MAX_AFFINITY_GROUPS
-    Instance { id: InstanceUuid, name: Name, run_state: InstanceState },
+    Instance {
+        #[schemars(with = "Uuid")]
+        id: InstanceUuid,
+        name: Name,
+        run_state: InstanceState,
+    },
 }
 
 impl SimpleIdentityOrName for AffinityGroupMember {
@@ -1331,7 +1338,12 @@ pub enum AntiAffinityGroupMember {
     ///
     /// Instances can belong to up to 16 anti-affinity groups.
     // See: INSTANCE_MAX_ANTI_AFFINITY_GROUPS
-    Instance { id: InstanceUuid, name: Name, run_state: InstanceState },
+    Instance {
+        #[schemars(with = "Uuid")]
+        id: InstanceUuid,
+        name: Name,
+        run_state: InstanceState,
+    },
 }
 
 impl SimpleIdentityOrName for AntiAffinityGroupMember {
@@ -3474,7 +3486,9 @@ pub struct TufRepoGetResponse {
 pub struct Probe {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
-    pub sled: Uuid,
+
+    #[schemars(with = "Uuid")]
+    pub sled: SledUuid,
 }
 
 /// Define policy relating to the import and export of prefixes from a BGP

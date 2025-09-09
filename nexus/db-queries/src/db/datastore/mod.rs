@@ -39,7 +39,9 @@ use omicron_common::api::external::ResourceType;
 use omicron_common::backoff::{
     BackoffError, retry_notify, retry_policy_internal_service,
 };
-use omicron_uuid_kinds::{GenericUuid, SledUuid};
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::OmicronZoneUuid;
+use omicron_uuid_kinds::SledUuid;
 use slog::Logger;
 use std::net::Ipv6Addr;
 use std::num::NonZeroU32;
@@ -85,7 +87,7 @@ mod probe;
 mod project;
 mod quota;
 mod rack;
-mod reconfigurator_chicken_switches;
+mod reconfigurator_config;
 mod region;
 mod region_replacement;
 mod region_snapshot;
@@ -151,8 +153,11 @@ pub use volume::*;
 // TODO: This should likely turn into a configuration option.
 pub const REGION_REDUNDANCY_THRESHOLD: usize = 3;
 
-/// The name of the built-in IP pool for Oxide services.
-pub const SERVICE_IP_POOL_NAME: &str = "oxide-service-pool";
+/// The name of the built-in IPv4 IP pool for Oxide services.
+pub const SERVICE_IPV4_POOL_NAME: &str = "oxide-service-pool-v4";
+
+/// The name of the built-in IPv6 IP pool for Oxide services.
+pub const SERVICE_IPV6_POOL_NAME: &str = "oxide-service-pool-v6";
 
 /// "limit" to be used in SQL queries that paginate through large result sets
 ///
@@ -184,6 +189,21 @@ pub trait RunnableQuery<U>:
 impl<U, T> RunnableQuery<U> for T where
     T: RunnableQueryNoReturn + LoadQuery<'static, DbConnection, U>
 {
+}
+
+/// Specifies whether the consumer wants to check whether they're allowed to
+/// access the database based on the `db_metadata_nexus` table.
+#[derive(Debug, Clone, Copy)]
+pub enum IdentityCheckPolicy {
+    /// The consumer wants full access to the database regardless of the current
+    /// upgrade / handoff state.  This would be used by almost all tools and
+    /// tests.
+    DontCare,
+
+    /// The consumer only wants to access the database if it's in the current
+    /// set of Nexus instances that's supposed to be able to access it.  If
+    /// possible and legal, take over access from the existing set.
+    CheckAndTakeover { nexus_id: OmicronZoneUuid },
 }
 
 pub struct DataStore {
@@ -411,7 +431,7 @@ impl DataStore {
                 e,
                 ErrorHandler::NotFoundByLookup(
                     ResourceType::Sled,
-                    LookupType::ById(sled_id.into_untyped_uuid()),
+                    LookupType::by_id(sled_id),
                 ),
             )
         })?;
@@ -502,12 +522,14 @@ mod test {
         ByteCount, Error, IdentityMetadataCreateParams, LookupType, Name,
     };
     use omicron_test_utils::dev;
+    use omicron_uuid_kinds::CollectionUuid;
     use omicron_uuid_kinds::DatasetUuid;
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::PhysicalDiskUuid;
+    use omicron_uuid_kinds::SiloUserUuid;
     use omicron_uuid_kinds::SledUuid;
     use omicron_uuid_kinds::VolumeUuid;
-    use omicron_uuid_kinds::{CollectionUuid, TypedUuid};
+    use omicron_uuid_kinds::ZpoolUuid;
     use std::collections::HashMap;
     use std::collections::HashSet;
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddrV6};
@@ -592,15 +614,16 @@ mod test {
         );
 
         let token = "a_token".to_string();
-        let silo_user_id = Uuid::new_v4();
+        let silo_user_id = SiloUserUuid::new_v4();
 
-        let session = ConsoleSession {
-            id: TypedUuid::new_v4().into(),
-            token: token.clone(),
-            time_created: Utc::now() - Duration::minutes(5),
-            time_last_used: Utc::now() - Duration::minutes(5),
+        let both_times = Utc::now() - Duration::minutes(5);
+
+        let session = ConsoleSession::new_with_times(
+            token.clone(),
             silo_user_id,
-        };
+            both_times,
+            both_times,
+        );
 
         let _ = datastore
             .session_create(&authn_opctx, session.clone())
@@ -626,7 +649,7 @@ mod test {
             .unwrap();
 
         let (.., db_silo_user) = LookupPath::new(&opctx, datastore)
-            .silo_user_id(session.silo_user_id)
+            .silo_user_id(session.silo_user_id())
             .fetch()
             .await
             .unwrap();
@@ -637,7 +660,7 @@ mod test {
             .session_lookup_by_token(&authn_opctx, token.clone())
             .await
             .unwrap();
-        assert_eq!(session.silo_user_id, fetched.silo_user_id);
+        assert_eq!(session.silo_user_id(), fetched.silo_user_id());
         assert_eq!(session.id, fetched.id);
 
         // also try looking it up by ID
@@ -646,7 +669,7 @@ mod test {
             .fetch()
             .await
             .unwrap();
-        assert_eq!(session.silo_user_id, fetched.silo_user_id);
+        assert_eq!(session.silo_user_id(), fetched.silo_user_id());
         assert_eq!(session.token, fetched.token);
 
         // trying to insert the same one again fails
@@ -746,7 +769,7 @@ mod test {
             serial,
             TEST_MODEL.into(),
             kind,
-            sled_id.into_untyped_uuid(),
+            sled_id,
         );
         datastore
             .physical_disk_insert(opctx, physical_disk.clone())
@@ -761,7 +784,7 @@ mod test {
         opctx: &OpContext,
         sled_id: SledUuid,
         physical_disk_id: PhysicalDiskUuid,
-    ) -> Uuid {
+    ) -> ZpoolUuid {
         let zpool_id = create_test_zpool_not_in_inventory(
             datastore,
             opctx,
@@ -783,11 +806,11 @@ mod test {
         opctx: &OpContext,
         sled_id: SledUuid,
         physical_disk_id: PhysicalDiskUuid,
-    ) -> Uuid {
-        let zpool_id = Uuid::new_v4();
+    ) -> ZpoolUuid {
+        let zpool_id = ZpoolUuid::new_v4();
         let zpool = Zpool::new(
             zpool_id,
-            sled_id.into_untyped_uuid(),
+            sled_id,
             physical_disk_id,
             ByteCount::from(0).into(),
         );
@@ -799,7 +822,7 @@ mod test {
     // collection UUID.
     async fn add_test_zpool_to_inventory(
         datastore: &DataStore,
-        zpool_id: Uuid,
+        zpool_id: ZpoolUuid,
         sled_id: SledUuid,
     ) {
         use nexus_db_schema::schema::inv_zpool::dsl;
@@ -809,7 +832,7 @@ mod test {
         let inv_pool = nexus_db_model::InvZpool {
             inv_collection_id: inv_collection_id.into(),
             time_collected,
-            id: zpool_id,
+            id: zpool_id.into(),
             sled_id: to_db_typed_uuid(sled_id),
             total_size: test_zpool_size().into(),
         };
@@ -961,7 +984,7 @@ mod test {
             #[derive(Copy, Clone)]
             struct Zpool {
                 sled_id: SledUuid,
-                pool_id: Uuid,
+                pool_id: ZpoolUuid,
             }
 
             // 1 pool per disk
@@ -1097,7 +1120,7 @@ mod test {
                 }
 
                 // Must be 3 unique zpools
-                assert!(disk_zpools.insert(dataset.pool_id));
+                assert!(disk_zpools.insert(dataset.pool_id()));
 
                 assert_eq!(volume_id, region.volume_id());
                 assert_eq!(ByteCount::from(4096), region.block_size());
@@ -1179,7 +1202,7 @@ mod test {
                 }
 
                 // Must be 3 unique zpools
-                assert!(disk_zpools.insert(dataset.pool_id));
+                assert!(disk_zpools.insert(dataset.pool_id()));
 
                 // Must be 3 unique sleds
                 let sled_id = test_datasets
@@ -1346,17 +1369,18 @@ mod test {
         .await;
 
         // Create enough zpools for region allocation to succeed
-        let zpool_ids: Vec<Uuid> = stream::iter(0..REGION_REDUNDANCY_THRESHOLD)
-            .then(|_| {
-                create_test_zpool_not_in_inventory(
-                    &datastore,
-                    &opctx,
-                    sled_id,
-                    physical_disk_id,
-                )
-            })
-            .collect()
-            .await;
+        let zpool_ids: Vec<ZpoolUuid> =
+            stream::iter(0..REGION_REDUNDANCY_THRESHOLD)
+                .then(|_| {
+                    create_test_zpool_not_in_inventory(
+                        &datastore,
+                        &opctx,
+                        sled_id,
+                        physical_disk_id,
+                    )
+                })
+                .collect()
+                .await;
 
         let bogus_addr = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 8080, 0, 0);
 
@@ -1439,7 +1463,7 @@ mod test {
         .await;
 
         // 1 less than REDUNDANCY level of zpools
-        let zpool_ids: Vec<Uuid> =
+        let zpool_ids: Vec<ZpoolUuid> =
             stream::iter(0..REGION_REDUNDANCY_THRESHOLD - 1)
                 .then(|_| {
                     create_test_zpool(
@@ -1751,7 +1775,7 @@ mod test {
             DEFAULT_SILO_ID,
             LookupType::ById(DEFAULT_SILO_ID),
         );
-        let silo_user_id = Uuid::new_v4();
+        let silo_user_id = SiloUserUuid::new_v4();
         datastore
             .silo_user_create(
                 &authz_silo,
@@ -1788,7 +1812,7 @@ mod test {
             .ssh_key_create(&opctx, &authz_user, ssh_key.clone())
             .await
             .unwrap();
-        assert_eq!(created.silo_user_id, ssh_key.silo_user_id);
+        assert_eq!(created.silo_user_id(), ssh_key.silo_user_id());
         assert_eq!(created.public_key, ssh_key.public_key);
 
         // Lookup the key we just created.
@@ -1801,7 +1825,7 @@ mod test {
                 .unwrap();
         assert_eq!(authz_silo.id(), DEFAULT_SILO_ID);
         assert_eq!(authz_silo_user.id(), silo_user_id);
-        assert_eq!(found.silo_user_id, ssh_key.silo_user_id);
+        assert_eq!(found.silo_user_id(), ssh_key.silo_user_id());
         assert_eq!(found.public_key, ssh_key.public_key);
 
         // Trying to insert the same one again fails.

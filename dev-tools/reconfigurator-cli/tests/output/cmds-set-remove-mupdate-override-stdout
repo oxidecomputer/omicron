@@ -274,6 +274,7 @@ parent:    df06bb57-ad42-4431-9206-abff322896c7
     internal DNS version:::   1
     external DNS version:::   1
     target release min gen:   1
+    nexus gen::::::::::::::   1
 
  PENDING MGS-MANAGED UPDATES: 0
 
@@ -397,6 +398,7 @@ to:   blueprint afb09faf-a586-4483-9289-04d4f1d8ba23
     internal DNS version:::   1 (unchanged)
     external DNS version:::   1 (unchanged)
     target release min gen:   1 (unchanged)
+    nexus gen::::::::::::::   1 (unchanged)
 
  OXIMETER SETTINGS:
     generation:   1 (unchanged)
@@ -405,32 +407,11 @@ to:   blueprint afb09faf-a586-4483-9289-04d4f1d8ba23
 
 internal DNS:
   DNS zone: "control-plane.oxide.internal" (unchanged)
-    name: 00320471-945d-413c-85e7-03e091a70b3c.sled          (records: 1)
-        AAAA fd00:1122:3344:108::1
-    name: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c.sled          (records: 1)
-        AAAA fd00:1122:3344:102::1
-    name: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6.sled          (records: 1)
-        AAAA fd00:1122:3344:101::1
-    name: 9a867dc9-d505-427f-9eff-cdb1d4d9bd73.sled          (records: 1)
-        AAAA fd00:1122:3344:106::1
-    name: _repo-depot._tcp                                   (records: 7)
-        SRV  port 12348 00320471-945d-413c-85e7-03e091a70b3c.sled.control-plane.oxide.internal
-        SRV  port 12348 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c.sled.control-plane.oxide.internal
-        SRV  port 12348 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6.sled.control-plane.oxide.internal
-        SRV  port 12348 9a867dc9-d505-427f-9eff-cdb1d4d9bd73.sled.control-plane.oxide.internal
-        SRV  port 12348 aff6c093-197d-42c5-ad80-9f10ba051a34.sled.control-plane.oxide.internal
-        SRV  port 12348 b82ede02-399c-48c6-a1de-411df4fa49a7.sled.control-plane.oxide.internal
-        SRV  port 12348 d81c6a84-79b8-4958-ae41-ea46c9b19763.sled.control-plane.oxide.internal
-    name: aff6c093-197d-42c5-ad80-9f10ba051a34.sled          (records: 1)
-        AAAA fd00:1122:3344:104::1
-    name: b82ede02-399c-48c6-a1de-411df4fa49a7.sled          (records: 1)
-        AAAA fd00:1122:3344:105::1
-    name: d81c6a84-79b8-4958-ae41-ea46c9b19763.sled          (records: 1)
-        AAAA fd00:1122:3344:103::1
+    unchanged names: 8 (records: 14)
 
 external DNS:
   DNS zone: "oxide.example" (unchanged)
-    name: example-silo.sys                                   (records: 0)
+    unchanged names: 1 (records: 0)
 
 
 
@@ -665,6 +646,7 @@ parent:    afb09faf-a586-4483-9289-04d4f1d8ba23
     internal DNS version:::   1
     external DNS version:::   1
     target release min gen:   2
+    nexus gen::::::::::::::   1
 
  PENDING MGS-MANAGED UPDATES: 0
 
@@ -684,6 +666,7 @@ to:   blueprint ce365dff-2cdb-4f35-a186-b15e20e1e700
     internal DNS version:::   1 (unchanged)
     external DNS version:::   1 (unchanged)
 *   target release min gen:   1 -> 2
+    nexus gen::::::::::::::   1 (unchanged)
 
  OXIMETER SETTINGS:
     generation:   1 (unchanged)
@@ -692,32 +675,11 @@ to:   blueprint ce365dff-2cdb-4f35-a186-b15e20e1e700
 
 internal DNS:
   DNS zone: "control-plane.oxide.internal" (unchanged)
-    name: 00320471-945d-413c-85e7-03e091a70b3c.sled          (records: 1)
-        AAAA fd00:1122:3344:108::1
-    name: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c.sled          (records: 1)
-        AAAA fd00:1122:3344:102::1
-    name: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6.sled          (records: 1)
-        AAAA fd00:1122:3344:101::1
-    name: 9a867dc9-d505-427f-9eff-cdb1d4d9bd73.sled          (records: 1)
-        AAAA fd00:1122:3344:106::1
-    name: _repo-depot._tcp                                   (records: 7)
-        SRV  port 12348 00320471-945d-413c-85e7-03e091a70b3c.sled.control-plane.oxide.internal
-        SRV  port 12348 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c.sled.control-plane.oxide.internal
-        SRV  port 12348 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6.sled.control-plane.oxide.internal
-        SRV  port 12348 9a867dc9-d505-427f-9eff-cdb1d4d9bd73.sled.control-plane.oxide.internal
-        SRV  port 12348 aff6c093-197d-42c5-ad80-9f10ba051a34.sled.control-plane.oxide.internal
-        SRV  port 12348 b82ede02-399c-48c6-a1de-411df4fa49a7.sled.control-plane.oxide.internal
-        SRV  port 12348 d81c6a84-79b8-4958-ae41-ea46c9b19763.sled.control-plane.oxide.internal
-    name: aff6c093-197d-42c5-ad80-9f10ba051a34.sled          (records: 1)
-        AAAA fd00:1122:3344:104::1
-    name: b82ede02-399c-48c6-a1de-411df4fa49a7.sled          (records: 1)
-        AAAA fd00:1122:3344:105::1
-    name: d81c6a84-79b8-4958-ae41-ea46c9b19763.sled          (records: 1)
-        AAAA fd00:1122:3344:103::1
+    unchanged names: 8 (records: 14)
 
 external DNS:
   DNS zone: "oxide.example" (unchanged)
-    name: example-silo.sys                                   (records: 0)
+    unchanged names: 1 (records: 0)
 
 
 

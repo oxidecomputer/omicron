@@ -17,6 +17,7 @@ use crate::blueprint_editor::SledEditError;
 use crate::mgs_updates::ImpossibleUpdatePolicy;
 use crate::mgs_updates::PlannedMgsUpdates;
 use crate::mgs_updates::plan_mgs_updates;
+use crate::planner::image_source::NoopConvertHostPhase2Contents;
 use crate::planner::image_source::NoopConvertZoneStatus;
 use crate::planner::omicron_zone_placement::PlacementError;
 use gateway_client::types::SpType;
@@ -52,6 +53,7 @@ use nexus_types::external_api::views::PhysicalDiskPolicy;
 use nexus_types::external_api::views::SledPolicy;
 use nexus_types::external_api::views::SledState;
 use nexus_types::inventory::Collection;
+use omicron_common::disk::M2Slot;
 use omicron_common::policy::BOUNDARY_NTP_REDUNDANCY;
 use omicron_common::policy::COCKROACHDB_REDUNDANCY;
 use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
@@ -172,8 +174,7 @@ impl<'a> Planner<'a> {
 
         let mut noop_info =
             NoopConvertInfo::new(self.input, self.inventory, &self.blueprint)?;
-        let plan_mupdate_override_res =
-            self.do_plan_mupdate_override(&mut noop_info)?;
+        let actions_by_sled = self.do_plan_mupdate_override(&mut noop_info)?;
 
         // Log noop-convert results after do_plan_mupdate_override, because this
         // step might alter noop_info.
@@ -181,31 +182,32 @@ impl<'a> Planner<'a> {
 
         // Within `do_plan_noop_image_source`, we plan noop image sources on
         // sleds other than those currently affected by mupdate overrides. This
-        // means that we don't have to wait for the `plan_mupdate_override_res`
-        // result for that step.
+        // means that we don't have to consider anything
+        // `do_plan_mupdate_override` does for this step.
         let noop_image_source = self.do_plan_noop_image_source(noop_info)?;
+
+        let add_update_blocked_reasons =
+            self.should_plan_add_or_update(&actions_by_sled)?;
 
         // Only plan MGS-based updates updates if there are no outstanding
         // MUPdate overrides.
-        let mgs_updates = if plan_mupdate_override_res.is_empty() {
+        let mgs_updates = if add_update_blocked_reasons.is_empty() {
             self.do_plan_mgs_updates()?
         } else {
             PlanningMgsUpdatesStepReport::new(PendingMgsUpdates::new())
         };
 
-        // Likewise for zone additions, unless overridden with the chicken switch.
-        let has_mupdate_override = !plan_mupdate_override_res.is_empty();
+        // Likewise for zone additions, unless overridden by the config.
         let add_zones_with_mupdate_override =
-            self.input.chicken_switches().add_zones_with_mupdate_override;
-        let mut add =
-            if !has_mupdate_override || add_zones_with_mupdate_override {
-                self.do_plan_add(&mgs_updates)?
-            } else {
-                PlanningAddStepReport::waiting_on(
-                    ZoneAddWaitingOn::MupdateOverrides,
-                )
-            };
-        add.has_mupdate_override = has_mupdate_override;
+            self.input.planner_config().add_zones_with_mupdate_override;
+        let mut add = if add_update_blocked_reasons.is_empty()
+            || add_zones_with_mupdate_override
+        {
+            self.do_plan_add(&mgs_updates)?
+        } else {
+            PlanningAddStepReport::waiting_on(ZoneAddWaitingOn::Blockers)
+        };
+        add.add_update_blocked_reasons = add_update_blocked_reasons;
         add.add_zones_with_mupdate_override = add_zones_with_mupdate_override;
 
         let zone_updates = if add.any_discretionary_zones_placed() {
@@ -221,10 +223,10 @@ impl<'a> Planner<'a> {
             PlanningZoneUpdatesStepReport::waiting_on(
                 ZoneUpdatesWaitingOn::PendingMgsUpdates,
             )
-        } else if !plan_mupdate_override_res.is_empty() {
-            // ... or if there are pending MUPdate overrides.
+        } else if !add.add_update_blocked_reasons.is_empty() {
+            // ... or if there are pending zone add blockers.
             PlanningZoneUpdatesStepReport::waiting_on(
-                ZoneUpdatesWaitingOn::MupdateOverrides,
+                ZoneUpdatesWaitingOn::ZoneAddBlockers,
             )
         } else {
             self.do_plan_zone_updates(&mgs_updates)?
@@ -236,7 +238,7 @@ impl<'a> Planner<'a> {
 
         Ok(PlanningReport {
             blueprint_id: self.blueprint.new_blueprint_id(),
-            chicken_switches: *self.input.chicken_switches(),
+            planner_config: *self.input.planner_config(),
             expunge,
             decommission,
             noop_image_source,
@@ -587,7 +589,9 @@ impl<'a> Planner<'a> {
         &mut self,
         noop_info: NoopConvertInfo,
     ) -> Result<PlanningNoopImageSourceStepReport, Error> {
-        use nexus_types::deployment::PlanningNoopImageSourceSkipSledReason as SkipSledReason;
+        use nexus_types::deployment::PlanningNoopImageSourceSkipSledHostPhase2Reason as SkipSledHostPhase2Reason;
+        use nexus_types::deployment::PlanningNoopImageSourceSkipSledZonesReason as SkipSledZonesReason;
+
         let mut report = PlanningNoopImageSourceStepReport::new();
 
         let sleds = match noop_info {
@@ -601,20 +605,44 @@ impl<'a> Planner<'a> {
             };
 
             let zone_counts = eligible.zone_counts();
-            if zone_counts.num_install_dataset() == 0 {
-                report.skip_sled(
+            let skipped_zones = if zone_counts.num_install_dataset() == 0 {
+                report.skip_sled_zones(
                     sled.sled_id,
-                    SkipSledReason::AllZonesAlreadyArtifact {
+                    SkipSledZonesReason::AllZonesAlreadyArtifact {
                         num_total: zone_counts.num_total,
                     },
                 );
+                true
+            } else {
+                false
+            };
+
+            let skipped_host_phase_2 =
+                if eligible.host_phase_2.both_already_artifact() {
+                    report.skip_sled_host_phase_2(
+                        sled.sled_id,
+                        SkipSledHostPhase2Reason::BothSlotsAlreadyArtifact,
+                    );
+                    true
+                } else {
+                    false
+                };
+
+            if skipped_zones && skipped_host_phase_2 {
+                // Nothing to do, continue to the next sled.
                 continue;
             }
-            if zone_counts.num_eligible > 0 {
-                report.converted_zones(
+
+            if zone_counts.num_eligible > 0
+                || eligible.host_phase_2.slot_a.is_eligible()
+                || eligible.host_phase_2.slot_b.is_eligible()
+            {
+                report.converted(
                     sled.sled_id,
                     zone_counts.num_eligible,
                     zone_counts.num_install_dataset(),
+                    eligible.host_phase_2.slot_a.is_eligible(),
+                    eligible.host_phase_2.slot_b.is_eligible(),
                 );
             }
 
@@ -637,6 +665,49 @@ impl<'a> Planner<'a> {
                     Operation::SledNoopZoneImageSourcesUpdated {
                         sled_id: sled.sled_id,
                         count: zone_counts.num_eligible,
+                    },
+                );
+            }
+
+            // Now convert over host phase 2 contents.
+            match &eligible.host_phase_2.slot_a {
+                NoopConvertHostPhase2Contents::Eligible(new_contents) => {
+                    self.blueprint.sled_set_host_phase_2_slot(
+                        sled.sled_id,
+                        M2Slot::A,
+                        new_contents.clone(),
+                    )?;
+                }
+                NoopConvertHostPhase2Contents::AlreadyArtifact { .. }
+                | NoopConvertHostPhase2Contents::Ineligible(_) => {}
+            }
+
+            match &eligible.host_phase_2.slot_b {
+                NoopConvertHostPhase2Contents::Eligible(new_contents) => {
+                    self.blueprint.sled_set_host_phase_2_slot(
+                        sled.sled_id,
+                        M2Slot::B,
+                        new_contents.clone(),
+                    )?;
+                }
+                NoopConvertHostPhase2Contents::AlreadyArtifact { .. }
+                | NoopConvertHostPhase2Contents::Ineligible(_) => {}
+            }
+
+            if eligible.host_phase_2.slot_a.is_eligible()
+                || eligible.host_phase_2.slot_b.is_eligible()
+            {
+                self.blueprint.record_operation(
+                    Operation::SledNoopHostPhase2Updated {
+                        sled_id: sled.sled_id,
+                        slot_a_updated: eligible
+                            .host_phase_2
+                            .slot_a
+                            .is_eligible(),
+                        slot_b_updated: eligible
+                            .host_phase_2
+                            .slot_b
+                            .is_eligible(),
                     },
                 );
             }
@@ -1457,10 +1528,12 @@ impl<'a> Planner<'a> {
         Ok(report)
     }
 
+    /// Perform planning for mupdate overrides, returning a map of sleds to
+    /// actions taken.
     fn do_plan_mupdate_override(
         &mut self,
         noop_info: &mut NoopConvertInfo,
-    ) -> Result<Vec<String>, Error> {
+    ) -> Result<BTreeMap<SledUuid, EnsureMupdateOverrideAction>, Error> {
         // For each sled, compare what's in the inventory to what's in the
         // blueprint.
         let mut actions_by_sled = BTreeMap::new();
@@ -1567,7 +1640,14 @@ impl<'a> Planner<'a> {
             }
         }
 
-        // Now we need to determine whether to also perform other actions like
+        Ok(actions_by_sled)
+    }
+
+    fn should_plan_add_or_update(
+        &self,
+        actions_by_sled: &BTreeMap<SledUuid, EnsureMupdateOverrideAction>,
+    ) -> Result<Vec<String>, Error> {
+        // We need to determine whether to also perform other actions like
         // updating or adding zones. We have to be careful here:
         //
         // * We may have moved existing zones with an Artifact source to using

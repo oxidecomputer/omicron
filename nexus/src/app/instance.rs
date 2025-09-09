@@ -273,7 +273,7 @@ async fn normalize_ssh_keys(
         .actor_required()
         .internal_context("loading current user's ssh keys for new Instance")?;
     let (.., authz_user) = LookupPath::new(opctx, datastore)
-        .silo_user_id(actor.actor_id())
+        .silo_user_actor(&actor)?
         .lookup_for(authz::Action::ListChildren)
         .await?;
 
@@ -643,7 +643,7 @@ impl super::Nexus {
         }
 
         let vmm = vmm.as_ref().unwrap();
-        if vmm.sled_id == params.dst_sled_id {
+        if vmm.sled_id() == params.dst_sled_id {
             return Err(Error::invalid_request(
                 "instance is already running on destination sled",
             ));
@@ -868,10 +868,7 @@ impl super::Nexus {
         // instance's current sled agent. If there is none, the request needs to
         // be handled specially based on its type.
         let (sled_id, propolis_id) = if let Some(vmm) = vmm_state {
-            (
-                SledUuid::from_untyped_uuid(vmm.sled_id),
-                PropolisUuid::from_untyped_uuid(vmm.id),
-            )
+            (vmm.sled_id(), PropolisUuid::from_untyped_uuid(vmm.id))
         } else {
             match effective_state {
                 // If there's no active sled because the instance is stopped,
@@ -1284,9 +1281,7 @@ impl super::Nexus {
         };
 
         let instance_id = InstanceUuid::from_untyped_uuid(db_instance.id());
-        let sa = self
-            .sled_client(&SledUuid::from_untyped_uuid(initial_vmm.sled_id))
-            .await?;
+        let sa = self.sled_client(&initial_vmm.sled_id()).await?;
         // The state of a freshly-created VMM record in the database is always
         // `VmmState::Creating`. Based on whether this VMM is created in order
         // to start or migrate an instance, determine the VMM state we will want

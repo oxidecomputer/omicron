@@ -424,11 +424,10 @@ async fn run_test<T: RoleAssignmentTest>(
     // resource.  This is a little ugly, but we don't have a way of creating
     // silo users yet and it's worth testing this.
     let mut new_policy = initial_policy.clone();
-    let role_assignment = shared::RoleAssignment {
-        identity_type: shared::IdentityType::SiloUser,
-        identity_id: USER_TEST_UNPRIVILEGED.id(),
-        role_name: T::ROLE,
-    };
+    let role_assignment = shared::RoleAssignment::for_silo_user(
+        USER_TEST_UNPRIVILEGED.id(),
+        T::ROLE,
+    );
     new_policy.role_assignments.push(role_assignment.clone());
 
     // Make sure the unprivileged user can't grant themselves access!

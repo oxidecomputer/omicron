@@ -13,12 +13,13 @@ use api_identity::ObjectIdentity;
 use chrono::DateTime;
 use chrono::Utc;
 use daft::Diffable;
+pub use omicron_common::api::external::IpVersion;
 use omicron_common::api::external::{
     AffinityPolicy, AllowedSourceIps as ExternalAllowedSourceIps, ByteCount,
     Digest, Error, FailureDomain, IdentityMetadata, InstanceState, Name,
     ObjectIdentity, SimpleIdentity, SimpleIdentityOrName,
 };
-use omicron_uuid_kinds::{AlertReceiverUuid, AlertUuid};
+use omicron_uuid_kinds::*;
 use oxnet::{Ipv4Net, Ipv6Net};
 use schemars::JsonSchema;
 use semver::Version;
@@ -57,6 +58,10 @@ pub struct Silo {
     /// unless there's a corresponding entry in this map.
     pub mapped_fleet_roles:
         BTreeMap<shared::SiloRole, BTreeSet<shared::FleetRole>>,
+
+    /// Optionally, silos can have a group name that is automatically granted
+    /// the silo admin role.
+    pub admin_group_name: Option<String>,
 }
 
 /// A collection of resource counts used to describe capacity and utilization
@@ -387,82 +392,24 @@ pub struct InternetGatewayIpAddress {
 pub struct IpPool {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
+    /// The IP version for the pool.
+    pub ip_version: IpVersion,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct Ipv4Utilization {
-    /// The number of IPv4 addresses allocated from this pool
-    pub allocated: u32,
-    /// The total number of IPv4 addresses in the pool, i.e., the sum of the
-    /// lengths of the IPv4 ranges. Unlike IPv6 capacity, can be a 32-bit
-    /// integer because there are only 2^32 IPv4 addresses.
-    pub capacity: u32,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct Ipv6Utilization {
-    /// The number of IPv6 addresses allocated from this pool. A 128-bit integer
-    /// string to match the capacity field.
-    #[serde(with = "U128String")]
-    pub allocated: u128,
-
-    /// The total number of IPv6 addresses in the pool, i.e., the sum of the
-    /// lengths of the IPv6 ranges. An IPv6 range can contain up to 2^128
-    /// addresses, so we represent this value in JSON as a numeric string with a
-    /// custom "uint128" format.
-    #[serde(with = "U128String")]
-    pub capacity: u128,
-}
-
+/// The utilization of IP addresses in a pool.
+///
+/// Note that both the count of remaining addresses and the total capacity are
+/// integers, reported as floating point numbers. This accommodates allocations
+/// larger than a 64-bit integer, which is common with IPv6 address spaces. With
+/// very large IP Pools (> 2**53 addresses), integer precision will be lost, in
+/// exchange for representing the entire range. In such a case the pool still
+/// has many available addresses.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct IpPoolUtilization {
-    /// Number of allocated and total available IPv4 addresses in pool
-    pub ipv4: Ipv4Utilization,
-    /// Number of allocated and total available IPv6 addresses in pool
-    pub ipv6: Ipv6Utilization,
-}
-
-// Custom struct for serializing/deserializing u128 as a string. The serde
-// docs will suggest using a module (or serialize_with and deserialize_with
-// functions), but as discussed in the comments on the UserData de/serializer,
-// schemars wants this to be a type, so it has to be a struct.
-struct U128String;
-impl U128String {
-    pub fn serialize<S>(value: &u128, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        serializer.serialize_str(&value.to_string())
-    }
-
-    pub fn deserialize<'de, D>(deserializer: D) -> Result<u128, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let s = String::deserialize(deserializer)?;
-        s.parse().map_err(serde::de::Error::custom)
-    }
-}
-
-impl JsonSchema for U128String {
-    fn schema_name() -> String {
-        "String".to_string()
-    }
-
-    fn json_schema(
-        _: &mut schemars::gen::SchemaGenerator,
-    ) -> schemars::schema::Schema {
-        schemars::schema::SchemaObject {
-            instance_type: Some(schemars::schema::InstanceType::String.into()),
-            format: Some("uint128".to_string()),
-            ..Default::default()
-        }
-        .into()
-    }
-
-    fn is_referenceable() -> bool {
-        false
-    }
+    /// The number of remaining addresses in the pool.
+    pub remaining: f64,
+    /// The total number of addresses in the pool.
+    pub capacity: f64,
 }
 
 /// An IP pool in the context of a silo
@@ -601,7 +548,8 @@ pub struct Rack {
 /// The unique ID of a sled.
 #[derive(Clone, Debug, Serialize, JsonSchema)]
 pub struct SledId {
-    pub id: Uuid,
+    #[schemars(with = "Uuid")]
+    pub id: SledUuid,
 }
 
 /// An operator's view of a Sled.
@@ -833,7 +781,8 @@ pub struct PhysicalDisk {
     pub state: PhysicalDiskState,
 
     /// The sled to which this disk is attached, if any.
-    pub sled_id: Option<Uuid>,
+    #[schemars(with = "Option<Uuid>")]
+    pub sled_id: Option<SledUuid>,
 
     pub vendor: String,
     pub serial: String,
@@ -939,7 +888,9 @@ impl fmt::Display for PhysicalDiskState {
 /// View of a User
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 pub struct User {
-    pub id: Uuid,
+    #[schemars(with = "Uuid")]
+    pub id: SiloUserUuid,
+
     /** Human-readable name that can identify the user */
     pub display_name: String,
 
@@ -974,7 +925,8 @@ pub struct CurrentUser {
 /// View of a Group
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 pub struct Group {
-    pub id: Uuid,
+    #[schemars(with = "Uuid")]
+    pub id: SiloGroupUuid,
 
     /// Human-readable name that can identify the group
     pub display_name: String,
@@ -1008,7 +960,8 @@ pub struct SshKey {
     pub identity: IdentityMetadata,
 
     /// The user to whom this key belongs
-    pub silo_user_id: Uuid,
+    #[schemars(with = "Uuid")]
+    pub silo_user_id: SiloUserUuid,
 
     /// SSH public key, e.g., `"ssh-ed25519 AAAAC3NzaC..."`
     pub public_key: String,
@@ -1307,12 +1260,14 @@ pub struct AlertDelivery {
     pub id: Uuid,
 
     /// The UUID of the alert receiver that this event was delivered to.
+    #[schemars(with = "Uuid")]
     pub receiver_id: AlertReceiverUuid,
 
     /// The event class.
     pub alert_class: String,
 
     /// The UUID of the event.
+    #[schemars(with = "Uuid")]
     pub alert_id: AlertUuid,
 
     /// The state of this delivery.
@@ -1636,8 +1591,18 @@ mod test {
 #[derive(Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum AuditLogEntryActor {
-    UserBuiltin { user_builtin_id: Uuid },
-    SiloUser { silo_user_id: Uuid, silo_id: Uuid },
+    UserBuiltin {
+        #[schemars(with = "Uuid")]
+        user_builtin_id: BuiltInUserUuid,
+    },
+
+    SiloUser {
+        #[schemars(with = "Uuid")]
+        silo_user_id: SiloUserUuid,
+
+        silo_id: Uuid,
+    },
+
     Unauthenticated,
 }
 

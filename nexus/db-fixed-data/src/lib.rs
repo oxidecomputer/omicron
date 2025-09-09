@@ -67,6 +67,18 @@ fn assert_valid_uuid(id: &uuid::Uuid) {
 }
 
 #[cfg(test)]
+use omicron_uuid_kinds::GenericUuid;
+#[cfg(test)]
+use omicron_uuid_kinds::TypedUuid;
+#[cfg(test)]
+use omicron_uuid_kinds::TypedUuidKind;
+
+#[cfg(test)]
+fn assert_valid_typed_uuid<T: TypedUuidKind>(id: &TypedUuid<T>) {
+    assert_valid_uuid(&id.into_untyped_uuid());
+}
+
+#[cfg(test)]
 mod test {
     use super::FLEET_ID;
     use super::allow_list::USER_FACING_SERVICES_ALLOW_LIST_ID;

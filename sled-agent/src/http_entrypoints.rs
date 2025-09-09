@@ -1003,24 +1003,88 @@ impl SledAgentApi for SledAgentImpl {
     }
 
     async fn chicken_switch_destroy_orphaned_datasets_get(
-        request_context: RequestContext<Self::Context>,
+        _request_context: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<ChickenSwitchDestroyOrphanedDatasets>, HttpError>
     {
-        let sa = request_context.context();
-        let destroy_orphans = sa.chicken_switch_destroy_orphaned_datasets();
+        // This API has been removed, but we still provide an endpoint for
+        // backwards compatibility. Only `omdb` ever called this endpoint, so we
+        // could probably just always return an error, but we can at least
+        // attempt to do something reasonable. We've removed this chicken switch
+        // and always attempt to destroy orphans, so we can just claim the
+        // chicken switch is always in that state.
+        let destroy_orphans = true;
         Ok(HttpResponseOk(ChickenSwitchDestroyOrphanedDatasets {
             destroy_orphans,
         }))
     }
 
     async fn chicken_switch_destroy_orphaned_datasets_put(
-        request_context: RequestContext<Self::Context>,
+        _request_context: RequestContext<Self::Context>,
         body: TypedBody<ChickenSwitchDestroyOrphanedDatasets>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let ChickenSwitchDestroyOrphanedDatasets { destroy_orphans } =
             body.into_inner();
+
+        // This API has been removed, but we still provide an endpoint for
+        // backwards compatibility. Only `omdb` ever called this endpoint, so we
+        // could probably just always return an error, but we can at least
+        // attempt to do something reasonable. We've removed this chicken switch
+        // and always attempt to destroy orphans, so we can treat requests to
+        // destroy orphans as successful and attempts to disable it as an error.
+        if destroy_orphans {
+            Ok(HttpResponseUpdatedNoContent())
+        } else {
+            Err(HttpError::for_bad_request(
+                None,
+                "orphaned dataset destruction can no longer be disabled"
+                    .to_string(),
+            ))
+        }
+    }
+
+    async fn debug_operator_switch_zone_policy_get(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<OperatorSwitchZonePolicy>, HttpError> {
         let sa = request_context.context();
-        sa.set_chicken_switch_destroy_orphaned_datasets(destroy_orphans);
+        Ok(HttpResponseOk(sa.hardware_monitor().current_switch_zone_policy()))
+    }
+
+    async fn debug_operator_switch_zone_policy_put(
+        request_context: RequestContext<Self::Context>,
+        body: TypedBody<OperatorSwitchZonePolicy>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = request_context.context();
+        let policy = body.into_inner();
+        match policy {
+            OperatorSwitchZonePolicy::StartIfSwitchPresent => (),
+            OperatorSwitchZonePolicy::StopDespiteSwitchPresence => {
+                // Disabling our switch zone is very dangerous: if our switch
+                // zone is the only one that's up, shutting it off will disable
+                // all connectivity to the rack. As a safety, refuse to set our
+                // policy to "off" if this request came from our switch zone;
+                // i.e., only allow disabling the switch zone if we have at
+                // least some evidence that the _other_ switch zone is up.
+                let (our_switch_zone_ip, _) = sa.switch_zone_underlay_info();
+                if request_context.request.remote_addr().ip()
+                    == our_switch_zone_ip
+                {
+                    // Build an explicit `HttpError` instead of using
+                    // `HttpError::for_bad_request()` so we can return a useful
+                    // `external_message`.
+                    let message = "requests to disable the switch zone must \
+                                   come from the other switch zone"
+                        .to_string();
+                    return Err(HttpError {
+                        status_code: ErrorStatusCode::BAD_REQUEST,
+                        error_code: None,
+                        external_message: message.clone(),
+                        internal_message: message,
+                        headers: None,
+                    });
+                }
+            }
+        }
+        sa.hardware_monitor().set_switch_zone_policy(policy);
         Ok(HttpResponseUpdatedNoContent())
     }
 }

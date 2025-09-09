@@ -60,7 +60,6 @@ use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::internal::shared::ExternalPortDiscovery;
 use omicron_common::api::internal::shared::LldpAdminStatus;
-use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SledUuid;
 use oxnet::IpNet;
 use sled_agent_client::types::AddSledRequest;
@@ -105,6 +104,7 @@ impl super::Nexus {
         opctx: &OpContext,
         rack_id: Uuid,
         request: RackInitializationRequest,
+        blueprint_execution_enabled: bool,
     ) -> Result<(), Error> {
         let log = &opctx.log;
 
@@ -144,13 +144,12 @@ impl super::Nexus {
             .map(|dataset| {
                 db::model::CrucibleDataset::new(
                     dataset.dataset_id,
-                    dataset.zpool_id.into_untyped_uuid(),
+                    dataset.zpool_id,
                     dataset.address,
                 )
             })
             .collect();
 
-        let service_ip_pool_ranges = request.internal_services_ip_pool_ranges;
         let tls_certificates: Vec<_> = request
             .certs
             .into_iter()
@@ -708,6 +707,7 @@ impl super::Nexus {
         } // TODO - https://github.com/oxidecomputer/omicron/issues/3277
         // record port speed
 
+        let service_ip_pool_ranges = request.internal_services_ip_pool_ranges;
         self.db_datastore
             .rack_set_initialized(
                 opctx,
@@ -716,6 +716,7 @@ impl super::Nexus {
                         .into(),
                     rack_id,
                     blueprint,
+                    blueprint_execution_enabled,
                     physical_disks,
                     zpools,
                     datasets,
@@ -740,7 +741,8 @@ impl super::Nexus {
 
         // We've potentially updated the list of DNS servers and the DNS
         // configuration for both internal and external DNS, plus the Silo
-        // certificates.  Activate the relevant background tasks.
+        // certificates and target blueprint.  Activate the relevant background
+        // tasks.
         for task in &[
             &self.background_tasks.task_internal_dns_config,
             &self.background_tasks.task_internal_dns_servers,
@@ -748,6 +750,7 @@ impl super::Nexus {
             &self.background_tasks.task_external_dns_servers,
             &self.background_tasks.task_external_endpoints,
             &self.background_tasks.task_inventory_collection,
+            &self.background_tasks.task_blueprint_loader,
         ] {
             self.background_tasks.activate(task);
         }

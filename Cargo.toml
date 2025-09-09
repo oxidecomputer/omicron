@@ -141,6 +141,8 @@ members = [
     "test-utils",
     "trust-quorum",
     "trust-quorum/gfss",
+    "trust-quorum/test-utils",
+    "trust-quorum/tqdb",
     "typed-rng",
     "update-common",
     "update-engine",
@@ -298,6 +300,8 @@ default-members = [
     "sp-sim",
     "trust-quorum",
     "trust-quorum/gfss",
+    "trust-quorum/test-utils",
+    "trust-quorum/tqdb",
     "test-utils",
     "typed-rng",
     "update-common",
@@ -361,7 +365,7 @@ approx = "0.5.1"
 assert_matches = "1.5.0"
 assert_cmd = "2.0.17"
 async-bb8-diesel = "0.2"
-async-trait = "0.1.88"
+async-trait = "0.1.89"
 atomicwrites = "0.4.4"
 authz-macros = { path = "nexus/authz-macros" }
 backoff = { version = "0.4.0", features = [ "tokio" ] }
@@ -374,7 +378,7 @@ bootstrap-agent-client = { path = "clients/bootstrap-agent-client" }
 buf-list = { version = "1.0.3", features = ["tokio1"] }
 byteorder = "1.5.0"
 bytes = "1.10.1"
-camino = { version = "1.1.11", features = ["serde1"] }
+camino = { version = "1.1.12", features = ["serde1"] }
 camino-tempfile = "1.4.1"
 camino-tempfile-ext = { version = "0.3.2", features = ["assert-color"] }
 cancel-safe-futures = "0.1.5"
@@ -428,7 +432,7 @@ digest = "0.10.7"
 dns-server = { path = "dns-server" }
 dns-server-api = { path = "dns-server-api" }
 dns-service-client = { path = "clients/dns-service-client" }
-dpd-client = { git = "https://github.com/oxidecomputer/dendrite", rev = "6e666520620e26432333d9060bc7d249ba9fa92e" }
+dpd-client = { git = "https://github.com/oxidecomputer/dendrite", rev = "738c80d18d5e94eda367440ade7743e9d9f124de" }
 dropshot = { version = "0.16.3", features = [ "usdt-probes" ] }
 dyn-clone = "1.0.20"
 either = "1.15.0"
@@ -460,6 +464,8 @@ gateway-test-utils = { path = "gateway-test-utils" }
 gateway-types = { path = "gateway-types" }
 gethostname = "0.5.0"
 gfss = { path = "trust-quorum/gfss" }
+trust-quorum = { path = "trust-quorum" }
+trust-quorum-test-utils = { path = "trust-quorum/test-utils" }
 glob = "0.3.2"
 guppy = "0.17.20"
 headers = "0.4.1"
@@ -522,8 +528,8 @@ newtype_derive = "0.1.6"
 ntp-admin-api = { path = "ntp-admin/api" }
 ntp-admin-client = { path = "clients/ntp-admin-client" }
 ntp-admin-types = { path = "ntp-admin/types" }
-mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "fa5f15cdcd5864161a929e2ec01534f70dfba216" }
-ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "fa5f15cdcd5864161a929e2ec01534f70dfba216" }
+mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "e3c587a47039a6c7aff6cc53b8e72e5328d57fc0" }
+ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "e3c587a47039a6c7aff6cc53b8e72e5328d57fc0" }
 multimap = "0.10.1"
 nexus-auth = { path = "nexus/auth" }
 nexus-background-task-interface = { path = "nexus/background-task-interface" }
@@ -834,6 +840,11 @@ panic = "abort"
 opt-level = 3
 
 [profile.dev.package.bootstore]
+opt-level = 3
+
+[profile.dev.package.trust-quorum]
+opt-level = 3
+[profile.dev.package.trust-quorum-test-utils]
 opt-level = 3
 
 # Crypto stuff always needs optimizations

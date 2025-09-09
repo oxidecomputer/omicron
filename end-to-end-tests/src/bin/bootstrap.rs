@@ -1,11 +1,13 @@
 use anyhow::Result;
 use end_to_end_tests::helpers::ctx::{ClientParams, Context};
-use end_to_end_tests::helpers::{generate_name, get_system_ip_pool};
+use end_to_end_tests::helpers::{
+    generate_name, get_system_ip_pool, try_create_ip_range,
+};
 use omicron_test_utils::dev::poll::{CondCheckError, wait_for_condition};
 use oxide_client::types::{
     ByteCount, DeviceAccessTokenRequest, DeviceAuthRequest, DeviceAuthVerify,
-    DiskCreate, DiskSource, IpPoolCreate, IpPoolLinkSilo, IpRange, Ipv4Range,
-    NameOrId, SiloQuotasUpdate,
+    DiskCreate, DiskSource, IpPoolCreate, IpPoolLinkSilo, IpVersion, NameOrId,
+    SiloQuotasUpdate,
 };
 use oxide_client::{
     ClientConsoleAuthExt, ClientDisksExt, ClientProjectsExt,
@@ -41,13 +43,16 @@ async fn run_test() -> Result<()> {
     let (first, last) = get_system_ip_pool().await?;
 
     // ===== CREATE IP POOL ===== //
-    eprintln!("creating IP pool... {:?} - {:?}", first, last);
+    let ip_version =
+        if first.is_ipv4() { IpVersion::V4 } else { IpVersion::V6 };
+    eprintln!("creating IP{} IP pool... {:?} - {:?}", ip_version, first, last);
     let pool_name = "default";
     client
         .ip_pool_create()
         .body(IpPoolCreate {
             name: pool_name.parse().unwrap(),
             description: "Default IP pool".to_string(),
+            ip_version,
         })
         .send()
         .await?;
@@ -63,7 +68,7 @@ async fn run_test() -> Result<()> {
     client
         .ip_pool_range_add()
         .pool(pool_name)
-        .body(IpRange::V4(Ipv4Range { first, last }))
+        .body(try_create_ip_range(first, last)?)
         .send()
         .await?;
 

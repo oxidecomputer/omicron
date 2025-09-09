@@ -138,15 +138,12 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
     let postgres_url = cptestctx.database.listen_url();
     let nexus_internal_url =
         format!("http://{}/", cptestctx.internal_client.bind_address);
-    let mgs_url = format!(
-        "http://{}/",
-        cptestctx
-            .gateway
-            .get(&SwitchLocation::Switch0)
-            .expect("nexus_test always sets up MGS on switch 0")
-            .client
-            .bind_address
-    );
+    let mgs_url = cptestctx
+        .gateway
+        .get(&SwitchLocation::Switch0)
+        .expect("nexus_test always sets up MGS on switch 0")
+        .client
+        .baseurl();
     let ox_url = format!("http://{}/", cptestctx.oximeter.server_address());
     let ox_test_producer = cptestctx.producer.address().ip();
     let ch_url = format!("http://{}/", cptestctx.clickhouse.http_address());
@@ -196,39 +193,37 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
         // actually being flaky yet, though.
         &["nexus", "background-tasks", "show", "--no-executing-info"],
         // background tasks: test picking out specific names
-        &["nexus", "background-tasks", "show", "saga_recovery"],
+        &[
+            "nexus",
+            "background-tasks",
+            "show",
+            "saga_recovery",
+            "--no-executing-info",
+        ],
         &[
             "nexus",
             "background-tasks",
             "show",
             "blueprint_loader",
             "blueprint_executor",
+            "--no-executing-info",
         ],
         // background tasks: test recognized group names
-        &["nexus", "background-tasks", "show", "dns_internal"],
-        &["nexus", "background-tasks", "show", "dns_external"],
-        &["nexus", "background-tasks", "show", "all"],
-        // chicken switches: show and set
-        &["nexus", "chicken-switches", "show", "current"],
         &[
-            "-w",
             "nexus",
-            "chicken-switches",
-            "set",
-            "--planner-enabled",
-            "true",
+            "background-tasks",
+            "show",
+            "dns_internal",
+            "--no-executing-info",
         ],
         &[
-            "-w",
             "nexus",
-            "chicken-switches",
-            "set",
-            "--add-zones-with-mupdate-override",
-            "false",
+            "background-tasks",
+            "show",
+            "dns_external",
+            "--no-executing-info",
         ],
-        // After the set commands above, we should see chicken switches
-        // populated.
-        &["nexus", "chicken-switches", "show", "current"],
+        &["nexus", "background-tasks", "show", "all", "--no-executing-info"],
         &["nexus", "sagas", "list"],
         &["--destructive", "nexus", "sagas", "demo-create"],
         &["nexus", "sagas", "list"],
@@ -251,6 +246,29 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
         ],
         // This one should fail because it has no parent.
         &["nexus", "blueprints", "diff", &initial_blueprint_id],
+        // reconfigurator config: show and set
+        &["nexus", "reconfigurator-config", "show", "current"],
+        // NOTE: Enabling the planner here _may_ cause Nexus to start creating
+        // new blueprints; any commands whose output is only stable if the set
+        // of blueprints is stable must come before this command to avoid being
+        // racy.
+        &[
+            "-w",
+            "nexus",
+            "reconfigurator-config",
+            "set",
+            "--planner-enabled",
+            "true",
+        ],
+        &[
+            "-w",
+            "nexus",
+            "reconfigurator-config",
+            "set",
+            "--add-zones-with-mupdate-override",
+            "true",
+        ],
+        &["nexus", "reconfigurator-config", "show", "current"],
         &["reconfigurator", "export", tmppath.as_str()],
         // We can't easily test the sled agent output because that's only
         // provided by a real sled agent, which is not available in the
@@ -264,7 +282,9 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
         .extra_variable_length(
             "cockroachdb_fingerprint",
             &initial_blueprint.cockroachdb_fingerprint,
-        );
+        )
+        // Error numbers vary between operating systems.
+        .field("os error", r"\d+");
 
     let crdb_version =
         initial_blueprint.cockroachdb_setting_preserve_downgrade.to_string();
@@ -279,6 +299,7 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
     redactor
         .field("put config ok:", r"\d+")
         .field("list ok:", r"\d+")
+        .field("triggered by", r"[\w ]+")
         .section(&["task: \"tuf_artifact_replication\"", "request ringbuf:"]);
 
     for args in invocations {

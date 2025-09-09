@@ -1106,8 +1106,7 @@ mod test {
 
         let sled1_url = format!("http://{}/", sled1.http_server.local_addr());
         let sled2_url = format!("http://{}/", sled2.http_server.local_addr());
-        let mgs_url = format!("http://{}/", gwtestctx.client.bind_address);
-        let mgs_client = gateway_client::Client::new(&mgs_url, log.clone());
+        let mgs_client = gwtestctx.client.clone();
         let sled_enum = StaticSledAgentEnumerator::new([sled1_url, sled2_url]);
         // We don't have any mocks for this, and it's unclear how much value
         // there would be in providing them at this juncture.
@@ -1186,10 +1185,8 @@ mod test {
         let sled2_url = format!("http://{}/", sled2.http_server.local_addr());
         let mgs_clients = [&gwtestctx1, &gwtestctx2]
             .into_iter()
-            .map(|g| {
-                let url = format!("http://{}/", g.client.bind_address);
-                gateway_client::Client::new(&url, log.clone())
-            })
+            .map(|g| &g.client)
+            .cloned()
             .collect::<Vec<_>>();
         let sled_enum = StaticSledAgentEnumerator::new([sled1_url, sled2_url]);
         // We don't have any mocks for this, and it's unclear how much value
@@ -1234,10 +1231,7 @@ mod test {
         )
         .await;
         let log = &gwtestctx.logctx.log;
-        let real_client = {
-            let url = format!("http://{}/", gwtestctx.client.bind_address);
-            gateway_client::Client::new(&url, log.clone())
-        };
+        let real_client = gwtestctx.client.clone();
         let bad_client = {
             // This IP range is guaranteed by RFC 6666 to discard traffic.
             let url = "http://[100::1]:12345";
@@ -1299,8 +1293,7 @@ mod test {
 
         let sled1_url = format!("http://{}/", sled1.http_server.local_addr());
         let sledbogus_url = String::from("http://[100::1]:45678");
-        let mgs_url = format!("http://{}/", gwtestctx.client.bind_address);
-        let mgs_client = gateway_client::Client::new(&mgs_url, log.clone());
+        let mgs_client = gwtestctx.client.clone();
         let sled_enum =
             StaticSledAgentEnumerator::new([sled1_url, sledbogus_url]);
         // We don't have any mocks for this, and it's unclear how much value

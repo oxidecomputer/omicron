@@ -23,6 +23,7 @@ use omicron_common::api::external::ListResultVec;
 use omicron_common::api::internal::nexus::HostIdentifier;
 use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::api::internal::shared::ResolvedVpcFirewallRule;
+use omicron_uuid_kinds::SledUuid;
 use oxnet::IpNet;
 use slog::Logger;
 use slog::debug;
@@ -31,7 +32,6 @@ use slog::info;
 use slog::warn;
 use std::collections::{HashMap, HashSet};
 use std::net::IpAddr;
-use uuid::Uuid;
 
 pub async fn vpc_list_firewall_rules(
     datastore: &DataStore,
@@ -439,7 +439,7 @@ pub async fn send_sled_agents_firewall_rules(
     opctx: &OpContext,
     vpc: &db::model::Vpc,
     rules: &[db::model::VpcFirewallRule],
-    sleds_filter: &[Uuid],
+    sleds_filter: &[SledUuid],
     sled_lookup_opctx: &OpContext,
     log: &Logger,
 ) -> Result<(), Error> {
@@ -498,7 +498,7 @@ pub async fn send_sled_agents_firewall_rules(
 pub async fn plumb_service_firewall_rules(
     datastore: &DataStore,
     opctx: &OpContext,
-    sleds_filter: &[Uuid],
+    sleds_filter: &[SledUuid],
     sled_lookup_opctx: &OpContext,
     log: &Logger,
 ) -> Result<(), Error> {

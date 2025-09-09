@@ -343,6 +343,7 @@ pub mod blueprint_zone_type {
     use crate::deployment::OmicronZoneExternalSnatIp;
     use daft::Diffable;
     use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
+    use omicron_common::api::external::Generation;
     use omicron_common::api::internal::shared::NetworkInterface;
     use schemars::JsonSchema;
     use serde::Deserialize;
@@ -566,6 +567,10 @@ pub mod blueprint_zone_type {
         pub external_tls: bool,
         /// External DNS servers Nexus can use to resolve external hosts.
         pub external_dns_servers: Vec<IpAddr>,
+        /// Generation number for this Nexus zone.
+        /// This is used to coordinate handoff between old and new Nexus instances
+        /// during updates. See RFD 588.
+        pub nexus_generation: Generation,
     }
 
     #[derive(

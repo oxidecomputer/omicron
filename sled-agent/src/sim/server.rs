@@ -120,6 +120,12 @@ impl Server {
             dropshot_log,
         )
         .config(config.dropshot.clone())
+        .version_policy(dropshot::VersionPolicy::Dynamic(Box::new(
+            dropshot::ClientSpecifiesVersionInHeader::new(
+                omicron_common::api::VERSION_HEADER,
+                sled_agent_api::VERSION_ADD_SWITCH_ZONE_OPERATOR_POLICY,
+            ),
+        )))
         .start()
         .map_err(|error| anyhow!("initializing server: {}", error))?;
 
@@ -447,6 +453,7 @@ pub async fn run_standalone_server(
                 },
                 external_tls: false,
                 external_dns_servers: vec![],
+                nexus_generation: Generation::new(),
             }),
             filesystem_pool: get_random_zpool(),
             image_source: BlueprintZoneImageSource::InstallDataset,

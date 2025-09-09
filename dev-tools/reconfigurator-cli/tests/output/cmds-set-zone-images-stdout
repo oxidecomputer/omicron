@@ -107,6 +107,7 @@ parent:    1b013011-2062-4b48-b544-a32b23bce83a
     internal DNS version:::   1
     external DNS version:::   1
     target release min gen:   1
+    nexus gen::::::::::::::   1
 
  PENDING MGS-MANAGED UPDATES: 0
 
@@ -225,6 +226,7 @@ parent:    9766ca20-38d4-4380-b005-e7c43c797e7c
     internal DNS version:::   1
     external DNS version:::   1
     target release min gen:   1
+    nexus gen::::::::::::::   1
 
  PENDING MGS-MANAGED UPDATES: 0
 
@@ -329,6 +331,7 @@ to:   blueprint f714e6ea-e85a-4d7d-93c2-a018744fe176
     internal DNS version:::   1 (unchanged)
     external DNS version:::   1 (unchanged)
     target release min gen:   1 (unchanged)
+    nexus gen::::::::::::::   1 (unchanged)
 
  OXIMETER SETTINGS:
     generation:   1 (unchanged)
@@ -337,103 +340,11 @@ to:   blueprint f714e6ea-e85a-4d7d-93c2-a018744fe176
 
 internal DNS:
   DNS zone: "control-plane.oxide.internal" (unchanged)
-    name: 1f19f188-e062-489c-b318-070819d86d5a.host          (records: 1)
-        AAAA fd00:1122:3344:3::1
-    name: 2f114b3c-adc9-4189-918e-f99984976121.host          (records: 1)
-        AAAA fd00:1122:3344:101::28
-    name: 2fa580a0-db67-4581-9c53-24fd1f42540e.host          (records: 1)
-        AAAA fd00:1122:3344:2::1
-    name: 3d853da1-51a7-4a9b-9254-ba480e6037f2.host          (records: 1)
-        AAAA fd00:1122:3344:101::29
-    name: 417f0724-65fa-4819-9e3b-02beb942f2cd.host          (records: 1)
-        AAAA fd00:1122:3344:101::23
-    name: 46cb864e-d722-4805-8725-5ec3c7f4e7f0.host          (records: 1)
-        AAAA fd00:1122:3344:101::21
-    name: 7cbd5731-4f6a-4d13-9248-2ec7483d3c37.host          (records: 1)
-        AAAA fd00:1122:3344:101::25
-    name: 80d4a70a-db63-412d-81d6-7f17c18895dd.host          (records: 1)
-        AAAA fd00:1122:3344:101::2a
-    name: 868d5b02-7792-4fc0-b6a9-654afcae9ea0.sled          (records: 1)
-        AAAA fd00:1122:3344:101::1
-    name: 871381e9-f76c-4f63-af49-4cedcc5ff52d.host          (records: 1)
-        AAAA fd00:1122:3344:101::24
-    name: 87505ee8-022c-45fd-8a38-55ffd685bca6.host          (records: 1)
-        AAAA fd00:1122:3344:101::2d
-    name: @                                                  (records: 3)
-        NS   ns1.control-plane.oxide.internal
-        NS   ns2.control-plane.oxide.internal
-        NS   ns3.control-plane.oxide.internal
-    name: _clickhouse-admin-single-server._tcp               (records: 1)
-        SRV  port  8888 7cbd5731-4f6a-4d13-9248-2ec7483d3c37.host.control-plane.oxide.internal
-    name: _clickhouse-native._tcp                            (records: 1)
-        SRV  port  9000 7cbd5731-4f6a-4d13-9248-2ec7483d3c37.host.control-plane.oxide.internal
-    name: _clickhouse._tcp                                   (records: 1)
-        SRV  port  8123 7cbd5731-4f6a-4d13-9248-2ec7483d3c37.host.control-plane.oxide.internal
-    name: _crucible-pantry._tcp                              (records: 3)
-        SRV  port 17000 3d853da1-51a7-4a9b-9254-ba480e6037f2.host.control-plane.oxide.internal
-        SRV  port 17000 80d4a70a-db63-412d-81d6-7f17c18895dd.host.control-plane.oxide.internal
-        SRV  port 17000 daca619d-d809-47d0-9957-d7ba9de2922e.host.control-plane.oxide.internal
-    name: _crucible._tcp.87505ee8-022c-45fd-8a38-55ffd685bca6 (records: 1)
-        SRV  port 32345 87505ee8-022c-45fd-8a38-55ffd685bca6.host.control-plane.oxide.internal
-    name: _crucible._tcp.b8766bf4-a8cb-4851-b7a1-199b8eb5da11 (records: 1)
-        SRV  port 32345 b8766bf4-a8cb-4851-b7a1-199b8eb5da11.host.control-plane.oxide.internal
-    name: _crucible._tcp.d4c24690-28b6-4926-b003-48f01a7a8bdd (records: 1)
-        SRV  port 32345 d4c24690-28b6-4926-b003-48f01a7a8bdd.host.control-plane.oxide.internal
-    name: _external-dns._tcp                                 (records: 3)
-        SRV  port  5353 2f114b3c-adc9-4189-918e-f99984976121.host.control-plane.oxide.internal
-        SRV  port  5353 a399d697-11cd-47cc-ac25-60ac6a07083d.host.control-plane.oxide.internal
-        SRV  port  5353 b6dcd340-c890-44a7-a6e7-3023f7182e1c.host.control-plane.oxide.internal
-    name: _internal-ntp._tcp                                 (records: 1)
-        SRV  port   123 46cb864e-d722-4805-8725-5ec3c7f4e7f0.host.control-plane.oxide.internal
-    name: _nameservice._tcp                                  (records: 3)
-        SRV  port  5353 1f19f188-e062-489c-b318-070819d86d5a.host.control-plane.oxide.internal
-        SRV  port  5353 2fa580a0-db67-4581-9c53-24fd1f42540e.host.control-plane.oxide.internal
-        SRV  port  5353 fc6956b2-56a8-4337-a93a-4d5a5d36f123.host.control-plane.oxide.internal
-    name: _nexus._tcp                                        (records: 3)
-        SRV  port 12221 417f0724-65fa-4819-9e3b-02beb942f2cd.host.control-plane.oxide.internal
-        SRV  port 12221 871381e9-f76c-4f63-af49-4cedcc5ff52d.host.control-plane.oxide.internal
-        SRV  port 12221 a24a9100-c1f6-4478-9412-4b7a6649bd7c.host.control-plane.oxide.internal
-    name: _oximeter-reader._tcp                              (records: 1)
-        SRV  port  9000 7cbd5731-4f6a-4d13-9248-2ec7483d3c37.host.control-plane.oxide.internal
-    name: _repo-depot._tcp                                   (records: 1)
-        SRV  port 12348 868d5b02-7792-4fc0-b6a9-654afcae9ea0.sled.control-plane.oxide.internal
-    name: a24a9100-c1f6-4478-9412-4b7a6649bd7c.host          (records: 1)
-        AAAA fd00:1122:3344:101::22
-    name: a399d697-11cd-47cc-ac25-60ac6a07083d.host          (records: 1)
-        AAAA fd00:1122:3344:101::27
-    name: b6dcd340-c890-44a7-a6e7-3023f7182e1c.host          (records: 1)
-        AAAA fd00:1122:3344:101::26
-    name: b8766bf4-a8cb-4851-b7a1-199b8eb5da11.host          (records: 1)
-        AAAA fd00:1122:3344:101::2e
-    name: d4c24690-28b6-4926-b003-48f01a7a8bdd.host          (records: 1)
-        AAAA fd00:1122:3344:101::2c
-    name: daca619d-d809-47d0-9957-d7ba9de2922e.host          (records: 1)
-        AAAA fd00:1122:3344:101::2b
-    name: fc6956b2-56a8-4337-a93a-4d5a5d36f123.host          (records: 1)
-        AAAA fd00:1122:3344:1::1
-    name: ns1                                                (records: 1)
-        AAAA fd00:1122:3344:1::1
-    name: ns2                                                (records: 1)
-        AAAA fd00:1122:3344:2::1
-    name: ns3                                                (records: 1)
-        AAAA fd00:1122:3344:3::1
+    unchanged names: 35 (records: 45)
 
 external DNS:
   DNS zone: "oxide.example" (unchanged)
-    name: @                                                  (records: 3)
-        NS   ns1.oxide.example
-        NS   ns2.oxide.example
-        NS   ns3.oxide.example
-    name: example-silo.sys                                   (records: 3)
-        A    192.0.2.3
-        A    192.0.2.4
-        A    192.0.2.2
-    name: ns1                                                (records: 1)
-        A    198.51.100.1
-    name: ns2                                                (records: 1)
-        A    198.51.100.2
-    name: ns3                                                (records: 1)
-        A    198.51.100.3
+    unchanged names: 5 (records: 9)
 
 
 
@@ -547,6 +458,7 @@ parent:    bb128f06-a2e1-44c1-8874-4f789d0ff896
     internal DNS version:::   1
     external DNS version:::   1
     target release min gen:   1
+    nexus gen::::::::::::::   1
 
  PENDING MGS-MANAGED UPDATES: 0
 
@@ -651,6 +563,7 @@ to:   blueprint d9c572a1-a68c-4945-b1ec-5389bd588fe9
     internal DNS version:::   1 (unchanged)
     external DNS version:::   1 (unchanged)
     target release min gen:   1 (unchanged)
+    nexus gen::::::::::::::   1 (unchanged)
 
  OXIMETER SETTINGS:
     generation:   1 (unchanged)
@@ -659,103 +572,11 @@ to:   blueprint d9c572a1-a68c-4945-b1ec-5389bd588fe9
 
 internal DNS:
   DNS zone: "control-plane.oxide.internal" (unchanged)
-    name: 1f19f188-e062-489c-b318-070819d86d5a.host          (records: 1)
-        AAAA fd00:1122:3344:3::1
-    name: 2f114b3c-adc9-4189-918e-f99984976121.host          (records: 1)
-        AAAA fd00:1122:3344:101::28
-    name: 2fa580a0-db67-4581-9c53-24fd1f42540e.host          (records: 1)
-        AAAA fd00:1122:3344:2::1
-    name: 3d853da1-51a7-4a9b-9254-ba480e6037f2.host          (records: 1)
-        AAAA fd00:1122:3344:101::29
-    name: 417f0724-65fa-4819-9e3b-02beb942f2cd.host          (records: 1)
-        AAAA fd00:1122:3344:101::23
-    name: 46cb864e-d722-4805-8725-5ec3c7f4e7f0.host          (records: 1)
-        AAAA fd00:1122:3344:101::21
-    name: 7cbd5731-4f6a-4d13-9248-2ec7483d3c37.host          (records: 1)
-        AAAA fd00:1122:3344:101::25
-    name: 80d4a70a-db63-412d-81d6-7f17c18895dd.host          (records: 1)
-        AAAA fd00:1122:3344:101::2a
-    name: 868d5b02-7792-4fc0-b6a9-654afcae9ea0.sled          (records: 1)
-        AAAA fd00:1122:3344:101::1
-    name: 871381e9-f76c-4f63-af49-4cedcc5ff52d.host          (records: 1)
-        AAAA fd00:1122:3344:101::24
-    name: 87505ee8-022c-45fd-8a38-55ffd685bca6.host          (records: 1)
-        AAAA fd00:1122:3344:101::2d
-    name: @                                                  (records: 3)
-        NS   ns1.control-plane.oxide.internal
-        NS   ns2.control-plane.oxide.internal
-        NS   ns3.control-plane.oxide.internal
-    name: _clickhouse-admin-single-server._tcp               (records: 1)
-        SRV  port  8888 7cbd5731-4f6a-4d13-9248-2ec7483d3c37.host.control-plane.oxide.internal
-    name: _clickhouse-native._tcp                            (records: 1)
-        SRV  port  9000 7cbd5731-4f6a-4d13-9248-2ec7483d3c37.host.control-plane.oxide.internal
-    name: _clickhouse._tcp                                   (records: 1)
-        SRV  port  8123 7cbd5731-4f6a-4d13-9248-2ec7483d3c37.host.control-plane.oxide.internal
-    name: _crucible-pantry._tcp                              (records: 3)
-        SRV  port 17000 3d853da1-51a7-4a9b-9254-ba480e6037f2.host.control-plane.oxide.internal
-        SRV  port 17000 80d4a70a-db63-412d-81d6-7f17c18895dd.host.control-plane.oxide.internal
-        SRV  port 17000 daca619d-d809-47d0-9957-d7ba9de2922e.host.control-plane.oxide.internal
-    name: _crucible._tcp.87505ee8-022c-45fd-8a38-55ffd685bca6 (records: 1)
-        SRV  port 32345 87505ee8-022c-45fd-8a38-55ffd685bca6.host.control-plane.oxide.internal
-    name: _crucible._tcp.b8766bf4-a8cb-4851-b7a1-199b8eb5da11 (records: 1)
-        SRV  port 32345 b8766bf4-a8cb-4851-b7a1-199b8eb5da11.host.control-plane.oxide.internal
-    name: _crucible._tcp.d4c24690-28b6-4926-b003-48f01a7a8bdd (records: 1)
-        SRV  port 32345 d4c24690-28b6-4926-b003-48f01a7a8bdd.host.control-plane.oxide.internal
-    name: _external-dns._tcp                                 (records: 3)
-        SRV  port  5353 2f114b3c-adc9-4189-918e-f99984976121.host.control-plane.oxide.internal
-        SRV  port  5353 a399d697-11cd-47cc-ac25-60ac6a07083d.host.control-plane.oxide.internal
-        SRV  port  5353 b6dcd340-c890-44a7-a6e7-3023f7182e1c.host.control-plane.oxide.internal
-    name: _internal-ntp._tcp                                 (records: 1)
-        SRV  port   123 46cb864e-d722-4805-8725-5ec3c7f4e7f0.host.control-plane.oxide.internal
-    name: _nameservice._tcp                                  (records: 3)
-        SRV  port  5353 1f19f188-e062-489c-b318-070819d86d5a.host.control-plane.oxide.internal
-        SRV  port  5353 2fa580a0-db67-4581-9c53-24fd1f42540e.host.control-plane.oxide.internal
-        SRV  port  5353 fc6956b2-56a8-4337-a93a-4d5a5d36f123.host.control-plane.oxide.internal
-    name: _nexus._tcp                                        (records: 3)
-        SRV  port 12221 417f0724-65fa-4819-9e3b-02beb942f2cd.host.control-plane.oxide.internal
-        SRV  port 12221 871381e9-f76c-4f63-af49-4cedcc5ff52d.host.control-plane.oxide.internal
-        SRV  port 12221 a24a9100-c1f6-4478-9412-4b7a6649bd7c.host.control-plane.oxide.internal
-    name: _oximeter-reader._tcp                              (records: 1)
-        SRV  port  9000 7cbd5731-4f6a-4d13-9248-2ec7483d3c37.host.control-plane.oxide.internal
-    name: _repo-depot._tcp                                   (records: 1)
-        SRV  port 12348 868d5b02-7792-4fc0-b6a9-654afcae9ea0.sled.control-plane.oxide.internal
-    name: a24a9100-c1f6-4478-9412-4b7a6649bd7c.host          (records: 1)
-        AAAA fd00:1122:3344:101::22
-    name: a399d697-11cd-47cc-ac25-60ac6a07083d.host          (records: 1)
-        AAAA fd00:1122:3344:101::27
-    name: b6dcd340-c890-44a7-a6e7-3023f7182e1c.host          (records: 1)
-        AAAA fd00:1122:3344:101::26
-    name: b8766bf4-a8cb-4851-b7a1-199b8eb5da11.host          (records: 1)
-        AAAA fd00:1122:3344:101::2e
-    name: d4c24690-28b6-4926-b003-48f01a7a8bdd.host          (records: 1)
-        AAAA fd00:1122:3344:101::2c
-    name: daca619d-d809-47d0-9957-d7ba9de2922e.host          (records: 1)
-        AAAA fd00:1122:3344:101::2b
-    name: fc6956b2-56a8-4337-a93a-4d5a5d36f123.host          (records: 1)
-        AAAA fd00:1122:3344:1::1
-    name: ns1                                                (records: 1)
-        AAAA fd00:1122:3344:1::1
-    name: ns2                                                (records: 1)
-        AAAA fd00:1122:3344:2::1
-    name: ns3                                                (records: 1)
-        AAAA fd00:1122:3344:3::1
+    unchanged names: 35 (records: 45)
 
 external DNS:
   DNS zone: "oxide.example" (unchanged)
-    name: @                                                  (records: 3)
-        NS   ns1.oxide.example
-        NS   ns2.oxide.example
-        NS   ns3.oxide.example
-    name: example-silo.sys                                   (records: 3)
-        A    192.0.2.3
-        A    192.0.2.4
-        A    192.0.2.2
-    name: ns1                                                (records: 1)
-        A    198.51.100.1
-    name: ns2                                                (records: 1)
-        A    198.51.100.2
-    name: ns3                                                (records: 1)
-        A    198.51.100.3
+    unchanged names: 5 (records: 9)
 
 
 

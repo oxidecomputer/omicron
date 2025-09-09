@@ -231,7 +231,7 @@ SP DETAILS: type "Switch" slot 1
 
 ---------------------------------------------
 stderr:
-note: using MGS URL http://[::1]:REDACTED_PORT/
+note: using MGS URL http://[::1]:REDACTED_PORT
 =============================================
 EXECUTING COMMAND: omdb ["nexus", "background-tasks", "doc"]
 termination: Exited(0)
@@ -266,10 +266,6 @@ task: "blueprint_planner"
 task: "blueprint_rendezvous"
     reconciles blueprints and inventory collection, updating Reconfigurator-
     owned rendezvous tables that other subsystems consume
-
-
-task: "chicken_switches_watcher"
-    watch db for chicken switch changes
 
 
 task: "crdb_node_id_collector"
@@ -357,6 +353,10 @@ task: "read_only_region_replacement_start"
     detect if read-only regions need replacement and begin the process
 
 
+task: "reconfigurator_config_watcher"
+    watch db for reconfigurator config changes
+
+
 task: "region_replacement"
     detects if a region requires replacing and begins the process
 
@@ -433,13 +433,13 @@ termination: Exited(0)
 stdout:
 task: "dns_config_internal"
   configured period: every <REDACTED_DURATION>m
-  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last generation found: 1
 
 task: "dns_servers_internal"
   configured period: every <REDACTED_DURATION>m
-  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     servers found: 1
 
@@ -448,7 +448,7 @@ task: "dns_servers_internal"
 
 task: "dns_propagation_internal"
   configured period: every <REDACTED_DURATION>m
-  last completed activation: <REDACTED ITERATIONS>, triggered by a dependent task completing
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     attempt to propagate generation: 1
 
@@ -458,13 +458,13 @@ task: "dns_propagation_internal"
 
 task: "dns_config_external"
   configured period: every <REDACTED_DURATION>m
-  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last generation found: 2
 
 task: "dns_servers_external"
   configured period: every <REDACTED_DURATION>m
-  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     servers found: 1
 
@@ -473,7 +473,7 @@ task: "dns_servers_external"
 
 task: "dns_propagation_external"
   configured period: every <REDACTED_DURATION>m
-  last completed activation: <REDACTED ITERATIONS>, triggered by a dependent task completing
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     attempt to propagate generation: 2
 
@@ -483,25 +483,31 @@ task: "dns_propagation_external"
 
 task: "nat_garbage_collector"
   configured period: every <REDACTED_DURATION>s
-  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last completion reported error: failed to resolve addresses for Dendrite services: proto error: no records found for Query { name: Name("_dendrite._tcp.control-plane.oxide.internal."), query_type: SRV, query_class: IN }
 
 task: "blueprint_loader"
   configured period: every <REDACTED_DURATION>m <REDACTED_DURATION>s
-  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    last completion reported error: failed to read target blueprint: Internal Error: no target blueprint set
+    target blueprint: ......<REDACTED_BLUEPRINT_ID>.......
+    execution:        disabled
+    created at:       <REDACTED_TIMESTAMP>
+    status:           first target blueprint
 
 task: "blueprint_executor"
   configured period: every <REDACTED_DURATION>m
-  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    last completion reported error: no blueprint
+    target blueprint: ......<REDACTED_BLUEPRINT_ID>....... 
+    execution:        disabled                             
+    status:           (no event report found)              
+    error:            (none)                               
 
 task: "abandoned_vmm_reaper"
   configured period: every <REDACTED_DURATION>m
-  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     total abandoned VMMs found:                0
       VMM records deleted:                     0
@@ -510,50 +516,55 @@ task: "abandoned_vmm_reaper"
 
 task: "alert_dispatcher"
   configured period: every <REDACTED_DURATION>m
-  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     alerts dispatched:                            0
     alerts with no receivers subscribed:          0
 
 task: "bfd_manager"
   configured period: every <REDACTED_DURATION>s
-  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last completion reported error: failed to resolve addresses for Dendrite services: proto error: no records found for Query { name: Name("_dendrite._tcp.control-plane.oxide.internal."), query_type: SRV, query_class: IN }
 
 task: "blueprint_planner"
   configured period: every <REDACTED_DURATION>m
-  last completed activation: <REDACTED ITERATIONS>, triggered by a dependent task completing
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     blueprint planning explicitly disabled by config!
 
 task: "blueprint_rendezvous"
   configured period: every <REDACTED_DURATION>m
-  last completed activation: <REDACTED ITERATIONS>, triggered by a dependent task completing
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    last completion reported error: no blueprint
-
-task: "chicken_switches_watcher"
-  configured period: every <REDACTED_DURATION>s
-  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
-    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-warning: unknown background task: "chicken_switches_watcher" (don't know how to interpret details: Object {"chicken_switches_updated": Bool(false)})
+    target blueprint:     ......<REDACTED_BLUEPRINT_ID>.......
+    inventory collection: ..........<REDACTED_UUID>...........
+    debug_dataset rendezvous counts:
+        num_inserted:           0
+        num_already_exist:      0
+        num_not_in_inventory:   0
+        num_tombstoned:         0
+        num_already_tombstoned: 0
+    crucible_dataset rendezvous counts:
+        num_inserted:         0
+        num_already_exist:    0
+        num_not_in_inventory: 0
 
 task: "crdb_node_id_collector"
   configured period: every <REDACTED_DURATION>m
-  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    last completion reported error: no blueprint
+warning: unknown background task: "crdb_node_id_collector" (don't know how to interpret details: Object {"errors": Array [Object {"err": String("failed to fetch node ID for zone ..........<REDACTED_UUID>........... at http://[::1]:REDACTED_PORT: Communication Error: error sending request for url (http://[::1]:REDACTED_PORT/node/id): error sending request for url (http://[::1]:REDACTED_PORT/node/id): client error (Connect): tcp connect error: Connection refused (os error <OS_ERROR_REDACTED>)"), "zone_id": String("..........<REDACTED_UUID>...........")}], "nsuccess": Number(0)})
 
 task: "decommissioned_disk_cleaner"
   configured period: every <REDACTED_DURATION>m
-  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
 warning: unknown background task: "decommissioned_disk_cleaner" (don't know how to interpret details: Object {"deleted": Number(0), "error": Null, "error_count": Number(0), "found": Number(0), "not_ready_to_be_deleted": Number(0)})
 
 task: "external_endpoints"
   configured period: every <REDACTED_DURATION>m
-  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     external API endpoints: 2 ('*' below marks default)
 
@@ -569,7 +580,7 @@ task: "external_endpoints"
 
 task: "instance_reincarnation"
   configured period: every <REDACTED_DURATION>m
-  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     instances eligible for reincarnation:                          0
       instance failed instances:                                   0
@@ -580,7 +591,7 @@ task: "instance_reincarnation"
 
 task: "instance_updater"
   configured period: every <REDACTED_DURATION>s
-  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     task explicitly disabled by config!
     instances in need of updates:             0
@@ -593,7 +604,7 @@ task: "instance_updater"
 
 task: "instance_watcher"
   configured period: every <REDACTED_DURATION>s
-  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     total instances checked: 0
     checks completed: 0
@@ -605,7 +616,7 @@ task: "instance_watcher"
 
 task: "inventory_collection"
   configured period: every <REDACTED_DURATION>m
-  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last collection id:      ..........<REDACTED_UUID>...........
     last collection started: <REDACTED_TIMESTAMP>
@@ -613,40 +624,46 @@ task: "inventory_collection"
 
 task: "lookup_region_port"
   configured period: every <REDACTED_DURATION>m
-  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     total filled in ports: 0
     errors: 0
 
 task: "metrics_producer_gc"
   configured period: every <REDACTED_DURATION>m
-  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
 warning: unknown background task: "metrics_producer_gc" (don't know how to interpret details: Object {"expiration": String("<REDACTED_TIMESTAMP>"), "pruned": Array []})
 
 task: "phantom_disks"
   configured period: every <REDACTED_DURATION>s
-  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     number of phantom disks deleted: 0
     number of phantom disk delete errors: 0
 
 task: "physical_disk_adoption"
   configured period: every <REDACTED_DURATION>s
-  last completed activation: <REDACTED ITERATIONS>, triggered by a dependent task completing
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last completion reported error: task disabled
 
 task: "read_only_region_replacement_start"
-  configured period: every <REDACTED_DURATION>m
-  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+  configured period: every <REDACTED_DURATION>days <REDACTED_DURATION>h <REDACTED_DURATION>m <REDACTED_DURATION>s
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     total requests created ok: 0
     errors: 0
 
+task: "reconfigurator_config_watcher"
+  configured period: every <REDACTED_DURATION>s
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+warning: unknown background task: "reconfigurator_config_watcher" (don't know how to interpret details: Object {"config_updated": Bool(false)})
+
 task: "region_replacement"
-  configured period: every <REDACTED_DURATION>m
-  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+  configured period: every <REDACTED_DURATION>days <REDACTED_DURATION>h <REDACTED_DURATION>m <REDACTED_DURATION>s
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     region replacement requests created ok: 0
     region replacement start sagas started ok: 0
@@ -654,30 +671,30 @@ task: "region_replacement"
     errors: 0
 
 task: "region_replacement_driver"
-  configured period: every <REDACTED_DURATION>m
-  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+  configured period: every <REDACTED_DURATION>days <REDACTED_DURATION>h <REDACTED_DURATION>m <REDACTED_DURATION>s
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     region replacement drive sagas started ok: 0
     region replacement finish sagas started ok: 0
     errors: 0
 
 task: "region_snapshot_replacement_finish"
-  configured period: every <REDACTED_DURATION>m
-  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+  configured period: every <REDACTED_DURATION>days <REDACTED_DURATION>h <REDACTED_DURATION>m <REDACTED_DURATION>s
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     region snapshot replacement finish sagas started ok: 0
     errors: 0
 
 task: "region_snapshot_replacement_garbage_collection"
-  configured period: every <REDACTED_DURATION>m
-  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+  configured period: every <REDACTED_DURATION>days <REDACTED_DURATION>h <REDACTED_DURATION>m <REDACTED_DURATION>s
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     total garbage collections requested: 0
     errors: 0
 
 task: "region_snapshot_replacement_start"
-  configured period: every <REDACTED_DURATION>m
-  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+  configured period: every <REDACTED_DURATION>days <REDACTED_DURATION>h <REDACTED_DURATION>m <REDACTED_DURATION>s
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     total requests created ok: 0
     total start saga invoked ok: 0
@@ -685,8 +702,8 @@ task: "region_snapshot_replacement_start"
     errors: 0
 
 task: "region_snapshot_replacement_step"
-  configured period: every <REDACTED_DURATION>m
-  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+  configured period: every <REDACTED_DURATION>days <REDACTED_DURATION>h <REDACTED_DURATION>m <REDACTED_DURATION>s
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     total step records created ok: 0
     total step garbage collect saga invoked ok: 0
@@ -696,7 +713,7 @@ task: "region_snapshot_replacement_step"
 
 task: "saga_recovery"
   configured period: every <REDACTED_DURATION>m
-  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     since Nexus started:
         sagas recovered:           0
@@ -716,18 +733,18 @@ task: "saga_recovery"
 
 task: "service_firewall_rule_propagation"
   configured period: every <REDACTED_DURATION>m
-  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
 
 task: "service_zone_nat_tracker"
   configured period: every <REDACTED_DURATION>s
-  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last completion reported error: inventory collection is None
 
 task: "sp_ereport_ingester"
   configured period: every <REDACTED_DURATION>s
-  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
 /!\ errors:                  1
       - failed to resolve MGS addresses: proto error: no records found for Query { name: Name("_mgs._tcp.control-plane.oxide.internal."), query_type: SRV, query_class: IN }
@@ -740,7 +757,7 @@ task: "sp_ereport_ingester"
 
 task: "support_bundle_collector"
   configured period: every <REDACTED_DURATION>days <REDACTED_DURATION>h <REDACTED_DURATION>m <REDACTED_DURATION>s
-  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     Support Bundle Cleanup Report:
       Bundles deleted from sleds: 0
@@ -751,13 +768,13 @@ task: "support_bundle_collector"
 
 task: "switch_port_config_manager"
   configured period: every <REDACTED_DURATION>s
-  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
 warning: unknown background task: "switch_port_config_manager" (don't know how to interpret details: Object {})
 
 task: "tuf_artifact_replication"
   configured period: every <REDACTED_DURATION>h
-  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     request ringbuf:
       <REDACTED_SECTION>
@@ -783,19 +800,19 @@ task: "tuf_artifact_replication"
 
 task: "v2p_manager"
   configured period: every <REDACTED_DURATION>s
-  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
 warning: unknown background task: "v2p_manager" (don't know how to interpret details: Object {})
 
 task: "vpc_route_manager"
   configured period: every <REDACTED_DURATION>s
-  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
 warning: unknown background task: "vpc_route_manager" (don't know how to interpret details: Object {})
 
 task: "webhook_deliverator"
   configured period: every <REDACTED_DURATION>m
-  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     receivers:                            0
     successful deliveries:                0
@@ -808,14 +825,13 @@ task: "webhook_deliverator"
 stderr:
 note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
 =============================================
-EXECUTING COMMAND: omdb ["nexus", "background-tasks", "show", "saga_recovery"]
+EXECUTING COMMAND: omdb ["nexus", "background-tasks", "show", "saga_recovery", "--no-executing-info"]
 termination: Exited(0)
 ---------------------------------------------
 stdout:
 task: "saga_recovery"
   configured period: every <REDACTED_DURATION>m
-  currently executing: no
-  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     since Nexus started:
         sagas recovered:           0
@@ -837,43 +853,45 @@ task: "saga_recovery"
 stderr:
 note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
 =============================================
-EXECUTING COMMAND: omdb ["nexus", "background-tasks", "show", "blueprint_loader", "blueprint_executor"]
+EXECUTING COMMAND: omdb ["nexus", "background-tasks", "show", "blueprint_loader", "blueprint_executor", "--no-executing-info"]
 termination: Exited(0)
 ---------------------------------------------
 stdout:
 task: "blueprint_loader"
   configured period: every <REDACTED_DURATION>m <REDACTED_DURATION>s
-  currently executing: no
-  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    last completion reported error: failed to read target blueprint: Internal Error: no target blueprint set
+    target blueprint: ......<REDACTED_BLUEPRINT_ID>.......
+    execution:        disabled
+    created at:       <REDACTED_TIMESTAMP>
+    status:           first target blueprint
 
 task: "blueprint_executor"
   configured period: every <REDACTED_DURATION>m
-  currently executing: no
-  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    last completion reported error: no blueprint
+    target blueprint: ......<REDACTED_BLUEPRINT_ID>....... 
+    execution:        disabled                             
+    status:           (no event report found)              
+    error:            (none)                               
 
 ---------------------------------------------
 stderr:
 note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
 =============================================
-EXECUTING COMMAND: omdb ["nexus", "background-tasks", "show", "dns_internal"]
+EXECUTING COMMAND: omdb ["nexus", "background-tasks", "show", "dns_internal", "--no-executing-info"]
 termination: Exited(0)
 ---------------------------------------------
 stdout:
 task: "dns_config_internal"
   configured period: every <REDACTED_DURATION>m
-  currently executing: no
-  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last generation found: 1
 
 task: "dns_servers_internal"
   configured period: every <REDACTED_DURATION>m
-  currently executing: no
-  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     servers found: 1
 
@@ -882,8 +900,7 @@ task: "dns_servers_internal"
 
 task: "dns_propagation_internal"
   configured period: every <REDACTED_DURATION>m
-  currently executing: no
-  last completed activation: <REDACTED ITERATIONS>, triggered by a dependent task completing
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     attempt to propagate generation: 1
 
@@ -895,21 +912,19 @@ task: "dns_propagation_internal"
 stderr:
 note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
 =============================================
-EXECUTING COMMAND: omdb ["nexus", "background-tasks", "show", "dns_external"]
+EXECUTING COMMAND: omdb ["nexus", "background-tasks", "show", "dns_external", "--no-executing-info"]
 termination: Exited(0)
 ---------------------------------------------
 stdout:
 task: "dns_config_external"
   configured period: every <REDACTED_DURATION>m
-  currently executing: no
-  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last generation found: 2
 
 task: "dns_servers_external"
   configured period: every <REDACTED_DURATION>m
-  currently executing: no
-  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     servers found: 1
 
@@ -918,8 +933,7 @@ task: "dns_servers_external"
 
 task: "dns_propagation_external"
   configured period: every <REDACTED_DURATION>m
-  currently executing: no
-  last completed activation: <REDACTED ITERATIONS>, triggered by a dependent task completing
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     attempt to propagate generation: 2
 
@@ -931,21 +945,19 @@ task: "dns_propagation_external"
 stderr:
 note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
 =============================================
-EXECUTING COMMAND: omdb ["nexus", "background-tasks", "show", "all"]
+EXECUTING COMMAND: omdb ["nexus", "background-tasks", "show", "all", "--no-executing-info"]
 termination: Exited(0)
 ---------------------------------------------
 stdout:
 task: "dns_config_internal"
   configured period: every <REDACTED_DURATION>m
-  currently executing: no
-  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last generation found: 1
 
 task: "dns_servers_internal"
   configured period: every <REDACTED_DURATION>m
-  currently executing: no
-  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     servers found: 1
 
@@ -954,8 +966,7 @@ task: "dns_servers_internal"
 
 task: "dns_propagation_internal"
   configured period: every <REDACTED_DURATION>m
-  currently executing: no
-  last completed activation: <REDACTED ITERATIONS>, triggered by a dependent task completing
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     attempt to propagate generation: 1
 
@@ -965,15 +976,13 @@ task: "dns_propagation_internal"
 
 task: "dns_config_external"
   configured period: every <REDACTED_DURATION>m
-  currently executing: no
-  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last generation found: 2
 
 task: "dns_servers_external"
   configured period: every <REDACTED_DURATION>m
-  currently executing: no
-  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     servers found: 1
 
@@ -982,8 +991,7 @@ task: "dns_servers_external"
 
 task: "dns_propagation_external"
   configured period: every <REDACTED_DURATION>m
-  currently executing: no
-  last completed activation: <REDACTED ITERATIONS>, triggered by a dependent task completing
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     attempt to propagate generation: 2
 
@@ -993,29 +1001,31 @@ task: "dns_propagation_external"
 
 task: "nat_garbage_collector"
   configured period: every <REDACTED_DURATION>s
-  currently executing: no
-  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last completion reported error: failed to resolve addresses for Dendrite services: proto error: no records found for Query { name: Name("_dendrite._tcp.control-plane.oxide.internal."), query_type: SRV, query_class: IN }
 
 task: "blueprint_loader"
   configured period: every <REDACTED_DURATION>m <REDACTED_DURATION>s
-  currently executing: no
-  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    last completion reported error: failed to read target blueprint: Internal Error: no target blueprint set
+    target blueprint: ......<REDACTED_BLUEPRINT_ID>.......
+    execution:        disabled
+    created at:       <REDACTED_TIMESTAMP>
+    status:           first target blueprint
 
 task: "blueprint_executor"
   configured period: every <REDACTED_DURATION>m
-  currently executing: no
-  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    last completion reported error: no blueprint
+    target blueprint: ......<REDACTED_BLUEPRINT_ID>....... 
+    execution:        disabled                             
+    status:           (no event report found)              
+    error:            (none)                               
 
 task: "abandoned_vmm_reaper"
   configured period: every <REDACTED_DURATION>m
-  currently executing: no
-  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     total abandoned VMMs found:                0
       VMM records deleted:                     0
@@ -1024,58 +1034,55 @@ task: "abandoned_vmm_reaper"
 
 task: "alert_dispatcher"
   configured period: every <REDACTED_DURATION>m
-  currently executing: no
-  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     alerts dispatched:                            0
     alerts with no receivers subscribed:          0
 
 task: "bfd_manager"
   configured period: every <REDACTED_DURATION>s
-  currently executing: no
-  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last completion reported error: failed to resolve addresses for Dendrite services: proto error: no records found for Query { name: Name("_dendrite._tcp.control-plane.oxide.internal."), query_type: SRV, query_class: IN }
 
 task: "blueprint_planner"
   configured period: every <REDACTED_DURATION>m
-  currently executing: no
-  last completed activation: <REDACTED ITERATIONS>, triggered by a dependent task completing
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     blueprint planning explicitly disabled by config!
 
 task: "blueprint_rendezvous"
   configured period: every <REDACTED_DURATION>m
-  currently executing: no
-  last completed activation: <REDACTED ITERATIONS>, triggered by a dependent task completing
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    last completion reported error: no blueprint
-
-task: "chicken_switches_watcher"
-  configured period: every <REDACTED_DURATION>s
-  currently executing: no
-  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
-    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-warning: unknown background task: "chicken_switches_watcher" (don't know how to interpret details: Object {"chicken_switches_updated": Bool(false)})
+    target blueprint:     ......<REDACTED_BLUEPRINT_ID>.......
+    inventory collection: ..........<REDACTED_UUID>...........
+    debug_dataset rendezvous counts:
+        num_inserted:           0
+        num_already_exist:      0
+        num_not_in_inventory:   0
+        num_tombstoned:         0
+        num_already_tombstoned: 0
+    crucible_dataset rendezvous counts:
+        num_inserted:         0
+        num_already_exist:    0
+        num_not_in_inventory: 0
 
 task: "crdb_node_id_collector"
   configured period: every <REDACTED_DURATION>m
-  currently executing: no
-  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    last completion reported error: no blueprint
+warning: unknown background task: "crdb_node_id_collector" (don't know how to interpret details: Object {"errors": Array [Object {"err": String("failed to fetch node ID for zone ..........<REDACTED_UUID>........... at http://[::1]:REDACTED_PORT: Communication Error: error sending request for url (http://[::1]:REDACTED_PORT/node/id): error sending request for url (http://[::1]:REDACTED_PORT/node/id): client error (Connect): tcp connect error: Connection refused (os error <OS_ERROR_REDACTED>)"), "zone_id": String("..........<REDACTED_UUID>...........")}], "nsuccess": Number(0)})
 
 task: "decommissioned_disk_cleaner"
   configured period: every <REDACTED_DURATION>m
-  currently executing: no
-  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
 warning: unknown background task: "decommissioned_disk_cleaner" (don't know how to interpret details: Object {"deleted": Number(0), "error": Null, "error_count": Number(0), "found": Number(0), "not_ready_to_be_deleted": Number(0)})
 
 task: "external_endpoints"
   configured period: every <REDACTED_DURATION>m
-  currently executing: no
-  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     external API endpoints: 2 ('*' below marks default)
 
@@ -1091,8 +1098,7 @@ task: "external_endpoints"
 
 task: "instance_reincarnation"
   configured period: every <REDACTED_DURATION>m
-  currently executing: no
-  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     instances eligible for reincarnation:                          0
       instance failed instances:                                   0
@@ -1103,8 +1109,7 @@ task: "instance_reincarnation"
 
 task: "instance_updater"
   configured period: every <REDACTED_DURATION>s
-  currently executing: no
-  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     task explicitly disabled by config!
     instances in need of updates:             0
@@ -1117,8 +1122,7 @@ task: "instance_updater"
 
 task: "instance_watcher"
   configured period: every <REDACTED_DURATION>s
-  currently executing: no
-  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     total instances checked: 0
     checks completed: 0
@@ -1130,8 +1134,7 @@ task: "instance_watcher"
 
 task: "inventory_collection"
   configured period: every <REDACTED_DURATION>m
-  currently executing: no
-  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last collection id:      ..........<REDACTED_UUID>...........
     last collection started: <REDACTED_TIMESTAMP>
@@ -1139,46 +1142,46 @@ task: "inventory_collection"
 
 task: "lookup_region_port"
   configured period: every <REDACTED_DURATION>m
-  currently executing: no
-  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     total filled in ports: 0
     errors: 0
 
 task: "metrics_producer_gc"
   configured period: every <REDACTED_DURATION>m
-  currently executing: no
-  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
 warning: unknown background task: "metrics_producer_gc" (don't know how to interpret details: Object {"expiration": String("<REDACTED_TIMESTAMP>"), "pruned": Array []})
 
 task: "phantom_disks"
   configured period: every <REDACTED_DURATION>s
-  currently executing: no
-  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     number of phantom disks deleted: 0
     number of phantom disk delete errors: 0
 
 task: "physical_disk_adoption"
   configured period: every <REDACTED_DURATION>s
-  currently executing: no
-  last completed activation: <REDACTED ITERATIONS>, triggered by a dependent task completing
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last completion reported error: task disabled
 
 task: "read_only_region_replacement_start"
-  configured period: every <REDACTED_DURATION>m
-  currently executing: no
-  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+  configured period: every <REDACTED_DURATION>days <REDACTED_DURATION>h <REDACTED_DURATION>m <REDACTED_DURATION>s
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     total requests created ok: 0
     errors: 0
 
+task: "reconfigurator_config_watcher"
+  configured period: every <REDACTED_DURATION>s
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+warning: unknown background task: "reconfigurator_config_watcher" (don't know how to interpret details: Object {"config_updated": Bool(false)})
+
 task: "region_replacement"
-  configured period: every <REDACTED_DURATION>m
-  currently executing: no
-  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+  configured period: every <REDACTED_DURATION>days <REDACTED_DURATION>h <REDACTED_DURATION>m <REDACTED_DURATION>s
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     region replacement requests created ok: 0
     region replacement start sagas started ok: 0
@@ -1186,34 +1189,30 @@ task: "region_replacement"
     errors: 0
 
 task: "region_replacement_driver"
-  configured period: every <REDACTED_DURATION>m
-  currently executing: no
-  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+  configured period: every <REDACTED_DURATION>days <REDACTED_DURATION>h <REDACTED_DURATION>m <REDACTED_DURATION>s
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     region replacement drive sagas started ok: 0
     region replacement finish sagas started ok: 0
     errors: 0
 
 task: "region_snapshot_replacement_finish"
-  configured period: every <REDACTED_DURATION>m
-  currently executing: no
-  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+  configured period: every <REDACTED_DURATION>days <REDACTED_DURATION>h <REDACTED_DURATION>m <REDACTED_DURATION>s
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     region snapshot replacement finish sagas started ok: 0
     errors: 0
 
 task: "region_snapshot_replacement_garbage_collection"
-  configured period: every <REDACTED_DURATION>m
-  currently executing: no
-  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+  configured period: every <REDACTED_DURATION>days <REDACTED_DURATION>h <REDACTED_DURATION>m <REDACTED_DURATION>s
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     total garbage collections requested: 0
     errors: 0
 
 task: "region_snapshot_replacement_start"
-  configured period: every <REDACTED_DURATION>m
-  currently executing: no
-  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+  configured period: every <REDACTED_DURATION>days <REDACTED_DURATION>h <REDACTED_DURATION>m <REDACTED_DURATION>s
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     total requests created ok: 0
     total start saga invoked ok: 0
@@ -1221,9 +1220,8 @@ task: "region_snapshot_replacement_start"
     errors: 0
 
 task: "region_snapshot_replacement_step"
-  configured period: every <REDACTED_DURATION>m
-  currently executing: no
-  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+  configured period: every <REDACTED_DURATION>days <REDACTED_DURATION>h <REDACTED_DURATION>m <REDACTED_DURATION>s
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     total step records created ok: 0
     total step garbage collect saga invoked ok: 0
@@ -1233,8 +1231,7 @@ task: "region_snapshot_replacement_step"
 
 task: "saga_recovery"
   configured period: every <REDACTED_DURATION>m
-  currently executing: no
-  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     since Nexus started:
         sagas recovered:           0
@@ -1254,21 +1251,18 @@ task: "saga_recovery"
 
 task: "service_firewall_rule_propagation"
   configured period: every <REDACTED_DURATION>m
-  currently executing: no
-  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
 
 task: "service_zone_nat_tracker"
   configured period: every <REDACTED_DURATION>s
-  currently executing: no
-  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last completion reported error: inventory collection is None
 
 task: "sp_ereport_ingester"
   configured period: every <REDACTED_DURATION>s
-  currently executing: no
-  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
 /!\ errors:                  1
       - failed to resolve MGS addresses: proto error: no records found for Query { name: Name("_mgs._tcp.control-plane.oxide.internal."), query_type: SRV, query_class: IN }
@@ -1281,8 +1275,7 @@ task: "sp_ereport_ingester"
 
 task: "support_bundle_collector"
   configured period: every <REDACTED_DURATION>days <REDACTED_DURATION>h <REDACTED_DURATION>m <REDACTED_DURATION>s
-  currently executing: no
-  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     Support Bundle Cleanup Report:
       Bundles deleted from sleds: 0
@@ -1293,15 +1286,13 @@ task: "support_bundle_collector"
 
 task: "switch_port_config_manager"
   configured period: every <REDACTED_DURATION>s
-  currently executing: no
-  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
 warning: unknown background task: "switch_port_config_manager" (don't know how to interpret details: Object {})
 
 task: "tuf_artifact_replication"
   configured period: every <REDACTED_DURATION>h
-  currently executing: no
-  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     request ringbuf:
       <REDACTED_SECTION>
@@ -1327,22 +1318,19 @@ task: "tuf_artifact_replication"
 
 task: "v2p_manager"
   configured period: every <REDACTED_DURATION>s
-  currently executing: no
-  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
 warning: unknown background task: "v2p_manager" (don't know how to interpret details: Object {})
 
 task: "vpc_route_manager"
   configured period: every <REDACTED_DURATION>s
-  currently executing: no
-  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
 warning: unknown background task: "vpc_route_manager" (don't know how to interpret details: Object {})
 
 task: "webhook_deliverator"
   configured period: every <REDACTED_DURATION>m
-  currently executing: no
-  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     receivers:                            0
     successful deliveries:                0
@@ -1351,53 +1339,6 @@ task: "webhook_deliverator"
     already delivered by another Nexus:   0
     in progress by another Nexus:         0
 
----------------------------------------------
-stderr:
-note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
-=============================================
-EXECUTING COMMAND: omdb ["nexus", "chicken-switches", "show", "current"]
-termination: Exited(0)
----------------------------------------------
-stdout:
-No chicken switches enabled
----------------------------------------------
-stderr:
-note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
-=============================================
-EXECUTING COMMAND: omdb ["-w", "nexus", "chicken-switches", "set", "--planner-enabled", "true"]
-termination: Exited(0)
----------------------------------------------
-stdout:
-chicken switches updated to version 1:
-    planner enabled: true
-    planner switches:
-        add zones with mupdate override:   true
----------------------------------------------
-stderr:
-note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
-=============================================
-EXECUTING COMMAND: omdb ["-w", "nexus", "chicken-switches", "set", "--add-zones-with-mupdate-override", "false"]
-termination: Exited(0)
----------------------------------------------
-stdout:
-chicken switches updated to version 2:
-    planner enabled:   true (unchanged)
-    planner switches:
-    *   add zones with mupdate override:   true -> false
----------------------------------------------
-stderr:
-note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
-=============================================
-EXECUTING COMMAND: omdb ["nexus", "chicken-switches", "show", "current"]
-termination: Exited(0)
----------------------------------------------
-stdout:
-Reconfigurator chicken switches:
-    version: 2
-    modified time: <REDACTED_TIMESTAMP>
-    planner enabled: true
-    planner switches:
-        add zones with mupdate override:   false
 ---------------------------------------------
 stderr:
 note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
@@ -1569,6 +1510,7 @@ parent:    <none>
     internal DNS version:::   1
     external DNS version:::   2
     target release min gen:   1
+    nexus gen::::::::::::::   1
 
  PENDING MGS-MANAGED UPDATES: 0
 
@@ -1692,6 +1634,7 @@ parent:    <none>
     internal DNS version:::   1
     external DNS version:::   2
     target release min gen:   1
+    nexus gen::::::::::::::   1
 
  PENDING MGS-MANAGED UPDATES: 0
 
@@ -1717,6 +1660,7 @@ to:   blueprint ......<REDACTED_BLUEPRINT_ID>.......
     internal DNS version:::   1 (unchanged)
     external DNS version:::   2 (unchanged)
     target release min gen:   1 (unchanged)
+    nexus gen::::::::::::::   1 (unchanged)
 
  OXIMETER SETTINGS:
     generation:   1 (unchanged)
@@ -1735,6 +1679,58 @@ stdout:
 stderr:
 note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
 Error: `blueprint2_id` was not specified and blueprint1 has no parent
+=============================================
+EXECUTING COMMAND: omdb ["nexus", "reconfigurator-config", "show", "current"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+Reconfigurator config:
+    version: 1
+    modified time: <REDACTED_TIMESTAMP>
+    planner enabled: false
+    planner config:
+        add zones with mupdate override:   false
+---------------------------------------------
+stderr:
+note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
+=============================================
+EXECUTING COMMAND: omdb ["-w", "nexus", "reconfigurator-config", "set", "--planner-enabled", "true"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+reconfigurator config updated to version 2:
+*   planner enabled:   false -> true
+    planner config:
+        add zones with mupdate override:   false (unchanged)
+---------------------------------------------
+stderr:
+note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
+=============================================
+EXECUTING COMMAND: omdb ["-w", "nexus", "reconfigurator-config", "set", "--add-zones-with-mupdate-override", "true"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+reconfigurator config updated to version 3:
+    planner enabled:   true (unchanged)
+    planner config:
+    *   add zones with mupdate override:   false -> true
+---------------------------------------------
+stderr:
+note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
+=============================================
+EXECUTING COMMAND: omdb ["nexus", "reconfigurator-config", "show", "current"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+Reconfigurator config:
+    version: 3
+    modified time: <REDACTED_TIMESTAMP>
+    planner enabled: true
+    planner config:
+        add zones with mupdate override:   true
+---------------------------------------------
+stderr:
+note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
 =============================================
 EXECUTING COMMAND: omdb ["reconfigurator", "export", "<TMP_PATH_REDACTED>"]
 termination: Exited(0)

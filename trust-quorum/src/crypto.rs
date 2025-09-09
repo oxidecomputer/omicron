@@ -45,6 +45,7 @@ const CHACHA20POLY1305_NONCE_LEN: usize = 12;
 
 // The key share format used for LRTQ
 #[derive(Clone, Serialize, Deserialize, Zeroize, ZeroizeOnDrop, From)]
+#[cfg_attr(feature = "danger_partial_eq_ct_wrapper", derive(PartialEq, Eq))]
 pub struct LrtqShare(Vec<u8>);
 
 // We don't want to risk debug-logging the actual share contents, so implement
@@ -74,17 +75,19 @@ impl LrtqShare {
 pub struct ShareDigestLrtq(Sha3_256Digest);
 
 #[derive(
-    Default,
-    Debug,
-    Clone,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Serialize,
-    Deserialize,
+    Default, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize,
 )]
 pub struct Sha3_256Digest(pub [u8; 32]);
+
+impl std::fmt::Debug for Sha3_256Digest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "sha3 digest: ")?;
+        for v in self.0.as_slice() {
+            write!(f, "{:x?}", v)?;
+        }
+        Ok(())
+    }
+}
 
 /// A boxed array containing rack secret data
 ///
@@ -111,15 +114,30 @@ impl ExposeSecret<[u8; SECRET_LEN]> for ReconstructedRackSecret {
     }
 }
 
-// Only use this in unit tests in this module
-#[cfg(test)]
 impl Clone for ReconstructedRackSecret {
     fn clone(&self) -> Self {
         self.expose_secret().as_slice().try_into().unwrap()
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[cfg(test)]
+impl PartialEq for ReconstructedRackSecret {
+    fn eq(&self, other: &Self) -> bool {
+        self.expose_secret().ct_eq(other.expose_secret()).into()
+    }
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    thiserror::Error,
+    PartialOrd,
+    Ord,
+    Serialize,
+    Deserialize,
+)]
 #[error("invalid rack secret size")]
 pub struct InvalidRackSecretSizeError;
 
@@ -165,7 +183,18 @@ impl From<RackSecret> for ReconstructedRackSecret {
     }
 }
 
-#[derive(Debug, Clone, thiserror::Error, PartialEq, Eq, SlogInlineError)]
+#[derive(
+    Debug,
+    Clone,
+    thiserror::Error,
+    PartialEq,
+    Eq,
+    SlogInlineError,
+    PartialOrd,
+    Ord,
+    Serialize,
+    Deserialize,
+)]
 pub enum RackSecretReconstructError {
     #[error("share combine error")]
     Combine(
@@ -271,7 +300,18 @@ pub struct EncryptedRackSecrets {
     data: Box<[u8]>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    thiserror::Error,
+    SlogInlineError,
+    Serialize,
+    Deserialize,
+)]
 pub enum DecryptionError {
     // An opaque error indicating decryption failed
     #[error("Failed to decrypt rack secrets")]
@@ -358,6 +398,10 @@ impl PlaintextRackSecrets {
 
     pub fn get(&self, epoch: Epoch) -> Option<&ReconstructedRackSecret> {
         self.secrets.get(&epoch)
+    }
+
+    pub fn into_inner(self) -> BTreeMap<Epoch, ReconstructedRackSecret> {
+        self.secrets
     }
 
     /// Consume the plaintext and return an `EncryptedRackSecrets`

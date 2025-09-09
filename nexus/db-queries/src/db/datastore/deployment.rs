@@ -548,6 +548,7 @@ impl DataStore {
             internal_dns_version,
             external_dns_version,
             target_release_minimum_generation,
+            nexus_generation,
             cockroachdb_fingerprint,
             cockroachdb_setting_preserve_downgrade,
             time_created,
@@ -574,6 +575,7 @@ impl DataStore {
                 *blueprint.internal_dns_version,
                 *blueprint.external_dns_version,
                 *blueprint.target_release_minimum_generation,
+                *blueprint.nexus_generation,
                 blueprint.cockroachdb_fingerprint,
                 blueprint.cockroachdb_setting_preserve_downgrade,
                 blueprint.time_created,
@@ -1325,6 +1327,7 @@ impl DataStore {
             internal_dns_version,
             external_dns_version,
             target_release_minimum_generation,
+            nexus_generation,
             cockroachdb_fingerprint,
             cockroachdb_setting_preserve_downgrade,
             clickhouse_cluster_config,
@@ -2954,6 +2957,7 @@ mod tests {
     use crate::db::pub_test_utils::TestDatabase;
     use crate::db::raw_query_builder::QueryBuilder;
     use gateway_types::rot::RotSlot;
+    use nexus_db_model::IpVersion;
     use nexus_inventory::CollectionBuilder;
     use nexus_inventory::now_db_precision;
     use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
@@ -3035,94 +3039,20 @@ mod tests {
         pub should_write_data: Option<Arc<AtomicBool>>,
     }
 
-    // This is a not-super-future-maintainer-friendly helper to check that all
-    // the subtables related to blueprints have been pruned of a specific
-    // blueprint ID. If additional blueprint tables are added in the future,
-    // this function will silently ignore them unless they're manually added.
+    // Check that all the subtables related to blueprints have been pruned of a specific
+    // blueprint ID. Uses the shared BlueprintTableCounts struct.
     async fn ensure_blueprint_fully_deleted(
         datastore: &DataStore,
         blueprint_id: BlueprintUuid,
     ) {
-        let conn = datastore.pool_connection_for_tests().await.unwrap();
+        let counts = BlueprintTableCounts::new(datastore, blueprint_id).await;
 
-        macro_rules! query_count {
-            ($table:ident, $blueprint_id_col:ident) => {{
-                use nexus_db_schema::schema::$table::dsl;
-                let result = dsl::$table
-                    .filter(
-                        dsl::$blueprint_id_col
-                            .eq(to_db_typed_uuid(blueprint_id)),
-                    )
-                    .count()
-                    .get_result_async(&*conn)
-                    .await;
-                (stringify!($table), result)
-            }};
-        }
-
-        // These tables start with `bp_` but do not represent the contents of a
-        // specific blueprint.  It should be uncommon to add things to this
-        // list.
-        let tables_ignored: BTreeSet<_> = ["bp_target"].into_iter().collect();
-
-        let mut tables_checked = BTreeSet::new();
-        for (table_name, result) in [
-            query_count!(blueprint, id),
-            query_count!(bp_sled_metadata, blueprint_id),
-            query_count!(bp_omicron_dataset, blueprint_id),
-            query_count!(bp_omicron_physical_disk, blueprint_id),
-            query_count!(bp_omicron_zone, blueprint_id),
-            query_count!(bp_omicron_zone_nic, blueprint_id),
-            query_count!(bp_clickhouse_cluster_config, blueprint_id),
-            query_count!(bp_clickhouse_keeper_zone_id_to_node_id, blueprint_id),
-            query_count!(bp_clickhouse_server_zone_id_to_node_id, blueprint_id),
-            query_count!(bp_oximeter_read_policy, blueprint_id),
-            query_count!(bp_pending_mgs_update_sp, blueprint_id),
-            query_count!(bp_pending_mgs_update_rot, blueprint_id),
-            query_count!(bp_pending_mgs_update_rot_bootloader, blueprint_id),
-            query_count!(bp_pending_mgs_update_host_phase_1, blueprint_id),
-        ] {
-            let count: i64 = result.unwrap();
-            assert_eq!(
-                count, 0,
-                "nonzero row count for blueprint \
-                 {blueprint_id} in table {table_name}"
-            );
-            tables_checked.insert(table_name);
-        }
-
-        // Look for likely blueprint-related tables that we didn't check.
-        let mut query = QueryBuilder::new();
-        query.sql(
-            "SELECT table_name \
-            FROM information_schema.tables \
-            WHERE table_name LIKE 'bp\\_%'",
+        // All tables should be empty (no exceptions for deleted blueprints)
+        assert!(
+            counts.all_empty(),
+            "Blueprint {blueprint_id} not fully deleted. Non-empty tables: {:?}",
+            counts.non_empty_tables()
         );
-        let tables_unchecked: Vec<String> = query
-            .query::<diesel::sql_types::Text>()
-            .load_async(&*conn)
-            .await
-            .expect("Failed to query information_schema for tables")
-            .into_iter()
-            .filter(|f: &String| {
-                let t = f.as_str();
-                !tables_ignored.contains(t) && !tables_checked.contains(t)
-            })
-            .collect();
-        if !tables_unchecked.is_empty() {
-            // If you see this message, you probably added a blueprint table
-            // whose name started with `bp_*`.  Add it to the block above so
-            // that this function checks whether deleting a blueprint deletes
-            // rows from that table.  (You may also find you need to update
-            // blueprint_delete() to actually delete said rows.)
-            panic!(
-                "found table(s) that look related to blueprints, but \
-                 aren't covered by ensure_blueprint_fully_deleted(). \
-                 Please add them to that function!\n
-                 Found: {}",
-                tables_unchecked.join(", ")
-            );
-        }
     }
 
     // Create a fake set of `SledDetails`, either with a subnet matching
@@ -3282,6 +3212,9 @@ mod tests {
             blueprint_list_all_ids(&opctx, &datastore).await,
             [blueprint1.id]
         );
+
+        // Ensure every bp_* table received at least one row for this blueprint (issue #8455).
+        ensure_blueprint_fully_populated(&datastore, blueprint1.id).await;
 
         // Check the number of blueprint elements against our collection.
         assert_eq!(
@@ -4221,12 +4154,17 @@ mod tests {
             Ipv4Addr::new(10, 0, 0, 10),
         ))
         .unwrap();
-        let (service_ip_pool, _) = datastore
-            .ip_pools_service_lookup(&opctx)
+        let (service_authz_ip_pool, service_ip_pool) = datastore
+            .ip_pools_service_lookup(&opctx, IpVersion::V4)
             .await
             .expect("lookup service ip pool");
         datastore
-            .ip_pool_add_range(&opctx, &service_ip_pool, &ip_range)
+            .ip_pool_add_range(
+                &opctx,
+                &service_authz_ip_pool,
+                &service_ip_pool,
+                &ip_range,
+            )
             .await
             .expect("add range to service ip pool");
         let zone_id = OmicronZoneUuid::new_v4();
@@ -4265,6 +4203,7 @@ mod tests {
                         },
                         external_tls: false,
                         external_dns_servers: vec![],
+                        nexus_generation: Generation::new(),
                     },
                 ),
                 image_source: BlueprintZoneImageSource::InstallDataset,
@@ -4353,13 +4292,14 @@ mod tests {
                     .map(|(ip, _nic)| ip.ip())
             })
             .expect("found external IP");
-        let (service_ip_pool, _) = datastore
-            .ip_pools_service_lookup(&opctx)
+        let (service_authz_ip_pool, service_ip_pool) = datastore
+            .ip_pools_service_lookup(&opctx, IpVersion::V4)
             .await
             .expect("lookup service ip pool");
         datastore
             .ip_pool_add_range(
                 &opctx,
+                &service_authz_ip_pool,
                 &service_ip_pool,
                 &IpRange::try_from((nexus_ip, nexus_ip))
                     .expect("valid IP range"),
@@ -4571,5 +4511,193 @@ mod tests {
             "expected all zones to be in service, \
              found these zones not in service: {not_in_service:?}"
         );
+    }
+
+    /// Counts rows in blueprint-related tables for a specific blueprint ID.
+    /// Used by both `ensure_blueprint_fully_populated` and `ensure_blueprint_fully_deleted`.
+    struct BlueprintTableCounts {
+        counts: BTreeMap<String, i64>,
+    }
+
+    impl BlueprintTableCounts {
+        /// Create a new BlueprintTableCounts by querying all blueprint tables.
+        async fn new(
+            datastore: &DataStore,
+            blueprint_id: BlueprintUuid,
+        ) -> BlueprintTableCounts {
+            let conn = datastore.pool_connection_for_tests().await.unwrap();
+
+            macro_rules! query_count {
+                ($table:ident, $blueprint_id_col:ident) => {{
+                    use nexus_db_schema::schema::$table::dsl;
+                    let result = dsl::$table
+                        .filter(
+                            dsl::$blueprint_id_col
+                                .eq(to_db_typed_uuid(blueprint_id)),
+                        )
+                        .count()
+                        .get_result_async(&*conn)
+                        .await;
+                    (stringify!($table), result)
+                }};
+            }
+
+            let mut counts = BTreeMap::new();
+            for (table_name, result) in [
+                query_count!(blueprint, id),
+                query_count!(bp_sled_metadata, blueprint_id),
+                query_count!(bp_omicron_dataset, blueprint_id),
+                query_count!(bp_omicron_physical_disk, blueprint_id),
+                query_count!(bp_omicron_zone, blueprint_id),
+                query_count!(bp_omicron_zone_nic, blueprint_id),
+                query_count!(bp_clickhouse_cluster_config, blueprint_id),
+                query_count!(
+                    bp_clickhouse_keeper_zone_id_to_node_id,
+                    blueprint_id
+                ),
+                query_count!(
+                    bp_clickhouse_server_zone_id_to_node_id,
+                    blueprint_id
+                ),
+                query_count!(bp_oximeter_read_policy, blueprint_id),
+                query_count!(bp_pending_mgs_update_sp, blueprint_id),
+                query_count!(bp_pending_mgs_update_rot, blueprint_id),
+                query_count!(
+                    bp_pending_mgs_update_rot_bootloader,
+                    blueprint_id
+                ),
+                query_count!(bp_pending_mgs_update_host_phase_1, blueprint_id),
+            ] {
+                let count: i64 = result.unwrap();
+                counts.insert(table_name.to_string(), count);
+            }
+
+            let table_counts = BlueprintTableCounts { counts };
+
+            // Verify no new blueprint tables were added without updating this function
+            if let Err(msg) =
+                table_counts.verify_all_tables_covered(datastore).await
+            {
+                panic!("{}", msg);
+            }
+
+            table_counts
+        }
+
+        /// Returns true if all tables are empty (0 rows).
+        fn all_empty(&self) -> bool {
+            self.counts.values().all(|&count| count == 0)
+        }
+
+        /// Returns a list of table names that are empty.
+        fn empty_tables(&self) -> Vec<String> {
+            self.counts
+                .iter()
+                .filter_map(
+                    |(table, &count)| {
+                        if count == 0 { Some(table.clone()) } else { None }
+                    },
+                )
+                .collect()
+        }
+
+        /// Returns a list of table names that are non-empty.
+        fn non_empty_tables(&self) -> Vec<String> {
+            self.counts
+                .iter()
+                .filter_map(
+                    |(table, &count)| {
+                        if count > 0 { Some(table.clone()) } else { None }
+                    },
+                )
+                .collect()
+        }
+
+        /// Get all table names that were checked.
+        fn tables_checked(&self) -> BTreeSet<&str> {
+            self.counts.keys().map(|s| s.as_str()).collect()
+        }
+
+        /// Verify no new blueprint tables were added without updating this function.
+        async fn verify_all_tables_covered(
+            &self,
+            datastore: &DataStore,
+        ) -> Result<(), String> {
+            let conn = datastore.pool_connection_for_tests().await.unwrap();
+
+            // Tables prefixed with `bp_` that are *not* specific to a single blueprint
+            // and therefore intentionally ignored.  There is only one of these right now.
+            let tables_ignored: BTreeSet<_> =
+                ["bp_target"].into_iter().collect();
+            let tables_checked = self.tables_checked();
+
+            let mut query = QueryBuilder::new();
+            query.sql(
+                "SELECT table_name FROM information_schema.tables WHERE table_name LIKE 'bp\\_%'",
+            );
+            let tables_unchecked: Vec<String> = query
+                .query::<diesel::sql_types::Text>()
+                .load_async(&*conn)
+                .await
+                .expect("Failed to query information_schema for tables")
+                .into_iter()
+                .filter(|f: &String| {
+                    let t = f.as_str();
+                    !tables_ignored.contains(t) && !tables_checked.contains(t)
+                })
+                .collect();
+
+            if !tables_unchecked.is_empty() {
+                Err(format!(
+                    "found blueprint-related table(s) not covered by BlueprintTableCounts: {}\n\n\
+                    If you see this message, you probably added a blueprint table whose name started with `bp_*`. \
+                    Add it to the query list in BlueprintTableCounts::new() so that this function checks the table. \
+                    You may also need to update blueprint deletion/insertion code to handle rows in that table.",
+                    tables_unchecked.join(", ")
+                ))
+            } else {
+                Ok(())
+            }
+        }
+    }
+
+    // Verify that every blueprint-related table contains ≥1 row for `blueprint_id`.
+    // Complements `ensure_blueprint_fully_deleted`.
+    async fn ensure_blueprint_fully_populated(
+        datastore: &DataStore,
+        blueprint_id: BlueprintUuid,
+    ) {
+        let counts = BlueprintTableCounts::new(datastore, blueprint_id).await;
+
+        // Exception tables that may be empty in the representative blueprint:
+        // - MGS update tables: only populated when blueprint includes firmware updates
+        // - ClickHouse tables: only populated when blueprint includes ClickHouse configuration
+        let exception_tables = [
+            "bp_pending_mgs_update_sp",
+            "bp_pending_mgs_update_rot",
+            "bp_pending_mgs_update_rot_bootloader",
+            "bp_pending_mgs_update_host_phase_1",
+            "bp_clickhouse_cluster_config",
+            "bp_clickhouse_keeper_zone_id_to_node_id",
+            "bp_clickhouse_server_zone_id_to_node_id",
+        ];
+
+        // Check that all non-exception tables have at least one row
+        let empty_tables = counts.empty_tables();
+        let problematic_tables: Vec<_> = empty_tables
+            .into_iter()
+            .filter(|table| !exception_tables.contains(&table.as_str()))
+            .collect();
+
+        if !problematic_tables.is_empty() {
+            panic!(
+                "Expected tables to be populated for blueprint {blueprint_id}: {:?}\n\n\
+                If every blueprint should be expected to have a value in this table, then this is a bug. \
+                Otherwise, you may need to add a table to the exception list in `ensure_blueprint_fully_populated()`. \
+                If you do this, please ensure that you add a test to `test_representative_blueprint()` that creates a \
+                blueprint that _does_ populate this table and verifies it.",
+                problematic_tables
+            );
+        }
     }
 }

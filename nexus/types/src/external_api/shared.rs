@@ -12,6 +12,10 @@ use chrono::DateTime;
 use chrono::Utc;
 use omicron_common::api::external::Name;
 use omicron_common::api::internal::shared::NetworkInterface;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::SiloGroupUuid;
+use omicron_uuid_kinds::SiloUserUuid;
+use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
 use parse_display::FromStr;
 use schemars::JsonSchema;
@@ -23,7 +27,7 @@ use slog_error_chain::InlineErrorChain;
 use strum::EnumIter;
 use uuid::Uuid;
 
-pub use omicron_common::address::{IpRange, Ipv4Range, Ipv6Range};
+pub use omicron_common::address::{IpRange, IpVersion, Ipv4Range, Ipv6Range};
 pub use omicron_common::api::external::BfdMode;
 
 /// Maximum number of role assignments allowed on any one resource
@@ -86,6 +90,30 @@ pub struct RoleAssignment<AllowedRoles> {
     pub identity_type: IdentityType,
     pub identity_id: Uuid,
     pub role_name: AllowedRoles,
+}
+
+impl<AllowedRoles> RoleAssignment<AllowedRoles> {
+    pub fn for_silo_user(
+        silo_user_id: SiloUserUuid,
+        role_name: AllowedRoles,
+    ) -> Self {
+        Self {
+            identity_type: IdentityType::SiloUser,
+            identity_id: silo_user_id.into_untyped_uuid(),
+            role_name,
+        }
+    }
+
+    pub fn for_silo_group(
+        silo_group_id: SiloGroupUuid,
+        role_name: AllowedRoles,
+    ) -> Self {
+        Self {
+            identity_type: IdentityType::SiloGroup,
+            identity_id: silo_group_id.into_untyped_uuid(),
+            role_name,
+        }
+    }
 }
 
 #[derive(
@@ -642,6 +670,7 @@ pub enum SupportBundleState {
 
 #[derive(Debug, Clone, JsonSchema, Serialize, Deserialize)]
 pub struct SupportBundleInfo {
+    #[schemars(with = "Uuid")]
     pub id: SupportBundleUuid,
     pub time_created: DateTime<Utc>,
     pub reason_for_creation: String,
@@ -654,7 +683,8 @@ pub struct SupportBundleInfo {
 pub struct ProbeInfo {
     pub id: Uuid,
     pub name: Name,
-    pub sled: Uuid,
+    #[schemars(with = "Uuid")]
+    pub sled: SledUuid,
     pub external_ips: Vec<ProbeExternalIp>,
     pub interface: NetworkInterface,
 }
