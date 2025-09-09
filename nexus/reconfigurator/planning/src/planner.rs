@@ -197,9 +197,9 @@ impl<'a> Planner<'a> {
             PlanningMgsUpdatesStepReport::new(PendingMgsUpdates::new())
         };
 
-        // Likewise for zone additions, unless overridden with the chicken switch.
+        // Likewise for zone additions, unless overridden by the config.
         let add_zones_with_mupdate_override =
-            self.input.chicken_switches().add_zones_with_mupdate_override;
+            self.input.planner_config().add_zones_with_mupdate_override;
         let mut add = if add_update_blocked_reasons.is_empty()
             || add_zones_with_mupdate_override
         {
@@ -238,7 +238,7 @@ impl<'a> Planner<'a> {
 
         Ok(PlanningReport {
             blueprint_id: self.blueprint.new_blueprint_id(),
-            chicken_switches: *self.input.chicken_switches(),
+            planner_config: *self.input.planner_config(),
             expunge,
             decommission,
             noop_image_source,

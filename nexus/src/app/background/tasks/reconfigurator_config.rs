@@ -10,41 +10,38 @@ use futures::FutureExt;
 use futures::future::BoxFuture;
 use nexus_auth::context::OpContext;
 use nexus_db_queries::db::DataStore;
-use nexus_types::deployment::ReconfiguratorChickenSwitchesView;
+use nexus_types::deployment::ReconfiguratorConfigView;
 use serde_json::json;
 use std::sync::Arc;
 use tokio::sync::watch;
 
 /// Enum that allows downstream tasks to know whether this task has had a chance
-/// to read the current chicken switches from the database.
+/// to read the current config from the database.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ReconfiguratorChickenSwitchesLoaderState {
+pub enum ReconfiguratorConfigLoaderState {
     NotYetLoaded,
-    Loaded(ReconfiguratorChickenSwitchesView),
+    Loaded(ReconfiguratorConfigView),
 }
 
-/// Background task that tracks reconfigurator chicken switches from the DB
-pub struct ChickenSwitchesLoader {
+/// Background task that tracks reconfigurator config from the DB
+pub struct ReconfiguratorConfigLoader {
     datastore: Arc<DataStore>,
-    tx: watch::Sender<ReconfiguratorChickenSwitchesLoaderState>,
+    tx: watch::Sender<ReconfiguratorConfigLoaderState>,
 }
 
-impl ChickenSwitchesLoader {
+impl ReconfiguratorConfigLoader {
     pub fn new(datastore: Arc<DataStore>) -> Self {
-        let (tx, _rx) = watch::channel(
-            ReconfiguratorChickenSwitchesLoaderState::NotYetLoaded,
-        );
+        let (tx, _rx) =
+            watch::channel(ReconfiguratorConfigLoaderState::NotYetLoaded);
         Self { datastore, tx }
     }
 
-    pub fn watcher(
-        &self,
-    ) -> watch::Receiver<ReconfiguratorChickenSwitchesLoaderState> {
+    pub fn watcher(&self) -> watch::Receiver<ReconfiguratorConfigLoaderState> {
         self.tx.subscribe()
     }
 }
 
-impl BackgroundTask for ChickenSwitchesLoader {
+impl BackgroundTask for ReconfiguratorConfigLoader {
     fn activate<'a>(
         &'a mut self,
         opctx: &'a OpContext,
@@ -52,21 +49,20 @@ impl BackgroundTask for ChickenSwitchesLoader {
         async {
             match self
                 .datastore
-                .reconfigurator_chicken_switches_get_latest(opctx)
+                .reconfigurator_config_get_latest(opctx)
                 .await
-                .context("failed to load chicken switches")
+                .context("failed to load reconfigurator config")
             {
                 Err(error) => {
                     let message = format!("{:#}", error);
-                    warn!(opctx.log, "chicken switches load failed";
+                    warn!(opctx.log, "reconfigurator config load failed";
                         "error" => message.clone());
                     json!({ "error": message })
                 }
                 Ok(switches) => {
-                    let switches =
-                        ReconfiguratorChickenSwitchesLoaderState::Loaded(
-                            switches.unwrap_or_default(),
-                        );
+                    let switches = ReconfiguratorConfigLoaderState::Loaded(
+                        switches.unwrap_or_default(),
+                    );
                     let updated = self.tx.send_if_modified(|s| {
                         if *s != switches {
                             *s = switches.clone();
@@ -75,10 +71,10 @@ impl BackgroundTask for ChickenSwitchesLoader {
                         false
                     });
                     debug!(
-                        opctx.log, "chicken switches load complete";
+                        opctx.log, "reconfigurator config load complete";
                         "switches" => ?switches,
                     );
-                    json!({ "chicken_switches_updated": updated })
+                    json!({ "config_updated": updated })
                 }
             }
         }
@@ -92,8 +88,7 @@ mod test {
     use async_bb8_diesel::AsyncRunQueryDsl;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::{
-        PlannerChickenSwitches, ReconfiguratorChickenSwitches,
-        ReconfiguratorChickenSwitchesParam,
+        PlannerConfig, ReconfiguratorConfig, ReconfiguratorConfigParam,
     };
 
     type ControlPlaneTestContext =
@@ -108,105 +103,94 @@ mod test {
             datastore.clone(),
         );
 
-        // `#[nexus_test]` inserts an initial set of chicken switch values to
-        // disable planning in general; let's remove that value so we can test
-        // from a clean slate.
+        // `#[nexus_test]` inserts an initial configuration disable planning in
+        // general; let's remove that value so we can test from a clean slate.
         //
-        // Chicken switch values are supposed to form a continuous history, so
+        // Configuration values are supposed to form a continuous history, so
         // there's no datastore method to delete existing values. We'll go
         // behind its back and delete them directly.
         {
-            use nexus_db_schema::schema::reconfigurator_chicken_switches::dsl;
+            use nexus_db_schema::schema::reconfigurator_config::dsl;
             let conn = datastore.pool_connection_for_tests().await.unwrap();
-            diesel::delete(dsl::reconfigurator_chicken_switches)
+            diesel::delete(dsl::reconfigurator_config)
                 .execute_async(&*conn)
                 .await
-                .expect("removed nexus_test default chicken switches");
+                .expect("removed nexus_test default reconfigurator config");
         }
 
-        let mut task = ChickenSwitchesLoader::new(datastore.clone());
+        let mut task = ReconfiguratorConfigLoader::new(datastore.clone());
 
         // Initial state should be `NotYetLoaded`.
         let mut rx = task.watcher();
         assert_eq!(
             *rx.borrow_and_update(),
-            ReconfiguratorChickenSwitchesLoaderState::NotYetLoaded
+            ReconfiguratorConfigLoaderState::NotYetLoaded
         );
 
         // We haven't inserted anything into the DB, so the initial activation
         // should populate the channel with our default values.
-        let default_switches = ReconfiguratorChickenSwitchesView::default();
+        let default_switches = ReconfiguratorConfigView::default();
         let out = task.activate(&opctx).await;
-        assert_eq!(out["chicken_switches_updated"], true);
+        assert_eq!(out["config_updated"], true);
         assert!(rx.has_changed().unwrap());
         assert_eq!(
             *rx.borrow_and_update(),
-            ReconfiguratorChickenSwitchesLoaderState::Loaded(
-                default_switches.clone()
-            )
+            ReconfiguratorConfigLoaderState::Loaded(default_switches.clone())
         );
 
         // Insert an initial set of switches.
-        let expected_switches = ReconfiguratorChickenSwitches {
-            planner_enabled: !default_switches.switches.planner_enabled,
-            planner_switches: PlannerChickenSwitches::default(),
+        let expected_switches = ReconfiguratorConfig {
+            planner_enabled: !default_switches.config.planner_enabled,
+            planner_config: PlannerConfig::default(),
         };
-        let switches = ReconfiguratorChickenSwitchesParam {
-            version: 1,
-            switches: expected_switches,
-        };
+        let switches =
+            ReconfiguratorConfigParam { version: 1, config: expected_switches };
         datastore
-            .reconfigurator_chicken_switches_insert_latest_version(
-                &opctx, switches,
-            )
+            .reconfigurator_config_insert_latest_version(&opctx, switches)
             .await
             .unwrap();
         let out = task.activate(&opctx).await;
-        assert_eq!(out["chicken_switches_updated"], true);
+        assert_eq!(out["config_updated"], true);
         assert!(rx.has_changed().unwrap());
         {
             let view = match rx.borrow_and_update().clone() {
-                ReconfiguratorChickenSwitchesLoaderState::NotYetLoaded => {
+                ReconfiguratorConfigLoaderState::NotYetLoaded => {
                     panic!("unexpected value")
                 }
-                ReconfiguratorChickenSwitchesLoaderState::Loaded(view) => view,
+                ReconfiguratorConfigLoaderState::Loaded(view) => view,
             };
             assert_eq!(view.version, 1);
-            assert_eq!(view.switches, expected_switches);
+            assert_eq!(view.config, expected_switches);
         }
 
         // Activating again should not change things.
         let out = task.activate(&opctx).await;
-        assert_eq!(out["chicken_switches_updated"], false);
+        assert_eq!(out["config_updated"], false);
         assert!(!rx.has_changed().unwrap());
 
         // Insert a new version.
-        let expected_switches = ReconfiguratorChickenSwitches {
+        let expected_switches = ReconfiguratorConfig {
             planner_enabled: !expected_switches.planner_enabled,
-            planner_switches: PlannerChickenSwitches::default(),
+            planner_config: PlannerConfig::default(),
         };
-        let switches = ReconfiguratorChickenSwitchesParam {
-            version: 2,
-            switches: expected_switches,
-        };
+        let switches =
+            ReconfiguratorConfigParam { version: 2, config: expected_switches };
         datastore
-            .reconfigurator_chicken_switches_insert_latest_version(
-                &opctx, switches,
-            )
+            .reconfigurator_config_insert_latest_version(&opctx, switches)
             .await
             .unwrap();
         let out = task.activate(&opctx).await;
-        assert_eq!(out["chicken_switches_updated"], true);
+        assert_eq!(out["config_updated"], true);
         assert!(rx.has_changed().unwrap());
         {
             let view = match rx.borrow_and_update().clone() {
-                ReconfiguratorChickenSwitchesLoaderState::NotYetLoaded => {
+                ReconfiguratorConfigLoaderState::NotYetLoaded => {
                     panic!("unexpected value")
                 }
-                ReconfiguratorChickenSwitchesLoaderState::Loaded(view) => view,
+                ReconfiguratorConfigLoaderState::Loaded(view) => view,
             };
             assert_eq!(view.version, 2);
-            assert_eq!(view.switches, expected_switches);
+            assert_eq!(view.config, expected_switches);
         }
     }
 }

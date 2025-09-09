@@ -165,9 +165,9 @@ The planner evaluates whether the current (target) blueprint is consistent with 
 
 The execution task evaluates whether the state reflected in the latest inventory collection is consistent with the current target blueprint.  If not, it executes operations to bring reality into line with the blueprint.  This means provisioning new zones, removing old zones, adding instances to DNS, removing instances from DNS, carrying out firmware updates, etc.
 
-=== Currently: plan on-demand, execute continuously
+=== Currently: plan continuously, execute continuously
 
-We're being cautious about rolling out that kind of automation.  Instead, today, `omdb` can be used to:
+By default in production, the planner runs periodically. `omdb` can be used to:
 
 * invoke the planner explicitly to generate a new blueprint
 * set a blueprint to be the current target
@@ -175,7 +175,7 @@ We're being cautious about rolling out that kind of automation.  Instead, today,
 
 `omdb` uses the Nexus internal API to do these things.  Since this can only be done using `omdb`, Reconfigurator can really only be used by Oxide engineering and support, not customers.
 
-The planner background task is currently disabled by default, but can be enabled via `omdb nexus chicken-switches --planner-enabled`.  To get to the long term vision where the system is doing all this on its own in response to operator input, we'll need to get confidence that continually executing the planner will have no ill effects on working systems.  This might involve more operational experience with it, more safeties, and tools for pausing execution, previewing what it _would_ do, etc.
+The planner background task is enabled by default on real systems but disabled in test environments. It can be controlled via `omdb nexus reconfigurator-config --planner-enabled {true,false}`.
 
 == Design patterns
 

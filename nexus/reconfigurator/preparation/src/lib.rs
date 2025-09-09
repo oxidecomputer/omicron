@@ -23,7 +23,7 @@ use nexus_types::deployment::CockroachDbSettings;
 use nexus_types::deployment::OmicronZoneExternalIp;
 use nexus_types::deployment::OmicronZoneNic;
 use nexus_types::deployment::OximeterReadPolicy;
-use nexus_types::deployment::PlannerChickenSwitches;
+use nexus_types::deployment::PlannerConfig;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::PlanningInputBuilder;
 use nexus_types::deployment::Policy;
@@ -83,7 +83,7 @@ pub struct PlanningInputFromDb<'a> {
     pub oximeter_read_policy: OximeterReadPolicy,
     pub tuf_repo: TufRepoPolicy,
     pub old_repo: TufRepoPolicy,
-    pub chicken_switches: PlannerChickenSwitches,
+    pub planner_config: PlannerConfig,
     pub log: &'a Logger,
 }
 
@@ -91,7 +91,7 @@ impl PlanningInputFromDb<'_> {
     pub async fn assemble(
         opctx: &OpContext,
         datastore: &DataStore,
-        chicken_switches: PlannerChickenSwitches,
+        planner_config: PlannerConfig,
     ) -> Result<PlanningInput, Error> {
         opctx.check_complex_operations_allowed()?;
         // Note we list *all* rows here including the ones for decommissioned
@@ -222,7 +222,7 @@ impl PlanningInputFromDb<'_> {
             oximeter_read_policy,
             tuf_repo,
             old_repo,
-            chicken_switches,
+            planner_config,
         }
         .build()
         .internal_context("assembling planning_input")?;
@@ -248,7 +248,7 @@ impl PlanningInputFromDb<'_> {
             oximeter_read_policy: self.oximeter_read_policy.clone(),
             tuf_repo: self.tuf_repo.clone(),
             old_repo: self.old_repo.clone(),
-            chicken_switches: self.chicken_switches,
+            planner_config: self.planner_config,
         };
         let mut builder = PlanningInputBuilder::new(
             policy,
@@ -382,15 +382,12 @@ pub async fn reconfigurator_state_load(
     datastore: &DataStore,
 ) -> Result<UnstableReconfiguratorState, anyhow::Error> {
     opctx.check_complex_operations_allowed()?;
-    let chicken_switches = datastore
-        .reconfigurator_chicken_switches_get_latest(opctx)
+    let planner_config = datastore
+        .reconfigurator_config_get_latest(opctx)
         .await?
-        .map_or_else(PlannerChickenSwitches::default, |switches| {
-            switches.switches.planner_switches
-        });
+        .map_or_else(PlannerConfig::default, |c| c.config.planner_config);
     let planning_input =
-        PlanningInputFromDb::assemble(opctx, datastore, chicken_switches)
-            .await?;
+        PlanningInputFromDb::assemble(opctx, datastore, planner_config).await?;
     let collection_ids = datastore
         .inventory_collections()
         .await
