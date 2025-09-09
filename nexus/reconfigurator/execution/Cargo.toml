@@ -55,6 +55,7 @@ async-bb8-diesel.workspace = true
 diesel.workspace = true
 httptest.workspace = true
 ipnet.workspace = true
+ipnetwork.workspace = true
 nexus-db-queries = { workspace = true, features = ["testing"] }
 nexus-db-schema.workspace = true
 nexus-reconfigurator-planning.workspace = true
