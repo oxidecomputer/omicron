@@ -22,8 +22,8 @@ use nexus_db_queries::db::DataStore;
 use nexus_types::identity::Asset;
 use omicron_common::api::external::DataPageParams;
 use omicron_uuid_kinds::CollectionUuid;
-use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
+use omicron_uuid_kinds::ZpoolUuid;
 use serde_json::json;
 use std::sync::Arc;
 use tokio::sync::watch;
@@ -133,12 +133,12 @@ impl BackgroundTask for PhysicalDiskAdoption {
                     inv_disk.serial,
                     inv_disk.model,
                     inv_disk.variant,
-                    inv_disk.sled_id.into_untyped_uuid(),
+                    inv_disk.sled_id.into(),
                 );
 
                 let zpool = Zpool::new(
-                    Uuid::new_v4(),
-                    inv_disk.sled_id.into_untyped_uuid(),
+                    ZpoolUuid::new_v4(),
+                    inv_disk.sled_id.into(),
                     disk.id(),
                     CONTROL_PLANE_STORAGE_BUFFER.into(),
                 );

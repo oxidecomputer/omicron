@@ -350,7 +350,7 @@ mod test {
     use nexus_types::deployment::OximeterReadMode;
     use nexus_types::deployment::OximeterReadPolicy;
     use nexus_types::deployment::PendingMgsUpdates;
-    use nexus_types::deployment::PlannerChickenSwitches;
+    use nexus_types::deployment::PlannerConfig;
     use nexus_types::deployment::PlanningReport;
     use nexus_types::deployment::SledFilter;
     use nexus_types::deployment::TufRepoPolicy;
@@ -1526,7 +1526,7 @@ mod test {
                 oximeter_read_policy: OximeterReadPolicy::new(1),
                 tuf_repo: TufRepoPolicy::initial(),
                 old_repo: TufRepoPolicy::initial(),
-                chicken_switches: PlannerChickenSwitches::default(),
+                planner_config: PlannerConfig::default(),
                 log,
             }
             .build()

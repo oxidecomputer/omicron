@@ -14,9 +14,10 @@
 
 use super::{Generation, VmmState};
 use crate::SqlU16;
+use crate::typed_uuid::DbTypedUuid;
 use chrono::{DateTime, Utc};
 use nexus_db_schema::schema::vmm;
-use omicron_uuid_kinds::{GenericUuid, InstanceUuid, PropolisUuid, SledUuid};
+use omicron_uuid_kinds::*;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -47,7 +48,7 @@ pub struct Vmm {
     pub instance_id: Uuid,
 
     /// The sled assigned to the care and feeding of this VMM.
-    pub sled_id: Uuid,
+    pub sled_id: DbTypedUuid<SledKind>,
 
     /// The IP address at which this VMM is serving the Propolis server API.
     pub propolis_ip: ipnetwork::IpNetwork,
@@ -79,7 +80,7 @@ impl Vmm {
             time_created: now,
             time_deleted: None,
             instance_id: instance_id.into_untyped_uuid(),
-            sled_id: sled_id.into_untyped_uuid(),
+            sled_id: sled_id.into(),
             propolis_ip,
             propolis_port: SqlU16(propolis_port),
             runtime: VmmRuntimeState {
@@ -88,6 +89,10 @@ impl Vmm {
                 gen: Generation::new(),
             },
         }
+    }
+
+    pub fn sled_id(&self) -> SledUuid {
+        self.sled_id.into()
     }
 }
 
