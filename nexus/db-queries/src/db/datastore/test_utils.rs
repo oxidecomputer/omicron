@@ -17,7 +17,6 @@ use nexus_db_lookup::LookupPath;
 use nexus_db_model::SledState;
 use nexus_types::external_api::views::SledPolicy;
 use nexus_types::external_api::views::SledProvisionPolicy;
-use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SledUuid;
 use strum::EnumCount;
 
@@ -253,7 +252,7 @@ pub(super) async fn sled_set_policy(
     expected_old_policy: Expected<SledPolicy>,
 ) -> Result<()> {
     let (authz_sled, _) = LookupPath::new(&opctx, datastore)
-        .sled_id(sled_id.into_untyped_uuid())
+        .sled_id(sled_id)
         .fetch_for(authz::Action::Modify)
         .await
         .unwrap();
@@ -301,7 +300,7 @@ pub(super) async fn sled_set_state(
     expected_old_state: Expected<SledState>,
 ) -> Result<()> {
     let (authz_sled, _) = LookupPath::new(&opctx, datastore)
-        .sled_id(sled_id.into_untyped_uuid())
+        .sled_id(sled_id)
         .fetch_for(authz::Action::Modify)
         .await
         .unwrap();

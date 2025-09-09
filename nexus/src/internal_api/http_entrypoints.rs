@@ -69,9 +69,7 @@ use omicron_common::api::internal::nexus::RepairFinishInfo;
 use omicron_common::api::internal::nexus::RepairProgress;
 use omicron_common::api::internal::nexus::RepairStartInfo;
 use omicron_common::api::internal::nexus::SledVmmState;
-use omicron_uuid_kinds::GenericUuid;
-use omicron_uuid_kinds::InstanceUuid;
-use omicron_uuid_kinds::SupportBundleUuid;
+use omicron_uuid_kinds::*;
 use range_requests::PotentialRange;
 use std::collections::BTreeMap;
 
@@ -98,10 +96,8 @@ impl NexusInternalApi for NexusInternalApiImpl {
         let path = path_params.into_inner();
         let sled_id = &path.sled_id;
         let handler = async {
-            let (.., sled) = nexus
-                .sled_lookup(&opctx, &sled_id.into_untyped_uuid())?
-                .fetch()
-                .await?;
+            let (.., sled) =
+                nexus.sled_lookup(&opctx, &sled_id)?.fetch().await?;
             Ok(HttpResponseOk(sled.into()))
         };
         apictx
@@ -122,9 +118,7 @@ impl NexusInternalApi for NexusInternalApiImpl {
         let info = sled_info.into_inner();
         let sled_id = &path.sled_id;
         let handler = async {
-            nexus
-                .upsert_sled(&opctx, sled_id.into_untyped_uuid(), info)
-                .await?;
+            nexus.upsert_sled(&opctx, *sled_id, info).await?;
             Ok(HttpResponseUpdatedNoContent())
         };
         apictx
@@ -143,12 +137,7 @@ impl NexusInternalApi for NexusInternalApiImpl {
         let path = path_params.into_inner();
         let sled_id = &path.sled_id;
         let handler = async {
-            nexus
-                .sled_request_firewall_rules(
-                    &opctx,
-                    sled_id.into_untyped_uuid(),
-                )
-                .await?;
+            nexus.sled_request_firewall_rules(&opctx, *sled_id).await?;
             Ok(HttpResponseUpdatedNoContent())
         };
         apictx
@@ -234,11 +223,7 @@ impl NexusInternalApi for NexusInternalApiImpl {
             let opctx =
                 crate::context::op_context_for_internal_api(&rqctx).await;
             let instance = nexus
-                .instance_migrate(
-                    &opctx,
-                    InstanceUuid::from_untyped_uuid(path.instance_id),
-                    migrate,
-                )
+                .instance_migrate(&opctx, path.instance_id, migrate)
                 .await?;
             Ok(HttpResponseOk(instance.into()))
         };

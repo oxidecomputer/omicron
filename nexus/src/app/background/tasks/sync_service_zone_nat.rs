@@ -19,7 +19,6 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_sled_agent_shared::inventory::OmicronZoneType;
 use omicron_common::address::{MAX_PORT, MIN_PORT};
-use omicron_uuid_kinds::GenericUuid;
 use serde_json::json;
 use std::sync::Arc;
 
@@ -105,7 +104,7 @@ impl BackgroundTask for ServiceZoneNatTracker {
 
             for sa in &collection.sled_agents {
                 let (_, sled) = match LookupPath::new(opctx, &*self.datastore)
-                    .sled_id(sa.sled_id.into_untyped_uuid())
+                    .sled_id(sa.sled_id)
                     .fetch()
                     .await
                     .context("failed to look up sled")

@@ -53,8 +53,6 @@ use omicron_common::policy::NEXUS_REDUNDANCY;
 use omicron_common::policy::OXIMETER_REDUNDANCY;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
-use omicron_uuid_kinds::SledUuid;
-use omicron_uuid_kinds::ZpoolUuid;
 use slog::Logger;
 use slog::error;
 use slog_error_chain::InlineErrorChain;
@@ -264,8 +262,7 @@ impl PlanningInputFromDb<'_> {
             let mut zpools = BTreeMap::new();
             for (zpool, disk) in self.zpool_rows {
                 let sled_zpool_names =
-                    zpools.entry(zpool.sled_id).or_insert_with(BTreeMap::new);
-                let zpool_id = ZpoolUuid::from_untyped_uuid(zpool.id());
+                    zpools.entry(zpool.sled_id()).or_insert_with(BTreeMap::new);
                 let disk = SledDisk {
                     disk_identity: DiskIdentity {
                         vendor: disk.vendor.clone(),
@@ -276,7 +273,7 @@ impl PlanningInputFromDb<'_> {
                     policy: disk.disk_policy.into(),
                     state: disk.disk_state.into(),
                 };
-                sled_zpool_names.insert(zpool_id, disk);
+                sled_zpool_names.insert(zpool.id(), disk);
             }
             zpools
         };
@@ -296,8 +293,6 @@ impl PlanningInputFromDb<'_> {
                     serial_number: sled_row.serial_number().to_owned(),
                 },
             };
-            // TODO-cleanup use `TypedUuid` everywhere
-            let sled_id = SledUuid::from_untyped_uuid(sled_id);
             builder.add_sled(sled_id, sled_details).map_err(|e| {
                 Error::internal_error(&format!(
                     "unexpectedly failed to add sled to planning input: {e}"

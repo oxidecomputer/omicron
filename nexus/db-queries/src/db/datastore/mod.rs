@@ -39,7 +39,9 @@ use omicron_common::api::external::ResourceType;
 use omicron_common::backoff::{
     BackoffError, retry_notify, retry_policy_internal_service,
 };
-use omicron_uuid_kinds::{GenericUuid, OmicronZoneUuid, SledUuid};
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::OmicronZoneUuid;
+use omicron_uuid_kinds::SledUuid;
 use slog::Logger;
 use std::net::Ipv6Addr;
 use std::num::NonZeroU32;
@@ -429,7 +431,7 @@ impl DataStore {
                 e,
                 ErrorHandler::NotFoundByLookup(
                     ResourceType::Sled,
-                    LookupType::ById(sled_id.into_untyped_uuid()),
+                    LookupType::by_id(sled_id),
                 ),
             )
         })?;
@@ -527,6 +529,7 @@ mod test {
     use omicron_uuid_kinds::SiloUserUuid;
     use omicron_uuid_kinds::SledUuid;
     use omicron_uuid_kinds::VolumeUuid;
+    use omicron_uuid_kinds::ZpoolUuid;
     use std::collections::HashMap;
     use std::collections::HashSet;
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddrV6};
@@ -766,7 +769,7 @@ mod test {
             serial,
             TEST_MODEL.into(),
             kind,
-            sled_id.into_untyped_uuid(),
+            sled_id,
         );
         datastore
             .physical_disk_insert(opctx, physical_disk.clone())
@@ -781,7 +784,7 @@ mod test {
         opctx: &OpContext,
         sled_id: SledUuid,
         physical_disk_id: PhysicalDiskUuid,
-    ) -> Uuid {
+    ) -> ZpoolUuid {
         let zpool_id = create_test_zpool_not_in_inventory(
             datastore,
             opctx,
@@ -803,11 +806,11 @@ mod test {
         opctx: &OpContext,
         sled_id: SledUuid,
         physical_disk_id: PhysicalDiskUuid,
-    ) -> Uuid {
-        let zpool_id = Uuid::new_v4();
+    ) -> ZpoolUuid {
+        let zpool_id = ZpoolUuid::new_v4();
         let zpool = Zpool::new(
             zpool_id,
-            sled_id.into_untyped_uuid(),
+            sled_id,
             physical_disk_id,
             ByteCount::from(0).into(),
         );
@@ -819,7 +822,7 @@ mod test {
     // collection UUID.
     async fn add_test_zpool_to_inventory(
         datastore: &DataStore,
-        zpool_id: Uuid,
+        zpool_id: ZpoolUuid,
         sled_id: SledUuid,
     ) {
         use nexus_db_schema::schema::inv_zpool::dsl;
@@ -829,7 +832,7 @@ mod test {
         let inv_pool = nexus_db_model::InvZpool {
             inv_collection_id: inv_collection_id.into(),
             time_collected,
-            id: zpool_id,
+            id: zpool_id.into(),
             sled_id: to_db_typed_uuid(sled_id),
             total_size: test_zpool_size().into(),
         };
@@ -981,7 +984,7 @@ mod test {
             #[derive(Copy, Clone)]
             struct Zpool {
                 sled_id: SledUuid,
-                pool_id: Uuid,
+                pool_id: ZpoolUuid,
             }
 
             // 1 pool per disk
@@ -1117,7 +1120,7 @@ mod test {
                 }
 
                 // Must be 3 unique zpools
-                assert!(disk_zpools.insert(dataset.pool_id));
+                assert!(disk_zpools.insert(dataset.pool_id()));
 
                 assert_eq!(volume_id, region.volume_id());
                 assert_eq!(ByteCount::from(4096), region.block_size());
@@ -1199,7 +1202,7 @@ mod test {
                 }
 
                 // Must be 3 unique zpools
-                assert!(disk_zpools.insert(dataset.pool_id));
+                assert!(disk_zpools.insert(dataset.pool_id()));
 
                 // Must be 3 unique sleds
                 let sled_id = test_datasets
@@ -1366,17 +1369,18 @@ mod test {
         .await;
 
         // Create enough zpools for region allocation to succeed
-        let zpool_ids: Vec<Uuid> = stream::iter(0..REGION_REDUNDANCY_THRESHOLD)
-            .then(|_| {
-                create_test_zpool_not_in_inventory(
-                    &datastore,
-                    &opctx,
-                    sled_id,
-                    physical_disk_id,
-                )
-            })
-            .collect()
-            .await;
+        let zpool_ids: Vec<ZpoolUuid> =
+            stream::iter(0..REGION_REDUNDANCY_THRESHOLD)
+                .then(|_| {
+                    create_test_zpool_not_in_inventory(
+                        &datastore,
+                        &opctx,
+                        sled_id,
+                        physical_disk_id,
+                    )
+                })
+                .collect()
+                .await;
 
         let bogus_addr = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 8080, 0, 0);
 
@@ -1459,7 +1463,7 @@ mod test {
         .await;
 
         // 1 less than REDUNDANCY level of zpools
-        let zpool_ids: Vec<Uuid> =
+        let zpool_ids: Vec<ZpoolUuid> =
             stream::iter(0..REGION_REDUNDANCY_THRESHOLD - 1)
                 .then(|_| {
                     create_test_zpool(

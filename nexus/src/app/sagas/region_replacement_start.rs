@@ -785,6 +785,7 @@ pub(crate) mod test {
     use nexus_types::identity::Asset;
     use omicron_uuid_kinds::DatasetUuid;
     use omicron_uuid_kinds::VolumeUuid;
+    use omicron_uuid_kinds::ZpoolUuid;
     use sled_agent_client::VolumeConstructionRequest;
     use uuid::Uuid;
 
@@ -900,22 +901,22 @@ pub(crate) mod test {
         let datasets = vec![
             CrucibleDataset::new(
                 DatasetUuid::new_v4(),
-                Uuid::new_v4(),
+                ZpoolUuid::new_v4(),
                 "[fd00:1122:3344:101::1]:12345".parse().unwrap(),
             ),
             CrucibleDataset::new(
                 DatasetUuid::new_v4(),
-                Uuid::new_v4(),
+                ZpoolUuid::new_v4(),
                 "[fd00:1122:3344:102::1]:12345".parse().unwrap(),
             ),
             CrucibleDataset::new(
                 DatasetUuid::new_v4(),
-                Uuid::new_v4(),
+                ZpoolUuid::new_v4(),
                 "[fd00:1122:3344:103::1]:12345".parse().unwrap(),
             ),
             CrucibleDataset::new(
                 DatasetUuid::new_v4(),
-                Uuid::new_v4(),
+                ZpoolUuid::new_v4(),
                 "[fd00:1122:3344:104::1]:12345".parse().unwrap(),
             ),
         ];
