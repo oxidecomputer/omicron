@@ -1573,21 +1573,20 @@ impl<'a> BlueprintBuilder<'a> {
     }
 
     // Determines the appropriate generation number for a new Nexus zone.
-    //
-    // Returns `Some(generation)` if a generation can be determined from existing
-    // Nexus zones, or `None` if no existing Nexus zones exist.
+    // This generation is based on the generation number used by existing
+    // Nexus zones.
     //
     // The logic is:
     // - If any existing Nexus zone has the same image source, reuse its generation
     // - Otherwise, use the highest existing generation + 1
-    // - If no existing zones exist, return None
+    // - If no existing zones exist, return an error
     //
     // This function also validates that the determined generation matches the
     // top-level current blueprint generation.
     fn determine_nexus_generation(
         &self,
         image_source: &BlueprintZoneImageSource,
-    ) -> Result<Option<Generation>, Error> {
+    ) -> Result<Generation, Error> {
         // If any other Nexus in the blueprint has the same image source,
         // use it. Otherwise, use the highest generation number + 1.
         //
@@ -1635,34 +1634,37 @@ impl<'a> BlueprintBuilder<'a> {
             None => highest_seen_generation.map(|gen| gen.next()),
         };
 
-        // Validate that the determined generation matches the top-level current blueprint generation
-        if let Some(gen) = determined_generation {
-            let current_blueprint_gen = self.parent_blueprint.nexus_generation;
-            if same_image_nexus_generation.is_some() {
-                // Existing image - should either match the currently-used Nexus
-                // generation, or be part of a "generation + 1".
-                let matches_current_nexus = current_blueprint_gen == gen;
-                let matches_next_nexus = current_blueprint_gen.next() == gen;
+        let Some(gen) = determined_generation else {
+            return Err(Error::NoNexusZonesInParentBlueprint);
+        };
 
-                if !matches_current_nexus && !matches_next_nexus {
-                    return Err(Error::OldImageNexusGenerationMismatch {
-                        expected: current_blueprint_gen,
-                        actual: gen,
-                    });
-                }
-            } else {
-                // New image source - should be current blueprint generation + 1
-                let expected_gen = current_blueprint_gen.next();
-                if gen != expected_gen {
-                    return Err(Error::NewImageNexusGenerationMismatch {
-                        expected: expected_gen,
-                        actual: gen,
-                    });
-                }
+        // Validate that the determined generation matches the top-level current
+        // blueprint generation
+        let current_blueprint_gen = self.parent_blueprint.nexus_generation;
+        if same_image_nexus_generation.is_some() {
+            // Existing image - should either match the currently-used Nexus
+            // generation, or be part of a "generation + 1".
+            let matches_current_nexus = current_blueprint_gen == gen;
+            let matches_next_nexus = current_blueprint_gen.next() == gen;
+
+            if !matches_current_nexus && !matches_next_nexus {
+                return Err(Error::OldImageNexusGenerationMismatch {
+                    expected: current_blueprint_gen,
+                    actual: gen,
+                });
+            }
+        } else {
+            // New image source - should be current blueprint generation + 1
+            let expected_gen = current_blueprint_gen.next();
+            if gen != expected_gen {
+                return Err(Error::NewImageNexusGenerationMismatch {
+                    expected: expected_gen,
+                    actual: gen,
+                });
             }
         }
 
-        Ok(determined_generation)
+        Ok(gen)
     }
 
     /// Adds a nexus zone on this sled.
@@ -1691,12 +1693,7 @@ impl<'a> BlueprintBuilder<'a> {
             };
 
         let nexus_generation =
-            match self.determine_nexus_generation(&image_source)? {
-                Some(generation) => generation,
-                None => {
-                    return Err(Error::NoNexusZonesInParentBlueprint);
-                }
-            };
+            self.determine_nexus_generation(&image_source)?;
 
         self.sled_add_zone_nexus_with_config(
             sled_id,
@@ -4199,7 +4196,8 @@ pub mod test {
         verify_blueprint(&blueprint);
 
         // Manually modify the blueprint to create a mismatch:
-        // Set the top-level nexus_generation to 2, but keep the zone generation at 1
+        // Set the top-level nexus_generation to 2, but keep the zone generation
+        // at 1
         blueprint.nexus_generation = Generation::new().next();
 
         let builder = BlueprintBuilder::new_based_on(
@@ -4212,10 +4210,11 @@ pub mod test {
         )
         .expect("failed to create builder");
 
-        let image_source = BlueprintZoneImageSource::InstallDataset; // Same as existing
+        // Same as existing
+        let image_source = BlueprintZoneImageSource::InstallDataset;
 
-        // Try to add another Nexus zone with same image source
-        // This should fail because existing zone has generation 1 but blueprint has generation 2
+        // Try to add another Nexus zone with same image source This should fail
+        // because existing zone has generation 1 but blueprint has generation 2
         let result = builder.determine_nexus_generation(&image_source);
 
         match result {
@@ -4223,8 +4222,10 @@ pub mod test {
                 expected,
                 actual,
             }) => {
-                assert_eq!(expected, Generation::new().next()); // Blueprint generation
-                assert_eq!(actual, Generation::new()); // Zone generation
+                // Blueprint generation
+                assert_eq!(expected, Generation::new().next());
+                // Zone generation
+                assert_eq!(actual, Generation::new());
             }
             other => panic!(
                 "Expected OldImageNexusGenerationMismatch error, got: {:?}",
@@ -4253,7 +4254,9 @@ pub mod test {
         // The zone has generation 1 and blueprint has generation 1
         // Now modify the blueprint generation to be different from what
         // the new image source logic would expect
-        blueprint.nexus_generation = Generation::new().next().next(); // Set to generation 3
+        //
+        // Set to generation 3
+        blueprint.nexus_generation = Generation::new().next().next();
 
         let builder = BlueprintBuilder::new_based_on(
             &logctx.log,
@@ -4265,7 +4268,8 @@ pub mod test {
         )
         .expect("failed to create builder");
 
-        // Use a different image source (this should get existing generation + 1 = 2)
+        // Use a different image source (this should get existing generation + 1
+        // = 2)
         let different_image_source = BlueprintZoneImageSource::Artifact {
             version: BlueprintArtifactVersion::Available {
                 version: ArtifactVersion::new_const("2.0.0"),
@@ -4273,8 +4277,9 @@ pub mod test {
             hash: ArtifactHash([0x42; 32]),
         };
 
-        // Try to add a Nexus zone with different image source
-        // This should fail because the calculated generation (2) doesn't match blueprint generation + 1 (4)
+        // Try to add a Nexus zone with different image source This should fail
+        // because the calculated generation (2) doesn't match blueprint
+        // generation + 1 (4)
         let result =
             builder.determine_nexus_generation(&different_image_source);
 
@@ -4283,8 +4288,10 @@ pub mod test {
                 expected,
                 actual,
             }) => {
-                assert_eq!(expected, Generation::new().next().next().next()); // Blueprint generation + 1 = 4
-                assert_eq!(actual, Generation::new().next()); // Calculated generation = 2
+                // Blueprint generation + 1 = 4
+                assert_eq!(expected, Generation::new().next().next().next());
+                // Calculated generation = 2
+                assert_eq!(actual, Generation::new().next());
             }
             other => panic!(
                 "Expected NewImageNexusGenerationMismatch error, got: {:?}",
