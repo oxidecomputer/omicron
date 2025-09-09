@@ -28,8 +28,6 @@ use nexus_mgs_updates::ArtifactCache;
 use nexus_mgs_updates::MgsUpdateDriver;
 use nexus_types::deployment::PendingMgsUpdates;
 use nexus_types::deployment::ReconfiguratorConfigParam;
-use nexus_types::quiesce::SagaQuiesceHandle;
-use omicron_common::address::DENDRITE_PORT;
 use omicron_common::address::MGD_PORT;
 use omicron_common::address::MGS_PORT;
 use omicron_common::api::external::ByteCount;
