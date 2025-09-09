@@ -46,7 +46,7 @@ use crate::job::Jobs;
 /// to as "v8", "version 8", or "release 8" to customers). The use of semantic
 /// versioning is mostly to hedge for perhaps wanting something more granular in
 /// the future.
-const BASE_VERSION: Version = Version::new(16, 0, 0);
+const BASE_VERSION: Version = Version::new(16, 1, 0);
 
 const RETRY_ATTEMPTS: usize = 3;
 
