@@ -1067,7 +1067,7 @@ mod test {
             address = "[::1]:4676"
             [initial_reconfigurator_config]
             planner_enabled = true
-            planner_switches.add_zones_with_mupdate_override = true
+            planner_config.add_zones_with_mupdate_override = true
             [background_tasks]
             dns_internal.period_secs_config = 1
             dns_internal.period_secs_servers = 2
