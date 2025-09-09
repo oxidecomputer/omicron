@@ -9,7 +9,7 @@ use super::BlueprintZoneConfig;
 use super::BlueprintZoneImageSource;
 use super::CockroachDbPreserveDowngrade;
 use super::PendingMgsUpdates;
-use super::PlannerChickenSwitches;
+use super::PlannerConfig;
 
 use daft::Diffable;
 use indent_write::fmt::IndentWriter;
@@ -54,8 +54,8 @@ pub struct PlanningReport {
     /// The blueprint produced by the planning run this report describes.
     pub blueprint_id: BlueprintUuid,
 
-    /// The set of "chicken switches" in effect for this planning run.
-    pub chicken_switches: PlannerChickenSwitches,
+    /// The configuration in effect for this planning run.
+    pub planner_config: PlannerConfig,
 
     // Step reports.
     pub expunge: PlanningExpungeStepReport,
@@ -72,7 +72,7 @@ impl PlanningReport {
     pub fn new(blueprint_id: BlueprintUuid) -> Self {
         Self {
             blueprint_id,
-            chicken_switches: PlannerChickenSwitches::default(),
+            planner_config: PlannerConfig::default(),
             expunge: PlanningExpungeStepReport::new(),
             decommission: PlanningDecommissionStepReport::new(),
             noop_image_source: PlanningNoopImageSourceStepReport::new(),
@@ -109,7 +109,7 @@ impl fmt::Display for PlanningReport {
         } else {
             let Self {
                 blueprint_id,
-                chicken_switches,
+                planner_config,
                 expunge,
                 decommission,
                 noop_image_source,
@@ -120,12 +120,8 @@ impl fmt::Display for PlanningReport {
                 cockroachdb_settings,
             } = self;
             writeln!(f, "planning report for blueprint {blueprint_id}:")?;
-            if *chicken_switches != PlannerChickenSwitches::default() {
-                writeln!(
-                    f,
-                    "chicken switches:\n{}",
-                    chicken_switches.display()
-                )?;
+            if *planner_config != PlannerConfig::default() {
+                writeln!(f, "planner config:\n{}", planner_config.display())?;
             }
             expunge.fmt(f)?;
             decommission.fmt(f)?;
@@ -572,7 +568,7 @@ pub struct PlanningAddStepReport {
     /// This is typically a list of MUPdate-related reasons.
     pub add_update_blocked_reasons: Vec<String>,
 
-    /// The value of the homonymous chicken switch. (What this really means is
+    /// The value of the homonymous planner config. (What this really means is
     /// that zone adds happen despite being blocked by one or more
     /// MUPdate-related reasons.)
     pub add_zones_with_mupdate_override: bool,
@@ -737,7 +733,7 @@ impl fmt::Display for PlanningAddStepReport {
                 f,
                 "* adding zones despite being blocked, \
                    as specified by the `add_zones_with_mupdate_override` \
-                   chicken switch"
+                   planner config option"
             )?;
         }
 

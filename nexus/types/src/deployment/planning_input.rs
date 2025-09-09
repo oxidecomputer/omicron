@@ -10,7 +10,7 @@ use super::BlueprintZoneImageSource;
 use super::OmicronZoneExternalIp;
 use super::OmicronZoneNetworkResources;
 use super::OmicronZoneNic;
-use crate::deployment::PlannerChickenSwitches;
+use crate::deployment::PlannerConfig;
 use crate::external_api::views::PhysicalDiskPolicy;
 use crate::external_api::views::PhysicalDiskState;
 use crate::external_api::views::SledPolicy;
@@ -219,8 +219,8 @@ impl PlanningInput {
         &self.policy.old_repo
     }
 
-    pub fn chicken_switches(&self) -> &PlannerChickenSwitches {
-        &self.policy.chicken_switches
+    pub fn planner_config(&self) -> &PlannerConfig {
+        &self.policy.planner_config
     }
 
     pub fn service_ip_pool_ranges(&self) -> &[IpRange] {
@@ -1045,8 +1045,8 @@ pub struct Policy {
     /// their image sources. See RFD 565 §9.
     pub old_repo: TufRepoPolicy,
 
-    /// Runtime chicken switches (feature flags) to control planner behavior.
-    pub chicken_switches: PlannerChickenSwitches,
+    /// Runtime configuration (feature flags) to control planner behavior.
+    pub planner_config: PlannerConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -1316,7 +1316,7 @@ impl PlanningInputBuilder {
                 oximeter_read_policy: OximeterReadPolicy::new(1),
                 tuf_repo: TufRepoPolicy::initial(),
                 old_repo: TufRepoPolicy::initial(),
-                chicken_switches: PlannerChickenSwitches::default(),
+                planner_config: PlannerConfig::default(),
             },
             internal_dns_version: Generation::new(),
             external_dns_version: Generation::new(),

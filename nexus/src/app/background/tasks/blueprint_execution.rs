@@ -254,7 +254,7 @@ mod test {
     use omicron_common::api::external::Generation;
     use omicron_common::zpool_name::ZpoolName;
     use omicron_uuid_kinds::BlueprintUuid;
-    use omicron_uuid_kinds::GenericUuid;
+
     use omicron_uuid_kinds::OmicronZoneUuid;
     use omicron_uuid_kinds::PhysicalDiskUuid;
     use omicron_uuid_kinds::SledUuid;
@@ -399,7 +399,7 @@ mod test {
             };
             let bogus_repo_depot_port = 0;
             let update = SledUpdate::new(
-                sled_id.into_untyped_uuid(),
+                *sled_id,
                 addr,
                 bogus_repo_depot_port,
                 SledBaseboard {
@@ -525,8 +525,8 @@ mod test {
 
             let pool_id = dataset.dataset.pool_name.id();
             let zpool = Zpool::new(
-                pool_id.into_untyped_uuid(),
-                sled_id.into_untyped_uuid(),
+                pool_id,
+                sled_id,
                 PhysicalDiskUuid::new_v4(),
                 external::ByteCount::from(0).into(),
             );

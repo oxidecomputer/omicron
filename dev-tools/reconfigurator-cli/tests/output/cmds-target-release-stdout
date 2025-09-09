@@ -14,7 +14,7 @@ internal DNS generations: 1
 external DNS generations: 1
 target number of Nexus instances: default
 target release (generation 1): unset
-chicken switches:
+planner config:
     add zones with mupdate override:   false
 
 
@@ -99,7 +99,7 @@ target release (generation 2): 1.0.0 (system-update-v1.0.0.zip)
     artifact: 32307d6d75c9707e8499ba4a4d379f99c0358237b6e190ff6a8024b470f62342 switch_rot_image_b (fake-switch-rot version 1.0.0)
     artifact: 70836d170abd5621f95bb4225987b27b3d3dd6168e73cd60e44309bdfeb94e98 switch_rot_bootloader (fake-switch-rot-bootloader version 1.0.0)
     artifact: c6ae866031d1183094c92cde9d9d1fd5f18356abc81a842ce31471b473fd5582 installinator_document (installinator_document version 1.0.0)
-chicken switches:
+planner config:
     add zones with mupdate override:   false
 
 
@@ -121,7 +121,7 @@ internal DNS generations:
 external DNS generations: 
 target number of Nexus instances: default
 target release (generation 1): unset
-chicken switches:
+planner config:
     add zones with mupdate override:   false
 
 
@@ -177,7 +177,7 @@ target release (generation 2): 1.0.0 (system-update-v1.0.0.zip)
     artifact: 32307d6d75c9707e8499ba4a4d379f99c0358237b6e190ff6a8024b470f62342 switch_rot_image_b (fake-switch-rot version 1.0.0)
     artifact: 70836d170abd5621f95bb4225987b27b3d3dd6168e73cd60e44309bdfeb94e98 switch_rot_bootloader (fake-switch-rot-bootloader version 1.0.0)
     artifact: c6ae866031d1183094c92cde9d9d1fd5f18356abc81a842ce31471b473fd5582 installinator_document (installinator_document version 1.0.0)
-chicken switches:
+planner config:
     add zones with mupdate override:   false
 
 
@@ -216,9 +216,6 @@ INFO configuring MGS-driven update, artifact_version: 1.0.0, artifact_hash: 5b0f
 INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1 based on parent blueprint dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21
 planning report for blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1:
-chicken switches:
-    add zones with mupdate override:   false
-
 * 1 pending MGS update:
   * model0:serial0: RotBootloader(PendingMgsUpdateRotBootloaderDetails { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: NoValidVersion })
 * discretionary zones placed:
@@ -493,9 +490,6 @@ INFO MGS-driven update not yet completed (will keep it), artifact_version: 1.0.0
 INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4 based on parent blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
 planning report for blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4:
-chicken switches:
-    add zones with mupdate override:   false
-
 * 1 pending MGS update:
   * model0:serial0: RotBootloader(PendingMgsUpdateRotBootloaderDetails { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: NoValidVersion })
 * zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
@@ -557,9 +551,6 @@ INFO configuring MGS-driven update, artifact_version: 1.0.0, artifact_hash: d11e
 INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint af934083-59b5-4bf6-8966-6fb5292c29e1 based on parent blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4
 planning report for blueprint af934083-59b5-4bf6-8966-6fb5292c29e1:
-chicken switches:
-    add zones with mupdate override:   false
-
 * 1 pending MGS update:
   * model0:serial0: Rot(PendingMgsUpdateRotDetails { expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: NoValidVersion, expected_persistent_boot_preference: A, expected_pending_persistent_boot_preference: None, expected_transient_boot_preference: None })
 * zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
@@ -630,9 +621,6 @@ INFO configuring MGS-driven update, artifact_version: 1.0.0, artifact_hash: 6846
 INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint df06bb57-ad42-4431-9206-abff322896c7 based on parent blueprint af934083-59b5-4bf6-8966-6fb5292c29e1
 planning report for blueprint df06bb57-ad42-4431-9206-abff322896c7:
-chicken switches:
-    add zones with mupdate override:   false
-
 * 1 pending MGS update:
   * model0:serial0: Sp(PendingMgsUpdateSpDetails { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: NoValidVersion })
 * zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
@@ -704,9 +692,6 @@ INFO configuring MGS-driven update, artifact_version: 1.0.0, artifact_hash: 2053
 INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba based on parent blueprint df06bb57-ad42-4431-9206-abff322896c7
 planning report for blueprint 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba:
-chicken switches:
-    add zones with mupdate override:   false
-
 * 1 pending MGS update:
   * model0:serial0: HostPhase1(PendingMgsUpdateHostPhase1Details { expected_active_phase_1_slot: A, expected_boot_disk: A, expected_active_phase_1_hash: ArtifactHash("0101010101010101010101010101010101010101010101010101010101010101"), expected_active_phase_2_hash: ArtifactHash("0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a"), expected_inactive_phase_1_hash: ArtifactHash("0202020202020202020202020202020202020202020202020202020202020202"), expected_inactive_phase_2_hash: ArtifactHash("f3dd0c7a1bd4500ea0d8bcf67581f576d47752b2f1998a4cb0f0c3155c483008"), sled_agent_address: [fd00:1122:3344:101::1]:12345 })
 * zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
@@ -829,9 +814,6 @@ INFO MGS-driven update not yet completed (will keep it), artifact_version: 1.0.0
 INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint 9034c710-3e57-45f3-99e5-4316145e87ac based on parent blueprint 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba
 planning report for blueprint 9034c710-3e57-45f3-99e5-4316145e87ac:
-chicken switches:
-    add zones with mupdate override:   false
-
 * 1 pending MGS update:
   * model0:serial0: HostPhase1(PendingMgsUpdateHostPhase1Details { expected_active_phase_1_slot: A, expected_boot_disk: A, expected_active_phase_1_hash: ArtifactHash("0101010101010101010101010101010101010101010101010101010101010101"), expected_active_phase_2_hash: ArtifactHash("0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a"), expected_inactive_phase_1_hash: ArtifactHash("0202020202020202020202020202020202020202020202020202020202020202"), expected_inactive_phase_2_hash: ArtifactHash("f3dd0c7a1bd4500ea0d8bcf67581f576d47752b2f1998a4cb0f0c3155c483008"), sled_agent_address: [fd00:1122:3344:101::1]:12345 })
 * zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
@@ -892,9 +874,6 @@ INFO MGS-driven update not yet completed (will keep it), artifact_version: 1.0.0
 INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint d60afc57-f15d-476c-bd0f-b1071e2bb976 based on parent blueprint 9034c710-3e57-45f3-99e5-4316145e87ac
 planning report for blueprint d60afc57-f15d-476c-bd0f-b1071e2bb976:
-chicken switches:
-    add zones with mupdate override:   false
-
 * 1 pending MGS update:
   * model0:serial0: HostPhase1(PendingMgsUpdateHostPhase1Details { expected_active_phase_1_slot: A, expected_boot_disk: A, expected_active_phase_1_hash: ArtifactHash("0101010101010101010101010101010101010101010101010101010101010101"), expected_active_phase_2_hash: ArtifactHash("0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a"), expected_inactive_phase_1_hash: ArtifactHash("0202020202020202020202020202020202020202020202020202020202020202"), expected_inactive_phase_2_hash: ArtifactHash("f3dd0c7a1bd4500ea0d8bcf67581f576d47752b2f1998a4cb0f0c3155c483008"), sled_agent_address: [fd00:1122:3344:101::1]:12345 })
 * zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
@@ -954,9 +933,6 @@ INFO keeping apparently-impossible MGS-driven update (waiting for recent update 
 INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint a5a8f242-ffa5-473c-8efd-2acf2dc0b736 based on parent blueprint d60afc57-f15d-476c-bd0f-b1071e2bb976
 planning report for blueprint a5a8f242-ffa5-473c-8efd-2acf2dc0b736:
-chicken switches:
-    add zones with mupdate override:   false
-
 * 1 pending MGS update:
   * model0:serial0: HostPhase1(PendingMgsUpdateHostPhase1Details { expected_active_phase_1_slot: A, expected_boot_disk: A, expected_active_phase_1_hash: ArtifactHash("0101010101010101010101010101010101010101010101010101010101010101"), expected_active_phase_2_hash: ArtifactHash("0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a"), expected_inactive_phase_1_hash: ArtifactHash("0202020202020202020202020202020202020202020202020202020202020202"), expected_inactive_phase_2_hash: ArtifactHash("f3dd0c7a1bd4500ea0d8bcf67581f576d47752b2f1998a4cb0f0c3155c483008"), sled_agent_address: [fd00:1122:3344:101::1]:12345 })
 * zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
@@ -1018,9 +994,6 @@ INFO configuring MGS-driven update, artifact_version: 1.0.0, artifact_hash: 5b0f
 INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint 626487fa-7139-45ec-8416-902271fc730b based on parent blueprint a5a8f242-ffa5-473c-8efd-2acf2dc0b736
 planning report for blueprint 626487fa-7139-45ec-8416-902271fc730b:
-chicken switches:
-    add zones with mupdate override:   false
-
 * 1 pending MGS update:
   * model1:serial1: RotBootloader(PendingMgsUpdateRotBootloaderDetails { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: NoValidVersion })
 * zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
@@ -1093,9 +1066,6 @@ INFO configuring MGS-driven update, artifact_version: 1.0.0, artifact_hash: 5b0f
 INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint c1a0d242-9160-40f4-96ae-61f8f40a0b1b based on parent blueprint 626487fa-7139-45ec-8416-902271fc730b
 planning report for blueprint c1a0d242-9160-40f4-96ae-61f8f40a0b1b:
-chicken switches:
-    add zones with mupdate override:   false
-
 * 1 pending MGS update:
   * model1:serial1: RotBootloader(PendingMgsUpdateRotBootloaderDetails { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: Version(ArtifactVersion("0.5.0")) })
 * zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
@@ -1163,9 +1133,6 @@ INFO configuring MGS-driven update, artifact_version: 1.0.0, artifact_hash: d11e
 INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint afb09faf-a586-4483-9289-04d4f1d8ba23 based on parent blueprint c1a0d242-9160-40f4-96ae-61f8f40a0b1b
 planning report for blueprint afb09faf-a586-4483-9289-04d4f1d8ba23:
-chicken switches:
-    add zones with mupdate override:   false
-
 * 1 pending MGS update:
   * model1:serial1: Rot(PendingMgsUpdateRotDetails { expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: NoValidVersion, expected_persistent_boot_preference: A, expected_pending_persistent_boot_preference: None, expected_transient_boot_preference: None })
 * zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
@@ -1237,9 +1204,6 @@ INFO configuring MGS-driven update, artifact_version: 1.0.0, artifact_hash: d11e
 INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint ce365dff-2cdb-4f35-a186-b15e20e1e700 based on parent blueprint afb09faf-a586-4483-9289-04d4f1d8ba23
 planning report for blueprint ce365dff-2cdb-4f35-a186-b15e20e1e700:
-chicken switches:
-    add zones with mupdate override:   false
-
 * 1 pending MGS update:
   * model1:serial1: Rot(PendingMgsUpdateRotDetails { expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: Version(ArtifactVersion("0.5.0")), expected_persistent_boot_preference: A, expected_pending_persistent_boot_preference: None, expected_transient_boot_preference: None })
 * zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
@@ -1307,9 +1271,6 @@ INFO configuring MGS-driven update, artifact_version: 1.0.0, artifact_hash: 6846
 INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint 8f2d1f39-7c88-4701-aa43-56bf281b28c1 based on parent blueprint ce365dff-2cdb-4f35-a186-b15e20e1e700
 planning report for blueprint 8f2d1f39-7c88-4701-aa43-56bf281b28c1:
-chicken switches:
-    add zones with mupdate override:   false
-
 * 1 pending MGS update:
   * model1:serial1: Sp(PendingMgsUpdateSpDetails { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: NoValidVersion })
 * zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
@@ -1380,9 +1341,6 @@ INFO configuring MGS-driven update, artifact_version: 1.0.0, artifact_hash: 6846
 INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint 12d602a6-5ab4-487a-b94e-eb30cdf30300 based on parent blueprint 8f2d1f39-7c88-4701-aa43-56bf281b28c1
 planning report for blueprint 12d602a6-5ab4-487a-b94e-eb30cdf30300:
-chicken switches:
-    add zones with mupdate override:   false
-
 * 1 pending MGS update:
   * model1:serial1: Sp(PendingMgsUpdateSpDetails { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: Version(ArtifactVersion("0.5.0")) })
 * zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
@@ -1451,9 +1409,6 @@ INFO configuring MGS-driven update, artifact_version: 1.0.0, artifact_hash: 2053
 INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint 61a93ea3-c872-48e0-aace-e86b0c52b839 based on parent blueprint 12d602a6-5ab4-487a-b94e-eb30cdf30300
 planning report for blueprint 61a93ea3-c872-48e0-aace-e86b0c52b839:
-chicken switches:
-    add zones with mupdate override:   false
-
 * 1 pending MGS update:
   * model1:serial1: HostPhase1(PendingMgsUpdateHostPhase1Details { expected_active_phase_1_slot: A, expected_boot_disk: A, expected_active_phase_1_hash: ArtifactHash("0101010101010101010101010101010101010101010101010101010101010101"), expected_active_phase_2_hash: ArtifactHash("0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a"), expected_inactive_phase_1_hash: ArtifactHash("0202020202020202020202020202020202020202020202020202020202020202"), expected_inactive_phase_2_hash: ArtifactHash("f3dd0c7a1bd4500ea0d8bcf67581f576d47752b2f1998a4cb0f0c3155c483008"), sled_agent_address: [fd00:1122:3344:102::1]:12345 })
 * zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
@@ -1591,9 +1546,6 @@ INFO configuring MGS-driven update, artifact_version: 1.0.0, artifact_hash: 2053
 INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint 27e755bc-dc10-4647-853c-f89bb3a15a2c based on parent blueprint 61a93ea3-c872-48e0-aace-e86b0c52b839
 planning report for blueprint 27e755bc-dc10-4647-853c-f89bb3a15a2c:
-chicken switches:
-    add zones with mupdate override:   false
-
 * 1 pending MGS update:
   * model1:serial1: HostPhase1(PendingMgsUpdateHostPhase1Details { expected_active_phase_1_slot: A, expected_boot_disk: A, expected_active_phase_1_hash: ArtifactHash("0101010101010101010101010101010101010101010101010101010101010101"), expected_active_phase_2_hash: ArtifactHash("0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a"), expected_inactive_phase_1_hash: ArtifactHash("ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"), expected_inactive_phase_2_hash: ArtifactHash("f3dd0c7a1bd4500ea0d8bcf67581f576d47752b2f1998a4cb0f0c3155c483008"), sled_agent_address: [fd00:1122:3344:102::1]:12345 })
 * zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
@@ -1667,9 +1619,6 @@ INFO configuring MGS-driven update, artifact_version: 1.0.0, artifact_hash: 5b0f
 INFO ran out of boards for MGS-driven update
 generated blueprint 9f89efdf-a23e-4137-b7cc-79f4a91cbe1f based on parent blueprint 27e755bc-dc10-4647-853c-f89bb3a15a2c
 planning report for blueprint 9f89efdf-a23e-4137-b7cc-79f4a91cbe1f:
-chicken switches:
-    add zones with mupdate override:   false
-
 * 1 pending MGS update:
   * model2:serial2: RotBootloader(PendingMgsUpdateRotBootloaderDetails { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: NoValidVersion })
 * zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
@@ -1736,9 +1685,6 @@ INFO configuring MGS-driven update, artifact_version: 1.0.0, artifact_hash: d11e
 INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint 9a9e6c32-5a84-4020-a159-33dceff18d35 based on parent blueprint 9f89efdf-a23e-4137-b7cc-79f4a91cbe1f
 planning report for blueprint 9a9e6c32-5a84-4020-a159-33dceff18d35:
-chicken switches:
-    add zones with mupdate override:   false
-
 * 1 pending MGS update:
   * model2:serial2: Rot(PendingMgsUpdateRotDetails { expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: NoValidVersion, expected_persistent_boot_preference: A, expected_pending_persistent_boot_preference: None, expected_transient_boot_preference: None })
 * zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
@@ -1809,9 +1755,6 @@ INFO configuring MGS-driven update, artifact_version: 1.0.0, artifact_hash: d11e
 INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint 13cfdd24-52ba-4e94-8c83-02e3a48fc746 based on parent blueprint 9a9e6c32-5a84-4020-a159-33dceff18d35
 planning report for blueprint 13cfdd24-52ba-4e94-8c83-02e3a48fc746:
-chicken switches:
-    add zones with mupdate override:   false
-
 * 1 pending MGS update:
   * model2:serial2: Rot(PendingMgsUpdateRotDetails { expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: Version(ArtifactVersion("1.0.0")), expected_persistent_boot_preference: B, expected_pending_persistent_boot_preference: None, expected_transient_boot_preference: None })
 * zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
@@ -1884,9 +1827,6 @@ INFO configuring MGS-driven update, artifact_version: 1.0.0, artifact_hash: d11e
 INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint b82656b0-a9be-433d-83d0-e2bdf371777a based on parent blueprint 13cfdd24-52ba-4e94-8c83-02e3a48fc746
 planning report for blueprint b82656b0-a9be-433d-83d0-e2bdf371777a:
-chicken switches:
-    add zones with mupdate override:   false
-
 * 1 pending MGS update:
   * model2:serial2: Rot(PendingMgsUpdateRotDetails { expected_active_slot: ExpectedActiveRotSlot { slot: B, version: ArtifactVersion("1.1.0") }, expected_inactive_version: Version(ArtifactVersion("0.0.2")), expected_persistent_boot_preference: B, expected_pending_persistent_boot_preference: Some(B), expected_transient_boot_preference: None })
 * zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
@@ -1956,9 +1896,6 @@ INFO configuring MGS-driven update, artifact_version: 1.0.0, artifact_hash: d11e
 INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint 31c84831-be52-4630-bc3f-128d72cd8f22 based on parent blueprint b82656b0-a9be-433d-83d0-e2bdf371777a
 planning report for blueprint 31c84831-be52-4630-bc3f-128d72cd8f22:
-chicken switches:
-    add zones with mupdate override:   false
-
 * 1 pending MGS update:
   * model2:serial2: Rot(PendingMgsUpdateRotDetails { expected_active_slot: ExpectedActiveRotSlot { slot: B, version: ArtifactVersion("1.1.0") }, expected_inactive_version: Version(ArtifactVersion("0.0.2")), expected_persistent_boot_preference: B, expected_pending_persistent_boot_preference: None, expected_transient_boot_preference: Some(B) })
 * zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
@@ -2026,9 +1963,6 @@ INFO configuring MGS-driven update, artifact_version: 1.0.0, artifact_hash: 6846
 INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint 778e3f3a-58b1-4a5e-acff-d23c5d7124c2 based on parent blueprint 31c84831-be52-4630-bc3f-128d72cd8f22
 planning report for blueprint 778e3f3a-58b1-4a5e-acff-d23c5d7124c2:
-chicken switches:
-    add zones with mupdate override:   false
-
 * 1 pending MGS update:
   * model2:serial2: Sp(PendingMgsUpdateSpDetails { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: NoValidVersion })
 * zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
@@ -2095,9 +2029,6 @@ INFO configuring MGS-driven update, artifact_version: 1.0.0, artifact_hash: 2053
 INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint 386a7ec3-7c2e-43cf-8f00-999e91e1d5e6 based on parent blueprint 778e3f3a-58b1-4a5e-acff-d23c5d7124c2
 planning report for blueprint 386a7ec3-7c2e-43cf-8f00-999e91e1d5e6:
-chicken switches:
-    add zones with mupdate override:   false
-
 * 1 pending MGS update:
   * model2:serial2: HostPhase1(PendingMgsUpdateHostPhase1Details { expected_active_phase_1_slot: A, expected_boot_disk: A, expected_active_phase_1_hash: ArtifactHash("0101010101010101010101010101010101010101010101010101010101010101"), expected_active_phase_2_hash: ArtifactHash("0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a"), expected_inactive_phase_1_hash: ArtifactHash("0202020202020202020202020202020202020202020202020202020202020202"), expected_inactive_phase_2_hash: ArtifactHash("f3dd0c7a1bd4500ea0d8bcf67581f576d47752b2f1998a4cb0f0c3155c483008"), sled_agent_address: [fd00:1122:3344:103::1]:12345 })
 * zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
@@ -2233,9 +2164,6 @@ INFO ran out of boards for MGS-driven update
 INFO some zones not yet up-to-date, zones_currently_updating: [ZonePropagationIncomplete { zone_id: a67ad53f-d551-40e7-abae-57664779b27b (service), zone_kind: Nexus, reason: MissingInInventory { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("0e32b4a3e5d3668bb1d6a16fb06b74dc60b973fa479dcee0aae3adbb52bf1388") } } }, ZonePropagationIncomplete { zone_id: 43cbc3a6-e640-43f5-a9a2-f83eff427870 (service), zone_kind: Nexus, reason: MissingInInventory { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("0e32b4a3e5d3668bb1d6a16fb06b74dc60b973fa479dcee0aae3adbb52bf1388") } } }, ZonePropagationIncomplete { zone_id: 26fbf986-e560-4449-a351-547d1721b90e (service), zone_kind: Nexus, reason: MissingInInventory { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("0e32b4a3e5d3668bb1d6a16fb06b74dc60b973fa479dcee0aae3adbb52bf1388") } } }]
 generated blueprint e54a0836-53e1-4948-a3af-0b77165289b5 based on parent blueprint 386a7ec3-7c2e-43cf-8f00-999e91e1d5e6
 planning report for blueprint e54a0836-53e1-4948-a3af-0b77165289b5:
-chicken switches:
-    add zones with mupdate override:   false
-
 * waiting to update top-level nexus_generation: pending non-nexus zone updates
 
 
@@ -2299,9 +2227,6 @@ INFO ran out of boards for MGS-driven update
 INFO some zones not yet up-to-date, zones_currently_updating: [ZonePropagationIncomplete { zone_id: 43cbc3a6-e640-43f5-a9a2-f83eff427870 (service), zone_kind: Nexus, reason: MissingInInventory { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("0e32b4a3e5d3668bb1d6a16fb06b74dc60b973fa479dcee0aae3adbb52bf1388") } } }, ZonePropagationIncomplete { zone_id: 26fbf986-e560-4449-a351-547d1721b90e (service), zone_kind: Nexus, reason: MissingInInventory { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("0e32b4a3e5d3668bb1d6a16fb06b74dc60b973fa479dcee0aae3adbb52bf1388") } } }]
 generated blueprint 459a45a5-616e-421f-873b-2fb08c36205c based on parent blueprint e54a0836-53e1-4948-a3af-0b77165289b5
 planning report for blueprint 459a45a5-616e-421f-873b-2fb08c36205c:
-chicken switches:
-    add zones with mupdate override:   false
-
 * waiting to update top-level nexus_generation: pending non-nexus zone updates
 
 
@@ -2361,9 +2286,6 @@ INFO ran out of boards for MGS-driven update
 INFO some zones not yet up-to-date, zones_currently_updating: [ZonePropagationIncomplete { zone_id: 43cbc3a6-e640-43f5-a9a2-f83eff427870 (service), zone_kind: Nexus, reason: MissingInInventory { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("0e32b4a3e5d3668bb1d6a16fb06b74dc60b973fa479dcee0aae3adbb52bf1388") } } }, ZonePropagationIncomplete { zone_id: 26fbf986-e560-4449-a351-547d1721b90e (service), zone_kind: Nexus, reason: MissingInInventory { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("0e32b4a3e5d3668bb1d6a16fb06b74dc60b973fa479dcee0aae3adbb52bf1388") } } }]
 generated blueprint b2295597-5788-482e-acf9-1731ec63fbd2 based on parent blueprint 459a45a5-616e-421f-873b-2fb08c36205c
 planning report for blueprint b2295597-5788-482e-acf9-1731ec63fbd2:
-chicken switches:
-    add zones with mupdate override:   false
-
 * waiting to update top-level nexus_generation: pending non-nexus zone updates
 
 
@@ -2417,9 +2339,6 @@ INFO ran out of boards for MGS-driven update
 INFO some zones not yet up-to-date, zones_currently_updating: [ZonePropagationIncomplete { zone_id: 43cbc3a6-e640-43f5-a9a2-f83eff427870 (service), zone_kind: Nexus, reason: MissingInInventory { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("0e32b4a3e5d3668bb1d6a16fb06b74dc60b973fa479dcee0aae3adbb52bf1388") } } }, ZonePropagationIncomplete { zone_id: 26fbf986-e560-4449-a351-547d1721b90e (service), zone_kind: Nexus, reason: MissingInInventory { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("0e32b4a3e5d3668bb1d6a16fb06b74dc60b973fa479dcee0aae3adbb52bf1388") } } }]
 generated blueprint 6fad8fd4-e825-433f-b76d-495484e068ce based on parent blueprint b2295597-5788-482e-acf9-1731ec63fbd2
 planning report for blueprint 6fad8fd4-e825-433f-b76d-495484e068ce:
-chicken switches:
-    add zones with mupdate override:   false
-
 * waiting to update top-level nexus_generation: pending non-nexus zone updates
 
 
@@ -2473,9 +2392,6 @@ INFO ran out of boards for MGS-driven update
 INFO some zones not yet up-to-date, zones_currently_updating: [ZonePropagationIncomplete { zone_id: 43cbc3a6-e640-43f5-a9a2-f83eff427870 (service), zone_kind: Nexus, reason: MissingInInventory { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("0e32b4a3e5d3668bb1d6a16fb06b74dc60b973fa479dcee0aae3adbb52bf1388") } } }, ZonePropagationIncomplete { zone_id: 26fbf986-e560-4449-a351-547d1721b90e (service), zone_kind: Nexus, reason: MissingInInventory { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("0e32b4a3e5d3668bb1d6a16fb06b74dc60b973fa479dcee0aae3adbb52bf1388") } } }]
 generated blueprint 24b6e243-100c-428d-8ea6-35b504226f55 based on parent blueprint 6fad8fd4-e825-433f-b76d-495484e068ce
 planning report for blueprint 24b6e243-100c-428d-8ea6-35b504226f55:
-chicken switches:
-    add zones with mupdate override:   false
-
 * waiting to update top-level nexus_generation: pending non-nexus zone updates
 
 
@@ -2529,9 +2445,6 @@ INFO ran out of boards for MGS-driven update
 INFO some zones not yet up-to-date, zones_currently_updating: [ZonePropagationIncomplete { zone_id: 43cbc3a6-e640-43f5-a9a2-f83eff427870 (service), zone_kind: Nexus, reason: MissingInInventory { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("0e32b4a3e5d3668bb1d6a16fb06b74dc60b973fa479dcee0aae3adbb52bf1388") } } }, ZonePropagationIncomplete { zone_id: 26fbf986-e560-4449-a351-547d1721b90e (service), zone_kind: Nexus, reason: MissingInInventory { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("0e32b4a3e5d3668bb1d6a16fb06b74dc60b973fa479dcee0aae3adbb52bf1388") } } }]
 generated blueprint 79fff7a2-2495-4c75-8465-4dc01bab48ce based on parent blueprint 24b6e243-100c-428d-8ea6-35b504226f55
 planning report for blueprint 79fff7a2-2495-4c75-8465-4dc01bab48ce:
-chicken switches:
-    add zones with mupdate override:   false
-
 * waiting to update top-level nexus_generation: pending non-nexus zone updates
 
 
@@ -2585,9 +2498,6 @@ INFO ran out of boards for MGS-driven update
 INFO some zones not yet up-to-date, zones_currently_updating: [ZonePropagationIncomplete { zone_id: 43cbc3a6-e640-43f5-a9a2-f83eff427870 (service), zone_kind: Nexus, reason: MissingInInventory { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("0e32b4a3e5d3668bb1d6a16fb06b74dc60b973fa479dcee0aae3adbb52bf1388") } } }, ZonePropagationIncomplete { zone_id: 26fbf986-e560-4449-a351-547d1721b90e (service), zone_kind: Nexus, reason: MissingInInventory { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("0e32b4a3e5d3668bb1d6a16fb06b74dc60b973fa479dcee0aae3adbb52bf1388") } } }]
 generated blueprint 3bcc37b2-0c0b-44d0-b4ed-3bcb605e4312 based on parent blueprint 79fff7a2-2495-4c75-8465-4dc01bab48ce
 planning report for blueprint 3bcc37b2-0c0b-44d0-b4ed-3bcb605e4312:
-chicken switches:
-    add zones with mupdate override:   false
-
 * waiting to update top-level nexus_generation: pending non-nexus zone updates
 
 
@@ -2641,9 +2551,6 @@ INFO ran out of boards for MGS-driven update
 INFO some zones not yet up-to-date, zones_currently_updating: [ZonePropagationIncomplete { zone_id: 43cbc3a6-e640-43f5-a9a2-f83eff427870 (service), zone_kind: Nexus, reason: MissingInInventory { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("0e32b4a3e5d3668bb1d6a16fb06b74dc60b973fa479dcee0aae3adbb52bf1388") } } }, ZonePropagationIncomplete { zone_id: 26fbf986-e560-4449-a351-547d1721b90e (service), zone_kind: Nexus, reason: MissingInInventory { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("0e32b4a3e5d3668bb1d6a16fb06b74dc60b973fa479dcee0aae3adbb52bf1388") } } }]
 generated blueprint 4d2eb6f3-7eb1-443a-8e76-7ecf05da2f6d based on parent blueprint 3bcc37b2-0c0b-44d0-b4ed-3bcb605e4312
 planning report for blueprint 4d2eb6f3-7eb1-443a-8e76-7ecf05da2f6d:
-chicken switches:
-    add zones with mupdate override:   false
-
 * waiting to update top-level nexus_generation: pending non-nexus zone updates
 
 
@@ -2697,9 +2604,6 @@ INFO ran out of boards for MGS-driven update
 INFO some zones not yet up-to-date, zones_currently_updating: [ZonePropagationIncomplete { zone_id: 43cbc3a6-e640-43f5-a9a2-f83eff427870 (service), zone_kind: Nexus, reason: MissingInInventory { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("0e32b4a3e5d3668bb1d6a16fb06b74dc60b973fa479dcee0aae3adbb52bf1388") } } }, ZonePropagationIncomplete { zone_id: 26fbf986-e560-4449-a351-547d1721b90e (service), zone_kind: Nexus, reason: MissingInInventory { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("0e32b4a3e5d3668bb1d6a16fb06b74dc60b973fa479dcee0aae3adbb52bf1388") } } }]
 generated blueprint e2125c83-b255-45c9-bc9b-802cff09a812 based on parent blueprint 4d2eb6f3-7eb1-443a-8e76-7ecf05da2f6d
 planning report for blueprint e2125c83-b255-45c9-bc9b-802cff09a812:
-chicken switches:
-    add zones with mupdate override:   false
-
 * waiting to update top-level nexus_generation: pending non-nexus zone updates
 
 
@@ -2753,9 +2657,6 @@ INFO ran out of boards for MGS-driven update
 INFO some zones not yet up-to-date, zones_currently_updating: [ZonePropagationIncomplete { zone_id: 43cbc3a6-e640-43f5-a9a2-f83eff427870 (service), zone_kind: Nexus, reason: MissingInInventory { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("0e32b4a3e5d3668bb1d6a16fb06b74dc60b973fa479dcee0aae3adbb52bf1388") } } }, ZonePropagationIncomplete { zone_id: 26fbf986-e560-4449-a351-547d1721b90e (service), zone_kind: Nexus, reason: MissingInInventory { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("0e32b4a3e5d3668bb1d6a16fb06b74dc60b973fa479dcee0aae3adbb52bf1388") } } }]
 generated blueprint f4a6848e-d13c-46e1-8c6a-944f886d7ba3 based on parent blueprint e2125c83-b255-45c9-bc9b-802cff09a812
 planning report for blueprint f4a6848e-d13c-46e1-8c6a-944f886d7ba3:
-chicken switches:
-    add zones with mupdate override:   false
-
 * waiting to update top-level nexus_generation: pending non-nexus zone updates
 
 
@@ -2809,9 +2710,6 @@ INFO ran out of boards for MGS-driven update
 INFO some zones not yet up-to-date, zones_currently_updating: [ZonePropagationIncomplete { zone_id: 43cbc3a6-e640-43f5-a9a2-f83eff427870 (service), zone_kind: Nexus, reason: MissingInInventory { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("0e32b4a3e5d3668bb1d6a16fb06b74dc60b973fa479dcee0aae3adbb52bf1388") } } }, ZonePropagationIncomplete { zone_id: 26fbf986-e560-4449-a351-547d1721b90e (service), zone_kind: Nexus, reason: MissingInInventory { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("0e32b4a3e5d3668bb1d6a16fb06b74dc60b973fa479dcee0aae3adbb52bf1388") } } }]
 generated blueprint 834e4dbe-3b71-443d-bd4c-20e8253abc0c based on parent blueprint f4a6848e-d13c-46e1-8c6a-944f886d7ba3
 planning report for blueprint 834e4dbe-3b71-443d-bd4c-20e8253abc0c:
-chicken switches:
-    add zones with mupdate override:   false
-
 * waiting to update top-level nexus_generation: pending non-nexus zone updates
 
 
@@ -2865,9 +2763,6 @@ INFO ran out of boards for MGS-driven update
 INFO some zones not yet up-to-date, zones_currently_updating: [ZonePropagationIncomplete { zone_id: 43cbc3a6-e640-43f5-a9a2-f83eff427870 (service), zone_kind: Nexus, reason: MissingInInventory { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("0e32b4a3e5d3668bb1d6a16fb06b74dc60b973fa479dcee0aae3adbb52bf1388") } } }, ZonePropagationIncomplete { zone_id: 26fbf986-e560-4449-a351-547d1721b90e (service), zone_kind: Nexus, reason: MissingInInventory { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("0e32b4a3e5d3668bb1d6a16fb06b74dc60b973fa479dcee0aae3adbb52bf1388") } } }]
 generated blueprint d9c5c5e3-c532-4c45-9ef5-22cb00f6a2e1 based on parent blueprint 834e4dbe-3b71-443d-bd4c-20e8253abc0c
 planning report for blueprint d9c5c5e3-c532-4c45-9ef5-22cb00f6a2e1:
-chicken switches:
-    add zones with mupdate override:   false
-
 * waiting to update top-level nexus_generation: pending non-nexus zone updates
 
 
@@ -2924,9 +2819,6 @@ INFO ran out of boards for MGS-driven update
 INFO some zones not yet up-to-date, zones_currently_updating: [ZonePropagationIncomplete { zone_id: 43cbc3a6-e640-43f5-a9a2-f83eff427870 (service), zone_kind: Nexus, reason: MissingInInventory { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("0e32b4a3e5d3668bb1d6a16fb06b74dc60b973fa479dcee0aae3adbb52bf1388") } } }, ZonePropagationIncomplete { zone_id: 26fbf986-e560-4449-a351-547d1721b90e (service), zone_kind: Nexus, reason: MissingInInventory { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("0e32b4a3e5d3668bb1d6a16fb06b74dc60b973fa479dcee0aae3adbb52bf1388") } } }]
 generated blueprint e2deb7c0-2262-49fe-855f-4250c22afb36 based on parent blueprint d9c5c5e3-c532-4c45-9ef5-22cb00f6a2e1
 planning report for blueprint e2deb7c0-2262-49fe-855f-4250c22afb36:
-chicken switches:
-    add zones with mupdate override:   false
-
 * waiting to update top-level nexus_generation: pending non-nexus zone updates
 
 
@@ -2981,9 +2873,6 @@ INFO ran out of boards for MGS-driven update
 INFO some zones not yet up-to-date, zones_currently_updating: [ZonePropagationIncomplete { zone_id: 26fbf986-e560-4449-a351-547d1721b90e (service), zone_kind: Nexus, reason: MissingInInventory { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("0e32b4a3e5d3668bb1d6a16fb06b74dc60b973fa479dcee0aae3adbb52bf1388") } } }]
 generated blueprint 23ce505c-8991-44a5-8863-f2b906fba9cf based on parent blueprint e2deb7c0-2262-49fe-855f-4250c22afb36
 planning report for blueprint 23ce505c-8991-44a5-8863-f2b906fba9cf:
-chicken switches:
-    add zones with mupdate override:   false
-
 * waiting to update top-level nexus_generation: pending non-nexus zone updates
 
 
@@ -3037,9 +2926,6 @@ INFO ran out of boards for MGS-driven update
 INFO some zones not yet up-to-date, zones_currently_updating: [ZonePropagationIncomplete { zone_id: 26fbf986-e560-4449-a351-547d1721b90e (service), zone_kind: Nexus, reason: MissingInInventory { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("0e32b4a3e5d3668bb1d6a16fb06b74dc60b973fa479dcee0aae3adbb52bf1388") } } }]
 generated blueprint c0d81ea6-909c-4efb-964e-beff67f6da0d based on parent blueprint 23ce505c-8991-44a5-8863-f2b906fba9cf
 planning report for blueprint c0d81ea6-909c-4efb-964e-beff67f6da0d:
-chicken switches:
-    add zones with mupdate override:   false
-
 * waiting to update top-level nexus_generation: pending non-nexus zone updates
 
 
@@ -3093,9 +2979,6 @@ INFO ran out of boards for MGS-driven update
 INFO some zones not yet up-to-date, zones_currently_updating: [ZonePropagationIncomplete { zone_id: 26fbf986-e560-4449-a351-547d1721b90e (service), zone_kind: Nexus, reason: MissingInInventory { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("0e32b4a3e5d3668bb1d6a16fb06b74dc60b973fa479dcee0aae3adbb52bf1388") } } }]
 generated blueprint 60b55d33-5fec-4277-9864-935197eaead7 based on parent blueprint c0d81ea6-909c-4efb-964e-beff67f6da0d
 planning report for blueprint 60b55d33-5fec-4277-9864-935197eaead7:
-chicken switches:
-    add zones with mupdate override:   false
-
 * waiting to update top-level nexus_generation: pending non-nexus zone updates
 
 
@@ -3149,9 +3032,6 @@ INFO ran out of boards for MGS-driven update
 INFO some zones not yet up-to-date, zones_currently_updating: [ZonePropagationIncomplete { zone_id: 26fbf986-e560-4449-a351-547d1721b90e (service), zone_kind: Nexus, reason: MissingInInventory { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("0e32b4a3e5d3668bb1d6a16fb06b74dc60b973fa479dcee0aae3adbb52bf1388") } } }]
 generated blueprint aa13f40f-41ff-4b68-bee1-df2e1f805544 based on parent blueprint 60b55d33-5fec-4277-9864-935197eaead7
 planning report for blueprint aa13f40f-41ff-4b68-bee1-df2e1f805544:
-chicken switches:
-    add zones with mupdate override:   false
-
 * waiting to update top-level nexus_generation: pending non-nexus zone updates
 
 
@@ -3205,9 +3085,6 @@ INFO ran out of boards for MGS-driven update
 INFO some zones not yet up-to-date, zones_currently_updating: [ZonePropagationIncomplete { zone_id: 26fbf986-e560-4449-a351-547d1721b90e (service), zone_kind: Nexus, reason: MissingInInventory { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("0e32b4a3e5d3668bb1d6a16fb06b74dc60b973fa479dcee0aae3adbb52bf1388") } } }]
 generated blueprint 316ccd9e-5c53-46c3-a2e9-20c3867b7111 based on parent blueprint aa13f40f-41ff-4b68-bee1-df2e1f805544
 planning report for blueprint 316ccd9e-5c53-46c3-a2e9-20c3867b7111:
-chicken switches:
-    add zones with mupdate override:   false
-
 * waiting to update top-level nexus_generation: pending non-nexus zone updates
 
 
@@ -3261,9 +3138,6 @@ INFO ran out of boards for MGS-driven update
 INFO some zones not yet up-to-date, zones_currently_updating: [ZonePropagationIncomplete { zone_id: 26fbf986-e560-4449-a351-547d1721b90e (service), zone_kind: Nexus, reason: MissingInInventory { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("0e32b4a3e5d3668bb1d6a16fb06b74dc60b973fa479dcee0aae3adbb52bf1388") } } }]
 generated blueprint 02078c95-3d58-4b7b-a03f-9b160361c50a based on parent blueprint 316ccd9e-5c53-46c3-a2e9-20c3867b7111
 planning report for blueprint 02078c95-3d58-4b7b-a03f-9b160361c50a:
-chicken switches:
-    add zones with mupdate override:   false
-
 * waiting to update top-level nexus_generation: pending non-nexus zone updates
 
 
@@ -3317,9 +3191,6 @@ INFO ran out of boards for MGS-driven update
 INFO some zones not yet up-to-date, zones_currently_updating: [ZonePropagationIncomplete { zone_id: 26fbf986-e560-4449-a351-547d1721b90e (service), zone_kind: Nexus, reason: MissingInInventory { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("0e32b4a3e5d3668bb1d6a16fb06b74dc60b973fa479dcee0aae3adbb52bf1388") } } }]
 generated blueprint e7a01ffc-6b0e-408b-917b-b1efe18b3110 based on parent blueprint 02078c95-3d58-4b7b-a03f-9b160361c50a
 planning report for blueprint e7a01ffc-6b0e-408b-917b-b1efe18b3110:
-chicken switches:
-    add zones with mupdate override:   false
-
 * waiting to update top-level nexus_generation: pending non-nexus zone updates
 
 
@@ -3373,9 +3244,6 @@ INFO ran out of boards for MGS-driven update
 INFO some zones not yet up-to-date, zones_currently_updating: [ZonePropagationIncomplete { zone_id: 26fbf986-e560-4449-a351-547d1721b90e (service), zone_kind: Nexus, reason: MissingInInventory { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("0e32b4a3e5d3668bb1d6a16fb06b74dc60b973fa479dcee0aae3adbb52bf1388") } } }]
 generated blueprint 880e2ffc-8187-4275-a2f3-1b36aa2f4482 based on parent blueprint e7a01ffc-6b0e-408b-917b-b1efe18b3110
 planning report for blueprint 880e2ffc-8187-4275-a2f3-1b36aa2f4482:
-chicken switches:
-    add zones with mupdate override:   false
-
 * waiting to update top-level nexus_generation: pending non-nexus zone updates
 
 
@@ -3429,9 +3297,6 @@ INFO ran out of boards for MGS-driven update
 INFO some zones not yet up-to-date, zones_currently_updating: [ZonePropagationIncomplete { zone_id: 26fbf986-e560-4449-a351-547d1721b90e (service), zone_kind: Nexus, reason: MissingInInventory { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("0e32b4a3e5d3668bb1d6a16fb06b74dc60b973fa479dcee0aae3adbb52bf1388") } } }]
 generated blueprint c4a20bcb-1a71-4e88-97b4-36d16f55daec based on parent blueprint 880e2ffc-8187-4275-a2f3-1b36aa2f4482
 planning report for blueprint c4a20bcb-1a71-4e88-97b4-36d16f55daec:
-chicken switches:
-    add zones with mupdate override:   false
-
 * waiting to update top-level nexus_generation: pending non-nexus zone updates
 
 
@@ -3485,9 +3350,6 @@ INFO ran out of boards for MGS-driven update
 INFO some zones not yet up-to-date, zones_currently_updating: [ZonePropagationIncomplete { zone_id: 26fbf986-e560-4449-a351-547d1721b90e (service), zone_kind: Nexus, reason: MissingInInventory { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("0e32b4a3e5d3668bb1d6a16fb06b74dc60b973fa479dcee0aae3adbb52bf1388") } } }]
 generated blueprint a2c6496d-98fc-444d-aa36-99508aa72367 based on parent blueprint c4a20bcb-1a71-4e88-97b4-36d16f55daec
 planning report for blueprint a2c6496d-98fc-444d-aa36-99508aa72367:
-chicken switches:
-    add zones with mupdate override:   false
-
 * waiting to update top-level nexus_generation: pending non-nexus zone updates
 
 
@@ -3544,9 +3406,6 @@ INFO ran out of boards for MGS-driven update
 INFO some zones not yet up-to-date, zones_currently_updating: [ZonePropagationIncomplete { zone_id: 26fbf986-e560-4449-a351-547d1721b90e (service), zone_kind: Nexus, reason: MissingInInventory { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("0e32b4a3e5d3668bb1d6a16fb06b74dc60b973fa479dcee0aae3adbb52bf1388") } } }]
 generated blueprint 6ed56354-5941-40d1-a06c-b0e940701d52 based on parent blueprint a2c6496d-98fc-444d-aa36-99508aa72367
 planning report for blueprint 6ed56354-5941-40d1-a06c-b0e940701d52:
-chicken switches:
-    add zones with mupdate override:   false
-
 * waiting to update top-level nexus_generation: pending non-nexus zone updates
 
 
@@ -3600,9 +3459,6 @@ INFO skipping board for MGS-driven update, serial_number: serial2, part_number: 
 INFO ran out of boards for MGS-driven update
 generated blueprint 9078c4ba-3a73-4b3f-ac2c-acb501f89cb2 based on parent blueprint 6ed56354-5941-40d1-a06c-b0e940701d52
 planning report for blueprint 9078c4ba-3a73-4b3f-ac2c-acb501f89cb2:
-chicken switches:
-    add zones with mupdate override:   false
-
 * 1 out-of-date zone updated in-place:
   * sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, zone 353b3b65-20f7-48c3-88f7-495bd5d31545 (clickhouse)
 * 25 remaining out-of-date zones
@@ -3725,9 +3581,6 @@ INFO ran out of boards for MGS-driven update
 INFO some zones not yet up-to-date, zones_currently_updating: [ZonePropagationIncomplete { zone_id: 353b3b65-20f7-48c3-88f7-495bd5d31545 (service), zone_kind: Clickhouse, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("52b1eb4daff6f9140491d547b11248392920230db3db0eef5f5fa5333fe9e659") }, inv_image_source: InstallDataset } }]
 generated blueprint 8763abc1-8a42-4932-b5a7-33109e0e0152 based on parent blueprint 9078c4ba-3a73-4b3f-ac2c-acb501f89cb2
 planning report for blueprint 8763abc1-8a42-4932-b5a7-33109e0e0152:
-chicken switches:
-    add zones with mupdate override:   false
-
 * waiting to update top-level nexus_generation: pending non-nexus zone updates
 
 
@@ -3781,9 +3634,6 @@ INFO ran out of boards for MGS-driven update
 INFO some zones not yet up-to-date, zones_currently_updating: [ZonePropagationIncomplete { zone_id: 353b3b65-20f7-48c3-88f7-495bd5d31545 (service), zone_kind: Clickhouse, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("52b1eb4daff6f9140491d547b11248392920230db3db0eef5f5fa5333fe9e659") }, inv_image_source: InstallDataset } }]
 generated blueprint 2b89e0d7-f15b-4474-8ac4-85959ed1bc88 based on parent blueprint 8763abc1-8a42-4932-b5a7-33109e0e0152
 planning report for blueprint 2b89e0d7-f15b-4474-8ac4-85959ed1bc88:
-chicken switches:
-    add zones with mupdate override:   false
-
 * waiting to update top-level nexus_generation: pending non-nexus zone updates
 
 
@@ -3837,9 +3687,6 @@ INFO ran out of boards for MGS-driven update
 INFO some zones not yet up-to-date, zones_currently_updating: [ZonePropagationIncomplete { zone_id: 353b3b65-20f7-48c3-88f7-495bd5d31545 (service), zone_kind: Clickhouse, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("52b1eb4daff6f9140491d547b11248392920230db3db0eef5f5fa5333fe9e659") }, inv_image_source: InstallDataset } }]
 generated blueprint 7f6b7297-c2bc-4f67-b3c0-c8e555ebbdc4 based on parent blueprint 2b89e0d7-f15b-4474-8ac4-85959ed1bc88
 planning report for blueprint 7f6b7297-c2bc-4f67-b3c0-c8e555ebbdc4:
-chicken switches:
-    add zones with mupdate override:   false
-
 * waiting to update top-level nexus_generation: pending non-nexus zone updates
 
 
@@ -3893,9 +3740,6 @@ INFO ran out of boards for MGS-driven update
 INFO some zones not yet up-to-date, zones_currently_updating: [ZonePropagationIncomplete { zone_id: 353b3b65-20f7-48c3-88f7-495bd5d31545 (service), zone_kind: Clickhouse, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("52b1eb4daff6f9140491d547b11248392920230db3db0eef5f5fa5333fe9e659") }, inv_image_source: InstallDataset } }]
 generated blueprint 59630e63-c953-4807-9e84-9e750a79f68e based on parent blueprint 7f6b7297-c2bc-4f67-b3c0-c8e555ebbdc4
 planning report for blueprint 59630e63-c953-4807-9e84-9e750a79f68e:
-chicken switches:
-    add zones with mupdate override:   false
-
 * waiting to update top-level nexus_generation: pending non-nexus zone updates
 
 
@@ -3949,9 +3793,6 @@ INFO ran out of boards for MGS-driven update
 INFO some zones not yet up-to-date, zones_currently_updating: [ZonePropagationIncomplete { zone_id: 353b3b65-20f7-48c3-88f7-495bd5d31545 (service), zone_kind: Clickhouse, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("52b1eb4daff6f9140491d547b11248392920230db3db0eef5f5fa5333fe9e659") }, inv_image_source: InstallDataset } }]
 generated blueprint e93650dc-b5ba-4ec7-8550-9171c1ada194 based on parent blueprint 59630e63-c953-4807-9e84-9e750a79f68e
 planning report for blueprint e93650dc-b5ba-4ec7-8550-9171c1ada194:
-chicken switches:
-    add zones with mupdate override:   false
-
 * waiting to update top-level nexus_generation: pending non-nexus zone updates
 
 
@@ -4005,9 +3846,6 @@ INFO ran out of boards for MGS-driven update
 INFO some zones not yet up-to-date, zones_currently_updating: [ZonePropagationIncomplete { zone_id: 353b3b65-20f7-48c3-88f7-495bd5d31545 (service), zone_kind: Clickhouse, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("52b1eb4daff6f9140491d547b11248392920230db3db0eef5f5fa5333fe9e659") }, inv_image_source: InstallDataset } }]
 generated blueprint 90650737-8142-47a6-9a48-a10efc487e57 based on parent blueprint e93650dc-b5ba-4ec7-8550-9171c1ada194
 planning report for blueprint 90650737-8142-47a6-9a48-a10efc487e57:
-chicken switches:
-    add zones with mupdate override:   false
-
 * waiting to update top-level nexus_generation: pending non-nexus zone updates
 
 
@@ -4061,9 +3899,6 @@ INFO ran out of boards for MGS-driven update
 INFO some zones not yet up-to-date, zones_currently_updating: [ZonePropagationIncomplete { zone_id: 353b3b65-20f7-48c3-88f7-495bd5d31545 (service), zone_kind: Clickhouse, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("52b1eb4daff6f9140491d547b11248392920230db3db0eef5f5fa5333fe9e659") }, inv_image_source: InstallDataset } }]
 generated blueprint 2182613d-dc9f-41eb-9c6a-d33801849caa based on parent blueprint 90650737-8142-47a6-9a48-a10efc487e57
 planning report for blueprint 2182613d-dc9f-41eb-9c6a-d33801849caa:
-chicken switches:
-    add zones with mupdate override:   false
-
 * waiting to update top-level nexus_generation: pending non-nexus zone updates
 
 
@@ -4117,9 +3952,6 @@ INFO ran out of boards for MGS-driven update
 INFO some zones not yet up-to-date, zones_currently_updating: [ZonePropagationIncomplete { zone_id: 353b3b65-20f7-48c3-88f7-495bd5d31545 (service), zone_kind: Clickhouse, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("52b1eb4daff6f9140491d547b11248392920230db3db0eef5f5fa5333fe9e659") }, inv_image_source: InstallDataset } }]
 generated blueprint e8b088a8-7da0-480b-a2dc-75ffef068ece based on parent blueprint 2182613d-dc9f-41eb-9c6a-d33801849caa
 planning report for blueprint e8b088a8-7da0-480b-a2dc-75ffef068ece:
-chicken switches:
-    add zones with mupdate override:   false
-
 * waiting to update top-level nexus_generation: pending non-nexus zone updates
 
 
@@ -4173,9 +4005,6 @@ INFO ran out of boards for MGS-driven update
 INFO some zones not yet up-to-date, zones_currently_updating: [ZonePropagationIncomplete { zone_id: 353b3b65-20f7-48c3-88f7-495bd5d31545 (service), zone_kind: Clickhouse, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("52b1eb4daff6f9140491d547b11248392920230db3db0eef5f5fa5333fe9e659") }, inv_image_source: InstallDataset } }]
 generated blueprint 810ea95a-4730-43dd-867e-1984aeb9d873 based on parent blueprint e8b088a8-7da0-480b-a2dc-75ffef068ece
 planning report for blueprint 810ea95a-4730-43dd-867e-1984aeb9d873:
-chicken switches:
-    add zones with mupdate override:   false
-
 * waiting to update top-level nexus_generation: pending non-nexus zone updates
 
 
@@ -4421,9 +4250,6 @@ parent:    e8b088a8-7da0-480b-a2dc-75ffef068ece
  PENDING MGS-MANAGED UPDATES: 0
 
 planning report for blueprint 810ea95a-4730-43dd-867e-1984aeb9d873:
-chicken switches:
-    add zones with mupdate override:   false
-
 * waiting to update top-level nexus_generation: pending non-nexus zone updates
 
 

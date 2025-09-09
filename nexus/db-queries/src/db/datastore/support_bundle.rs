@@ -602,7 +602,7 @@ mod test {
             let rack_id = Uuid::new_v4();
             let blueprint_id = BlueprintUuid::new_v4();
             let sled = SledUpdate::new(
-                *self.sled.as_untyped_uuid(),
+                self.sled,
                 "[::1]:0".parse().unwrap(),
                 0,
                 SledBaseboard {
@@ -628,8 +628,8 @@ mod test {
             // Create fake zpools that back our fake datasets.
             for pool in &self.pools {
                 let zpool = Zpool::new(
-                    *pool.pool.as_untyped_uuid(),
-                    *self.sled.as_untyped_uuid(),
+                    pool.pool,
+                    self.sled,
                     PhysicalDiskUuid::new_v4(),
                     ByteCount::from(0).into(),
                 );
