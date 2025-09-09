@@ -709,7 +709,8 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         let log = &self.logctx.log;
         debug!(log, "Starting Dendrite for {switch_location}");
         let mgs = self.gateway.get(&switch_location).unwrap();
-        let mgs_addr = mgs.client.bind_address;
+        let mgs_addr =
+            SocketAddrV6::new(Ipv6Addr::LOCALHOST, mgs.port, 0, 0).into();
 
         // Set up a stub instance of dendrite
         let dendrite = dev::dendrite::DendriteInstance::start(
