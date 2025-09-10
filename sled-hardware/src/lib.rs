@@ -31,8 +31,8 @@ pub mod underlay;
 #[allow(dead_code)]
 pub enum HardwareUpdate {
     TofinoDeviceChange,
-    TofinoLoaded,
-    TofinoUnloaded,
+    TofinoAvailable,
+    TofinoUnavailable,
     DiskAdded(UnparsedDisk),
     DiskRemoved(UnparsedDisk),
     DiskUpdated(UnparsedDisk),

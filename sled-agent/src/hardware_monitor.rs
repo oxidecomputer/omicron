@@ -77,8 +77,10 @@ pub struct HardwareMonitor {
     /// or policy changes.
     service_manager: Option<ServiceManager>,
 
-    /// Whether or not the tofino is loaded.
-    is_tofino_loaded: bool,
+    /// Whether or not the tofino is available.  This implies that the ASIC is
+    /// present, the driver has been loaded, and that we are able to use the
+    /// driver to interact with the ASIC.
+    is_tofino_available: bool,
 }
 
 impl HardwareMonitor {
@@ -96,6 +98,7 @@ impl HardwareMonitor {
             oneshot::channel();
         let baseboard = hardware_manager.baseboard();
         let hardware_rx = hardware_manager.monitor();
+        info!(log, "tofino: hardware monitor task");
         let log = log.new(o!("component" => "HardwareMonitor"));
         let (switch_zone_policy_tx, switch_zone_policy_rx) =
             watch::channel(OperatorSwitchZonePolicy::StartIfSwitchPresent);
@@ -110,7 +113,7 @@ impl HardwareMonitor {
             raw_disks_tx,
             sled_agent: None,
             service_manager: None,
-            is_tofino_loaded: false,
+            is_tofino_available: false,
         };
         tokio::spawn(monitor.run());
         let handle = HardwareMonitorHandle { switch_zone_policy_tx };
@@ -131,7 +134,6 @@ impl HardwareMonitor {
                 Ok(sled_agent) = &mut self.sled_agent_started_rx,
                     if self.sled_agent.is_none() =>
                 {
-                    info!(self.log, "Sled Agent Started");
                     self.sled_agent = Some(sled_agent);
                     self.check_latest_hardware_snapshot().await;
                 }
@@ -144,26 +146,20 @@ impl HardwareMonitor {
                     // the service manager to start the switch zone; do so now.
                     let policy = self.current_switch_zone_policy();
                     self.ensure_switch_zone_activated_or_deactivated(
-                        self.is_tofino_loaded,
+                        self.is_tofino_available,
                         policy,
                     ).await;
                 }
-                update = self.hardware_rx.recv() => {
-                    info!(
-                        self.log,
-                        "Received hardware update message";
-                        "update" => ?update,
-                    );
-                    self.handle_hardware_update(update).await;
-                }
+                update = self.hardware_rx.recv() =>
+                    self.handle_hardware_update(update.clone()).await,
                 Ok(()) = self.switch_zone_policy_rx.changed() => {
                     let policy = self.current_switch_zone_policy();
                     info!(
-                        self.log, "Switch zone policy changed; reevaluating";
+                        self.log, "NNN Switch zone policy changed; reevaluating";
                         "policy" => ?policy,
                     );
                     self.ensure_switch_zone_activated_or_deactivated(
-                        self.is_tofino_loaded,
+                        self.is_tofino_available,
                         policy,
                     ).await;
                 }
@@ -184,14 +180,22 @@ impl HardwareMonitor {
     ) {
         match update {
             Ok(update) => match update {
-                HardwareUpdate::TofinoLoaded => {
+                HardwareUpdate::TofinoAvailable => {
+                    info!(
+                        self.log,
+                        "Hardware monitor got TofinoAvailable message"
+                    );
                     let policy = self.current_switch_zone_policy();
                     self.ensure_switch_zone_activated_or_deactivated(
                         true, policy,
                     )
                     .await
                 }
-                HardwareUpdate::TofinoUnloaded => {
+                HardwareUpdate::TofinoUnavailable => {
+                    info!(
+                        self.log,
+                        "Hardware monitor got TofinoUnavailable message"
+                    );
                     let policy = self.current_switch_zone_policy();
                     self.ensure_switch_zone_activated_or_deactivated(
                         false, policy,
@@ -199,6 +203,10 @@ impl HardwareMonitor {
                     .await
                 }
                 HardwareUpdate::TofinoDeviceChange => {
+                    info!(
+                        self.log,
+                        "Hardware monitor got TofinoDeviceChange message"
+                    );
                     if let Some(sled_agent) = &mut self.sled_agent {
                         sled_agent.notify_nexus_about_self(&self.log).await;
                     }
@@ -231,12 +239,12 @@ impl HardwareMonitor {
 
     async fn ensure_switch_zone_activated_or_deactivated(
         &mut self,
-        is_tofino_loaded: bool,
+        is_tofino_available: bool,
         policy: OperatorSwitchZonePolicy,
     ) {
         // Remember whether the tofino is loaded regardless of the action we
         // take (or don't take) below.
-        self.is_tofino_loaded = is_tofino_loaded;
+        self.is_tofino_available = is_tofino_available;
 
         // If we don't have the service manager yet, we can't do anything.
         let Some(service_manager) = &self.service_manager else {
@@ -244,8 +252,8 @@ impl HardwareMonitor {
         };
 
         // Decide whether to activate or deactivate based on the combination of
-        // `tofino_loaded` and the operator policy.
-        let should_activate = match (is_tofino_loaded, policy) {
+        // `tofino_available` and the operator policy.
+        let should_activate = match (is_tofino_available, policy) {
             // We have a tofino and policy says to start the switch zone
             (true, OperatorSwitchZonePolicy::StartIfSwitchPresent) => {
                 info!(
@@ -308,7 +316,7 @@ impl HardwareMonitor {
 
         let policy = self.current_switch_zone_policy();
         self.ensure_switch_zone_activated_or_deactivated(
-            self.hardware_manager.is_scrimlet_driver_loaded(),
+            self.hardware_manager.is_scrimlet_asic_available(),
             policy,
         )
         .await;
