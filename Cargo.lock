@@ -5115,6 +5115,7 @@ dependencies = [
  "itertools 0.14.0",
  "libc",
  "macaddr",
+ "nix 0.30.1",
  "omicron-common",
  "omicron-test-utils",
  "omicron-uuid-kinds",
@@ -5131,6 +5132,7 @@ dependencies = [
  "slog-error-chain",
  "smf 0.2.3",
  "thiserror 2.0.17",
+ "tofino",
  "tokio",
  "toml 0.8.23",
  "uuid",
@@ -8799,6 +8801,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "sha3",
+ "signal-hook",
  "sled-agent-api",
  "sled-agent-client",
  "sled-agent-config-reconciler",
@@ -13064,6 +13067,7 @@ dependencies = [
  "tofino",
  "tokio",
  "uuid",
+ "zone 0.3.1",
 ]
 
 [[package]]
@@ -14301,7 +14305,7 @@ dependencies = [
 [[package]]
 name = "tofino"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/tofino?branch=main#1b66b89c3727d2191082df057b068ec52560e334"
+source = "git+https://github.com/oxidecomputer/tofino?branch=presence#361e334f35387f6669f6f03bb2a421b0e9c25b8f"
 dependencies = [
  "anyhow",
  "cc",
