@@ -1888,13 +1888,13 @@ impl<'a> Planner<'a> {
             }
         }
 
-        // Confirm that we have new nexuses at the desired generation number,
-        // and also that they have records in "db_metadata_nexus" (this is
-        // verified by checking that new Nexuses have entries in
-        // "self.input.not_yet_nexus_zones").
+        // In order to do a handoff, there must be Nexus instances at the
+        // proposed generation number. Tese Nexuses must also have records in
+        // "db_metadata_nexus" (this is verified by checking that new Nexuses
+        // have entries in "self.input.not_yet_nexus_zones").
         let current_generation = self.blueprint.nexus_generation();
         let proposed_generation = self.blueprint.nexus_generation().next();
-        let mut out_of_date_nexuses_at_current_gen = 0;
+        let mut old_nexuses_at_current_gen = 0;
         let mut nexuses_at_next_gen = 0;
         let mut nexuses_at_next_gen_missing_metadata_record = 0;
         for sled_id in self.blueprint.sled_ids_with_zones() {
@@ -1914,13 +1914,13 @@ impl<'a> Planner<'a> {
                         && z.image_source
                             != new_repo.zone_image_source(z.zone_type.kind())?
                     {
-                        out_of_date_nexuses_at_current_gen += 1;
+                        old_nexuses_at_current_gen += 1;
                     }
                 }
             }
         }
 
-        if out_of_date_nexuses_at_current_gen == 0 {
+        if old_nexuses_at_current_gen == 0 {
             // If all the current-generation Nexuses are "up-to-date", then we may have
             // just completed handoff successfully. In this case, there's nothing to report.
             return Ok(report);
