@@ -846,13 +846,6 @@ impl InternalHostType {
     }
 }
 
-fn should_sled_continue(host_type: InternalHostType) -> bool {
-    match host_type {
-        InternalHostType::Cosmo => false,
-        InternalHostType::Gimlet => true,
-    }
-}
-
 #[derive(Debug)]
 struct UpdateDriver {}
 
@@ -1360,7 +1353,8 @@ impl UpdateDriver {
         self.register_deliver_host_phase1_steps(
             update_cx,
             registrar,
-            &plan.trampoline_phase_1,
+            &plan.gimlet_trampoline_phase_1,
+            &plan.cosmo_trampoline_phase_1,
             "trampoline",
             StepHandle::ready(trampoline_phase_1_boot_slots).into_shared(),
             host_type.clone(),
@@ -1550,7 +1544,8 @@ impl UpdateDriver {
         self.register_deliver_host_phase1_steps(
             update_cx,
             registrar,
-            &plan.host_phase_1,
+            &plan.gimlet_host_phase_1,
+            &plan.cosmo_host_phase_1,
             "host",
             slots_to_update.clone(),
             host_type.clone(),
@@ -1660,28 +1655,12 @@ impl UpdateDriver {
         &self,
         update_cx: &'a UpdateContext,
         registrar: &mut ComponentRegistrar<'_, 'a>,
-        artifact: &'a ArtifactIdData,
+        gimlet_artifact: &'a ArtifactIdData,
+        cosmo_artifact: &'a ArtifactIdData,
         kind: &str, // "host" or "trampoline"
         slots_to_update: SharedStepHandle<BTreeSet<u16>>,
         host_type: SharedStepHandle<InternalHostType>,
     ) {
-        registrar
-            .new_step(
-                UpdateStepId::CheckHostType,
-                "Checking host type",
-                async |cx| {
-                    let host_type = host_type.into_value(cx.token()).await;
-                    // We can't update cosmo sleds at the moment
-                    // Make this a terminal error until we fix this.
-                    if should_sled_continue(host_type) {
-                        StepSuccess::new(()).into()
-                    } else {
-                        Err(UpdateTerminalError::CosmoHost)
-                    }
-                },
-            )
-            .register();
-
         registrar
             .new_step(
                 UpdateStepId::SetHostPowerState { state: PowerState::A2 },
@@ -1699,8 +1678,14 @@ impl UpdateDriver {
                 UpdateStepId::SpComponentUpdate,
                 format!("Updating {kind} phase 1"),
                 async move |cx| {
+                    let host_type = host_type.into_value(cx.token()).await;
                     let slots_to_update =
                         slots_to_update.into_value(cx.token()).await;
+                    
+                    let artifact = match host_type {
+                        InternalHostType::Cosmo => cosmo_artifact,
+                        InternalHostType::Gimlet => gimlet_artifact,
+                    };
 
                     for boot_slot in slots_to_update {
                         cx.with_nested_engine(|engine| {

@@ -14267,7 +14267,7 @@ dependencies = [
 [[package]]
 name = "tufaceous"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#57832718056c6585b4cddb4f3ebc04b9a07c7bd7"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=cosmo_awareness#8fde91ed6d05819e494dda254fd45f44293dfa3a"
 dependencies = [
  "anyhow",
  "camino",
@@ -14288,7 +14288,7 @@ dependencies = [
 [[package]]
 name = "tufaceous-artifact"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#57832718056c6585b4cddb4f3ebc04b9a07c7bd7"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=cosmo_awareness#8fde91ed6d05819e494dda254fd45f44293dfa3a"
 dependencies = [
  "daft",
  "hex",
@@ -14305,7 +14305,7 @@ dependencies = [
 [[package]]
 name = "tufaceous-brand-metadata"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#57832718056c6585b4cddb4f3ebc04b9a07c7bd7"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=cosmo_awareness#8fde91ed6d05819e494dda254fd45f44293dfa3a"
 dependencies = [
  "semver 1.0.26",
  "serde",
@@ -14317,7 +14317,7 @@ dependencies = [
 [[package]]
 name = "tufaceous-lib"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#57832718056c6585b4cddb4f3ebc04b9a07c7bd7"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=cosmo_awareness#8fde91ed6d05819e494dda254fd45f44293dfa3a"
 dependencies = [
  "anyhow",
  "async-trait",
