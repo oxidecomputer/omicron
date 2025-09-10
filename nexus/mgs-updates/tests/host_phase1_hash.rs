@@ -68,17 +68,13 @@ async fn test_host_phase1_hashing() {
     .await;
 
     // We'll only talk to one sp-sim for this test.
-    let mgs_client = mgstestctx.client();
+    let mgs_client = &mgstestctx.client;
     let sp_sim = &mgstestctx.simrack.gimlets[0];
     let sp_type = SpType::Sled;
     let sp_component = SpComponent::HOST_CPU_BOOT_FLASH.const_as_str();
     let sp_slot = 0;
-    let phase1_checker = Phase1HashStatusChecker {
-        mgs_client: &mgs_client,
-        sp_type,
-        sp_slot,
-        sp_component,
-    };
+    let phase1_checker =
+        Phase1HashStatusChecker { mgs_client, sp_type, sp_slot, sp_component };
 
     // We want explicit (i.e., not-timer-based) control over when hashing
     // completes.

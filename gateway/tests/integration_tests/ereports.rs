@@ -4,7 +4,8 @@
 
 // Copyright 2025 Oxide Computer Company
 
-use dropshot::test_util;
+use ereport_types::Ena;
+use ereport_types::EreporterRestartUuid;
 use gateway_messages::SpPort;
 use gateway_test_utils::current_simulator_state;
 use gateway_test_utils::setup;
@@ -14,41 +15,31 @@ use std::sync::LazyLock;
 use uuid::Uuid;
 
 struct EreportRequest {
-    sled: usize,
-    restart_id: Uuid,
-    start_ena: u64,
-    committed_ena: Option<u64>,
-    limit: usize,
+    sled: u16,
+    restart_id: EreporterRestartUuid,
+    start_ena: Ena,
+    committed_ena: Option<Ena>,
+    limit: u32,
 }
 
 impl EreportRequest {
     async fn response(
         self,
-        client: &test_util::ClientTestContext,
+        client: &gateway_client::Client,
     ) -> ereport_types::Ereports {
         let Self { sled, restart_id, start_ena, committed_ena, limit } = self;
-        use std::fmt::Write;
-
-        let base = client.url("/sp/sled");
-        let mut url = format!(
-            "{base}/{sled}/ereports?restart_id={restart_id}&start_at={start_ena}&limit={limit}"
-        );
-        if let Some(committed) = committed_ena {
-            write!(&mut url, "&committed={committed}").unwrap();
-        }
-        // N.B. that we must use `ClientTestContext::make_request` rather than one
-        // of the higher level helpers like `objects_post`, as our combination of
-        // method and status code is a bit weird.
-        let mut response = client
-            .make_request::<()>(
-                http::Method::POST,
-                &url,
-                None,
-                http::StatusCode::OK,
+        client
+            .sp_ereports_ingest(
+                gateway_client::types::SpType::Sled,
+                sled,
+                committed_ena.as_ref(),
+                limit.try_into().unwrap(),
+                &restart_id,
+                Some(&start_ena),
             )
             .await
-            .unwrap();
-        test_util::read_json::<ereport_types::Ereports>(&mut response).await
+            .unwrap()
+            .into_inner()
     }
 }
 
@@ -250,8 +241,8 @@ async fn ereports_basic() {
     let ereport_types::Ereports { restart_id, reports } = dbg!(
         EreportRequest {
             sled: 1,
-            restart_id: Uuid::new_v4(),
-            start_ena: 0,
+            restart_id: EreporterRestartUuid::new_v4(),
+            start_ena: Ena(0),
             committed_ena: None,
             limit: 100
         }
@@ -284,8 +275,8 @@ async fn ereports_limit() {
     let ereport_types::Ereports { restart_id, reports } = dbg!(
         EreportRequest {
             sled: 0,
-            restart_id: Uuid::new_v4(),
-            start_ena: 0,
+            restart_id: EreporterRestartUuid::new_v4(),
+            start_ena: Ena(0),
             committed_ena: None,
             limit: 3
         }
@@ -312,8 +303,8 @@ async fn ereports_limit() {
     let ereport_types::Ereports { restart_id, reports } = dbg!(
         EreportRequest {
             sled: 0,
-            restart_id: restart_id.into_untyped_uuid(),
-            start_ena: 3,
+            restart_id,
+            start_ena: Ena(3),
             committed_ena: None,
             limit: 2
         }
@@ -345,9 +336,9 @@ async fn ereports_commit() {
     let ereport_types::Ereports { restart_id, reports } = dbg!(
         EreportRequest {
             sled: 0,
-            restart_id: Uuid::new_v4(),
-            start_ena: 3,
-            committed_ena: Some(2),
+            restart_id: EreporterRestartUuid::new_v4(),
+            start_ena: Ena(3),
+            committed_ena: Some(Ena(2)),
             limit: 2
         }
         .response(client)
@@ -371,9 +362,9 @@ async fn ereports_commit() {
     let ereport_types::Ereports { restart_id, reports } = dbg!(
         EreportRequest {
             sled: 0,
-            restart_id: restart_id.into_untyped_uuid(),
-            start_ena: 0,
-            committed_ena: Some(2),
+            restart_id,
+            start_ena: Ena(0),
+            committed_ena: Some(Ena(2)),
             limit: 2
         }
         .response(client)
@@ -396,8 +387,8 @@ async fn ereports_commit() {
     let ereport_types::Ereports { restart_id, reports } = dbg!(
         EreportRequest {
             sled: 0,
-            restart_id: restart_id.into_untyped_uuid(),
-            start_ena: 0,
+            restart_id,
+            start_ena: Ena(0),
             committed_ena: None,
             limit: 100
         }

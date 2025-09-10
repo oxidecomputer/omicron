@@ -18,8 +18,9 @@ use anyhow::anyhow;
 use async_trait::async_trait;
 use headers::HeaderMapExt;
 use headers::authorization::{Authorization, Bearer};
+use omicron_uuid_kinds::SiloUserUuid;
 use slog::debug;
-use uuid::Uuid;
+use std::str::FromStr;
 
 // This scheme is intended for demos, development, and testing until we have a
 // more automatable identity provider that can be used for those purposes.
@@ -118,7 +119,7 @@ where
 
 fn authn_spoof_parse_id(
     raw_value: Option<&Authorization<Bearer>>,
-) -> Result<Option<Uuid>, Reason> {
+) -> Result<Option<SiloUserUuid>, Reason> {
     let token = match raw_value {
         None => return Ok(None),
         Some(bearer) => bearer.token(),
@@ -142,7 +143,7 @@ fn authn_spoof_parse_id(
         });
     }
 
-    Uuid::parse_str(str_value)
+    SiloUserUuid::from_str(str_value)
         .context("parsing header value as UUID")
         .map(|silo_user_id| Some(silo_user_id))
         .map_err(|source| Reason::BadFormat { source })
@@ -150,7 +151,7 @@ fn authn_spoof_parse_id(
 
 /// Returns a value of the `Authorization` header for this actor that will be
 /// accepted using this scheme
-pub fn make_header_value(id: Uuid) -> Authorization<Bearer> {
+pub fn make_header_value<T: std::fmt::Display>(id: T) -> Authorization<Bearer> {
     make_header_value_str(&id.to_string()).unwrap()
 }
 
@@ -193,6 +194,7 @@ mod test {
     use headers::HeaderMapExt;
     use headers::authorization::Bearer;
     use headers::authorization::Credentials;
+    use omicron_uuid_kinds::SiloUserUuid;
     use uuid::Uuid;
 
     #[test]
@@ -243,14 +245,14 @@ mod test {
     #[test]
     fn test_spoof_header_valid() {
         let test_uuid_str = "37b56e4f-8c60-453b-a37e-99be6efe8a89";
-        let test_uuid = test_uuid_str.parse::<Uuid>().unwrap();
+        let test_uuid = test_uuid_str.parse::<SiloUserUuid>().unwrap();
         let test_header = make_header_value(test_uuid);
 
         // Success case: the client provided a valid uuid in the header.
         let success_case = authn_spoof_parse_id(Some(&test_header));
         match success_case {
-            Ok(Some(actor_id)) => {
-                assert_eq!(actor_id, test_uuid);
+            Ok(Some(silo_user_id)) => {
+                assert_eq!(silo_user_id, test_uuid);
             }
             _ => {
                 assert!(false);

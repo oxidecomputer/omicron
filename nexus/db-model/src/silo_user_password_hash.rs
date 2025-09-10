@@ -2,14 +2,17 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use crate::DbTypedUuid;
+use crate::to_db_typed_uuid;
 use diesel::backend::Backend;
 use diesel::deserialize::{self, FromSql};
 use diesel::serialize::{self, ToSql};
 use diesel::sql_types;
 use nexus_db_schema::schema::silo_user_password_hash;
+use omicron_uuid_kinds::SiloUserKind;
+use omicron_uuid_kinds::SiloUserUuid;
 use parse_display::Display;
 use ref_cast::RefCast;
-use uuid::Uuid;
 
 /// Newtype wrapper around [`omicron_passwords::PasswordHashString`].
 #[derive(
@@ -58,14 +61,22 @@ where
 #[derive(Queryable, Insertable, Debug, Selectable)]
 #[diesel(table_name = silo_user_password_hash)]
 pub struct SiloUserPasswordHash {
-    pub silo_user_id: Uuid,
+    silo_user_id: DbTypedUuid<SiloUserKind>,
     pub hash: PasswordHashString,
     pub time_created: chrono::DateTime<chrono::Utc>,
 }
 
 impl SiloUserPasswordHash {
-    pub fn new(silo_user_id: Uuid, hash: PasswordHashString) -> Self {
-        Self { silo_user_id, hash, time_created: chrono::Utc::now() }
+    pub fn new(silo_user_id: SiloUserUuid, hash: PasswordHashString) -> Self {
+        Self {
+            silo_user_id: to_db_typed_uuid(silo_user_id),
+            hash,
+            time_created: chrono::Utc::now(),
+        }
+    }
+
+    pub fn silo_user_id(&self) -> SiloUserUuid {
+        self.silo_user_id.into()
     }
 }
 

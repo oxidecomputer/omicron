@@ -677,17 +677,17 @@
         }
       }
     },
-    "/deployment/chicken-switches": {
+    "/deployment/reconfigurator-config": {
       "get": {
-        "summary": "Get the current set of chicken switches",
-        "operationId": "reconfigurator_chicken_switches_show_current",
+        "summary": "Get the current reconfigurator configuration",
+        "operationId": "reconfigurator_config_show_current",
         "responses": {
           "200": {
             "description": "successful operation",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ReconfiguratorChickenSwitchesView"
+                  "$ref": "#/components/schemas/ReconfiguratorConfigView"
                 }
               }
             }
@@ -701,13 +701,13 @@
         }
       },
       "post": {
-        "summary": "Update the chicken switches at the latest versions",
-        "operationId": "reconfigurator_chicken_switches_set",
+        "summary": "Update the reconfigurator config at the latest versions",
+        "operationId": "reconfigurator_config_set",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ReconfiguratorChickenSwitchesParam"
+                "$ref": "#/components/schemas/ReconfiguratorConfigParam"
               }
             }
           },
@@ -726,10 +726,10 @@
         }
       }
     },
-    "/deployment/chicken-switches/{version}": {
+    "/deployment/reconfigurator-config/{version}": {
       "get": {
-        "summary": "Get the chicken switches at `version` if it exists",
-        "operationId": "reconfigurator_chicken_switches_show",
+        "summary": "Get the reconfigurator config at `version` if it exists",
+        "operationId": "reconfigurator_config_show",
         "parameters": [
           {
             "in": "path",
@@ -748,7 +748,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ReconfiguratorChickenSwitchesView"
+                  "$ref": "#/components/schemas/ReconfiguratorConfigView"
                 }
               }
             }
@@ -2568,6 +2568,14 @@
               }
             ]
           },
+          "nexus_generation": {
+            "description": "The generation of the active group of Nexuses\n\nIf a Nexus instance notices it has a nexus_generation less than this value, it will start to quiesce in preparation for handing off control to the newer generation (see: RFD 588).",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Generation"
+              }
+            ]
+          },
           "oximeter_read_mode": {
             "description": "Whether oximeter should read from a single node or a cluster",
             "allOf": [
@@ -2638,6 +2646,7 @@
           "external_dns_version",
           "id",
           "internal_dns_version",
+          "nexus_generation",
           "oximeter_read_mode",
           "oximeter_read_version",
           "pending_mgs_updates",
@@ -2862,6 +2871,14 @@
               }
             ]
           },
+          "nexus_generation": {
+            "description": "The Nexus generation number\n\nSee [`Blueprint::nexus_generation`].",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Generation"
+              }
+            ]
+          },
           "parent_blueprint_id": {
             "nullable": true,
             "description": "which blueprint this blueprint is based on",
@@ -2892,6 +2909,7 @@
           "external_dns_version",
           "id",
           "internal_dns_version",
+          "nexus_generation",
           "target_release_minimum_generation",
           "time_created"
         ]
@@ -3517,6 +3535,14 @@
                 "description": "The address at which the internal nexus server is reachable.",
                 "type": "string"
               },
+              "nexus_generation": {
+                "description": "Generation number for this Nexus zone. This is used to coordinate handoff between old and new Nexus instances during updates. See RFD 588.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Generation"
+                  }
+                ]
+              },
               "nic": {
                 "description": "The service vNIC providing external connectivity using OPTE.",
                 "allOf": [
@@ -3537,6 +3563,7 @@
               "external_ip",
               "external_tls",
               "internal_address",
+              "nexus_generation",
               "nic",
               "type"
             ]
@@ -4192,6 +4219,21 @@
           "saga_id"
         ]
       },
+      "DiscretionaryZonePlacement": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "source"
+        ]
+      },
       "DiskIdentity": {
         "description": "Uniquely identifies a disk.",
         "type": "object",
@@ -4814,6 +4856,118 @@
           "id"
         ]
       },
+      "HostPhase1Status": {
+        "oneOf": [
+          {
+            "description": "This device has no host phase 1 status because it is not a sled (e.g., it's a PSC or switch).",
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "not_a_sled"
+                ]
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "active_slot": {
+                "nullable": true,
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/M2Slot"
+                  }
+                ]
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "sled"
+                ]
+              },
+              "sled_id": {
+                "nullable": true,
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/TypedUuidForSledKind"
+                  }
+                ]
+              },
+              "slot_a_version": {
+                "$ref": "#/components/schemas/TufRepoVersion"
+              },
+              "slot_b_version": {
+                "$ref": "#/components/schemas/TufRepoVersion"
+              }
+            },
+            "required": [
+              "kind",
+              "slot_a_version",
+              "slot_b_version"
+            ]
+          }
+        ]
+      },
+      "HostPhase2Status": {
+        "type": "object",
+        "properties": {
+          "boot_disk": {
+            "x-rust-type": {
+              "crate": "std",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/M2Slot"
+                },
+                {
+                  "type": "string"
+                }
+              ],
+              "path": "::std::result::Result",
+              "version": "*"
+            },
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "ok": {
+                    "$ref": "#/components/schemas/M2Slot"
+                  }
+                },
+                "required": [
+                  "ok"
+                ]
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "err": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "err"
+                ]
+              }
+            ]
+          },
+          "slot_a_version": {
+            "$ref": "#/components/schemas/TufRepoVersion"
+          },
+          "slot_b_version": {
+            "$ref": "#/components/schemas/TufRepoVersion"
+          }
+        },
+        "required": [
+          "boot_disk",
+          "slot_a_version",
+          "slot_b_version"
+        ]
+      },
       "IdMapBlueprintDatasetConfig": {
         "type": "object",
         "additionalProperties": {
@@ -5392,6 +5546,33 @@
         "pattern": "^([0-9a-fA-F]{0,2}:){5}[0-9a-fA-F]{0,2}$",
         "minLength": 5,
         "maxLength": 17
+      },
+      "MgsDrivenUpdateStatus": {
+        "type": "object",
+        "properties": {
+          "baseboard_description": {
+            "type": "string"
+          },
+          "host_os_phase_1": {
+            "$ref": "#/components/schemas/HostPhase1Status"
+          },
+          "rot": {
+            "$ref": "#/components/schemas/RotStatus"
+          },
+          "rot_bootloader": {
+            "$ref": "#/components/schemas/RotBootloaderStatus"
+          },
+          "sp": {
+            "$ref": "#/components/schemas/SpStatus"
+          }
+        },
+        "required": [
+          "baseboard_description",
+          "host_os_phase_1",
+          "rot",
+          "rot_bootloader",
+          "sp"
+        ]
       },
       "MgsUpdateDriverStatus": {
         "description": "Status of ongoing update attempts, recently completed attempts, and update requests that are waiting for retry.",
@@ -6436,6 +6617,32 @@
           "by_baseboard"
         ]
       },
+      "PendingRecovery": {
+        "description": "Snapshot of reassignment state when a recovery pass started",
+        "type": "object",
+        "properties": {
+          "blueprint_id": {
+            "nullable": true,
+            "description": "which blueprint id we'd be fully caught up to upon completion",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TypedUuidForBlueprintKind"
+              }
+            ]
+          },
+          "generation": {
+            "description": "what `reassignment_generation` was when this recovery started",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Generation"
+              }
+            ]
+          }
+        },
+        "required": [
+          "generation"
+        ]
+      },
       "PendingSagaInfo": {
         "description": "Describes a pending saga (for debugging why quiesce is stuck)",
         "type": "object",
@@ -6538,11 +6745,11 @@
           "ok"
         ]
       },
-      "PlannerChickenSwitches": {
+      "PlannerConfig": {
         "type": "object",
         "properties": {
           "add_zones_with_mupdate_override": {
-            "description": "Whether to add zones even if a mupdate override is present.\n\nOnce Nexus-driven update is active on a customer system, we must not add new zones while the system is recovering from a MUPdate. But that would require customers to upload a TUF repo before adding a new sled, even though Nexus-driven update is not active (as of r16).\n\nThis switch, which is currently on by default, allows us to add zones even if we've detected a recent MUPdate on the system. We will want to turn it off as part of enabling Nexus-driven update.",
+            "description": "Whether to add zones even if a mupdate override is present.\n\nOnce Nexus-driven update is active on a customer system, we must not add new zones while the system is recovering from a MUPdate.\n\nThis setting, which is off by default, allows us to add zones even if we've detected a recent MUPdate on the system.",
             "type": "boolean"
           }
         },
@@ -6581,7 +6788,7 @@
             }
           },
           "add_zones_with_mupdate_override": {
-            "description": "The value of the homonymous chicken switch. (What this really means is that zone adds happen despite being blocked by one or more MUPdate-related reasons.)",
+            "description": "The value of the homonymous planner config. (What this really means is that zone adds happen despite being blocked by one or more MUPdate-related reasons.)",
             "type": "boolean"
           },
           "discretionary_zones_placed": {
@@ -6590,7 +6797,7 @@
             "additionalProperties": {
               "type": "array",
               "items": {
-                "type": "string"
+                "$ref": "#/components/schemas/DiscretionaryZonePlacement"
               }
             }
           },
@@ -7031,14 +7238,6 @@
               }
             ]
           },
-          "chicken_switches": {
-            "description": "The set of \"chicken switches\" in effect for this planning run.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/PlannerChickenSwitches"
-              }
-            ]
-          },
           "cockroachdb_settings": {
             "$ref": "#/components/schemas/PlanningCockroachdbSettingsStepReport"
           },
@@ -7054,6 +7253,14 @@
           "noop_image_source": {
             "$ref": "#/components/schemas/PlanningNoopImageSourceStepReport"
           },
+          "planner_config": {
+            "description": "The configuration in effect for this planning run.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PlannerConfig"
+              }
+            ]
+          },
           "zone_updates": {
             "$ref": "#/components/schemas/PlanningZoneUpdatesStepReport"
           }
@@ -7061,12 +7268,12 @@
         "required": [
           "add",
           "blueprint_id",
-          "chicken_switches",
           "cockroachdb_settings",
           "decommission",
           "expunge",
           "mgs_updates",
           "noop_image_source",
+          "planner_config",
           "zone_updates"
         ]
       },
@@ -7410,8 +7617,23 @@
         ]
       },
       "QuiesceState": {
-        "description": "See [`QuiesceStatus`] for more on Nexus quiescing.\n\nAt any given time, Nexus is always in one of these states:\n\n```text Running             (normal operation) | | quiesce starts v WaitingForSagas     (no new sagas are allowed, but some are still running) | | no more sagas running v WaitingForDb        (no sagas running; no new db connections may be acquired by Nexus at-large, but some are still held) | | no more database connections held v Quiesced            (no sagas running, no database connections in use) ```\n\nQuiescing is (currently) a one-way trip: once a Nexus process starts quiescing, it will never go back to normal operation.  It will never go back to an earlier stage, either.",
+        "description": "See [`QuiesceStatus`] for more on Nexus quiescing.\n\nAt any given time, Nexus is always in one of these states:\n\n```text Undetermined        (have not loaded persistent state; don't know yet) | | load persistent state and find we're not quiescing v Running             (normal operation) | | quiesce starts v DrainingSagas       (no new sagas are allowed, but some are still running) | | no more sagas running v DrainingDb          (no sagas running; no new db connections may be |                  acquired by Nexus at-large, but some are still held) | | no more database connections held v RecordingQuiesce    (everything is quiesced aside from one connection being |                  used to record our final quiesced state) | | finish recording quiesce state in database v Quiesced            (no sagas running, no database connections in use) ```\n\nQuiescing is (currently) a one-way trip: once a Nexus process starts quiescing, it will never go back to normal operation.  It will never go back to an earlier stage, either.",
         "oneOf": [
+          {
+            "description": "We have not yet determined based on persistent state if we're supposed to be quiesced or not",
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "undetermined"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
           {
             "description": "Normal operation",
             "type": "object",
@@ -7428,7 +7650,7 @@
             ]
           },
           {
-            "description": "New sagas disallowed, but some are still running.",
+            "description": "New sagas disallowed, but some are still running on some Nexus instances",
             "type": "object",
             "properties": {
               "quiesce_details": {
@@ -7446,7 +7668,7 @@
               "state": {
                 "type": "string",
                 "enum": [
-                  "waiting_for_sagas"
+                  "draining_sagas"
                 ]
               }
             },
@@ -7456,13 +7678,13 @@
             ]
           },
           {
-            "description": "No sagas running, no new database connections may be claimed, but some database connections are still held.",
+            "description": "No sagas running on any Nexus instances\n\nNo new database connections may be claimed, but some database connections are still held.",
             "type": "object",
             "properties": {
               "quiesce_details": {
                 "type": "object",
                 "properties": {
-                  "duration_waiting_for_sagas": {
+                  "duration_draining_sagas": {
                     "$ref": "#/components/schemas/Duration"
                   },
                   "time_requested": {
@@ -7471,14 +7693,50 @@
                   }
                 },
                 "required": [
-                  "duration_waiting_for_sagas",
+                  "duration_draining_sagas",
                   "time_requested"
                 ]
               },
               "state": {
                 "type": "string",
                 "enum": [
-                  "waiting_for_db"
+                  "draining_db"
+                ]
+              }
+            },
+            "required": [
+              "quiesce_details",
+              "state"
+            ]
+          },
+          {
+            "description": "No database connections in use except to record the final \"quiesced\" state",
+            "type": "object",
+            "properties": {
+              "quiesce_details": {
+                "type": "object",
+                "properties": {
+                  "duration_draining_db": {
+                    "$ref": "#/components/schemas/Duration"
+                  },
+                  "duration_draining_sagas": {
+                    "$ref": "#/components/schemas/Duration"
+                  },
+                  "time_requested": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                },
+                "required": [
+                  "duration_draining_db",
+                  "duration_draining_sagas",
+                  "time_requested"
+                ]
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "recording_quiesce"
                 ]
               }
             },
@@ -7494,13 +7752,16 @@
               "quiesce_details": {
                 "type": "object",
                 "properties": {
+                  "duration_draining_db": {
+                    "$ref": "#/components/schemas/Duration"
+                  },
+                  "duration_draining_sagas": {
+                    "$ref": "#/components/schemas/Duration"
+                  },
+                  "duration_recording_quiesce": {
+                    "$ref": "#/components/schemas/Duration"
+                  },
                   "duration_total": {
-                    "$ref": "#/components/schemas/Duration"
-                  },
-                  "duration_waiting_for_db": {
-                    "$ref": "#/components/schemas/Duration"
-                  },
-                  "duration_waiting_for_sagas": {
                     "$ref": "#/components/schemas/Duration"
                   },
                   "time_quiesced": {
@@ -7513,9 +7774,10 @@
                   }
                 },
                 "required": [
+                  "duration_draining_db",
+                  "duration_draining_sagas",
+                  "duration_recording_quiesce",
                   "duration_total",
-                  "duration_waiting_for_db",
-                  "duration_waiting_for_sagas",
                   "time_quiesced",
                   "time_requested"
                 ]
@@ -7557,24 +7819,13 @@
             },
             "uniqueItems": true
           },
-          "sagas_pending": {
-            "title": "IdOrdMap",
-            "description": "what sagas are currently running or known needing to be recovered\n\nThis should only be non-empty when state is `Running` or `WaitingForSagas`.  Entries here prevent transitioning from `WaitingForSagas` to `WaitingForDb`.",
-            "x-rust-type": {
-              "crate": "iddqd",
-              "parameters": [
-                {
-                  "$ref": "#/components/schemas/PendingSagaInfo"
-                }
-              ],
-              "path": "iddqd::IdOrdMap",
-              "version": "*"
-            },
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/PendingSagaInfo"
-            },
-            "uniqueItems": true
+          "sagas": {
+            "description": "information about saga quiescing",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SagaQuiesceStatus"
+              }
+            ]
           },
           "state": {
             "description": "what stage of quiescing is Nexus at",
@@ -7587,7 +7838,7 @@
         },
         "required": [
           "db_claims",
-          "sagas_pending",
+          "sagas",
           "state"
         ]
       },
@@ -7745,26 +7996,26 @@
           "rack_subnet"
         ]
       },
-      "ReconfiguratorChickenSwitches": {
+      "ReconfiguratorConfig": {
         "type": "object",
         "properties": {
+          "planner_config": {
+            "$ref": "#/components/schemas/PlannerConfig"
+          },
           "planner_enabled": {
             "type": "boolean"
-          },
-          "planner_switches": {
-            "$ref": "#/components/schemas/PlannerChickenSwitches"
           }
         },
         "required": [
-          "planner_enabled",
-          "planner_switches"
+          "planner_config",
+          "planner_enabled"
         ]
       },
-      "ReconfiguratorChickenSwitchesParam": {
+      "ReconfiguratorConfigParam": {
         "type": "object",
         "properties": {
-          "switches": {
-            "$ref": "#/components/schemas/ReconfiguratorChickenSwitches"
+          "config": {
+            "$ref": "#/components/schemas/ReconfiguratorConfig"
           },
           "version": {
             "type": "integer",
@@ -7773,15 +8024,15 @@
           }
         },
         "required": [
-          "switches",
+          "config",
           "version"
         ]
       },
-      "ReconfiguratorChickenSwitchesView": {
+      "ReconfiguratorConfigView": {
         "type": "object",
         "properties": {
-          "switches": {
-            "$ref": "#/components/schemas/ReconfiguratorChickenSwitches"
+          "config": {
+            "$ref": "#/components/schemas/ReconfiguratorConfig"
           },
           "time_modified": {
             "type": "string",
@@ -7794,7 +8045,7 @@
           }
         },
         "required": [
-          "switches",
+          "config",
           "time_modified",
           "version"
         ]
@@ -7906,6 +8157,21 @@
           "time"
         ]
       },
+      "RotBootloaderStatus": {
+        "type": "object",
+        "properties": {
+          "stage0_next_version": {
+            "$ref": "#/components/schemas/TufRepoVersion"
+          },
+          "stage0_version": {
+            "$ref": "#/components/schemas/TufRepoVersion"
+          }
+        },
+        "required": [
+          "stage0_next_version",
+          "stage0_version"
+        ]
+      },
       "RotSlot": {
         "oneOf": [
           {
@@ -7936,6 +8202,29 @@
               "slot"
             ]
           }
+        ]
+      },
+      "RotStatus": {
+        "type": "object",
+        "properties": {
+          "active_slot": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RotSlot"
+              }
+            ]
+          },
+          "slot_a_version": {
+            "$ref": "#/components/schemas/TufRepoVersion"
+          },
+          "slot_b_version": {
+            "$ref": "#/components/schemas/TufRepoVersion"
+          }
+        },
+        "required": [
+          "slot_a_version",
+          "slot_b_version"
         ]
       },
       "RouteConfig": {
@@ -8081,6 +8370,106 @@
           }
         ]
       },
+      "SagaQuiesceStatus": {
+        "type": "object",
+        "properties": {
+          "drained_blueprint_id": {
+            "nullable": true,
+            "description": "blueprint id that we're \"fully drained up to\"\n\nIf this value is non-`None`, that means that:\n\n- saga creation is disallowed - no sagas are running - we have re-assigned sagas from other Nexus instances expunged in this blueprint or earlier - we have finished recovery for all those sagas (that had been assigned to us as of the re-assignment pass for this blueprint id)\n\nThis means that the only way we can wind up running another saga is if there's a new blueprint that expunges a different Nexus zone.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TypedUuidForBlueprintKind"
+              }
+            ]
+          },
+          "first_recovery_complete": {
+            "description": "whether at least one recovery pass has successfully completed\n\nWe have to track this because we can't quiesce until we know we've recovered all outstanding sagas.",
+            "type": "boolean"
+          },
+          "new_sagas_allowed": {
+            "description": "current policy: are we allowed to *create* new sagas?\n\nThis also affects re-assigning sagas from expunged Nexus instances to ourselves.  It does **not** affect saga recovery.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SagasAllowed"
+              }
+            ]
+          },
+          "reassignment_blueprint_id": {
+            "nullable": true,
+            "description": "blueprint id associated with last successful saga reassignment\n\nSimilar to the generation number, this is used to track whether we've accounted for all sagas for all expungements up through this target blueprint.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TypedUuidForBlueprintKind"
+              }
+            ]
+          },
+          "reassignment_generation": {
+            "description": "generation number for the saga reassignment\n\nThis gets bumped whenever a saga reassignment operation completes that may have re-assigned us some sagas.  It's used to keep track of when we've recovered all sagas that could be assigned to us.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Generation"
+              }
+            ]
+          },
+          "reassignment_pending": {
+            "description": "whether there is a saga reassignment operation happening\n\nThese operatinos may assign new sagas to Nexus that must be recovered and completed before quiescing can finish.",
+            "type": "boolean"
+          },
+          "recovered_blueprint_id": {
+            "nullable": true,
+            "description": "blueprint id that saga recovery has \"caught up to\"\n\nThis means that we have finished recovering any sagas that were re-assigned to us due to expungements of other Nexus zones up through this blueprint.  Put differently: we know that we will never be assigned more sagas due to expungement unless the target blueprint changes past this one.\n\nThis does not mean that we've fully drained all sagas up through this blueprint.  There may still be sagas running.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TypedUuidForBlueprintKind"
+              }
+            ]
+          },
+          "recovered_reassignment_generation": {
+            "description": "\"saga reassignment generation number\" that was \"caught up to\" by the last recovery pass\n\nThis is used with `reassignment_generation` to help us know when we've recovered all the sagas that may have been assigned to us during a given reassignment pass.  See `reassignment_done()` for details.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Generation"
+              }
+            ]
+          },
+          "recovery_pending": {
+            "nullable": true,
+            "description": "If a recovery pass is ongoing, a snapshot of reassignment state when it started (which reflects what we'll be caught up to when it finishes)",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PendingRecovery"
+              }
+            ]
+          },
+          "sagas_pending": {
+            "title": "IdOrdMap",
+            "description": "list of sagas we need to wait to complete before quiescing\n\nThese are basically running sagas.  They may have been created in this Nexus process lifetime or created in another process and then recovered in this one.",
+            "x-rust-type": {
+              "crate": "iddqd",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/PendingSagaInfo"
+                }
+              ],
+              "path": "iddqd::IdOrdMap",
+              "version": "*"
+            },
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PendingSagaInfo"
+            },
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "first_recovery_complete",
+          "new_sagas_allowed",
+          "reassignment_generation",
+          "reassignment_pending",
+          "recovered_reassignment_generation",
+          "sagas_pending"
+        ]
+      },
       "SagaResultsPage": {
         "description": "A single page of results",
         "type": "object",
@@ -8188,6 +8577,32 @@
           }
         ]
       },
+      "SagasAllowed": {
+        "description": "Policy determining whether new sagas are allowed to be started\n\nThis is used by Nexus quiesce to disallow creation of new sagas when we're trying to quiesce Nexus.",
+        "oneOf": [
+          {
+            "description": "New sagas may be started (normal condition)",
+            "type": "string",
+            "enum": [
+              "allowed"
+            ]
+          },
+          {
+            "description": "New sagas may not be started because we're quiescing or quiesced",
+            "type": "string",
+            "enum": [
+              "disallowed_quiesce"
+            ]
+          },
+          {
+            "description": "New sagas may not be started because we just started up and haven't determined if we're quiescing yet",
+            "type": "string",
+            "enum": [
+              "disallowed_unknown"
+            ]
+          }
+        ]
+      },
       "ServerId": {
         "description": "A unique ID for a Clickhouse Server",
         "type": "integer",
@@ -8278,6 +8693,40 @@
           "sa_address",
           "usable_hardware_threads",
           "usable_physical_ram"
+        ]
+      },
+      "SledAgentUpdateStatus": {
+        "type": "object",
+        "properties": {
+          "host_phase_2": {
+            "$ref": "#/components/schemas/HostPhase2Status"
+          },
+          "sled_id": {
+            "$ref": "#/components/schemas/TypedUuidForSledKind"
+          },
+          "zones": {
+            "title": "IdOrdMap",
+            "x-rust-type": {
+              "crate": "iddqd",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/ZoneStatus"
+                }
+              ],
+              "path": "iddqd::IdOrdMap",
+              "version": "*"
+            },
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ZoneStatus"
+            },
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "host_phase_2",
+          "sled_id",
+          "zones"
         ]
       },
       "SledCpuFamily": {
@@ -8504,14 +8953,6 @@
       "SpStatus": {
         "type": "object",
         "properties": {
-          "sled_id": {
-            "nullable": true,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/TypedUuidForSledKind"
-              }
-            ]
-          },
           "slot0_version": {
             "$ref": "#/components/schemas/TufRepoVersion"
           },
@@ -8945,25 +9386,46 @@
       "UpdateStatus": {
         "type": "object",
         "properties": {
-          "sps": {
-            "type": "object",
-            "additionalProperties": {
-              "$ref": "#/components/schemas/SpStatus"
-            }
+          "mgs_driven": {
+            "title": "IdOrdMap",
+            "x-rust-type": {
+              "crate": "iddqd",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/MgsDrivenUpdateStatus"
+                }
+              ],
+              "path": "iddqd::IdOrdMap",
+              "version": "*"
+            },
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MgsDrivenUpdateStatus"
+            },
+            "uniqueItems": true
           },
-          "zones": {
-            "type": "object",
-            "additionalProperties": {
-              "type": "array",
-              "items": {
-                "$ref": "#/components/schemas/ZoneStatus"
-              }
-            }
+          "sleds": {
+            "title": "IdOrdMap",
+            "x-rust-type": {
+              "crate": "iddqd",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/SledAgentUpdateStatus"
+                }
+              ],
+              "path": "iddqd::IdOrdMap",
+              "version": "*"
+            },
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SledAgentUpdateStatus"
+            },
+            "uniqueItems": true
           }
         },
         "required": [
-          "sps",
-          "zones"
+          "mgs_driven",
+          "sleds"
         ]
       },
       "UplinkAddressConfig": {

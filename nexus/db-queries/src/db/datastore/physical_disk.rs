@@ -68,7 +68,7 @@ impl DataStore {
                     // expunged.
                     Self::check_sled_in_service_on_connection(
                         &conn,
-                        SledUuid::from_untyped_uuid(disk.sled_id),
+                        disk.sled_id(),
                     )
                     .await
                     .map_err(|txn_error| txn_error.into_diesel(&err))?;
@@ -122,9 +122,9 @@ impl DataStore {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         use nexus_db_schema::schema::physical_disk::dsl;
 
-        let sled_id = disk.sled_id;
+        let sled_id = disk.sled_id();
         let disk_in_db = Sled::insert_resource(
-            sled_id,
+            sled_id.into(),
             diesel::insert_into(dsl::physical_disk).values(disk.clone()),
         )
         .insert_and_get_result_async(conn)
@@ -132,7 +132,7 @@ impl DataStore {
         .map_err(|e| match e {
             AsyncInsertError::CollectionNotFound => Error::ObjectNotFound {
                 type_name: ResourceType::Sled,
-                lookup_type: LookupType::ById(sled_id),
+                lookup_type: LookupType::by_id(sled_id),
             },
             AsyncInsertError::DatabaseError(e) => public_error_from_diesel(
                 e,
@@ -266,17 +266,18 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
+    /// Return a page of physical disks for a given sled id
     pub async fn sled_list_physical_disks(
         &self,
         opctx: &OpContext,
-        sled_id: Uuid,
+        sled_id: SledUuid,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<PhysicalDisk> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         use nexus_db_schema::schema::physical_disk::dsl;
         paginated(dsl::physical_disk, dsl::id, pagparams)
             .filter(dsl::time_deleted.is_null())
-            .filter(dsl::sled_id.eq(sled_id))
+            .filter(dsl::sled_id.eq(to_db_typed_uuid(sled_id)))
             .select(PhysicalDisk::as_select())
             .load_async(&*self.pool_connection_authorized(opctx).await?)
             .await
@@ -346,6 +347,7 @@ mod test {
     use omicron_common::api::external::ByteCount;
     use omicron_common::disk::{DiskIdentity, DiskVariant};
     use omicron_test_utils::dev;
+    use omicron_uuid_kinds::ZpoolUuid;
     use std::num::NonZeroU32;
 
     async fn create_test_sled(db: &DataStore) -> Sled {
@@ -690,7 +692,7 @@ mod test {
                     reservoir_size: ByteCount::from(1024),
                     sled_role: SledRole::Gimlet,
                     sled_agent_address: "[::1]:56792".parse().unwrap(),
-                    sled_id: SledUuid::from_untyped_uuid(sled.id()),
+                    sled_id: sled.id(),
                     usable_hardware_threads: 10,
                     usable_physical_ram: ByteCount::from(1024 * 1024),
                     cpu_family: SledCpuFamily::AmdMilan,
@@ -755,7 +757,7 @@ mod test {
     }
 
     fn create_disk_zpool_combo(
-        sled_id: Uuid,
+        sled_id: SledUuid,
         inv_disk: &InventoryDisk,
     ) -> (PhysicalDisk, Zpool) {
         let disk = PhysicalDisk::new(
@@ -768,7 +770,7 @@ mod test {
         );
 
         let zpool = Zpool::new(
-            Uuid::new_v4(),
+            ZpoolUuid::new_v4(),
             sled_id,
             disk.id(),
             ByteCount::from(0).into(),

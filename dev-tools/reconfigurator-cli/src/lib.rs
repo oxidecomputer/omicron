@@ -36,7 +36,7 @@ use nexus_types::deployment::execution::blueprint_internal_dns_config;
 use nexus_types::deployment::{Blueprint, UnstableReconfiguratorState};
 use nexus_types::deployment::{BlueprintArtifactVersion, PendingMgsUpdate};
 use nexus_types::deployment::{
-    BlueprintHostPhase2DesiredContents, PlannerChickenSwitches,
+    BlueprintHostPhase2DesiredContents, PlannerConfig,
 };
 use nexus_types::deployment::{BlueprintZoneDisposition, ExpectedVersion};
 use nexus_types::deployment::{
@@ -245,7 +245,7 @@ fn process_command(
             cmd_sled_update_host_phase_2(sim, args)
         }
         Commands::SledUpdateRotBootloader(args) => {
-            cmd_sled_update_rot_bootlaoder(sim, args)
+            cmd_sled_update_rot_bootloader(sim, args)
         }
         Commands::SiloList => cmd_silo_list(sim),
         Commands::SiloAdd(args) => cmd_silo_add(sim, args),
@@ -402,6 +402,8 @@ struct SledSetArgs {
 enum SledSetCommand {
     /// set the policy for this sled
     Policy(SledSetPolicyArgs),
+    /// set the Omicron config for this sled from a blueprint
+    OmicronConfig(SledSetOmicronConfigArgs),
     #[clap(flatten)]
     Visibility(SledSetVisibilityCommand),
     /// set the mupdate override for this sled
@@ -413,6 +415,12 @@ struct SledSetPolicyArgs {
     /// the policy to set
     #[clap(value_enum)]
     policy: SledPolicyOpt,
+}
+
+#[derive(Debug, Args)]
+struct SledSetOmicronConfigArgs {
+    /// the blueprint to derive the Omicron config from
+    blueprint: BlueprintIdOpt,
 }
 
 #[derive(Debug, Subcommand)]
@@ -1161,8 +1169,8 @@ enum SetArgs {
         /// TUF repo containing release artifacts
         filename: Utf8PathBuf,
     },
-    /// planner chicken switches
-    ChickenSwitches(SetChickenSwitchesArgs),
+    /// planner config
+    PlannerConfig(SetPlannerConfigArgs),
     /// timestamp for ignoring impossible MGS updates
     IgnoreImpossibleMgsUpdatesSince {
         since: SetIgnoreImpossibleMgsUpdatesSinceArgs,
@@ -1187,26 +1195,26 @@ impl FromStr for SetIgnoreImpossibleMgsUpdatesSinceArgs {
 }
 
 #[derive(Debug, Args)]
-struct SetChickenSwitchesArgs {
+struct SetPlannerConfigArgs {
     #[clap(flatten)]
-    switches: ChickenSwitchesOpts,
+    planner_config: PlannerConfigOpts,
 }
 
-// Define the switches separately so we can use `group(required = true, multiple
-// = true).`
+// Define the config fields separately so we can use `group(required = true,
+// multiple = true).`
 #[derive(Debug, Clone, Args)]
 #[group(required = true, multiple = true)]
-pub struct ChickenSwitchesOpts {
+pub struct PlannerConfigOpts {
     #[clap(long, action = ArgAction::Set)]
     add_zones_with_mupdate_override: Option<bool>,
 }
 
-impl ChickenSwitchesOpts {
+impl PlannerConfigOpts {
     fn update_if_modified(
         &self,
-        current: &PlannerChickenSwitches,
-    ) -> Option<PlannerChickenSwitches> {
-        let new = PlannerChickenSwitches {
+        current: &PlannerConfig,
+    ) -> Option<PlannerConfig> {
+        let new = PlannerConfig {
             add_zones_with_mupdate_override: self
                 .add_zones_with_mupdate_override
                 .unwrap_or(current.add_zones_with_mupdate_override),
@@ -1538,6 +1546,30 @@ fn cmd_sled_set(
             );
             Ok(Some(format!("set sled {sled_id} policy to {policy}")))
         }
+        SledSetCommand::OmicronConfig(command) => {
+            let resolved_id =
+                system.resolve_blueprint_id(command.blueprint.into())?;
+            let blueprint = system.get_blueprint(&resolved_id)?;
+            let sled_cfg =
+                blueprint.sleds.get(&sled_id).with_context(|| {
+                    format!("sled id {sled_id} not found in blueprint")
+                })?;
+            let omicron_sled_cfg =
+                sled_cfg.clone().into_in_service_sled_config();
+            system
+                .description_mut()
+                .sled_set_omicron_config(sled_id, omicron_sled_cfg)?;
+            sim.commit_and_bump(
+                format!(
+                    "reconfigurator-cli sled-set omicron-config: \
+                     {sled_id} from {resolved_id}",
+                ),
+                state,
+            );
+            Ok(Some(format!(
+                "set sled {sled_id} omicron config from {resolved_id}"
+            )))
+        }
         SledSetCommand::Visibility(command) => {
             let new = command.to_visibility();
             let prev = system
@@ -1636,7 +1668,7 @@ fn cmd_sled_update_install_dataset(
     )))
 }
 
-fn cmd_sled_update_rot_bootlaoder(
+fn cmd_sled_update_rot_bootloader(
     sim: &mut ReconfiguratorSim,
     args: SledUpdateRotBootloaderArgs,
 ) -> anyhow::Result<Option<String>> {
@@ -2615,13 +2647,13 @@ fn cmd_show(sim: &mut ReconfiguratorSim) -> anyhow::Result<Option<String>> {
             );
         }
     }
-    swriteln!(s, "chicken switches:");
+    swriteln!(s, "planner config:");
     // No need for swriteln! here because .display() adds its own newlines at
     // the end.
     swrite!(
         s,
         "{}",
-        state.system().description().get_chicken_switches().display()
+        state.system().description().get_planner_config().display()
     );
 
     Ok(Some(s))
@@ -2669,18 +2701,15 @@ fn cmd_set(
             );
             format!("set target release based on {}", filename)
         }
-        SetArgs::ChickenSwitches(args) => {
-            let current =
-                state.system_mut().description().get_chicken_switches();
-            if let Some(new) = args.switches.update_if_modified(&current) {
-                state.system_mut().description_mut().set_chicken_switches(new);
+        SetArgs::PlannerConfig(args) => {
+            let current = state.system_mut().description().get_planner_config();
+            if let Some(new) = args.planner_config.update_if_modified(&current)
+            {
+                state.system_mut().description_mut().set_planner_config(new);
                 let diff = current.diff(&new);
-                format!("chicken switches updated:\n{}", diff.display())
+                format!("planner config updated:\n{}", diff.display())
             } else {
-                format!(
-                    "no changes to chicken switches:\n{}",
-                    current.display()
-                )
+                format!("no changes to planner config:\n{}", current.display())
             }
         }
         SetArgs::IgnoreImpossibleMgsUpdatesSince { since } => {

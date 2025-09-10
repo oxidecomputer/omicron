@@ -14,6 +14,7 @@ use nexus_types::internal_api::views::QuiesceStatus;
 use nexus_types::quiesce::SagaQuiesceHandle;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::UpdateResult;
+use slog::Logger;
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::watch;
@@ -21,26 +22,7 @@ use tokio::sync::watch;
 impl super::Nexus {
     pub async fn quiesce_start(&self, opctx: &OpContext) -> UpdateResult<()> {
         opctx.authorize(authz::Action::Modify, &authz::QUIESCE_STATE).await?;
-        let started = self.quiesce.send_if_modified(|q| {
-            if let QuiesceState::Running = q {
-                let time_requested = Utc::now();
-                let time_waiting_for_sagas = Instant::now();
-                *q = QuiesceState::WaitingForSagas {
-                    time_requested,
-                    time_waiting_for_sagas,
-                };
-                true
-            } else {
-                false
-            }
-        });
-        if started {
-            tokio::spawn(do_quiesce(
-                self.quiesce.clone(),
-                self.saga_quiesce.clone(),
-                self.datastore().clone(),
-            ));
-        }
+        self.quiesce.set_quiescing(true);
         Ok(())
     }
 
@@ -49,56 +31,174 @@ impl super::Nexus {
         opctx: &OpContext,
     ) -> LookupResult<QuiesceStatus> {
         opctx.authorize(authz::Action::Read, &authz::QUIESCE_STATE).await?;
-        let state = self.quiesce.borrow().clone();
-        let sagas_pending = self.saga_quiesce.sagas_pending();
+        let state = self.quiesce.state();
+        let sagas = self.quiesce.sagas().status();
         let db_claims = self.datastore().claims_held();
-        Ok(QuiesceStatus { state, sagas_pending, db_claims })
+        Ok(QuiesceStatus { state, sagas, db_claims })
     }
 }
 
-async fn do_quiesce(
-    quiesce: watch::Sender<QuiesceState>,
-    saga_quiesce: SagaQuiesceHandle,
+/// Describes the configuration and state around quiescing Nexus
+#[derive(Clone)]
+pub struct NexusQuiesceHandle {
+    log: Logger,
     datastore: Arc<DataStore>,
-) {
-    assert_matches!(*quiesce.borrow(), QuiesceState::WaitingForSagas { .. });
-    saga_quiesce.quiesce();
-    saga_quiesce.wait_for_quiesced().await;
-    quiesce.send_modify(|q| {
-        let QuiesceState::WaitingForSagas {
+    sagas: SagaQuiesceHandle,
+    state: watch::Sender<QuiesceState>,
+}
+
+impl NexusQuiesceHandle {
+    pub fn new(log: &Logger, datastore: Arc<DataStore>) -> NexusQuiesceHandle {
+        let my_log = log.new(o!("component" => "NexusQuiesceHandle"));
+        let saga_quiesce_log = log.new(o!("component" => "SagaQuiesceHandle"));
+        let sagas = SagaQuiesceHandle::new(saga_quiesce_log);
+        let (state, _) = watch::channel(QuiesceState::Undetermined);
+        NexusQuiesceHandle { log: my_log, datastore, sagas, state }
+    }
+
+    pub fn sagas(&self) -> SagaQuiesceHandle {
+        self.sagas.clone()
+    }
+
+    pub fn state(&self) -> QuiesceState {
+        self.state.borrow().clone()
+    }
+
+    pub fn set_quiescing(&self, quiescing: bool) {
+        let new_state = if quiescing {
+            let time_requested = Utc::now();
+            let time_draining_sagas = Instant::now();
+            QuiesceState::DrainingSagas { time_requested, time_draining_sagas }
+        } else {
+            QuiesceState::Running
+        };
+
+        let changed = self.state.send_if_modified(|q| {
+            match q {
+                QuiesceState::Undetermined => {
+                    info!(&self.log, "initial state"; "state" => ?new_state);
+                    *q = new_state;
+                    true
+                }
+                QuiesceState::Running => {
+                    if quiescing {
+                        info!(&self.log, "quiesce starting");
+                        *q = new_state;
+                        true
+                    } else {
+                        // We're not quiescing and not being asked to quiesce.
+                        // Nothing to do.
+                        false
+                    }
+                }
+                QuiesceState::DrainingSagas { .. }
+                | QuiesceState::DrainingDb { .. }
+                | QuiesceState::RecordingQuiesce { .. }
+                | QuiesceState::Quiesced { .. } => {
+                    // Once we start quiescing, we never go back.
+                    false
+                }
+            }
+        });
+
+        // Immediately (synchronously) update the saga quiesce status.  It's
+        // okay to do this even if there wasn't a change.
+        self.sagas.set_quiescing(quiescing);
+
+        if changed && quiescing {
+            // Asynchronously complete the rest of the quiesce process.
+            tokio::spawn(do_quiesce(self.clone()));
+        }
+    }
+}
+
+async fn do_quiesce(quiesce: NexusQuiesceHandle) {
+    let saga_quiesce = quiesce.sagas.clone();
+    let datastore = quiesce.datastore.clone();
+
+    // NOTE: This sequence will change as we implement RFD 588.
+    // We will need to use the datastore to report our saga drain status and
+    // also to see when other Nexus instances have finished draining their
+    // sagas.  For now, this implementation begins quiescing its database as
+    // soon as its sagas are locally drained.
+    assert_matches!(
+        *quiesce.state.borrow(),
+        QuiesceState::DrainingSagas { .. }
+    );
+
+    // TODO per RFD 588, this is where we will enter a loop, pausing either on
+    // timeout or when our local quiesce state changes.  At each pause: if we
+    // need to update our db_metadata_nexus record, do so.  Then load the
+    // current blueprint and check the records for all nexus instances.  This
+    // work is covered by a combination of oxidecomputer/omicron#8859,
+    // oxidecomputer/omicron#8857, and oxidecomputer/omicron#8796.
+    //
+    // For now, we skip the cross-Nexus coordination and simply wait for our own
+    // Nexus to finish what it's doing.
+    saga_quiesce.wait_for_drained().await;
+
+    quiesce.state.send_modify(|q| {
+        let QuiesceState::DrainingSagas {
             time_requested,
-            time_waiting_for_sagas,
+            time_draining_sagas,
         } = *q
         else {
             panic!("wrong state in do_quiesce(): {:?}", q);
         };
-        *q = QuiesceState::WaitingForDb {
+        let time_draining_db = Instant::now();
+        *q = QuiesceState::DrainingDb {
             time_requested,
-            time_waiting_for_sagas,
-            duration_waiting_for_sagas: time_waiting_for_sagas.elapsed(),
-            time_waiting_for_db: Instant::now(),
+            time_draining_sagas,
+            duration_draining_sagas: time_draining_db - time_draining_sagas,
+            time_draining_db,
         };
     });
 
     datastore.quiesce();
     datastore.wait_for_quiesced().await;
-    quiesce.send_modify(|q| {
-        let QuiesceState::WaitingForDb {
+    quiesce.state.send_modify(|q| {
+        let QuiesceState::DrainingDb {
             time_requested,
-            time_waiting_for_sagas,
-            duration_waiting_for_sagas,
-            time_waiting_for_db,
+            time_draining_sagas,
+            duration_draining_sagas,
+            time_draining_db,
         } = *q
         else {
             panic!("wrong state in do_quiesce(): {:?}", q);
         };
+        let time_recording_quiesce = Instant::now();
+        *q = QuiesceState::RecordingQuiesce {
+            time_requested,
+            time_draining_sagas,
+            duration_draining_sagas,
+            duration_draining_db: time_recording_quiesce - time_draining_db,
+            time_recording_quiesce,
+        };
+    });
+
+    // TODO per RFD 588, this is where we will enter a loop trying to update our
+    // database record for the last time.  See oxidecomputer/omicron#8971.
+
+    quiesce.state.send_modify(|q| {
+        let QuiesceState::RecordingQuiesce {
+            time_requested,
+            time_draining_sagas,
+            duration_draining_sagas,
+            duration_draining_db,
+            time_recording_quiesce,
+        } = *q
+        else {
+            panic!("wrong state in do_quiesce(): {:?}", q);
+        };
+
         let finished = Instant::now();
         *q = QuiesceState::Quiesced {
             time_requested,
-            duration_waiting_for_sagas,
-            duration_waiting_for_db: finished - time_waiting_for_db,
-            duration_total: finished - time_waiting_for_sagas,
             time_quiesced: Utc::now(),
+            duration_draining_sagas,
+            duration_draining_db,
+            duration_recording_quiesce: finished - time_recording_quiesce,
+            duration_total: finished - time_draining_sagas,
         };
     });
 }
@@ -161,26 +261,29 @@ mod test {
         let QuiesceState::Quiesced {
             time_requested,
             time_quiesced,
-            duration_waiting_for_sagas,
-            duration_waiting_for_db,
+            duration_draining_sagas,
+            duration_draining_db,
+            duration_recording_quiesce,
             duration_total,
         } = status.state
         else {
             panic!("not quiesced");
         };
         let duration_total = Duration::from(duration_total);
-        let duration_waiting_for_sagas =
-            Duration::from(duration_waiting_for_sagas);
-        let duration_waiting_for_db = Duration::from(duration_waiting_for_db);
+        let duration_draining_sagas = Duration::from(duration_draining_sagas);
+        let duration_draining_db = Duration::from(duration_draining_db);
+        let duration_recording_quiesce =
+            Duration::from(duration_recording_quiesce);
         assert!(time_requested >= before);
         assert!(time_requested <= after);
         assert!(time_quiesced >= before);
         assert!(time_quiesced <= after);
         assert!(time_quiesced >= time_requested);
-        assert!(duration_total >= duration_waiting_for_sagas);
-        assert!(duration_total >= duration_waiting_for_db);
+        assert!(duration_total >= duration_draining_sagas);
+        assert!(duration_total >= duration_draining_db);
+        assert!(duration_total >= duration_recording_quiesce);
         assert!(duration_total <= (after - before).to_std().unwrap());
-        assert!(status.sagas_pending.is_empty());
+        assert!(status.sagas.sagas_pending.is_empty());
         assert!(status.db_claims.is_empty());
     }
 
@@ -252,9 +355,11 @@ mod test {
         debug!(log, "found quiesce status"; "status" => ?quiesce_status);
         assert_matches!(
             quiesce_status.state,
-            QuiesceState::WaitingForSagas { .. }
+            QuiesceState::DrainingSagas { .. }
         );
-        assert!(quiesce_status.sagas_pending.contains_key(&demo_saga.saga_id));
+        assert!(
+            quiesce_status.sagas.sagas_pending.contains_key(&demo_saga.saga_id)
+        );
         // We should see at least one held database claim from the one we took
         // above.
         assert!(!quiesce_status.db_claims.is_empty());
@@ -315,10 +420,10 @@ mod test {
                     .map_err(|e| CondCheckError::Failed(e))?
                     .into_inner();
                 debug!(log, "found quiesce state"; "state" => ?rv);
-                if !matches!(rv.state, QuiesceState::WaitingForDb { .. }) {
+                if !matches!(rv.state, QuiesceState::DrainingDb { .. }) {
                     return Err(CondCheckError::<NexusClientError>::NotYet);
                 }
-                assert!(rv.sagas_pending.is_empty());
+                assert!(rv.sagas.sagas_pending.is_empty());
                 // The database claim we took is still held.
                 assert!(!rv.db_claims.is_empty());
                 Ok(())

@@ -4,7 +4,7 @@
 
 // Copyright 2022 Oxide Computer Company
 
-use dropshot::Method;
+use dropshot::HttpErrorResponseBody;
 use futures::prelude::*;
 use gateway_messages::SpPort;
 use gateway_test_utils::current_simulator_state;
@@ -12,10 +12,9 @@ use gateway_test_utils::setup;
 use gateway_test_utils::sim_sp_serial_console;
 use gateway_types::component::SpType;
 use http::StatusCode;
-use http::Uri;
-use http::uri::Scheme;
-use tokio_tungstenite::tungstenite;
+use tokio_tungstenite::WebSocketStream;
 use tokio_tungstenite::tungstenite::protocol::Message;
+use tokio_tungstenite::tungstenite::protocol::Role;
 
 #[tokio::test]
 async fn serial_console_communication() {
@@ -34,14 +33,17 @@ async fn serial_console_communication() {
         sim_sp_serial_console(&simrack.gimlets[0]).await;
 
     // connect to the MGS websocket for this gimlet
-    let url = {
-        let mut parts = client
-            .url("/sp/sled/0/component/sp3-host-cpu/serial-console/attach")
-            .into_parts();
-        parts.scheme = Some(Scheme::try_from("ws").unwrap());
-        Uri::from_parts(parts).unwrap()
-    };
-    let (mut ws, _resp) = tokio_tungstenite::connect_async(url).await.unwrap();
+    let upgraded = client
+        .sp_component_serial_console_attach(
+            gateway_client::types::SpType::Sled,
+            0,
+            "sp3-host-cpu",
+        )
+        .await
+        .unwrap()
+        .into_inner();
+    let mut ws =
+        WebSocketStream::from_raw_socket(upgraded, Role::Client, None).await;
 
     for i in 0..8 {
         let msg_from_mgs = format!("hello from MGS {}", i).into_bytes();
@@ -80,36 +82,34 @@ async fn serial_console_detach() {
         sim_sp_serial_console(&simrack.gimlets[0]).await;
 
     // connect to the MGS websocket for this gimlet
-    let attach_url = {
-        let mut parts = client
-            .url("/sp/sled/0/component/sp3-host-cpu/serial-console/attach")
-            .into_parts();
-        parts.scheme = Some(Scheme::try_from("ws").unwrap());
-        Uri::from_parts(parts).unwrap()
-    };
-    let (mut ws, _resp) =
-        tokio_tungstenite::connect_async(attach_url.clone()).await.unwrap();
+    let upgraded = client
+        .sp_component_serial_console_attach(
+            gateway_client::types::SpType::Sled,
+            0,
+            "sp3-host-cpu",
+        )
+        .await
+        .unwrap()
+        .into_inner();
+    let mut ws =
+        WebSocketStream::from_raw_socket(upgraded, Role::Client, None).await;
 
     // attempting to connect while the first connection is still open should
     // fail
-    let err =
-        tokio_tungstenite::connect_async(attach_url.clone()).await.unwrap_err();
-    match err {
-        tungstenite::Error::Http(resp) => {
-            assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
-        }
-        tungstenite::Error::ConnectionClosed
-        | tungstenite::Error::AlreadyClosed
-        | tungstenite::Error::AttackAttempt
-        | tungstenite::Error::Io(_)
-        | tungstenite::Error::Tls(_)
-        | tungstenite::Error::Capacity(_)
-        | tungstenite::Error::Protocol(_)
-        | tungstenite::Error::WriteBufferFull(_)
-        | tungstenite::Error::Utf8
-        | tungstenite::Error::Url(_)
-        | tungstenite::Error::HttpFormat(_) => panic!("unexpected error"),
-    }
+    let err = client
+        .sp_component_serial_console_attach(
+            gateway_client::types::SpType::Sled,
+            0,
+            "sp3-host-cpu",
+        )
+        .await
+        .unwrap_err();
+    let gateway_client::Error::UnexpectedResponse(response) = err else {
+        panic!("unexpected error");
+    };
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let err: HttpErrorResponseBody = response.json().await.unwrap();
+    assert!(err.message.contains("serial console already attached"));
 
     // the original websocket should still work
     ws.send(Message::Binary(b"hello".to_vec())).await.unwrap();
@@ -121,12 +121,12 @@ async fn serial_console_detach() {
     );
 
     // hit the detach endpoint, which should disconnect `ws`
-    let detach_url = format!(
-        "{}",
-        client.url("/sp/sled/0/component/sp3-host-cpu/serial-console/detach")
-    );
     client
-        .make_request_no_body(Method::POST, &detach_url, StatusCode::NO_CONTENT)
+        .sp_component_serial_console_detach(
+            gateway_client::types::SpType::Sled,
+            0,
+            "sp3-host-cpu",
+        )
         .await
         .unwrap();
     match ws.next().await {
@@ -137,8 +137,17 @@ async fn serial_console_detach() {
     }
 
     // we should now be able to rettach
-    let (mut ws, _resp) =
-        tokio_tungstenite::connect_async(attach_url.clone()).await.unwrap();
+    let upgraded = client
+        .sp_component_serial_console_attach(
+            gateway_client::types::SpType::Sled,
+            0,
+            "sp3-host-cpu",
+        )
+        .await
+        .unwrap()
+        .into_inner();
+    let mut ws =
+        WebSocketStream::from_raw_socket(upgraded, Role::Client, None).await;
     ws.send(Message::Binary(b"hello".to_vec())).await.unwrap();
     assert_eq!(console_read.recv().await.unwrap(), b"hello");
     console_write.send(b"world".to_vec()).await.unwrap();

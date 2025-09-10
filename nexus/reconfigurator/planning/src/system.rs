@@ -34,7 +34,7 @@ use nexus_types::deployment::CockroachDbClusterVersion;
 use nexus_types::deployment::CockroachDbSettings;
 use nexus_types::deployment::ExpectedVersion;
 use nexus_types::deployment::OximeterReadPolicy;
-use nexus_types::deployment::PlannerChickenSwitches;
+use nexus_types::deployment::PlannerConfig;
 use nexus_types::deployment::PlanningInputBuilder;
 use nexus_types::deployment::Policy;
 use nexus_types::deployment::SledDetails;
@@ -63,6 +63,7 @@ use omicron_common::api::external::Generation;
 use omicron_common::disk::DiskIdentity;
 use omicron_common::disk::DiskVariant;
 use omicron_common::disk::M2Slot;
+use omicron_common::policy::CRUCIBLE_PANTRY_REDUNDANCY;
 use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
 use omicron_common::policy::NEXUS_REDUNDANCY;
 use omicron_uuid_kinds::MupdateOverrideUuid;
@@ -122,7 +123,7 @@ pub struct SystemDescription {
     oximeter_read_policy: OximeterReadPolicy,
     tuf_repo: TufRepoPolicy,
     old_repo: TufRepoPolicy,
-    chicken_switches: PlannerChickenSwitches,
+    planner_config: PlannerConfig,
     ignore_impossible_mgs_updates_since: DateTime<Utc>,
 }
 
@@ -163,6 +164,7 @@ impl SystemDescription {
         // Policy defaults
         let target_nexus_zone_count = NEXUS_REDUNDANCY;
         let target_internal_dns_zone_count = INTERNAL_DNS_REDUNDANCY;
+        let target_crucible_pantry_zone_count = CRUCIBLE_PANTRY_REDUNDANCY;
 
         // TODO-cleanup These are wrong, but we don't currently set up any
         // of these zones in our fake system, so this prevents downstream test
@@ -171,7 +173,6 @@ impl SystemDescription {
         let target_boundary_ntp_zone_count = 0;
         let target_cockroachdb_zone_count = 0;
         let target_oximeter_zone_count = 0;
-        let target_crucible_pantry_zone_count = 0;
 
         let target_cockroachdb_cluster_version =
             CockroachDbClusterVersion::POLICY;
@@ -205,8 +206,7 @@ impl SystemDescription {
             oximeter_read_policy: OximeterReadPolicy::new(1),
             tuf_repo: TufRepoPolicy::initial(),
             old_repo: TufRepoPolicy::initial(),
-            chicken_switches:
-                PlannerChickenSwitches::default_for_system_description(),
+            planner_config: PlannerConfig::default(),
             ignore_impossible_mgs_updates_since: Utc::now(),
         }
     }
@@ -770,19 +770,19 @@ impl SystemDescription {
         self.tuf_repo = tuf_repo;
     }
 
-    /// Get the planner's chicken switches.
-    pub fn get_chicken_switches(&self) -> PlannerChickenSwitches {
-        self.chicken_switches
+    /// Get the planner's configuration.
+    pub fn get_planner_config(&self) -> PlannerConfig {
+        self.planner_config
     }
 
-    /// Set the planner's chicken switches.
+    /// Set the planner's configuration.
     ///
     /// Returns the previous value.
-    pub fn set_chicken_switches(
+    pub fn set_planner_config(
         &mut self,
-        switches: PlannerChickenSwitches,
-    ) -> PlannerChickenSwitches {
-        mem::replace(&mut self.chicken_switches, switches)
+        config: PlannerConfig,
+    ) -> PlannerConfig {
+        mem::replace(&mut self.planner_config, config)
     }
 
     pub fn set_target_release(
@@ -1056,7 +1056,7 @@ impl SystemDescription {
             oximeter_read_policy: self.oximeter_read_policy.clone(),
             tuf_repo: self.tuf_repo.clone(),
             old_repo: self.old_repo.clone(),
-            chicken_switches: self.chicken_switches,
+            planner_config: self.planner_config,
         };
         let mut builder = PlanningInputBuilder::new(
             policy,
