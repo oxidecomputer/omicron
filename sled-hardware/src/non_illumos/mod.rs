@@ -65,7 +65,7 @@ impl HardwareManager {
         unimplemented!("Accessing hardware unsupported on non-illumos");
     }
 
-    pub fn is_scrimlet_driver_loaded(&self) -> bool {
+    pub fn is_scrimlet_asic_available(&self) -> bool {
         unimplemented!("Accessing hardware unsupported on non-illumos");
     }
 
