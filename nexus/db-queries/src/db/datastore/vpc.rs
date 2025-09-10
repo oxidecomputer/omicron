@@ -124,10 +124,8 @@ impl DataStore {
         };
 
         // Common logic: project_id -> project -> silo
-        let (.., db_project) = LookupPath::new(opctx, self)
-            .project_id(project_id)
-            .fetch()
-            .await?;
+        let (.., db_project) =
+            LookupPath::new(opctx, self).project_id(project_id).fetch().await?;
         let (authz_silo, db_silo) = LookupPath::new(opctx, self)
             .silo_id(db_project.silo_id)
             .fetch()
@@ -4219,6 +4217,50 @@ mod tests {
         assert_eq!(created_igw2.description(), "second test internet gateway");
         assert_eq!(created_igw2.vpc_id, authz_vpc.id());
         assert_ne!(created_igw.id(), created_igw2.id());
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_get_silo_for_network_auth_helper() {
+        let logctx =
+            dev::test_setup_log("test_get_silo_for_network_auth_helper");
+        let log = &logctx.log;
+        let db = TestDatabase::new_with_datastore(log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Create project in default silo
+        let project_params = params::ProjectCreate {
+            identity: external::IdentityMetadataCreateParams {
+                name: "helper-test-project".parse().unwrap(),
+                description: "project to test helper function".to_string(),
+            },
+        };
+        let project = Project::new(DEFAULT_SILO.id(), project_params);
+        let (authz_project, _) = datastore
+            .project_create(&opctx, project)
+            .await
+            .expect("failed to create project");
+
+        // Test: Helper works with Project resource
+        let (authz_silo, db_silo) = datastore
+            .get_silo_for_network_auth(
+                &opctx,
+                NetworkResourceId::Project(authz_project.id()),
+            )
+            .await
+            .expect("failed to get silo for project");
+
+        // Verify that the helper correctly traverses project -> silo
+        assert_eq!(authz_silo.id(), DEFAULT_SILO.id());
+        assert_eq!(db_silo.id(), DEFAULT_SILO.id());
+        assert_eq!(db_silo.network_admin_required, false); // Default silo should have this false
+
+        info!(
+            log,
+            "Helper function test passed - correctly retrieved silo information for network authorization"
+        );
 
         db.terminate().await;
         logctx.cleanup_successful();
