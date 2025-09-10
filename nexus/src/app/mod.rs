@@ -24,10 +24,11 @@ use nexus_db_queries::authn;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
+use nexus_db_queries::db::datastore::IdentityCheckPolicy;
 use nexus_mgs_updates::ArtifactCache;
 use nexus_mgs_updates::MgsUpdateDriver;
 use nexus_types::deployment::PendingMgsUpdates;
-use nexus_types::quiesce::SagaQuiesceHandle;
+use nexus_types::deployment::ReconfiguratorConfigParam;
 use omicron_common::address::DENDRITE_PORT;
 use omicron_common::address::MGD_PORT;
 use omicron_common::address::MGS_PORT;
@@ -39,6 +40,7 @@ use oximeter_producer::Server as ProducerServer;
 use sagas::common_storage::PooledPantryClient;
 use sagas::common_storage::make_pantry_connection_pool;
 use slog::Logger;
+use slog_error_chain::InlineErrorChain;
 use std::collections::HashMap;
 use std::net::SocketAddrV6;
 use std::net::{IpAddr, Ipv6Addr};
@@ -111,11 +113,11 @@ pub(crate) mod sagas;
 // TODO: When referring to API types, we should try to include
 // the prefix unless it is unambiguous.
 
+use crate::app::quiesce::NexusQuiesceHandle;
 pub(crate) use nexus_db_model::MAX_NICS_PER_INSTANCE;
 pub(crate) use nexus_db_queries::db::queries::disk::MAX_DISKS_PER_INSTANCE;
 use nexus_mgs_updates::DEFAULT_RETRY_TIMEOUT;
 use nexus_types::internal_api::views::MgsUpdateDriverStatus;
-use nexus_types::internal_api::views::QuiesceState;
 use sagas::demo::CompletingDemoSagas;
 
 // XXX: Might want to recast as max *floating* IPs, we have at most one
@@ -280,11 +282,8 @@ pub struct Nexus {
     #[allow(dead_code)]
     repo_depot_resolver: Box<dyn qorb::resolver::Resolver>,
 
-    /// whether Nexus is quiescing, and how far it's gotten
-    quiesce: watch::Sender<QuiesceState>,
-
-    /// details about saga quiescing
-    saga_quiesce: SagaQuiesceHandle,
+    /// state of overall Nexus quiesce activity
+    quiesce: NexusQuiesceHandle,
 }
 
 impl Nexus {
@@ -310,12 +309,14 @@ impl Nexus {
             .map(|s| AllSchemaVersions::load(&s.schema_dir))
             .transpose()
             .map_err(|error| format!("{error:#}"))?;
+        let nexus_id = config.deployment.id;
         let db_datastore = Arc::new(
             db::DataStore::new_with_timeout(
                 &log,
                 Arc::clone(&pool),
                 all_versions.as_ref(),
                 config.pkg.tunables.load_timeout,
+                IdentityCheckPolicy::CheckAndTakeover { nexus_id },
             )
             .await?,
         );
@@ -335,6 +336,8 @@ impl Nexus {
             )),
             sec_store,
         ));
+
+        let quiesce = NexusQuiesceHandle::new(&log, db_datastore.clone());
 
         // It's a bit of a red flag to use an unbounded channel.
         //
@@ -360,14 +363,11 @@ impl Nexus {
         // task.  If someone changed the config, they'd have to remember to
         // update this here.  This doesn't seem worth it.
         let (saga_create_tx, saga_recovery_rx) = mpsc::unbounded_channel();
-        let saga_quiesce = SagaQuiesceHandle::new(
-            log.new(o!("component" => "SagaQuiesceHandle")),
-        );
         let sagas = Arc::new(SagaExecutor::new(
             Arc::clone(&sec_client),
             log.new(o!("component" => "SagaExecutor")),
             saga_create_tx,
-            saga_quiesce.clone(),
+            quiesce.sagas(),
         ));
 
         // Create a channel for replicating repository artifacts. 16 is a
@@ -465,8 +465,6 @@ impl Nexus {
         let mgs_update_status_rx = mgs_update_driver.status_rx();
         let _mgs_driver_task = tokio::spawn(mgs_update_driver.run());
 
-        let (quiesce, _) = watch::channel(QuiesceState::running());
-
         let nexus = Nexus {
             id: config.deployment.id,
             rack_id,
@@ -520,7 +518,6 @@ impl Nexus {
             mgs_resolver,
             repo_depot_resolver,
             quiesce,
-            saga_quiesce,
         };
 
         // TODO-cleanup all the extra Arcs here seems wrong
@@ -552,6 +549,28 @@ impl Nexus {
                 }
             };
 
+            // Before starting our background tasks, inject an initial set of
+            // reconfigurator configuration if we're configured with one.
+            // This is only provided by the test suite, where we have an initial
+            // config to disable automatic blueprint planning.
+            if let Some(config) = task_config.pkg.initial_reconfigurator_config
+            {
+                let config = ReconfiguratorConfigParam { version: 1, config };
+                if let Err(err) = db_datastore
+                    .reconfigurator_config_insert_latest_version(
+                        &background_ctx,
+                        config,
+                    )
+                    .await
+                {
+                    error!(
+                        task_log,
+                        "failed to insert initial reconfigurator config";
+                        InlineErrorChain::new(&err),
+                    );
+                }
+            }
+
             // That said, even if the populate step fails, we may as well try to
             // start the background tasks so that whatever can work will work.
             info!(task_log, "activating background tasks");
@@ -570,6 +589,7 @@ impl Nexus {
                     webhook_delivery_client: task_nexus
                         .webhook_delivery_client
                         .clone(),
+                    nexus_quiesce: task_nexus.quiesce.clone(),
 
                     saga_recovery: SagaRecoveryHelpers {
                         recovery_opctx: saga_recovery_opctx,
@@ -577,7 +597,7 @@ impl Nexus {
                         sec_client: sec_client.clone(),
                         registry: sagas::ACTION_REGISTRY.clone(),
                         sagas_started_rx: saga_recovery_rx,
-                        quiesce: task_nexus.saga_quiesce.clone(),
+                        quiesce: task_nexus.quiesce.sagas(),
                     },
                     tuf_artifact_replication_rx,
                     mgs_updates_tx,
@@ -626,6 +646,14 @@ impl Nexus {
                 }
             };
         }
+    }
+
+    // Waits for Nexus to determine whether sagas are supposed to be quiesced
+    //
+    // This is used by the test suite because most tests assume that sagas are
+    // operational as soon as they start.
+    pub(crate) async fn wait_for_saga_determination(&self) {
+        self.quiesce.sagas().wait_for_determination().await;
     }
 
     pub(crate) async fn external_tls_config(

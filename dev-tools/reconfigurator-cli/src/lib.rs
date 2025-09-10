@@ -38,7 +38,7 @@ use nexus_types::deployment::execution::blueprint_internal_dns_config;
 use nexus_types::deployment::{Blueprint, UnstableReconfiguratorState};
 use nexus_types::deployment::{BlueprintArtifactVersion, PendingMgsUpdate};
 use nexus_types::deployment::{
-    BlueprintHostPhase2DesiredContents, PlannerChickenSwitches,
+    BlueprintHostPhase2DesiredContents, PlannerConfig,
 };
 use nexus_types::deployment::{BlueprintZoneDisposition, ExpectedVersion};
 use nexus_types::deployment::{
@@ -1160,8 +1160,8 @@ enum SetArgs {
         /// TUF repo containing release artifacts
         filename: Utf8PathBuf,
     },
-    /// planner chicken switches
-    ChickenSwitches(SetChickenSwitchesArgs),
+    /// planner config
+    PlannerConfig(SetPlannerConfigArgs),
     /// timestamp for ignoring impossible MGS updates
     IgnoreImpossibleMgsUpdatesSince {
         since: SetIgnoreImpossibleMgsUpdatesSinceArgs,
@@ -1186,26 +1186,26 @@ impl FromStr for SetIgnoreImpossibleMgsUpdatesSinceArgs {
 }
 
 #[derive(Debug, Args)]
-struct SetChickenSwitchesArgs {
+struct SetPlannerConfigArgs {
     #[clap(flatten)]
-    switches: ChickenSwitchesOpts,
+    planner_config: PlannerConfigOpts,
 }
 
-// Define the switches separately so we can use `group(required = true, multiple
-// = true).`
+// Define the config fields separately so we can use `group(required = true,
+// multiple = true).`
 #[derive(Debug, Clone, Args)]
 #[group(required = true, multiple = true)]
-pub struct ChickenSwitchesOpts {
+pub struct PlannerConfigOpts {
     #[clap(long, action = ArgAction::Set)]
     add_zones_with_mupdate_override: Option<bool>,
 }
 
-impl ChickenSwitchesOpts {
+impl PlannerConfigOpts {
     fn update_if_modified(
         &self,
-        current: &PlannerChickenSwitches,
-    ) -> Option<PlannerChickenSwitches> {
-        let new = PlannerChickenSwitches {
+        current: &PlannerConfig,
+    ) -> Option<PlannerConfig> {
+        let new = PlannerConfig {
             add_zones_with_mupdate_override: self
                 .add_zones_with_mupdate_override
                 .unwrap_or(current.add_zones_with_mupdate_override),
@@ -2638,13 +2638,13 @@ fn cmd_show(sim: &mut ReconfiguratorSim) -> anyhow::Result<Option<String>> {
             );
         }
     }
-    swriteln!(s, "chicken switches:");
+    swriteln!(s, "planner config:");
     // No need for swriteln! here because .display() adds its own newlines at
     // the end.
     swrite!(
         s,
         "{}",
-        state.system().description().get_chicken_switches().display()
+        state.system().description().get_planner_config().display()
     );
 
     Ok(Some(s))
@@ -2692,18 +2692,15 @@ fn cmd_set(
             );
             format!("set target release based on {}", filename)
         }
-        SetArgs::ChickenSwitches(args) => {
-            let current =
-                state.system_mut().description().get_chicken_switches();
-            if let Some(new) = args.switches.update_if_modified(&current) {
-                state.system_mut().description_mut().set_chicken_switches(new);
+        SetArgs::PlannerConfig(args) => {
+            let current = state.system_mut().description().get_planner_config();
+            if let Some(new) = args.planner_config.update_if_modified(&current)
+            {
+                state.system_mut().description_mut().set_planner_config(new);
                 let diff = current.diff(&new);
-                format!("chicken switches updated:\n{}", diff.display())
+                format!("planner config updated:\n{}", diff.display())
             } else {
-                format!(
-                    "no changes to chicken switches:\n{}",
-                    current.display()
-                )
+                format!("no changes to planner config:\n{}", current.display())
             }
         }
         SetArgs::IgnoreImpossibleMgsUpdatesSince { since } => {

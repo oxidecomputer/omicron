@@ -24,6 +24,7 @@ pub use error::*;
 use futures::stream::BoxStream;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
+use omicron_uuid_kinds::SledUuid;
 use oxnet::IpNet;
 use oxnet::Ipv4Net;
 use parse_display::Display;
@@ -3485,7 +3486,9 @@ pub struct TufRepoGetResponse {
 pub struct Probe {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
-    pub sled: Uuid,
+
+    #[schemars(with = "Uuid")]
+    pub sled: SledUuid,
 }
 
 /// Define policy relating to the import and export of prefixes from a BGP

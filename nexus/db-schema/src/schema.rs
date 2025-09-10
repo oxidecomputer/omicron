@@ -1918,7 +1918,7 @@ table! {
 }
 
 table! {
-    reconfigurator_chicken_switches (version) {
+    reconfigurator_config (version) {
         version -> Int8,
         planner_enabled -> Bool,
         time_modified -> Timestamptz,
@@ -1970,6 +1970,8 @@ table! {
         cockroachdb_setting_preserve_downgrade -> Nullable<Text>,
 
         target_release_minimum_generation -> Int8,
+
+        nexus_generation -> Int8,
     }
 }
 
@@ -2070,6 +2072,7 @@ table! {
         filesystem_pool -> Uuid,
         image_source -> crate::enums::BpZoneImageSourceEnum,
         image_artifact_sha256 -> Nullable<Text>,
+        nexus_generation -> Nullable<Int8>,
     }
 }
 
@@ -2370,6 +2373,14 @@ table! {
         time_modified -> Timestamptz,
         version -> Text,
         target_version -> Nullable<Text>,
+    }
+}
+
+table! {
+    db_metadata_nexus (nexus_id) {
+        nexus_id -> Uuid,
+        last_drained_blueprint_id -> Nullable<Uuid>,
+        state -> crate::enums::DbMetadataNexusStateEnum,
     }
 }
 
