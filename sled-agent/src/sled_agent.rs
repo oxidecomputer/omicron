@@ -16,7 +16,7 @@ use crate::nexus::{
     NexusClient, NexusNotifierHandle, NexusNotifierInput, NexusNotifierTask,
 };
 use crate::probe_manager::ProbeManager;
-use crate::services::{self, ServiceManager};
+use crate::services::{self, ServiceManager, UnderlayInfo};
 use crate::support_bundle::logs::SupportBundleLogs;
 use crate::support_bundle::storage::SupportBundleManager;
 use crate::vmm_reservoir::{ReservoirMode, VmmReservoirManager};
@@ -710,10 +710,11 @@ impl SledAgent {
         )
     }
 
-    pub(crate) fn switch_zone_underlay_info(
-        &self,
-    ) -> (Ipv6Addr, Option<&RackNetworkConfig>) {
-        (self.inner.switch_zone_ip(), self.inner.rack_network_config.as_ref())
+    pub(crate) fn switch_zone_underlay_info(&self) -> UnderlayInfo {
+        UnderlayInfo {
+            ip: self.inner.switch_zone_ip(),
+            rack_network_config: self.inner.rack_network_config.clone(),
+        }
     }
 
     pub fn id(&self) -> SledUuid {
