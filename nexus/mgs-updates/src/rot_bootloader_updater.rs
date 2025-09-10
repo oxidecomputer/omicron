@@ -200,9 +200,16 @@ impl SpComponentUpdateHelperImpl for ReconfiguratorRotBootloaderUpdater {
             // stage0_next, the device won't let us load this image onto stage0.
             // We return a fatal error.
             if let Some(e) = stage0next_error {
-                return Err(PostUpdateError::FatalError {
-                    error: InlineErrorChain::new(&e).to_string(),
-                });
+                // With some RoT bootloaders in manufacturing, it isn't strictly
+                // necessary to go through our update process and stage0next will
+                // still be erased. This raises an FirstPageErased error, but it
+                // doesn't mean that we should stop the update process. We
+                // ignore it.
+                if e != RotImageError::FirstPageErased {
+                    return Err(PostUpdateError::FatalError {
+                        error: InlineErrorChain::new(&e).to_string(),
+                    });
+                }
             }
 
             // This operation is very delicate. Here, we're overwriting the

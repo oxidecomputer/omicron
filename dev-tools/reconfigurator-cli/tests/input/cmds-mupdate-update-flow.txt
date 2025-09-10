@@ -169,13 +169,13 @@ inventory-generate
 blueprint-plan latest latest
 blueprint-diff latest
 
-# Test that the add-zones-with-mupdate-override chicken switch works as
+# Test that the add-zones-with-mupdate-override planner config works as
 # expected. We do this by:
 # * setting the mupdate override on a sled
 # * adding a new sled
 #
-# With the chicken switch disabled (the current state), the planner will
-# not proceed with adding new zones. But with the chicken switch enabled,
+# With the option disabled (the current state), the planner will
+# not proceed with adding new zones. But with the option enabled,
 # new zones will be added.
 sled-set serial0 mupdate-override c8fba912-63ae-473a-9115-0495d10fb3bc
 sled-add c3bc4c6d-fdde-4fc4-8493-89d2a1e5ee6b
@@ -187,7 +187,7 @@ blueprint-plan latest latest
 blueprint-diff latest
 
 # This *will* generate the datasets and internal NTP zone on the new sled.
-set chicken-switches --add-zones-with-mupdate-override true
+set planner-config --add-zones-with-mupdate-override true
 blueprint-plan latest latest
 blueprint-diff latest
 

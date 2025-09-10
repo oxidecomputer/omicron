@@ -27,6 +27,7 @@ use crate::db::queries::ip_pool::FilterOverlappingIpRanges;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
+use diesel::result::DatabaseErrorKind;
 use diesel::result::Error as DieselError;
 use ipnetwork::IpNetwork;
 use nexus_db_errors::ErrorHandler;
@@ -57,16 +58,6 @@ use omicron_common::api::external::http_pagination::PaginatedBy;
 use ref_cast::RefCast;
 use uuid::Uuid;
 
-pub struct IpsAllocated {
-    pub ipv4: i64,
-    pub ipv6: i64,
-}
-
-pub struct IpsCapacity {
-    pub ipv4: u32,
-    pub ipv6: u128,
-}
-
 /// Helper type with both an authz IP Pool and the actual DB record.
 #[derive(Debug, Clone)]
 pub struct ServiceIpPool {
@@ -95,6 +86,16 @@ impl ServiceIpPools {
         }
     }
 }
+
+// Constraint used to ensure we don't set a default IP Pool for the internal
+// silo.
+const INTERNAL_SILO_DEFAULT_CONSTRAINT: &'static str =
+    "internal_silo_has_no_default_pool";
+
+// Error message emitted when we attempt to set a default IP Pool for the
+// internal silo.
+const INTERNAL_SILO_DEFAULT_ERROR: &'static str =
+    "The internal Silo cannot have a default IP Pool";
 
 impl DataStore {
     /// List IP Pools
@@ -401,53 +402,100 @@ impl DataStore {
             })
     }
 
-    pub async fn ip_pool_allocated_count(
+    /// Return the number of IPs allocated from and the capacity of the provided
+    /// IP Pool.
+    pub async fn ip_pool_utilization(
         &self,
         opctx: &OpContext,
         authz_pool: &authz::IpPool,
-    ) -> Result<IpsAllocated, Error> {
-        opctx.authorize(authz::Action::Read, authz_pool).await?;
-
-        use diesel::dsl::sql;
-        use diesel::sql_types::BigInt;
-        use nexus_db_schema::schema::external_ip;
-
-        let (ipv4, ipv6) = external_ip::table
-            .filter(external_ip::ip_pool_id.eq(authz_pool.id()))
-            .filter(external_ip::time_deleted.is_null())
-            // need to do distinct IP because SNAT IPs are shared between
-            // multiple instances, and each gets its own row in the table
-            .select((
-                sql::<BigInt>(
-                    "count(distinct ip) FILTER (WHERE family(ip) = 4)",
-                ),
-                sql::<BigInt>(
-                    "count(distinct ip) FILTER (WHERE family(ip) = 6)",
-                ),
-            ))
-            .first_async::<(i64, i64)>(
-                &*self.pool_connection_authorized(opctx).await?,
-            )
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
-
-        Ok(IpsAllocated { ipv4, ipv6 })
-    }
-
-    pub async fn ip_pool_total_capacity(
-        &self,
-        opctx: &OpContext,
-        authz_pool: &authz::IpPool,
-    ) -> Result<IpsCapacity, Error> {
+    ) -> Result<(i64, u128), Error> {
         opctx.authorize(authz::Action::Read, authz_pool).await?;
         opctx.authorize(authz::Action::ListChildren, authz_pool).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
+        let (allocated, ranges) = self
+            .transaction_retry_wrapper("ip_pool_utilization")
+            .transaction(&conn, |conn| async move {
+                let allocated = self
+                    .ip_pool_allocated_count_on_connection(&conn, authz_pool)
+                    .await?;
+                let ranges = self
+                    .ip_pool_list_ranges_batched_on_connection(
+                        &conn, authz_pool,
+                    )
+                    .await?;
+                Ok((allocated, ranges))
+            })
+            .await
+            .map_err(|e| match &e {
+                DieselError::NotFound => public_error_from_diesel(
+                    e,
+                    ErrorHandler::NotFoundByResource(authz_pool),
+                ),
+                _ => public_error_from_diesel(e, ErrorHandler::Server),
+            })?;
+        let capacity = Self::accumulate_ip_range_sizes(ranges)?;
+        Ok((allocated, capacity))
+    }
 
+    /// Return the total number of IPs allocated from the provided pool.
+    #[cfg(test)]
+    async fn ip_pool_allocated_count(
+        &self,
+        opctx: &OpContext,
+        authz_pool: &authz::IpPool,
+    ) -> Result<i64, Error> {
+        opctx.authorize(authz::Action::Read, authz_pool).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
+        self.ip_pool_allocated_count_on_connection(&conn, authz_pool)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    async fn ip_pool_allocated_count_on_connection(
+        &self,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        authz_pool: &authz::IpPool,
+    ) -> Result<i64, DieselError> {
+        use nexus_db_schema::schema::external_ip;
+        external_ip::table
+            .filter(external_ip::ip_pool_id.eq(authz_pool.id()))
+            .filter(external_ip::time_deleted.is_null())
+            .select(diesel::dsl::count_distinct(external_ip::ip))
+            .first_async::<i64>(conn)
+            .await
+    }
+
+    /// Return the total capacity of the provided pool.
+    #[cfg(test)]
+    async fn ip_pool_total_capacity(
+        &self,
+        opctx: &OpContext,
+        authz_pool: &authz::IpPool,
+    ) -> Result<u128, Error> {
+        opctx.authorize(authz::Action::Read, authz_pool).await?;
+        opctx.authorize(authz::Action::ListChildren, authz_pool).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
+        self.ip_pool_list_ranges_batched_on_connection(&conn, authz_pool)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(
+                    e,
+                    ErrorHandler::NotFoundByResource(authz_pool),
+                )
+            })
+            .and_then(Self::accumulate_ip_range_sizes)
+    }
+
+    async fn ip_pool_list_ranges_batched_on_connection(
+        &self,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        authz_pool: &authz::IpPool,
+    ) -> Result<Vec<(IpNetwork, IpNetwork)>, DieselError> {
         use nexus_db_schema::schema::ip_pool_range;
-
-        let ranges = ip_pool_range::table
+        ip_pool_range::table
             .filter(ip_pool_range::ip_pool_id.eq(authz_pool.id()))
             .filter(ip_pool_range::time_deleted.is_null())
-            .select(IpPoolRange::as_select())
+            .select((ip_pool_range::first_address, ip_pool_range::last_address))
             // This is a rare unpaginated DB query, which means we are
             // vulnerable to a resource exhaustion attack in which someone
             // creates a very large number of ranges in order to make this
@@ -457,28 +505,25 @@ impl DataStore {
             // than 10,000 ranges in a pool, we will undercount, but I have a
             // hard time seeing that as a practical problem.
             .limit(10000)
-            .get_results_async::<IpPoolRange>(
-                &*self.pool_connection_authorized(opctx).await?,
-            )
+            .get_results_async::<(IpNetwork, IpNetwork)>(conn)
             .await
-            .map_err(|e| {
-                public_error_from_diesel(
-                    e,
-                    ErrorHandler::NotFoundByResource(authz_pool),
-                )
-            })?;
+    }
 
-        let mut ipv4: u32 = 0;
-        let mut ipv6: u128 = 0;
-
-        for range in &ranges {
-            let r = IpRange::from(range);
+    fn accumulate_ip_range_sizes(
+        ranges: Vec<(IpNetwork, IpNetwork)>,
+    ) -> Result<u128, Error> {
+        let mut count: u128 = 0;
+        for range in ranges.into_iter() {
+            let first = range.0.ip();
+            let last = range.1.ip();
+            let r = IpRange::try_from((first, last))
+                .map_err(|e| Error::internal_error(e.as_str()))?;
             match r {
-                IpRange::V4(r) => ipv4 += r.len(),
-                IpRange::V6(r) => ipv6 += r.len(),
+                IpRange::V4(r) => count += u128::from(r.len()),
+                IpRange::V6(r) => count += r.len(),
             }
         }
-        Ok(IpsCapacity { ipv4, ipv6 })
+        Ok(count)
     }
 
     pub async fn ip_pool_silo_list(
@@ -554,22 +599,34 @@ impl DataStore {
         let conn = self.pool_connection_authorized(opctx).await?;
 
         let result = diesel::insert_into(dsl::ip_pool_resource)
-            .values(ip_pool_resource.clone())
+            .values(ip_pool_resource)
             .get_result_async(&*conn)
             .await
             .map_err(|e| {
-                public_error_from_diesel(
-                    e,
-                    ErrorHandler::Conflict(
-                        ResourceType::IpPoolResource,
-                        &format!(
-                            "ip_pool_id: {:?}, resource_id: {:?}, resource_type: {:?}",
-                            ip_pool_resource.ip_pool_id,
-                            ip_pool_resource.resource_id,
-                            ip_pool_resource.resource_type,
+                match e {
+                    // Catch the check constraint ensuring the internal silo has
+                    // no default pool
+                    DieselError::DatabaseError(DatabaseErrorKind::CheckViolation, ref info)
+                        if info.constraint_name() == Some(INTERNAL_SILO_DEFAULT_CONSTRAINT) =>
+                    {
+                        Error::invalid_request(INTERNAL_SILO_DEFAULT_ERROR)
+                    }
+                    DieselError::DatabaseError(DatabaseErrorKind::UniqueViolation, _) => {
+                        public_error_from_diesel(
+                            e,
+                            ErrorHandler::Conflict(
+                                ResourceType::IpPoolResource,
+                                &format!(
+                                    "ip_pool_id: {}, resource_id: {}, resource_type: {:?}",
+                                    ip_pool_resource.ip_pool_id,
+                                    ip_pool_resource.resource_id,
+                                    ip_pool_resource.resource_type,
+                                ),
+                            )
                         )
-                    ),
-                )
+                    }
+                    _ => public_error_from_diesel(e, ErrorHandler::Server),
+                }
             })?;
 
         if ip_pool_resource.is_default {
@@ -851,21 +908,47 @@ impl DataStore {
                     IpPoolResourceUpdateError::FailedToUnsetDefault(err),
                 )) => public_error_from_diesel(err, ErrorHandler::Server),
                 Some(TxnError::Database(err)) => {
-                    public_error_from_diesel(err, ErrorHandler::Server)
+                    match err {
+                        // Catch the check constraint ensuring the internal silo has
+                        // no default pool
+                        DieselError::DatabaseError(
+                            DatabaseErrorKind::CheckViolation,
+                            ref info,
+                        ) if info.constraint_name()
+                            == Some(INTERNAL_SILO_DEFAULT_CONSTRAINT) =>
+                        {
+                            Error::invalid_request(INTERNAL_SILO_DEFAULT_ERROR)
+                        }
+                        _ => {
+                            public_error_from_diesel(err, ErrorHandler::Server)
+                        }
+                    }
                 }
                 None => {
-                    public_error_from_diesel(
-                        e,
-                        ErrorHandler::NotFoundByLookup(
-                            ResourceType::IpPoolResource,
-                            // TODO: would be nice to put the actual names and/or ids in
-                            // here but LookupType on each of the two silos doesn't have
-                            // a nice to_string yet or a way of composing them
-                            LookupType::ByCompositeId(
-                                "(pool, silo)".to_string(),
+                    match e {
+                        // Catch the check constraint ensuring the internal silo has
+                        // no default pool
+                        DieselError::DatabaseError(
+                            DatabaseErrorKind::CheckViolation,
+                            ref info,
+                        ) if info.constraint_name()
+                            == Some(INTERNAL_SILO_DEFAULT_CONSTRAINT) =>
+                        {
+                            Error::invalid_request(INTERNAL_SILO_DEFAULT_ERROR)
+                        }
+                        _ => public_error_from_diesel(
+                            e,
+                            ErrorHandler::NotFoundByLookup(
+                                ResourceType::IpPoolResource,
+                                // TODO: would be nice to put the actual names and/or ids in
+                                // here but LookupType on each of the two silos doesn't have
+                                // a nice to_string yet or a way of composing them
+                                LookupType::ByCompositeId(
+                                    "(pool, silo)".to_string(),
+                                ),
                             ),
                         ),
-                    )
+                    }
                 }
             })
     }
@@ -1235,12 +1318,13 @@ mod test {
     use std::num::NonZeroU32;
 
     use crate::authz;
+    use crate::db::datastore::ip_pool::INTERNAL_SILO_DEFAULT_ERROR;
     use crate::db::model::{
         IpPool, IpPoolResource, IpPoolResourceType, Project,
     };
     use crate::db::pub_test_utils::TestDatabase;
     use assert_matches::assert_matches;
-    use nexus_db_model::IpVersion;
+    use nexus_db_model::{IpPoolIdentity, IpVersion};
     use nexus_types::external_api::params;
     use nexus_types::identity::Resource;
     use omicron_common::address::{IpRange, Ipv4Range, Ipv6Range};
@@ -1249,6 +1333,7 @@ mod test {
         DataPageParams, Error, IdentityMetadataCreateParams, LookupType,
     };
     use omicron_test_utils::dev;
+    use uuid::Uuid;
 
     #[tokio::test]
     async fn test_default_ip_pools() {
@@ -1326,7 +1411,7 @@ mod test {
             is_default: false,
         };
         datastore
-            .ip_pool_link_silo(&opctx, link_body.clone())
+            .ip_pool_link_silo(&opctx, link_body)
             .await
             .expect("Failed to associate IP pool with silo");
 
@@ -1455,9 +1540,6 @@ mod test {
             assert_eq!(is_internal, Ok(false));
 
             // now link it to the current silo, and it is still not internal.
-            //
-            // We're only making the IPv4 pool the default right now. See
-            // https://github.com/oxidecomputer/omicron/issues/8884 for more.
             let silo_id = opctx.authn.silo_required().unwrap().id();
             let is_default = matches!(version, IpVersion::V4);
             let link = IpPoolResource {
@@ -1474,6 +1556,87 @@ mod test {
             let is_internal =
                 datastore.ip_pool_is_internal(&opctx, &authz_other_pool).await;
             assert_eq!(is_internal, Ok(false));
+        }
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn cannot_set_default_ip_pool_for_internal_silo() {
+        let logctx =
+            dev::test_setup_log("cannot_set_default_ip_pool_for_internal_silo");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        for ip_version in [IpVersion::V4, IpVersion::V6] {
+            // Make some new pool.
+            let params = IpPool {
+                identity: IpPoolIdentity::new(
+                    Uuid::new_v4(),
+                    IdentityMetadataCreateParams {
+                        name: format!("test-pool-{}", ip_version)
+                            .parse()
+                            .unwrap(),
+                        description: String::new(),
+                    },
+                ),
+                ip_version,
+                rcgen: 0,
+            };
+            let pool = datastore
+                .ip_pool_create(&opctx, params)
+                .await
+                .expect("Should be able to create pool");
+            assert_eq!(pool.ip_version, ip_version);
+            let authz_pool =
+                nexus_db_lookup::LookupPath::new(&opctx, datastore)
+                    .ip_pool_id(pool.id())
+                    .lookup_for(authz::Action::Read)
+                    .await
+                    .expect("Should be able to lookup new IP Pool")
+                    .0;
+
+            // Try to link it as the default.
+            let (authz_silo, ..) =
+                nexus_db_lookup::LookupPath::new(&opctx, datastore)
+                    .silo_id(nexus_types::silo::INTERNAL_SILO_ID)
+                    .lookup_for(authz::Action::Read)
+                    .await
+                    .expect("Should be able to lookup internal silo");
+            let link = IpPoolResource {
+                ip_pool_id: authz_pool.id(),
+                resource_type: IpPoolResourceType::Silo,
+                resource_id: authz_silo.id(),
+                is_default: true,
+            };
+            let Err(e) = datastore.ip_pool_link_silo(opctx, link).await else {
+                panic!(
+                    "should have failed to link IP Pool to internal silo as a default"
+                );
+            };
+            let Error::InvalidRequest { message } = &e else {
+                panic!("should have received an invalid request, got: {:?}", e);
+            };
+            assert_eq!(message.external_message(), INTERNAL_SILO_DEFAULT_ERROR);
+
+            // We can link it if it's not the default.
+            let link = IpPoolResource { is_default: false, ..link };
+            datastore.ip_pool_link_silo(opctx, link).await.expect(
+                "Should be able to link non-default pool to internal silo",
+            );
+
+            // Try to set it to the default, and ensure that this also fails.
+            let Err(e) = datastore
+                .ip_pool_set_default(opctx, &authz_pool, &authz_silo, true)
+                .await
+            else {
+                panic!("should have failed to set internal pool to default");
+            };
+            let Error::InvalidRequest { message } = &e else {
+                panic!("should have received an invalid request, got: {:?}", e);
+            };
+            assert_eq!(message.external_message(), INTERNAL_SILO_DEFAULT_ERROR);
         }
 
         db.terminate().await;
@@ -1523,8 +1686,7 @@ mod test {
             .ip_pool_total_capacity(&opctx, &authz_pool)
             .await
             .unwrap();
-        assert_eq!(max_ips.ipv4, 0);
-        assert_eq!(max_ips.ipv6, 0);
+        assert_eq!(max_ips, 0);
 
         let range = IpRange::V4(
             Ipv4Range::new(
@@ -1543,8 +1705,7 @@ mod test {
             .ip_pool_total_capacity(&opctx, &authz_pool)
             .await
             .unwrap();
-        assert_eq!(max_ips.ipv4, 5);
-        assert_eq!(max_ips.ipv6, 0);
+        assert_eq!(max_ips, 5);
 
         let link = IpPoolResource {
             ip_pool_id: pool.id(),
@@ -1561,8 +1722,7 @@ mod test {
             .ip_pool_allocated_count(&opctx, &authz_pool)
             .await
             .unwrap();
-        assert_eq!(ip_count.ipv4, 0);
-        assert_eq!(ip_count.ipv6, 0);
+        assert_eq!(ip_count, 0);
 
         let identity = IdentityMetadataCreateParams {
             name: "my-ip".parse().unwrap(),
@@ -1578,16 +1738,14 @@ mod test {
             .ip_pool_allocated_count(&opctx, &authz_pool)
             .await
             .unwrap();
-        assert_eq!(ip_count.ipv4, 1);
-        assert_eq!(ip_count.ipv6, 0);
+        assert_eq!(ip_count, 1);
 
         // allocating one has nothing to do with total capacity
         let max_ips = datastore
             .ip_pool_total_capacity(&opctx, &authz_pool)
             .await
             .unwrap();
-        assert_eq!(max_ips.ipv4, 5);
-        assert_eq!(max_ips.ipv6, 0);
+        assert_eq!(max_ips, 5);
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -1642,8 +1800,7 @@ mod test {
             .ip_pool_total_capacity(&opctx, &authz_pool)
             .await
             .unwrap();
-        assert_eq!(max_ips.ipv4, 0);
-        assert_eq!(max_ips.ipv6, 0);
+        assert_eq!(max_ips, 0);
 
         // Add an IPv6 range
         let ipv6_range = IpRange::V6(
@@ -1661,15 +1818,13 @@ mod test {
             .ip_pool_total_capacity(&opctx, &authz_pool)
             .await
             .unwrap();
-        assert_eq!(max_ips.ipv4, 0);
-        assert_eq!(max_ips.ipv6, 11 + 65536);
+        assert_eq!(max_ips, 11 + 65536);
 
         let ip_count = datastore
             .ip_pool_allocated_count(&opctx, &authz_pool)
             .await
             .unwrap();
-        assert_eq!(ip_count.ipv4, 0);
-        assert_eq!(ip_count.ipv6, 0);
+        assert_eq!(ip_count, 0);
 
         let identity = IdentityMetadataCreateParams {
             name: "my-ip".parse().unwrap(),
@@ -1685,16 +1840,14 @@ mod test {
             .ip_pool_allocated_count(&opctx, &authz_pool)
             .await
             .unwrap();
-        assert_eq!(ip_count.ipv4, 0);
-        assert_eq!(ip_count.ipv6, 1);
+        assert_eq!(ip_count, 1);
 
         // allocating one has nothing to do with total capacity
         let max_ips = datastore
             .ip_pool_total_capacity(&opctx, &authz_pool)
             .await
             .unwrap();
-        assert_eq!(max_ips.ipv4, 0);
-        assert_eq!(max_ips.ipv6, 11 + 65536);
+        assert_eq!(max_ips, 11 + 65536);
 
         // add a giant range for fun
         let ipv6_range = IpRange::V6(
@@ -1715,8 +1868,7 @@ mod test {
             .ip_pool_total_capacity(&opctx, &authz_pool)
             .await
             .unwrap();
-        assert_eq!(max_ips.ipv4, 0);
-        assert_eq!(max_ips.ipv6, 1208925819614629174706166);
+        assert_eq!(max_ips, 1208925819614629174706166);
 
         db.terminate().await;
         logctx.cleanup_successful();

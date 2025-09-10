@@ -37,6 +37,7 @@ define_enums! {
     CabooseWhichEnum => "caboose_which",
     ClickhouseModeEnum => "clickhouse_mode",
     DatasetKindEnum => "dataset_kind",
+    DbMetadataNexusStateEnum => "db_metadata_nexus_state",
     DnsGroupEnum => "dns_group",
     DownstairsClientStopRequestReasonEnum => "downstairs_client_stop_request_reason_type",
     DownstairsClientStoppedReasonEnum => "downstairs_client_stopped_reason_type",

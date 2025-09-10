@@ -12,9 +12,9 @@ blueprint-diff dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21 8da82a8e-bf97-4fbd-8ddd-9f64
 blueprint-edit 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1 mark-for-cleanup 99e2f30b-3174-40bf-a78a-90da8abba8ca
 blueprint-diff 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1 58d5e830-0884-47d8-a7cd-b2b3751adeb4
 
-# Set the add_zones_with_mupdate_override chicken switch to ensure that zone
+# Set the add_zones_with_mupdate_override planner config to ensure that zone
 # adds happen despite zone image sources not being Artifact.
-set chicken-switches --add-zones-with-mupdate-override true
+set planner-config --add-zones-with-mupdate-override true
 
 # Planning a new blueprint will now replace the expunged zone, with new records for its replacement.
 blueprint-plan 58d5e830-0884-47d8-a7cd-b2b3751adeb4

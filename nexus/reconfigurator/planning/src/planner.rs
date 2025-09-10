@@ -200,9 +200,9 @@ impl<'a> Planner<'a> {
             PlanningMgsUpdatesStepReport::new(PendingMgsUpdates::new())
         };
 
-        // Likewise for zone additions, unless overridden with the chicken switch.
+        // Likewise for zone additions, unless overridden by the config.
         let add_zones_with_mupdate_override =
-            self.input.chicken_switches().add_zones_with_mupdate_override;
+            self.input.planner_config().add_zones_with_mupdate_override;
         let mut add = if add_update_blocked_reasons.is_empty()
             || add_zones_with_mupdate_override
         {
@@ -241,7 +241,7 @@ impl<'a> Planner<'a> {
 
         Ok(PlanningReport {
             blueprint_id: self.blueprint.new_blueprint_id(),
-            chicken_switches: *self.input.chicken_switches(),
+            planner_config: *self.input.planner_config(),
             expunge,
             decommission,
             noop_image_source,
@@ -1144,46 +1144,47 @@ impl<'a> Planner<'a> {
                 }
             };
 
-            let image_source =
+            let image =
                 self.image_source_for_new_zone(kind.into(), mgs_updates)?;
+            let image_source = image.clone();
             match kind {
                 DiscretionaryOmicronZone::BoundaryNtp => {
                     self.blueprint.sled_promote_internal_ntp_to_boundary_ntp(
-                        sled_id,
-                        image_source,
+                        sled_id, image,
                     )?
                 }
-                DiscretionaryOmicronZone::Clickhouse => self
-                    .blueprint
-                    .sled_add_zone_clickhouse(sled_id, image_source)?,
+                DiscretionaryOmicronZone::Clickhouse => {
+                    self.blueprint.sled_add_zone_clickhouse(sled_id, image)?
+                }
                 DiscretionaryOmicronZone::ClickhouseKeeper => self
                     .blueprint
-                    .sled_add_zone_clickhouse_keeper(sled_id, image_source)?,
+                    .sled_add_zone_clickhouse_keeper(sled_id, image)?,
                 DiscretionaryOmicronZone::ClickhouseServer => self
                     .blueprint
-                    .sled_add_zone_clickhouse_server(sled_id, image_source)?,
-                DiscretionaryOmicronZone::CockroachDb => self
-                    .blueprint
-                    .sled_add_zone_cockroachdb(sled_id, image_source)?,
+                    .sled_add_zone_clickhouse_server(sled_id, image)?,
+                DiscretionaryOmicronZone::CockroachDb => {
+                    self.blueprint.sled_add_zone_cockroachdb(sled_id, image)?
+                }
                 DiscretionaryOmicronZone::CruciblePantry => self
                     .blueprint
-                    .sled_add_zone_crucible_pantry(sled_id, image_source)?,
-                DiscretionaryOmicronZone::InternalDns => self
-                    .blueprint
-                    .sled_add_zone_internal_dns(sled_id, image_source)?,
-                DiscretionaryOmicronZone::ExternalDns => self
-                    .blueprint
-                    .sled_add_zone_external_dns(sled_id, image_source)?,
-                DiscretionaryOmicronZone::Nexus => {
-                    self.blueprint.sled_add_zone_nexus(sled_id, image_source)?
+                    .sled_add_zone_crucible_pantry(sled_id, image)?,
+                DiscretionaryOmicronZone::InternalDns => {
+                    self.blueprint.sled_add_zone_internal_dns(sled_id, image)?
                 }
-                DiscretionaryOmicronZone::Oximeter => self
-                    .blueprint
-                    .sled_add_zone_oximeter(sled_id, image_source)?,
+                DiscretionaryOmicronZone::ExternalDns => {
+                    self.blueprint.sled_add_zone_external_dns(sled_id, image)?
+                }
+                DiscretionaryOmicronZone::Nexus => {
+                    self.blueprint.sled_add_zone_nexus(sled_id, image)?
+                }
+                DiscretionaryOmicronZone::Oximeter => {
+                    self.blueprint.sled_add_zone_oximeter(sled_id, image)?
+                }
             };
             report.discretionary_zone_placed(
                 sled_id,
                 ZoneKind::from(kind).report_str(),
+                &image_source,
             );
         }
 
@@ -2298,9 +2299,9 @@ pub(crate) mod test {
 
         // Set this chicken switch so that zones are added even though image
         // sources are currently InstallDataset.
-        let mut chicken_switches = example.system.get_chicken_switches();
-        chicken_switches.add_zones_with_mupdate_override = true;
-        example.system.set_chicken_switches(chicken_switches);
+        let mut config = example.system.get_planner_config();
+        config.add_zones_with_mupdate_override = true;
+        example.system.set_planner_config(config);
 
         let input = example
             .system
@@ -2510,9 +2511,9 @@ pub(crate) mod test {
 
         // Set this chicken switch so that zones are added even though image
         // sources are currently InstallDataset.
-        let mut chicken_switches = example.system.get_chicken_switches();
-        chicken_switches.add_zones_with_mupdate_override = true;
-        example.system.set_chicken_switches(chicken_switches);
+        let mut config = example.system.get_planner_config();
+        config.add_zones_with_mupdate_override = true;
+        example.system.set_planner_config(config);
 
         let input = example
             .system
@@ -2614,9 +2615,9 @@ pub(crate) mod test {
 
         // Set this chicken switch so that zones are added even though image
         // sources are currently InstallDataset.
-        let mut chicken_switches = example.system.get_chicken_switches();
-        chicken_switches.add_zones_with_mupdate_override = true;
-        example.system.set_chicken_switches(chicken_switches);
+        let mut config = example.system.get_planner_config();
+        config.add_zones_with_mupdate_override = true;
+        example.system.set_planner_config(config);
 
         // This blueprint should only have 3 Nexus zones: one on each sled.
         assert_eq!(blueprint1.sleds.len(), 3);
@@ -2711,9 +2712,9 @@ pub(crate) mod test {
 
         // Set this chicken switch so that zones are added even though image
         // sources are currently InstallDataset.
-        let mut chicken_switches = example.system.get_chicken_switches();
-        chicken_switches.add_zones_with_mupdate_override = true;
-        example.system.set_chicken_switches(chicken_switches);
+        let mut config = example.system.get_planner_config();
+        config.add_zones_with_mupdate_override = true;
+        example.system.set_planner_config(config);
 
         example
             .system
@@ -2865,9 +2866,9 @@ pub(crate) mod test {
 
         // Set this chicken switch so that zones are added even though image
         // sources are currently InstallDataset.
-        let mut chicken_switches = example.system.get_chicken_switches();
-        chicken_switches.add_zones_with_mupdate_override = true;
-        example.system.set_chicken_switches(chicken_switches);
+        let mut config = example.system.get_planner_config();
+        config.add_zones_with_mupdate_override = true;
+        example.system.set_planner_config(config);
 
         // Expunge the first sled we see, which will result in a Nexus external
         // IP no longer being associated with a running zone, and a new Nexus
@@ -2983,9 +2984,9 @@ pub(crate) mod test {
 
         // Set this chicken switch so that zones are added even though image
         // sources are currently InstallDataset.
-        let mut chicken_switches = example.system.get_chicken_switches();
-        chicken_switches.add_zones_with_mupdate_override = true;
-        example.system.set_chicken_switches(chicken_switches);
+        let mut config = example.system.get_planner_config();
+        config.add_zones_with_mupdate_override = true;
+        example.system.set_planner_config(config);
 
         let input = example
             .system
@@ -3180,9 +3181,9 @@ pub(crate) mod test {
         let collection = example.collection;
         // Set this chicken switch so that zones are added even though zones are
         // currently InstallDataset.
-        let mut chicken_switches = example.system.get_chicken_switches();
-        chicken_switches.add_zones_with_mupdate_override = true;
-        example.system.set_chicken_switches(chicken_switches);
+        let mut config = example.system.get_planner_config();
+        config.add_zones_with_mupdate_override = true;
+        example.system.set_planner_config(config);
 
         let mut builder = example
             .system
@@ -3289,9 +3290,9 @@ pub(crate) mod test {
 
         // Set this chicken switch so that zones are added even though image
         // sources are currently InstallDataset.
-        let mut chicken_switches = example.system.get_chicken_switches();
-        chicken_switches.add_zones_with_mupdate_override = true;
-        example.system.set_chicken_switches(chicken_switches);
+        let mut config = example.system.get_planner_config();
+        config.add_zones_with_mupdate_override = true;
+        example.system.set_planner_config(config);
 
         let mut builder = example
             .system
@@ -3735,9 +3736,9 @@ pub(crate) mod test {
 
         // Set this chicken switch so that zones are added even though image
         // sources are currently InstallDataset.
-        let mut chicken_switches = example.system.get_chicken_switches();
-        chicken_switches.add_zones_with_mupdate_override = true;
-        example.system.set_chicken_switches(chicken_switches);
+        let mut config = example.system.get_planner_config();
+        config.add_zones_with_mupdate_override = true;
+        example.system.set_planner_config(config);
 
         let mut builder = example
             .system
@@ -3881,9 +3882,9 @@ pub(crate) mod test {
 
         // Set this chicken switch so that zones are added even though image
         // sources are currently InstallDataset.
-        let mut chicken_switches = example.system.get_chicken_switches();
-        chicken_switches.add_zones_with_mupdate_override = true;
-        example.system.set_chicken_switches(chicken_switches);
+        let mut config = example.system.get_planner_config();
+        config.add_zones_with_mupdate_override = true;
+        example.system.set_planner_config(config);
 
         // This blueprint should only have 5 Nexus zones: one on each sled.
         assert_eq!(blueprint1.sleds.len(), 5);
@@ -4215,9 +4216,9 @@ pub(crate) mod test {
 
         // Set this chicken switch so that zones are added even though image
         // sources are currently InstallDataset.
-        let mut chicken_switches = example.system.get_chicken_switches();
-        chicken_switches.add_zones_with_mupdate_override = true;
-        example.system.set_chicken_switches(chicken_switches);
+        let mut config = example.system.get_planner_config();
+        config.add_zones_with_mupdate_override = true;
+        example.system.set_planner_config(config);
 
         let collection = example.collection;
 
@@ -4509,9 +4510,9 @@ pub(crate) mod test {
 
         // Set this chicken switch so that zones are added even though image
         // sources are currently InstallDataset.
-        let mut chicken_switches = example.system.get_chicken_switches();
-        chicken_switches.add_zones_with_mupdate_override = true;
-        example.system.set_chicken_switches(chicken_switches);
+        let mut config = example.system.get_planner_config();
+        config.add_zones_with_mupdate_override = true;
+        example.system.set_planner_config(config);
 
         // We should start with CRUCIBLE_PANTRY_REDUNDANCY pantries spread out
         // to at most 1 per sled. Find one of the sleds running one.
@@ -4594,9 +4595,9 @@ pub(crate) mod test {
 
         // Set this chicken switch so that zones are added even though image
         // sources are currently InstallDataset.
-        let mut chicken_switches = example.system.get_chicken_switches();
-        chicken_switches.add_zones_with_mupdate_override = true;
-        example.system.set_chicken_switches(chicken_switches);
+        let mut config = example.system.get_planner_config();
+        config.add_zones_with_mupdate_override = true;
+        example.system.set_planner_config(config);
 
         // We should start with one ClickHouse zone. Find out which sled it's on.
         let clickhouse_sleds = blueprint1
@@ -4676,9 +4677,9 @@ pub(crate) mod test {
 
         // Set this chicken switch so that zones are added even though image
         // sources are currently InstallDataset.
-        let mut chicken_switches = example.system.get_chicken_switches();
-        chicken_switches.add_zones_with_mupdate_override = true;
-        example.system.set_chicken_switches(chicken_switches);
+        let mut config = example.system.get_planner_config();
+        config.add_zones_with_mupdate_override = true;
+        example.system.set_planner_config(config);
 
         // We shouldn't have a clickhouse cluster config, as we don't have a
         // clickhouse policy set yet
@@ -5033,9 +5034,9 @@ pub(crate) mod test {
 
         // Set this chicken switch so that zones are added even though image
         // sources are currently InstallDataset.
-        let mut chicken_switches = example.system.get_chicken_switches();
-        chicken_switches.add_zones_with_mupdate_override = true;
-        example.system.set_chicken_switches(chicken_switches);
+        let mut config = example.system.get_planner_config();
+        config.add_zones_with_mupdate_override = true;
+        example.system.set_planner_config(config);
 
         let mut input_builder = example
             .system
@@ -5264,9 +5265,9 @@ pub(crate) mod test {
 
         // Set this chicken switch so that zones are added even though image
         // sources are currently InstallDataset.
-        let mut chicken_switches = example.system.get_chicken_switches();
-        chicken_switches.add_zones_with_mupdate_override = true;
-        example.system.set_chicken_switches(chicken_switches);
+        let mut config = example.system.get_planner_config();
+        config.add_zones_with_mupdate_override = true;
+        example.system.set_planner_config(config);
 
         let mut input_builder = example
             .system
@@ -5660,9 +5661,9 @@ pub(crate) mod test {
 
         // Set this chicken switch so that zones are added even though image
         // sources are currently InstallDataset.
-        let mut chicken_switches = example.system.get_chicken_switches();
-        chicken_switches.add_zones_with_mupdate_override = true;
-        example.system.set_chicken_switches(chicken_switches);
+        let mut config = example.system.get_planner_config();
+        config.add_zones_with_mupdate_override = true;
+        example.system.set_planner_config(config);
 
         // Find a internal DNS zone we'll use for our test.
         let (sled_id, internal_dns_config) = blueprint1

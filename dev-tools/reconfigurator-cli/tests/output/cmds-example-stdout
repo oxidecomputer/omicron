@@ -17,7 +17,7 @@ internal DNS generations: 1
 external DNS generations: 1
 target number of Nexus instances: default
 target release (generation 1): unset
-chicken switches:
+planner config:
     add zones with mupdate override:   false
 
 
@@ -399,6 +399,7 @@ parent:    02697f74-b14a-4418-90f0-c28b2a3a6aa9
     internal DNS version:::   1
     external DNS version:::   1
     target release min gen:   1
+    nexus gen::::::::::::::   1
 
  PENDING MGS-MANAGED UPDATES: 0
 
@@ -518,6 +519,7 @@ parent:    02697f74-b14a-4418-90f0-c28b2a3a6aa9
     internal DNS version:::   1
     external DNS version:::   1
     target release min gen:   1
+    nexus gen::::::::::::::   1
 
  PENDING MGS-MANAGED UPDATES: 0
 
@@ -554,9 +556,6 @@ WARN cannot issue more MGS-driven updates (no current artifacts)
 INFO some zones not yet up-to-date, sled_id: 89d02b1b-478c-401a-8e28-7a26f74fa41b, zones_currently_updating: [ZoneCurrentlyUpdating { zone_id: b3c9c041-d2f0-4767-bdaf-0e52e9d7a013 (service), zone_kind: InternalNtp, reason: MissingInInventory { bp_image_source: InstallDataset } }]
 generated blueprint 86db3308-f817-4626-8838-4085949a6a41 based on parent blueprint ade5749d-bdf3-4fab-a8ae-00bea01b3a5a
 planning report for blueprint 86db3308-f817-4626-8838-4085949a6a41:
-chicken switches:
-    add zones with mupdate override:   false
-
 * discretionary zone placement waiting for NTP zones on sleds: 89d02b1b-478c-401a-8e28-7a26f74fa41b
 * missing NTP zone on sled 89d02b1b-478c-401a-8e28-7a26f74fa41b
 * only placed 0/1 desired clickhouse zones
@@ -633,6 +632,7 @@ to:   blueprint 86db3308-f817-4626-8838-4085949a6a41
     internal DNS version:::   1 (unchanged)
     external DNS version:::   1 (unchanged)
     target release min gen:   1 (unchanged)
+    nexus gen::::::::::::::   1 (unchanged)
 
  OXIMETER SETTINGS:
     generation:   1 (unchanged)
@@ -710,6 +710,7 @@ to:   blueprint 86db3308-f817-4626-8838-4085949a6a41
     internal DNS version:::   1 (unchanged)
     external DNS version:::   1 (unchanged)
     target release min gen:   1 (unchanged)
+    nexus gen::::::::::::::   1 (unchanged)
 
  OXIMETER SETTINGS:
     generation:   1 (unchanged)
@@ -787,6 +788,7 @@ to:   blueprint 02697f74-b14a-4418-90f0-c28b2a3a6aa9
     internal DNS version:::   1 (unchanged)
     external DNS version:::   1 (unchanged)
     target release min gen:   1 (unchanged)
+    nexus gen::::::::::::::   1 (unchanged)
 
  OXIMETER SETTINGS:
     generation:   1 (unchanged)
@@ -1023,6 +1025,7 @@ parent:    02697f74-b14a-4418-90f0-c28b2a3a6aa9
     internal DNS version:::   1
     external DNS version:::   1
     target release min gen:   1
+    nexus gen::::::::::::::   1
 
  PENDING MGS-MANAGED UPDATES: 0
 
@@ -1576,9 +1579,6 @@ INTERNAL DNS STATUS
 INFO skipping noop image source check for all sleds, reason: no target release is currently set
 generated blueprint 86db3308-f817-4626-8838-4085949a6a41 based on parent blueprint ade5749d-bdf3-4fab-a8ae-00bea01b3a5a
 planning report for blueprint 86db3308-f817-4626-8838-4085949a6a41:
-chicken switches:
-    add zones with mupdate override:   false
-
 * zone adds waiting on blockers
 * zone adds and updates are blocked:
   - sleds have deployment units with image sources not set to Artifact:
@@ -1670,6 +1670,7 @@ to:   blueprint 86db3308-f817-4626-8838-4085949a6a41
     internal DNS version:::   1 (unchanged)
     external DNS version:::   1 (unchanged)
     target release min gen:   1 (unchanged)
+    nexus gen::::::::::::::   1 (unchanged)
 
  OXIMETER SETTINGS:
     generation:   1 (unchanged)
@@ -1707,19 +1708,19 @@ external DNS:
 
 
 
-> # Set chicken switches.
-> set chicken-switches --add-zones-with-mupdate-override false
-no changes to chicken switches:
+> # Set planner config.
+> set planner-config --add-zones-with-mupdate-override false
+no changes to planner config:
     add zones with mupdate override:   false
 
 
-> set chicken-switches --add-zones-with-mupdate-override true
-chicken switches updated:
+> set planner-config --add-zones-with-mupdate-override true
+planner config updated:
 *   add zones with mupdate override:   false -> true
 
 
-> set chicken-switches --add-zones-with-mupdate-override true
-no changes to chicken switches:
+> set planner-config --add-zones-with-mupdate-override true
+no changes to planner config:
     add zones with mupdate override:   true
 
 

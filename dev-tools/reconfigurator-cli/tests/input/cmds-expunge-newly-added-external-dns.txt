@@ -10,9 +10,9 @@ blueprint-diff 3f00b694-1b16-4aaa-8f78-e6b3a527b434 366b0b68-d80e-4bc1-abd3-dc69
 
 blueprint-show 366b0b68-d80e-4bc1-abd3-dc69837847e0
 
-# Set the add_zones_with_mupdate_override chicken switch to ensure that zone
+# Set the add_zones_with_mupdate_override planner config to ensure that zone
 # adds happen despite zone image sources not being Artifact.
-set chicken-switches --add-zones-with-mupdate-override true
+set planner-config --add-zones-with-mupdate-override true
 
 # blueprint-plan will place a new external DNS zone, diff DNS to see the new zone has `ns<N>` and NS records.
 blueprint-plan 366b0b68-d80e-4bc1-abd3-dc69837847e0
