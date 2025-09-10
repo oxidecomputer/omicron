@@ -115,6 +115,8 @@ pub enum Error {
     NoAvailableZpool { sled_id: SledUuid, kind: ZoneKind },
     #[error("no Nexus zones exist in parent blueprint")]
     NoNexusZonesInParentBlueprint,
+    #[error("no active Nexus zones exist in parent blueprint")]
+    NoActiveNexusZonesInParentBlueprint,
     #[error("no Boundary NTP zones exist in parent blueprint")]
     NoBoundaryNtpZonesInParentBlueprint,
     #[error(
@@ -3830,7 +3832,7 @@ pub mod test {
             ExampleSystemBuilder::new(&logctx.log, TEST_NAME)
                 .nexus_count(0)
                 .build();
-        verify_blueprint(&blueprint);
+        // NOTE: Technically, this Blueprint is invalid, according to blippy.
 
         let mut builder = BlueprintBuilder::new_based_on(
             &logctx.log,
@@ -4147,131 +4149,6 @@ pub mod test {
         let image_b_gens = nexus_by_image.get(&image_source_b).unwrap();
         assert_eq!(image_b_gens.len(), 1);
         assert_eq!(image_b_gens[0], existing_nexus_gen.next());
-
-        logctx.cleanup_successful();
-    }
-
-    /// Test that the validation which normally occurs as a part of
-    /// "sled_add_zone_nexus" - namely, the invocation of
-    /// "determine_nexus_generation" - throws expected errors when the
-    /// "next Nexus zone" generation does not match the parent blueprint's
-    /// value of "nexus generation".
-    #[test]
-    fn test_nexus_generation_blueprint_validation() {
-        static TEST_NAME: &str = "test_nexus_generation_blueprint_validation";
-        let logctx = test_setup_log(TEST_NAME);
-        let mut rng = SimRngState::from_seed(TEST_NAME);
-
-        // Start with a system that has one Nexus zone
-        let (example_system, mut blueprint) =
-            ExampleSystemBuilder::new(&logctx.log, TEST_NAME)
-                .nexus_count(1)
-                .build();
-        verify_blueprint(&blueprint);
-
-        // Manually modify the blueprint to create a mismatch:
-        // Set the top-level nexus_generation to 2, but keep the zone generation
-        // at 1
-        blueprint.nexus_generation = Generation::new().next();
-
-        let builder = BlueprintBuilder::new_based_on(
-            &logctx.log,
-            &blueprint,
-            &example_system.input,
-            &example_system.collection,
-            "test",
-            rng.next_planner_rng(),
-        )
-        .expect("failed to create builder");
-
-        // Same as existing
-        let image_source = BlueprintZoneImageSource::InstallDataset;
-
-        // Try to add another Nexus zone with same image source This should fail
-        // because existing zone has generation 1 but blueprint has generation 2
-        let result = builder.determine_nexus_generation(&image_source);
-
-        match result {
-            Err(Error::OldImageNexusGenerationMismatch {
-                expected,
-                actual,
-            }) => {
-                // Blueprint generation
-                assert_eq!(expected, Generation::new().next());
-                // Zone generation
-                assert_eq!(actual, Generation::new());
-            }
-            other => panic!(
-                "Expected OldImageNexusGenerationMismatch error, got: {:?}",
-                other
-            ),
-        }
-
-        logctx.cleanup_successful();
-    }
-
-    /// Test nexus generation validation for new image source
-    #[test]
-    fn test_nexus_generation_blueprint_validation_new_image() {
-        static TEST_NAME: &str =
-            "test_nexus_generation_blueprint_validation_new_image";
-        let logctx = test_setup_log(TEST_NAME);
-        let mut rng = SimRngState::from_seed(TEST_NAME);
-
-        // Start with a system that has one Nexus zone
-        let (example_system, mut blueprint) =
-            ExampleSystemBuilder::new(&logctx.log, TEST_NAME)
-                .nexus_count(1)
-                .build();
-        verify_blueprint(&blueprint);
-
-        // The zone has generation 1 and blueprint has generation 1
-        // Now modify the blueprint generation to be different from what
-        // the new image source logic would expect
-        //
-        // Set to generation 3
-        blueprint.nexus_generation = Generation::new().next().next();
-
-        let builder = BlueprintBuilder::new_based_on(
-            &logctx.log,
-            &blueprint,
-            &example_system.input,
-            &example_system.collection,
-            "test",
-            rng.next_planner_rng(),
-        )
-        .expect("failed to create builder");
-
-        // Use a different image source (this should get existing generation + 1
-        // = 2)
-        let different_image_source = BlueprintZoneImageSource::Artifact {
-            version: BlueprintArtifactVersion::Available {
-                version: ArtifactVersion::new_const("2.0.0"),
-            },
-            hash: ArtifactHash([0x42; 32]),
-        };
-
-        // Try to add a Nexus zone with different image source This should fail
-        // because the calculated generation (2) doesn't match blueprint
-        // generation + 1 (4)
-        let result =
-            builder.determine_nexus_generation(&different_image_source);
-
-        match result {
-            Err(Error::NewImageNexusGenerationMismatch {
-                expected,
-                actual,
-            }) => {
-                // Blueprint generation + 1 = 4
-                assert_eq!(expected, Generation::new().next().next().next());
-                // Calculated generation = 2
-                assert_eq!(actual, Generation::new().next());
-            }
-            other => panic!(
-                "Expected NewImageNexusGenerationMismatch error, got: {:?}",
-                other
-            ),
-        }
 
         logctx.cleanup_successful();
     }

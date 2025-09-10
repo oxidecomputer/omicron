@@ -2376,7 +2376,7 @@ planner config:
 * adding zones despite being blocked, as specified by the `add_zones_with_mupdate_override` planner config option
 * discretionary zone placement waiting for NTP zones on sleds: c3bc4c6d-fdde-4fc4-8493-89d2a1e5ee6b
 * missing NTP zone on sled c3bc4c6d-fdde-4fc4-8493-89d2a1e5ee6b
-* only placed 0/2 desired nexus zones
+* only placed 0/1 desired nexus zones
 * zone updates waiting on zone add blockers
 * waiting to update top-level nexus_generation: pending non-nexus zone updates
 

@@ -1026,25 +1026,40 @@ impl<'a> Planner<'a> {
             // (new and old) during a handoff.
             let image_sources = match zone_kind {
                 DiscretionaryOmicronZone::Nexus => {
-                    let new_image = self
-                        .input
-                        .tuf_repo()
-                        .description()
-                        .zone_image_source(zone_kind.into())?;
+                    let new_repo = self.input.tuf_repo().description();
+                    let new_image =
+                        new_repo.zone_image_source(zone_kind.into())?;
 
                     let mut images = vec![];
-                    if let Some(nexus_in_charge_image) =
+                    let Some(nexus_in_charge_image) =
                         self.lookup_current_nexus_image()
-                    {
-                        // We may still want to deploy the old image alongside
-                        // the new image: if we're running the "old version of a
-                        // Nexus" currently, we need to ensure we have
-                        // redundancy before the handoff completes.
-                        if nexus_in_charge_image != new_image {
-                            images.push(nexus_in_charge_image);
-                        }
+                    else {
+                        return Err(Error::NoActiveNexusZonesInParentBlueprint);
+                    };
+
+                    let all_non_nexus_zones_updated =
+                        report.discretionary_zones_placed.is_empty()
+                            && self.all_non_nexus_zones_using_new_image()?;
+                    let new_image_is_different =
+                        nexus_in_charge_image != new_image;
+
+                    // We may still want to deploy the old image alongside
+                    // the new image: if we're running the "old version of a
+                    // Nexus" currently, we need to ensure we have
+                    // redundancy before the handoff completes.
+                    images.push(nexus_in_charge_image);
+
+                    // If all other zones are using the new image, boot this
+                    // image.
+                    //
+                    // NOTE: Checking `all_non_nexus_zones_updated` shouldn't be
+                    // strictly necessary! It should be fine to launch the new
+                    // Nexus before other zone updates; due to Nexus handoff
+                    // implementation, it should boot and remain idle.
+                    if all_non_nexus_zones_updated && new_image_is_different {
+                        images.push(new_image);
                     }
-                    images.push(new_image);
+                    assert!(!images.is_empty());
                     images
                 }
                 _ => {
@@ -1529,21 +1544,7 @@ impl<'a> Planner<'a> {
                 if !self.can_zone_be_shut_down_safely(zone, &mut report) {
                     return false;
                 }
-                match self.is_zone_ready_for_update(mgs_updates) {
-                    Ok(true) => true,
-                    Ok(false) => false,
-                    Err(err) => {
-                        // If we can't tell whether a zone is ready for update,
-                        // assume it can't be.
-                        warn!(
-                            self.log,
-                            "cannot determine whether zone is ready for update";
-                            "zone" => ?zone,
-                            InlineErrorChain::new(&err),
-                        );
-                        false
-                    }
-                }
+                self.is_zone_ready_for_update(mgs_updates)
             },
         );
 
@@ -1889,7 +1890,7 @@ impl<'a> Planner<'a> {
         }
 
         // In order to do a handoff, there must be Nexus instances at the
-        // proposed generation number. Tese Nexuses must also have records in
+        // proposed generation number. These Nexuses must also have records in
         // "db_metadata_nexus" (this is verified by checking that new Nexuses
         // have entries in "self.input.not_yet_nexus_zones").
         let current_generation = self.blueprint.nexus_generation();
@@ -1922,19 +1923,27 @@ impl<'a> Planner<'a> {
         }
 
         if old_nexuses_at_current_gen == 0 {
-            // If all the current-generation Nexuses are "up-to-date", then we may have
-            // just completed handoff successfully. In this case, there's nothing to report.
+            // If all the current-generation Nexuses are "up-to-date", then we
+            // have completed a handoff successfully.
+            //
+            // In this case, there's nothing to report.
+            //
+            // Note that we'll continue to hit this case until the next update
+            // starts (in other words, then `new_repo` changes).
             return Ok(report);
-        } else if nexuses_at_proposed_gen < self.input.target_nexus_zone_count()
-        {
-            // If there aren't enough Nexuses at the next generation, quiescing could
-            // be a dangerous operation. Blueprint execution should be able to continue
-            // even if the new Nexuses haven't started, but to be conservative, we'll wait
-            // for the target count.
+        }
+
+        if nexuses_at_proposed_gen < self.input.target_nexus_zone_count() {
+            // If there aren't enough Nexuses at the next generation, quiescing
+            // could be a dangerous operation. Blueprint execution should be
+            // able to continue even if the new Nexuses haven't started, but to
+            // be conservative, we'll wait for the target count.
             report
                 .set_waiting_on(NexusGenerationBumpWaitingOn::NewNexusBringup);
             return Ok(report);
-        } else if nexuses_at_proposed_gen_missing_metadata_record > 0 {
+        }
+
+        if nexuses_at_proposed_gen_missing_metadata_record > 0 {
             // There are enough Nexuses at the target generation, but not all of
             // them have records yet. Blueprint execution should fix this, by
             // creating these records.
@@ -1959,9 +1968,14 @@ impl<'a> Planner<'a> {
 
         // If we're here:
         // - There's a new repo
-        // - The current generation of Nexuses are considered "out-of-date"
+        // - The current generation of Nexuses are not running an image from the
+        // new repo (which means they are "older" from the perspective of the
+        // update system)
         // - There are Nexuses running with "current generation + 1"
-        // - All non-Nexus zones have updated
+        // - Those new Nexuses have database metadata records that will let
+        // them boot successfully
+        // - All non-Nexus zones have updated (i.e., are running images from the
+        // new repo)
         // - All other blueprint zones have propagated to inventory
         //
         // If all of these are true, the "zone update" portion of the planner
@@ -2078,7 +2092,7 @@ impl<'a> Planner<'a> {
         zone_kind: ZoneKind,
         mgs_updates: &PlanningMgsUpdatesStepReport,
     ) -> Result<BlueprintZoneImageSource, TufRepoContentsError> {
-        let source_repo = if self.is_zone_ready_for_update(mgs_updates)? {
+        let source_repo = if self.is_zone_ready_for_update(mgs_updates) {
             self.input.tuf_repo().description()
         } else {
             self.input.old_repo().description()
@@ -2091,15 +2105,33 @@ impl<'a> Planner<'a> {
     fn is_zone_ready_for_update(
         &self,
         mgs_updates: &PlanningMgsUpdatesStepReport,
-    ) -> Result<bool, TufRepoContentsError> {
+    ) -> bool {
         // We return false for all zone kinds if there are still
         // pending updates for components earlier in the update ordering
         // than zones: RoT bootloader / RoT / SP / Host OS.
         if !mgs_updates.is_empty() {
-            return Ok(false);
+            return false;
         }
 
-        Ok(true)
+        true
+    }
+
+    fn all_non_nexus_zones_using_new_image(&self) -> Result<bool, Error> {
+        let new_repo = self.input.tuf_repo().description();
+        for sled_id in self.blueprint.sled_ids_with_zones() {
+            for z in self.blueprint.current_sled_zones(
+                sled_id,
+                BlueprintZoneDisposition::is_in_service,
+            ) {
+                let kind = z.zone_type.kind();
+                if kind != ZoneKind::Nexus
+                    && z.image_source != new_repo.zone_image_source(kind)?
+                {
+                    return Ok(false);
+                }
+            }
+        }
+        return Ok(true);
     }
 
     fn lookup_current_nexus_image(&self) -> Option<BlueprintZoneImageSource> {
@@ -2438,6 +2470,23 @@ pub(crate) mod test {
     /// planner tests
     fn clickhouse_policy(mode: ClickhouseMode) -> ClickhousePolicy {
         ClickhousePolicy { version: 0, mode, time_created: Utc::now() }
+    }
+
+    fn get_nexus_ids_at_generation(
+        blueprint: &Blueprint,
+        generation: Generation,
+    ) -> BTreeSet<OmicronZoneUuid> {
+        blueprint
+            .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+            .filter_map(|(_, z)| match &z.zone_type {
+                BlueprintZoneType::Nexus(nexus_zone)
+                    if nexus_zone.nexus_generation == generation =>
+                {
+                    Some(z.id)
+                }
+                _ => None,
+            })
+            .collect::<BTreeSet<_>>()
     }
 
     #[track_caller]
@@ -3824,15 +3873,20 @@ pub(crate) mod test {
 
         // Create an example system with a single sled
         let (example, blueprint1) =
-            ExampleSystemBuilder::new(&logctx.log, TEST_NAME).nsleds(1).build();
+            ExampleSystemBuilder::new(&logctx.log, TEST_NAME)
+                .nsleds(1)
+                .nexus_count(2)
+                .build();
         let collection = example.collection;
         let input = example.input;
 
         let mut builder = input.into_builder();
 
         // Aside: Avoid churning on the quantity of Nexus zones - we're okay
-        // staying at one.
-        builder.policy_mut().target_nexus_zone_count = 1;
+        // staying at two.
+        //
+        // Force two so that we can't expunge our way down to zero.
+        builder.policy_mut().target_nexus_zone_count = 2;
 
         // Find whatever pool NTP was using
         let pool_to_expunge = blueprint1
@@ -3877,7 +3931,7 @@ pub(crate) mod test {
             .unwrap();
         disk.policy = PhysicalDiskPolicy::Expunged;
 
-        let mut input = builder.build();
+        let input = builder.build();
 
         let blueprint2 = Planner::new_based_on(
             logctx.log.clone(),
@@ -3934,12 +3988,6 @@ pub(crate) mod test {
             }
         }
         assert_eq!(zone_kinds_on_pool, zone_kinds_added);
-
-        // This operation expunged the old Nexus, and added a new one.
-        //
-        // Update our input to "become the newer Nexus" to observe these
-        // changes.
-        set_current_nexus_to_highest_generation(&mut input, &blueprint2);
 
         // Test a no-op planning iteration.
         assert_planning_makes_no_changes(
@@ -5849,6 +5897,15 @@ pub(crate) mod test {
         }
         example.collection =
             example.system.to_collection_builder().unwrap().build();
+
+        let active_nexus_zones =
+            get_nexus_ids_at_generation(&blueprint, blueprint.nexus_generation);
+        let not_yet_nexus_zones = get_nexus_ids_at_generation(
+            &blueprint,
+            blueprint.nexus_generation.next(),
+        );
+        example.input.set_active_nexus_zones(active_nexus_zones);
+        example.input.set_not_yet_nexus_zones(not_yet_nexus_zones);
     }
 
     macro_rules! fake_zone_artifact {
@@ -5998,47 +6055,27 @@ pub(crate) mod test {
             };
         }
 
-        // Nexus should deploy new zones, but keep the old ones running.
         let expected_new_nexus_zones =
             input_builder.policy_mut().target_nexus_zone_count;
+        let expected_pantries =
+            input_builder.policy_mut().target_crucible_pantry_zone_count;
         example.input = input_builder.build();
 
-        // Check that there are new nexus zones deployed, though handoff is
-        // incomplete (since not all of its dependencies are updated yet).
-        update_collection_from_blueprint(&mut example, &blueprint1);
-        let blueprint2 = Planner::new_based_on(
-            log.clone(),
-            &blueprint1,
-            &example.input,
-            "test_blueprint3",
-            &example.collection,
-            PlannerRng::from_seed((TEST_NAME, "bp3")),
-        )
-        .expect("can't create planner")
-        .plan()
-        .expect("can't re-plan for new Nexus zone");
-        {
-            let summary = blueprint2.diff_since_blueprint(&blueprint1);
-            let mut modified_sleds = 0;
-            for sled in summary.diff.sleds.modified_values_diff() {
-                assert!(sled.zones.removed.is_empty());
-                assert_eq!(sled.zones.added.len(), 1);
-                let added = sled.zones.added.values().next().unwrap();
-                assert!(matches!(
-                    &added.zone_type,
-                    BlueprintZoneType::Nexus(_)
-                ));
-                assert_eq!(&added.image_source, &image_source);
-                modified_sleds += 1;
-            }
-            assert_eq!(modified_sleds, expected_new_nexus_zones);
-        }
+        // We should now have iterations of expunge/cleanup/add iterations for
+        // the Crucible Pantry zones.
+        let mut parent = blueprint1;
 
-        // We should now have three sets of expunge/add iterations for the
-        // Crucible Pantry zones.
-        let mut parent = blueprint2;
-        for i in 3..=8 {
-            let blueprint_name = format!("blueprint_{i}");
+        let mut old_pantries = expected_pantries;
+        let mut expunging_pantries = 0;
+        let mut added_pantries = 0;
+        let mut i = 0;
+
+        while old_pantries > 0
+            || expunging_pantries > 0
+            || added_pantries != expected_pantries
+        {
+            let blueprint_name = format!("expunging_crucible_pantry_{i}");
+            i += 1;
             update_collection_from_blueprint(&mut example, &parent);
             let blueprint = Planner::new_based_on(
                 log.clone(),
@@ -6050,49 +6087,73 @@ pub(crate) mod test {
             )
             .expect("can't create planner")
             .plan()
-            .unwrap_or_else(|_| panic!("can't re-plan after {i} iterations"));
+            .unwrap_or_else(|err| {
+                panic!("can't re-plan: {}", InlineErrorChain::new(&err))
+            });
 
             {
                 let summary = blueprint.diff_since_blueprint(&parent);
                 eprintln!("diff to {blueprint_name}: {}", summary.display());
                 for sled in summary.diff.sleds.modified_values_diff() {
-                    if i % 2 == 1 {
-                        assert!(sled.zones.added.is_empty());
-                        assert!(sled.zones.removed.is_empty());
-                        assert_eq!(
-                            sled.zones
-                                .common
-                                .iter()
-                                .filter(|(_, z)| matches!(
-                                    z.after.zone_type,
-                                    BlueprintZoneType::CruciblePantry(_)
-                                ) && matches!(
-                                    z.after.disposition,
-                                    BlueprintZoneDisposition::Expunged { .. }
-                                ))
-                                .count(),
-                            1
-                        );
-                    } else {
-                        assert!(sled.zones.removed.is_empty());
-                        assert_eq!(sled.zones.added.len(), 1);
-                        let added = sled.zones.added.values().next().unwrap();
+                    assert!(sled.zones.removed.is_empty());
+
+                    for modified_zone in sled.zones.modified_values_diff() {
                         assert!(matches!(
-                            &added.zone_type,
+                            *modified_zone.zone_type.before,
                             BlueprintZoneType::CruciblePantry(_)
                         ));
-                        assert_eq!(added.image_source, image_source);
+                        // If the zone was previously in-service, it gets
+                        // expunged.
+                        if modified_zone.disposition.before.is_in_service() {
+                            assert_eq!(
+                                *modified_zone.image_source.before,
+                                BlueprintZoneImageSource::InstallDataset
+                            );
+                            assert!(
+                                modified_zone.disposition.after.is_expunged(),
+                            );
+                            old_pantries -= 1;
+                            expunging_pantries += 1;
+                        }
+
+                        // If the zone was previously expunged and not ready for
+                        // cleanup, it should be marked ready-for-cleanup
+                        if modified_zone.disposition.before.is_expunged()
+                            && !modified_zone
+                                .disposition
+                                .before
+                                .is_ready_for_cleanup()
+                        {
+                            assert!(
+                                modified_zone
+                                    .disposition
+                                    .after
+                                    .is_ready_for_cleanup(),
+                            );
+
+                            expunging_pantries -= 1;
+                        }
+                    }
+
+                    for (_, zone) in &sled.zones.added {
+                        match zone.zone_type {
+                            BlueprintZoneType::CruciblePantry(_) => {
+                                assert_eq!(zone.image_source, image_source);
+                                added_pantries += 1;
+                            }
+                            _ => panic!("Unexpected zone add: {zone:?}"),
+                        }
                     }
                 }
             }
 
             parent = blueprint;
         }
-        let blueprint8 = parent;
+        let mut blueprint = parent;
 
         // All Crucible Pantries should now be updated.
         assert_eq!(
-            blueprint8
+            blueprint
                 .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
                 .filter(|(_, z)| is_up_to_date_pantry(z))
                 .count(),
@@ -6101,39 +6162,95 @@ pub(crate) mod test {
 
         // All old Pantry zones should now be expunged.
         assert_eq!(
-            blueprint8
+            blueprint
                 .all_omicron_zones(BlueprintZoneDisposition::is_expunged)
                 .filter(|(_, z)| is_old_pantry(z))
                 .count(),
             CRUCIBLE_PANTRY_REDUNDANCY
         );
 
+        // Nexus should deploy new zones, but keep the old ones running.
+        update_collection_from_blueprint(&mut example, &blueprint);
+        let new_blueprint = Planner::new_based_on(
+            log.clone(),
+            &blueprint,
+            &example.input,
+            "test_blueprint_new_nexus",
+            &example.collection,
+            PlannerRng::from_seed((TEST_NAME, "test_blueprint_new_nexus")),
+        )
+        .expect("Can't create planner")
+        .plan()
+        .expect("Can't re-plan for new Nexus zones");
+        {
+            let summary = new_blueprint.diff_since_blueprint(&blueprint);
+            let mut modified_sleds = 0;
+            for sled in summary.diff.sleds.modified_values_diff() {
+                assert!(sled.zones.removed.is_empty());
+                assert_eq!(sled.zones.added.len(), 1);
+                let added = sled.zones.added.values().next().unwrap();
+                let BlueprintZoneType::Nexus(nexus_zone) = &added.zone_type
+                else {
+                    panic!("Unexpected zone type: {:?}", added.zone_type);
+                };
+                assert_eq!(
+                    nexus_zone.nexus_generation,
+                    Generation::new().next()
+                );
+                assert_eq!(&added.image_source, &image_source);
+                modified_sleds += 1;
+            }
+            assert_eq!(modified_sleds, expected_new_nexus_zones);
+        }
+        blueprint = new_blueprint;
+
         // Now we can update Nexus, because all of its dependent zones
         // are up-to-date w/r/t the new repo.
-        assert_eq!(
-            blueprint8
-                .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
-                .filter(|(_, z)| is_old_nexus(z))
-                .count(),
-            NEXUS_REDUNDANCY,
-        );
-        assert_eq!(
-            blueprint8
-                .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
-                .filter(|(_, z)| is_up_to_date_nexus(z))
-                .count(),
-            NEXUS_REDUNDANCY,
-        );
+        //
+        // First, we'll expect the nexus generation to get bumped.
+        let active_nexus_zones =
+            get_nexus_ids_at_generation(&blueprint, Generation::new());
+        let not_yet_nexus_zones =
+            get_nexus_ids_at_generation(&blueprint, Generation::new().next());
 
-        // We have to pretend that we're running the "Newer Nexus" to shut down
-        // the old Nexuses. If we don't do this: it's as if handoff has not
-        // happened, and the old Nexuses cannot shut down.
-        set_current_nexus_to_highest_generation(
-            &mut example.input,
-            &blueprint8,
-        );
-        let mut parent = blueprint8;
+        assert_eq!(active_nexus_zones.len(), NEXUS_REDUNDANCY);
+        assert_eq!(not_yet_nexus_zones.len(), NEXUS_REDUNDANCY);
 
+        update_collection_from_blueprint(&mut example, &blueprint);
+
+        // This is a replacement for the reconfigurator executor, which
+        // would normally propagate records for these zones into the
+        // database.
+        example.input.set_active_nexus_zones(active_nexus_zones);
+        example.input.set_not_yet_nexus_zones(not_yet_nexus_zones);
+
+        let blueprint_name = format!("blueprint_to_bump_nexus_gen");
+        let new_blueprint = Planner::new_based_on(
+            log.clone(),
+            &blueprint,
+            &example.input,
+            &blueprint_name,
+            &example.collection,
+            PlannerRng::from_seed((TEST_NAME, &blueprint_name)),
+        )
+        .expect("can't create planner")
+        .plan()
+        .unwrap_or_else(|_| panic!("can't re-plan"));
+        {
+            let summary = new_blueprint.diff_since_blueprint(&blueprint);
+            assert!(
+                summary.has_changes(),
+                "Should have bumped nexus generation"
+            );
+            assert_eq!(
+                summary.diff.nexus_generation.before.next(),
+                *summary.diff.nexus_generation.after,
+            );
+            assert!(summary.diff.sleds.modified_values_diff().next().is_none());
+        }
+        blueprint = new_blueprint;
+
+        let mut parent = blueprint;
         for i in 9..=12 {
             update_collection_from_blueprint(&mut example, &parent);
             let blueprint_name = format!("blueprint{i}");
@@ -7381,62 +7498,6 @@ pub(crate) mod test {
         logctx.cleanup_successful();
     }
 
-    // Updates the PlanningInput to pretend like we're running
-    // from whichever Nexuses have the highest "nexus_generation" value.
-    fn set_current_nexus_to_highest_generation(
-        input: &mut PlanningInput,
-        blueprint: &Blueprint,
-    ) {
-        // Grab the current generation from the input / blueprint
-        let mut current_gen = blueprint
-            .sleds
-            .values()
-            .find_map(|sled| {
-                for zone in &sled.zones {
-                    if input.active_nexus_zones().contains(&zone.id) {
-                        if let BlueprintZoneType::Nexus(nexus_config) =
-                            &zone.zone_type
-                        {
-                            return Some(nexus_config.nexus_generation);
-                        }
-                    }
-                }
-                None
-            })
-            .unwrap_or(Generation::new());
-
-        // Look for Nexuses with a higher generation anywhere in the blueprint
-        for (_, zone) in
-            blueprint.all_omicron_zones(BlueprintZoneDisposition::is_in_service)
-        {
-            if let BlueprintZoneType::Nexus(nexus_config) = &zone.zone_type {
-                if nexus_config.nexus_generation > current_gen {
-                    current_gen = nexus_config.nexus_generation;
-                }
-            }
-        }
-
-        // Set the active nexus zones as "the ones the highest generation"
-        input.set_active_nexus_zones(
-            blueprint
-                .sleds
-                .values()
-                .flat_map(|sled_config| {
-                    sled_config.zones.iter().filter_map(|zone| {
-                        if let BlueprintZoneType::Nexus(nexus_config) =
-                            &zone.zone_type
-                        {
-                            if nexus_config.nexus_generation == current_gen {
-                                return Some(zone.id);
-                            }
-                        }
-                        None
-                    })
-                })
-                .collect(),
-        );
-    }
-
     /// Ensure that planning to update all zones terminates.
     #[test]
     fn test_update_all_zones() {
@@ -7494,13 +7555,13 @@ pub(crate) mod test {
             ),
         };
         input_builder.policy_mut().tuf_repo = tuf_repo;
-        let mut input = input_builder.build();
+        example.input = input_builder.build();
 
         /// Expected number of planner iterations required to converge.
         /// If incidental planner work changes this value occasionally,
         /// that's fine; but if we find we're changing it all the time,
         /// we should probably drop it and keep just the maximum below.
-        const EXP_PLANNING_ITERATIONS: usize = 55;
+        const EXP_PLANNING_ITERATIONS: usize = 57;
 
         /// Planning must not take more than this number of iterations.
         const MAX_PLANNING_ITERATIONS: usize = 100;
@@ -7514,7 +7575,7 @@ pub(crate) mod test {
             let blueprint = Planner::new_based_on(
                 log.clone(),
                 &parent,
-                &input,
+                &example.input,
                 &blueprint_name,
                 &example.collection,
                 PlannerRng::from_seed((TEST_NAME, &blueprint_name)),
@@ -7534,6 +7595,8 @@ pub(crate) mod test {
                 if summary.total_zones_added() == 0
                     && summary.total_zones_removed() == 0
                     && summary.total_zones_modified() == 0
+                    && summary.before.nexus_generation
+                        == summary.after.nexus_generation
                 {
                     assert!(
                         blueprint
@@ -7554,11 +7617,6 @@ pub(crate) mod test {
                     return;
                 }
             }
-
-            // If there is a newer Nexus, we must jump to it to expunge
-            // the older Nexus zones.
-            set_current_nexus_to_highest_generation(&mut input, &blueprint);
-
             parent = blueprint;
         }
 
@@ -7719,16 +7777,6 @@ pub(crate) mod test {
         fn update_inventory_from_blueprint(&mut self) {
             update_collection_from_blueprint(
                 &mut self.example,
-                &self.blueprint,
-            );
-        }
-
-        // Use the "highest generation Nexus".
-        //
-        // This effectively changes "which Nexus is trying to perform planning".
-        fn set_current_nexus_to_highest_generation(&mut self) {
-            set_current_nexus_to_highest_generation(
-                &mut self.example.input,
                 &self.blueprint,
             );
         }
@@ -7952,44 +8000,9 @@ pub(crate) mod test {
         assert_eq!(*observed_next_gen, new_generation);
         bp_generator.blueprint = new_bp;
 
-        // Check: After the generation bump, further planning should make no changes
+        // Check: After the generation bump, we should begin expunging
+        // the old Nexus zones.
         bp_generator.update_inventory_from_blueprint();
-        let new_bp = bp_generator.plan_new_blueprint("no-op");
-        bp_generator.assert_child_bp_makes_no_changes(&new_bp);
-
-        // However, there will be a report of "three Nexus zones that aren't
-        // ready to shut down". The blueprint generator still thinks it's
-        // running from one of these "old Nexuses".
-        let unsafe_to_shutdown_zones = &new_bp.report.zone_updates.unsafe_zones;
-        assert_eq!(
-            unsafe_to_shutdown_zones.len(),
-            bp_generator.example.input.target_nexus_zone_count()
-        );
-        for why in unsafe_to_shutdown_zones.values() {
-            use nexus_types::deployment::ZoneUnsafeToShutdown;
-            match why {
-                ZoneUnsafeToShutdown::Nexus {
-                    zone_generation,
-                    current_nexus_generation,
-                } => {
-                    assert_eq!(zone_generation, &Generation::new());
-                    assert_eq!(
-                        current_nexus_generation,
-                        &Some(Generation::new())
-                    );
-                }
-                _ => panic!("Unexpected unsafe-to-shutdown zone: {why}"),
-            }
-        }
-        assert_eq!(
-            unsafe_to_shutdown_zones.len(),
-            bp_generator.example.input.target_nexus_zone_count()
-        );
-
-        // Move ourselves to a "new Nexus". Now observe: we expunge the old
-        // Nexus zones.
-        bp_generator.set_current_nexus_to_highest_generation();
-
         // Old Nexuses which are in-service
         let mut old_nexuses =
             bp_generator.example.input.target_nexus_zone_count();
