@@ -66,6 +66,12 @@ pub struct Silo {
     /// Optionally, silos can have a group name that is automatically granted
     /// the silo admin role.
     pub admin_group_name: Option<String>,
+
+    /// Whether this silo requires silo admin permissions for network operations
+    /// (VPC, subnet, gateway creation/modification). When true, only users with
+    /// silo admin role can perform these operations. When false, standard
+    /// project-level permissions are used.
+    pub network_admin_required: bool,
 }
 
 /// A collection of resource counts used to describe capacity and utilization

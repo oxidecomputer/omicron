@@ -116,6 +116,12 @@ pub struct Silo {
     /// important to store this name so that when groups are created the same
     /// automatic policy can be created as well.
     pub admin_group_name: Option<String>,
+
+    /// Whether this silo requires silo admin permissions for network operations
+    /// (VPC, subnet, gateway creation/modification). When true, only users with
+    /// silo admin role can perform these operations. When false, standard
+    /// project-level permissions are used.
+    pub network_admin_required: bool,
 }
 
 /// Form of mapped fleet roles used when serializing to the database
@@ -197,6 +203,9 @@ impl Silo {
             rcgen: Generation::new(),
             mapped_fleet_roles,
             admin_group_name: params.admin_group_name,
+            network_admin_required: params
+                .network_admin_required
+                .unwrap_or(false),
         })
     }
 
@@ -243,6 +252,7 @@ impl TryFrom<Silo> for views::Silo {
             identity_mode,
             mapped_fleet_roles,
             admin_group_name: silo.admin_group_name,
+            network_admin_required: silo.network_admin_required,
         })
     }
 }

@@ -33,6 +33,7 @@ pub static DEFAULT_SILO: LazyLock<model::Silo> = LazyLock::new(|| {
             admin_group_name: None,
             tls_certificates: vec![],
             mapped_fleet_roles: Default::default(),
+            network_admin_required: None, // Default silo uses standard permissions
         },
     )
     .unwrap()
@@ -55,6 +56,7 @@ pub static INTERNAL_SILO: LazyLock<model::Silo> = LazyLock::new(|| {
             admin_group_name: None,
             tls_certificates: vec![],
             mapped_fleet_roles: Default::default(),
+            network_admin_required: None, // Internal silo uses standard permissions
         },
     )
     .unwrap()

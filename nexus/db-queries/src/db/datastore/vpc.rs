@@ -93,7 +93,56 @@ use std::collections::HashSet;
 use std::net::IpAddr;
 use uuid::Uuid;
 
+/// Resource identifier for network authorization lookups
+pub enum NetworkResourceId {
+    /// Look up silo via project ID
+    Project(Uuid),
+    /// Look up silo via VPC ID -> project ID -> silo ID
+    Vpc(Uuid),
+}
+
 impl DataStore {
+    /// Get silo information for network authorization checks
+    ///
+    /// This helper function traverses the resource hierarchy to find the silo
+    /// that governs network permissions for the given resource.
+    async fn get_silo_for_network_auth(
+        &self,
+        opctx: &OpContext,
+        resource_id: NetworkResourceId,
+    ) -> Result<(authz::Silo, crate::db::model::Silo), Error> {
+        use nexus_db_lookup::LookupPath;
+
+        match resource_id {
+            NetworkResourceId::Project(project_id) => {
+                // Direct project -> silo lookup
+                let (.., db_project) = LookupPath::new(opctx, self)
+                    .project_id(project_id)
+                    .fetch()
+                    .await?;
+                let (authz_silo, db_silo) = LookupPath::new(opctx, self)
+                    .silo_id(db_project.silo_id)
+                    .fetch()
+                    .await?;
+                Ok((authz_silo, db_silo))
+            }
+            NetworkResourceId::Vpc(vpc_id) => {
+                // VPC -> project -> silo lookup
+                let (.., db_vpc) =
+                    LookupPath::new(opctx, self).vpc_id(vpc_id).fetch().await?;
+                let (.., db_project) = LookupPath::new(opctx, self)
+                    .project_id(db_vpc.project_id)
+                    .fetch()
+                    .await?;
+                let (authz_silo, db_silo) = LookupPath::new(opctx, self)
+                    .silo_id(db_project.silo_id)
+                    .fetch()
+                    .await?;
+                Ok((authz_silo, db_silo))
+            }
+        }
+    }
+
     /// Load built-in VPCs into the database.
     pub async fn load_builtin_vpcs(
         &self,
@@ -472,7 +521,20 @@ impl DataStore {
         use nexus_db_schema::schema::vpc::dsl;
 
         assert_eq!(authz_project.id(), vpc_query.vpc.project_id);
+
+        // Check network permissions (resource + silo admin if required)
+        let (authz_silo, db_silo) = self
+            .get_silo_for_network_auth(
+                opctx,
+                NetworkResourceId::Project(authz_project.id()),
+            )
+            .await?;
+
         opctx.authorize(authz::Action::CreateChild, authz_project).await?;
+
+        if db_silo.network_admin_required {
+            opctx.authorize(authz::Action::Modify, &authz_silo).await?;
+        }
 
         let name = vpc_query.vpc.identity.name.clone();
         let project_id = vpc_query.vpc.project_id;
@@ -1536,7 +1598,19 @@ impl DataStore {
         authz_vpc: &authz::Vpc,
         igw: InternetGateway,
     ) -> CreateResult<(authz::InternetGateway, InternetGateway)> {
+        // Check network permissions (resource + silo admin if required)
+        let (authz_silo, db_silo) = self
+            .get_silo_for_network_auth(
+                opctx,
+                NetworkResourceId::Vpc(authz_vpc.id()),
+            )
+            .await?;
+
         opctx.authorize(authz::Action::CreateChild, authz_vpc).await?;
+
+        if db_silo.network_admin_required {
+            opctx.authorize(authz::Action::Modify, &authz_silo).await?;
+        }
 
         use nexus_db_schema::schema::internet_gateway::dsl;
         let name = igw.name().clone();
@@ -3010,7 +3084,8 @@ mod tests {
                 description: String::from("test project"),
             },
         };
-        let project = Project::new(Uuid::new_v4(), project_params);
+        let project =
+            Project::new(nexus_types::silo::DEFAULT_SILO_ID, project_params);
         let (authz_project, _) = datastore
             .project_create(&opctx, project)
             .await
@@ -3115,7 +3190,8 @@ mod tests {
                 description: String::from("test project"),
             },
         };
-        let project = Project::new(Uuid::new_v4(), project_params);
+        let project =
+            Project::new(nexus_types::silo::DEFAULT_SILO_ID, project_params);
         let (authz_project, _) = datastore
             .project_create(&opctx, project)
             .await
@@ -4038,6 +4114,119 @@ mod tests {
                 RouterTarget::Ip(ip) => ip == nic.ip.ip(),
                 _ => false,
             }));
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_vpc_create_internet_gateway() {
+        use crate::db::model::{IncompleteVpc, Project};
+        use assert_matches::assert_matches;
+        use nexus_types::external_api::params;
+        use omicron_common::api::external::{
+            Error, IdentityMetadataCreateParams,
+        };
+        use omicron_test_utils::dev;
+
+        let logctx = dev::test_setup_log("test_vpc_create_internet_gateway");
+        let log = &logctx.log;
+        let db = TestDatabase::new_with_datastore(log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Create a project
+        let project_params = params::ProjectCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "test-project".parse().unwrap(),
+                description: String::from("test project"),
+            },
+        };
+        let project =
+            Project::new(nexus_types::silo::DEFAULT_SILO_ID, project_params);
+        let (authz_project, _) = datastore
+            .project_create(&opctx, project)
+            .await
+            .expect("failed to create project");
+
+        // Create a VPC
+        let vpc_name: omicron_common::api::external::Name =
+            "test-vpc".parse().unwrap();
+        let vpc_params = params::VpcCreate {
+            identity: IdentityMetadataCreateParams {
+                name: vpc_name.clone(),
+                description: String::from("test vpc"),
+            },
+            ipv6_prefix: None,
+            dns_name: vpc_name.clone(),
+        };
+        let incomplete_vpc = IncompleteVpc::new(
+            Uuid::new_v4(),
+            authz_project.id(),
+            Uuid::new_v4(),
+            vpc_params,
+        )
+        .expect("failed to create incomplete vpc");
+        let (authz_vpc, _) = datastore
+            .project_create_vpc(&opctx, &authz_project, incomplete_vpc)
+            .await
+            .expect("failed to create vpc");
+
+        // Create internet gateway
+        let igw_params = params::InternetGatewayCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "test-igw".parse().unwrap(),
+                description: String::from("test internet gateway"),
+            },
+        };
+        let igw = InternetGateway::new(
+            Uuid::new_v4(),
+            authz_vpc.id(),
+            igw_params.clone(),
+        );
+        let (_authz_igw, created_igw) = datastore
+            .vpc_create_internet_gateway(&opctx, &authz_vpc, igw)
+            .await
+            .expect("failed to create internet gateway");
+
+        assert_eq!(
+            created_igw.name(),
+            &"test-igw".parse::<omicron_common::api::external::Name>().unwrap()
+        );
+        assert_eq!(created_igw.description(), "test internet gateway");
+        assert_eq!(created_igw.vpc_id, authz_vpc.id());
+
+        // Try to create another gateway with the same name (should fail)
+        let igw_duplicate =
+            InternetGateway::new(Uuid::new_v4(), authz_vpc.id(), igw_params);
+        let conflict = datastore
+            .vpc_create_internet_gateway(&opctx, &authz_vpc, igw_duplicate)
+            .await
+            .expect_err("creating gateway with same name should error");
+        assert_matches!(conflict, Error::ObjectAlreadyExists { .. });
+
+        // Create a second gateway with different name
+        let igw2_params = params::InternetGatewayCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "test-igw-2".parse().unwrap(),
+                description: String::from("second test internet gateway"),
+            },
+        };
+        let igw2 =
+            InternetGateway::new(Uuid::new_v4(), authz_vpc.id(), igw2_params);
+        let (_authz_igw2, created_igw2) = datastore
+            .vpc_create_internet_gateway(&opctx, &authz_vpc, igw2)
+            .await
+            .expect("failed to create second internet gateway");
+
+        assert_eq!(
+            created_igw2.name(),
+            &"test-igw-2"
+                .parse::<omicron_common::api::external::Name>()
+                .unwrap()
+        );
+        assert_eq!(created_igw2.description(), "second test internet gateway");
+        assert_eq!(created_igw2.vpc_id, authz_vpc.id());
+        assert_ne!(created_igw.id(), created_igw2.id());
 
         db.terminate().await;
         logctx.cleanup_successful();

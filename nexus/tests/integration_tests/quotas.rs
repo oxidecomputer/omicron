@@ -211,6 +211,7 @@ async fn setup_silo_with_quota(
             admin_group_name: None,
             tls_certificates: vec![],
             mapped_fleet_roles: Default::default(),
+            network_admin_required: None,
         },
     )
     .await;
@@ -430,6 +431,7 @@ async fn test_negative_quota(cptestctx: &ControlPlaneTestContext) {
             admin_group_name: None,
             tls_certificates: vec![],
             mapped_fleet_roles: Default::default(),
+            network_admin_required: None,
         },
         http::StatusCode::BAD_REQUEST,
     )

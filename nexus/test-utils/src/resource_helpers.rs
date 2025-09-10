@@ -394,6 +394,7 @@ pub async fn create_silo(
             admin_group_name: None,
             tls_certificates: vec![],
             mapped_fleet_roles: Default::default(),
+            network_admin_required: None, // Use default permissions for test silos
         },
     )
     .await

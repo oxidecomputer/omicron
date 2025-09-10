@@ -877,7 +877,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.silo (
     /* child resource generation number, per RFD 192 */
     rcgen INT NOT NULL,
 
-    admin_group_name TEXT
+    admin_group_name TEXT,
+
+    /* Whether this silo requires silo admin permissions for networking operations */
+    network_admin_required BOOL NOT NULL DEFAULT FALSE
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS lookup_silo_by_name ON omicron.public.silo (

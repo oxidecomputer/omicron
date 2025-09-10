@@ -448,6 +448,12 @@ pub struct SiloCreate {
     #[serde(default)]
     pub mapped_fleet_roles:
         BTreeMap<shared::SiloRole, BTreeSet<shared::FleetRole>>,
+
+    /// Whether this silo requires silo admin permissions for network operations
+    /// (VPC, subnet, gateway creation/modification). When true, only users with
+    /// silo admin role can perform these operations. When false (default),
+    /// standard project-level permissions are used.
+    pub network_admin_required: Option<bool>,
 }
 
 /// The amount of provisionable resources for a Silo
