@@ -113,34 +113,26 @@ impl DataStore {
     ) -> Result<(authz::Silo, crate::db::model::Silo), Error> {
         use nexus_db_lookup::LookupPath;
 
-        match resource_id {
-            NetworkResourceId::Project(project_id) => {
-                // Direct project -> silo lookup
-                let (.., db_project) = LookupPath::new(opctx, self)
-                    .project_id(project_id)
-                    .fetch()
-                    .await?;
-                let (authz_silo, db_silo) = LookupPath::new(opctx, self)
-                    .silo_id(db_project.silo_id)
-                    .fetch()
-                    .await?;
-                Ok((authz_silo, db_silo))
-            }
+        // Get the project_id from either the resource directly or via lookup
+        let project_id = match resource_id {
+            NetworkResourceId::Project(project_id) => project_id,
             NetworkResourceId::Vpc(vpc_id) => {
-                // VPC -> project -> silo lookup
                 let (.., db_vpc) =
                     LookupPath::new(opctx, self).vpc_id(vpc_id).fetch().await?;
-                let (.., db_project) = LookupPath::new(opctx, self)
-                    .project_id(db_vpc.project_id)
-                    .fetch()
-                    .await?;
-                let (authz_silo, db_silo) = LookupPath::new(opctx, self)
-                    .silo_id(db_project.silo_id)
-                    .fetch()
-                    .await?;
-                Ok((authz_silo, db_silo))
+                db_vpc.project_id
             }
-        }
+        };
+
+        // Common logic: project_id -> project -> silo
+        let (.., db_project) = LookupPath::new(opctx, self)
+            .project_id(project_id)
+            .fetch()
+            .await?;
+        let (authz_silo, db_silo) = LookupPath::new(opctx, self)
+            .silo_id(db_project.silo_id)
+            .fetch()
+            .await?;
+        Ok((authz_silo, db_silo))
     }
 
     /// Load built-in VPCs into the database.
