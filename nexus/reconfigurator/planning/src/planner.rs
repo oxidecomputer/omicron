@@ -1895,8 +1895,8 @@ impl<'a> Planner<'a> {
         let current_generation = self.blueprint.nexus_generation();
         let proposed_generation = self.blueprint.nexus_generation().next();
         let mut old_nexuses_at_current_gen = 0;
-        let mut nexuses_at_next_gen = 0;
-        let mut nexuses_at_next_gen_missing_metadata_record = 0;
+        let mut nexuses_at_proposed_gen = 0;
+        let mut nexuses_at_proposed_gen_missing_metadata_record = 0;
         for sled_id in self.blueprint.sled_ids_with_zones() {
             for z in self.blueprint.current_sled_zones(
                 sled_id,
@@ -1904,9 +1904,10 @@ impl<'a> Planner<'a> {
             ) {
                 if let BlueprintZoneType::Nexus(nexus_zone) = &z.zone_type {
                     if nexus_zone.nexus_generation == proposed_generation {
-                        nexuses_at_next_gen += 1;
+                        nexuses_at_proposed_gen += 1;
                         if !self.input.not_yet_nexus_zones().contains(&z.id) {
-                            nexuses_at_next_gen_missing_metadata_record += 1;
+                            nexuses_at_proposed_gen_missing_metadata_record +=
+                                1;
                         }
                     }
 
@@ -1924,7 +1925,8 @@ impl<'a> Planner<'a> {
             // If all the current-generation Nexuses are "up-to-date", then we may have
             // just completed handoff successfully. In this case, there's nothing to report.
             return Ok(report);
-        } else if nexuses_at_next_gen < self.input.target_nexus_zone_count() {
+        } else if nexuses_at_proposed_gen < self.input.target_nexus_zone_count()
+        {
             // If there aren't enough Nexuses at the next generation, quiescing could
             // be a dangerous operation. Blueprint execution should be able to continue
             // even if the new Nexuses haven't started, but to be conservative, we'll wait
@@ -1932,7 +1934,7 @@ impl<'a> Planner<'a> {
             report
                 .set_waiting_on(NexusGenerationBumpWaitingOn::NewNexusBringup);
             return Ok(report);
-        } else if nexuses_at_next_gen_missing_metadata_record > 0 {
+        } else if nexuses_at_proposed_gen_missing_metadata_record > 0 {
             // There are enough Nexuses at the target generation, but not all of
             // them have records yet. Blueprint execution should fix this, by
             // creating these records.
