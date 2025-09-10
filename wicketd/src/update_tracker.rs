@@ -1681,7 +1681,7 @@ impl UpdateDriver {
                     let host_type = host_type.into_value(cx.token()).await;
                     let slots_to_update =
                         slots_to_update.into_value(cx.token()).await;
-                    
+
                     let artifact = match host_type {
                         InternalHostType::Cosmo => cosmo_artifact,
                         InternalHostType::Gimlet => gimlet_artifact,

@@ -23,7 +23,11 @@ impl Hardware {
     pub async fn scan(log: &Logger) -> Result<Self> {
         let is_gimlet = sled_hardware::is_gimlet()
             .context("failed to detect whether host is a gimlet")?;
-        ensure!(is_gimlet, "hardware scan only supported on gimlets");
+
+        let is_cosmo = sled_hardware::is_cosmo()
+            .context("failed to detect whether host is a cosmo")?;
+
+        ensure!(is_gimlet || is_cosmo, "hardware scan only supported on sleds");
 
         let hardware = HardwareManager::new(log, SledMode::Auto, vec![])
             .map_err(|err| {
@@ -34,7 +38,7 @@ impl Hardware {
             hardware.disks().into_values().map(|disk| disk.into()).collect();
 
         info!(
-            log, "found gimlet hardware";
+            log, "found sled hardware";
             "baseboard" => ?hardware.baseboard(),
             "is_scrimlet" => hardware.is_scrimlet(),
             "num_disks" => disks.len(),

@@ -88,6 +88,17 @@ pub fn is_gimlet() -> anyhow::Result<bool> {
     Ok(root.node_name() == GIMLET_ROOT_NODE_NAME)
 }
 
+const COSMO_ROOT_NODE_NAME: &str = "Oxide,Cosmo";
+/// Return true if the host system is an Oxide Cosmo.
+pub fn is_cosmo() -> anyhow::Result<bool> {
+    let mut device_info = DevInfo::new()?;
+    let mut node_walker = device_info.walk_node();
+    let Some(root) = node_walker.next().transpose()? else {
+        anyhow::bail!("No nodes in device tree");
+    };
+    Ok(root.node_name() == COSMO_ROOT_NODE_NAME)
+}
+
 // A snapshot of information about the underlying Tofino device
 #[derive(Copy, Clone)]
 struct TofinoSnapshot {
