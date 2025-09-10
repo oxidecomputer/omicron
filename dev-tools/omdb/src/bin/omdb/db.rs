@@ -2158,8 +2158,8 @@ async fn cmd_db_disk_info(
                 .context("failed to look up sled")?;
 
             let import_address = match disk.pantry_address {
-                Some(ref pa) => format!("{}", pa.clone()),
-                None => format!("-"),
+                Some(ref pa) => pa.clone().to_string(),
+                None => "-".to_string(),
             };
             UpstairsRow {
                 host_serial: my_sled.serial_number().to_string(),
@@ -2172,8 +2172,8 @@ async fn cmd_db_disk_info(
             }
         } else {
             let import_address = match disk.pantry_address {
-                Some(ref pa) => format!("{}", pa.clone()),
-                None => format!("-"),
+                Some(ref pa) => pa.clone().to_string(),
+                None => "-".to_string(),
             };
             UpstairsRow {
                 host_serial: NOT_ON_SLED_MSG.to_string(),
@@ -2189,8 +2189,8 @@ async fn cmd_db_disk_info(
         // If the disk is not attached to anything, just print empty
         // fields.
         let import_address = match disk.pantry_address {
-            Some(ref pa) => format!("{}", pa.clone()),
-            None => format!("-"),
+            Some(ref pa) => pa.clone().to_string(),
+            None => "-".to_string(),
         };
         UpstairsRow {
             host_serial: "-".to_string(),
