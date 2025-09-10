@@ -139,7 +139,7 @@ async fn test_run_all() {
     let cmd_path = path_to_omicron_dev();
 
     let cmdstr = format!(
-        "( set -o monitor; {} run-all --nexus-listen-port 0 && true )",
+        "( set -o monitor; {} run-all --nexus-listen-port 0 --nexus-config ../../nexus/examples/config.toml && true )",
         cmd_path.display()
     );
     let exec =
