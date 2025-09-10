@@ -2454,7 +2454,7 @@ INFO ran out of boards for MGS-driven update
 generated blueprint 24b6e243-100c-428d-8ea6-35b504226f55 based on parent blueprint 6fad8fd4-e825-433f-b76d-495484e068ce
 planning report for blueprint 24b6e243-100c-428d-8ea6-35b504226f55:
 * discretionary zones placed:
-  * 1 zone on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: external_dns
+  * external_dns zone on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c from source artifact: version 1.0.0
 * zone updates waiting on discretionary zones
 
 
@@ -2869,7 +2869,7 @@ INFO ran out of boards for MGS-driven update
 generated blueprint 4d2eb6f3-7eb1-443a-8e76-7ecf05da2f6d based on parent blueprint 3bcc37b2-0c0b-44d0-b4ed-3bcb605e4312
 planning report for blueprint 4d2eb6f3-7eb1-443a-8e76-7ecf05da2f6d:
 * discretionary zones placed:
-  * 1 zone on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: internal_dns
+  * internal_dns zone on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c from source artifact: version 1.0.0
 * zone updates waiting on discretionary zones
 
 
@@ -3152,7 +3152,7 @@ INFO ran out of boards for MGS-driven update
 generated blueprint f4a6848e-d13c-46e1-8c6a-944f886d7ba3 based on parent blueprint e2125c83-b255-45c9-bc9b-802cff09a812
 planning report for blueprint f4a6848e-d13c-46e1-8c6a-944f886d7ba3:
 * discretionary zones placed:
-  * 1 zone on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: crucible_pantry
+  * crucible_pantry zone on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c from source artifact: version 1.0.0
 * zone updates waiting on discretionary zones
 
 
@@ -3799,7 +3799,7 @@ INFO ran out of boards for MGS-driven update
 generated blueprint c0d81ea6-909c-4efb-964e-beff67f6da0d based on parent blueprint 23ce505c-8991-44a5-8863-f2b906fba9cf
 planning report for blueprint c0d81ea6-909c-4efb-964e-beff67f6da0d:
 * discretionary zones placed:
-  * 1 zone on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: internal_dns
+  * internal_dns zone on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 from source artifact: version 1.0.0
 * zone updates waiting on discretionary zones
 
 
@@ -4451,7 +4451,7 @@ INFO ran out of boards for MGS-driven update
 generated blueprint e7a01ffc-6b0e-408b-917b-b1efe18b3110 based on parent blueprint 02078c95-3d58-4b7b-a03f-9b160361c50a
 planning report for blueprint e7a01ffc-6b0e-408b-917b-b1efe18b3110:
 * discretionary zones placed:
-  * 1 zone on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: external_dns
+  * external_dns zone on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 from source artifact: version 1.0.0
 * zone updates waiting on discretionary zones
 
 
@@ -4725,7 +4725,7 @@ INFO ran out of boards for MGS-driven update
 generated blueprint c4a20bcb-1a71-4e88-97b4-36d16f55daec based on parent blueprint 880e2ffc-8187-4275-a2f3-1b36aa2f4482
 planning report for blueprint c4a20bcb-1a71-4e88-97b4-36d16f55daec:
 * discretionary zones placed:
-  * 1 zone on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: crucible_pantry
+  * crucible_pantry zone on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 from source artifact: version 1.0.0
 * zone updates waiting on discretionary zones
 
 
@@ -5226,7 +5226,7 @@ INFO ran out of boards for MGS-driven update
 generated blueprint 8763abc1-8a42-4932-b5a7-33109e0e0152 based on parent blueprint 9078c4ba-3a73-4b3f-ac2c-acb501f89cb2
 planning report for blueprint 8763abc1-8a42-4932-b5a7-33109e0e0152:
 * discretionary zones placed:
-  * 1 zone on sled d81c6a84-79b8-4958-ae41-ea46c9b19763: crucible_pantry
+  * crucible_pantry zone on sled d81c6a84-79b8-4958-ae41-ea46c9b19763 from source artifact: version 1.0.0
 * zone updates waiting on discretionary zones
 
 
@@ -5603,7 +5603,7 @@ INFO ran out of boards for MGS-driven update
 generated blueprint 59630e63-c953-4807-9e84-9e750a79f68e based on parent blueprint 7f6b7297-c2bc-4f67-b3c0-c8e555ebbdc4
 planning report for blueprint 59630e63-c953-4807-9e84-9e750a79f68e:
 * discretionary zones placed:
-  * 1 zone on sled d81c6a84-79b8-4958-ae41-ea46c9b19763: internal_dns
+  * internal_dns zone on sled d81c6a84-79b8-4958-ae41-ea46c9b19763 from source artifact: version 1.0.0
 * zone updates waiting on discretionary zones
 
 
@@ -6261,7 +6261,7 @@ INFO ran out of boards for MGS-driven update
 generated blueprint 810ea95a-4730-43dd-867e-1984aeb9d873 based on parent blueprint e8b088a8-7da0-480b-a2dc-75ffef068ece
 planning report for blueprint 810ea95a-4730-43dd-867e-1984aeb9d873:
 * discretionary zones placed:
-  * 1 zone on sled d81c6a84-79b8-4958-ae41-ea46c9b19763: external_dns
+  * external_dns zone on sled d81c6a84-79b8-4958-ae41-ea46c9b19763 from source artifact: version 1.0.0
 * zone updates waiting on discretionary zones
 
 
@@ -6619,7 +6619,7 @@ parent:    e8b088a8-7da0-480b-a2dc-75ffef068ece
 
 planning report for blueprint 810ea95a-4730-43dd-867e-1984aeb9d873:
 * discretionary zones placed:
-  * 1 zone on sled d81c6a84-79b8-4958-ae41-ea46c9b19763: external_dns
+  * external_dns zone on sled d81c6a84-79b8-4958-ae41-ea46c9b19763 from source artifact: version 1.0.0
 * zone updates waiting on discretionary zones
 
 
