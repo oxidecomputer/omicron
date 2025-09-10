@@ -1356,6 +1356,9 @@ impl<'a> Planner<'a> {
         Ok(PlanningMgsUpdatesStepReport::new(pending_updates))
     }
 
+    // Returns the zones which appear in the blueprint on commissioned sleds,
+    // but which have not been reported by the latest reconciliation result from
+    // inventory.
     fn get_zones_not_yet_propagated_to_inventory(
         &self,
     ) -> Vec<ZonePropagationIncomplete<'_>> {
