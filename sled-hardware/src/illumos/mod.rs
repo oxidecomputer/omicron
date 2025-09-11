@@ -155,7 +155,7 @@ impl HardwareSnapshot {
             )));
         };
         let root_node = root.node_name();
-        if root_node != GIMLET_ROOT_NODE_NAME {
+        if root_node != GIMLET_ROOT_NODE_NAME && root_node != COSMO_ROOT_NODE_NAME {
             return Err(Error::NotAGimlet(root_node));
         }
 
