@@ -20,6 +20,7 @@ use omicron_common::api::external::{
     ObjectIdentity, SimpleIdentity, SimpleIdentityOrName,
 };
 use omicron_uuid_kinds::*;
+use oximeter_db::QuerySummary;
 use oxnet::{Ipv4Net, Ipv6Net};
 use schemars::JsonSchema;
 use semver::Version;
@@ -1128,6 +1129,8 @@ impl From<oxql_types::Table> for OxqlTable {
 pub struct OxqlQueryResult {
     /// Tables resulting from the query, each containing timeseries.
     pub tables: Vec<OxqlTable>,
+    /// Summaries of queries run against Clickhouse.
+    pub query_summaries: Vec<QuerySummary>,
 }
 
 // ALERTS

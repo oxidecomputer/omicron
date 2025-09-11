@@ -132,6 +132,8 @@ impl Query {
 pub struct QueryResult {
     /// The ID of the query.
     pub id: Uuid,
+    /// The raw SQL query.
+    pub query: String,
     /// The accumulated query progress for the whole query.
     pub progress: Progress,
     /// Any data returned by the query.
@@ -150,6 +152,7 @@ impl QueryResult {
     pub fn query_summary(&self) -> QuerySummary {
         QuerySummary {
             id: self.id,
+            query: self.query.clone(),
             elapsed: self.progress.query_time,
             io_summary: self.progress.into(),
         }
