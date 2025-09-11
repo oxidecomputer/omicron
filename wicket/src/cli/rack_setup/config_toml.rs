@@ -189,15 +189,21 @@ fn build_sleds_array(sleds: &BTreeSet<BootstrapSledDescription>) -> Array {
         match &sled.baseboard {
             Baseboard::Gimlet { identifier, model, revision } => {
                 format!(
-                    " # {identifier} (model {model} revision {revision}, {ip})\
-                     {end}"
+                    " # Gimlet {identifier} (model {model} revision {revision},\
+                     {ip}) {end}"
+                )
+            }
+            Baseboard::Cosmo { identifier, model, revision } => {
+                format!(
+                    " # Cosmo {identifier} (model {model} revision {revision},\
+                     {ip}) {end}"
                 )
             }
             Baseboard::Unknown => {
                 format!(" # UNKNOWN SLED ({ip}){end}")
             }
             Baseboard::Pc { identifier, model } => {
-                format!(" # NON-GIMLET {identifier} (model {model}, {ip}){end}")
+                format!(" # NON-OXIDE {identifier} (model {model}, {ip}){end}")
             }
         }
     }

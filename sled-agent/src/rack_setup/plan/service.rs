@@ -1259,6 +1259,7 @@ mod tests {
                 bfd: Vec::new(),
             },
             allowed_source_ips: AllowedSourceIps::Any,
+            skip_timesync: Some(false),
         }
     }
 

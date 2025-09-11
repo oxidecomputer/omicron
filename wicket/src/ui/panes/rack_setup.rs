@@ -35,7 +35,6 @@ use ratatui::widgets::Block;
 use ratatui::widgets::BorderType;
 use ratatui::widgets::Borders;
 use ratatui::widgets::Paragraph;
-use sled_hardware_types::Baseboard;
 use std::borrow::Cow;
 use wicket_common::rack_setup::BgpAuthKeyInfo;
 use wicket_common::rack_setup::BgpAuthKeyStatus;
@@ -1278,11 +1277,7 @@ fn rss_config_text<'a>(
         bootstrap_sleds
             .iter()
             .map(|desc| {
-                let identifier = match &desc.baseboard {
-                    Baseboard::Gimlet { identifier, .. } => identifier,
-                    Baseboard::Pc { identifier, .. } => identifier,
-                    Baseboard::Unknown => "unknown",
-                };
+                let identifier = desc.baseboard.identifier();
                 let mut spans = vec![
                     Span::styled("  • ", label_style),
                     Span::styled(format!("Cubby {}", desc.id.slot), ok_style),

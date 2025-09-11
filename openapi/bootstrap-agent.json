@@ -209,7 +209,7 @@
         "pattern": "^[a-zA-Z0-9._+-]{1,63}$"
       },
       "Baseboard": {
-        "description": "Describes properties that should uniquely identify a Gimlet.",
+        "description": "Describes properties that should uniquely identify a system.",
         "oneOf": [
           {
             "type": "object",
@@ -229,6 +229,34 @@
                 "type": "string",
                 "enum": [
                   "gimlet"
+                ]
+              }
+            },
+            "required": [
+              "identifier",
+              "model",
+              "revision",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "identifier": {
+                "type": "string"
+              },
+              "model": {
+                "type": "string"
+              },
+              "revision": {
+                "type": "integer",
+                "format": "uint32",
+                "minimum": 0
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "cosmo"
                 ]
               }
             },
@@ -1000,6 +1028,11 @@
                 "$ref": "#/components/schemas/RecoverySiloConfig"
               }
             ]
+          },
+          "skip_timesync": {
+            "nullable": true,
+            "description": "Skip timesync (for debugging)",
+            "type": "boolean"
           },
           "trust_quorum_peers": {
             "nullable": true,

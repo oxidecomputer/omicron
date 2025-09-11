@@ -66,13 +66,13 @@ impl std::fmt::Display for DendriteAsic {
     }
 }
 
-/// Configuration for forcing a sled to run as a Scrimlet or Gimlet
+/// Configuration for forcing a sled to run as a Scrimlet or compute Sled
 #[derive(Copy, Clone, Debug)]
 pub enum SledMode {
-    /// Automatically detect whether to run as a Gimlet or Scrimlet (w/ real Tofino ASIC)
+    /// Automatically detect whether to run as a compute sled or Scrimlet (w/ real Tofino ASIC)
     Auto,
     /// Force sled to run as a Gimlet
-    Gimlet,
+    Sled,
     /// Force sled to run as a Scrimlet
     Scrimlet { asic: DendriteAsic },
 }

@@ -61,10 +61,13 @@ async fn do_run() -> Result<(), CmdError> {
                 rss_config_path
             };
             let rss_config = if rss_config_path.exists() {
-                Some(
+                let mut rss_config =
                     RackInitializeRequest::from_file(rss_config_path)
-                        .map_err(|e| CmdError::Failure(anyhow!(e)))?,
-                )
+                        .map_err(|e| CmdError::Failure(anyhow!(e)))?;
+                if rss_config.skip_timesync.is_none() {
+                    rss_config.skip_timesync = config.skip_timesync;
+                }
+                Some(rss_config)
             } else {
                 None
             };

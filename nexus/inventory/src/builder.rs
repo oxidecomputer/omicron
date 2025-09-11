@@ -627,7 +627,8 @@ impl CollectionBuilder {
 
         let baseboard_id = match inventory.baseboard {
             Baseboard::Pc { .. } => None,
-            Baseboard::Gimlet { identifier, model, revision: _ } => {
+            Baseboard::Gimlet { identifier, model, .. }
+            | Baseboard::Cosmo { identifier, model, .. } => {
                 Some(Self::normalize_item(
                     &mut self.baseboards,
                     BaseboardId {

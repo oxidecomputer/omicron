@@ -94,6 +94,11 @@ async fn scan_for_peers(
                             model,
                             revision,
                         } => Baseboard::new_gimlet(identifier, model, revision),
+                        bootstrap_agent_client::types::Baseboard::Cosmo {
+                            identifier,
+                            model,
+                            revision,
+                        } => Baseboard::new_cosmo(identifier, model, revision),
                         bootstrap_agent_client::types::Baseboard::Unknown => {
                             Baseboard::unknown()
                         }
