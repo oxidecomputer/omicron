@@ -22334,7 +22334,8 @@
         "type": "object",
         "properties": {
           "query_summaries": {
-            "description": "Summaries of queries run against Clickhouse.",
+            "nullable": true,
+            "description": "Summaries of queries run against ClickHouse.",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/QuerySummary"
@@ -22349,7 +22350,6 @@
           }
         },
         "required": [
-          "query_summaries",
           "tables"
         ]
       },
@@ -25771,6 +25771,11 @@
         "description": "A timeseries query string, written in the Oximeter query language.",
         "type": "object",
         "properties": {
+          "include_summaries": {
+            "nullable": true,
+            "description": "Whether to include ClickHouse query summaries in the response.",
+            "type": "boolean"
+          },
           "query": {
             "description": "A timeseries query string, written in the Oximeter query language.",
             "type": "string"

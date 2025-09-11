@@ -6562,7 +6562,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let nexus = &apictx.context.nexus;
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
-            let query = body.into_inner().query;
+            let body_params = body.into_inner();
+            let query = body_params.query;
+            let include_summaries = body_params.include_summaries;
             nexus
                 .timeseries_query(&opctx, &query)
                 .await
@@ -6573,7 +6575,10 @@ impl NexusExternalApi for NexusExternalApiImpl {
                             .into_iter()
                             .map(Into::into)
                             .collect(),
-                        query_summaries: result.query_summaries,
+                        query_summaries: match include_summaries {
+                            Some(true) => Some(result.query_summaries),
+                            _ => None,
+                        },
                     })
                 })
                 .map_err(HttpError::from)
@@ -6596,7 +6601,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
             let project_selector = query_params.into_inner();
-            let query = body.into_inner().query;
+            let body_params = body.into_inner();
+            let query = body_params.query;
+            let include_summaries = body_params.include_summaries;
             let project_lookup =
                 nexus.project_lookup(&opctx, project_selector)?;
             nexus
@@ -6609,7 +6616,10 @@ impl NexusExternalApi for NexusExternalApiImpl {
                             .into_iter()
                             .map(Into::into)
                             .collect(),
-                        query_summaries: result.query_summaries,
+                        query_summaries: match include_summaries {
+                            Some(true) => Some(result.query_summaries),
+                            _ => None,
+                        },
                     })
                 })
                 .map_err(HttpError::from)
