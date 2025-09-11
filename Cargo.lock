@@ -9411,6 +9411,8 @@ dependencies = [
  "oximeter-types 0.1.0",
  "schemars",
  "serde",
+ "serde_json",
+ "uuid",
 ]
 
 [[package]]

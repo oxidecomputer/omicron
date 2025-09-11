@@ -1144,6 +1144,7 @@ pub static SYSTEM_TIMESERIES_QUERY_URL: LazyLock<String> =
 pub static DEMO_TIMESERIES_QUERY: LazyLock<params::TimeseriesQuery> =
     LazyLock::new(|| params::TimeseriesQuery {
         query: String::from("get http_service:request_latency_histogram"),
+        include_summaries: false,
     });
 
 // Users

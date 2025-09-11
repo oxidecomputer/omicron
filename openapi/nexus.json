@@ -18116,25 +18116,6 @@
           "sum_of_samples"
         ]
       },
-      "Duration": {
-        "type": "object",
-        "properties": {
-          "nanos": {
-            "type": "integer",
-            "format": "uint32",
-            "minimum": 0
-          },
-          "secs": {
-            "type": "integer",
-            "format": "uint64",
-            "minimum": 0
-          }
-        },
-        "required": [
-          "nanos",
-          "secs"
-        ]
-      },
       "EphemeralIpCreate": {
         "description": "Parameters for creating an ephemeral IP address for an instance.",
         "type": "object",
@@ -22334,10 +22315,11 @@
         "type": "object",
         "properties": {
           "query_summaries": {
-            "description": "Summaries of queries run against Clickhouse.",
+            "nullable": true,
+            "description": "Summaries of queries run against ClickHouse.",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/QuerySummary"
+              "$ref": "#/components/schemas/OxqlQuerySummary"
             }
           },
           "tables": {
@@ -22349,8 +22331,42 @@
           }
         },
         "required": [
-          "query_summaries",
           "tables"
+        ]
+      },
+      "OxqlQuerySummary": {
+        "description": "Basic metadata about the resource usage of a single ClickHouse SQL query.",
+        "type": "object",
+        "properties": {
+          "elapsed_ms": {
+            "description": "The total duration of the ClickHouse query (network plus execution).",
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0
+          },
+          "id": {
+            "description": "The database-assigned query ID.",
+            "type": "string",
+            "format": "uuid"
+          },
+          "io_summary": {
+            "description": "Summary of the data read and written.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/IoSummary"
+              }
+            ]
+          },
+          "query": {
+            "description": "The raw ClickHouse SQL query.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "elapsed_ms",
+          "id",
+          "io_summary",
+          "query"
         ]
       },
       "OxqlTable": {
@@ -22931,43 +22947,6 @@
           "marker_heights",
           "marker_positions",
           "p"
-        ]
-      },
-      "QuerySummary": {
-        "description": "Basic metadata about the resource usage of a single SQL query.",
-        "type": "object",
-        "properties": {
-          "elapsed": {
-            "description": "The total duration of the query (network plus execution).",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Duration"
-              }
-            ]
-          },
-          "id": {
-            "description": "The database-assigned query ID.",
-            "type": "string",
-            "format": "uuid"
-          },
-          "io_summary": {
-            "description": "Summary of the data read and written.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/IoSummary"
-              }
-            ]
-          },
-          "query": {
-            "description": "The raw SQL query.",
-            "type": "string"
-          }
-        },
-        "required": [
-          "elapsed",
-          "id",
-          "io_summary",
-          "query"
         ]
       },
       "Rack": {
@@ -25771,6 +25750,11 @@
         "description": "A timeseries query string, written in the Oximeter query language.",
         "type": "object",
         "properties": {
+          "include_summaries": {
+            "description": "Whether to include ClickHouse query summaries in the response.",
+            "default": false,
+            "type": "boolean"
+          },
           "query": {
             "description": "A timeseries query string, written in the Oximeter query language.",
             "type": "string"
