@@ -99,6 +99,24 @@ pub fn is_cosmo() -> anyhow::Result<bool> {
     Ok(root.node_name() == COSMO_ROOT_NODE_NAME)
 }
 
+#[derive(Copy, Clone)]
+enum InternalHostType {
+    Cosmo,
+    Gimlet,
+}
+
+impl InternalHostType {
+    fn from_node_name(root_node: String) -> Result<Self, Error> {
+        if root_node == GIMLET_ROOT_NODE_NAME {
+            Ok(InternalHostType::Gimlet)
+        } else if root_node == COSMO_ROOT_NODE_NAME {
+            Ok(InternalHostType::Cosmo)
+        } else {
+            Err(Error::NotAGimlet(root_node))
+        }
+    }
+}
+
 // A snapshot of information about the underlying Tofino device
 #[derive(Copy, Clone)]
 struct TofinoSnapshot {
@@ -154,10 +172,8 @@ impl HardwareSnapshot {
                 "No nodes in device tree"
             )));
         };
-        let root_node = root.node_name();
-        if root_node != GIMLET_ROOT_NODE_NAME && root_node != COSMO_ROOT_NODE_NAME {
-            return Err(Error::NotAGimlet(root_node));
-        }
+
+        let root_node = InternalHostType::from_node_name(root.node_name())?;
 
         let properties = find_properties(
             &root,
@@ -185,7 +201,13 @@ impl HardwareSnapshot {
         while let Some(node) =
             node_walker.next().transpose().map_err(Error::DevInfo)?
         {
-            poll_blkdev_node(&log, &mut disks, node, boot_storage_unit)?;
+            poll_blkdev_node(
+                &log,
+                &mut disks,
+                node,
+                boot_storage_unit,
+                root_node,
+            )?;
         }
 
         Ok(Self { tofino, disks, baseboard })
@@ -320,14 +342,26 @@ impl HardwareView {
     }
 }
 
-fn slot_to_disk_variant(slot: i64) -> Option<DiskVariant> {
-    match slot {
-        // For the source of these values, refer to:
-        //
-        // https://github.com/oxidecomputer/illumos-gate/blob/87a8bbb8edfb89ad5012beb17fa6f685c7795416/usr/src/uts/oxide/milan/milan_dxio_data.c#L823-L847
-        0x00..=0x09 => Some(DiskVariant::U2),
-        0x11..=0x12 => Some(DiskVariant::M2),
-        _ => None,
+fn slot_to_disk_variant(
+    slot: i64,
+    root: InternalHostType,
+) -> Option<DiskVariant> {
+    match root {
+        InternalHostType::Gimlet => {
+            match slot {
+                // For the source of these values, refer to:
+                //
+                // https://github.com/oxidecomputer/illumos-gate/blob/87a8bbb8edfb89ad5012beb17fa6f685c7795416/usr/src/uts/oxide/milan/milan_dxio_data.c#L823-L847
+                0x00..=0x09 => Some(DiskVariant::U2),
+                0x11..=0x12 => Some(DiskVariant::M2),
+                _ => None,
+            }
+        }
+        InternalHostType::Cosmo => match slot {
+            0x20..=0x29 => Some(DiskVariant::U2),
+            0x11..=0x12 => Some(DiskVariant::M2),
+            _ => None,
+        },
     }
 }
 
@@ -495,6 +529,7 @@ fn poll_blkdev_node(
     disks: &mut HashMap<DiskIdentity, UnparsedDisk>,
     node: Node<'_>,
     boot_storage_unit: BootStorageUnit,
+    root: InternalHostType,
 ) -> Result<(), Error> {
     let Some(driver_name) = node.driver_name() else {
         return Ok(());
@@ -562,7 +597,7 @@ fn poll_blkdev_node(
     let slot = i64_from_property(
         &find_properties(&pcieb_node, ["physical-slot#"])?[0],
     )?;
-    let Some(variant) = slot_to_disk_variant(slot) else {
+    let Some(variant) = slot_to_disk_variant(slot, root) else {
         warn!(log, "Slot# {slot} is not recognized as a disk: {devfs_path}");
         return Err(Error::UnrecognizedSlot { slot });
     };
