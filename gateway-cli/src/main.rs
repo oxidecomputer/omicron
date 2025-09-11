@@ -301,6 +301,9 @@ enum Command {
         /// Component to reset
         component: String,
     },
+
+    /// Get the ID for the switch this MGS instance is connected to.
+    LocalSwitchId {},
 }
 
 fn level_from_str(s: &str) -> Result<Level> {
@@ -606,6 +609,10 @@ async fn main_impl() -> Result<()> {
         }
         Command::ResetComponent { sp, component } => {
             client.sp_component_reset(sp.type_, sp.slot, &component).await?;
+        }
+        Command::LocalSwitchId {} => {
+            let sp_id = client.sp_local_switch_id().await?.into_inner();
+            dumper.dump(&sp_id)?;
         }
     }
 
