@@ -86,10 +86,12 @@ impl TryFrom<serde_json::Value> for IoSummary {
 }
 
 /// Basic metadata about the resource usage of a single SQL query.
-#[derive(Clone, Copy, Debug, Deserialize, JsonSchema, Serialize)]
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
 pub struct QuerySummary {
     /// The database-assigned query ID.
     pub id: Uuid,
+    /// The raw SQL query.
+    pub query: String,
     /// The total duration of the query (network plus execution).
     pub elapsed: Duration,
     /// Summary of the data read and written.
@@ -120,6 +122,6 @@ impl QuerySummary {
         let id = get_header(headers, "X-ClickHouse-Query-Id")?
             .parse()
             .map_err(|err: uuid::Error| Error::Database(err.to_string()))?;
-        Ok(Self { id, elapsed, io_summary: summary })
+        Ok(Self { id, query: String::from(""), elapsed, io_summary: summary })
     }
 }
