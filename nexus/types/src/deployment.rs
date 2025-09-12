@@ -134,6 +134,7 @@ pub use planning_report::PlanningZoneUpdatesStepReport;
 pub use planning_report::ZoneAddWaitingOn;
 pub use planning_report::ZoneUnsafeToShutdown;
 pub use planning_report::ZoneUpdatesWaitingOn;
+pub use planning_report::ZoneWaitingToExpunge;
 pub use reconfigurator_config::PlannerConfig;
 pub use reconfigurator_config::PlannerConfigDiff;
 pub use reconfigurator_config::PlannerConfigDisplay;

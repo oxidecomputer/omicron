@@ -844,6 +844,7 @@ pub struct PlanningZoneUpdatesStepReport {
     pub expunged_zones: BTreeMap<SledUuid, Vec<BlueprintZoneConfig>>,
     pub updated_zones: BTreeMap<SledUuid, Vec<BlueprintZoneConfig>>,
     pub unsafe_zones: BTreeMap<BlueprintZoneConfig, ZoneUnsafeToShutdown>,
+    pub waiting_zones: BTreeMap<BlueprintZoneConfig, ZoneWaitingToExpunge>,
 }
 
 impl PlanningZoneUpdatesStepReport {
@@ -854,6 +855,7 @@ impl PlanningZoneUpdatesStepReport {
             expunged_zones: BTreeMap::new(),
             updated_zones: BTreeMap::new(),
             unsafe_zones: BTreeMap::new(),
+            waiting_zones: BTreeMap::new(),
         }
     }
 
@@ -869,6 +871,7 @@ impl PlanningZoneUpdatesStepReport {
             && self.expunged_zones.is_empty()
             && self.updated_zones.is_empty()
             && self.unsafe_zones.is_empty()
+            && self.waiting_zones.is_empty()
     }
 
     pub fn out_of_date_zone(
@@ -916,6 +919,14 @@ impl PlanningZoneUpdatesStepReport {
     ) {
         self.unsafe_zones.insert(zone.clone(), reason);
     }
+
+    pub fn waiting_zone(
+        &mut self,
+        zone: &BlueprintZoneConfig,
+        reason: ZoneWaitingToExpunge,
+    ) {
+        self.waiting_zones.insert(zone.clone(), reason);
+    }
 }
 
 impl fmt::Display for PlanningZoneUpdatesStepReport {
@@ -926,6 +937,7 @@ impl fmt::Display for PlanningZoneUpdatesStepReport {
             expunged_zones,
             updated_zones,
             unsafe_zones,
+            waiting_zones,
         } = self;
 
         if let Some(waiting_on) = waiting_on {
@@ -973,6 +985,20 @@ impl fmt::Display for PlanningZoneUpdatesStepReport {
             let (n, s) = plural_map(unsafe_zones);
             writeln!(f, "* {n} zone{s} not ready to shut down safely:")?;
             for (zone, reason) in unsafe_zones.iter() {
+                writeln!(
+                    f,
+                    "  * zone {} ({}): {}",
+                    zone.id,
+                    zone.zone_type.kind().report_str(),
+                    reason,
+                )?;
+            }
+        }
+
+        if !waiting_zones.is_empty() {
+            let (n, s) = plural_map(unsafe_zones);
+            writeln!(f, "* {n} zone{s} waiting to be expunged:")?;
+            for (zone, reason) in waiting_zones.iter() {
                 writeln!(
                     f,
                     "  * zone {} ({}): {}",
@@ -1048,6 +1074,38 @@ impl fmt::Display for ZoneUnsafeToShutdown {
                 total_internal_dns_zones: t,
                 synchronized_count: s,
             } => write!(f, "only {s}/{t} internal DNS zones are synchronized"),
+            Self::Nexus { zone_generation, current_nexus_generation } => {
+                match current_nexus_generation {
+                    Some(current) => write!(
+                        f,
+                        "zone gen ({zone_generation}) >= currently-running \
+                         Nexus gen ({current})"
+                    ),
+                    None => write!(
+                        f,
+                        "zone gen is {zone_generation}, but currently-running \
+                         Nexus generation is unknown"
+                    ),
+                }
+            }
+        }
+    }
+}
+
+#[derive(
+    Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Diffable, JsonSchema,
+)]
+#[serde(rename_all = "snake_case", tag = "type")]
+pub enum ZoneWaitingToExpunge {
+    Nexus {
+        zone_generation: Generation,
+        current_nexus_generation: Option<Generation>,
+    },
+}
+
+impl fmt::Display for ZoneWaitingToExpunge {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
             Self::Nexus { zone_generation, current_nexus_generation } => {
                 match current_nexus_generation {
                     Some(current) => write!(

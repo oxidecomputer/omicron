@@ -7446,13 +7446,20 @@
                 "$ref": "#/components/schemas/ZoneUpdatesWaitingOn"
               }
             ]
+          },
+          "waiting_zones": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ZoneWaitingToExpunge"
+            }
           }
         },
         "required": [
           "expunged_zones",
           "out_of_date_zones",
           "unsafe_zones",
-          "updated_zones"
+          "updated_zones",
+          "waiting_zones"
         ]
       },
       "PortConfigV2": {
@@ -9892,6 +9899,36 @@
             },
             "required": [
               "type"
+            ]
+          }
+        ]
+      },
+      "ZoneWaitingToExpunge": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "current_nexus_generation": {
+                "nullable": true,
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Generation"
+                  }
+                ]
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "nexus"
+                ]
+              },
+              "zone_generation": {
+                "$ref": "#/components/schemas/Generation"
+              }
+            },
+            "required": [
+              "type",
+              "zone_generation"
             ]
           }
         ]
