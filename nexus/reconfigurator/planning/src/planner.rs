@@ -1172,7 +1172,12 @@ impl<'a> Planner<'a> {
                     .blueprint
                     .sled_add_zone_external_dns(sled_id, image_source)?,
                 DiscretionaryOmicronZone::Nexus => {
-                    self.blueprint.sled_add_zone_nexus(sled_id, image_source)?
+                    self.blueprint.sled_add_zone_nexus(
+                        sled_id,
+                        image_source,
+                        // XXX-dap
+                        self.blueprint.nexus_generation(),
+                    )?
                 }
                 DiscretionaryOmicronZone::Oximeter => self
                     .blueprint

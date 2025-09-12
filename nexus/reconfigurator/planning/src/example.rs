@@ -485,6 +485,7 @@ impl ExampleSystemBuilder {
                                 false,
                                 vec![],
                                 image_source.clone(),
+                                initial_blueprint.nexus_generation,
                             )
                             .unwrap();
                     }
