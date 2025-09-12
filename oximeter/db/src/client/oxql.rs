@@ -7,7 +7,6 @@
 // Copyright 2024 Oxide Computer Company
 
 use super::Handle;
-use super::query_summary::QuerySummary;
 use crate::Error;
 use crate::Metric;
 use crate::Target;
@@ -70,7 +69,7 @@ pub struct OxqlResult {
     /// This returns a list of summaries, one for each SQL query that was run.
     /// It includes the ClickHouse-assigned query ID for correlation and looking
     /// up in the logs.
-    pub query_summaries: Vec<QuerySummary>,
+    pub query_summaries: Vec<oxql_types::QuerySummary>,
 
     /// The list of OxQL tables returned from the query.
     pub tables: Vec<oxql_types::Table>,
@@ -615,7 +614,10 @@ impl Client {
         limit: Option<Limit>,
         total_rows_fetched: &mut u64,
     ) -> Result<
-        (Vec<QuerySummary>, BTreeMap<TimeseriesKey, oxql_types::Timeseries>),
+        (
+            Vec<oxql_types::QuerySummary>,
+            BTreeMap<TimeseriesKey, oxql_types::Timeseries>,
+        ),
         Error,
     > {
         // We'll create timeseries for each key on the fly. To enable computing

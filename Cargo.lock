@@ -7137,6 +7137,7 @@ dependencies = [
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "openssl",
+ "oximeter-db",
  "oxnet",
  "oxql-types",
  "parse-display",
@@ -8640,7 +8641,6 @@ dependencies = [
  "toml_edit 0.19.15",
  "toml_edit 0.22.27",
  "tracing",
- "unicode-xid",
  "url",
  "usdt",
  "usdt-impl",
@@ -9397,6 +9397,8 @@ dependencies = [
  "oximeter-types 0.1.0",
  "schemars",
  "serde",
+ "serde_json",
+ "uuid",
 ]
 
 [[package]]

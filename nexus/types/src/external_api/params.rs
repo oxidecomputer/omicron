@@ -2421,6 +2421,8 @@ pub struct ProbeListSelector {
 pub struct TimeseriesQuery {
     /// A timeseries query string, written in the Oximeter query language.
     pub query: String,
+    /// Whether to include ClickHouse query summaries in the response.
+    pub include_summaries: Option<bool>,
 }
 
 // Allowed source IPs
