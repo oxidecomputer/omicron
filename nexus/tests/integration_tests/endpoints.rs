@@ -121,6 +121,7 @@ pub static DEMO_SILO_CREATE: LazyLock<params::SiloCreate> =
         admin_group_name: None,
         tls_certificates: vec![],
         mapped_fleet_roles: Default::default(),
+        restrict_network_actions: None,
     });
 
 pub static DEMO_SILO_UTIL_URL: LazyLock<String> = LazyLock::new(|| {

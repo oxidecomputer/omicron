@@ -261,19 +261,27 @@ pub struct SiloAuthnPolicy {
     /// Describes which fleet-level roles are automatically conferred by which
     /// silo-level roles.
     mapped_fleet_roles: BTreeMap<SiloRole, BTreeSet<FleetRole>>,
+
+    /// When true, restricts networking actions to Silo Admins only
+    pub restrict_network_actions: bool,
 }
 
 impl SiloAuthnPolicy {
     pub fn new(
         mapped_fleet_roles: BTreeMap<SiloRole, BTreeSet<FleetRole>>,
+        restrict_network_actions: bool,
     ) -> SiloAuthnPolicy {
-        SiloAuthnPolicy { mapped_fleet_roles }
+        SiloAuthnPolicy { mapped_fleet_roles, restrict_network_actions }
     }
 
     pub fn mapped_fleet_roles(
         &self,
     ) -> &BTreeMap<SiloRole, BTreeSet<FleetRole>> {
         &self.mapped_fleet_roles
+    }
+
+    pub fn restrict_network_actions(&self) -> bool {
+        self.restrict_network_actions
     }
 }
 
@@ -283,9 +291,10 @@ impl TryFrom<&nexus_db_model::Silo> for SiloAuthnPolicy {
     fn try_from(
         value: &nexus_db_model::Silo,
     ) -> Result<Self, omicron_common::api::external::Error> {
-        value
-            .mapped_fleet_roles()
-            .map(|mapped_fleet_roles| SiloAuthnPolicy { mapped_fleet_roles })
+        value.mapped_fleet_roles().map(|mapped_fleet_roles| SiloAuthnPolicy {
+            mapped_fleet_roles,
+            restrict_network_actions: value.restrict_network_actions,
+        })
     }
 }
 
