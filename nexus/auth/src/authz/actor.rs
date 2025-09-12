@@ -88,6 +88,14 @@ impl AuthenticatedActor {
             })
             .collect()
     }
+
+    /// Returns true if this actor's Silo restricts networking actions to Silo Admins only
+    pub fn restricts_networking(&self) -> bool {
+        self.silo_policy
+            .as_ref()
+            .map(|policy| policy.restrict_network_actions())
+            .unwrap_or(false)
+    }
 }
 
 impl PartialEq for AuthenticatedActor {
@@ -151,5 +159,8 @@ impl oso::PolarClass for AuthenticatedActor {
                     authn::Actor::UserBuiltin { .. } => false,
                 },
             )
+            .add_method("restricts_networking", |a: &AuthenticatedActor| {
+                a.restricts_networking()
+            })
     }
 }
