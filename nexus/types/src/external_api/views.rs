@@ -63,6 +63,10 @@ pub struct Silo {
     /// Optionally, silos can have a group name that is automatically granted
     /// the silo admin role.
     pub admin_group_name: Option<String>,
+
+    /// When true, restricts networking actions (VPC, subnet, etc.) to Silo Admins only.
+    /// When false (default), Project Collaborators can perform networking actions.
+    pub restrict_network_actions: bool,
 }
 
 /// A collection of resource counts used to describe capacity and utilization

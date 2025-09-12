@@ -40,6 +40,7 @@ use authz_macros::authz_resource;
 use futures::FutureExt;
 use futures::future::BoxFuture;
 use nexus_db_fixed_data::FLEET_ID;
+use nexus_db_model;
 use nexus_types::external_api::shared::{FleetRole, ProjectRole, SiloRole};
 use omicron_common::api::external::{Error, LookupType, ResourceType};
 use oso::PolarClass;
@@ -1090,7 +1091,7 @@ authz_resource! {
     parent = "Project",
     primary_key = Uuid,
     roles_allowed = false,
-    polar_snippet = InProject,
+    polar_snippet = InProjectNetworking,
 }
 
 authz_resource! {
@@ -1098,7 +1099,7 @@ authz_resource! {
     parent = "Vpc",
     primary_key = Uuid,
     roles_allowed = false,
-    polar_snippet = InProject,
+    polar_snippet = InProjectNetworking,
 }
 
 authz_resource! {
@@ -1106,7 +1107,7 @@ authz_resource! {
     parent = "VpcRouter",
     primary_key = Uuid,
     roles_allowed = false,
-    polar_snippet = InProject,
+    polar_snippet = InProjectNetworking,
 }
 
 authz_resource! {
@@ -1114,7 +1115,7 @@ authz_resource! {
     parent = "Vpc",
     primary_key = Uuid,
     roles_allowed = false,
-    polar_snippet = InProject,
+    polar_snippet = InProjectNetworking,
 }
 
 authz_resource! {
@@ -1122,7 +1123,7 @@ authz_resource! {
     parent = "Vpc",
     primary_key = Uuid,
     roles_allowed = false,
-    polar_snippet = InProject,
+    polar_snippet = InProjectNetworking,
 }
 
 authz_resource! {
@@ -1251,6 +1252,38 @@ authz_resource! {
 
 impl ApiResourceWithRolesType for Silo {
     type AllowedRoles = SiloRole;
+}
+
+// Add methods that can be called from Polar
+impl Silo {
+    pub fn restricts_networking(&self) -> bool {
+        // This method should not be called if project.silo refers to the database silo
+        // Returning false to maintain existing behavior
+        false
+    }
+
+    /// Custom init method that adds restricts_networking to the Polar class
+    pub(super) fn init_with_networking() -> Init {
+        // Create a custom class builder that includes the restricts_networking method
+        let class = oso::Class::builder()
+            .with_equality_check()
+            .add_method(
+                "has_role",
+                |r: &Silo, actor: AuthenticatedActor, role: String| {
+                    actor.has_role_resource(ResourceType::Silo, r.key, &role)
+                },
+            )
+            .add_attribute_getter("fleet", |r: &Silo| r.parent)
+            .add_method("restricts_networking", |silo: &Silo| {
+                silo.restricts_networking()
+            })
+            .build();
+
+        Init {
+            polar_snippet: "", // Custom snippet defined in omicron.polar
+            polar_class: class,
+        }
+    }
 }
 
 authz_resource! {

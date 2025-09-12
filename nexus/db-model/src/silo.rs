@@ -119,6 +119,10 @@ pub struct Silo {
     /// important to store this name so that when groups are created the same
     /// automatic policy can be created as well.
     pub admin_group_name: Option<String>,
+
+    /// When true, restricts networking actions (VPC, subnet, etc.) to Silo Admins only.
+    /// When false (default), Project Collaborators can perform networking actions.
+    pub restrict_network_actions: bool,
 }
 
 /// Form of mapped fleet roles used when serializing to the database
@@ -200,6 +204,9 @@ impl Silo {
             rcgen: Generation::new(),
             mapped_fleet_roles,
             admin_group_name: params.admin_group_name,
+            restrict_network_actions: params
+                .restrict_network_actions
+                .unwrap_or(false),
         })
     }
 
@@ -251,7 +258,15 @@ impl TryFrom<Silo> for views::Silo {
             identity_mode,
             mapped_fleet_roles,
             admin_group_name: silo.admin_group_name,
+            restrict_network_actions: silo.restrict_network_actions,
         })
+    }
+}
+
+impl Silo {
+    /// Returns true if this silo restricts networking actions to Silo Admins only
+    pub fn restricts_networking(&self) -> bool {
+        self.restrict_network_actions
     }
 }
 

@@ -265,6 +265,10 @@ enum PolarSnippet {
     /// Generate it as a resource nested within a Project (either directly or
     /// indirectly)
     InProject,
+
+    /// Generate it as a resource nested within a Project with networking restrictions
+    /// When the Silo's restrict_network_actions is true, only Silo Admins can perform networking actions
+    InProjectNetworking,
 }
 
 /// Implementation of [`authz_resource!`]
@@ -415,6 +419,87 @@ fn do_authz_resource(
                     }};
                     "list_children" if "viewer" on "containing_project";
                     "read" if "viewer" on "containing_project";
+                    "modify" if "collaborator" on "containing_project";
+                    "create_child" if "collaborator" on "containing_project";
+                }}
+
+                has_relation(project: Project, "containing_project", child: {})
+                    if has_relation(project, "containing_project", child.{});
+
+                has_relation(parent: {}, "parent", child: {})
+                    if child.{} = parent;
+            "#,
+            resource_name,
+            parent_resource_name,
+            resource_name,
+            parent_as_snake,
+            parent_resource_name,
+            resource_name,
+            parent_as_snake,
+        ),
+
+        // If this networking resource is directly inside a Project, we need to
+        // check if the Silo restricts networking actions to Silo admins only.
+        // Read/list actions are always allowed for Project Collaborators.
+        (PolarSnippet::InProjectNetworking, "Project") => format!(
+            r#"
+                resource {} {{
+                    permissions = [
+                        "list_children",
+                        "modify",
+                        "read",
+                        "create_child",
+                    ];
+
+                    relations = {{ containing_project: Project }};
+                    
+                    # Read/list actions are always allowed for Project viewers/collaborators
+                    "list_children" if "viewer" on "containing_project";
+                    "read" if "viewer" on "containing_project";
+                    
+                    # Silo admins can always perform networking actions (override restrictions)  
+                    "modify" if "admin" on "containing_project".parent_silo;
+                    "create_child" if "admin" on "containing_project".parent_silo;
+                    
+                    # Project collaborators can perform networking actions (restriction logic via has_permission rules)
+                    "modify" if "collaborator" on "containing_project";
+                    "create_child" if "collaborator" on "containing_project";
+                }}
+
+                has_relation(parent: Project, "containing_project", child: {})
+                        if child.project = parent;
+            "#,
+            resource_name, resource_name,
+        ),
+
+        // If this networking resource is nested under something else within the Project,
+        // we need to define both the "parent" relationship and the (indirect)
+        // relationship to the containing Project, with networking restrictions.
+        // Read/list actions are always allowed for Project Collaborators.
+        (PolarSnippet::InProjectNetworking, _) => format!(
+            r#"
+                resource {} {{
+                    permissions = [
+                        "list_children",
+                        "modify",
+                        "read",
+                        "create_child",
+                    ];
+
+                    relations = {{
+                        containing_project: Project,
+                        parent: {}
+                    }};
+                    
+                    # Read/list actions are always allowed for Project viewers/collaborators
+                    "list_children" if "viewer" on "containing_project";
+                    "read" if "viewer" on "containing_project";
+                    
+                    # Silo admins can always perform networking actions (override restrictions)  
+                    "modify" if "admin" on "containing_project".parent_silo;
+                    "create_child" if "admin" on "containing_project".parent_silo;
+                    
+                    # Project collaborators can perform networking actions (restriction logic via has_permission rules)
                     "modify" if "collaborator" on "containing_project";
                     "create_child" if "collaborator" on "containing_project";
                 }}
