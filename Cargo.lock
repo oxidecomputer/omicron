@@ -959,7 +959,7 @@ dependencies = [
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "oxnet",
- "progenitor 0.10.0",
+ "progenitor 0.11.1",
  "regress",
  "reqwest",
  "schemars",
@@ -1472,7 +1472,7 @@ dependencies = [
  "clickhouse-admin-types",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
- "progenitor 0.10.0",
+ "progenitor 0.11.1",
  "reqwest",
  "schemars",
  "serde",
@@ -1487,7 +1487,7 @@ dependencies = [
  "clickhouse-admin-types",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
- "progenitor 0.10.0",
+ "progenitor 0.11.1",
  "reqwest",
  "schemars",
  "serde",
@@ -1502,7 +1502,7 @@ dependencies = [
  "clickhouse-admin-types",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
- "progenitor 0.10.0",
+ "progenitor 0.11.1",
  "reqwest",
  "schemars",
  "serde",
@@ -1622,7 +1622,7 @@ dependencies = [
  "chrono",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
- "progenitor 0.10.0",
+ "progenitor 0.11.1",
  "reqwest",
  "schemars",
  "serde",
@@ -1657,7 +1657,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "117725a109d387c937a1533ce01b450cbde6b88abceea8473c4d7a85853cda3c"
 dependencies = [
  "lazy_static",
- "windows-sys 0.48.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -2775,7 +2775,7 @@ dependencies = [
  "openapiv3",
  "oxide-tokio-rt",
  "pretty-hex 0.4.1",
- "progenitor 0.10.0",
+ "progenitor 0.11.1",
  "reqwest",
  "schemars",
  "semver 1.0.26",
@@ -2817,7 +2817,7 @@ dependencies = [
  "http",
  "internal-dns-types",
  "omicron-workspace-hack",
- "progenitor 0.10.0",
+ "progenitor 0.11.1",
  "reqwest",
  "schemars",
  "serde",
@@ -2889,7 +2889,7 @@ dependencies = [
  "futures",
  "http",
  "oxnet",
- "progenitor 0.11.0",
+ "progenitor 0.11.1",
  "regress",
  "reqwest",
  "schemars",
@@ -3696,7 +3696,7 @@ dependencies = [
  "gateway-types",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
- "progenitor 0.10.0",
+ "progenitor 0.11.1",
  "rand 0.9.2",
  "reqwest",
  "schemars",
@@ -5141,7 +5141,7 @@ dependencies = [
  "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
- "progenitor 0.10.0",
+ "progenitor 0.11.1",
  "regress",
  "reqwest",
  "schemars",
@@ -5217,7 +5217,7 @@ dependencies = [
  "omicron-test-utils",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
- "progenitor 0.10.0",
+ "progenitor 0.11.1",
  "qorb",
  "reqwest",
  "semver 1.0.26",
@@ -5641,7 +5641,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4979f22fdb869068da03c9f7528f8297c6fd2606bc3a4affe42e6a823fdb8da4"
 dependencies = [
  "cfg-if",
- "windows-targets 0.48.5",
+ "windows-targets 0.52.6",
 ]
 
 [[package]]
@@ -6311,7 +6311,7 @@ dependencies = [
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "oxnet",
- "progenitor 0.10.0",
+ "progenitor 0.11.1",
  "regress",
  "reqwest",
  "schemars",
@@ -7267,7 +7267,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "omicron-workspace-hack",
- "progenitor 0.10.0",
+ "progenitor 0.11.1",
  "reqwest",
  "schemars",
  "serde",
@@ -7662,7 +7662,7 @@ dependencies = [
  "omicron-workspace-hack",
  "oxnet",
  "parse-display",
- "progenitor-client 0.10.0",
+ "progenitor-client 0.11.1",
  "proptest",
  "protocol",
  "rand 0.9.2",
@@ -7695,7 +7695,7 @@ dependencies = [
  "omicron-common",
  "omicron-workspace-hack",
  "oxnet",
- "progenitor-client 0.10.0",
+ "progenitor-client 0.11.1",
  "reqwest",
  "serde",
  "sled-hardware-types",
@@ -7967,7 +7967,7 @@ dependencies = [
  "petgraph 0.8.2",
  "pq-sys",
  "pretty_assertions",
- "progenitor-client 0.10.0",
+ "progenitor-client 0.11.1",
  "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=23b06c2f452a97fac1dc12561d8451ce876d7c5a)",
  "qorb",
  "rand 0.9.2",
@@ -8553,7 +8553,6 @@ dependencies = [
  "getrandom 0.3.1",
  "group",
  "hashbrown 0.15.4",
- "heck 0.4.1",
  "hickory-proto 0.25.2",
  "hmac",
  "hyper",
@@ -8936,8 +8935,8 @@ dependencies = [
  "hyper",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
- "progenitor 0.10.0",
- "progenitor-client 0.10.0",
+ "progenitor 0.11.1",
+ "progenitor-client 0.11.1",
  "rand 0.9.2",
  "regress",
  "reqwest",
@@ -9033,7 +9032,7 @@ dependencies = [
  "futures",
  "omicron-common",
  "omicron-workspace-hack",
- "progenitor 0.10.0",
+ "progenitor 0.11.1",
  "reqwest",
  "serde",
  "slog",
@@ -10296,13 +10295,13 @@ dependencies = [
 
 [[package]]
 name = "progenitor"
-version = "0.11.0"
+version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d7b99ef43fdd69d70aa4df8869db24b10ac704a2dbbc387ffac51944a1f3c0a8"
+checksum = "135a23fcb9ad36a46ef4be323d006e195ad5121779c9da64ef95cf0600771b77"
 dependencies = [
- "progenitor-client 0.11.0",
- "progenitor-impl 0.11.0",
- "progenitor-macro 0.11.0",
+ "progenitor-client 0.11.1",
+ "progenitor-impl 0.11.1",
+ "progenitor-macro 0.11.1",
 ]
 
 [[package]]
@@ -10352,9 +10351,9 @@ dependencies = [
 
 [[package]]
 name = "progenitor-client"
-version = "0.11.0"
+version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3832a961a5f1b0b5a5ccda5fbf67cae2ba708f6add667401007764ba504ffebf"
+checksum = "920f044db9ec07a3339175729794d3701e11d338dcf8cfd946df838102307780"
 dependencies = [
  "bytes",
  "futures-core",
@@ -10433,9 +10432,9 @@ dependencies = [
 
 [[package]]
 name = "progenitor-impl"
-version = "0.11.0"
+version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7646201b823e61712dd72f37428ceecaa8fb2a6c841e5d7cf909edb9a17f5677"
+checksum = "8276d558f1dfd4cc7fc4cceee0a51dab482b5a4be2e69e7eab8c57fbfb1472f4"
 dependencies = [
  "heck 0.5.0",
  "http",
@@ -10509,13 +10508,13 @@ dependencies = [
 
 [[package]]
 name = "progenitor-macro"
-version = "0.11.0"
+version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e710a11140d9b4241b7d8a90748f6125b6796d7a1205238eddb08dc790ce3830"
+checksum = "5dd79317ec8ab905738484d2744d368beee6e357fc043944d985f85a0174f1f7"
 dependencies = [
  "openapiv3",
  "proc-macro2",
- "progenitor-impl 0.11.0",
+ "progenitor-impl 0.11.1",
  "quote",
  "schemars",
  "serde",
@@ -11115,9 +11114,9 @@ dependencies = [
 
 [[package]]
 name = "regex"
-version = "1.11.1"
+version = "1.11.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b544ef1b4eac5dc2db33ea63606ae9ffcfac26c1416a2806ae0bf5f56b201191"
+checksum = "23d7fd106d8c02486a8d64e778353d1cffe08ce79ac2e82f540c86d0facf6912"
 dependencies = [
  "aho-corasick",
  "memchr",
@@ -11189,7 +11188,7 @@ name = "repo-depot-client"
 version = "0.1.0"
 dependencies = [
  "omicron-workspace-hack",
- "progenitor 0.10.0",
+ "progenitor 0.11.1",
  "reqwest",
  "schemars",
  "serde",
@@ -12401,7 +12400,7 @@ dependencies = [
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "oxnet",
- "progenitor 0.10.0",
+ "progenitor 0.11.1",
  "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=23b06c2f452a97fac1dc12561d8451ce876d7c5a)",
  "regress",
  "reqwest",
@@ -12862,7 +12861,7 @@ version = "0.8.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "03c3c6b7927ffe7ecaa769ee0e3994da3b8cafc8f444578982c83ecb161af917"
 dependencies = [
- "heck 0.4.1",
+ "heck 0.5.0",
  "proc-macro2",
  "quote",
  "syn 2.0.106",
@@ -15531,7 +15530,7 @@ dependencies = [
  "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
- "progenitor 0.10.0",
+ "progenitor 0.11.1",
  "regress",
  "reqwest",
  "schemars",
@@ -15574,7 +15573,7 @@ version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf221c93e13a30d793f7645a0e7762c55d169dbb0a49671918a2319d289b10bb"
 dependencies = [
- "windows-sys 0.48.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
