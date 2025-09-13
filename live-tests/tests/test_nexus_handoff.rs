@@ -17,7 +17,7 @@ use nexus_reconfigurator_preparation::PlanningInputFromDb;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneImageSource;
 use nexus_types::deployment::BlueprintZoneType;
-use nexus_types::deployment::PlannerChickenSwitches;
+use nexus_types::deployment::PlannerConfig;
 use nexus_types::deployment::blueprint_zone_type;
 use omicron_test_utils::dev::poll::CondCheckError;
 use omicron_test_utils::dev::poll::wait_for_condition;
@@ -146,15 +146,13 @@ async fn test_nexus_handoff(lc: &LiveTestContext) {
     // For each zone in the current generation, create a replacement at the next
     // generation.
     let next_generation = blueprint1.nexus_generation.next();
-    let chicken_switches = datastore
-        .reconfigurator_chicken_switches_get_latest(opctx)
+    let planner_config = datastore
+        .reconfigurator_config_get_latest(opctx)
         .await
-        .expect("obtained latest chicken switches")
-        .map_or_else(PlannerChickenSwitches::default, |cs| {
-            cs.switches.planner_switches
-        });
+        .expect("obtained latest reconfigurator config")
+        .map_or_else(PlannerConfig::default, |cs| cs.config.planner_config);
     let planning_input =
-        PlanningInputFromDb::assemble(opctx, datastore, chicken_switches)
+        PlanningInputFromDb::assemble(opctx, datastore, planner_config)
             .await
             .expect("planning input");
     let (_blueprint1, blueprint2) = blueprint_edit_current_target(
@@ -238,7 +236,7 @@ async fn test_nexus_handoff(lc: &LiveTestContext) {
 
     // Now update the target blueprint to trigger a handoff.
     let planning_input =
-        PlanningInputFromDb::assemble(opctx, datastore, chicken_switches)
+        PlanningInputFromDb::assemble(opctx, datastore, planner_config)
             .await
             .expect("planning input");
     let (_blueprint2, blueprint3) = blueprint_edit_current_target(
@@ -374,7 +372,7 @@ async fn test_nexus_handoff(lc: &LiveTestContext) {
 
     // Clean up: expunge the old Nexus instances.
     let planning_input =
-        PlanningInputFromDb::assemble(opctx, datastore, chicken_switches)
+        PlanningInputFromDb::assemble(opctx, datastore, planner_config)
             .await
             .expect("planning input");
     let new_nexus =

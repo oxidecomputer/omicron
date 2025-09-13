@@ -448,32 +448,35 @@ impl DataStore {
         })
     }
 
-    // Ensures that the database schema matches "desired_version".
-    //
-    // - Updating the schema makes the database incompatible with older
-    // versions of Nexus, which are not running "desired_version".
-    // - This is a one-way operation that cannot be undone.
-    // - The caller is responsible for ensuring that the new version is valid,
-    // and that all running Nexus instances can understand the new schema
-    // version.
-    //
-    // TODO: This function assumes that all concurrently executing Nexus
-    // instances on the rack are operating on the same version of software.
-    // If that assumption is broken, nothing would stop a "new deployment"
-    // from making a change that invalidates the queries used by an "old
-    // deployment".
-    pub async fn ensure_schema(
+    /// Ensures that the database schema matches `desired_version`.
+    ///
+    /// - `validated_action`: A [ValidatedDatastoreSetupAction], indicating that
+    /// [Self::check_schema_and_access] has already been called.
+    /// - `all_versions`: A description of all schema versions between
+    /// "whatever is in the DB" and `desired_version`, instructing
+    /// how to perform an update.
+    pub async fn update_schema(
         &self,
-        log: &Logger,
-        desired_version: Version,
+        validated_action: ValidatedDatastoreSetupAction,
         all_versions: Option<&AllSchemaVersions>,
     ) -> Result<(), anyhow::Error> {
+        let action = validated_action.action();
+
+        match action {
+            DatastoreSetupAction::Ready => {
+                bail!("No schema update is necessary")
+            }
+            DatastoreSetupAction::Update => (),
+            _ => bail!("Not ready for schema update"),
+        }
+
+        let desired_version = validated_action.desired_version().clone();
         let (found_version, found_target_version) = self
             .database_schema_version()
             .await
             .context("Cannot read database schema version")?;
 
-        let log = log.new(o!(
+        let log = self.log.new(o!(
             "found_version" => found_version.to_string(),
             "desired_version" => desired_version.to_string(),
         ));
@@ -1256,15 +1259,34 @@ mod test {
     // Confirms that calling the internal "ensure_schema" function can succeed
     // when the database is already at that version.
     #[tokio::test]
-    async fn ensure_schema_is_current_version() {
-        let logctx = dev::test_setup_log("ensure_schema_is_current_version");
+    async fn check_schema_is_current_version() {
+        let logctx = dev::test_setup_log("check_schema_is_current_version");
         let db = TestDatabase::new_with_raw_datastore(&logctx.log).await;
         let datastore = db.datastore();
 
-        datastore
-            .ensure_schema(&logctx.log, SCHEMA_VERSION, None)
+        let checked_action = datastore
+            .check_schema_and_access(
+                IdentityCheckPolicy::DontCare,
+                SCHEMA_VERSION,
+            )
             .await
-            .expect("Failed to ensure schema");
+            .expect("Failed to check schema and access");
+
+        assert!(
+            matches!(checked_action.action(), DatastoreSetupAction::Ready),
+            "Unexpected action: {:?}",
+            checked_action.action(),
+        );
+        assert_eq!(
+            checked_action.desired_version(),
+            &SCHEMA_VERSION,
+            "Unexpected desired version: {}",
+            checked_action.desired_version()
+        );
+
+        datastore.update_schema(checked_action, None).await.expect_err(
+            "Should not be able to update schema that's already up-to-date",
+        );
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -1367,8 +1389,13 @@ mod test {
             let log = log.clone();
             let pool = pool.clone();
             tokio::task::spawn(async move {
-                let datastore =
-                    DataStore::new(&log, pool, Some(&all_versions)).await?;
+                let datastore = DataStore::new(
+                    &log,
+                    pool,
+                    Some(&all_versions),
+                    IdentityCheckPolicy::DontCare,
+                )
+                .await?;
 
                 // This is the crux of this test: confirm that, as each
                 // migration completes, it's not possible to see any artifacts
@@ -1495,9 +1522,23 @@ mod test {
 
         // Manually construct the datastore to avoid the backoff timeout.
         // We want to trigger errors, but have no need to wait.
+
         let datastore = DataStore::new_unchecked(log.clone(), pool.clone());
+        let checked_action = datastore
+            .check_schema_and_access(
+                IdentityCheckPolicy::DontCare,
+                SCHEMA_VERSION,
+            )
+            .await
+            .expect("Failed to check schema and access");
+
+        // This needs to be in a loop because we constructed a schema change
+        // that will intentionally fail sometimes when doing this work.
+        //
+        // This isn't a normal behavior! But we're trying to test the
+        // intermediate steps of a schema change here.
         while let Err(e) = datastore
-            .ensure_schema(&log, SCHEMA_VERSION, Some(&all_versions))
+            .update_schema(checked_action.clone(), Some(&all_versions))
             .await
         {
             warn!(log, "Failed to ensure schema"; "err" => %e);

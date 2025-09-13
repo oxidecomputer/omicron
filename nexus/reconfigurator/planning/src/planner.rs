@@ -197,9 +197,9 @@ impl<'a> Planner<'a> {
             PlanningMgsUpdatesStepReport::new(PendingMgsUpdates::new())
         };
 
-        // Likewise for zone additions, unless overridden with the chicken switch.
+        // Likewise for zone additions, unless overridden by the config.
         let add_zones_with_mupdate_override =
-            self.input.chicken_switches().add_zones_with_mupdate_override;
+            self.input.planner_config().add_zones_with_mupdate_override;
         let mut add = if add_update_blocked_reasons.is_empty()
             || add_zones_with_mupdate_override
         {
@@ -238,7 +238,7 @@ impl<'a> Planner<'a> {
 
         Ok(PlanningReport {
             blueprint_id: self.blueprint.new_blueprint_id(),
-            chicken_switches: *self.input.chicken_switches(),
+            planner_config: *self.input.planner_config(),
             expunge,
             decommission,
             noop_image_source,
@@ -1141,51 +1141,52 @@ impl<'a> Planner<'a> {
                 }
             };
 
-            let image_source =
+            let image =
                 self.image_source_for_new_zone(kind.into(), mgs_updates)?;
+            let image_source = image.clone();
             match kind {
                 DiscretionaryOmicronZone::BoundaryNtp => {
                     self.blueprint.sled_promote_internal_ntp_to_boundary_ntp(
-                        sled_id,
-                        image_source,
+                        sled_id, image,
                     )?
                 }
-                DiscretionaryOmicronZone::Clickhouse => self
-                    .blueprint
-                    .sled_add_zone_clickhouse(sled_id, image_source)?,
+                DiscretionaryOmicronZone::Clickhouse => {
+                    self.blueprint.sled_add_zone_clickhouse(sled_id, image)?
+                }
                 DiscretionaryOmicronZone::ClickhouseKeeper => self
                     .blueprint
-                    .sled_add_zone_clickhouse_keeper(sled_id, image_source)?,
+                    .sled_add_zone_clickhouse_keeper(sled_id, image)?,
                 DiscretionaryOmicronZone::ClickhouseServer => self
                     .blueprint
-                    .sled_add_zone_clickhouse_server(sled_id, image_source)?,
-                DiscretionaryOmicronZone::CockroachDb => self
-                    .blueprint
-                    .sled_add_zone_cockroachdb(sled_id, image_source)?,
+                    .sled_add_zone_clickhouse_server(sled_id, image)?,
+                DiscretionaryOmicronZone::CockroachDb => {
+                    self.blueprint.sled_add_zone_cockroachdb(sled_id, image)?
+                }
                 DiscretionaryOmicronZone::CruciblePantry => self
                     .blueprint
-                    .sled_add_zone_crucible_pantry(sled_id, image_source)?,
-                DiscretionaryOmicronZone::InternalDns => self
-                    .blueprint
-                    .sled_add_zone_internal_dns(sled_id, image_source)?,
-                DiscretionaryOmicronZone::ExternalDns => self
-                    .blueprint
-                    .sled_add_zone_external_dns(sled_id, image_source)?,
+                    .sled_add_zone_crucible_pantry(sled_id, image)?,
+                DiscretionaryOmicronZone::InternalDns => {
+                    self.blueprint.sled_add_zone_internal_dns(sled_id, image)?
+                }
+                DiscretionaryOmicronZone::ExternalDns => {
+                    self.blueprint.sled_add_zone_external_dns(sled_id, image)?
+                }
                 DiscretionaryOmicronZone::Nexus => {
                     self.blueprint.sled_add_zone_nexus(
                         sled_id,
-                        image_source,
+                        image,
                         // XXX-dap
                         self.blueprint.nexus_generation(),
                     )?
                 }
-                DiscretionaryOmicronZone::Oximeter => self
-                    .blueprint
-                    .sled_add_zone_oximeter(sled_id, image_source)?,
+                DiscretionaryOmicronZone::Oximeter => {
+                    self.blueprint.sled_add_zone_oximeter(sled_id, image)?
+                }
             };
             report.discretionary_zone_placed(
                 sled_id,
                 ZoneKind::from(kind).report_str(),
+                &image_source,
             );
         }
 

@@ -15,6 +15,7 @@ use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SiloGroupUuid;
 use omicron_uuid_kinds::SiloUserUuid;
+use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
 use parse_display::FromStr;
 use schemars::JsonSchema;
@@ -682,7 +683,8 @@ pub struct SupportBundleInfo {
 pub struct ProbeInfo {
     pub id: Uuid,
     pub name: Name,
-    pub sled: Uuid,
+    #[schemars(with = "Uuid")]
+    pub sled: SledUuid,
     pub external_ips: Vec<ProbeExternalIp>,
     pub interface: NetworkInterface,
 }

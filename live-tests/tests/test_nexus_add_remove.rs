@@ -22,7 +22,7 @@ use nexus_reconfigurator_preparation::PlanningInputFromDb;
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneType;
-use nexus_types::deployment::PlannerChickenSwitches;
+use nexus_types::deployment::PlannerConfig;
 use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::blueprint_zone_type;
 use omicron_common::address::NEXUS_INTERNAL_PORT;
@@ -49,15 +49,13 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
     let opctx = lc.opctx();
     let datastore = lc.datastore();
 
-    let chicken_switches = datastore
-        .reconfigurator_chicken_switches_get_latest(opctx)
+    let planner_config = datastore
+        .reconfigurator_config_get_latest(opctx)
         .await
-        .expect("obtained latest chicken switches")
-        .map_or_else(PlannerChickenSwitches::default, |cs| {
-            cs.switches.planner_switches
-        });
+        .expect("obtained latest reconfigurator config")
+        .map_or_else(PlannerConfig::default, |c| c.config.planner_config);
     let planning_input =
-        PlanningInputFromDb::assemble(&opctx, &datastore, chicken_switches)
+        PlanningInputFromDb::assemble(&opctx, &datastore, planner_config)
             .await
             .expect("planning input");
     let collection = datastore
@@ -271,7 +269,7 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
     // Now run through the planner.
     info!(log, "running through planner");
     let planning_input =
-        PlanningInputFromDb::assemble(&opctx, &datastore, chicken_switches)
+        PlanningInputFromDb::assemble(&opctx, &datastore, planner_config)
             .await
             .expect("planning input");
     let (_, parent_blueprint) = datastore

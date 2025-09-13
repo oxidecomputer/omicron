@@ -24,10 +24,11 @@ use nexus_db_queries::authn;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
+use nexus_db_queries::db::datastore::IdentityCheckPolicy;
 use nexus_mgs_updates::ArtifactCache;
 use nexus_mgs_updates::MgsUpdateDriver;
 use nexus_types::deployment::PendingMgsUpdates;
-use nexus_types::deployment::ReconfiguratorChickenSwitchesParam;
+use nexus_types::deployment::ReconfiguratorConfigParam;
 use omicron_common::address::DENDRITE_PORT;
 use omicron_common::address::MGD_PORT;
 use omicron_common::address::MGS_PORT;
@@ -308,12 +309,14 @@ impl Nexus {
             .map(|s| AllSchemaVersions::load(&s.schema_dir))
             .transpose()
             .map_err(|error| format!("{error:#}"))?;
+        let nexus_id = config.deployment.id;
         let db_datastore = Arc::new(
             db::DataStore::new_with_timeout(
                 &log,
                 Arc::clone(&pool),
                 all_versions.as_ref(),
                 config.pkg.tunables.load_timeout,
+                IdentityCheckPolicy::CheckAndTakeover { nexus_id },
             )
             .await?,
         );
@@ -560,25 +563,22 @@ impl Nexus {
             };
 
             // Before starting our background tasks, inject an initial set of
-            // reconfigurator chicken switches if we're configured with one.
+            // reconfigurator configuration if we're configured with one.
             // This is only provided by the test suite, where we have an initial
-            // set of switches to disable automatic blueprint planning.
-            if let Some(switches) =
-                task_config.pkg.initial_reconfigurator_chicken_switches
+            // config to disable automatic blueprint planning.
+            if let Some(config) = task_config.pkg.initial_reconfigurator_config
             {
-                let switches =
-                    ReconfiguratorChickenSwitchesParam { version: 1, switches };
+                let config = ReconfiguratorConfigParam { version: 1, config };
                 if let Err(err) = db_datastore
-                    .reconfigurator_chicken_switches_insert_latest_version(
+                    .reconfigurator_config_insert_latest_version(
                         &background_ctx,
-                        switches,
+                        config,
                     )
                     .await
                 {
                     error!(
                         task_log,
-                        "failed to insert initial reconfigurator \
-                         chicken switches";
+                        "failed to insert initial reconfigurator config";
                         InlineErrorChain::new(&err),
                     );
                 }

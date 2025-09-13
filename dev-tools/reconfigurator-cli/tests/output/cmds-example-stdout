@@ -17,7 +17,7 @@ internal DNS generations: 1
 external DNS generations: 1
 target number of Nexus instances: default
 target release (generation 1): unset
-chicken switches:
+planner config:
     add zones with mupdate override:   false
 
 
@@ -1702,19 +1702,19 @@ external DNS:
 
 
 
-> # Set chicken switches.
-> set chicken-switches --add-zones-with-mupdate-override false
-no changes to chicken switches:
+> # Set planner config.
+> set planner-config --add-zones-with-mupdate-override false
+no changes to planner config:
     add zones with mupdate override:   false
 
 
-> set chicken-switches --add-zones-with-mupdate-override true
-chicken switches updated:
+> set planner-config --add-zones-with-mupdate-override true
+planner config updated:
 *   add zones with mupdate override:   false -> true
 
 
-> set chicken-switches --add-zones-with-mupdate-override true
-no changes to chicken switches:
+> set planner-config --add-zones-with-mupdate-override true
+no changes to planner config:
     add zones with mupdate override:   true
 
 
