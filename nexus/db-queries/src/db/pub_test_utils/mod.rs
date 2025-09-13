@@ -247,6 +247,15 @@ impl TestDatabase {
         }
     }
 
+    pub async fn extra_datastore(&self, log: &Logger) -> Arc<DataStore> {
+        let pool = new_pool(log, &self.db);
+        Arc::new(
+            DataStore::new(&log, pool, None, IdentityCheckPolicy::DontCare)
+                .await
+                .unwrap(),
+        )
+    }
+
     pub fn opctx(&self) -> &OpContext {
         match &self.kind {
             TestKind::NoPool

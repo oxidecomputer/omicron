@@ -24,11 +24,16 @@ use nexus_db_model::EARLIEST_SUPPORTED_VERSION;
 use nexus_db_model::SchemaUpgradeStep;
 use nexus_db_model::SchemaVersion;
 use nexus_types::deployment::BlueprintZoneDisposition;
+use nexus_types::deployment::BlueprintZoneType;
+use nexus_types::deployment::blueprint_zone_type;
 use omicron_common::api::external::Error;
+use omicron_common::api::external::Generation;
+use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use semver::Version;
 use slog::{Logger, error, info, o};
+use std::collections::BTreeSet;
 use std::ops::Bound;
 use std::str::FromStr;
 
@@ -686,6 +691,79 @@ impl DataStore {
         Ok(())
     }
 
+    /// Returns information about access for all of the given Nexus ids
+    ///
+    /// This set is assumed to be pretty small.
+    pub async fn database_nexus_access_all(
+        &self,
+        opctx: &OpContext,
+        nexus_ids: &BTreeSet<OmicronZoneUuid>,
+    ) -> Result<Vec<DbMetadataNexus>, Error> {
+        use nexus_db_schema::schema::db_metadata_nexus::dsl;
+
+        let db_nexus_ids: BTreeSet<_> = nexus_ids
+            .iter()
+            .cloned()
+            .map(nexus_db_model::to_db_typed_uuid)
+            .collect();
+        dsl::db_metadata_nexus
+            .filter(dsl::nexus_id.eq_any(db_nexus_ids))
+            .load_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// Updates the "last_drained_blueprint_id" for the given Nexus id
+    pub async fn database_nexus_access_update_blueprint(
+        &self,
+        opctx: &OpContext,
+        nexus_id: OmicronZoneUuid,
+        blueprint_id: Option<BlueprintUuid>,
+    ) -> Result<usize, Error> {
+        use nexus_db_schema::schema::db_metadata_nexus::dsl;
+
+        let nexus_id = nexus_db_model::to_db_typed_uuid(nexus_id);
+        let blueprint_id = blueprint_id.map(nexus_db_model::to_db_typed_uuid);
+
+        let conn = self.pool_connection_authorized(opctx).await?;
+        let count = diesel::update(dsl::db_metadata_nexus)
+            .filter(dsl::nexus_id.eq(nexus_id))
+            // To be conservative, we'll only update this value if the record is
+            // currently active.  There's no reason it should ever not be active
+            // if we're calling this function and if there were an easy way to
+            // return an error in that case, we'd just do that.
+            .filter(dsl::state.eq(DbMetadataNexusState::Active))
+            .set(dsl::last_drained_blueprint_id.eq(blueprint_id))
+            .execute_async(&*conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+        Ok(count)
+    }
+
+    /// Updates the "last_drained_blueprint_id" for the given Nexus id
+    pub async fn database_nexus_access_update_quiesced(
+        &self,
+        nexus_id: OmicronZoneUuid,
+    ) -> Result<usize, Error> {
+        // A traditional authz check is not possible here because we've quiesced
+        // the DataStore, so no further connections are ordinarily available.
+        // (We use the lower-level pool interface to bypass that.)
+        let conn = self.pool.claim_quiesced().await?;
+
+        // XXX-dap could use a separate user here who only has this one
+        // privilege.
+        use nexus_db_schema::schema::db_metadata_nexus::dsl;
+
+        let nexus_id = nexus_db_model::to_db_typed_uuid(nexus_id);
+        let count = diesel::update(dsl::db_metadata_nexus)
+            .filter(dsl::nexus_id.eq(nexus_id))
+            .set(dsl::state.eq(DbMetadataNexusState::Quiesced))
+            .execute_async(&*conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+        Ok(count)
+    }
+
     // Returns the access this Nexus has to the database
     async fn database_nexus_access(
         &self,
@@ -758,24 +836,36 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         blueprint: &nexus_types::deployment::Blueprint,
+        active_generation: Generation,
     ) -> Result<(), Error> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
 
-        // TODO: Without https://github.com/oxidecomputer/omicron/pull/8863, we
-        // treat all Nexuses as active. Some will become "not_yet", depending on
-        // the Nexus Generation, once it exists.
-        let active_nexus_zones = blueprint
+        let new_nexuses: Vec<_> = blueprint
             .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
-            .filter_map(|(_sled, zone_cfg)| {
-                if zone_cfg.zone_type.is_nexus() {
-                    Some(zone_cfg)
-                } else {
+            .filter_map(|(_sled, z)| {
+                let BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
+                    nexus_generation,
+                    ..
+                }) = &z.zone_type
+                else {
+                    return None;
+                };
+
+                if *nexus_generation < active_generation {
                     None
+                } else if *nexus_generation == active_generation {
+                    Some(DbMetadataNexus::new(
+                        z.id,
+                        DbMetadataNexusState::Active,
+                    ))
+                } else {
+                    Some(DbMetadataNexus::new(
+                        z.id,
+                        DbMetadataNexusState::NotYet,
+                    ))
                 }
-            });
-        let new_nexuses = active_nexus_zones
-            .map(|z| DbMetadataNexus::new(z.id, DbMetadataNexusState::Active))
-            .collect::<Vec<_>>();
+            })
+            .collect();
 
         let conn = &*self.pool_connection_authorized(&opctx).await?;
         self.transaction_if_current_blueprint_is(
@@ -2158,7 +2248,11 @@ mod test {
 
         // Create nexus access records
         datastore
-            .database_nexus_access_create(&opctx, &blueprint)
+            .database_nexus_access_create(
+                &opctx,
+                &blueprint,
+                blueprint.nexus_generation,
+            )
             .await
             .expect("Failed to create nexus access");
 
@@ -2226,7 +2320,11 @@ mod test {
 
         // Create nexus access records (first time)
         datastore
-            .database_nexus_access_create(&opctx, &blueprint)
+            .database_nexus_access_create(
+                &opctx,
+                &blueprint,
+                blueprint.nexus_generation,
+            )
             .await
             .expect("Failed to create nexus access (first time)");
 
@@ -2248,7 +2346,11 @@ mod test {
 
         // Creating the record again: not an error.
         datastore
-            .database_nexus_access_create(&opctx, &blueprint)
+            .database_nexus_access_create(
+                &opctx,
+                &blueprint,
+                blueprint.nexus_generation,
+            )
             .await
             .expect("Failed to create nexus access (first time)");
         confirm_state(datastore, nexus_id, DbMetadataNexusState::Active).await;
@@ -2269,7 +2371,11 @@ mod test {
         // Create nexus access records another time - should be idempotent,
         // but should be "on-conflict, ignore".
         datastore
-            .database_nexus_access_create(&opctx, &blueprint)
+            .database_nexus_access_create(
+                &opctx,
+                &blueprint,
+                blueprint.nexus_generation,
+            )
             .await
             .expect("Failed to create nexus access (second time)");
         confirm_state(datastore, nexus_id, DbMetadataNexusState::Quiesced)
@@ -2326,7 +2432,11 @@ mod test {
         // This should fail because the transaction should check if the
         // blueprint is the current target
         let result = datastore
-            .database_nexus_access_create(&opctx, &non_target_blueprint)
+            .database_nexus_access_create(
+                &opctx,
+                &non_target_blueprint,
+                non_target_blueprint.nexus_generation,
+            )
             .await;
         assert!(
             result.is_err(),
@@ -2345,7 +2455,11 @@ mod test {
 
         // Verify that using the correct target blueprint works
         datastore
-            .database_nexus_access_create(&opctx, &target_blueprint)
+            .database_nexus_access_create(
+                &opctx,
+                &target_blueprint,
+                target_blueprint.nexus_generation,
+            )
             .await
             .expect(
                 "Creating nexus access with correct blueprint should succeed",

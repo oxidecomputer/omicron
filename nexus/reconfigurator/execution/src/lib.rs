@@ -204,6 +204,7 @@ pub async fn realize_blueprint(
         &opctx,
         datastore,
         blueprint,
+        nexus_id,
     );
 
     register_deploy_sled_configs_step(
@@ -405,22 +406,30 @@ fn register_deploy_db_metadata_nexus_records_step<'a>(
     opctx: &'a OpContext,
     datastore: &'a DataStore,
     blueprint: &'a Blueprint,
+    nexus_id: Option<OmicronZoneUuid>,
 ) {
     registrar
         .new_step(
             ExecutionStepId::Ensure,
             "Ensure db_metadata_nexus_state records exist",
-            async move |_cx| match database::deploy_db_metadata_nexus_records(
-                opctx, &datastore, &blueprint,
-            )
-            .await
-            {
-                Ok(()) => StepSuccess::new(()).into(),
-                Err(err) => StepWarning::new(
-                    (),
-                    err.context("ensuring db_metadata_nexus_state").to_string(),
+            async move |_cx| {
+                let Some(nexus_id) = nexus_id else {
+                    return StepSkipped::new((), "not running as Nexus").into();
+                };
+
+                match database::deploy_db_metadata_nexus_records(
+                    opctx, &datastore, &blueprint, nexus_id,
                 )
-                .into(),
+                .await
+                {
+                    Ok(()) => StepSuccess::new(()).into(),
+                    Err(err) => StepWarning::new(
+                        (),
+                        err.context("ensuring db_metadata_nexus_state")
+                            .to_string(),
+                    )
+                    .into(),
+                }
             },
         )
         .register();

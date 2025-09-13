@@ -3345,6 +3345,7 @@ mod tests {
                     false,
                     Vec::new(),
                     BlueprintZoneImageSource::InstallDataset,
+                    bp0.nexus_generation,
                 )
                 .expect("added nexus to third sled");
             builder.build()
@@ -3420,6 +3421,7 @@ mod tests {
                         false,
                         Vec::new(),
                         BlueprintZoneImageSource::InstallDataset,
+                        bp2.nexus_generation,
                     )
                     .expect("added nexus to third sled");
             }
