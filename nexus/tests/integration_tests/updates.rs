@@ -683,7 +683,7 @@ async fn test_update_status() -> Result<()> {
 
     let counts = status.components_by_release;
     assert_eq!(counts.get("install dataset").unwrap(), &7);
-    assert_eq!(counts.get("unknown").unwrap(), &8);
+    assert_eq!(counts.get("unknown").unwrap(), &15);
 
     cptestctx.teardown().await;
     Ok(())

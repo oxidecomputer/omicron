@@ -16,10 +16,12 @@ use nexus_types::deployment::TargetReleaseDescription;
 use nexus_types::external_api::shared::TufSignedRootRole;
 use nexus_types::external_api::views;
 use nexus_types::internal_api::views as internal_views;
+use nexus_types::inventory::RotSlot;
 use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::{
     DataPageParams, Error, TufRepoInsertResponse, TufRepoInsertStatus,
 };
+use omicron_common::disk::M2Slot;
 use omicron_uuid_kinds::{GenericUuid, TufTrustRootUuid};
 use semver::Version;
 use std::collections::BTreeMap;
@@ -247,16 +249,55 @@ impl super::Nexus {
             &inventory,
         );
 
-        let zone_versions = status
-            .zones
-            .values()
-            .flat_map(|zones| zones.iter().map(|zone| zone.version.clone()));
-        let sp_versions = status.sps.values().flat_map(|sp| {
-            [sp.slot0_version.clone(), sp.slot1_version.clone()]
+        let sled_versions = status.sleds.into_iter().flat_map(|sled| {
+            let zone_versions = sled.zones.into_iter().map(|zone| zone.version);
+
+            // boot_disk tells you which slot is relevant
+            let host_version =
+                sled.host_phase_2.boot_disk.ok().map(|slot| match slot {
+                    M2Slot::A => sled.host_phase_2.slot_a_version.clone(),
+                    M2Slot::B => sled.host_phase_2.slot_b_version.clone(),
+                });
+
+            zone_versions.chain(host_version)
         });
 
+        let mgs_driven_versions =
+            status.mgs_driven.into_iter().flat_map(|status| {
+                // for the SP, slot0_version is the active one
+                let sp_version = status.sp.slot0_version.clone();
+
+                // for the bootloader, stage0_version is the active one.
+                let bootloader_version =
+                    status.rot_bootloader.stage0_version.clone();
+
+                let rot_version =
+                    status.rot.active_slot.map(|slot| match slot {
+                        RotSlot::A => status.rot.slot_a_version.clone(),
+                        RotSlot::B => status.rot.slot_b_version.clone(),
+                    });
+
+                let host_version = match &status.host_os_phase_1 {
+                    internal_views::HostPhase1Status::Sled {
+                        slot_a_version,
+                        slot_b_version,
+                        active_slot,
+                        ..
+                    } => active_slot.map(|slot| match slot {
+                        M2Slot::A => slot_a_version.clone(),
+                        M2Slot::B => slot_b_version.clone(),
+                    }),
+                    _ => None,
+                };
+
+                std::iter::once(sp_version)
+                    .chain(rot_version)
+                    .chain(std::iter::once(bootloader_version))
+                    .chain(host_version)
+            });
+
         let mut counts = BTreeMap::new();
-        for version in zone_versions.chain(sp_versions) {
+        for version in sled_versions.chain(mgs_driven_versions) {
             *counts.entry(version.to_string()).or_insert(0) += 1;
         }
         Ok(counts)
