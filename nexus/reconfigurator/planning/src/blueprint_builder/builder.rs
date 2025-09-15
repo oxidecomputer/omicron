@@ -1574,18 +1574,18 @@ impl<'a> BlueprintBuilder<'a> {
             })
     }
 
-    // Determines the appropriate generation number for a new Nexus zone.
-    // This generation is based on the generation number used by existing
-    // Nexus zones.
-    //
-    // The logic is:
-    // - If any existing Nexus zone has the same image source, reuse its generation
-    // - Otherwise, use the highest existing generation + 1
-    // - If no existing zones exist, return an error
-    //
-    // This function also validates that the determined generation matches the
-    // top-level current blueprint generation.
-    fn determine_nexus_generation(
+    /// Determines the appropriate generation number for a new Nexus zone.
+    /// This generation is based on the generation number used by existing
+    /// Nexus zones.
+    ///
+    /// The logic is:
+    /// - If any existing Nexus zone has the same image source, reuse its generation
+    /// - Otherwise, use the highest existing generation + 1
+    /// - If no existing zones exist, return an error
+    ///
+    /// This function also validates that the determined generation matches the
+    /// top-level current blueprint generation.
+    pub fn determine_nexus_generation(
         &self,
         image_source: &BlueprintZoneImageSource,
     ) -> Result<Generation, Error> {
@@ -1648,6 +1648,7 @@ impl<'a> BlueprintBuilder<'a> {
         &mut self,
         sled_id: SledUuid,
         image_source: BlueprintZoneImageSource,
+        nexus_generation: Generation,
     ) -> Result<(), Error> {
         // Whether Nexus should use TLS and what the external DNS servers it
         // should use are currently provided at rack-setup time, and should be
@@ -1667,9 +1668,6 @@ impl<'a> BlueprintBuilder<'a> {
                     return Err(Error::NoNexusZonesInParentBlueprint);
                 }
             };
-
-        let nexus_generation =
-            self.determine_nexus_generation(&image_source)?;
 
         self.sled_add_zone_nexus_with_config(
             sled_id,
@@ -3446,6 +3444,7 @@ pub mod test {
                     .map(|sa| sa.sled_id)
                     .expect("no sleds present"),
                 BlueprintZoneImageSource::InstallDataset,
+                parent.nexus_generation,
             )
             .unwrap_err();
 
@@ -3548,6 +3547,7 @@ pub mod test {
                 .sled_add_zone_nexus(
                     sled_id,
                     BlueprintZoneImageSource::InstallDataset,
+                    parent.nexus_generation,
                 )
                 .expect("added nexus zone");
         }
@@ -3570,6 +3570,7 @@ pub mod test {
                     .sled_add_zone_nexus(
                         sled_id,
                         BlueprintZoneImageSource::InstallDataset,
+                        parent.nexus_generation,
                     )
                     .expect("added nexus zone");
             }
@@ -3609,6 +3610,7 @@ pub mod test {
                 .sled_add_zone_nexus(
                     sled_id,
                     BlueprintZoneImageSource::InstallDataset,
+                    parent.nexus_generation,
                 )
                 .unwrap_err();
 
@@ -4019,7 +4021,13 @@ pub mod test {
 
         // Add another Nexus zone with different image source - should increment generation
         builder
-            .sled_add_zone_nexus(second_sled_id, different_image_source.clone())
+            .sled_add_zone_nexus(
+                second_sled_id,
+                different_image_source.clone(),
+                builder
+                    .determine_nexus_generation(&different_image_source)
+                    .unwrap(),
+            )
             .expect("failed to add nexus zone");
 
         let blueprint2 = builder.build();
@@ -4110,10 +4118,18 @@ pub mod test {
         // 1. One zone with image source A (should reuse existing generation)
         // 2. One zone with image source B (should get existing generation + 1)
         builder
-            .sled_add_zone_nexus(sled_ids[1], image_source_a.clone())
+            .sled_add_zone_nexus(
+                sled_ids[1],
+                image_source_a.clone(),
+                builder.determine_nexus_generation(&image_source_a).unwrap(),
+            )
             .expect("failed to add nexus zone with image source A");
         builder
-            .sled_add_zone_nexus(sled_ids[2], image_source_b.clone())
+            .sled_add_zone_nexus(
+                sled_ids[2],
+                image_source_b.clone(),
+                builder.determine_nexus_generation(&image_source_b).unwrap(),
+            )
             .expect("failed to add nexus zone with image source B");
 
         let blueprint2 = builder.build();

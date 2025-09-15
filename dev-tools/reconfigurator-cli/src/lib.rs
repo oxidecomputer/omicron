@@ -718,6 +718,10 @@ enum BlueprintEditCommands {
     AddNexus {
         /// sled on which to deploy the new instance
         sled_id: SledOpt,
+
+        /// generation of the new Nexus instance
+        nexus_generation: Generation,
+
         /// image source for the new zone
         ///
         /// The image source is required if the planning input of the system
@@ -2152,7 +2156,11 @@ fn cmd_blueprint_edit(
     }
 
     let label = match args.edit_command {
-        BlueprintEditCommands::AddNexus { sled_id, image_source } => {
+        BlueprintEditCommands::AddNexus {
+            sled_id,
+            image_source,
+            nexus_generation,
+        } => {
             let sled_id = sled_id.to_sled_id(system.description())?;
             let image_source = image_source_unwrap_or(
                 image_source,
@@ -2160,7 +2168,7 @@ fn cmd_blueprint_edit(
                 ZoneKind::Nexus,
             )?;
             builder
-                .sled_add_zone_nexus(sled_id, image_source)
+                .sled_add_zone_nexus(sled_id, image_source, nexus_generation)
                 .context("failed to add Nexus zone")?;
             format!("added Nexus zone to sled {}", sled_id)
         }
