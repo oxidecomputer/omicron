@@ -177,6 +177,7 @@ pub struct ControlPlaneTestContext<N> {
     pub external_client: ClientTestContext,
     pub techport_client: ClientTestContext,
     pub internal_client: ClientTestContext,
+    pub debug_client: ClientTestContext,
     pub server: N,
     pub database: dev::db::CockroachInstance,
     pub database_admin: omicron_cockroach_admin::Server,
@@ -438,6 +439,7 @@ pub struct ControlPlaneTestContextBuilder<'a, N: NexusServer> {
     pub external_client: Option<ClientTestContext>,
     pub techport_client: Option<ClientTestContext>,
     pub internal_client: Option<ClientTestContext>,
+    pub debug_client: Option<ClientTestContext>,
 
     pub server: Option<N>,
     pub database: Option<dev::db::CockroachInstance>,
@@ -497,6 +499,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             external_client: None,
             techport_client: None,
             internal_client: None,
+            debug_client: None,
             server: None,
             database: None,
             database_admin: None,
@@ -1113,6 +1116,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             server.get_http_server_techport_address().await;
         let internal_server_addr =
             server.get_http_server_internal_address().await;
+        let debug_server_addr = server.get_http_server_debug_address().await;
         let testctx_external = ClientTestContext::new(
             external_server_addr,
             self.logctx
@@ -1131,11 +1135,16 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                 .log
                 .new(o!("component" => "internal client test context")),
         );
+        let testctx_debug = ClientTestContext::new(
+            debug_server_addr,
+            self.logctx.log.new(o!("component" => "debug client test context")),
+        );
 
         self.external_dns_zone_name = Some(external_dns_zone_name);
         self.external_client = Some(testctx_external);
         self.techport_client = Some(testctx_techport);
         self.internal_client = Some(testctx_internal);
+        self.debug_client = Some(testctx_debug);
         self.silo_name = Some(silo_name);
         self.user_name = Some(user_name);
         self.password = Some(TEST_SUITE_PASSWORD.to_string());
@@ -1496,6 +1505,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             external_client: self.external_client.unwrap(),
             techport_client: self.techport_client.unwrap(),
             internal_client: self.internal_client.unwrap(),
+            debug_client: self.debug_client.unwrap(),
             database: self.database.unwrap(),
             database_admin: self.database_admin.unwrap(),
             clickhouse: self.clickhouse.unwrap(),
