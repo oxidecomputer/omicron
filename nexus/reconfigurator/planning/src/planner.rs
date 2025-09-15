@@ -6245,7 +6245,7 @@ pub(crate) mod test {
         example.input.set_active_nexus_zones(active_nexus_zones);
         example.input.set_not_yet_nexus_zones(not_yet_nexus_zones);
 
-        let blueprint_name = format!("blueprint_to_bump_nexus_gen");
+        let blueprint_name = "blueprint_to_bump_nexus_gen".to_string();
         let new_blueprint = Planner::new_based_on(
             log.clone(),
             &blueprint,

@@ -54,7 +54,7 @@ impl fmt::Display for Severity {
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Kind {
     Blueprint(BlueprintKind),
-    Sled { sled_id: SledUuid, kind: SledKind },
+    Sled { sled_id: SledUuid, kind: Box<SledKind> },
 }
 
 impl Kind {
@@ -548,7 +548,10 @@ impl<'a> Blippy<'a> {
         severity: Severity,
         kind: SledKind,
     ) {
-        self.notes.push(Note { severity, kind: Kind::Sled { sled_id, kind } });
+        self.notes.push(Note {
+            severity,
+            kind: Kind::Sled { sled_id, kind: Box::new(kind) },
+        });
     }
 
     pub fn into_report(

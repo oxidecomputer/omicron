@@ -660,7 +660,7 @@ fn check_nexus_generation_consistency(blippy: &mut Blippy<'_>) {
 
     // Check that the top-level Nexus generation is consistent with the images
     let active_gen = blippy.blueprint().nexus_generation;
-    if generation_info.get(&active_gen).is_none() {
+    if !generation_info.contains_key(&active_gen) {
         blippy.push_blueprint_note(
             Severity::Fatal,
             BlueprintKind::NoZonesWithActiveNexusGeneration(active_gen),
@@ -799,30 +799,30 @@ mod tests {
                 severity: Severity::Fatal,
                 kind: Kind::Sled {
                     sled_id: nexus1_sled_id,
-                    kind: SledKind::DuplicateUnderlayIp {
+                    kind: Box::new(SledKind::DuplicateUnderlayIp {
                         zone1: nexus0.clone(),
                         zone2: nexus1.clone(),
-                    },
+                    }),
                 },
             },
             Note {
                 severity: Severity::Fatal,
                 kind: Kind::Sled {
                     sled_id: nexus1_sled_id,
-                    kind: SledKind::SledWithMixedUnderlaySubnets {
+                    kind: Box::new(SledKind::SledWithMixedUnderlaySubnets {
                         zone1: mixed_underlay_zone1,
                         zone2: mixed_underlay_zone2,
-                    },
+                    }),
                 },
             },
             Note {
                 severity: Severity::Fatal,
                 kind: Kind::Sled {
                     sled_id: nexus1_sled_id,
-                    kind: SledKind::ConflictingSledSubnets {
+                    kind: Box::new(SledKind::ConflictingSledSubnets {
                         other_sled: nexus0_sled_id,
                         subnet: Ipv6Subnet::new(dup_ip),
-                    },
+                    }),
                 },
             },
         ];
@@ -901,13 +901,13 @@ mod tests {
             severity: Severity::Fatal,
             kind: Kind::Sled {
                 sled_id: dns1_sled_id,
-                kind: SledKind::InternalDnsZoneBadSubnet {
+                kind: Box::new(SledKind::InternalDnsZoneBadSubnet {
                     zone: dns1.clone(),
                     rack_dns_subnets: rack_subnet
                         .get_dns_subnets()
                         .into_iter()
                         .collect(),
-                },
+                }),
             },
         };
 
@@ -973,11 +973,11 @@ mod tests {
             severity: Severity::Fatal,
             kind: Kind::Sled {
                 sled_id: nexus1_sled_id,
-                kind: SledKind::DuplicateExternalIp {
+                kind: Box::new(SledKind::DuplicateExternalIp {
                     zone1: nexus0.clone(),
                     zone2: nexus1.clone(),
                     ip: dup_ip.ip,
-                },
+                }),
             },
         }];
 
@@ -1040,11 +1040,11 @@ mod tests {
             severity: Severity::Fatal,
             kind: Kind::Sled {
                 sled_id: nexus1_sled_id,
-                kind: SledKind::DuplicateNicIp {
+                kind: Box::new(SledKind::DuplicateNicIp {
                     zone1: nexus0.clone(),
                     zone2: nexus1.clone(),
                     ip: dup_ip,
-                },
+                }),
             },
         }];
 
@@ -1107,11 +1107,11 @@ mod tests {
             severity: Severity::Fatal,
             kind: Kind::Sled {
                 sled_id: nexus1_sled_id,
-                kind: SledKind::DuplicateNicMac {
+                kind: Box::new(SledKind::DuplicateNicMac {
                     zone1: nexus0.clone(),
                     zone2: nexus1.clone(),
                     mac: dup_mac,
-                },
+                }),
             },
         }];
 
@@ -1179,22 +1179,24 @@ mod tests {
                 severity: Severity::Fatal,
                 kind: Kind::Sled {
                     sled_id: dns1_sled_id,
-                    kind: SledKind::ZoneDurableDatasetCollision {
+                    kind: Box::new(SledKind::ZoneDurableDatasetCollision {
                         zone1: dns0.clone(),
                         zone2: dns1.clone(),
                         zpool: dup_zpool,
-                    },
+                    }),
                 },
             },
             Note {
                 severity: Severity::Fatal,
                 kind: Kind::Sled {
                     sled_id: dns1_sled_id,
-                    kind: SledKind::ZoneWithDatasetsOnDifferentZpools {
-                        zone: dns1.clone(),
-                        durable_zpool: dup_zpool,
-                        transient_zpool: dns1.filesystem_pool,
-                    },
+                    kind: Box::new(
+                        SledKind::ZoneWithDatasetsOnDifferentZpools {
+                            zone: dns1.clone(),
+                            durable_zpool: dup_zpool,
+                            transient_zpool: dns1.filesystem_pool,
+                        },
+                    ),
                 },
             },
         ];
@@ -1249,22 +1251,27 @@ mod tests {
                 severity: Severity::Fatal,
                 kind: Kind::Sled {
                     sled_id: dns1_sled_id,
-                    kind: SledKind::ZoneFilesystemDatasetCollision {
+                    kind: Box::new(SledKind::ZoneFilesystemDatasetCollision {
                         zone1: dns0.clone(),
                         zone2: dns1.clone(),
                         zpool: dup_zpool,
-                    },
+                    }),
                 },
             },
             Note {
                 severity: Severity::Fatal,
                 kind: Kind::Sled {
                     sled_id: dns1_sled_id,
-                    kind: SledKind::ZoneWithDatasetsOnDifferentZpools {
-                        zone: dns1.clone(),
-                        durable_zpool: *dns1.zone_type.durable_zpool().unwrap(),
-                        transient_zpool: dup_zpool,
-                    },
+                    kind: Box::new(
+                        SledKind::ZoneWithDatasetsOnDifferentZpools {
+                            zone: dns1.clone(),
+                            durable_zpool: *dns1
+                                .zone_type
+                                .durable_zpool()
+                                .unwrap(),
+                            transient_zpool: dup_zpool,
+                        },
+                    ),
                 },
             },
         ];
@@ -1320,11 +1327,11 @@ mod tests {
             severity: Severity::Fatal,
             kind: Kind::Sled {
                 sled_id,
-                kind: SledKind::ZpoolWithDuplicateDatasetKinds {
+                kind: Box::new(SledKind::ZpoolWithDuplicateDatasetKinds {
                     dataset1,
                     dataset2,
                     zpool: zpool.id(),
-                },
+                }),
             },
         }];
 
@@ -1378,7 +1385,7 @@ mod tests {
         eprintln!("{}", report.display());
         for note in report.notes() {
             match &note.kind {
-                Kind::Sled { kind, .. } => match kind {
+                Kind::Sled { kind, .. } => match &**kind {
                     SledKind::ZpoolWithDuplicateDatasetKinds { .. } => {
                         panic!(
                             "Saw unexpected duplicate dataset kind note: {note:?}"
@@ -1441,18 +1448,18 @@ mod tests {
                 severity: Severity::Fatal,
                 kind: Kind::Sled {
                     sled_id: *sled_id,
-                    kind: SledKind::ZpoolMissingDebugDataset {
+                    kind: Box::new(SledKind::ZpoolMissingDebugDataset {
                         zpool: debug_dataset.pool.id(),
-                    },
+                    }),
                 },
             },
             Note {
                 severity: Severity::Fatal,
                 kind: Kind::Sled {
                     sled_id: *sled_id,
-                    kind: SledKind::ZpoolMissingZoneRootDataset {
+                    kind: Box::new(SledKind::ZpoolMissingZoneRootDataset {
                         zpool: zoneroot_dataset.pool.id(),
-                    },
+                    }),
                 },
             },
         ];
@@ -1516,18 +1523,18 @@ mod tests {
                 severity: Severity::Fatal,
                 kind: Kind::Sled {
                     sled_id: *sled_id,
-                    kind: SledKind::ZoneMissingFilesystemDataset {
+                    kind: Box::new(SledKind::ZoneMissingFilesystemDataset {
                         zone: root_zone.clone(),
-                    },
+                    }),
                 },
             },
             Note {
                 severity: Severity::Fatal,
                 kind: Kind::Sled {
                     sled_id: *sled_id,
-                    kind: SledKind::ZoneMissingDurableDataset {
+                    kind: Box::new(SledKind::ZoneMissingDurableDataset {
                         zone: durable_zone,
-                    },
+                    }),
                 },
             },
         ];
@@ -1593,9 +1600,9 @@ mod tests {
                         severity: Severity::Fatal,
                         kind: Kind::Sled {
                             sled_id: *sled_id,
-                            kind: SledKind::OrphanedDataset {
+                            kind: Box::new(SledKind::OrphanedDataset {
                                 dataset: dataset.clone(),
-                            },
+                            }),
                         },
                     })
                 } else {
@@ -1652,9 +1659,9 @@ mod tests {
                             severity: Severity::Fatal,
                             kind: Kind::Sled {
                                 sled_id,
-                                kind: SledKind::OrphanedDataset {
+                                kind: Box::new(SledKind::OrphanedDataset {
                                     dataset: dataset.clone(),
-                                },
+                                }),
                             },
                         }
                     }
@@ -1662,9 +1669,11 @@ mod tests {
                         severity: Severity::Fatal,
                         kind: Kind::Sled {
                             sled_id,
-                            kind: SledKind::DatasetOnNonexistentZpool {
-                                dataset: dataset.clone(),
-                            },
+                            kind: Box::new(
+                                SledKind::DatasetOnNonexistentZpool {
+                                    dataset: dataset.clone(),
+                                },
+                            ),
                         },
                     },
                 };
@@ -1744,10 +1753,10 @@ mod tests {
                             severity: Severity::Fatal,
                             kind: Kind::Sled {
                                 sled_id: *sled_id,
-                                kind: SledKind::CrucibleDatasetWithIncorrectAddress {
+                                kind: Box::new(SledKind::CrucibleDatasetWithIncorrectAddress {
                                     dataset: dataset.clone(),
                                     expected_address,
-                                },
+                                }),
                             },
                         });
                     }
@@ -1760,10 +1769,10 @@ mod tests {
                             severity: Severity::Fatal,
                             kind: Kind::Sled {
                                 sled_id: *sled_id,
-                                kind: SledKind::NonCrucibleDatasetWithAddress {
+                                kind: Box::new(SledKind::NonCrucibleDatasetWithAddress {
                                     dataset: dataset.clone(),
                                     address,
-                                },
+                                }),
                             },
                         });
                         }
@@ -1869,15 +1878,24 @@ mod tests {
         let expected_notes = vec![
             Note {
                 severity: Severity::Fatal,
-                kind: Kind::Sled { sled_id, kind: artifact_zone_kind },
+                kind: Kind::Sled {
+                    sled_id,
+                    kind: Box::new(artifact_zone_kind),
+                },
             },
             Note {
                 severity: Severity::Fatal,
-                kind: Kind::Sled { sled_id, kind: host_phase_2_a_kind },
+                kind: Kind::Sled {
+                    sled_id,
+                    kind: Box::new(host_phase_2_a_kind),
+                },
             },
             Note {
                 severity: Severity::Fatal,
-                kind: Kind::Sled { sled_id, kind: host_phase_2_b_kind },
+                kind: Kind::Sled {
+                    sled_id,
+                    kind: Box::new(host_phase_2_b_kind),
+                },
             },
         ];
 
@@ -2001,11 +2019,13 @@ mod tests {
             severity: Severity::Fatal,
             kind: Kind::Sled {
                 sled_id: sled1,
-                kind: SledKind::NexusZoneGenerationImageSourceMismatch {
-                    zone1,
-                    zone2,
-                    generation,
-                },
+                kind: Box::new(
+                    SledKind::NexusZoneGenerationImageSourceMismatch {
+                        zone1,
+                        zone2,
+                        generation,
+                    },
+                ),
             },
         }];
 
