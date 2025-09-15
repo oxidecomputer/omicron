@@ -24,9 +24,11 @@ use nexus_db_queries::authn;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
+use nexus_db_queries::db::datastore::IdentityCheckPolicy;
 use nexus_mgs_updates::ArtifactCache;
 use nexus_mgs_updates::MgsUpdateDriver;
 use nexus_types::deployment::PendingMgsUpdates;
+use nexus_types::deployment::ReconfiguratorConfigParam;
 use omicron_common::address::DENDRITE_PORT;
 use omicron_common::address::MGD_PORT;
 use omicron_common::address::MGS_PORT;
@@ -38,6 +40,7 @@ use oximeter_producer::Server as ProducerServer;
 use sagas::common_storage::PooledPantryClient;
 use sagas::common_storage::make_pantry_connection_pool;
 use slog::Logger;
+use slog_error_chain::InlineErrorChain;
 use std::collections::HashMap;
 use std::net::SocketAddrV6;
 use std::net::{IpAddr, Ipv6Addr};
@@ -309,12 +312,14 @@ impl Nexus {
             .map(|s| AllSchemaVersions::load(&s.schema_dir))
             .transpose()
             .map_err(|error| format!("{error:#}"))?;
+        let nexus_id = config.deployment.id;
         let db_datastore = Arc::new(
             db::DataStore::new_with_timeout(
                 &log,
                 Arc::clone(&pool),
                 all_versions.as_ref(),
                 config.pkg.tunables.load_timeout,
+                IdentityCheckPolicy::CheckAndTakeover { nexus_id },
             )
             .await?,
         );
@@ -547,6 +552,28 @@ impl Nexus {
                     error!(task_log, "populate failed");
                 }
             };
+
+            // Before starting our background tasks, inject an initial set of
+            // reconfigurator configuration if we're configured with one.
+            // This is only provided by the test suite, where we have an initial
+            // config to disable automatic blueprint planning.
+            if let Some(config) = task_config.pkg.initial_reconfigurator_config
+            {
+                let config = ReconfiguratorConfigParam { version: 1, config };
+                if let Err(err) = db_datastore
+                    .reconfigurator_config_insert_latest_version(
+                        &background_ctx,
+                        config,
+                    )
+                    .await
+                {
+                    error!(
+                        task_log,
+                        "failed to insert initial reconfigurator config";
+                        InlineErrorChain::new(&err),
+                    );
+                }
+            }
 
             // That said, even if the populate step fails, we may as well try to
             // start the background tasks so that whatever can work will work.

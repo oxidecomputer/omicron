@@ -119,7 +119,7 @@ blueprints.period_secs_plan = 600
 blueprints.period_secs_execute = 600
 blueprints.period_secs_rendezvous = 600
 blueprints.period_secs_collect_crdb_node_ids = 600
-blueprints.period_secs_load_chicken_switches = 5
+blueprints.period_secs_load_reconfigurator_config = 5
 sync_service_zone_nat.period_secs = 30
 switch_port_settings_manager.period_secs = 30
 # Set this (and other region / region snapshot replacement machinery) to a

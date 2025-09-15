@@ -60,7 +60,9 @@ use nexus_types::deployment::OmicronZoneExternalFloatingAddr;
 use nexus_types::deployment::OmicronZoneExternalFloatingIp;
 use nexus_types::deployment::OmicronZoneExternalSnatIp;
 use nexus_types::deployment::OximeterReadMode;
+use nexus_types::deployment::PlannerConfig;
 use nexus_types::deployment::PlanningReport;
+use nexus_types::deployment::ReconfiguratorConfig;
 use nexus_types::deployment::blueprint_zone_type;
 use nexus_types::external_api::views::SledState;
 use nexus_types::internal_api::params::DnsConfigParams;
@@ -192,6 +194,7 @@ pub struct ControlPlaneTestContext<N> {
     pub initial_blueprint_id: BlueprintUuid,
     pub silo_name: Name,
     pub user_name: UserId,
+    pub password: String,
 }
 
 impl<N: NexusServer> ControlPlaneTestContext<N> {
@@ -223,8 +226,7 @@ impl<N: NexusServer> ControlPlaneTestContext<N> {
     }
 
     /// Find a sled agent that doesn't match the provided ID
-    pub fn find_sled_agent(&self, exclude_sled: Uuid) -> Option<SledUuid> {
-        let exclude_sled = SledUuid::from_untyped_uuid(exclude_sled);
+    pub fn find_sled_agent(&self, exclude_sled: SledUuid) -> Option<SledUuid> {
         self.all_sled_agents()
             .find(|sa| sa.sled_agent.id != exclude_sled)
             .map(|sa| sa.sled_agent.id)
@@ -466,6 +468,7 @@ pub struct ControlPlaneTestContextBuilder<'a, N: NexusServer> {
 
     pub silo_name: Option<Name>,
     pub user_name: Option<UserId>,
+    pub password: Option<String>,
 
     pub simulated_upstairs: Arc<sim::SimulatedUpstairs>,
 }
@@ -515,6 +518,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             blueprint_sleds: None,
             silo_name: None,
             user_name: None,
+            password: None,
             simulated_upstairs: Arc::new(sim::SimulatedUpstairs::new(
                 simulated_upstairs_log,
             )),
@@ -815,6 +819,12 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         let log = &self.logctx.log;
         debug!(log, "Starting Nexus (internal API)");
 
+        // In tests, disable blueprint planning.
+        self.config.pkg.initial_reconfigurator_config =
+            Some(ReconfiguratorConfig {
+                planner_enabled: false,
+                planner_config: PlannerConfig::default(),
+            });
         self.config.deployment.internal_dns = InternalDns::FromAddress {
             address: self
                 .internal_dns
@@ -1128,6 +1138,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         self.internal_client = Some(testctx_internal);
         self.silo_name = Some(silo_name);
         self.user_name = Some(user_name);
+        self.password = Some(TEST_SUITE_PASSWORD.to_string());
         self.server = Some(server);
     }
 
@@ -1501,6 +1512,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             initial_blueprint_id: self.initial_blueprint_id.unwrap(),
             silo_name: self.silo_name.unwrap(),
             user_name: self.user_name.unwrap(),
+            password: self.password.unwrap(),
         }
     }
 

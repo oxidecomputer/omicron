@@ -28,6 +28,7 @@ use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::internal::shared::ResolvedVpcFirewallRule;
+use omicron_uuid_kinds::SledUuid;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -244,7 +245,7 @@ impl super::Nexus {
         opctx: &OpContext,
         vpc: &db::model::Vpc,
         rules: &[db::model::VpcFirewallRule],
-        sleds_filter: &[Uuid],
+        sleds_filter: &[SledUuid],
     ) -> Result<(), Error> {
         nexus_networking::send_sled_agents_firewall_rules(
             &self.db_datastore,

@@ -246,12 +246,16 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
         ],
         // This one should fail because it has no parent.
         &["nexus", "blueprints", "diff", &initial_blueprint_id],
-        // chicken switches: show and set
-        &["nexus", "chicken-switches", "show", "current"],
+        // reconfigurator config: show and set
+        &["nexus", "reconfigurator-config", "show", "current"],
+        // NOTE: Enabling the planner here _may_ cause Nexus to start creating
+        // new blueprints; any commands whose output is only stable if the set
+        // of blueprints is stable must come before this command to avoid being
+        // racy.
         &[
             "-w",
             "nexus",
-            "chicken-switches",
+            "reconfigurator-config",
             "set",
             "--planner-enabled",
             "true",
@@ -259,14 +263,12 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
         &[
             "-w",
             "nexus",
-            "chicken-switches",
+            "reconfigurator-config",
             "set",
             "--add-zones-with-mupdate-override",
-            "false",
+            "true",
         ],
-        // After the set commands above, we should see chicken switches
-        // populated.
-        &["nexus", "chicken-switches", "show", "current"],
+        &["nexus", "reconfigurator-config", "show", "current"],
         &["reconfigurator", "export", tmppath.as_str()],
         // We can't easily test the sled agent output because that's only
         // provided by a real sled agent, which is not available in the

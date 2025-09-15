@@ -11,7 +11,10 @@ use db_macros::Asset;
 use nexus_db_schema::schema::{crucible_dataset, zpool};
 use omicron_uuid_kinds::PhysicalDiskKind;
 use omicron_uuid_kinds::PhysicalDiskUuid;
-use uuid::Uuid;
+use omicron_uuid_kinds::SledKind;
+use omicron_uuid_kinds::SledUuid;
+use omicron_uuid_kinds::ZpoolKind;
+use omicron_uuid_kinds::ZpoolUuid;
 
 /// Database representation of a Pool.
 ///
@@ -19,6 +22,7 @@ use uuid::Uuid;
 /// physical sled.
 #[derive(Queryable, Insertable, Debug, Clone, Selectable, Asset)]
 #[diesel(table_name = zpool)]
+#[asset(uuid_kind = ZpoolKind)]
 pub struct Zpool {
     #[diesel(embed)]
     identity: ZpoolIdentity,
@@ -26,7 +30,7 @@ pub struct Zpool {
     rcgen: Generation,
 
     // Sled to which this Zpool belongs.
-    pub sled_id: Uuid,
+    pub sled_id: DbTypedUuid<SledKind>,
 
     // The physical disk to which this Zpool is attached.
     pub physical_disk_id: DbTypedUuid<PhysicalDiskKind>,
@@ -48,8 +52,8 @@ pub struct Zpool {
 
 impl Zpool {
     pub fn new(
-        id: Uuid,
-        sled_id: Uuid,
+        id: ZpoolUuid,
+        sled_id: SledUuid,
         physical_disk_id: PhysicalDiskUuid,
         control_plane_storage_buffer: ByteCount,
     ) -> Self {
@@ -57,7 +61,7 @@ impl Zpool {
             identity: ZpoolIdentity::new(id),
             time_deleted: None,
             rcgen: Generation::new(),
-            sled_id,
+            sled_id: sled_id.into(),
             physical_disk_id: physical_disk_id.into(),
             control_plane_storage_buffer,
         }
@@ -70,10 +74,18 @@ impl Zpool {
     pub fn control_plane_storage_buffer(&self) -> ByteCount {
         self.control_plane_storage_buffer
     }
+
+    pub fn sled_id(&self) -> SledUuid {
+        self.sled_id.into()
+    }
+
+    pub fn physical_disk_id(&self) -> PhysicalDiskUuid {
+        self.physical_disk_id.into()
+    }
 }
 
 impl DatastoreCollectionConfig<CrucibleDataset> for Zpool {
-    type CollectionId = Uuid;
+    type CollectionId = DbTypedUuid<ZpoolKind>;
     type GenerationNumberColumn = zpool::dsl::rcgen;
     type CollectionTimeDeletedColumn = zpool::dsl::time_deleted;
     type CollectionIdColumn = crucible_dataset::dsl::pool_id;
