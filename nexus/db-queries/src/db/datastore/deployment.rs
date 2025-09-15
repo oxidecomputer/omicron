@@ -62,6 +62,7 @@ use nexus_db_model::BpSledMetadata;
 use nexus_db_model::BpTarget;
 use nexus_db_model::DbArtifactVersion;
 use nexus_db_model::DbTypedUuid;
+use nexus_db_model::DebugLogBlueprintPlanning;
 use nexus_db_model::HwBaseboardId;
 use nexus_db_model::HwM2Slot;
 use nexus_db_model::HwRotSlot;
@@ -105,6 +106,7 @@ use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::TypedUuid;
 use slog::Logger;
+use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::sync::Arc;
@@ -505,6 +507,35 @@ impl DataStore {
                         &opctx.log,
                     )
                     .await?;
+                }
+
+                // Serialize and insert a debug log for the planning report
+                // created with this blueprint.
+                match DebugLogBlueprintPlanning::try_from(
+                    blueprint.report.clone(),
+                ) {
+                    Ok(debug_log) => {
+                        use nexus_db_schema::schema::debug_log_blueprint_planning::dsl;
+                        let _ = diesel::insert_into(
+                            dsl::debug_log_blueprint_planning
+                        )
+                            .values(debug_log)
+                            .execute_async(&conn)
+                            .await?;
+                    }
+                    Err(err) => {
+                        // This isn't a fatal error - we've already inserted the
+                        // production-meaningful blueprint content. Not being
+                        // able to log the debug version of the report isn't
+                        // great, but blocking real blueprint insertion on debug
+                        // logging issues seems worse.
+                        warn!(
+                            self.log,
+                            "could not serialize blueprint planning report";
+                            InlineErrorChain::new(&err),
+                        );
+                    }
+
                 }
 
                 Ok(())
@@ -1316,7 +1347,9 @@ impl DataStore {
             )?;
         }
 
-        // FIXME: Once reports are stored in the database, read them out here.
+        // We do not load full fidelity reports from the database.
+        //
+        // TODO-cleanup Should we remove this field from `Blueprint` entirely?
         let report = PlanningReport::new(blueprint_id);
 
         Ok(Blueprint {
@@ -1376,6 +1409,7 @@ impl DataStore {
             npending_mgs_updates_rot: usize,
             npending_mgs_updates_rot_bootloader: usize,
             npending_mgs_updates_host_phase_1: usize,
+            ndebug_log_planning_report: usize,
         }
 
         let NumRowsDeleted {
@@ -1393,6 +1427,7 @@ impl DataStore {
             npending_mgs_updates_rot,
             npending_mgs_updates_rot_bootloader,
             npending_mgs_updates_host_phase_1,
+            ndebug_log_planning_report,
         } = self
             .transaction_retry_wrapper("blueprint_delete")
             .transaction(&conn, |conn| {
@@ -1635,6 +1670,21 @@ impl DataStore {
                         .await?
                     };
 
+                    let ndebug_log_planning_report = {
+                        // Skip rustfmt because it bails out on this long line.
+                        #[rustfmt::skip]
+                        use nexus_db_schema::schema::
+                            debug_log_blueprint_planning::dsl;
+                        diesel::delete(
+                            dsl::debug_log_blueprint_planning.filter(
+                                dsl::blueprint_id
+                                    .eq(to_db_typed_uuid(blueprint_id)),
+                            ),
+                        )
+                        .execute_async(&conn)
+                        .await?
+                    };
+
                     Ok(NumRowsDeleted {
                         nblueprints,
                         nsled_metadata,
@@ -1650,6 +1700,7 @@ impl DataStore {
                         npending_mgs_updates_rot,
                         npending_mgs_updates_rot_bootloader,
                         npending_mgs_updates_host_phase_1,
+                        ndebug_log_planning_report,
                     })
                 }
             })
@@ -1677,6 +1728,7 @@ impl DataStore {
             npending_mgs_updates_rot_bootloader,
             "npending_mgs_updates_host_phase_1" =>
             npending_mgs_updates_host_phase_1,
+            "ndebug_log_planning_report" => ndebug_log_planning_report,
         );
 
         Ok(())
@@ -4567,6 +4619,7 @@ mod tests {
                     blueprint_id
                 ),
                 query_count!(bp_pending_mgs_update_host_phase_1, blueprint_id),
+                query_count!(debug_log_blueprint_planning, blueprint_id),
             ] {
                 let count: i64 = result.unwrap();
                 counts.insert(table_name.to_string(), count);

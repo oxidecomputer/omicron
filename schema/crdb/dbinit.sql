@@ -4971,6 +4971,23 @@ CREATE TABLE IF NOT EXISTS omicron.public.cockroachdb_zone_id_to_node_id (
     PRIMARY KEY (omicron_zone_id, crdb_node_id)
 );
 
+-- Debug logging of blueprint planner reports
+--
+-- When the blueprint planner inside Nexus runs, it generates a report
+-- describing what it did and why. This report has a very rich representation in
+-- Rust which would be pretty painful to represent with full fidelity in SQL
+-- (and diesel). The only practical use of these reports is human debugging, so
+-- we punt on a SQL representation entirely. This table stores a JSON blob
+-- containing the planning reports for blueprints, but we _do not_ provide any
+-- way to parse this data in Nexus or omicron proper. (JSON in the database has
+-- all the normal problems of versioning, etc., and we punt on that entirely by
+-- saying "you just can't parse this - it's just a JSON blob".) omdb and other
+-- dev tooling is free to (attempt to) parse and interpret these JSON blobs.
+CREATE TABLE IF NOT EXISTS omicron.public.debug_log_blueprint_planning (
+    blueprint_id UUID NOT NULL PRIMARY KEY,
+    debug_blob JSONB NOT NULL
+);
+
 /*
  * List of debug datasets available for use (e.g., by support bundles).
  *

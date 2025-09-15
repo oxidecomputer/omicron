@@ -25,9 +25,10 @@ use nexus_db_schema::schema::{
     bp_oximeter_read_policy, bp_pending_mgs_update_host_phase_1,
     bp_pending_mgs_update_rot, bp_pending_mgs_update_rot_bootloader,
     bp_pending_mgs_update_sp, bp_sled_metadata, bp_target,
+    debug_log_blueprint_planning,
 };
 use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
-use nexus_types::deployment::BlueprintHostPhase2DesiredSlots;
+use nexus_types::deployment::{BlueprintHostPhase2DesiredSlots, PlanningReport};
 use nexus_types::deployment::BlueprintPhysicalDiskConfig;
 use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
 use nexus_types::deployment::BlueprintTarget;
@@ -1517,5 +1518,38 @@ impl BpPendingMgsUpdateComponent for BpPendingMgsUpdateHostPhase1 {
                 },
             ),
         }
+    }
+}
+
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = debug_log_blueprint_planning)]
+pub struct DebugLogBlueprintPlanning {
+    pub blueprint_id: DbTypedUuid<BlueprintKind>,
+    pub debug_blob: serde_json::Value,
+}
+
+impl TryFrom<PlanningReport> for DebugLogBlueprintPlanning {
+    type Error = serde_json::Error;
+
+    fn try_from(report: PlanningReport) -> Result<Self, Self::Error> {
+        let blueprint_id = report.blueprint_id.into();
+        let report = serde_json::to_value(report)?;
+
+        // We explicitly _don't_ define a struct describing the format of
+        // `debug_blob`, because we don't want anyone to attempt to parse it. It
+        // should only be useful to humans, potentially via omdb, and they (and
+        // omdb) can duplicate these fields to understand it.
+        let git_commit = if env!("VERGEN_GIT_DIRTY") == "true" {
+            concat!(env!("VERGEN_GIT_SHA"), "-dirty")
+        } else {
+            env!("VERGEN_GIT_SHA")
+        };
+
+        let debug_blob = serde_json::json!({
+            "git-commit": git_commit,
+            "report": report,
+        });
+
+        Ok(Self { blueprint_id, debug_blob })
     }
 }
