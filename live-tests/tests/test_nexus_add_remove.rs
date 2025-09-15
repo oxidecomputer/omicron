@@ -107,7 +107,7 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
                 .sled_add_zone_nexus(
                     sled_id,
                     image_source,
-                    builder.nexus_generation,
+                    builder.nexus_generation(),
                 )
                 .context("adding Nexus zone")?;
 
