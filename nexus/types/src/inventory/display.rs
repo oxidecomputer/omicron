@@ -1032,7 +1032,7 @@ fn display_orphaned_datasets(
             .last_reconciliation
             .as_ref()
             .map(|r| &r.orphaned_datasets)
-            .unwrap_or(&*EMPTY_SET);
+            .unwrap_or(&EMPTY_SET);
 
         let mut indented = IndentWriter::new("    ", f);
         if orphaned_datasets.is_empty() {
