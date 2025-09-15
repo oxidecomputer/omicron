@@ -1,0 +1,19 @@
+[package]
+name = "nexus-debug-client"
+version = "0.1.0"
+edition = "2024"
+license = "MPL-2.0"
+
+[lints]
+workspace = true
+
+[dependencies]
+chrono.workspace = true
+omicron-workspace-hack.workspace = true
+progenitor.workspace = true
+regress.workspace = true
+reqwest.workspace = true
+schemars.workspace = true
+serde.workspace = true
+slog.workspace = true
+uuid.workspace = true

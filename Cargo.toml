@@ -16,6 +16,7 @@ members = [
     "clients/gateway-client",
     "clients/installinator-client",
     "clients/nexus-client",
+    "clients/nexus-debug-client",
     "clients/ntp-admin-client",
     "clients/oxide-client",
     "clients/oximeter-client",
@@ -175,6 +176,7 @@ default-members = [
     "clients/gateway-client",
     "clients/installinator-client",
     "clients/nexus-client",
+    "clients/nexus-debug-client",
     "clients/ntp-admin-client",
     "clients/oxide-client",
     "clients/oximeter-client",
@@ -544,6 +546,7 @@ nexus-db-model = { path = "nexus/db-model" }
 nexus-db-queries = { path = "nexus/db-queries" }
 nexus-db-schema = { path = "nexus/db-schema" }
 nexus-debug-api = { path = "nexus/debug-api" }
+nexus-debug-client = { path = "clients/nexus-debug-client" }
 nexus-defaults = { path = "nexus/defaults" }
 nexus-external-api = { path = "nexus/external-api" }
 nexus-inventory = { path = "nexus/inventory" }

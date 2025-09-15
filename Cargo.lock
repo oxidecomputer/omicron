@@ -6562,6 +6562,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "nexus-debug-client"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "omicron-workspace-hack",
+ "progenitor 0.10.0",
+ "regress",
+ "reqwest",
+ "schemars",
+ "serde",
+ "slog",
+ "uuid",
+]
+
+[[package]]
 name = "nexus-defaults"
 version = "0.1.0"
 dependencies = [
