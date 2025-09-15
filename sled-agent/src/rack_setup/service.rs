@@ -97,7 +97,7 @@ use nexus_types::deployment::{
     Blueprint, BlueprintDatasetConfig, BlueprintDatasetDisposition,
     BlueprintHostPhase2DesiredSlots, BlueprintSledConfig, BlueprintZoneType,
     CockroachDbPreserveDowngrade, OximeterReadMode, PendingMgsUpdates,
-    PlanningReport, blueprint_zone_type,
+    blueprint_zone_type,
 };
 use nexus_types::external_api::views::SledState;
 use ntp_admin_client::{
@@ -1646,7 +1646,6 @@ pub(crate) fn build_initial_blueprint_from_sled_configs(
         time_created: Utc::now(),
         creator: "RSS".to_string(),
         comment: "initial blueprint from rack setup".to_string(),
-        report: PlanningReport::new(id),
     })
 }
 

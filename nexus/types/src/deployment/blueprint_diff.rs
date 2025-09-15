@@ -77,7 +77,6 @@ impl<'a> BlueprintDiffSummary<'a> {
             oximeter_read_mode,
             creator: _,
             comment: _,
-            report: _,
         } = &self.diff;
 
         // Did we modify, add, or remove any sleds?

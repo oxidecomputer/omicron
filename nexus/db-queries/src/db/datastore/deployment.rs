@@ -79,6 +79,7 @@ use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintMetadata;
 use nexus_types::deployment::BlueprintSledConfig;
 use nexus_types::deployment::BlueprintTarget;
+use nexus_types::deployment::BlueprintWithPlanningReport;
 use nexus_types::deployment::ClickhouseClusterConfig;
 use nexus_types::deployment::CockroachDbPreserveDowngrade;
 use nexus_types::deployment::ExpectedVersion;
@@ -90,7 +91,6 @@ use nexus_types::deployment::PendingMgsUpdateRotBootloaderDetails;
 use nexus_types::deployment::PendingMgsUpdateRotDetails;
 use nexus_types::deployment::PendingMgsUpdateSpDetails;
 use nexus_types::deployment::PendingMgsUpdates;
-use nexus_types::deployment::PlanningReport;
 use nexus_types::inventory::BaseboardId;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
@@ -143,7 +143,7 @@ impl DataStore {
     pub async fn blueprint_insert(
         &self,
         opctx: &OpContext,
-        blueprint: &Blueprint,
+        blueprint: &BlueprintWithPlanningReport,
     ) -> Result<(), Error> {
         let conn = self.pool_connection_authorized(opctx).await?;
         self.blueprint_insert_on_connection(&conn, opctx, blueprint).await
@@ -223,11 +223,14 @@ impl DataStore {
         &self,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         opctx: &OpContext,
-        blueprint: &Blueprint,
+        blueprint_with_report: &BlueprintWithPlanningReport,
     ) -> Result<(), Error> {
         opctx
             .authorize(authz::Action::Modify, &authz::BLUEPRINT_CONFIG)
             .await?;
+
+        let BlueprintWithPlanningReport { blueprint, report } =
+            blueprint_with_report;
 
         // In the database, the blueprint is represented essentially as a tree
         // rooted at a `blueprint` row.  Other nodes in the tree point
@@ -512,7 +515,7 @@ impl DataStore {
                 // Serialize and insert a debug log for the planning report
                 // created with this blueprint.
                 match DebugLogBlueprintPlanning::try_from(
-                    blueprint.report.clone(),
+                    report.clone(),
                 ) {
                     Ok(debug_log) => {
                         use nexus_db_schema::schema::debug_log_blueprint_planning::dsl;
@@ -1347,11 +1350,6 @@ impl DataStore {
             )?;
         }
 
-        // We do not load full fidelity reports from the database.
-        //
-        // TODO-cleanup Should we remove this field from `Blueprint` entirely?
-        let report = PlanningReport::new(blueprint_id);
-
         Ok(Blueprint {
             id: blueprint_id,
             pending_mgs_updates,
@@ -1369,7 +1367,6 @@ impl DataStore {
             time_created,
             creator,
             comment,
-            report,
         })
     }
 

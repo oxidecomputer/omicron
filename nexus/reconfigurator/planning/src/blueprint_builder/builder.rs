@@ -54,7 +54,6 @@ use nexus_types::deployment::OximeterReadMode;
 use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdates;
 use nexus_types::deployment::PlanningInput;
-use nexus_types::deployment::PlanningReport;
 use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::SledResources;
 use nexus_types::deployment::TufRepoContentsError;
@@ -527,7 +526,6 @@ pub struct BlueprintBuilder<'a> {
     cockroachdb_setting_preserve_downgrade: CockroachDbPreserveDowngrade,
     target_release_minimum_generation: Generation,
     nexus_generation: Generation,
-    report: Option<PlanningReport>,
 
     creator: String,
     operations: Vec<Operation>,
@@ -585,7 +583,6 @@ impl<'a> BlueprintBuilder<'a> {
         let num_sleds = sleds.len();
 
         let id = rng.next_blueprint();
-        let report = PlanningReport::new(id);
         Blueprint {
             id,
             sleds,
@@ -604,7 +601,6 @@ impl<'a> BlueprintBuilder<'a> {
             time_created: now_db_precision(),
             creator: creator.to_owned(),
             comment: format!("starting blueprint with {num_sleds} empty sleds"),
-            report,
         }
     }
 
@@ -677,7 +673,6 @@ impl<'a> BlueprintBuilder<'a> {
             target_release_minimum_generation: parent_blueprint
                 .target_release_minimum_generation,
             nexus_generation: parent_blueprint.nexus_generation,
-            report: None,
             creator: creator.to_owned(),
             operations: Vec::new(),
             comments: Vec::new(),
@@ -891,9 +886,6 @@ impl<'a> BlueprintBuilder<'a> {
                 .chain(self.operations.iter().map(|op| op.to_string()))
                 .collect::<Vec<String>>()
                 .join(", "),
-            report: self
-                .report
-                .unwrap_or_else(|| PlanningReport::new(blueprint_id)),
         }
     }
 
@@ -922,12 +914,6 @@ impl<'a> BlueprintBuilder<'a> {
         editor
             .decommission()
             .map_err(|err| Error::SledEditError { sled_id, err })
-    }
-
-    /// Set the planning report for this blueprint.
-    pub fn set_report(&mut self, report: PlanningReport) -> &mut Self {
-        self.report = Some(report);
-        self
     }
 
     /// This is a short human-readable string summarizing the changes reflected

@@ -13,8 +13,10 @@ use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintMetadata;
 use nexus_types::deployment::BlueprintTarget;
 use nexus_types::deployment::BlueprintTargetSet;
+use nexus_types::deployment::BlueprintWithPlanningReport;
 use nexus_types::deployment::PlannerConfig;
 use nexus_types::deployment::PlanningInput;
+use nexus_types::deployment::PlanningReport;
 use nexus_types::internal_api::views::UpdateStatus;
 use nexus_types::inventory::Collection;
 use omicron_common::api::external::CreateResult;
@@ -165,7 +167,7 @@ impl super::Nexus {
     async fn blueprint_add(
         &self,
         opctx: &OpContext,
-        blueprint: &Blueprint,
+        blueprint: &BlueprintWithPlanningReport,
     ) -> Result<(), Error> {
         self.db_datastore.blueprint_insert(opctx, blueprint).await
     }
@@ -202,7 +204,7 @@ impl super::Nexus {
         })?;
 
         self.blueprint_add(&opctx, &blueprint).await?;
-        Ok(blueprint)
+        Ok(blueprint.blueprint)
     }
 
     pub async fn blueprint_import(
@@ -210,8 +212,10 @@ impl super::Nexus {
         opctx: &OpContext,
         blueprint: Blueprint,
     ) -> Result<(), Error> {
-        let _ = self.blueprint_add(&opctx, &blueprint).await?;
-        Ok(())
+        // Imported blueprints have no planning report; construct an empty one.
+        let report = PlanningReport::new(blueprint.id);
+        let blueprint = BlueprintWithPlanningReport { blueprint, report };
+        self.blueprint_add(&opctx, &blueprint).await
     }
 
     pub async fn update_status(

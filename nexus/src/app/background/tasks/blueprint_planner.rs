@@ -14,6 +14,7 @@ use nexus_db_queries::db::DataStore;
 use nexus_reconfigurator_planning::planner::Planner;
 use nexus_reconfigurator_planning::planner::PlannerRng;
 use nexus_reconfigurator_preparation::PlanningInputFromDb;
+use nexus_types::deployment::BlueprintWithPlanningReport;
 use nexus_types::deployment::{Blueprint, BlueprintTarget};
 use nexus_types::internal_api::background::BlueprintPlannerStatus;
 use omicron_common::api::external::LookupType;
@@ -257,7 +258,7 @@ impl BlueprintPlanner {
         }
 
         // We have a new target!
-        let report = blueprint.report.clone();
+        let BlueprintWithPlanningReport { blueprint, report } = blueprint;
         self.tx_blueprint.send_replace(Some(Arc::new((target, blueprint))));
         BlueprintPlannerStatus::Targeted {
             parent_blueprint_id,

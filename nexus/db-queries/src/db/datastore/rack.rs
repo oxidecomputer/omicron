@@ -47,10 +47,12 @@ use nexus_db_model::SledState;
 use nexus_db_model::SledUnderlaySubnetAllocation;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintTarget;
+use nexus_types::deployment::BlueprintWithPlanningReport;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::OmicronZoneExternalIp;
+use nexus_types::deployment::PlanningReport;
 use nexus_types::deployment::blueprint_zone_type;
 use nexus_types::external_api::params as external_params;
 use nexus_types::external_api::shared;
@@ -764,8 +766,16 @@ impl DataStore {
                     }
 
                     // Insert the RSS-generated blueprint.
+                    //
+                    // RSS does not run the planner, so we construct an empty
+                    // `PlanningReport` for this blueprint.
+                    let report = PlanningReport::new(blueprint.id);
+                    let blueprint_with_report = BlueprintWithPlanningReport {
+                        blueprint,
+                        report,
+                    };
                     self.blueprint_insert_on_connection(
-                        &conn, opctx, &blueprint,
+                        &conn, opctx, &blueprint_with_report,
                     )
                     .await
                     .map_err(|e| {
@@ -777,6 +787,7 @@ impl DataStore {
                         err.set(RackInitError::BlueprintInsert(e)).unwrap();
                         DieselError::RollbackTransaction
                     })?;
+                    let blueprint = blueprint_with_report.blueprint;
 
                     // Make that initial blueprint the target.
                     Self::blueprint_target_set_current_on_connection(
@@ -1056,7 +1067,7 @@ mod test {
     };
     use nexus_types::deployment::{
         BlueprintZoneDisposition, BlueprintZoneImageSource,
-        OmicronZoneExternalSnatIp, OximeterReadMode, PlanningReport,
+        OmicronZoneExternalSnatIp, OximeterReadMode,
     };
     use nexus_types::external_api::shared::SiloIdentityMode;
     use nexus_types::external_api::views::SledState;

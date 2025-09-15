@@ -59,6 +59,8 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
+use std::ops::Deref;
+use std::ops::DerefMut;
 use std::sync::Arc;
 use strum::EnumIter;
 use tufaceous_artifact::ArtifactHash;
@@ -269,9 +271,6 @@ pub struct Blueprint {
     /// human-readable string describing why this blueprint was created
     /// (for debugging)
     pub comment: String,
-
-    /// Report on the planning session that resulted in this blueprint
-    pub report: PlanningReport,
 }
 
 impl Blueprint {
@@ -404,6 +403,43 @@ impl Blueprint {
         };
 
         Ok(zone_config.nexus_generation < self.nexus_generation)
+    }
+}
+
+/// A [`Blueprint`] along with the [`PlanningReport`] produced when it was
+/// planned.
+///
+/// This is a separate structure because the planning reports are not stored
+/// with full fidelity in the database.
+///
+/// This type [`Deref`]s to [`Blueprint`], primarily for easy access in tests
+/// when iterating on planning; e.g., this allows passing a
+/// `BlueprintWithPlanningReport` back to the planner as the parent `Blueprint`.
+#[derive(Clone, Debug)]
+pub struct BlueprintWithPlanningReport {
+    pub blueprint: Blueprint,
+    pub report: PlanningReport,
+}
+
+impl BlueprintWithPlanningReport {
+    /// Return a struct that can be displayed to present information about the
+    /// blueprint and its planning report.
+    pub fn display(&self) -> BlueprintWithPlanningReportDisplay<'_> {
+        BlueprintWithPlanningReportDisplay { blueprint_with_report: self }
+    }
+}
+
+impl Deref for BlueprintWithPlanningReport {
+    type Target = Blueprint;
+
+    fn deref(&self) -> &Self::Target {
+        &self.blueprint
+    }
+}
+
+impl DerefMut for BlueprintWithPlanningReport {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.blueprint
     }
 }
 
@@ -688,7 +724,6 @@ impl fmt::Display for BlueprintDisplay<'_> {
             time_created: _,
             creator: _,
             comment: _,
-            report,
         } = self.blueprint;
 
         writeln!(f, "blueprint  {}", id)?;
@@ -801,9 +836,25 @@ impl fmt::Display for BlueprintDisplay<'_> {
             )?;
         }
 
-        writeln!(f, "\n{report}")?;
-
         Ok(())
+    }
+}
+
+/// Wrapper to allow a [`BlueprintWithPlanningReport`] to be displayed.
+///
+/// Returned by [`BlueprintWithPlanningReport::display()`].
+#[derive(Clone, Debug)]
+#[must_use = "this struct does nothing unless displayed"]
+pub struct BlueprintWithPlanningReportDisplay<'a> {
+    blueprint_with_report: &'a BlueprintWithPlanningReport,
+}
+
+impl fmt::Display for BlueprintWithPlanningReportDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let BlueprintWithPlanningReport { blueprint, report } =
+            self.blueprint_with_report;
+        let blueprint = blueprint.display();
+        writeln!(f, "{blueprint}\n{report}")
     }
 }
 

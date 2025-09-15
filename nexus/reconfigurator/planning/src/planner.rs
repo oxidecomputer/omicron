@@ -28,6 +28,7 @@ use nexus_sled_agent_shared::inventory::OmicronZoneType;
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
+use nexus_types::deployment::BlueprintWithPlanningReport;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneImageSource;
@@ -149,11 +150,11 @@ impl<'a> Planner<'a> {
         Ok(Planner { log, input, blueprint, inventory })
     }
 
-    pub fn plan(mut self) -> Result<Blueprint, Error> {
+    pub fn plan(mut self) -> Result<BlueprintWithPlanningReport, Error> {
         let checked = self.check_input_validity()?;
         let report = self.do_plan(checked)?;
-        self.blueprint.set_report(report);
-        Ok(self.blueprint.build())
+        let blueprint = self.blueprint.build();
+        Ok(BlueprintWithPlanningReport { blueprint, report })
     }
 
     fn check_input_validity(&self) -> Result<InputChecked, Error> {
@@ -5970,7 +5971,7 @@ pub(crate) mod test {
             assert_eq!(summary.total_zones_removed(), 0);
             assert_eq!(summary.total_zones_modified(), 0);
         }
-        blueprint = new_blueprint;
+        blueprint = new_blueprint.blueprint;
         update_collection_from_blueprint(&mut example, &blueprint);
 
         // We should have started with no specified TUF repo and nothing to do.
@@ -6158,7 +6159,7 @@ pub(crate) mod test {
             .plan()
             .expect("plan for trivial TUF repo");
 
-            blueprint = new_blueprint;
+            blueprint = new_blueprint.blueprint;
 
             assert_eq!(
                 blueprint
@@ -6357,7 +6358,7 @@ pub(crate) mod test {
                 BOUNDARY_NTP_REDUNDANCY - 1
             );
         }
-        blueprint = new_blueprint;
+        blueprint = new_blueprint.blueprint;
         update_collection_from_blueprint(&mut example, &blueprint);
 
         assert_eq!(
@@ -6391,7 +6392,7 @@ pub(crate) mod test {
                 BOUNDARY_NTP_REDUNDANCY - 1
             );
         }
-        blueprint = new_blueprint;
+        blueprint = new_blueprint.blueprint;
         update_collection_from_blueprint(&mut example, &blueprint);
 
         // We should have started with no specified TUF repo and nothing to do.
@@ -6618,7 +6619,7 @@ pub(crate) mod test {
             assert_eq!(summary.total_zones_removed(), 0);
             assert_eq!(summary.total_zones_modified(), 1);
         }
-        blueprint = new_blueprint;
+        blueprint = new_blueprint.blueprint;
         update_collection_from_blueprint(&mut example, &blueprint);
         set_valid_looking_timesync(&mut example.collection);
 
@@ -6667,7 +6668,7 @@ pub(crate) mod test {
             assert_eq!(summary.total_zones_removed(), 0);
             assert_eq!(summary.total_zones_modified(), 2);
         }
-        blueprint = new_blueprint;
+        blueprint = new_blueprint.blueprint;
         update_collection_from_blueprint(&mut example, &blueprint);
         set_valid_looking_timesync(&mut example.collection);
 
@@ -6707,7 +6708,7 @@ pub(crate) mod test {
             assert_eq!(summary.total_zones_removed(), 0);
             assert_eq!(summary.total_zones_modified(), 2);
         }
-        blueprint = new_blueprint;
+        blueprint = new_blueprint.blueprint;
         update_collection_from_blueprint(&mut example, &blueprint);
         set_valid_looking_timesync(&mut example.collection);
 
@@ -6748,7 +6749,7 @@ pub(crate) mod test {
             assert_eq!(summary.total_zones_removed(), 0);
             assert_eq!(summary.total_zones_modified(), 1);
         }
-        blueprint = new_blueprint;
+        blueprint = new_blueprint.blueprint;
         update_collection_from_blueprint(&mut example, &blueprint);
         set_valid_looking_timesync(&mut example.collection);
 
@@ -6785,7 +6786,7 @@ pub(crate) mod test {
             assert_eq!(summary.total_zones_removed(), 0);
             assert_eq!(summary.total_zones_modified(), 1);
         }
-        blueprint = new_blueprint;
+        blueprint = new_blueprint.blueprint;
         update_collection_from_blueprint(&mut example, &blueprint);
         set_valid_looking_timesync(&mut example.collection);
 
@@ -7012,7 +7013,7 @@ pub(crate) mod test {
                 assert_eq!(summary.total_zones_removed(), 0);
                 assert_eq!(summary.total_zones_modified(), 1);
             }
-            blueprint = new_blueprint;
+            blueprint = new_blueprint.blueprint;
             update_collection_from_blueprint(&mut example, &blueprint);
             verify_blueprint(&blueprint);
 
@@ -7038,7 +7039,7 @@ pub(crate) mod test {
                 assert_eq!(summary.total_zones_removed(), 0);
                 assert_eq!(summary.total_zones_modified(), 1);
             }
-            blueprint = new_blueprint;
+            blueprint = new_blueprint.blueprint;
             update_collection_from_blueprint(&mut example, &blueprint);
             verify_blueprint(&blueprint);
 
@@ -7200,7 +7201,7 @@ pub(crate) mod test {
                 }
             }
 
-            parent = blueprint;
+            parent = blueprint.blueprint;
         }
 
         panic!("did not converge after {MAX_PLANNING_ITERATIONS} iterations");

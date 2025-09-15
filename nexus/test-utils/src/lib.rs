@@ -60,7 +60,6 @@ use nexus_types::deployment::OmicronZoneExternalFloatingIp;
 use nexus_types::deployment::OmicronZoneExternalSnatIp;
 use nexus_types::deployment::OximeterReadMode;
 use nexus_types::deployment::PlannerConfig;
-use nexus_types::deployment::PlanningReport;
 use nexus_types::deployment::ReconfiguratorConfig;
 use nexus_types::deployment::blueprint_zone_type;
 use nexus_types::external_api::views::SledState;
@@ -1035,7 +1034,6 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             time_created: Utc::now(),
             creator: "nexus-test-utils".to_string(),
             comment: "initial test blueprint".to_string(),
-            report: PlanningReport::new(id),
         };
 
         self.initial_blueprint_id = Some(blueprint.id);
