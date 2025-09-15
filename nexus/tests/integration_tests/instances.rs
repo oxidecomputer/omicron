@@ -6891,7 +6891,7 @@ pub async fn instance_wait_for_state_as(
     instance_id: InstanceUuid,
     state: omicron_common::api::external::InstanceState,
 ) -> Instance {
-    const MAX_WAIT: Duration = Duration::from_secs(320); // 120 was not enough
+    const MAX_WAIT: Duration = Duration::from_secs(320);
 
     slog::info!(
         &client.client_log,

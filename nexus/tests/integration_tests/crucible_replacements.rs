@@ -481,7 +481,7 @@ mod region_replacement {
                     }
                 },
                 &std::time::Duration::from_millis(50),
-                &std::time::Duration::from_secs(260), // 60 was not enough
+                &std::time::Duration::from_secs(260),
             )
             .await
             .expect("request transitioned to expected state");
@@ -1730,7 +1730,6 @@ mod region_snapshot_replacement {
         pub async fn remove_disk_from_snapshot_rop(&self) {
             let disk_url = get_disk_url("disk-from-snapshot");
 
-            eprintln!("NOW Remove disk from snapshot for disk {:?}", disk_url);
             let disk_from_snapshot: external::Disk =
                 NexusRequest::object_get(&self.client, &disk_url)
                     .authn_as(AuthnMode::PrivilegedUser)
@@ -1742,7 +1741,6 @@ mod region_snapshot_replacement {
 
             let disk_id = disk_from_snapshot.identity.id;
 
-            eprintln!("NOW Remove disk id {:?}", disk_id);
             // Note: `make_request` needs a type here, otherwise rustc cannot
             // figure out the type of the `request_body` parameter
             self.internal_client
