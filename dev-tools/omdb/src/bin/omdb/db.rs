@@ -19,6 +19,7 @@
 
 use crate::Omdb;
 use crate::check_allow_destructive::DestructiveOperationToken;
+use crate::db::blueprint::cmd_db_blueprint;
 use crate::db::ereport::cmd_db_ereport;
 use crate::helpers::CONNECTION_OPTIONS_HEADING;
 use crate::helpers::DATABASE_OPTIONS_HEADING;
@@ -170,6 +171,7 @@ use tabled::Tabled;
 use uuid::Uuid;
 
 mod alert;
+mod blueprint;
 mod ereport;
 mod saga;
 mod user_data_export;
@@ -338,6 +340,10 @@ pub struct DbFetchOptions {
 /// Subcommands that query or update the database
 #[derive(Debug, Subcommand, Clone)]
 enum DbCommands {
+    /// Print information about blueprints
+    ///
+    /// Most blueprint information is available via `omdb nexus`, not `omdb db`.
+    Blueprints(blueprint::BlueprintArgs),
     /// Commands relevant to Crucible datasets
     CrucibleDataset(CrucibleDatasetArgs),
     /// Print any Crucible resources that are located on expunged physical disks
@@ -1128,6 +1134,9 @@ impl DbArgs {
         self.db_url_opts.with_datastore(omdb, log, |opctx, datastore| {
             async move {
                 match &self.command {
+                    DbCommands::Blueprints(args) => {
+                        cmd_db_blueprint(&opctx, &datastore, &fetch_opts, &args).await
+                    }
                     DbCommands::CrucibleDataset(CrucibleDatasetArgs {
                         command: CrucibleDatasetCommands::List,
                     }) => {

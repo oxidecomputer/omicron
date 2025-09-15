@@ -1132,6 +1132,8 @@ table! {
     }
 }
 
+allow_tables_to_appear_in_same_query!(blueprint, debug_log_blueprint_planning);
+
 table! {
     rendezvous_debug_dataset (id) {
         id -> Uuid,
