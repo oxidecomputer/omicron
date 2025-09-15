@@ -253,15 +253,16 @@ pub(crate) fn plan_mgs_updates(
         }
 
         let PlannedMgsUpdates {
-            pending_updates: update,
+            pending_updates: updates,
             pending_host_phase_2_changes: mut host_phase_2,
             skipped_mgs_updates: mut skipped_updates,
         } = try_make_update(log, board, inventory, current_artifacts);
 
-        if !update.is_empty() {
+        // TODO-K: Is there a bug here somehow?
+        if !updates.is_empty() {
             // We can safely unwrap because we just created the update with the
             // baseboard_id in try_make_update above
-            let update = update.get(&board).unwrap();
+            let update = updates.get(&board).unwrap();
             info!(log, "configuring MGS-driven update"; update);
             pending_updates.insert(update.clone());
         } else {
