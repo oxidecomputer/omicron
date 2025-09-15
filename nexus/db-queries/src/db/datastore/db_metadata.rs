@@ -747,8 +747,6 @@ impl DataStore {
         // (We use the lower-level pool interface to bypass that.)
         let conn = self.pool.claim_quiesced().await?;
 
-        // XXX-dap could use a separate user here who only has this one
-        // privilege.
         use nexus_db_schema::schema::db_metadata_nexus::dsl;
 
         let nexus_id = nexus_db_model::to_db_typed_uuid(nexus_id);

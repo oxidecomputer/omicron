@@ -347,7 +347,7 @@ impl Nexus {
         );
         let quiesce = NexusQuiesceHandle::new(
             db_datastore.clone(),
-            config.deployment.id.into(),
+            config.deployment.id,
             blueprint_load_rx,
             quiesce_opctx,
         );
