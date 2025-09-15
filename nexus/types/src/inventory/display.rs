@@ -8,7 +8,6 @@ use std::{
     borrow::Cow,
     collections::{BTreeMap, BTreeSet},
     fmt::{self, Write},
-    sync::LazyLock,
 };
 
 use chrono::SecondsFormat;
@@ -1015,8 +1014,7 @@ fn display_orphaned_datasets(
     f: &mut dyn fmt::Write,
 ) -> fmt::Result {
     // Helper for `unwrap_or()` passing borrow check below
-    static EMPTY_SET: LazyLock<IdOrdMap<OrphanedDataset>> =
-        LazyLock::new(IdOrdMap::new);
+    static EMPTY_SET: IdOrdMap<OrphanedDataset> = IdOrdMap::new();
 
     let mut f = f;
     writeln!(f, "ORPHANED DATASETS")?;
