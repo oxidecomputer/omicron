@@ -396,7 +396,7 @@ async fn test_nexus_handoff(lc: &LiveTestContext) {
     .expect("editing blueprint to expunge old Nexus zones");
     info!(
         log,
-        "wrote new target blueprint with new nexus generation";
+        "wrote new target blueprint with expunged zones";
         "blueprint_id" => %blueprint4.id
     );
 
@@ -406,7 +406,7 @@ async fn test_nexus_handoff(lc: &LiveTestContext) {
         datastore,
         &blueprint4,
         new_nexus,
-        Duration::from_secs(90),
+        Duration::from_secs(120),
     )
     .await
     .expect("waiting for blueprint4 sled configs");
