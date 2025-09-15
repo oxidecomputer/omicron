@@ -457,11 +457,7 @@ fn do_authz_resource(
                     "list_children" if "viewer" on "containing_project";
                     "read" if "viewer" on "containing_project";
                     
-                    # Silo admins can always perform networking actions (override restrictions)  
-                    "modify" if "admin" on "containing_project".parent_silo;
-                    "create_child" if "admin" on "containing_project".parent_silo;
-                    
-                    # Project collaborators can perform networking actions (restriction logic via has_permission rules)
+                    # Basic networking permissions - restrictions enforced by has_permission overrides
                     "modify" if "collaborator" on "containing_project";
                     "create_child" if "collaborator" on "containing_project";
                 }}
@@ -495,11 +491,7 @@ fn do_authz_resource(
                     "list_children" if "viewer" on "containing_project";
                     "read" if "viewer" on "containing_project";
                     
-                    # Silo admins can always perform networking actions (override restrictions)  
-                    "modify" if "admin" on "containing_project".parent_silo;
-                    "create_child" if "admin" on "containing_project".parent_silo;
-                    
-                    # Project collaborators can perform networking actions (restriction logic via has_permission rules)
+                    # Basic networking permissions - restrictions enforced by has_permission overrides
                     "modify" if "collaborator" on "containing_project";
                     "create_child" if "collaborator" on "containing_project";
                 }}
