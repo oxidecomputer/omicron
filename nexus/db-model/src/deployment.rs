@@ -28,7 +28,6 @@ use nexus_db_schema::schema::{
     debug_log_blueprint_planning,
 };
 use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
-use nexus_types::deployment::{BlueprintHostPhase2DesiredSlots, PlanningReport};
 use nexus_types::deployment::BlueprintPhysicalDiskConfig;
 use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
 use nexus_types::deployment::BlueprintTarget;
@@ -49,6 +48,9 @@ use nexus_types::deployment::{
 use nexus_types::deployment::{BlueprintDatasetDisposition, ExpectedVersion};
 use nexus_types::deployment::{
     BlueprintHostPhase2DesiredContents, PendingMgsUpdateHostPhase1Details,
+};
+use nexus_types::deployment::{
+    BlueprintHostPhase2DesiredSlots, PlanningReport,
 };
 use nexus_types::deployment::{BlueprintZoneImageSource, blueprint_zone_type};
 use nexus_types::deployment::{
