@@ -207,7 +207,7 @@ async fn cmd_db_blueprint_planner_report_show(
 
     let our_git_commit = env!("VERGEN_GIT_SHA");
     if our_git_commit != log_git_commit {
-        println!(
+        eprintln!(
             "WARNING: planner report debug log was produced by a Nexus \
              on git commit {log_git_commit}, but omdb was built from \
              {our_git_commit}. We will attempt to parse it anyway."
