@@ -311,8 +311,7 @@ async fn do_quiesce(mut quiesce: NexusQuiesceHandle) {
 /// Otherwise, returns an error describing why we're not drained.
 ///
 /// Invoked by the caller in a loop until this function returns that we're
-/// quiesced.  This function sleeps as necessary to avoid spinning when called
-/// in a loop.
+/// quiesced.
 async fn check_all_sagas_drained(
     quiesce: &mut NexusQuiesceHandle,
     last_recorded_blueprint_id: &mut Option<BlueprintUuid>,
