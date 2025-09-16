@@ -63,6 +63,7 @@ use omicron_uuid_kinds::VnicUuid;
 use omicron_uuid_kinds::{BlueprintUuid, MupdateOverrideUuid};
 use omicron_uuid_kinds::{CollectionUuid, MupdateUuid};
 use std::borrow::Cow;
+use std::collections::BTreeSet;
 use std::convert::Infallible;
 use std::fmt::{self, Write};
 use std::io::IsTerminal;
@@ -158,6 +159,9 @@ impl ReconfiguratorSim {
         builder.set_internal_dns_version(parent_blueprint.internal_dns_version);
         builder.set_external_dns_version(parent_blueprint.external_dns_version);
 
+        let mut active_nexus_zones = BTreeSet::new();
+        let mut not_yet_nexus_zones = BTreeSet::new();
+
         for (_, zone) in parent_blueprint
             .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
         {
@@ -179,7 +183,26 @@ impl ReconfiguratorSim {
                     .add_omicron_zone_nic(zone.id, nic)
                     .context("adding omicron zone NIC")?;
             }
+
+            match &zone.zone_type {
+                nexus_types::deployment::BlueprintZoneType::Nexus(nexus) => {
+                    if nexus.nexus_generation
+                        == parent_blueprint.nexus_generation
+                    {
+                        active_nexus_zones.insert(zone.id);
+                    } else if nexus.nexus_generation
+                        > parent_blueprint.nexus_generation
+                    {
+                        not_yet_nexus_zones.insert(zone.id);
+                    }
+                }
+                _ => (),
+            }
         }
+
+        builder.set_active_nexuses(active_nexus_zones);
+        builder.set_not_yet_nexuses(not_yet_nexus_zones);
+
         Ok(builder.build())
     }
 }
@@ -695,6 +718,7 @@ enum BlueprintEditCommands {
     AddNexus {
         /// sled on which to deploy the new instance
         sled_id: SledOpt,
+
         /// image source for the new zone
         ///
         /// The image source is required if the planning input of the system
