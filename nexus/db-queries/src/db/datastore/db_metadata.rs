@@ -29,6 +29,7 @@ use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use semver::Version;
 use slog::{Logger, error, info, o};
+use std::collections::BTreeSet;
 use std::ops::Bound;
 use std::str::FromStr;
 
@@ -775,8 +776,8 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         blueprint_id: BlueprintUuid,
-        active: &Vec<OmicronZoneUuid>,
-        not_yet: &Vec<OmicronZoneUuid>,
+        active: &BTreeSet<OmicronZoneUuid>,
+        not_yet: &BTreeSet<OmicronZoneUuid>,
     ) -> Result<(), Error> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
 

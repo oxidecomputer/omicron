@@ -5,12 +5,12 @@
 //! Manages deployment of records into the database.
 
 use anyhow::anyhow;
-use nexus_db_model::DbMetadataNexusState;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintZoneDisposition;
-use nexus_types::deployment::BlueprintZoneType;
+use omicron_uuid_kinds::OmicronZoneUuid;
+use std::collections::BTreeSet;
 
 /// Idempotently ensure that the Nexus records for the zones are populated
 /// in the database.
@@ -18,34 +18,39 @@ pub(crate) async fn deploy_db_metadata_nexus_records(
     opctx: &OpContext,
     datastore: &DataStore,
     blueprint: &Blueprint,
+    nexus_id: OmicronZoneUuid,
 ) -> Result<(), anyhow::Error> {
-    // We need to determine the generation of the currently running set of
-    // Nexuses. This is usually the same as "blueprint.nexus_generation", but
-    // can lag behind it if we are one of those Nexuses running after quiescing
-    // has started.
-    let active_nexus_zones = datastore
-        .get_db_metadata_nexus_in_state(opctx, &[DbMetadataNexusState::Active])
-        .await?
-        .into_iter()
-        .map(|z| z.nexus_id())
-        .collect::<std::collections::BTreeSet<_>>();
+    // To determine what state to use for new records, we need to know which is
+    // the currently active Nexus generation.  This is not quite the same as the
+    // blueprint's `nexus_generation`.  That field describes which generation
+    // the system is *trying* to put in control.  It gets bumped in order to
+    // trigger the handoff process.  But between when it gets bumped and when
+    // the handoff has finished, that generation number is ahead of the one
+    // currently in control.
+    //
+    // The actual generation number that's currently active is necessarily the
+    // generation number of the Nexus instance that's doing the execution.
     let active_generation = blueprint
-        .find_generation_for_nexus(&active_nexus_zones)
+        .all_nexus_zones(BlueprintZoneDisposition::is_in_service)
+        .find_map(|(_sled_id, zone_cfg, nexus_config)| {
+            (zone_cfg.id == nexus_id).then_some(nexus_config.nexus_generation)
+        })
         .ok_or_else(|| {
-            anyhow!("No Nexuses with active db_metadata_nexus records found in blueprint")
+            anyhow!(
+                "did not find nexus generation for current \
+                 Nexus zone ({nexus_id})"
+            )
         })?;
 
-    let mut active = vec![];
-    let mut not_yet = vec![];
-    for (_, zone) in
-        blueprint.all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+    let mut active = BTreeSet::new();
+    let mut not_yet = BTreeSet::new();
+    for (_, zone, nexus_config) in
+        blueprint.all_nexus_zones(BlueprintZoneDisposition::is_in_service)
     {
-        if let BlueprintZoneType::Nexus(ref nexus) = zone.zone_type {
-            if nexus.nexus_generation == active_generation {
-                active.push(zone.id);
-            } else if nexus.nexus_generation > active_generation {
-                not_yet.push(zone.id);
-            }
+        if nexus_config.nexus_generation == active_generation {
+            active.insert(zone.id);
+        } else if nexus_config.nexus_generation > active_generation {
+            not_yet.insert(zone.id);
         }
     }
 
@@ -245,9 +250,11 @@ mod test {
             .expect("Failed to set blueprint target");
 
         // Create nexus access records
-        deploy_db_metadata_nexus_records(&opctx, datastore, &blueprint)
-            .await
-            .expect("Failed to create nexus access");
+        deploy_db_metadata_nexus_records(
+            &opctx, datastore, &blueprint, nexus1_id,
+        )
+        .await
+        .expect("Failed to create nexus access");
 
         // Verify records were created for in-service Nexuses.
         let nexus1_access = datastore
@@ -358,9 +365,11 @@ mod test {
             .expect("Failed to set blueprint target");
 
         // Create nexus access records
-        deploy_db_metadata_nexus_records(&opctx, datastore, &blueprint)
-            .await
-            .expect("Failed to create nexus access");
+        deploy_db_metadata_nexus_records(
+            &opctx, datastore, &blueprint, nexus1_id,
+        )
+        .await
+        .expect("Failed to create nexus access");
 
         // Verify records were created for in-service Nexuses.
         let nexus1_access = datastore
@@ -470,9 +479,11 @@ mod test {
         confirm_state(datastore, nexus2_id, DbMetadataNexusState::Active).await;
 
         // Creating the record again: not an error.
-        deploy_db_metadata_nexus_records(&opctx, datastore, &blueprint)
-            .await
-            .expect("Failed to create nexus access");
+        deploy_db_metadata_nexus_records(
+            &opctx, datastore, &blueprint, nexus1_id,
+        )
+        .await
+        .expect("Failed to create nexus access");
         confirm_state(datastore, nexus1_id, DbMetadataNexusState::Active).await;
         confirm_state(datastore, nexus2_id, DbMetadataNexusState::Active).await;
 
@@ -484,9 +495,11 @@ mod test {
 
         // Create nexus access records another time - should be idempotent,
         // but should be "on-conflict, ignore".
-        deploy_db_metadata_nexus_records(&opctx, datastore, &blueprint)
-            .await
-            .expect("Failed to create nexus access");
+        deploy_db_metadata_nexus_records(
+            &opctx, datastore, &blueprint, nexus1_id,
+        )
+        .await
+        .expect("Failed to create nexus access");
         confirm_state(datastore, nexus1_id, DbMetadataNexusState::Quiesced)
             .await;
         confirm_state(datastore, nexus2_id, DbMetadataNexusState::Active).await;
@@ -560,6 +573,7 @@ mod test {
             &opctx,
             datastore,
             &non_target_blueprint,
+            nexus1_id,
         )
         .await;
         assert!(
@@ -578,9 +592,14 @@ mod test {
         );
 
         // Verify that using the correct target blueprint works
-        deploy_db_metadata_nexus_records(&opctx, datastore, &target_blueprint)
-            .await
-            .expect("Failed to create nexus access");
+        deploy_db_metadata_nexus_records(
+            &opctx,
+            datastore,
+            &target_blueprint,
+            nexus1_id,
+        )
+        .await
+        .expect("Failed to create nexus access");
 
         let access_after_correct = datastore
             .database_nexus_access(nexus2_id)

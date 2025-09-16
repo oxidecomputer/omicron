@@ -314,6 +314,25 @@ impl Blueprint {
         )
     }
 
+    /// Iterate over all Nexus zones that match the provided filter.
+    pub fn all_nexus_zones<F>(
+        &self,
+        filter: F,
+    ) -> impl Iterator<
+        Item = (SledUuid, &BlueprintZoneConfig, &blueprint_zone_type::Nexus),
+    >
+    where
+        F: FnMut(BlueprintZoneDisposition) -> bool,
+    {
+        self.all_omicron_zones(filter).filter_map(|(sled_id, zone)| {
+            if let BlueprintZoneType::Nexus(nexus_config) = &zone.zone_type {
+                Some((sled_id, zone, nexus_config))
+            } else {
+                None
+            }
+        })
+    }
+
     /// Iterate over the [`BlueprintZoneConfig`] instances that match the
     /// provided filter, along with the associated sled id.
     //
