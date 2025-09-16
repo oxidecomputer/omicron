@@ -84,8 +84,6 @@ async fn test_nexus_handoff(lc: &LiveTestContext) {
         );
     }
 
-    // XXX-dap make sure autoplanner is off
-
     // Identify the current generation of Nexus zones.
     struct CurrentNexusZone<'a> {
         sled_id: SledUuid,
