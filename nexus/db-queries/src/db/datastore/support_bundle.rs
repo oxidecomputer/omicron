@@ -522,6 +522,7 @@ mod test {
     use nexus_reconfigurator_planning::example::ExampleSystemBuilder;
     use nexus_reconfigurator_planning::example::SimRngState;
     use nexus_types::deployment::Blueprint;
+    use nexus_types::deployment::BlueprintWithPlanningReport;
     use nexus_types::deployment::BlueprintZoneType;
     use omicron_common::api::external::ByteCount;
     use omicron_common::api::external::LookupType;
@@ -1053,6 +1054,7 @@ mod test {
         //
         // Regardless, make this starter blueprint our target.
         bp1.parent_blueprint_id = None;
+        let bp1 = BlueprintWithPlanningReport::with_empty_report(bp1);
         bp_insert_and_make_target(&opctx, &datastore, &bp1).await;
 
         // Manually perform the equivalent of blueprint execution to populate
@@ -1159,6 +1161,7 @@ mod test {
         //
         // Regardless, make this starter blueprint our target.
         bp1.parent_blueprint_id = None;
+        let bp1 = BlueprintWithPlanningReport::with_empty_report(bp1);
         bp_insert_and_make_target(&opctx, &datastore, &bp1).await;
 
         // Manually perform the equivalent of blueprint execution to populate
@@ -1264,6 +1267,7 @@ mod test {
         .build();
 
         bp1.parent_blueprint_id = None;
+        let bp1 = BlueprintWithPlanningReport::with_empty_report(bp1);
         bp_insert_and_make_target(&opctx, &datastore, &bp1).await;
 
         // Manually perform the equivalent of blueprint execution to populate
@@ -1387,6 +1391,7 @@ mod test {
         .build();
 
         bp1.parent_blueprint_id = None;
+        let bp1 = BlueprintWithPlanningReport::with_empty_report(bp1);
         bp_insert_and_make_target(&opctx, &datastore, &bp1).await;
 
         // Manually perform the equivalent of blueprint execution to populate

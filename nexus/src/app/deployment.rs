@@ -16,7 +16,6 @@ use nexus_types::deployment::BlueprintTargetSet;
 use nexus_types::deployment::BlueprintWithPlanningReport;
 use nexus_types::deployment::PlannerConfig;
 use nexus_types::deployment::PlanningInput;
-use nexus_types::deployment::PlanningReport;
 use nexus_types::internal_api::views::UpdateStatus;
 use nexus_types::inventory::Collection;
 use omicron_common::api::external::CreateResult;
@@ -213,8 +212,8 @@ impl super::Nexus {
         blueprint: Blueprint,
     ) -> Result<(), Error> {
         // Imported blueprints have no planning report; construct an empty one.
-        let report = PlanningReport::new(blueprint.id);
-        let blueprint = BlueprintWithPlanningReport { blueprint, report };
+        let blueprint =
+            BlueprintWithPlanningReport::with_empty_report(blueprint);
         self.blueprint_add(&opctx, &blueprint).await
     }
 

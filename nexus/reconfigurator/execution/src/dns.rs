@@ -337,6 +337,7 @@ mod test {
     use nexus_types::deployment::BlueprintHostPhase2DesiredSlots;
     use nexus_types::deployment::BlueprintSledConfig;
     use nexus_types::deployment::BlueprintTarget;
+    use nexus_types::deployment::BlueprintWithPlanningReport;
     use nexus_types::deployment::BlueprintZoneConfig;
     use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::BlueprintZoneImageSource;
@@ -351,7 +352,6 @@ mod test {
     use nexus_types::deployment::OximeterReadPolicy;
     use nexus_types::deployment::PendingMgsUpdates;
     use nexus_types::deployment::PlannerConfig;
-    use nexus_types::deployment::PlanningReport;
     use nexus_types::deployment::SledFilter;
     use nexus_types::deployment::TufRepoPolicy;
     use nexus_types::deployment::blueprint_zone_type;
@@ -729,7 +729,6 @@ mod test {
             time_created: now_db_precision(),
             creator: "test-suite".to_string(),
             comment: "test blueprint".to_string(),
-            report: PlanningReport::new(blueprint_id),
         };
 
         // To make things slightly more interesting, let's add a zone that's
@@ -1578,6 +1577,8 @@ mod test {
         // Set this blueprint as the current target.  We set it to disabled
         // because we're controlling the execution directly here.  But we need
         // to do this so that silo creation sees the change.
+        let blueprint2 =
+            BlueprintWithPlanningReport::with_empty_report(blueprint2);
         datastore
             .blueprint_insert(&opctx, &blueprint2)
             .await

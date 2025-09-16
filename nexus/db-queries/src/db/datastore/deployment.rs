@@ -3188,6 +3188,8 @@ mod tests {
             std::iter::empty(),
             "test",
         );
+        let blueprint1 =
+            BlueprintWithPlanningReport::with_empty_report(blueprint1);
         let authz_blueprint = authz_blueprint_from_id(blueprint1.id);
 
         // Trying to read it from the database should fail with the relevant
@@ -3207,7 +3209,7 @@ mod tests {
             .blueprint_read(&opctx, &authz_blueprint)
             .await
             .expect("failed to read blueprint back");
-        assert_eq!(blueprint1, blueprint_read);
+        assert_eq!(*blueprint1, blueprint_read);
         assert_eq!(
             blueprint_list_all_ids(&opctx, &datastore).await,
             [blueprint1.id]
@@ -3245,6 +3247,8 @@ mod tests {
         // Create a cohesive representative collection/policy/blueprint
         let (collection, planning_input, blueprint1) =
             representative(&logctx.log, TEST_NAME);
+        let blueprint1 =
+            BlueprintWithPlanningReport::with_empty_report(blueprint1);
         let authz_blueprint1 = authz_blueprint_from_id(blueprint1.id);
 
         // Write it to the database and read it back.
@@ -3256,7 +3260,7 @@ mod tests {
             .blueprint_read(&opctx, &authz_blueprint1)
             .await
             .expect("failed to read collection back");
-        assert_eq!(blueprint1, blueprint_read);
+        assert_eq!(*blueprint1, blueprint_read);
         assert_eq!(
             blueprint_list_all_ids(&opctx, &datastore).await,
             [blueprint1.id]
@@ -3292,7 +3296,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             datastore.blueprint_target_get_current_full(&opctx).await.unwrap(),
-            (bp1_target, blueprint1.clone())
+            (bp1_target, (*blueprint1).clone())
         );
         let err = datastore
             .blueprint_delete(&opctx, &authz_blueprint1)
@@ -3579,7 +3583,8 @@ mod tests {
         let num_new_crucible_zones = new_sled_zpools.len();
         let num_new_sled_zones = num_new_ntp_zones + num_new_crucible_zones;
 
-        let blueprint2 = builder.build();
+        let blueprint2 =
+            BlueprintWithPlanningReport::with_empty_report(builder.build());
         let authz_blueprint2 = authz_blueprint_from_id(blueprint2.id);
 
         let diff = blueprint2.diff_since_blueprint(&blueprint1);
@@ -3626,7 +3631,7 @@ mod tests {
             .expect("failed to read collection back");
         let diff = blueprint_read.diff_since_blueprint(&blueprint2);
         println!("diff: {}", diff.display());
-        assert_eq!(blueprint2, blueprint_read);
+        assert_eq!(*blueprint2, blueprint_read);
         assert_eq!(blueprint2.internal_dns_version, new_internal_dns_version);
         assert_eq!(blueprint2.external_dns_version, new_external_dns_version);
         {
@@ -3651,7 +3656,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             datastore.blueprint_target_get_current_full(&opctx).await.unwrap(),
-            (bp2_target, blueprint2.clone())
+            (bp2_target, (*blueprint2).clone())
         );
         let err = datastore
             .blueprint_delete(&opctx, &authz_blueprint2)
@@ -3707,14 +3712,15 @@ mod tests {
             artifact_hash: ArtifactHash([72; 32]),
             artifact_version: "2.0.0".parse().unwrap(),
         });
-        let blueprint3 = builder.build();
+        let blueprint3 =
+            BlueprintWithPlanningReport::with_empty_report(builder.build());
         let authz_blueprint3 = authz_blueprint_from_id(blueprint3.id);
         datastore
             .blueprint_insert(&opctx, &blueprint3)
             .await
             .expect("failed to insert blueprint");
         assert_eq!(
-            blueprint3,
+            *blueprint3,
             datastore
                 .blueprint_read(&opctx, &authz_blueprint3)
                 .await
@@ -3761,14 +3767,15 @@ mod tests {
             artifact_hash: ArtifactHash([72; 32]),
             artifact_version: "2.0.0".parse().unwrap(),
         });
-        let blueprint4 = builder.build();
+        let blueprint4 =
+            BlueprintWithPlanningReport::with_empty_report(builder.build());
         let authz_blueprint4 = authz_blueprint_from_id(blueprint4.id);
         datastore
             .blueprint_insert(&opctx, &blueprint4)
             .await
             .expect("failed to insert blueprint");
         assert_eq!(
-            blueprint4,
+            *blueprint4,
             datastore
                 .blueprint_read(&opctx, &authz_blueprint4)
                 .await
@@ -3819,14 +3826,15 @@ mod tests {
             artifact_hash: ArtifactHash([72; 32]),
             artifact_version: "2.0.0".parse().unwrap(),
         });
-        let blueprint5 = builder.build();
+        let blueprint5 =
+            BlueprintWithPlanningReport::with_empty_report(builder.build());
         let authz_blueprint5 = authz_blueprint_from_id(blueprint5.id);
         datastore
             .blueprint_insert(&opctx, &blueprint5)
             .await
             .expect("failed to insert blueprint");
         assert_eq!(
-            blueprint5,
+            *blueprint5,
             datastore
                 .blueprint_read(&opctx, &authz_blueprint5)
                 .await
@@ -3846,16 +3854,18 @@ mod tests {
 
         // Now make a new blueprint (with no meaningful changes) to ensure we
         // can delete the last test blueprint we generated above.
-        let blueprint6 = BlueprintBuilder::new_based_on(
-            &logctx.log,
-            &blueprint5,
-            &planning_input,
-            &collection,
-            "dummy",
-            PlannerRng::from_entropy(),
-        )
-        .expect("failed to create builder")
-        .build();
+        let blueprint6 = BlueprintWithPlanningReport::with_empty_report(
+            BlueprintBuilder::new_based_on(
+                &logctx.log,
+                &blueprint5,
+                &planning_input,
+                &collection,
+                "dummy",
+                PlannerRng::from_entropy(),
+            )
+            .expect("failed to create builder")
+            .build(),
+        );
         datastore
             .blueprint_insert(&opctx, &blueprint6)
             .await
@@ -3949,6 +3959,12 @@ mod tests {
         assert_eq!(blueprint3.parent_blueprint_id, Some(blueprint1.id));
 
         // Insert all three into the blueprint table.
+        let blueprint1 =
+            BlueprintWithPlanningReport::with_empty_report(blueprint1);
+        let blueprint2 =
+            BlueprintWithPlanningReport::with_empty_report(blueprint2);
+        let blueprint3 =
+            BlueprintWithPlanningReport::with_empty_report(blueprint3);
         datastore.blueprint_insert(&opctx, &blueprint1).await.unwrap();
         datastore.blueprint_insert(&opctx, &blueprint2).await.unwrap();
         datastore.blueprint_insert(&opctx, &blueprint3).await.unwrap();
@@ -3999,7 +4015,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             datastore.blueprint_target_get_current_full(&opctx).await.unwrap(),
-            (bp1_target, blueprint1.clone())
+            (bp1_target, (*blueprint1).clone())
         );
 
         // Now that blueprint1 is the current target, we should be able to
@@ -4010,7 +4026,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             datastore.blueprint_target_get_current_full(&opctx).await.unwrap(),
-            (bp3_target, blueprint3.clone())
+            (bp3_target, (*blueprint3).clone())
         );
 
         // Now that blueprint3 is the target, trying to insert blueprint1 or
@@ -4035,16 +4051,18 @@ mod tests {
 
         // Create a child of blueprint3, and ensure when we set it as the target
         // with enabled=false, that status is serialized.
-        let blueprint4 = BlueprintBuilder::new_based_on(
-            &logctx.log,
-            &blueprint3,
-            &EMPTY_PLANNING_INPUT,
-            &collection,
-            "test3",
-            PlannerRng::from_entropy(),
-        )
-        .expect("failed to create builder")
-        .build();
+        let blueprint4 = BlueprintWithPlanningReport::with_empty_report(
+            BlueprintBuilder::new_based_on(
+                &logctx.log,
+                &blueprint3,
+                &EMPTY_PLANNING_INPUT,
+                &collection,
+                "test3",
+                PlannerRng::from_entropy(),
+            )
+            .expect("failed to create builder")
+            .build(),
+        );
         assert_eq!(blueprint4.parent_blueprint_id, Some(blueprint3.id));
         datastore.blueprint_insert(&opctx, &blueprint4).await.unwrap();
         let bp4_target = BlueprintTarget {
@@ -4058,7 +4076,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             datastore.blueprint_target_get_current_full(&opctx).await.unwrap(),
-            (bp4_target, blueprint4)
+            (bp4_target, (*blueprint4).clone())
         );
 
         // Clean up.
@@ -4095,6 +4113,10 @@ mod tests {
         assert_eq!(blueprint2.parent_blueprint_id, Some(blueprint1.id));
 
         // Insert both into the blueprint table.
+        let blueprint1 =
+            BlueprintWithPlanningReport::with_empty_report(blueprint1);
+        let blueprint2 =
+            BlueprintWithPlanningReport::with_empty_report(blueprint2);
         datastore.blueprint_insert(&opctx, &blueprint1).await.unwrap();
         datastore.blueprint_insert(&opctx, &blueprint2).await.unwrap();
 
@@ -4183,7 +4205,7 @@ mod tests {
     async fn create_blueprint_with_external_ip(
         datastore: &DataStore,
         opctx: &OpContext,
-    ) -> Blueprint {
+    ) -> BlueprintWithPlanningReport {
         // Create an initial blueprint and a child.
         let sled_id = SledUuid::new_v4();
         let mut blueprint = BlueprintBuilder::build_empty_with_sleds(
@@ -4259,7 +4281,7 @@ mod tests {
             },
         );
 
-        blueprint
+        BlueprintWithPlanningReport::with_empty_report(blueprint)
     }
 
     #[tokio::test]
@@ -4359,6 +4381,12 @@ mod tests {
         // Insert both (plus the original parent of blueprint1, internal to
         // `ExampleSystemBuilder`) into the blueprint table.
         let blueprint0 = example_system.initial_blueprint;
+        let blueprint0 =
+            BlueprintWithPlanningReport::with_empty_report(blueprint0);
+        let blueprint1 =
+            BlueprintWithPlanningReport::with_empty_report(blueprint1);
+        let blueprint2 =
+            BlueprintWithPlanningReport::with_empty_report(blueprint2);
         datastore.blueprint_insert(&opctx, &blueprint0).await.unwrap();
         datastore.blueprint_insert(&opctx, &blueprint1).await.unwrap();
         datastore.blueprint_insert(&opctx, &blueprint2).await.unwrap();

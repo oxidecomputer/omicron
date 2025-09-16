@@ -194,8 +194,8 @@ mod test {
     use nexus_inventory::now_db_precision;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::{
-        Blueprint, BlueprintTarget, CockroachDbPreserveDowngrade,
-        OximeterReadMode, PendingMgsUpdates, PlanningReport,
+        Blueprint, BlueprintTarget, BlueprintWithPlanningReport,
+        CockroachDbPreserveDowngrade, OximeterReadMode, PendingMgsUpdates,
     };
     use omicron_common::api::external::Generation;
     use omicron_uuid_kinds::BlueprintUuid;
@@ -207,7 +207,7 @@ mod test {
 
     fn create_blueprint(
         parent_blueprint_id: BlueprintUuid,
-    ) -> (BlueprintTarget, Blueprint) {
+    ) -> (BlueprintTarget, BlueprintWithPlanningReport) {
         let id = BlueprintUuid::new_v4();
         (
             BlueprintTarget {
@@ -215,7 +215,7 @@ mod test {
                 enabled: true,
                 time_made_target: now_db_precision(),
             },
-            Blueprint {
+            BlueprintWithPlanningReport::with_empty_report(Blueprint {
                 id,
                 sleds: BTreeMap::new(),
                 pending_mgs_updates: PendingMgsUpdates::new(),
@@ -233,8 +233,7 @@ mod test {
                 time_created: now_db_precision(),
                 creator: "test".to_string(),
                 comment: "test blueprint".to_string(),
-                report: PlanningReport::new(id),
-            },
+            }),
         )
     }
 
@@ -286,7 +285,7 @@ mod test {
         assert_eq!(update.status, "target blueprint updated");
         let rx_update = rx.borrow_and_update().clone().unwrap();
         assert_eq!(rx_update.0, target);
-        assert_eq!(rx_update.1, blueprint);
+        assert_eq!(rx_update.1, *blueprint);
 
         // Activation without changing the target blueprint results in no update
         let value = task.activate(&opctx).await;
@@ -308,7 +307,7 @@ mod test {
         assert_eq!(update.status, "target blueprint updated");
         let rx_update = rx.borrow_and_update().clone().unwrap();
         assert_eq!(rx_update.0, new_target);
-        assert_eq!(rx_update.1, new_blueprint);
+        assert_eq!(rx_update.1, *new_blueprint);
 
         // Activating again without changing the target blueprint results in
         // no update

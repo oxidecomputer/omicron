@@ -2968,6 +2968,7 @@ fn is_services_vpc_gateway(igw: &InternetGateway) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::db::datastore::test::bp_insert_and_make_target;
     use crate::db::datastore::test_utils::IneligibleSleds;
     use crate::db::model::Project;
     use crate::db::pub_test_utils::TestDatabase;
@@ -2980,8 +2981,7 @@ mod tests {
     use nexus_reconfigurator_planning::planner::PlannerRng;
     use nexus_reconfigurator_planning::system::SledBuilder;
     use nexus_reconfigurator_planning::system::SystemDescription;
-    use nexus_types::deployment::Blueprint;
-    use nexus_types::deployment::BlueprintTarget;
+    use nexus_types::deployment::BlueprintWithPlanningReport;
     use nexus_types::deployment::BlueprintZoneConfig;
     use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::BlueprintZoneImageSource;
@@ -3230,28 +3230,6 @@ mod tests {
         assert_eq!(expected_sled_ids, service_sled_ids);
     }
 
-    async fn bp_insert_and_make_target(
-        opctx: &OpContext,
-        datastore: &DataStore,
-        bp: &Blueprint,
-    ) {
-        datastore
-            .blueprint_insert(opctx, bp)
-            .await
-            .expect("inserted blueprint");
-        datastore
-            .blueprint_target_set_current(
-                opctx,
-                BlueprintTarget {
-                    target_id: bp.id,
-                    enabled: true,
-                    time_made_target: Utc::now(),
-                },
-            )
-            .await
-            .expect("made blueprint the target");
-    }
-
     #[tokio::test]
     async fn test_vpc_resolve_to_sleds_uses_current_target_blueprint() {
         // Test setup.
@@ -3303,9 +3281,11 @@ mod tests {
         };
 
         // Create an initial, empty blueprint, and make it the target.
-        let bp0 = BlueprintBuilder::build_empty_with_sleds(
-            sled_ids.iter().copied(),
-            "test",
+        let bp0 = BlueprintWithPlanningReport::with_empty_report(
+            BlueprintBuilder::build_empty_with_sleds(
+                sled_ids.iter().copied(),
+                "test",
+            ),
         );
         bp_insert_and_make_target(&opctx, &datastore, &bp0).await;
 
@@ -3348,7 +3328,7 @@ mod tests {
                     bp0.nexus_generation,
                 )
                 .expect("added nexus to third sled");
-            builder.build()
+            BlueprintWithPlanningReport::with_empty_report(builder.build())
         };
         bp_insert_and_make_target(&opctx, &datastore, &bp1).await;
 
@@ -3426,7 +3406,7 @@ mod tests {
                     )
                     .expect("added nexus to third sled");
             }
-            builder.build()
+            BlueprintWithPlanningReport::with_empty_report(builder.build())
         };
 
         // Insert the service NIC records for all the Nexuses.

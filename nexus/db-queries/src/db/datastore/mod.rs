@@ -590,8 +590,8 @@ mod test {
     use nexus_db_lookup::LookupPath;
     use nexus_db_model::IpAttachState;
     use nexus_db_model::to_db_typed_uuid;
-    use nexus_types::deployment::Blueprint;
     use nexus_types::deployment::BlueprintTarget;
+    use nexus_types::deployment::BlueprintWithPlanningReport;
     use nexus_types::external_api::params;
     use nexus_types::silo::DEFAULT_SILO_ID;
     use omicron_common::address::REPO_DEPOT_PORT;
@@ -622,7 +622,7 @@ mod test {
     pub async fn bp_insert_and_make_target(
         opctx: &OpContext,
         datastore: &DataStore,
-        bp: &Blueprint,
+        bp: &BlueprintWithPlanningReport,
     ) {
         datastore
             .blueprint_insert(opctx, bp)

@@ -422,6 +422,17 @@ pub struct BlueprintWithPlanningReport {
 }
 
 impl BlueprintWithPlanningReport {
+    /// Create a `BlueprintWithPlanningReport` containing the given blueprint
+    /// and an empty report.
+    ///
+    /// This is useful for contexts that construct a blueprint outside the
+    /// planner (mostly tests, and RSS in production) but need a full
+    /// `BlueprintWithPlanningReport` for various reasons.
+    pub fn with_empty_report(blueprint: Blueprint) -> Self {
+        let report = PlanningReport::new(blueprint.id);
+        Self { blueprint, report }
+    }
+
     /// Return a struct that can be displayed to present information about the
     /// blueprint and its planning report.
     pub fn display(&self) -> BlueprintWithPlanningReportDisplay<'_> {

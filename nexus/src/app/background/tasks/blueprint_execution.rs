@@ -244,10 +244,10 @@ mod test {
     };
     use nexus_types::deployment::{
         Blueprint, BlueprintHostPhase2DesiredSlots, BlueprintSledConfig,
-        BlueprintTarget, BlueprintZoneConfig, BlueprintZoneDisposition,
-        BlueprintZoneImageSource, BlueprintZoneType,
+        BlueprintTarget, BlueprintWithPlanningReport, BlueprintZoneConfig,
+        BlueprintZoneDisposition, BlueprintZoneImageSource, BlueprintZoneType,
         CockroachDbPreserveDowngrade, OximeterReadMode, PendingMgsUpdates,
-        PlanningReport, blueprint_zone_type,
+        blueprint_zone_type,
     };
     use nexus_types::external_api::views::SledState;
     use omicron_common::api::external;
@@ -328,11 +328,12 @@ mod test {
             time_created: chrono::Utc::now(),
             creator: "test".to_string(),
             comment: "test blueprint".to_string(),
-            report: PlanningReport::new(id),
         };
+        let blueprint_with_report =
+            BlueprintWithPlanningReport::with_empty_report(blueprint);
 
         datastore
-            .blueprint_insert(opctx, &blueprint)
+            .blueprint_insert(opctx, &blueprint_with_report)
             .await
             .expect("inserted new blueprint");
         datastore
@@ -340,7 +341,7 @@ mod test {
             .await
             .expect("set new blueprint as current target");
 
-        (target, blueprint)
+        (target, blueprint_with_report.blueprint)
     }
 
     #[nexus_test(server = crate::Server)]
