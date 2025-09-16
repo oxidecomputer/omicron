@@ -1549,6 +1549,7 @@ impl<'a> BlueprintBuilder<'a> {
         &mut self,
         sled_id: SledUuid,
         image_source: BlueprintZoneImageSource,
+        nexus_generation: Generation,
     ) -> Result<(), Error> {
         // Whether Nexus should use TLS and what the external DNS servers it
         // should use are currently provided at rack-setup time, and should be
@@ -1577,6 +1578,7 @@ impl<'a> BlueprintBuilder<'a> {
             external_tls,
             external_dns_servers,
             image_source,
+            nexus_generation,
         )
     }
 
@@ -1586,6 +1588,7 @@ impl<'a> BlueprintBuilder<'a> {
         external_tls: bool,
         external_dns_servers: Vec<IpAddr>,
         image_source: BlueprintZoneImageSource,
+        nexus_generation: Generation,
     ) -> Result<(), Error> {
         let nexus_id = self.rng.sled_rng(sled_id).next_zone();
         let ExternalNetworkingChoice {
@@ -1624,7 +1627,7 @@ impl<'a> BlueprintBuilder<'a> {
             nic,
             external_tls,
             external_dns_servers: external_dns_servers.clone(),
-            nexus_generation: Generation::new(),
+            nexus_generation,
         });
         let filesystem_pool =
             self.sled_select_zpool(sled_id, zone_type.kind())?;
@@ -3343,6 +3346,7 @@ pub mod test {
                     .map(|sa| sa.sled_id)
                     .expect("no sleds present"),
                 BlueprintZoneImageSource::InstallDataset,
+                Generation::new(),
             )
             .unwrap_err();
 
@@ -3445,6 +3449,7 @@ pub mod test {
                 .sled_add_zone_nexus(
                     sled_id,
                     BlueprintZoneImageSource::InstallDataset,
+                    parent.nexus_generation,
                 )
                 .expect("added nexus zone");
         }
@@ -3467,6 +3472,7 @@ pub mod test {
                     .sled_add_zone_nexus(
                         sled_id,
                         BlueprintZoneImageSource::InstallDataset,
+                        parent.nexus_generation,
                     )
                     .expect("added nexus zone");
             }
@@ -3506,6 +3512,7 @@ pub mod test {
                 .sled_add_zone_nexus(
                     sled_id,
                     BlueprintZoneImageSource::InstallDataset,
+                    parent.nexus_generation,
                 )
                 .unwrap_err();
 

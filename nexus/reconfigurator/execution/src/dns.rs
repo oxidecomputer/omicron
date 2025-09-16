@@ -1560,6 +1560,7 @@ mod test {
             .sled_add_zone_nexus(
                 sled_id,
                 BlueprintZoneImageSource::InstallDataset,
+                blueprint.nexus_generation,
             )
             .unwrap();
         let blueprint2 = builder.build();

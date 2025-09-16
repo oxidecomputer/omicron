@@ -695,6 +695,10 @@ enum BlueprintEditCommands {
     AddNexus {
         /// sled on which to deploy the new instance
         sled_id: SledOpt,
+
+        /// generation of the new Nexus instance
+        nexus_generation: Generation,
+
         /// image source for the new zone
         ///
         /// The image source is required if the planning input of the system
@@ -1268,10 +1272,6 @@ struct LoadExampleArgs {
     /// The number of disks per sled in the example system.
     #[clap(short = 'd', long, default_value_t = SledBuilder::DEFAULT_NPOOLS)]
     ndisks_per_sled: u8,
-
-    /// Do not create zones in the example system.
-    #[clap(short = 'Z', long)]
-    no_zones: bool,
 
     /// Do not create entries for disks in the blueprint.
     #[clap(long)]
@@ -2129,7 +2129,11 @@ fn cmd_blueprint_edit(
     }
 
     let label = match args.edit_command {
-        BlueprintEditCommands::AddNexus { sled_id, image_source } => {
+        BlueprintEditCommands::AddNexus {
+            sled_id,
+            image_source,
+            nexus_generation,
+        } => {
             let sled_id = sled_id.to_sled_id(system.description())?;
             let image_source = image_source_unwrap_or(
                 image_source,
@@ -2137,7 +2141,7 @@ fn cmd_blueprint_edit(
                 ZoneKind::Nexus,
             )?;
             builder
-                .sled_add_zone_nexus(sled_id, image_source)
+                .sled_add_zone_nexus(sled_id, image_source, nexus_generation)
                 .context("failed to add Nexus zone")?;
             format!("added Nexus zone to sled {}", sled_id)
         }
@@ -2973,7 +2977,6 @@ fn cmd_load_example(
         )
         .external_dns_count(3)
         .context("invalid external DNS zone count")?
-        .create_zones(!args.no_zones)
         .create_disks_in_blueprint(!args.no_disks_in_blueprint);
     for sled_policy in args.sled_policy {
         builder = builder

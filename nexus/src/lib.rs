@@ -7,8 +7,6 @@
 // We only use rustdoc for internal documentation, including private items, so
 // it's expected that we'll have links to private items in the docs.
 #![allow(rustdoc::private_intra_doc_links)]
-// TODO(#40): Remove this exception once resolved.
-#![allow(clippy::unnecessary_wraps)]
 
 pub mod app; // Public for documentation examples
 mod cidata;
