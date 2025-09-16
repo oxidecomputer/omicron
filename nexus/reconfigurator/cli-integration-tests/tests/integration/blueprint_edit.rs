@@ -147,7 +147,13 @@ async fn test_blueprint_edit(cptestctx: &ControlPlaneTestContext) {
     // blueprint, and save the entire state to a new file.
     let mut s = String::new();
     swriteln!(s, "load {} {}", saved_state1_path, collection.id);
-    swriteln!(s, "blueprint-edit {} add-nexus {}", blueprint.id, sled_id);
+    swriteln!(
+        s,
+        "blueprint-edit {} add-nexus {} {}",
+        blueprint.id,
+        sled_id,
+        blueprint.nexus_generation
+    );
     swriteln!(s, "save {}", saved_state2_path);
     std::fs::write(&script1_path, &s)
         .with_context(|| format!("write {}", &script1_path))
