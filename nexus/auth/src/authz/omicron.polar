@@ -704,5 +704,86 @@ resource AlertClassList {
 has_relation(fleet: Fleet, "parent_fleet", collection: AlertClassList)
 	if collection.fleet = fleet;
 
+# NETWORKING RESTRICTIONS BASED ON SILO SETTINGS
+#
+# These rules enforce networking restrictions when a silo has restrict_network_actions = true.
+# For silos with this restriction, only Silo Admins can perform networking create/modify/delete actions,
+# while read/list actions remain available to all project collaborators.
+
+# Override networking permissions for VPCs
+has_permission(actor: AuthenticatedActor, "create_child", vpc: Vpc) if
+    has_role(actor, "collaborator", vpc.project) and
+    not vpc.project.silo.restricts_networking();
+
+has_permission(actor: AuthenticatedActor, "create_child", vpc: Vpc) if
+    has_role(actor, "admin", vpc.project.silo);
+
+has_permission(actor: AuthenticatedActor, "modify", vpc: Vpc) if
+    has_role(actor, "collaborator", vpc.project) and
+    not vpc.project.silo.restricts_networking();
+
+has_permission(actor: AuthenticatedActor, "modify", vpc: Vpc) if
+    has_role(actor, "admin", vpc.project.silo);
+
+# Override networking permissions for VPC Routers
+has_permission(actor: AuthenticatedActor, "create_child", router: VpcRouter) if
+    has_role(actor, "collaborator", router.vpc.project) and
+    not router.vpc.project.silo.restricts_networking();
+
+has_permission(actor: AuthenticatedActor, "create_child", router: VpcRouter) if
+    has_role(actor, "admin", router.vpc.project.silo);
+
+has_permission(actor: AuthenticatedActor, "modify", router: VpcRouter) if
+    has_role(actor, "collaborator", router.vpc.project) and
+    not router.vpc.project.silo.restricts_networking();
+
+has_permission(actor: AuthenticatedActor, "modify", router: VpcRouter) if
+    has_role(actor, "admin", router.vpc.project.silo);
+
+# Override networking permissions for VPC Subnets
+has_permission(actor: AuthenticatedActor, "create_child", subnet: VpcSubnet) if
+    has_role(actor, "collaborator", subnet.vpc.project) and
+    not subnet.vpc.project.silo.restricts_networking();
+
+has_permission(actor: AuthenticatedActor, "create_child", subnet: VpcSubnet) if
+    has_role(actor, "admin", subnet.vpc.project.silo);
+
+has_permission(actor: AuthenticatedActor, "modify", subnet: VpcSubnet) if
+    has_role(actor, "collaborator", subnet.vpc.project) and
+    not subnet.vpc.project.silo.restricts_networking();
+
+has_permission(actor: AuthenticatedActor, "modify", subnet: VpcSubnet) if
+    has_role(actor, "admin", subnet.vpc.project.silo);
+
+# Override networking permissions for Internet Gateways
+has_permission(actor: AuthenticatedActor, "create_child", gateway: InternetGateway) if
+    has_role(actor, "collaborator", gateway.vpc.project) and
+    not gateway.vpc.project.silo.restricts_networking();
+
+has_permission(actor: AuthenticatedActor, "create_child", gateway: InternetGateway) if
+    has_role(actor, "admin", gateway.vpc.project.silo);
+
+has_permission(actor: AuthenticatedActor, "modify", gateway: InternetGateway) if
+    has_role(actor, "collaborator", gateway.vpc.project) and
+    not gateway.vpc.project.silo.restricts_networking();
+
+has_permission(actor: AuthenticatedActor, "modify", gateway: InternetGateway) if
+    has_role(actor, "admin", gateway.vpc.project.silo);
+
+# Override networking permissions for Router Routes
+has_permission(actor: AuthenticatedActor, "create_child", route: RouterRoute) if
+    has_role(actor, "collaborator", route.vpc_router.vpc.project) and
+    not route.vpc_router.vpc.project.silo.restricts_networking();
+
+has_permission(actor: AuthenticatedActor, "create_child", route: RouterRoute) if
+    has_role(actor, "admin", route.vpc_router.vpc.project.silo);
+
+has_permission(actor: AuthenticatedActor, "modify", route: RouterRoute) if
+    has_role(actor, "collaborator", route.vpc_router.vpc.project) and
+    not route.vpc_router.vpc.project.silo.restricts_networking();
+
+has_permission(actor: AuthenticatedActor, "modify", route: RouterRoute) if
+    has_role(actor, "admin", route.vpc_router.vpc.project.silo);
+
 #
 
