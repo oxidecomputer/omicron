@@ -9,7 +9,6 @@ use super::BlueprintZoneConfig;
 use super::BlueprintZoneImageSource;
 use super::CockroachDbPreserveDowngrade;
 use super::PendingMgsUpdates;
-use super::PlannerChickenSwitches;
 use super::PlannerConfig;
 use crate::deployment::MgsUpdateComponent;
 use crate::inventory::BaseboardId;
