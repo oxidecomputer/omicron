@@ -11,9 +11,6 @@ using provided RNG seed: reconfigurator-cli-test
 > #
 > # We'll also add another sled below (new_sled_id) with
 > # remove_mupdate_override set.
-> #
-> # We don't need any zones for this test, so disable that to keep the
-> # outputs minimal.
 
 > load-example --nsleds 7 --ndisks-per-sled 1
 loaded example system with:
