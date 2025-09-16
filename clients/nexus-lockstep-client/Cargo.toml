@@ -9,6 +9,7 @@ workspace = true
 
 [dependencies]
 chrono.workspace = true
+futures.workspace = true
 omicron-workspace-hack.workspace = true
 progenitor.workspace = true
 regress.workspace = true

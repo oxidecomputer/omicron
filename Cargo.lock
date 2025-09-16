@@ -6676,6 +6676,7 @@ name = "nexus-lockstep-client"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "futures",
  "omicron-workspace-hack",
  "progenitor 0.10.0",
  "regress",
