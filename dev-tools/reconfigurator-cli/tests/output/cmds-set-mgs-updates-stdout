@@ -1347,6 +1347,8 @@ Commands:
           delete a configured SP update
   debug
           debug commands that bypass normal checks
+  bump-nexus-generation
+          bumps the blueprint's Nexus generation
   help
           Print this message or the help of the given subcommand(s)
 

@@ -4,7 +4,7 @@
 
 //! developer REPL for driving blueprint planning
 
-use anyhow::{Context, anyhow, bail};
+use anyhow::{Context, anyhow, bail, ensure};
 use camino::{Utf8Path, Utf8PathBuf};
 use chrono::{DateTime, Utc};
 use clap::{ArgAction, ValueEnum};
@@ -784,6 +784,11 @@ enum BlueprintEditCommands {
         #[command(subcommand)]
         command: BlueprintEditDebugCommands,
     },
+    /// bumps the blueprint's Nexus generation
+    ///
+    /// This initiates a handoff from the current generation of Nexus zones to
+    /// the next generation of Nexus zones.
+    BumpNexusGeneration,
 }
 
 #[derive(Debug, Subcommand)]
@@ -2160,6 +2165,29 @@ fn cmd_blueprint_edit(
                 .sled_add_zone_cockroachdb(sled_id, image_source)
                 .context("failed to add CockroachDB zone")?;
             format!("added CockroachDB zone to sled {}", sled_id)
+        }
+        BlueprintEditCommands::BumpNexusGeneration => {
+            let current_generation = builder.nexus_generation();
+            let current_max = blueprint
+                .all_nexus_zones(BlueprintZoneDisposition::is_in_service)
+                .fold(
+                    current_generation,
+                    |current_max, (_sled_id, _zone_config, nexus_config)| {
+                        std::cmp::max(
+                            nexus_config.nexus_generation,
+                            current_max,
+                        )
+                    },
+                );
+            ensure!(
+                current_max > current_generation,
+                "cannot bump blueprint generation (currently \
+                 {current_generation}) past highest deployed Nexus \
+                 generation (currently {current_max})",
+            );
+            let next = current_generation.next();
+            builder.set_nexus_generation(next);
+            format!("nexus generation: {current_generation} -> {next}")
         }
         BlueprintEditCommands::SetRemoveMupdateOverride { sled_id, value } => {
             let sled_id = sled_id.to_sled_id(system.description())?;
