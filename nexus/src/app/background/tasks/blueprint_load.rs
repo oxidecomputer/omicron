@@ -24,8 +24,10 @@ pub struct TargetBlueprintLoader {
 }
 
 impl TargetBlueprintLoader {
-    pub fn new(datastore: Arc<DataStore>) -> TargetBlueprintLoader {
-        let (tx, _) = watch::channel(None);
+    pub fn new(
+        datastore: Arc<DataStore>,
+        tx: watch::Sender<Option<Arc<(BlueprintTarget, Blueprint)>>>,
+    ) -> TargetBlueprintLoader {
         TargetBlueprintLoader { datastore, last: None, tx }
     }
 
@@ -256,7 +258,8 @@ mod test {
             datastore.clone(),
         );
 
-        let mut task = TargetBlueprintLoader::new(datastore.clone());
+        let (tx, _) = watch::channel(None);
+        let mut task = TargetBlueprintLoader::new(datastore.clone(), tx);
         let mut rx = task.watcher();
 
         // We expect to see the initial blueprint set up by nexus-test-utils
