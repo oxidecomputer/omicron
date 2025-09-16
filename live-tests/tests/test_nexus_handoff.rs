@@ -105,7 +105,7 @@ async fn test_nexus_handoff(lc: &LiveTestContext) {
                 (
                     z.id,
                     CurrentNexusZone {
-                        sled_id: sled_id,
+                        sled_id,
                         image_source: &z.image_source,
                         cfg,
                     },
