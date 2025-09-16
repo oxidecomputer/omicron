@@ -5936,11 +5936,13 @@ pub(crate) mod test {
 
         // Use our example system.
         let mut rng = SimRngState::from_seed(TEST_NAME);
-        let (mut example, mut blueprint) = ExampleSystemBuilder::new_with_rng(
+        let (mut example, blueprint) = ExampleSystemBuilder::new_with_rng(
             &logctx.log,
             rng.next_system_rng(),
         )
         .build();
+        let mut blueprint =
+            BlueprintWithPlanningReport::with_empty_report(blueprint);
         verify_blueprint(&blueprint);
 
         // Update the example system and blueprint, as a part of test set-up.
@@ -5971,7 +5973,7 @@ pub(crate) mod test {
             assert_eq!(summary.total_zones_removed(), 0);
             assert_eq!(summary.total_zones_modified(), 0);
         }
-        blueprint = new_blueprint.blueprint;
+        blueprint = new_blueprint;
         update_collection_from_blueprint(&mut example, &blueprint);
 
         // We should have started with no specified TUF repo and nothing to do.
@@ -6159,7 +6161,7 @@ pub(crate) mod test {
             .plan()
             .expect("plan for trivial TUF repo");
 
-            blueprint = new_blueprint.blueprint;
+            blueprint = new_blueprint;
 
             assert_eq!(
                 blueprint
@@ -6220,11 +6222,13 @@ pub(crate) mod test {
 
         // Use our example system.
         let mut rng = SimRngState::from_seed(TEST_NAME);
-        let (mut example, mut blueprint) = ExampleSystemBuilder::new_with_rng(
+        let (mut example, blueprint) = ExampleSystemBuilder::new_with_rng(
             &logctx.log,
             rng.next_system_rng(),
         )
         .build();
+        let mut blueprint =
+            BlueprintWithPlanningReport::with_empty_report(blueprint);
         verify_blueprint(&blueprint);
 
         // The example system creates three internal NTP zones, and zero
@@ -6358,7 +6362,7 @@ pub(crate) mod test {
                 BOUNDARY_NTP_REDUNDANCY - 1
             );
         }
-        blueprint = new_blueprint.blueprint;
+        blueprint = new_blueprint;
         update_collection_from_blueprint(&mut example, &blueprint);
 
         assert_eq!(
@@ -6392,7 +6396,7 @@ pub(crate) mod test {
                 BOUNDARY_NTP_REDUNDANCY - 1
             );
         }
-        blueprint = new_blueprint.blueprint;
+        blueprint = new_blueprint;
         update_collection_from_blueprint(&mut example, &blueprint);
 
         // We should have started with no specified TUF repo and nothing to do.
@@ -6619,7 +6623,7 @@ pub(crate) mod test {
             assert_eq!(summary.total_zones_removed(), 0);
             assert_eq!(summary.total_zones_modified(), 1);
         }
-        blueprint = new_blueprint.blueprint;
+        blueprint = new_blueprint;
         update_collection_from_blueprint(&mut example, &blueprint);
         set_valid_looking_timesync(&mut example.collection);
 
@@ -6668,7 +6672,7 @@ pub(crate) mod test {
             assert_eq!(summary.total_zones_removed(), 0);
             assert_eq!(summary.total_zones_modified(), 2);
         }
-        blueprint = new_blueprint.blueprint;
+        blueprint = new_blueprint;
         update_collection_from_blueprint(&mut example, &blueprint);
         set_valid_looking_timesync(&mut example.collection);
 
@@ -6708,7 +6712,7 @@ pub(crate) mod test {
             assert_eq!(summary.total_zones_removed(), 0);
             assert_eq!(summary.total_zones_modified(), 2);
         }
-        blueprint = new_blueprint.blueprint;
+        blueprint = new_blueprint;
         update_collection_from_blueprint(&mut example, &blueprint);
         set_valid_looking_timesync(&mut example.collection);
 
@@ -6749,7 +6753,7 @@ pub(crate) mod test {
             assert_eq!(summary.total_zones_removed(), 0);
             assert_eq!(summary.total_zones_modified(), 1);
         }
-        blueprint = new_blueprint.blueprint;
+        blueprint = new_blueprint;
         update_collection_from_blueprint(&mut example, &blueprint);
         set_valid_looking_timesync(&mut example.collection);
 
@@ -6786,7 +6790,7 @@ pub(crate) mod test {
             assert_eq!(summary.total_zones_removed(), 0);
             assert_eq!(summary.total_zones_modified(), 1);
         }
-        blueprint = new_blueprint.blueprint;
+        blueprint = new_blueprint;
         update_collection_from_blueprint(&mut example, &blueprint);
         set_valid_looking_timesync(&mut example.collection);
 
@@ -6825,11 +6829,13 @@ pub(crate) mod test {
 
         // Use our example system.
         let mut rng = SimRngState::from_seed(TEST_NAME);
-        let (mut example, mut blueprint) = ExampleSystemBuilder::new_with_rng(
+        let (mut example, blueprint) = ExampleSystemBuilder::new_with_rng(
             &logctx.log,
             rng.next_system_rng(),
         )
         .build();
+        let mut blueprint =
+            BlueprintWithPlanningReport::with_empty_report(blueprint);
         verify_blueprint(&blueprint);
 
         // All zones should be sourced from the install dataset by default.
@@ -7013,7 +7019,7 @@ pub(crate) mod test {
                 assert_eq!(summary.total_zones_removed(), 0);
                 assert_eq!(summary.total_zones_modified(), 1);
             }
-            blueprint = new_blueprint.blueprint;
+            blueprint = new_blueprint;
             update_collection_from_blueprint(&mut example, &blueprint);
             verify_blueprint(&blueprint);
 
@@ -7039,7 +7045,7 @@ pub(crate) mod test {
                 assert_eq!(summary.total_zones_removed(), 0);
                 assert_eq!(summary.total_zones_modified(), 1);
             }
-            blueprint = new_blueprint.blueprint;
+            blueprint = new_blueprint;
             update_collection_from_blueprint(&mut example, &blueprint);
             verify_blueprint(&blueprint);
 
@@ -7154,7 +7160,8 @@ pub(crate) mod test {
         const MAX_PLANNING_ITERATIONS: usize = 100;
         assert!(EXP_PLANNING_ITERATIONS < MAX_PLANNING_ITERATIONS);
 
-        let mut parent = blueprint1;
+        let mut parent =
+            BlueprintWithPlanningReport::with_empty_report(blueprint1);
         for i in 2..=MAX_PLANNING_ITERATIONS {
             update_collection_from_blueprint(&mut example, &parent);
 
@@ -7201,7 +7208,7 @@ pub(crate) mod test {
                 }
             }
 
-            parent = blueprint.blueprint;
+            parent = blueprint;
         }
 
         panic!("did not converge after {MAX_PLANNING_ITERATIONS} iterations");
