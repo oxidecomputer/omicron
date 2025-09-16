@@ -158,8 +158,7 @@ pub struct ExampleSystem {
     pub system: SystemDescription,
     pub input: PlanningInput,
     pub collection: Collection,
-    /// The initial blueprint that was used to describe the system. This
-    /// blueprint has sleds but no zones.
+    /// The initial blueprint that was used to describe the system.
     pub initial_blueprint: Blueprint,
 }
 
@@ -483,15 +482,13 @@ impl ExampleSystemBuilder {
                     {
                         let external_tls = false;
                         let external_dns_servers = vec![];
-                        let nexus_generation =
-                            builder.parent_blueprint().nexus_generation;
                         builder
                             .sled_add_zone_nexus_with_config(
                                 sled_id,
                                 external_tls,
                                 external_dns_servers,
                                 image_source.clone(),
-                                nexus_generation,
+                                initial_blueprint.nexus_generation,
                             )
                             .unwrap();
                     }

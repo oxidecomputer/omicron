@@ -3341,14 +3341,13 @@ mod tests {
             }
             let external_tls = false;
             let external_dns_servers = vec![];
-            let nexus_generation = builder.parent_blueprint().nexus_generation;
             builder
                 .sled_add_zone_nexus_with_config(
                     sled_ids[2],
                     external_tls,
                     external_dns_servers,
                     BlueprintZoneImageSource::InstallDataset,
-                    nexus_generation,
+                    bp0.nexus_generation,
                 )
                 .expect("added nexus to third sled");
             builder.build()
@@ -3420,15 +3419,13 @@ mod tests {
             for &sled_id in &sled_ids {
                 let external_tls = false;
                 let external_dns_servers = vec![];
-                let nexus_generation =
-                    builder.parent_blueprint().nexus_generation;
                 builder
                     .sled_add_zone_nexus_with_config(
                         sled_id,
                         external_tls,
                         external_dns_servers,
                         BlueprintZoneImageSource::InstallDataset,
-                        nexus_generation,
+                        bp2.nexus_generation,
                     )
                     .expect("added nexus to third sled");
             }
