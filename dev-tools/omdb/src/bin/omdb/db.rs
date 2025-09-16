@@ -2084,6 +2084,7 @@ async fn cmd_db_disk_info(
         propolis_zone: String,
         volume_id: String,
         disk_state: String,
+        import_address: String,
     }
 
     // The rows describing the downstairs regions for this disk/volume
@@ -2155,6 +2156,10 @@ async fn cmd_db_disk_info(
                 .await
                 .context("failed to look up sled")?;
 
+            let import_address = match disk.pantry_address {
+                Some(ref pa) => pa.clone().to_string(),
+                None => "-".to_string(),
+            };
             UpstairsRow {
                 host_serial: my_sled.serial_number().to_string(),
                 disk_name,
@@ -2162,8 +2167,13 @@ async fn cmd_db_disk_info(
                 propolis_zone: format!("oxz_propolis-server_{}", propolis_id),
                 volume_id: disk.volume_id().to_string(),
                 disk_state: disk.runtime_state.disk_state.to_string(),
+                import_address,
             }
         } else {
+            let import_address = match disk.pantry_address {
+                Some(ref pa) => pa.clone().to_string(),
+                None => "-".to_string(),
+            };
             UpstairsRow {
                 host_serial: NOT_ON_SLED_MSG.to_string(),
                 disk_name,
@@ -2171,11 +2181,16 @@ async fn cmd_db_disk_info(
                 propolis_zone: NO_ACTIVE_PROPOLIS_MSG.to_string(),
                 volume_id: disk.volume_id().to_string(),
                 disk_state: disk.runtime_state.disk_state.to_string(),
+                import_address,
             }
         }
     } else {
         // If the disk is not attached to anything, just print empty
         // fields.
+        let import_address = match disk.pantry_address {
+            Some(ref pa) => pa.clone().to_string(),
+            None => "-".to_string(),
+        };
         UpstairsRow {
             host_serial: "-".to_string(),
             disk_name: disk.name().to_string(),
@@ -2183,6 +2198,7 @@ async fn cmd_db_disk_info(
             propolis_zone: "-".to_string(),
             volume_id: disk.volume_id().to_string(),
             disk_state: disk.runtime_state.disk_state.to_string(),
+            import_address,
         }
     };
     rows.push(usr);
