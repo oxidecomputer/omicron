@@ -63,7 +63,6 @@ use omicron_sled_agent::sim::SledAgent;
 use omicron_test_utils::dev::poll::CondCheckError;
 use omicron_test_utils::dev::poll::wait_for_condition;
 use omicron_uuid_kinds::DatasetUuid;
-use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SiloUserUuid;
 use omicron_uuid_kinds::SledUuid;
@@ -166,7 +165,7 @@ where
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
     .await
-    .unwrap()
+    .unwrap_or_else(|err| panic!("Error creating object with {path}: {err}"))
     .parsed_body::<HttpErrorResponseBody>()
     .unwrap()
 }
@@ -258,6 +257,9 @@ pub async fn create_ip_pool(
                 name: pool_name.parse().unwrap(),
                 description: String::from("an ip pool"),
             },
+            ip_version: ip_range
+                .map(|r| r.version())
+                .unwrap_or_else(views::IpVersion::v4),
         },
     )
     .await;
@@ -1057,35 +1059,29 @@ pub async fn detach_ip_address_from_igw(
         .unwrap();
 }
 
+/// Assert that the utilization of the provided pool matches expectations.
+///
+/// Note that the third argument is the number of _allocated_ addresses as an
+/// integer. This is compared against the count of remaining addresses
+/// internally, which is what the API returns.
 pub async fn assert_ip_pool_utilization(
     client: &ClientTestContext,
     pool_name: &str,
-    ipv4_allocated: u32,
-    ipv4_capacity: u32,
-    ipv6_allocated: u128,
-    ipv6_capacity: u128,
+    allocated: u32,
+    capacity: f64,
 ) {
     let url = format!("/v1/system/ip-pools/{}/utilization", pool_name);
     let utilization: views::IpPoolUtilization = object_get(client, &url).await;
+    let remaining = capacity - f64::from(allocated);
     assert_eq!(
-        utilization.ipv4.allocated, ipv4_allocated,
-        "IP pool '{}': expected {} IPv4 allocated, got {:?}",
-        pool_name, ipv4_allocated, utilization.ipv4.allocated
+        remaining, utilization.remaining,
+        "IP pool '{}': expected {} remaining, got {}",
+        pool_name, remaining, utilization.remaining,
     );
     assert_eq!(
-        utilization.ipv4.capacity, ipv4_capacity,
-        "IP pool '{}': expected {} IPv4 capacity, got {:?}",
-        pool_name, ipv4_capacity, utilization.ipv4.capacity
-    );
-    assert_eq!(
-        utilization.ipv6.allocated, ipv6_allocated,
-        "IP pool '{}': expected {} IPv6 allocated, got {:?}",
-        pool_name, ipv6_allocated, utilization.ipv6.allocated
-    );
-    assert_eq!(
-        utilization.ipv6.capacity, ipv6_capacity,
-        "IP pool '{}': expected {} IPv6 capacity, got {:?}",
-        pool_name, ipv6_capacity, utilization.ipv6.capacity
+        capacity, utilization.capacity,
+        "IP pool '{}': expected {} capacity, got {:?}",
+        pool_name, capacity, utilization.capacity,
     );
 }
 
@@ -1567,14 +1563,14 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
                 model: disk_identity.model.clone(),
                 variant:
                     nexus_types::external_api::params::PhysicalDiskKind::U2,
-                sled_id: sled_id.into_untyped_uuid(),
+                sled_id,
             };
 
         let zpool_request =
             nexus_types::internal_api::params::ZpoolPutRequest {
-                id: zpool.id.into_untyped_uuid(),
+                id: zpool.id,
                 physical_disk_id,
-                sled_id: sled_id.into_untyped_uuid(),
+                sled_id,
             };
 
         // Find the sled on which we're adding a zpool
@@ -1775,9 +1771,9 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
     /// _not_ clean up crucible resources on an expunged disk (due to the "gone"
     /// check that it performs), but it's useful for tests to be able to assert
     /// all crucible resources are cleaned up.
-    pub async fn remove_zpool(&mut self, zpool_id: Uuid) {
+    pub async fn remove_zpool(&mut self, zpool_id: ZpoolUuid) {
         for sled in self.sleds.values_mut() {
-            sled.zpools.retain(|zpool| *zpool.id.as_untyped_uuid() != zpool_id);
+            sled.zpools.retain(|zpool| zpool.id != zpool_id);
         }
     }
 }

@@ -331,6 +331,7 @@ parent:    06c88262-f435-410e-ba98-101bed41ec27
     internal DNS version:::   1
     external DNS version:::   1
     target release min gen:   1
+    nexus gen::::::::::::::   1
 
  PENDING MGS-MANAGED UPDATES: 0
 
@@ -463,6 +464,7 @@ to:   blueprint 366b0b68-d80e-4bc1-abd3-dc69837847e0
     internal DNS version:::   1 (unchanged)
     external DNS version:::   1 (unchanged)
     target release min gen:   1 (unchanged)
+    nexus gen::::::::::::::   1 (unchanged)
 
  OXIMETER SETTINGS:
     generation:   1 (unchanged)
@@ -826,6 +828,7 @@ parent:    3f00b694-1b16-4aaa-8f78-e6b3a527b434
     internal DNS version:::   1
     external DNS version:::   1
     target release min gen:   1
+    nexus gen::::::::::::::   1
 
  PENDING MGS-MANAGED UPDATES: 0
 
@@ -839,11 +842,8 @@ INFO skipping noop image source check for all sleds, reason: no target release i
 INFO system in initial release state no update artifacts available (no update necessary)
 generated blueprint 9c998c1d-1a7b-440a-ae0c-40f781dea6e2 based on parent blueprint 366b0b68-d80e-4bc1-abd3-dc69837847e0
 planning report for blueprint 9c998c1d-1a7b-440a-ae0c-40f781dea6e2:
-chicken switches:
-    add zones with mupdate override:   false
-
 * discretionary zones placed:
-  * 1 zone on sled 711ac7f8-d19e-4572-bdb9-e9b50f6e362a: external_dns
+  * external_dns zone on sled 711ac7f8-d19e-4572-bdb9-e9b50f6e362a from source install dataset
 * zone updates waiting on discretionary zones
 
 
@@ -967,6 +967,7 @@ to:   blueprint 9c998c1d-1a7b-440a-ae0c-40f781dea6e2
     internal DNS version:::   1 (unchanged)
     external DNS version:::   1 (unchanged)
     target release min gen:   1 (unchanged)
+    nexus gen::::::::::::::   1 (unchanged)
 
  OXIMETER SETTINGS:
     generation:   1 (unchanged)
@@ -1333,15 +1334,13 @@ parent:    366b0b68-d80e-4bc1-abd3-dc69837847e0
     internal DNS version:::   1
     external DNS version:::   1
     target release min gen:   1
+    nexus gen::::::::::::::   1
 
  PENDING MGS-MANAGED UPDATES: 0
 
 planning report for blueprint 9c998c1d-1a7b-440a-ae0c-40f781dea6e2:
-chicken switches:
-    add zones with mupdate override:   false
-
 * discretionary zones placed:
-  * 1 zone on sled 711ac7f8-d19e-4572-bdb9-e9b50f6e362a: external_dns
+  * external_dns zone on sled 711ac7f8-d19e-4572-bdb9-e9b50f6e362a from source install dataset
 * zone updates waiting on discretionary zones
 
 
@@ -1467,6 +1466,7 @@ to:   blueprint 2ac8c740-444d-42ff-8d66-9812a7e51288
     internal DNS version:::   1 (unchanged)
     external DNS version:::   1 (unchanged)
     target release min gen:   1 (unchanged)
+    nexus gen::::::::::::::   1 (unchanged)
 
  OXIMETER SETTINGS:
     generation:   1 (unchanged)

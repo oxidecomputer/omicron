@@ -10,6 +10,7 @@ use super::BlueprintZoneImageSource;
 use super::CockroachDbPreserveDowngrade;
 use super::PendingMgsUpdates;
 use super::PlannerChickenSwitches;
+use super::PlannerConfig;
 use crate::deployment::MgsUpdateComponent;
 use crate::inventory::BaseboardId;
 use crate::inventory::CabooseWhich;
@@ -60,8 +61,8 @@ pub struct PlanningReport {
     /// The blueprint produced by the planning run this report describes.
     pub blueprint_id: BlueprintUuid,
 
-    /// The set of "chicken switches" in effect for this planning run.
-    pub chicken_switches: PlannerChickenSwitches,
+    /// The configuration in effect for this planning run.
+    pub planner_config: PlannerConfig,
 
     // Step reports.
     pub expunge: PlanningExpungeStepReport,
@@ -77,7 +78,7 @@ impl PlanningReport {
     pub fn new(blueprint_id: BlueprintUuid) -> Self {
         Self {
             blueprint_id,
-            chicken_switches: PlannerChickenSwitches::default(),
+            planner_config: PlannerConfig::default(),
             expunge: PlanningExpungeStepReport::new(),
             decommission: PlanningDecommissionStepReport::new(),
             noop_image_source: PlanningNoopImageSourceStepReport::new(),
@@ -113,7 +114,7 @@ impl fmt::Display for PlanningReport {
         } else {
             let Self {
                 blueprint_id,
-                chicken_switches,
+                planner_config,
                 expunge,
                 decommission,
                 noop_image_source,
@@ -123,12 +124,8 @@ impl fmt::Display for PlanningReport {
                 cockroachdb_settings,
             } = self;
             writeln!(f, "planning report for blueprint {blueprint_id}:")?;
-            if *chicken_switches != PlannerChickenSwitches::default() {
-                writeln!(
-                    f,
-                    "chicken switches:\n{}",
-                    chicken_switches.display()
-                )?;
+            if *planner_config != PlannerConfig::default() {
+                writeln!(f, "planner config:\n{}", planner_config.display())?;
             }
             expunge.fmt(f)?;
             decommission.fmt(f)?;
@@ -667,6 +664,14 @@ pub struct PlanningAddSufficientZonesExist {
 #[derive(
     Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Diffable, JsonSchema,
 )]
+pub struct DiscretionaryZonePlacement {
+    kind: String,
+    source: String,
+}
+
+#[derive(
+    Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Diffable, JsonSchema,
+)]
 #[serde(rename_all = "snake_case", tag = "type")]
 pub enum ZoneAddWaitingOn {
     /// Waiting on one or more blockers (typically MUPdate-related reasons) to
@@ -694,7 +699,7 @@ pub struct PlanningAddStepReport {
     /// This is typically a list of MUPdate-related reasons.
     pub add_update_blocked_reasons: Vec<String>,
 
-    /// The value of the homonymous chicken switch. (What this really means is
+    /// The value of the homonymous planner config. (What this really means is
     /// that zone adds happen despite being blocked by one or more
     /// MUPdate-related reasons.)
     pub add_zones_with_mupdate_override: bool,
@@ -716,7 +721,8 @@ pub struct PlanningAddStepReport {
     /// Sled ID → kinds of discretionary zones placed there
     // TODO: make `sled_add_zone_*` methods return the added zone config
     // so that we can report it here.
-    pub discretionary_zones_placed: BTreeMap<SledUuid, Vec<String>>,
+    pub discretionary_zones_placed:
+        BTreeMap<SledUuid, Vec<DiscretionaryZonePlacement>>,
 }
 
 impl PlanningAddStepReport {
@@ -799,11 +805,22 @@ impl PlanningAddStepReport {
         &mut self,
         sled_id: SledUuid,
         zone_kind: &str,
+        image_source: &BlueprintZoneImageSource,
     ) {
         self.discretionary_zones_placed
             .entry(sled_id)
-            .and_modify(|kinds| kinds.push(zone_kind.to_owned()))
-            .or_insert_with(|| vec![zone_kind.to_owned()]);
+            .and_modify(|kinds| {
+                kinds.push(DiscretionaryZonePlacement {
+                    kind: zone_kind.to_owned(),
+                    source: image_source.to_string(),
+                })
+            })
+            .or_insert_with(|| {
+                vec![DiscretionaryZonePlacement {
+                    kind: zone_kind.to_owned(),
+                    source: image_source.to_string(),
+                }]
+            });
     }
 }
 
@@ -847,7 +864,7 @@ impl fmt::Display for PlanningAddStepReport {
                 f,
                 "* adding zones despite being blocked, \
                    as specified by the `add_zones_with_mupdate_override` \
-                   chicken switch"
+                   planner config option"
             )?;
         }
 
@@ -924,13 +941,13 @@ impl fmt::Display for PlanningAddStepReport {
 
         if !discretionary_zones_placed.is_empty() {
             writeln!(f, "* discretionary zones placed:")?;
-            for (sled_id, kinds) in discretionary_zones_placed.iter() {
-                let (n, s) = plural_vec(kinds);
-                writeln!(
-                    f,
-                    "  * {n} zone{s} on sled {sled_id}: {}",
-                    kinds.join(", ")
-                )?;
+            for (sled_id, placements) in discretionary_zones_placed.iter() {
+                for DiscretionaryZonePlacement { kind, source } in placements {
+                    writeln!(
+                        f,
+                        "  * {kind} zone on sled {sled_id} from source {source}",
+                    )?;
+                }
             }
         }
 

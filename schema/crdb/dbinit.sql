@@ -1073,7 +1073,11 @@ CREATE TABLE IF NOT EXISTS omicron.public.silo_quotas (
     time_modified TIMESTAMPTZ NOT NULL,
     cpus INT8 NOT NULL,
     memory_bytes INT8 NOT NULL,
-    storage_bytes INT8 NOT NULL
+    storage_bytes INT8 NOT NULL,
+
+    CONSTRAINT cpus_not_negative CHECK (cpus >= 0),
+    CONSTRAINT memory_not_negative CHECK (memory_bytes >= 0),
+    CONSTRAINT storage_not_negative CHECK (storage_bytes >= 0)
 );
 
 /**
@@ -2110,7 +2114,17 @@ CREATE TABLE IF NOT EXISTS omicron.public.ip_pool_resource (
 
     -- resource_type is redundant because resource IDs are globally unique, but
     -- logically it belongs here
-    PRIMARY KEY (ip_pool_id, resource_type, resource_id)
+    PRIMARY KEY (ip_pool_id, resource_type, resource_id),
+
+    -- Check that there are no default pools for the internal silo
+    CONSTRAINT internal_silo_has_no_default_pool CHECK (
+        NOT (
+            resource_type = 'silo' AND
+            resource_id = '001de000-5110-4000-8000-000000000001' AND
+            is_default
+        )
+    )
+
 );
 
 -- a given resource can only have one default ip pool
@@ -2123,6 +2137,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS one_default_ip_pool_per_resource ON omicron.pu
 CREATE INDEX IF NOT EXISTS ip_pool_resource_id ON omicron.public.ip_pool_resource (
     resource_id
 );
+
 CREATE INDEX IF NOT EXISTS ip_pool_resource_ip_pool_id ON omicron.public.ip_pool_resource (
     ip_pool_id
 );
@@ -4417,7 +4432,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_internal_dns (
  *
  * See https://github.com/oxidecomputer/omicron/issues/8253 for more details.
  */
-CREATE TABLE IF NOT EXISTS omicron.public.reconfigurator_chicken_switches (
+CREATE TABLE IF NOT EXISTS omicron.public.reconfigurator_config (
     -- Monotonically increasing version for all bp_targets
     version INT8 PRIMARY KEY,
 
@@ -4524,7 +4539,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.blueprint (
     -- driving the system to the target release.
     --
     -- This is set to 1 by default in application code.
-    target_release_minimum_generation INT8 NOT NULL
+    target_release_minimum_generation INT8 NOT NULL,
+
+    -- The generation of the active group of Nexus instances
+    nexus_generation INT8 NOT NULL
 );
 
 -- table describing both the current and historical target blueprints of the
@@ -4734,6 +4752,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_omicron_zone (
     image_source omicron.public.bp_zone_image_source NOT NULL,
     image_artifact_sha256 STRING(64),
 
+    -- Generation for Nexus zones
+    nexus_generation INT8,
+
     PRIMARY KEY (blueprint_id, id),
 
     CONSTRAINT expunged_disposition_properties CHECK (
@@ -4751,6 +4772,12 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_omicron_zone (
         OR
         (image_source != 'artifact'
             AND image_artifact_sha256 IS NULL)
+    ),
+
+    CONSTRAINT nexus_generation_for_nexus_zones CHECK (
+        (zone_type = 'nexus' AND nexus_generation IS NOT NULL)
+        OR
+        (zone_type != 'nexus' AND nexus_generation IS NULL)
     )
 );
 
@@ -5629,29 +5656,6 @@ CREATE INDEX IF NOT EXISTS lookup_region_snapshot_replacement_step_by_state
 
 CREATE INDEX IF NOT EXISTS lookup_region_snapshot_replacement_step_by_old_volume_id
     on omicron.public.region_snapshot_replacement_step (old_snapshot_volume_id);
-
-/*
- * Metadata for the schema itself. This version number isn't great, as there's
- * nothing to ensure it gets bumped when it should be, but it's a start.
- */
-CREATE TABLE IF NOT EXISTS omicron.public.db_metadata (
-    -- There should only be one row of this table for the whole DB.
-    -- It's a little goofy, but filter on "singleton = true" before querying
-    -- or applying updates, and you'll access the singleton row.
-    --
-    -- We also add a constraint on this table to ensure it's not possible to
-    -- access the version of this table with "singleton = false".
-    singleton BOOL NOT NULL PRIMARY KEY,
-    time_created TIMESTAMPTZ NOT NULL,
-    time_modified TIMESTAMPTZ NOT NULL,
-    -- Semver representation of the DB version
-    version STRING(64) NOT NULL,
-
-    -- (Optional) Semver representation of the DB version to which we're upgrading
-    target_version STRING(64),
-
-    CHECK (singleton = true)
-);
 
 -- An allowlist of IP addresses that can make requests to user-facing services.
 CREATE TABLE IF NOT EXISTS omicron.public.allow_list (
@@ -6553,10 +6557,59 @@ ON omicron.public.host_ereport (
 ) WHERE
     time_deleted IS NULL;
 
-/*
- * Keep this at the end of file so that the database does not contain a version
- * until it is fully populated.
- */
+-- Metadata for the schema itself.
+--
+-- This table may be read by Nexuses with different notions of "what the schema should be".
+-- Unlike other tables in the database, caution should be taken when upgrading this schema.
+CREATE TABLE IF NOT EXISTS omicron.public.db_metadata (
+    -- There should only be one row of this table for the whole DB.
+    -- It's a little goofy, but filter on "singleton = true" before querying
+    -- or applying updates, and you'll access the singleton row.
+    --
+    -- We also add a constraint on this table to ensure it's not possible to
+    -- access the version of this table with "singleton = false".
+    singleton BOOL NOT NULL PRIMARY KEY,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    -- Semver representation of the DB version
+    version STRING(64) NOT NULL,
+
+    -- (Optional) Semver representation of the DB version to which we're upgrading
+    target_version STRING(64),
+
+    CHECK (singleton = true)
+);
+
+CREATE TYPE IF NOT EXISTS omicron.public.db_metadata_nexus_state AS ENUM (
+    -- This Nexus is allowed to access this database
+    'active',
+
+    -- This Nexus is not yet allowed to access the database
+    'not_yet',
+
+    -- This Nexus has committed to no longer accessing this database
+    'quiesced'
+);
+
+-- Nexuses which may be attempting to access the database, and a state
+-- which identifies if they should be allowed to do so.
+--
+-- This table is used during upgrade implement handoff between old and new
+-- Nexus zones. It is read by all Nexuses during initialization to identify
+-- if they should have access to the database.
+CREATE TABLE IF NOT EXISTS omicron.public.db_metadata_nexus (
+    nexus_id UUID NOT NULL PRIMARY KEY,
+    last_drained_blueprint_id UUID,
+    state omicron.public.db_metadata_nexus_state NOT NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_db_metadata_nexus_by_state on omicron.public.db_metadata_nexus (
+    state,
+    nexus_id
+);
+
+-- Keep this at the end of file so that the database does not contain a version
+-- until it is fully populated.
 INSERT INTO omicron.public.db_metadata (
     singleton,
     time_created,
@@ -6564,7 +6617,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '184.0.0', NULL)
+    (TRUE, NOW(), NOW(), '189.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

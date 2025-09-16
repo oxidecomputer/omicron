@@ -123,7 +123,7 @@ impl Server {
         .version_policy(dropshot::VersionPolicy::Dynamic(Box::new(
             dropshot::ClientSpecifiesVersionInHeader::new(
                 omicron_common::api::VERSION_HEADER,
-                sled_agent_api::VERSION_REMOVE_DESTROY_ORPHANED_DATASETS_CHICKEN_SWITCH,
+                sled_agent_api::VERSION_ADD_SWITCH_ZONE_OPERATOR_POLICY,
             ),
         )))
         .start()
@@ -453,6 +453,7 @@ pub async fn run_standalone_server(
                 },
                 external_tls: false,
                 external_dns_servers: vec![],
+                nexus_generation: Generation::new(),
             }),
             filesystem_pool: get_random_zpool(),
             image_source: BlueprintZoneImageSource::InstallDataset,
