@@ -305,7 +305,7 @@ impl From<BlueprintZoneType> for OmicronZoneType {
             }
             BlueprintZoneType::Nexus(zone) => Self::Nexus {
                 internal_address: zone.internal_address,
-                debug_port: zone.debug_port,
+                lockstep_port: zone.lockstep_port,
                 external_ip: zone.external_ip.ip,
                 nic: zone.nic,
                 external_tls: zone.external_tls,
@@ -560,9 +560,9 @@ pub mod blueprint_zone_type {
     pub struct Nexus {
         /// The address at which the internal nexus server is reachable.
         pub internal_address: SocketAddrV6,
-        /// The port at which the debug server is reachable. This shares the
+        /// The port at which the lockstep server is reachable. This shares the
         /// same IP address with `internal_address`.
-        pub debug_port: u16,
+        pub lockstep_port: u16,
         /// The address at which the external nexus server is reachable.
         pub external_ip: OmicronZoneExternalFloatingIp,
         /// The service vNIC providing external connectivity using OPTE.

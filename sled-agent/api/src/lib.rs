@@ -69,7 +69,7 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
-    (4, ADD_NEXUS_DEBUG_PORT_TO_INVENTORY),
+    (4, ADD_NEXUS_LOCKSTEP_PORT_TO_INVENTORY),
     (3, ADD_SWITCH_ZONE_OPERATOR_POLICY),
     (2, REMOVE_DESTROY_ORPHANED_DATASETS_CHICKEN_SWITCH),
     (1, INITIAL),
@@ -327,7 +327,7 @@ pub trait SledAgentApi {
     #[endpoint {
         method = PUT,
         path = "/omicron-config",
-        versions = VERSION_ADD_NEXUS_DEBUG_PORT_TO_INVENTORY..,
+        versions = VERSION_ADD_NEXUS_LOCKSTEP_PORT_TO_INVENTORY..,
     }]
     async fn omicron_config_put(
         rqctx: RequestContext<Self::Context>,
@@ -338,7 +338,7 @@ pub trait SledAgentApi {
         operation_id = "omicron_config_put",
         method = PUT,
         path = "/omicron-config",
-        versions = ..VERSION_ADD_NEXUS_DEBUG_PORT_TO_INVENTORY,
+        versions = ..VERSION_ADD_NEXUS_LOCKSTEP_PORT_TO_INVENTORY,
     }]
     async fn v3_omicron_config_put(
         rqctx: RequestContext<Self::Context>,
@@ -569,7 +569,7 @@ pub trait SledAgentApi {
     #[endpoint {
         method = GET,
         path = "/inventory",
-        versions = VERSION_ADD_NEXUS_DEBUG_PORT_TO_INVENTORY..,
+        versions = VERSION_ADD_NEXUS_LOCKSTEP_PORT_TO_INVENTORY..,
     }]
     async fn inventory(
         rqctx: RequestContext<Self::Context>,
@@ -580,7 +580,7 @@ pub trait SledAgentApi {
         operation_id = "inventory",
         method = GET,
         path = "/inventory",
-        versions = ..VERSION_ADD_NEXUS_DEBUG_PORT_TO_INVENTORY,
+        versions = ..VERSION_ADD_NEXUS_LOCKSTEP_PORT_TO_INVENTORY,
     }]
     async fn v3_inventory(
         rqctx: RequestContext<Self::Context>,

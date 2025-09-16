@@ -15,7 +15,7 @@ use nexus_sled_agent_shared::inventory::{
     OmicronZoneDataset, OmicronZoneImageSource, OrphanedDataset,
     RemoveMupdateOverrideInventory, SledRole, ZoneImageResolverInventory,
 };
-use omicron_common::address::NEXUS_DEBUG_PORT;
+use omicron_common::address::NEXUS_LOCKSTEP_PORT;
 use omicron_common::{
     api::external::{ByteCount, Generation},
     api::internal::shared::{NetworkInterface, SourceNatConfig},
@@ -316,7 +316,7 @@ impl From<OmicronZoneType> for inventory::OmicronZoneType {
                 external_dns_servers,
             } => Self::Nexus {
                 internal_address,
-                debug_port: NEXUS_DEBUG_PORT,
+                lockstep_port: NEXUS_LOCKSTEP_PORT,
                 external_ip,
                 nic,
                 external_tls,
@@ -389,7 +389,7 @@ impl From<inventory::OmicronZoneType> for OmicronZoneType {
             }
             inventory::OmicronZoneType::Nexus {
                 internal_address,
-                debug_port: _,
+                lockstep_port: _,
                 external_ip,
                 nic,
                 external_tls,

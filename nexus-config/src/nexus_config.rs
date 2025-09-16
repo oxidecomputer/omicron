@@ -174,9 +174,9 @@ pub struct DeploymentConfig {
     /// Dropshot configuration for internal API server.
     #[schemars(skip)] // TODO we're protected against dropshot changes
     pub dropshot_internal: ConfigDropshot,
-    /// Dropshot configuration for debug API server.
+    /// Dropshot configuration for lockstep API server.
     #[schemars(skip)] // TODO we're protected against dropshot changes
-    pub dropshot_debug: ConfigDropshot,
+    pub dropshot_lockstep: ConfigDropshot,
     /// Describes how Nexus should find internal DNS servers
     /// for bootstrapping.
     pub internal_dns: InternalDns,
@@ -1059,7 +1059,7 @@ mod test {
             [deployment.dropshot_internal]
             bind_address = "10.1.2.3:4568"
             default_request_body_max_bytes = 1024
-            [deployment.dropshot_debug]
+            [deployment.dropshot_lockstep]
             bind_address = "10.1.2.3:4569"
             default_request_body_max_bytes = 1024
             [deployment.internal_dns]
@@ -1158,7 +1158,7 @@ mod test {
                             .unwrap(),
                         ..Default::default()
                     },
-                    dropshot_debug: ConfigDropshot {
+                    dropshot_lockstep: ConfigDropshot {
                         bind_address: "10.1.2.3:4569"
                             .parse::<SocketAddr>()
                             .unwrap(),
@@ -1395,7 +1395,7 @@ mod test {
             [deployment.dropshot_internal]
             bind_address = "10.1.2.3:4568"
             default_request_body_max_bytes = 1024
-            [deployment.dropshot_debug]
+            [deployment.dropshot_lockstep]
             bind_address = "10.1.2.3:4569"
             default_request_body_max_bytes = 1024
             [deployment.internal_dns]
@@ -1495,7 +1495,7 @@ mod test {
             [deployment.dropshot_internal]
             bind_address = "10.1.2.3:4568"
             default_request_body_max_bytes = 1024
-            [deployment.dropshot_debug]
+            [deployment.dropshot_lockstep]
             bind_address = "10.1.2.3:4569"
             default_request_body_max_bytes = 1024
             [deployment.internal_dns]
@@ -1552,7 +1552,7 @@ mod test {
             [deployment.dropshot_internal]
             bind_address = "10.1.2.3:4568"
             default_request_body_max_bytes = 1024
-            [deployment.dropshot_debug]
+            [deployment.dropshot_lockstep]
             bind_address = "10.1.2.3:4568"
             default_request_body_max_bytes = 1024
             [deployment.internal_dns]

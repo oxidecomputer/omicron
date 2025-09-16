@@ -22,7 +22,7 @@ use nexus_types::deployment::{
 };
 use omicron_common::address::{
     DENDRITE_PORT, DNS_HTTP_PORT, DNS_PORT, Ipv6Subnet, MGD_PORT, MGS_PORT,
-    NEXUS_DEBUG_PORT, NEXUS_INTERNAL_PORT, NTP_PORT, NUM_SOURCE_NAT_PORTS,
+    NEXUS_INTERNAL_PORT, NEXUS_LOCKSTEP_PORT, NTP_PORT, NUM_SOURCE_NAT_PORTS,
     REPO_DEPOT_PORT, RSS_RESERVED_ADDRESSES, ReservedRackSubnet, SLED_PREFIX,
     get_sled_address, get_switch_zone_address,
 };
@@ -544,7 +544,7 @@ impl Plan {
             let internal_address =
                 SocketAddrV6::new(ip, NEXUS_INTERNAL_PORT, 0, 0);
             dns_builder
-                .host_zone_nexus(id, internal_address, NEXUS_DEBUG_PORT)
+                .host_zone_nexus(id, internal_address, NEXUS_LOCKSTEP_PORT)
                 .unwrap();
             let (nic, external_ip) = svc_port_builder.next_nexus(id)?;
             let filesystem_pool = sled.alloc_zpool_from_u2s()?;
@@ -554,7 +554,7 @@ impl Plan {
                 zone_type: BlueprintZoneType::Nexus(
                     blueprint_zone_type::Nexus {
                         internal_address,
-                        debug_port: NEXUS_DEBUG_PORT,
+                        lockstep_port: NEXUS_LOCKSTEP_PORT,
                         external_ip: from_ipaddr_to_external_floating_ip(
                             external_ip,
                         ),

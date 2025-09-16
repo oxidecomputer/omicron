@@ -56,7 +56,7 @@ default_request_body_max_bytes = 1048576
 bind_address = "127.0.0.1:0"
 default_request_body_max_bytes = 1048576
 
-[deployment.dropshot_debug]
+[deployment.dropshot_lockstep]
 bind_address = "127.0.0.1:0"
 default_request_body_max_bytes = 1048576
 

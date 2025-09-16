@@ -13,9 +13,9 @@
 pub mod app; // Public for documentation examples
 mod cidata;
 mod context; // Public for documentation examples
-mod debug_api;
 pub mod external_api; // Public for testing
 mod internal_api;
+mod lockstep_api;
 mod populate;
 mod saga_interface;
 
@@ -23,10 +23,10 @@ pub use app::Nexus;
 pub use app::test_interfaces::TestInterfaces;
 use context::ApiContext;
 use context::ServerContext;
-use debug_api::http_entrypoints::debug_api;
 use dropshot::ConfigDropshot;
 use external_api::http_entrypoints::external_api;
 use internal_api::http_entrypoints::internal_api;
+use lockstep_api::http_entrypoints::lockstep_api;
 use nexus_config::NexusConfig;
 use nexus_db_model::RendezvousDebugDataset;
 use nexus_db_queries::db;
@@ -65,8 +65,8 @@ pub struct InternalServer {
     apictx: ApiContext,
     /// dropshot server for internal API
     http_server_internal: dropshot::HttpServer<ApiContext>,
-    /// dropshot server for debug API
-    http_server_debug: dropshot::HttpServer<ApiContext>,
+    /// dropshot server for lockstep API
+    http_server_lockstep: dropshot::HttpServer<ApiContext>,
     config: NexusConfig,
     log: Logger,
 }
@@ -106,18 +106,16 @@ impl InternalServer {
             }
         };
 
-        // Launch the debug server. This is launched at the same time as the
-        // internal server, before all the other servers. (Most debug endpoints
-        // will not be useful until after Nexus finishes starting, but some
-        // may be.)
-        let http_server_debug = match dropshot::ServerBuilder::new(
-            debug_api(),
+        // Launch the lockstep server. This is launched at the same time as the
+        // internal server, before all the other servers.
+        let http_server_lockstep = match dropshot::ServerBuilder::new(
+            lockstep_api(),
             context.clone(),
-            log.new(o!("component" => "dropshot_debug")),
+            log.new(o!("component" => "dropshot_lockstep")),
         )
-        .config(config.deployment.dropshot_debug.clone())
+        .config(config.deployment.dropshot_lockstep.clone())
         .start()
-        .map_err(|error| format!("initializing debug server: {}", error))
+        .map_err(|error| format!("initializing lockstep server: {}", error))
         {
             Ok(server) => server,
             Err(err) => {
@@ -129,7 +127,7 @@ impl InternalServer {
         Ok(Self {
             apictx: context,
             http_server_internal,
-            http_server_debug,
+            http_server_lockstep,
             config: config.clone(),
             log,
         })
@@ -141,8 +139,8 @@ impl nexus_test_interface::InternalServer for InternalServer {
         self.http_server_internal.local_addr()
     }
 
-    fn get_http_server_debug_address(&self) -> SocketAddr {
-        self.http_server_debug.local_addr()
+    fn get_http_server_lockstep_address(&self) -> SocketAddr {
+        self.http_server_lockstep.local_addr()
     }
 }
 
@@ -159,7 +157,7 @@ impl Server {
     async fn start(internal: InternalServer) -> Result<Self, String> {
         let apictx = internal.apictx;
         let http_server_internal = internal.http_server_internal;
-        let http_server_debug = internal.http_server_debug;
+        let http_server_lockstep = internal.http_server_lockstep;
         let log = internal.log;
         let config = internal.config;
 
@@ -246,7 +244,7 @@ impl Server {
                 http_server_external,
                 http_server_techport_external,
                 http_server_internal,
-                http_server_debug,
+                http_server_lockstep,
                 producer_server,
             )
             .await;
@@ -406,8 +404,8 @@ impl nexus_test_interface::NexusServer for Server {
         self.apictx.context.nexus.get_internal_server_address().await.unwrap()
     }
 
-    async fn get_http_server_debug_address(&self) -> SocketAddr {
-        self.apictx.context.nexus.get_debug_server_address().await.unwrap()
+    async fn get_http_server_lockstep_address(&self) -> SocketAddr {
+        self.apictx.context.nexus.get_lockstep_server_address().await.unwrap()
     }
 
     async fn upsert_test_dataset(

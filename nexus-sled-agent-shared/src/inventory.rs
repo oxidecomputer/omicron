@@ -1235,10 +1235,10 @@ pub enum OmicronZoneType {
     Nexus {
         /// The address at which the internal nexus server is reachable.
         internal_address: SocketAddrV6,
-        /// The port at which the debug server is reachable. This shares the
-        /// same IP address with `internal_address`.
-        #[serde(default = "default_nexus_debug_port")]
-        debug_port: u16,
+        /// The port at which the internal lockstep server is reachable. This
+        /// shares the same IP address with `internal_address`.
+        #[serde(default = "default_nexus_lockstep_port")]
+        lockstep_port: u16,
         /// The address at which the external nexus server is reachable.
         external_ip: IpAddr,
         /// The service vNIC providing external connectivity using OPTE.
@@ -1466,8 +1466,8 @@ impl OmicronZoneType {
     }
 }
 
-fn default_nexus_debug_port() -> u16 {
-    omicron_common::address::NEXUS_DEBUG_PORT
+fn default_nexus_lockstep_port() -> u16 {
+    omicron_common::address::NEXUS_LOCKSTEP_PORT
 }
 
 /// Like [`OmicronZoneType`], but without any associated data.

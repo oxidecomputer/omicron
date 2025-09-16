@@ -1,8 +1,8 @@
 {
   "openapi": "3.0.3",
   "info": {
-    "title": "Nexus debug API",
-    "description": "Nexus debug API",
+    "title": "Nexus lockstep API",
+    "description": "Nexus lockstep internal API",
     "contact": {
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"

@@ -6553,30 +6553,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "nexus-debug-api"
-version = "0.1.0"
-dependencies = [
- "dropshot",
- "nexus-types",
- "omicron-workspace-hack",
-]
-
-[[package]]
-name = "nexus-debug-client"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "omicron-workspace-hack",
- "progenitor 0.10.0",
- "regress",
- "reqwest",
- "schemars",
- "serde",
- "slog",
- "uuid",
-]
-
-[[package]]
 name = "nexus-defaults"
 version = "0.1.0"
 dependencies = [
@@ -6668,6 +6644,30 @@ dependencies = [
  "tokio",
  "tufaceous-artifact",
  "typed-rng",
+ "uuid",
+]
+
+[[package]]
+name = "nexus-lockstep-api"
+version = "0.1.0"
+dependencies = [
+ "dropshot",
+ "nexus-types",
+ "omicron-workspace-hack",
+]
+
+[[package]]
+name = "nexus-lockstep-client"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "omicron-workspace-hack",
+ "progenitor 0.10.0",
+ "regress",
+ "reqwest",
+ "schemars",
+ "serde",
+ "slog",
  "uuid",
 ]
 
@@ -7944,11 +7944,11 @@ dependencies = [
  "nexus-db-model",
  "nexus-db-queries",
  "nexus-db-schema",
- "nexus-debug-api",
  "nexus-defaults",
  "nexus-external-api",
  "nexus-internal-api",
  "nexus-inventory",
+ "nexus-lockstep-api",
  "nexus-metrics-producer-gc",
  "nexus-mgs-updates",
  "nexus-networking",
@@ -8768,9 +8768,9 @@ dependencies = [
  "installinator-api",
  "itertools 0.14.0",
  "newtype_derive",
- "nexus-debug-api",
  "nexus-external-api",
  "nexus-internal-api",
+ "nexus-lockstep-api",
  "ntp-admin-api",
  "omicron-workspace-hack",
  "openapi-lint",

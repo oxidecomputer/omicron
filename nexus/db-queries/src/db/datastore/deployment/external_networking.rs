@@ -640,7 +640,7 @@ mod tests {
                     zone_type: BlueprintZoneType::Nexus(
                         blueprint_zone_type::Nexus {
                             internal_address: "[::1]:0".parse().unwrap(),
-                            debug_port: 0,
+                            lockstep_port: 0,
                             external_ip: self.nexus_external_ip,
                             nic: self.nexus_nic.clone(),
                             external_tls: false,

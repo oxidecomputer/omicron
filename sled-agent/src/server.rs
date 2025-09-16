@@ -82,7 +82,7 @@ impl Server {
         .version_policy(dropshot::VersionPolicy::Dynamic(Box::new(
             dropshot::ClientSpecifiesVersionInHeader::new(
                 omicron_common::api::VERSION_HEADER,
-                sled_agent_api::VERSION_ADD_NEXUS_DEBUG_PORT_TO_INVENTORY,
+                sled_agent_api::VERSION_ADD_NEXUS_LOCKSTEP_PORT_TO_INVENTORY,
             ),
         )))
         .start()

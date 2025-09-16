@@ -88,7 +88,7 @@ pub trait NexusServer: Send + Sync + 'static {
     async fn get_http_server_external_address(&self) -> SocketAddr;
     async fn get_http_server_techport_address(&self) -> SocketAddr;
     async fn get_http_server_internal_address(&self) -> SocketAddr;
-    async fn get_http_server_debug_address(&self) -> SocketAddr;
+    async fn get_http_server_lockstep_address(&self) -> SocketAddr;
 
     // Previously, as a dataset was created (within the sled agent),
     // we'd use an internal API from Nexus to record that the dataset
@@ -132,5 +132,5 @@ pub trait NexusServer: Send + Sync + 'static {
 
 pub trait InternalServer: Send + Sync + 'static {
     fn get_http_server_internal_address(&self) -> SocketAddr;
-    fn get_http_server_debug_address(&self) -> SocketAddr;
+    fn get_http_server_lockstep_address(&self) -> SocketAddr;
 }

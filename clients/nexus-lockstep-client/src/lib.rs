@@ -2,11 +2,12 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Interface for making API requests to the Oxide control plane at large
-//! from debugging tools
+//! Interface for making API requests to the Oxide control plane at large from
+//! callers that update in lockstep with Nexus itself (e.g. rack initialization,
+//! tests and debugging)
 
 progenitor::generate_api!(
-    spec = "../../openapi/nexus-debug.json",
+    spec = "../../openapi/nexus-lockstep.json",
     interface = Positional,
     derives = [schemars::JsonSchema],
     inner_type = slog::Logger,

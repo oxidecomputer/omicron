@@ -1619,7 +1619,7 @@ impl<'a> BlueprintBuilder<'a> {
         let internal_address = SocketAddrV6::new(ip, port, 0, 0);
         let zone_type = BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
             internal_address,
-            debug_port: omicron_common::address::NEXUS_DEBUG_PORT,
+            lockstep_port: omicron_common::address::NEXUS_LOCKSTEP_PORT,
             external_ip,
             nic,
             external_tls,

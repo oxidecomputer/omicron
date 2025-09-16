@@ -411,7 +411,7 @@ impl DnsConfigBuilder {
     }
 
     /// Higher-level shorthand for adding a Nexus zone with both its internal
-    /// API service and its debug API service.
+    /// API service and its lockstep API service.
     ///
     /// # Errors
     ///
@@ -421,7 +421,7 @@ impl DnsConfigBuilder {
         &mut self,
         zone_id: OmicronZoneUuid,
         internal_address: SocketAddrV6,
-        debug_port: u16,
+        lockstep_port: u16,
     ) -> anyhow::Result<()> {
         let zone = self.host_zone(zone_id, *internal_address.ip())?;
         self.service_backend_zone(
@@ -429,7 +429,11 @@ impl DnsConfigBuilder {
             &zone,
             internal_address.port(),
         )?;
-        self.service_backend_zone(ServiceName::NexusDebug, &zone, debug_port)
+        self.service_backend_zone(
+            ServiceName::NexusLockstep,
+            &zone,
+            lockstep_port,
+        )
     }
 
     /// Higher-level shorthand for adding a ClickHouse single node zone with
@@ -765,7 +769,10 @@ mod test {
         assert_eq!(ServiceName::Cockroach.dns_name(), "_cockroach._tcp",);
         assert_eq!(ServiceName::InternalDns.dns_name(), "_nameservice._tcp",);
         assert_eq!(ServiceName::Nexus.dns_name(), "_nexus._tcp",);
-        assert_eq!(ServiceName::NexusDebug.dns_name(), "_nexus-debug._tcp",);
+        assert_eq!(
+            ServiceName::NexusLockstep.dns_name(),
+            "_nexus-lockstep._tcp",
+        );
         assert_eq!(ServiceName::Oximeter.dns_name(), "_oximeter._tcp",);
         assert_eq!(
             ServiceName::OximeterReader.dns_name(),

@@ -3511,12 +3511,6 @@
           {
             "type": "object",
             "properties": {
-              "debug_port": {
-                "description": "The port at which the debug server is reachable. This shares the same IP address with `internal_address`.",
-                "type": "integer",
-                "format": "uint16",
-                "minimum": 0
-              },
               "external_dns_servers": {
                 "description": "External DNS servers Nexus can use to resolve external hosts.",
                 "type": "array",
@@ -3540,6 +3534,12 @@
               "internal_address": {
                 "description": "The address at which the internal nexus server is reachable.",
                 "type": "string"
+              },
+              "lockstep_port": {
+                "description": "The port at which the lockstep server is reachable. This shares the same IP address with `internal_address`.",
+                "type": "integer",
+                "format": "uint16",
+                "minimum": 0
               },
               "nexus_generation": {
                 "description": "Generation number for this Nexus zone. This is used to coordinate handoff between old and new Nexus instances during updates. See RFD 588.",
@@ -3565,11 +3565,11 @@
               }
             },
             "required": [
-              "debug_port",
               "external_dns_servers",
               "external_ip",
               "external_tls",
               "internal_address",
+              "lockstep_port",
               "nexus_generation",
               "nic",
               "type"
@@ -6225,13 +6225,6 @@
           {
             "type": "object",
             "properties": {
-              "debug_port": {
-                "description": "The port at which the debug server is reachable. This shares the same IP address with `internal_address`.",
-                "default": 12232,
-                "type": "integer",
-                "format": "uint16",
-                "minimum": 0
-              },
               "external_dns_servers": {
                 "description": "External DNS servers Nexus can use to resolve external hosts.",
                 "type": "array",
@@ -6252,6 +6245,13 @@
               "internal_address": {
                 "description": "The address at which the internal nexus server is reachable.",
                 "type": "string"
+              },
+              "lockstep_port": {
+                "description": "The port at which the internal lockstep server is reachable. This shares the same IP address with `internal_address`.",
+                "default": 12232,
+                "type": "integer",
+                "format": "uint16",
+                "minimum": 0
               },
               "nic": {
                 "description": "The service vNIC providing external connectivity using OPTE.",

@@ -6,7 +6,7 @@ use dropshot::{HttpError, HttpResponseOk, RequestContext};
 use nexus_types::external_api::views::{Ping, PingStatus};
 
 #[dropshot::api_description]
-pub trait NexusDebugApi {
+pub trait NexusLockstepApi {
     type Context;
 
     /// Ping API

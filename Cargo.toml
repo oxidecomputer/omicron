@@ -16,7 +16,7 @@ members = [
     "clients/gateway-client",
     "clients/installinator-client",
     "clients/nexus-client",
-    "clients/nexus-debug-client",
+    "clients/nexus-lockstep-client",
     "clients/ntp-admin-client",
     "clients/oxide-client",
     "clients/oximeter-client",
@@ -86,11 +86,11 @@ members = [
     "nexus/db-model",
     "nexus/db-queries",
     "nexus/db-schema",
-    "nexus/debug-api",
     "nexus/defaults",
     "nexus/external-api",
     "nexus/internal-api",
     "nexus/inventory",
+    "nexus/lockstep-api",
     "nexus/macros-common",
     "nexus/metrics-producer-gc",
     "nexus/mgs-updates",
@@ -176,7 +176,7 @@ default-members = [
     "clients/gateway-client",
     "clients/installinator-client",
     "clients/nexus-client",
-    "clients/nexus-debug-client",
+    "clients/nexus-lockstep-client",
     "clients/ntp-admin-client",
     "clients/oxide-client",
     "clients/oximeter-client",
@@ -248,11 +248,11 @@ default-members = [
     "nexus/db-model",
     "nexus/db-queries",
     "nexus/db-schema",
-    "nexus/debug-api",
     "nexus/defaults",
     "nexus/external-api",
     "nexus/internal-api",
     "nexus/inventory",
+    "nexus/lockstep-api",
     "nexus/macros-common",
     "nexus/metrics-producer-gc",
     "nexus/mgs-updates",
@@ -545,12 +545,12 @@ nexus-db-lookup = { path = "nexus/db-lookup" }
 nexus-db-model = { path = "nexus/db-model" }
 nexus-db-queries = { path = "nexus/db-queries" }
 nexus-db-schema = { path = "nexus/db-schema" }
-nexus-debug-api = { path = "nexus/debug-api" }
-nexus-debug-client = { path = "clients/nexus-debug-client" }
 nexus-defaults = { path = "nexus/defaults" }
 nexus-external-api = { path = "nexus/external-api" }
 nexus-inventory = { path = "nexus/inventory" }
 nexus-internal-api = { path = "nexus/internal-api" }
+nexus-lockstep-api = { path = "nexus/lockstep-api" }
+nexus-lockstep-client = { path = "clients/nexus-lockstep-client" }
 nexus-macros-common = { path = "nexus/macros-common" }
 nexus-metrics-producer-gc = { path = "nexus/metrics-producer-gc" }
 nexus-mgs-updates = { path = "nexus/mgs-updates" }

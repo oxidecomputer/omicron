@@ -528,7 +528,7 @@ pub struct BpOmicronZone {
     pub image_source: DbBpZoneImageSource,
     pub image_artifact_sha256: Option<ArtifactHash>,
     pub nexus_generation: Option<Generation>,
-    pub nexus_debug_port: Option<SqlU16>,
+    pub nexus_lockstep_port: Option<SqlU16>,
 }
 
 impl BpOmicronZone {
@@ -591,7 +591,7 @@ impl BpOmicronZone {
             snat_first_port: None,
             snat_last_port: None,
             nexus_generation: None,
-            nexus_debug_port: None,
+            nexus_lockstep_port: None,
         };
 
         match &blueprint_zone.zone_type {
@@ -719,7 +719,7 @@ impl BpOmicronZone {
             }
             BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
                 internal_address,
-                debug_port,
+                lockstep_port,
                 external_ip,
                 nic,
                 external_tls,
@@ -734,8 +734,8 @@ impl BpOmicronZone {
                 bp_omicron_zone.bp_nic_id = Some(nic.id);
                 bp_omicron_zone.second_service_ip =
                     Some(IpNetwork::from(external_ip.ip));
-                bp_omicron_zone.nexus_debug_port =
-                    Some(SqlU16::from(*debug_port));
+                bp_omicron_zone.nexus_lockstep_port =
+                    Some(SqlU16::from(*lockstep_port));
                 bp_omicron_zone.nexus_external_tls = Some(*external_tls);
                 bp_omicron_zone.nexus_external_dns_servers = Some(
                     external_dns_servers
@@ -930,9 +930,9 @@ impl BpOmicronZone {
             ZoneType::Nexus => {
                 BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
                     internal_address: primary_address,
-                    debug_port: *self.nexus_debug_port.ok_or_else(|| {
-                        anyhow!("expected 'nexus_debug_port'")
-                    })?,
+                    lockstep_port: *self.nexus_lockstep_port.ok_or_else(
+                        || anyhow!("expected 'nexus_lockstep_port'"),
+                    )?,
                     external_ip: OmicronZoneExternalFloatingIp {
                         id: external_ip_id?,
                         ip: self

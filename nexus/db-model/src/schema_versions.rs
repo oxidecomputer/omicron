@@ -28,7 +28,7 @@ static KNOWN_VERSIONS: LazyLock<Vec<KnownVersion>> = LazyLock::new(|| {
         // |  leaving the first copy as an example for the next person.
         // v
         // KnownVersion::new(next_int, "unique-dirname-with-the-sql-files"),
-        KnownVersion::new(190, "nexus-debug-port"),
+        KnownVersion::new(190, "nexus-lockstep-port"),
         KnownVersion::new(189, "reconfigurator-chicken-switches-to-config"),
         KnownVersion::new(188, "positive-quotas"),
         KnownVersion::new(187, "no-default-pool-for-internal-silo"),
