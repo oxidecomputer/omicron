@@ -5822,10 +5822,8 @@ pub(crate) mod test {
 
         // Request another Nexus zone.
         input_builder.policy_mut().target_nexus_zone_count =
-            input_builder.policy_mut().target_nexus_zone_count + 1;
+            input_builder.policy_mut().target_nexus_zone_count + 3;
         let input = input_builder.build();
-
-        // TODO-K: Why is there no new nexus being created?
 
         // Check that there is a new nexus zone that does *not* use the new
         // artifact (since not all of its dependencies are updated yet).
@@ -5843,8 +5841,29 @@ pub(crate) mod test {
         .expect("can't re-plan for new Nexus zone");
         {
             let summary = blueprint2.diff_since_blueprint(&blueprint1);
+            // TODO-K: host phase2 is showing stuff in each of the sleds,
+            // instead of nexus in one sled being the only change
+            //
+            // host_phase_2: BlueprintHostPhase2DesiredSlotsDiff {
+            //     slot_a: Leaf {
+            //         before: CurrentContents,
+            //         after: Artifact {
+            //             version: Available {
+            //                 version: ArtifactVersion(
+            //                     "1.0.0-freeform",
+            //                 ),
+            //             },
+            //             hash: ArtifactHash(
+            //                 "0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+            //             ),
+            //         },
+            //     },
+            //     slot_b: Leaf {
+            //         before: CurrentContents,
+            //         after: CurrentContents,
+            //     },
+            // },
             for sled in summary.diff.sleds.modified_values_diff() {
-                println!("DEBUG: {:#?}", sled.zones);
                 assert!(sled.zones.removed.is_empty());
                 assert_eq!(sled.zones.added.len(), 1);
                 let added = sled.zones.added.values().next().unwrap();
@@ -5940,10 +5959,10 @@ pub(crate) mod test {
                 .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
                 .filter(|(_, z)| is_old_nexus(z))
                 .count(),
-            NEXUS_REDUNDANCY + 1,
+            NEXUS_REDUNDANCY + 3,
         );
         let mut parent = blueprint8;
-        for i in 9..=16 {
+        for i in 9..=20 {
             update_collection_from_blueprint(&mut example, &parent);
 
             let blueprint_name = format!("blueprint{i}");
@@ -5982,19 +6001,19 @@ pub(crate) mod test {
         }
 
         // Everything's up-to-date in Kansas City!
-        let blueprint16 = parent;
+        let blueprint20 = parent;
         assert_eq!(
-            blueprint16
+            blueprint20
                 .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
                 .filter(|(_, z)| is_up_to_date_nexus(z))
                 .count(),
-            NEXUS_REDUNDANCY + 1,
+            NEXUS_REDUNDANCY + 3,
         );
 
-        update_collection_from_blueprint(&mut example, &blueprint16);
+        update_collection_from_blueprint(&mut example, &blueprint20);
         assert_planning_makes_no_changes(
             &logctx.log,
-            &blueprint16,
+            &blueprint20,
             &input,
             &example.collection,
             TEST_NAME,
@@ -6597,12 +6616,44 @@ pub(crate) mod test {
             collection.ntp_timesync = ntp_timesync;
         };
 
+        // First we update the blueprints three times, as the diff will always
+        // report there are changes with the host phase 2 even though the artifact
+        // matches and no update is needed
+        let mut parent = blueprint;
+        for i in 2..=4 {
+            update_collection_from_blueprint(&mut example, &parent);
+
+            let blueprint_name = format!("blueprint{i}");
+            let blueprint = Planner::new_based_on(
+                log.clone(),
+                &parent,
+                &example.input,
+                &blueprint_name,
+                &example.collection,
+                PlannerRng::from_seed((TEST_NAME, &blueprint_name)),
+            )
+            .expect("can't create planner")
+            .plan()
+            .unwrap_or_else(|_| panic!("can't re-plan after {i} iterations"));
+
+            {
+                let summary = blueprint.diff_since_blueprint(&parent);
+                for sled in summary.diff.sleds.modified_values_diff() {
+                        assert!(sled.zones.added.is_empty());
+                        assert!(sled.zones.removed.is_empty());
+                }
+            }
+
+            parent = blueprint;
+        }
+        let blueprint4 = parent;
+
         // If we have missing info in our inventory, the
         // planner will not update any boundary NTP zones.
         example.collection.ntp_timesync = IdOrdMap::new();
         assert_planning_makes_no_changes(
             &log,
-            &blueprint,
+            &blueprint4,
             &example.input,
             &example.collection,
             TEST_NAME,
@@ -6625,7 +6676,7 @@ pub(crate) mod test {
         example.collection.ntp_timesync.remove(&boundary_ntp_zone);
         assert_planning_makes_no_changes(
             &log,
-            &blueprint,
+            &blueprint4,
             &example.input,
             &example.collection,
             TEST_NAME,
@@ -6653,7 +6704,7 @@ pub(crate) mod test {
             .synced = false;
         assert_planning_makes_no_changes(
             &log,
-            &blueprint,
+            &blueprint4,
             &example.input,
             &example.collection,
             TEST_NAME,
@@ -6673,7 +6724,7 @@ pub(crate) mod test {
         //
         let new_blueprint = Planner::new_based_on(
             log.clone(),
-            &blueprint,
+            &blueprint4,
             &example.input,
             "test_blueprint_expunge_old_boundary_ntp",
             &example.collection,
@@ -6683,7 +6734,7 @@ pub(crate) mod test {
         .plan()
         .expect("plan for trivial TUF repo");
         {
-            let summary = new_blueprint.diff_since_blueprint(&blueprint);
+            let summary = new_blueprint.diff_since_blueprint(&blueprint4);
             eprintln!(
                 "diff between blueprints (should be expunging boundary NTP using install dataset):\n{}",
                 summary.display()
