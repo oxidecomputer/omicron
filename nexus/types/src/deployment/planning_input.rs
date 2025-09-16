@@ -259,17 +259,9 @@ impl PlanningInput {
         &self.active_nexus_zones
     }
 
-    pub fn set_active_nexus_zones(&mut self, ids: BTreeSet<OmicronZoneUuid>) {
-        self.active_nexus_zones = ids;
-    }
-
     /// ID of the soon-to-be-running Nexus zones
     pub fn not_yet_nexus_zones(&self) -> &BTreeSet<OmicronZoneUuid> {
         &self.not_yet_nexus_zones
-    }
-
-    pub fn set_not_yet_nexus_zones(&mut self, ids: BTreeSet<OmicronZoneUuid>) {
-        self.not_yet_nexus_zones = ids;
     }
 
     pub fn all_sleds(
@@ -1347,20 +1339,6 @@ impl PlanningInputBuilder {
             active_nexus_zones: BTreeSet::new(),
             not_yet_nexus_zones: BTreeSet::new(),
         }
-    }
-
-    pub fn set_active_nexuses(
-        &mut self,
-        active_nexus_zones: BTreeSet<OmicronZoneUuid>,
-    ) {
-        self.active_nexus_zones = active_nexus_zones;
-    }
-
-    pub fn set_not_yet_nexuses(
-        &mut self,
-        not_yet_nexus_zones: BTreeSet<OmicronZoneUuid>,
-    ) {
-        self.not_yet_nexus_zones = not_yet_nexus_zones;
     }
 
     pub fn add_sled(

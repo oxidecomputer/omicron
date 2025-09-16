@@ -1540,7 +1540,7 @@ mod test {
                 old_repo: TufRepoPolicy::initial(),
                 planner_config: PlannerConfig::default(),
                 active_nexus_zones,
-                not_yet_nexus_zones: Vec::new(),
+                not_yet_nexus_zones: BTreeSet::new(),
                 log,
             }
             .build()

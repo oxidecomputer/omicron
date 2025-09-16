@@ -5931,8 +5931,15 @@ pub(crate) mod test {
             &blueprint,
             blueprint.nexus_generation.next(),
         );
-        example.input.set_active_nexus_zones(active_nexus_zones);
-        example.input.set_not_yet_nexus_zones(not_yet_nexus_zones);
+
+        let mut input = std::mem::replace(
+            &mut example.input,
+            nexus_types::deployment::PlanningInputBuilder::empty_input(),
+        )
+        .into_builder();
+        input.set_active_nexus_zones(active_nexus_zones);
+        input.set_not_yet_nexus_zones(not_yet_nexus_zones);
+        example.input = input.build();
     }
 
     macro_rules! fake_zone_artifact {
@@ -6248,8 +6255,14 @@ pub(crate) mod test {
         // This is a replacement for the reconfigurator executor, which
         // would normally propagate records for these zones into the
         // database.
-        example.input.set_active_nexus_zones(active_nexus_zones);
-        example.input.set_not_yet_nexus_zones(not_yet_nexus_zones);
+        let mut input = std::mem::replace(
+            &mut example.input,
+            nexus_types::deployment::PlanningInputBuilder::empty_input(),
+        )
+        .into_builder();
+        input.set_active_nexus_zones(active_nexus_zones);
+        input.set_not_yet_nexus_zones(not_yet_nexus_zones);
+        example.input = input.build();
 
         let blueprint_name = "blueprint_to_bump_nexus_gen".to_string();
         let new_blueprint = Planner::new_based_on(
@@ -7939,10 +7952,13 @@ pub(crate) mod test {
                 None
             })
             .collect();
-        bp_generator
-            .example
-            .input
-            .set_not_yet_nexus_zones(new_nexus_zones.clone());
+        let mut input = std::mem::replace(
+            &mut bp_generator.example.input,
+            nexus_types::deployment::PlanningInputBuilder::empty_input(),
+        )
+        .into_builder();
+        input.set_not_yet_nexus_zones(new_nexus_zones.clone());
+        bp_generator.example.input = input.build();
 
         // Check: If we try generating a new blueprint, we're still stuck behind
         // propagation to inventory.
@@ -7982,7 +7998,14 @@ pub(crate) mod test {
         //
         // ✘ The new Nexus Zones are missing db records
         // ✔ The new Nexus Zones are in inventory.
-        bp_generator.example.input.set_not_yet_nexus_zones(BTreeSet::new());
+        let mut input = std::mem::replace(
+            &mut bp_generator.example.input,
+            nexus_types::deployment::PlanningInputBuilder::empty_input(),
+        )
+        .into_builder();
+        input.set_not_yet_nexus_zones(BTreeSet::new());
+        bp_generator.example.input = input.build();
+
         {
             let new_bp =
                 bp_generator.plan_new_blueprint("test_blocked_by_db_records");
@@ -8001,7 +8024,13 @@ pub(crate) mod test {
                 new_bp.report.nexus_generation_bump
             );
         }
-        bp_generator.example.input.set_not_yet_nexus_zones(new_nexus_zones);
+        let mut input = std::mem::replace(
+            &mut bp_generator.example.input,
+            nexus_types::deployment::PlanningInputBuilder::empty_input(),
+        )
+        .into_builder();
+        input.set_not_yet_nexus_zones(new_nexus_zones);
+        bp_generator.example.input = input.build();
 
         // Check: Now nexus generation update should succeed.
         //
