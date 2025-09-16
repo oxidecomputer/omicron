@@ -122,6 +122,14 @@ impl Align {
                 .iter()
                 .map(|table| align_and_aggregate(table, query_end, &self.period, rate_in_window))
                 .collect(),
+            AlignmentMethod::Max => tables
+                .iter()
+                .map(|table| align_and_aggregate(table, query_end, &self.period, max_value_in_window))
+                .collect(),
+            AlignmentMethod::Min => tables
+                .iter()
+                .map(|table| align_and_aggregate(table, query_end, &self.period, min_value_in_window))
+                .collect(),
         }
     }
 }
@@ -135,10 +143,15 @@ pub enum AlignmentMethod {
     /// Alignment is done by computing the mean of the output data within the
     /// specified period.
     MeanWithin,
-
     /// Alignment is done by computing the per second rate of the output data
     /// within the specified period.
-    Rate
+    Rate,
+    /// Alignment is done by computing the max of the output data within the
+    /// specified period.
+    Max,
+    /// Alignment is done by computing the min of the output data within the
+    /// specified period.
+    Min,
 }
 
 impl fmt::Display for AlignmentMethod {
@@ -147,6 +160,8 @@ impl fmt::Display for AlignmentMethod {
             AlignmentMethod::Interpolate => write!(f, "interpolate"),
             AlignmentMethod::MeanWithin => write!(f, "mean_within"),
             AlignmentMethod::Rate => write!(f, "rate"),
+            AlignmentMethod::Max => write!(f, "max"),
+            AlignmentMethod::Min => write!(f, "min"),
         }
     }
 }
@@ -529,6 +544,34 @@ fn rate_in_window(
         *maybe_sum.get_or_insert(0.0) += it;
     }
     maybe_sum.map(|sum| sum / window_secs)
+}
+
+fn max_value_in_window(
+    _metric_type: &MetricType,
+    window: &MetricWindow,
+) -> Option<f64> {
+    window.input_points.iter()
+        .filter_map(|&x| x)
+        .fold(None, |acc, x| {
+        match acc {
+            None => Some(x),
+            Some(max_val) => Some(max_val.max(x)),
+        }
+    })
+}
+
+fn min_value_in_window(
+    _metric_type: &MetricType,
+    window: &MetricWindow,
+) -> Option<f64> {
+    window.input_points.iter()
+        .filter_map(|&x| x)
+        .fold(None, |acc, x| {
+        match acc {
+            None => Some(x),
+            Some(min_val) => Some(min_val.min(x)),
+        }
+    })
 }
 
 fn align_interpolate(

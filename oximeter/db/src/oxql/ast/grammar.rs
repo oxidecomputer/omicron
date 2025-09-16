@@ -542,6 +542,8 @@ peg::parser! {
             = "interpolate" { AlignmentMethod::Interpolate }
             / "mean_within" { AlignmentMethod::MeanWithin }
             / "rate" { AlignmentMethod::Rate }
+            / "min" { AlignmentMethod::Min }
+            / "max" { AlignmentMethod::Max }
 
         /// Parse an alignment table operation.
         pub rule align() -> Align
@@ -1332,6 +1334,22 @@ mod tests {
             query_parser::align("align rate(100s)").unwrap(),
             Align {
                 method: AlignmentMethod::Rate,
+                period: Duration::from_secs(100)
+            }
+        );
+
+        assert_eq!(
+            query_parser::align("align min(100s)").unwrap(),
+            Align {
+                method: AlignmentMethod::Min,
+                period: Duration::from_secs(100)
+            }
+        );
+
+        assert_eq!(
+            query_parser::align("align max(100s)").unwrap(),
+            Align {
+                method: AlignmentMethod::Max,
                 period: Duration::from_secs(100)
             }
         );
