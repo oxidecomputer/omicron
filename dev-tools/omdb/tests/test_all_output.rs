@@ -178,6 +178,20 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
 
     let invocations: &[&[&str]] = &[
         &["db", "db-metadata", "ls-nexus"],
+
+        // We expect this operation to fail (the nexus generation is the same
+        // as the one in the target blueprint - it shouldn't be trying to
+        // quiesce yet).
+        //
+        // We tests a version of this command which sets this record to
+        // quiesced anyway as the final invocation.
+        &[
+            "--destructive",
+            "db",
+            "db-metadata",
+            "force-nexus-quiesce",
+            &cptestctx.server.server_context().nexus.id().to_string(),
+        ],
         &["db", "disks", "list"],
         &["db", "dns", "show"],
         &["db", "dns", "diff", "external", "2"],
@@ -274,6 +288,20 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
         // We can't easily test the sled agent output because that's only
         // provided by a real sled agent, which is not available in the
         // ControlPlaneTestContext.
+
+        // This operation will set the "db_metadata_nexus" state to quiesced.
+        //
+        // This would normally only be set by a Nexus as it shuts itself down;
+        // save it for last to avoid causing a weird state while testing other
+        // commands.
+        &[
+            "--destructive",
+            "db",
+            "db-metadata",
+            "force-nexus-quiesce",
+            "--ignore-target-blueprint",
+            &cptestctx.server.server_context().nexus.id().to_string(),
+        ],
     ];
 
     let mut redactor = Redactor::default();
