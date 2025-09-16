@@ -6190,8 +6190,8 @@ pub(crate) mod test {
             {
                 let summary = blueprint.diff_since_blueprint(&parent);
                 for sled in summary.diff.sleds.modified_values_diff() {
-                        assert!(sled.zones.added.is_empty());
-                        assert!(sled.zones.removed.is_empty());
+                    assert!(sled.zones.added.is_empty());
+                    assert!(sled.zones.removed.is_empty());
                 }
             }
 
@@ -6671,8 +6671,8 @@ pub(crate) mod test {
             {
                 let summary = blueprint.diff_since_blueprint(&parent);
                 for sled in summary.diff.sleds.modified_values_diff() {
-                        assert!(sled.zones.added.is_empty());
-                        assert!(sled.zones.removed.is_empty());
+                    assert!(sled.zones.added.is_empty());
+                    assert!(sled.zones.removed.is_empty());
                 }
             }
 
@@ -7083,6 +7083,40 @@ pub(crate) mod test {
             }
             result
         };
+
+        // First we update the blueprints three times, as the diff will always
+        // report there are changes with the host phase 2 even though the artifact
+        // matches and no update is needed
+        let mut parent = blueprint;
+        for i in 2..=4 {
+            update_collection_from_blueprint(&mut example, &parent);
+
+            let blueprint_name = format!("blueprint{i}");
+            // We make sure we don't update any internal DNS zones yet
+            example.collection.internal_dns_generation_status = IdOrdMap::new();
+            let blueprint = Planner::new_based_on(
+                log.clone(),
+                &parent,
+                &example.input,
+                &blueprint_name,
+                &example.collection,
+                PlannerRng::from_seed((TEST_NAME, &blueprint_name)),
+            )
+            .expect("can't create planner")
+            .plan()
+            .unwrap_or_else(|_| panic!("can't re-plan after {i} iterations"));
+
+            {
+                let summary = blueprint.diff_since_blueprint(&parent);
+                for sled in summary.diff.sleds.modified_values_diff() {
+                    assert!(sled.zones.added.is_empty());
+                    assert!(sled.zones.removed.is_empty());
+                }
+            }
+
+            parent = blueprint;
+        }
+        let mut blueprint = parent;
 
         // If we have missing info in our inventory, the
         // planner will not update any Internal DNS zones.
