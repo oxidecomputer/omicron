@@ -142,12 +142,17 @@ async fn test_blueprint_edit(cptestctx: &ControlPlaneTestContext) {
 
     // unwrap: we checked above that this list was non-empty.
     let blueprint = state1.blueprints.first().unwrap();
+    let nexus_generation = omicron_common::api::external::Generation::new();
 
     // Write a reconfigurator-cli script to load the file, edit the
     // blueprint, and save the entire state to a new file.
     let mut s = String::new();
     swriteln!(s, "load {} {}", saved_state1_path, collection.id);
-    swriteln!(s, "blueprint-edit {} add-nexus {}", blueprint.id, sled_id);
+    swriteln!(
+        s,
+        "blueprint-edit {} add-nexus {sled_id} {nexus_generation}",
+        blueprint.id
+    );
     swriteln!(s, "save {}", saved_state2_path);
     std::fs::write(&script1_path, &s)
         .with_context(|| format!("write {}", &script1_path))
@@ -162,7 +167,7 @@ async fn test_blueprint_edit(cptestctx: &ControlPlaneTestContext) {
     // Load the new file and find the new blueprint name.
     let state2: UnstableReconfiguratorState =
         read_json(&saved_state2_path).unwrap();
-    assert_eq!(state2.blueprints.len(), state1.blueprints.len() + 1);
+    assert_eq!(state2.blueprints.len(), state1.blueprints.len() + 1); // XXX
     let new_blueprint = state2.blueprints.into_iter().rev().next().unwrap();
     assert_ne!(new_blueprint.id, blueprint.id);
 
