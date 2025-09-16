@@ -637,7 +637,7 @@ to:   blueprint 86db3308-f817-4626-8838-4085949a6a41
 
 internal DNS:
   DNS zone: "control-plane.oxide.internal" (unchanged)
-    unchanged names: 37 (records: 47)
+    unchanged names: 38 (records: 50)
 
 external DNS:
   DNS zone: "oxide.example" (unchanged)
@@ -806,6 +806,10 @@ internal DNS:
 +       SRV  port  5353 2521ef1e-ef52-46f0-9f27-93a3b6683d92.host.control-plane.oxide.internal
 +       SRV  port  5353 7f4e4ff4-b1eb-4c47-b079-9d7fcfcf35f6.host.control-plane.oxide.internal
 +       SRV  port  5353 e50dff5f-8d7c-440b-b86a-5ca7e9117dfa.host.control-plane.oxide.internal
++   name: _nexus-lockstep._tcp                               (records: 3)
++       SRV  port 12232 a2f67884-b0e7-498a-a005-f6686f599ca6.host.control-plane.oxide.internal
++       SRV  port 12232 e34091ec-ac63-4976-b2b8-85b9223c136f.host.control-plane.oxide.internal
++       SRV  port 12232 fb88d7af-16bd-4638-a9f4-ef04d0045f20.host.control-plane.oxide.internal
 +   name: _nexus._tcp                                        (records: 3)
 +       SRV  port 12221 a2f67884-b0e7-498a-a005-f6686f599ca6.host.control-plane.oxide.internal
 +       SRV  port 12221 e34091ec-ac63-4976-b2b8-85b9223c136f.host.control-plane.oxide.internal
@@ -1018,6 +1022,10 @@ internal DNS:
 -       SRV  port  5353 2521ef1e-ef52-46f0-9f27-93a3b6683d92.host.control-plane.oxide.internal
 -       SRV  port  5353 7f4e4ff4-b1eb-4c47-b079-9d7fcfcf35f6.host.control-plane.oxide.internal
 -       SRV  port  5353 e50dff5f-8d7c-440b-b86a-5ca7e9117dfa.host.control-plane.oxide.internal
+-   name: _nexus-lockstep._tcp                               (records: 3)
+-       SRV  port 12232 a2f67884-b0e7-498a-a005-f6686f599ca6.host.control-plane.oxide.internal
+-       SRV  port 12232 e34091ec-ac63-4976-b2b8-85b9223c136f.host.control-plane.oxide.internal
+-       SRV  port 12232 fb88d7af-16bd-4638-a9f4-ef04d0045f20.host.control-plane.oxide.internal
 -   name: _nexus._tcp                                        (records: 3)
 -       SRV  port 12221 a2f67884-b0e7-498a-a005-f6686f599ca6.host.control-plane.oxide.internal
 -       SRV  port 12221 e34091ec-ac63-4976-b2b8-85b9223c136f.host.control-plane.oxide.internal
