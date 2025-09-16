@@ -21,7 +21,14 @@ pub(crate) async fn deploy_db_metadata_nexus_records(
     nexus_id: OmicronZoneUuid,
 ) -> Result<(), anyhow::Error> {
     // To determine what state to use for new records, we need to know which is
-    // the currently active Nexus generation.  That is necessarily the
+    // the currently active Nexus generation.  This is not quite the same as the
+    // blueprint's `nexus_generation`.  That field describes which generation
+    // the system is *trying* to put in control.  It gets bumped in order to
+    // trigger the handoff process.  But between when it gets bumped and when
+    // the handoff has finished, that generation number is ahead of the one
+    // currently in control.
+    //
+    // The actual generation number that's currently active is necessarily the
     // generation number of the Nexus instance that's doing the execution.
     let active_generation = blueprint
         .all_nexus_zones(BlueprintZoneDisposition::is_in_service)
