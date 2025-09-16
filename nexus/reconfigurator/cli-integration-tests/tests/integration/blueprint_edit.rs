@@ -167,7 +167,7 @@ async fn test_blueprint_edit(cptestctx: &ControlPlaneTestContext) {
     // Load the new file and find the new blueprint name.
     let state2: UnstableReconfiguratorState =
         read_json(&saved_state2_path).unwrap();
-    assert_eq!(state2.blueprints.len(), state1.blueprints.len() + 1); // XXX
+    assert_eq!(state2.blueprints.len(), state1.blueprints.len() + 1);
     let new_blueprint = state2.blueprints.into_iter().rev().next().unwrap();
     assert_ne!(new_blueprint.id, blueprint.id);
 
