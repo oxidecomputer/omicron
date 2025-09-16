@@ -178,7 +178,6 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
 
     let invocations: &[&[&str]] = &[
         &["db", "db-metadata", "ls-nexus"],
-
         // We expect this operation to fail (the nexus generation is the same
         // as the one in the target blueprint - it shouldn't be trying to
         // quiesce yet).
