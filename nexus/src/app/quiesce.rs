@@ -160,7 +160,7 @@ async fn do_quiesce(mut quiesce: NexusQuiesceHandle) {
     //
     // So here's the plan: we keep track of the blueprint id as of which we have
     // fully drained.  That means that we've processed all Nexus expungements up
-    // to that blueprint, _and_ we've recovered all sagas assigned to us, _and
+    // to that blueprint, _and_ we've recovered all sagas assigned to us, _and_
     // finished running them all.  When this blueprint id changes (because we've
     // processed re-assignments for a new blueprint), we'll do two things:
     //
@@ -444,7 +444,7 @@ async fn check_all_sagas_drained(
     // of them is already quiesced.  That would mean *they* already saw that we
     // were all drained up to the same point, which is good enough for us to
     // proceed, too.
-    let other_nexus_ids: BTreeSet<OmicronZoneUuid> = current_blueprint
+    let our_gen_nexus_ids: BTreeSet<OmicronZoneUuid> = current_blueprint
         .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
         .filter_map(|(_sled_id, zone)| {
             if let BlueprintZoneType::Nexus(nexus) = &zone.zone_type {
@@ -454,9 +454,9 @@ async fn check_all_sagas_drained(
             }
         })
         .collect();
-    assert!(!other_nexus_ids.is_empty());
+    assert!(!our_gen_nexus_ids.is_empty());
     let other_records = datastore
-        .database_nexus_access_all(&quiesce_opctx, &other_nexus_ids)
+        .database_nexus_access_all(&quiesce_opctx, &our_gen_nexus_ids)
         .await
         .context(
             "loading db_metadata_nexus records for other Nexus instances",
@@ -474,13 +474,13 @@ async fn check_all_sagas_drained(
         return Ok(());
     }
 
-    if other_records.len() < other_nexus_ids.len() {
+    if other_records.len() < our_gen_nexus_ids.len() {
         // This shouldn't ever happen.  But if it does, we don't want to
         // proceed because we don't know if the missing Nexus zone really is
         // drained.
         bail!(
             "found too few other Nexus records (expected {:?}, found {:?})",
-            other_nexus_ids,
+            our_gen_nexus_ids,
             other_records,
         );
     }
