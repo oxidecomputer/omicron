@@ -586,6 +586,25 @@ fn align_interpolate(
 mod tests {
     use super::*;
 
+    struct OwnedMetricWindow {
+        start_times: Vec<DateTime<Utc>>,
+        timestamps: Vec<DateTime<Utc>>,
+        input_points: Vec<Option<f64>>,
+        start: DateTime<Utc>,
+        end: DateTime<Utc>,
+    }
+    impl OwnedMetricWindow {
+        fn metric_window(&self) -> MetricWindow<'_> {
+            MetricWindow{
+                start_times: &self.start_times,
+                timestamps: &self.timestamps,
+                input_points: &self.input_points,
+                start: self.start,
+                end: self.end,
+            }
+        }
+    }
+
     #[test]
     fn test_fraction_overlap_with_window() {
         let now = Utc::now();
@@ -837,42 +856,62 @@ mod tests {
         );
     }
 
+    fn parse_example_data(fixture: &[(&str, &str, f64)]) -> OwnedMetricWindow {
+        let start_times: Vec<DateTime<Utc>> =
+            fixture.into_iter().map(|r| r.0.parse().unwrap()).collect();
+        let timestamps: Vec<DateTime<Utc>> =
+            fixture.into_iter().map(|r| r.1.parse().unwrap()).collect();
+
+        let input_points: Vec<_> =
+            fixture.into_iter().map(|r| Some(r.2)).collect();
+
+        let window_start = start_times[0];
+        let window_end = timestamps[timestamps.len() - 1];
+
+        OwnedMetricWindow{
+            start_times: start_times,
+            timestamps: timestamps,
+            input_points: input_points,
+            start: window_start,
+            end: window_end,
+        }
+    }
+
     #[test]
     fn test_rate_in_window_steady_state() {
         // 1000 bytes every 10 seconds -> 100 bytes per second
-        let raw_data = &[
+        let window = parse_example_data(&[
             ("2025-08-12T19:17:00.0000Z", "2025-08-12T19:17:10.0000Z", 1000f64),
             ("2025-08-12T19:17:10.0000Z", "2025-08-12T19:17:20.0000Z", 1000f64),
             ("2025-08-12T19:17:20.0000Z", "2025-08-12T19:17:30.0000Z", 1000f64),
             ("2025-08-12T19:17:30.0000Z", "2025-08-12T19:17:40.0000Z", 1000f64),
             ("2025-08-12T19:17:40.0000Z", "2025-08-12T19:17:50.0000Z", 1000f64),
             ("2025-08-12T19:17:50.0000Z", "2025-08-12T19:18:00.0000Z", 1000f64),
-        ];
+        ]);
 
-        let start_times: Vec<DateTime<Utc>> =
-            raw_data.into_iter().map(|r| r.0.parse().unwrap()).collect();
-        let timestamps: Vec<DateTime<Utc>> =
-            raw_data.into_iter().map(|r| r.1.parse().unwrap()).collect();
-
-        let input_points: Vec<_> =
-            raw_data.into_iter().map(|r| Some(r.2)).collect();
-
-        let window_start = start_times[0];
-        let window_end = timestamps[timestamps.len() - 1];
-
-        let mean = rate_in_window(
-            &MetricType::Delta,
-            &MetricWindow{
-                start_times: &start_times,
-                timestamps: &timestamps,
-                input_points: &input_points,
-                start: window_start,
-                end: window_end,
-            }
-        )
-        .unwrap();
+        let mean = rate_in_window(&MetricType::Delta, &window.metric_window()).unwrap();
         let expected = 100.0;
         assert!((mean - expected).abs() < 1e-6, "mean={mean}, expected={expected}");
+    }
+
+    #[test]
+    fn test_min_and_max_in_window() {
+        let window = parse_example_data(&[
+            ("2025-08-12T19:17:00.0000Z", "2025-08-12T19:17:10.0000Z", 2000f64),
+            ("2025-08-12T19:17:10.0000Z", "2025-08-12T19:17:20.0000Z", 1000f64),
+            ("2025-08-12T19:17:20.0000Z", "2025-08-12T19:17:30.0000Z", 3000f64),
+            ("2025-08-12T19:17:30.0000Z", "2025-08-12T19:17:40.0000Z", 4000f64),
+            ("2025-08-12T19:17:40.0000Z", "2025-08-12T19:17:50.0000Z", 3000f64),
+            ("2025-08-12T19:17:50.0000Z", "2025-08-12T19:18:00.0000Z", 2000f64),
+        ]);
+
+        let min = min_value_in_window(&MetricType::Gauge, &window.metric_window()).unwrap();
+        let expected = 1000.0;
+        assert!((min - expected).abs() < 1e-6, "min={min}, expected={expected}");
+
+        let max = max_value_in_window(&MetricType::Gauge, &window.metric_window()).unwrap();
+        let expected = 4000.0;
+        assert!((max - expected).abs() < 1e-6, "max={max}, expected={expected}");
     }
 
     #[test]
