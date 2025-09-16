@@ -74,8 +74,6 @@ impl super::Nexus {
         let (.., authz_project) =
             project_lookup.lookup_for(authz::Action::CreateChild).await?;
 
-        opctx.authorize(authz::Action::CreateChild, &authz_project).await?;
-
         let saga_params = sagas::vpc_create::Params {
             serialized_authn: authn::saga::Serialized::for_opctx(opctx),
             vpc_create: params.clone(),
