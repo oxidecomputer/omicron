@@ -85,8 +85,8 @@ pub struct PlanningInputFromDb<'a> {
     pub tuf_repo: TufRepoPolicy,
     pub old_repo: TufRepoPolicy,
     pub planner_config: PlannerConfig,
-    pub active_nexus_zones: Vec<OmicronZoneUuid>,
-    pub not_yet_nexus_zones: Vec<OmicronZoneUuid>,
+    pub active_nexus_zones: BTreeSet<OmicronZoneUuid>,
+    pub not_yet_nexus_zones: BTreeSet<OmicronZoneUuid>,
     pub log: &'a Logger,
 }
 
@@ -213,7 +213,7 @@ impl PlanningInputFromDb<'_> {
                     ],
                 )
                 .await
-                .internal_context("fetching db_metdata_nexus records")?
+                .internal_context("fetching db_metadata_nexus records")?
                 .into_iter()
                 .partition(|nexus| {
                     nexus.state() == DbMetadataNexusState::Active
@@ -282,10 +282,10 @@ impl PlanningInputFromDb<'_> {
             self.external_dns_version.into(),
             self.cockroachdb_settings.clone(),
         );
-        builder.set_active_nexuses(
+        builder.set_active_nexus_zones(
             self.active_nexus_zones.clone().into_iter().collect(),
         );
-        builder.set_not_yet_nexuses(
+        builder.set_not_yet_nexus_zones(
             self.not_yet_nexus_zones.clone().into_iter().collect(),
         );
 

@@ -200,8 +200,8 @@ impl ReconfiguratorSim {
             }
         }
 
-        builder.set_active_nexuses(active_nexus_zones);
-        builder.set_not_yet_nexuses(not_yet_nexus_zones);
+        builder.set_active_nexus_zones(active_nexus_zones);
+        builder.set_not_yet_nexus_zones(not_yet_nexus_zones);
 
         Ok(builder.build())
     }
