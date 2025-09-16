@@ -1523,9 +1523,6 @@ pub enum TargetReleaseSource {
 /// View of a system software target release.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 pub struct TargetRelease {
-    /// The target-release generation number.
-    pub generation: i64,
-
     /// The time it was set as the target release.
     pub time_requested: DateTime<Utc>,
 
@@ -1551,11 +1548,11 @@ pub struct UpdatesTrustRoot {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 pub struct UpdateStatus {
-    /// Current target release information
-    pub target_release: Option<TargetRelease>,
+    /// Current target release config
+    pub target_release: TargetRelease,
 
     /// Count of components running each release version
-    pub components_by_release: BTreeMap<String, usize>,
+    pub components_by_release_version: BTreeMap<String, usize>,
 
     /// Time when the last blueprint was created
     pub last_blueprint_time: Option<DateTime<Utc>>,

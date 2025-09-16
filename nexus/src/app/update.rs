@@ -161,17 +161,17 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
     ) -> Result<views::UpdateStatus, Error> {
-        // Get target release information
-        let target_release =
-            match self.datastore().target_release_get_current(opctx).await {
-                Ok(tr) => Some(
-                    self.datastore().target_release_view(opctx, &tr).await?,
-                ),
-                Err(_) => None, // No target release set
-            };
+        // ? because we expect there to always be a current target release. but
+        // it can still have an Unspecified release_source
+        let db_target_release =
+            self.datastore().target_release_get_current(opctx).await?;
+        let target_release = self
+            .datastore()
+            .target_release_view(opctx, &db_target_release)
+            .await?;
 
-        let components_by_release =
-            self.component_version_counts(opctx).await?;
+        let components_by_release_version =
+            self.component_version_counts(opctx, &db_target_release).await?;
 
         let last_blueprint_time =
             self.datastore().blueprint_get_latest_time(opctx).await?;
@@ -180,7 +180,7 @@ impl super::Nexus {
 
         Ok(views::UpdateStatus {
             target_release,
-            components_by_release,
+            components_by_release_version,
             last_blueprint_time,
         })
     }
@@ -189,6 +189,7 @@ impl super::Nexus {
     async fn component_version_counts(
         &self,
         opctx: &OpContext,
+        target_release: &nexus_db_model::TargetRelease,
     ) -> Result<BTreeMap<String, usize>, Error> {
         // Get the latest inventory collection
         let Some(inventory) =
@@ -197,9 +198,6 @@ impl super::Nexus {
             // No inventory collection available, return empty counts
             return Ok(BTreeMap::new());
         };
-
-        let target_release =
-            self.datastore().target_release_get_current(opctx).await?;
 
         let Some(target_release_tuf_repo_id) = target_release.tuf_repo_id
         else {

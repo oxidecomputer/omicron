@@ -25575,11 +25575,6 @@
         "description": "View of a system software target release.",
         "type": "object",
         "properties": {
-          "generation": {
-            "description": "The target-release generation number.",
-            "type": "integer",
-            "format": "int64"
-          },
           "release_source": {
             "description": "The source of the target release.",
             "allOf": [
@@ -25595,7 +25590,6 @@
           }
         },
         "required": [
-          "generation",
           "release_source",
           "time_requested"
         ]
@@ -26099,7 +26093,7 @@
       "UpdateStatus": {
         "type": "object",
         "properties": {
-          "components_by_release": {
+          "components_by_release_version": {
             "description": "Count of components running each release version",
             "type": "object",
             "additionalProperties": {
@@ -26115,17 +26109,12 @@
             "format": "date-time"
           },
           "target_release": {
-            "nullable": true,
-            "description": "Current target release information",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/TargetRelease"
-              }
-            ]
+            "$ref": "#/components/schemas/TargetRelease"
           }
         },
         "required": [
-          "components_by_release"
+          "components_by_release_version",
+          "target_release"
         ]
       },
       "UpdatesTrustRoot": {

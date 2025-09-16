@@ -677,11 +677,11 @@ async fn test_update_status() -> Result<()> {
     dbg!(status.clone());
 
     assert_eq!(
-        status.target_release.unwrap().release_source,
+        status.target_release.release_source,
         views::TargetReleaseSource::SystemVersion { version: v2 }
     );
 
-    let counts = status.components_by_release;
+    let counts = status.components_by_release_version;
     assert_eq!(counts.get("install dataset").unwrap(), &7);
     assert_eq!(counts.get("unknown").unwrap(), &15);
 
