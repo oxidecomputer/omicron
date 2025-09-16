@@ -1,3 +1,27 @@
+EXECUTING COMMAND: omdb ["db", "blueprints", "planner-report", "list"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+ID                                   TIME_CREATED         HAS_REPORT COMMENT                
+......<REDACTED_BLUEPRINT_ID>....... <REDACTED_TIMESTAMP> yes        initial test blueprint 
+---------------------------------------------
+stderr:
+note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
+note: database schema version matches expected (<redacted database version>)
+=============================================
+EXECUTING COMMAND: omdb ["db", "blueprints", "planner-report", "show", "current-target"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+planner report for blueprint ......<REDACTED_BLUEPRINT_ID>.......:
+empty planning report for blueprint ......<REDACTED_BLUEPRINT_ID>........
+
+---------------------------------------------
+stderr:
+note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
+note: database schema version matches expected (<redacted database version>)
+WARNING: planner report debug log was produced by a Nexus on git commit <GIT_COMMIT_REDACTED>, but omdb was built from git commit <GIT_COMMIT_REDACTED>. We will attempt to parse it anyway.
+=============================================
 EXECUTING COMMAND: omdb ["db", "disks", "list"]
 termination: Exited(0)
 ---------------------------------------------

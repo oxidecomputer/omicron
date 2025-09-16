@@ -177,6 +177,8 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
     let mut output = String::new();
 
     let invocations: &[&[&str]] = &[
+        &["db", "blueprints", "planner-report", "list"],
+        &["db", "blueprints", "planner-report", "show", "current-target"],
         &["db", "disks", "list"],
         &["db", "dns", "show"],
         &["db", "dns", "diff", "external", "2"],
@@ -283,6 +285,8 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
             "cockroachdb_fingerprint",
             &initial_blueprint.cockroachdb_fingerprint,
         )
+        // git commits vary between runs
+        .field("git commit", r"[0-9a-f]{40}(-dirty)?")
         // Error numbers vary between operating systems.
         .field("os error", r"\d+");
 

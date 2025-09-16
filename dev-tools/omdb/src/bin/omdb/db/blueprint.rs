@@ -14,8 +14,7 @@ use crate::nexus::BlueprintIdOrCurrentTarget;
 use anyhow::Context;
 use anyhow::bail;
 use async_bb8_diesel::AsyncRunQueryDsl;
-use chrono::DateTime;
-use chrono::Utc;
+use chrono::SecondsFormat;
 use clap::Args;
 use clap::Subcommand;
 use diesel::ExpressionMethods;
@@ -99,7 +98,7 @@ async fn cmd_db_blueprint_planner_report_list(
     #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
     struct BlueprintRow {
         id: BlueprintUuid,
-        time_created: DateTime<Utc>,
+        time_created: String,
         has_report: &'static str,
         comment: String,
     }
@@ -137,7 +136,9 @@ async fn cmd_db_blueprint_planner_report_list(
                 if bps_with_report.contains(&bp.id) { "yes" } else { "no" };
             BlueprintRow {
                 id: bp.id,
-                time_created: bp.time_created,
+                time_created: bp
+                    .time_created
+                    .to_rfc3339_opts(SecondsFormat::Secs, true),
                 has_report,
                 comment: bp.comment,
             }
@@ -210,7 +211,7 @@ async fn cmd_db_blueprint_planner_report_show(
         eprintln!(
             "WARNING: planner report debug log was produced by a Nexus \
              on git commit {log_git_commit}, but omdb was built from \
-             {our_git_commit}. We will attempt to parse it anyway."
+             git commit {our_git_commit}. We will attempt to parse it anyway."
         );
     }
 
