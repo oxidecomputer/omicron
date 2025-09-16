@@ -1269,10 +1269,6 @@ struct LoadExampleArgs {
     #[clap(short = 'd', long, default_value_t = SledBuilder::DEFAULT_NPOOLS)]
     ndisks_per_sled: u8,
 
-    /// Do not create zones in the example system.
-    #[clap(short = 'Z', long)]
-    no_zones: bool,
-
     /// Do not create entries for disks in the blueprint.
     #[clap(long)]
     no_disks_in_blueprint: bool,
@@ -2973,7 +2969,6 @@ fn cmd_load_example(
         )
         .external_dns_count(3)
         .context("invalid external DNS zone count")?
-        .create_zones(!args.no_zones)
         .create_disks_in_blueprint(!args.no_disks_in_blueprint);
     for sled_policy in args.sled_policy {
         builder = builder
