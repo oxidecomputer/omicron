@@ -755,7 +755,7 @@ enum BlueprintEditCommands {
         generation: Generation,
     },
     /// expunge a zone
-    ExpungeZone { zone_id: OmicronZoneUuid },
+    ExpungeZones { zone_ids: Vec<OmicronZoneUuid> },
     /// mark an expunged zone ready for cleanup
     MarkForCleanup { zone_id: OmicronZoneUuid },
     /// configure an SP update
@@ -2244,12 +2244,16 @@ fn cmd_blueprint_edit(
                 .context("failed to set host phase 2 source")?;
             rv
         }
-        BlueprintEditCommands::ExpungeZone { zone_id } => {
-            let sled_id = sled_with_zone(&builder, &zone_id)?;
-            builder
-                .sled_expunge_zone(sled_id, zone_id)
-                .context("failed to expunge zone")?;
-            format!("expunged zone {zone_id} from sled {sled_id}")
+        BlueprintEditCommands::ExpungeZones { zone_ids } => {
+            let mut rv = String::new();
+            for zone_id in zone_ids {
+                let sled_id = sled_with_zone(&builder, &zone_id)?;
+                builder.sled_expunge_zone(sled_id, zone_id).with_context(
+                    || format!("failed to expunge zone {zone_id}"),
+                )?;
+                swriteln!(rv, "expunged zone {zone_id} from sled {sled_id}");
+            }
+            rv
         }
         BlueprintEditCommands::MarkForCleanup { zone_id } => {
             let sled_id = sled_with_zone(&builder, &zone_id)?;
