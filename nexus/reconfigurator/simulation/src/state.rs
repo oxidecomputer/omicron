@@ -137,7 +137,11 @@ impl SimState {
             planning_input,
             collections: self.system.all_collections().cloned().collect(),
             target_blueprint: self.system().target_blueprint(),
-            blueprints: self.system.all_blueprints().cloned().collect(),
+            blueprints: self
+                .system
+                .all_blueprints()
+                .map(|b| b.blueprint.clone())
+                .collect(),
             internal_dns: self
                 .system
                 .all_internal_dns()

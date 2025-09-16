@@ -2083,13 +2083,15 @@ fn cmd_blueprint_plan(
     )
     .context("creating planner")?;
 
-    let BlueprintWithPlanningReport { blueprint, report } =
+    let blueprint_with_report =
         planner.plan().context("generating blueprint")?;
     let rv = format!(
-        "generated blueprint {} based on parent blueprint {}\n{report}",
-        blueprint.id, parent_blueprint.id,
+        "generated blueprint {} based on parent blueprint {}\n{}",
+        blueprint_with_report.id,
+        parent_blueprint.id,
+        blueprint_with_report.report
     );
-    system.add_blueprint(blueprint)?;
+    system.add_blueprint(blueprint_with_report)?;
 
     sim.commit_and_bump("reconfigurator-cli blueprint-plan".to_owned(), state);
 
@@ -2317,7 +2319,12 @@ fn cmd_blueprint_edit(
         "blueprint {} created from {}: {}",
         new_blueprint.id, resolved_id, label
     );
-    system.add_blueprint(new_blueprint)?;
+
+    // We didn't go through the planner here and therefore have no meaningful
+    // report.
+    system.add_blueprint(BlueprintWithPlanningReport::with_empty_report(
+        new_blueprint,
+    ))?;
 
     sim.commit_and_bump("reconfigurator-cli blueprint-edit".to_owned(), state);
     Ok(Some(rv))
@@ -2505,7 +2512,7 @@ fn cmd_blueprint_save(
     let state = sim.current_state();
     let resolved_id =
         state.system().resolve_blueprint_id(blueprint_id.into())?;
-    let blueprint = state.system().get_blueprint(&resolved_id)?;
+    let blueprint = &state.system().get_blueprint(&resolved_id)?.blueprint;
 
     let output_path = &args.filename;
     let output_str = serde_json::to_string_pretty(&blueprint)
