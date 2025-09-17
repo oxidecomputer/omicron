@@ -996,7 +996,7 @@ impl fmt::Display for PlanningZoneUpdatesStepReport {
         }
 
         if !waiting_zones.is_empty() {
-            let (n, s) = plural_map(unsafe_zones);
+            let (n, s) = plural_map(waiting_zones);
             writeln!(f, "* {n} zone{s} waiting to be expunged:")?;
             for (zone, reason) in waiting_zones.iter() {
                 writeln!(
