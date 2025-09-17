@@ -32,7 +32,7 @@ use tabled::Tabled;
 use uuid::Uuid;
 
 #[derive(Debug, Args, Clone)]
-pub(super) struct BlueprintArgs {
+pub(super) struct BlueprintsArgs {
     #[command(subcommand)]
     command: BlueprintCommands,
 }
@@ -63,11 +63,11 @@ struct ShowPlannerReportArgs {
     blueprint_id: BlueprintIdOrCurrentTarget,
 }
 
-pub(super) async fn cmd_db_blueprint(
+pub(super) async fn cmd_db_blueprints(
     opctx: &OpContext,
     datastore: &DataStore,
     fetch_opts: &DbFetchOptions,
-    args: &BlueprintArgs,
+    args: &BlueprintsArgs,
 ) -> anyhow::Result<()> {
     match &args.command {
         BlueprintCommands::PlannerReport(PlannerReportArgs {
