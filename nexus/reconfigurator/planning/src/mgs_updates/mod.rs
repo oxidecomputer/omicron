@@ -268,17 +268,6 @@ pub(crate) fn plan_mgs_updates(
             info!(log, "skipping board for MGS-driven update"; board)
         }
 
-        // TODO-K: Remove debugging logs
-        //for skipped in &skipped_updates.updates {
-        //    warn!(
-        //        log,
-        //        "update to {} {} has been skipped: {}",
-        //        skipped.baseboard_id,
-        //        skipped.component,
-        //        skipped.reason
-        //    );
-        //}
-
         pending_host_phase_2_changes.append(&mut host_phase_2);
         skipped_mgs_updates.append(&mut skipped_updates);
     }
@@ -1421,55 +1410,20 @@ mod test {
 
         // Test that we don't try to update boards that aren't in
         // `current_boards`, even if they're in inventory and outdated.
-        //
-        // TODO-K: Remove fake boards and find a better way to test this
-        let mut fake_boards = BTreeSet::new();
-        let fake_board = Arc::new(BaseboardId {
-            part_number: "bob".to_string(),
-            serial_number: "ob".to_string(),
-        });
-        fake_boards.insert(fake_board.clone());
         let collection = test_boards
             .collection_builder()
             .stage0_version_exception(SpType::Sled, 0, ARTIFACT_VERSION_1)
             .build();
-        let PlannedMgsUpdates {
-            pending_updates: updates,
-            skipped_mgs_updates,
-            ..
-        } = plan_mgs_updates(
-            log,
-            &collection,
-            &fake_boards,
-            //&BTreeSet::new(),
-            &PendingMgsUpdates::new(),
-            &TargetReleaseDescription::TufRepo(repo.clone()),
-            nmax_updates,
-            impossible_update_policy,
-        );
-        // TODO-K: Find a better way to test functionality
-        let mut expected_skipped_updates = SkippedMgsUpdates::new();
-        expected_skipped_updates.push(SkippedMgsUpdate {
-            baseboard_id: fake_board.clone(),
-            component: MgsUpdateComponent::RotBootloader,
-            reason: FailedMgsUpdateReason::SpNotInInventory,
-        });
-        expected_skipped_updates.push(SkippedMgsUpdate {
-            baseboard_id: fake_board.clone(),
-            component: MgsUpdateComponent::Rot,
-            reason: FailedMgsUpdateReason::SpNotInInventory,
-        });
-        expected_skipped_updates.push(SkippedMgsUpdate {
-            baseboard_id: fake_board.clone(),
-            component: MgsUpdateComponent::Sp,
-            reason: FailedMgsUpdateReason::SpNotInInventory,
-        });
-        expected_skipped_updates.push(SkippedMgsUpdate {
-            baseboard_id: fake_board,
-            component: MgsUpdateComponent::HostOs,
-            reason: FailedMgsUpdateReason::SpNotInInventory,
-        });
-        assert_eq!(skipped_mgs_updates, expected_skipped_updates);
+        let PlannedMgsUpdates { pending_updates: updates, .. } =
+            plan_mgs_updates(
+                log,
+                &collection,
+                &BTreeSet::new(),
+                &PendingMgsUpdates::new(),
+                &TargetReleaseDescription::TufRepo(repo.clone()),
+                nmax_updates,
+                impossible_update_policy,
+            );
         assert!(updates.is_empty());
         let PlannedMgsUpdates { pending_updates: updates, .. } =
             plan_mgs_updates(
