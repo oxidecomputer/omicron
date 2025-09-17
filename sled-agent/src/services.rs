@@ -3289,8 +3289,11 @@ impl ServiceManager {
 
         // We can only ensure uplinks if we have a rack network config.
         //
-        // TODO-correctness How can we have an underlay IP without a rack
-        // network config??
+        // It'd be surprising to have `underlay_info` containing our underlay IP
+        // without a rack network config, but it is technically possible. These
+        // bits of information are ledgered separately, and we could have
+        // ledgered our underlay IP, then crashed before the bootstore gossip
+        // happened to tell us the rack network config, and are now restarting.
         let Some(rack_network_config) = &underlay_info.rack_network_config
         else {
             return;
