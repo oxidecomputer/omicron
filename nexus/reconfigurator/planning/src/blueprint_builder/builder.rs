@@ -141,17 +141,6 @@ pub enum Error {
     AllocateInternalDnsSubnet(#[from] NoAvailableDnsSubnets),
     #[error("error allocating external networking resources")]
     AllocateExternalNetworking(#[from] ExternalNetworkingError),
-    #[error(
-        "mismatch while setting nexus_generation for a zone with an old image, \
-         expected current value is {expected} but actual value is {actual}"
-    )]
-    OldImageNexusGenerationMismatch { expected: Generation, actual: Generation },
-    #[error(
-        "mismatch while setting nexus_generation for a zone with a new image, \
-         expected current value is {expected} (or that +1) but actual value is \
-         {actual}"
-    )]
-    NewImageNexusGenerationMismatch { expected: Generation, actual: Generation },
     #[error("can only have {INTERNAL_DNS_REDUNDANCY} internal DNS servers")]
     PolicySpecifiesTooManyInternalDnsServers,
     #[error("zone is already up-to-date and should not be updated")]

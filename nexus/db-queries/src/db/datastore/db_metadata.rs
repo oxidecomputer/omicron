@@ -910,22 +910,6 @@ impl DataStore {
         Ok(())
     }
 
-    /// Updates a nexus access record to "Quiesced"
-    pub async fn database_nexus_access_quiesce(
-        &self,
-        nexus_id: OmicronZoneUuid,
-    ) -> Result<(), Error> {
-        use nexus_db_schema::schema::db_metadata_nexus::dsl;
-
-        diesel::update(dsl::db_metadata_nexus)
-            .filter(dsl::nexus_id.eq(nexus_id.into_untyped_uuid()))
-            .set(dsl::state.eq(DbMetadataNexusState::Quiesced))
-            .execute_async(&*self.pool_connection_unauthorized().await?)
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
-
-        Ok(())
-    }
     /// Initializes Nexus database access records from a blueprint using an
     /// existing connection
     ///
