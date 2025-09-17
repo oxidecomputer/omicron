@@ -699,7 +699,7 @@ impl DataStore {
 
         let db_nexus_ids: BTreeSet<_> = nexus_ids
             .iter()
-            .cloned()
+            .copied()
             .map(nexus_db_model::to_db_typed_uuid)
             .collect();
         dsl::db_metadata_nexus
@@ -736,7 +736,7 @@ impl DataStore {
         Ok(count)
     }
 
-    /// Updates the "last_drained_blueprint_id" for the given Nexus id
+    /// Updates the state for the given Nexus id to "quiesced"
     pub async fn database_nexus_access_update_quiesced(
         &self,
         nexus_id: OmicronZoneUuid,
