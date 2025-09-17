@@ -437,7 +437,8 @@ fn milan_ideal() -> CpuIdDump {
     leaf.set_syscall_sysret(true);
     leaf.set_execute_disable(true);
     leaf.set_mmx_extensions(true);
-    leaf.set_fast_fxsave_fxstor(true);
+    // illumos does not support setting EFER.FFSXR, so hide the bit
+    leaf.set_fast_fxsave_fxstor(false);
     leaf.set_1gib_pages(true);
     leaf.set_rdtscp(true);
     leaf.set_64bit_mode(true);
@@ -653,6 +654,19 @@ pub fn milan_rfd314() -> CpuIdDump {
         .set_l2_l3_cache_and_tlb_info(Some(leaf))
         .expect("can set leaf 8000_0006h");
 
+    let mut leaf = cpuid
+        .get_processor_capacity_feature_info()
+        .expect("can get leaf 8000_0008h");
+
+    // Support for `wbnoinvd` is hidden in bhyve for the time being. This would
+    // probably be fine to pass through, but it is as-yet untested. Continue
+    // hiding this instruction.
+    leaf.set_wbnoinvd(false);
+
+    cpuid
+        .set_processor_capacity_feature_info(Some(leaf))
+        .expect("can set leaf 8000_0008h");
+
     // Set up TLB information for 1GiB pages (leaf 8000_0019h)
     let mut leaf = Tlb1gbPageInfo::empty();
     leaf.set_dtlb_l1_1gb_associativity(0xF);
@@ -805,14 +819,14 @@ mod test {
             0xD, 0x2, 0x00000100, 0x00000240, 0x00000000, 0x00000000
         ),
         cpuid_leaf!(0x80000000, 0x80000021, 0x68747541, 0x444D4163, 0x69746E65),
-        cpuid_leaf!(0x80000001, 0x00A00F11, 0x40000000, 0x444001F9, 0x27D3FBFF),
+        cpuid_leaf!(0x80000001, 0x00A00F11, 0x40000000, 0x444001F9, 0x25D3FBFF),
         cpuid_leaf!(0x80000002, 0x20444D41, 0x43595045, 0x31373720, 0x36205033),
         cpuid_leaf!(0x80000003, 0x6F432D34, 0x50206572, 0x65636F72, 0x726F7373),
         cpuid_leaf!(0x80000004, 0x20202020, 0x20202020, 0x20202020, 0x00202020),
         cpuid_leaf!(0x80000005, 0xFF40FF40, 0xFF40FF40, 0x20080140, 0x20080140),
         cpuid_leaf!(0x80000006, 0x48002200, 0x68004200, 0x02006140, 0x08009140),
         cpuid_leaf!(0x80000007, 0x00000000, 0x00000000, 0x00000000, 0x00000100),
-        cpuid_leaf!(0x80000008, 0x00003030, 0x00000205, 0x00000000, 0x00000000),
+        cpuid_leaf!(0x80000008, 0x00003030, 0x00000005, 0x00000000, 0x00000000),
         cpuid_leaf!(0x8000000A, 0x00000000, 0x00000000, 0x00000000, 0x00000000),
         cpuid_leaf!(0x80000019, 0xF040F040, 0xF0400000, 0x00000000, 0x00000000),
         cpuid_leaf!(0x8000001A, 0x00000006, 0x00000000, 0x00000000, 0x00000000),
@@ -975,8 +989,6 @@ mod test {
         // had been passing the CPUID bits through
         ext_processor_features.set_skinit(true);
         ext_processor_features.set_wdt(true);
-        // TODO: Fast FXSAVE was not passed through?
-        ext_processor_features.set_fast_fxsave_fxstor(false);
         cpuid
             .set_extended_processor_and_feature_identifiers(Some(
                 ext_processor_features,
@@ -990,9 +1002,6 @@ mod test {
         // Support for the instructions retired MSR was passed through by bhyve
         // even though the MSR itself is not available to guests.
         leaf.set_inst_ret_cntr_msr(true);
-
-        // TODO: Support for `wbnoinvd` was hidden from guests by byhve?
-        leaf.set_wbnoinvd(false);
 
         // INVLPGB and RDPRU max were passed through even those instructions are not
         // supported.
