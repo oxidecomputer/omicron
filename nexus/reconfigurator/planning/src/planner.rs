@@ -1014,8 +1014,11 @@ impl<'a> Planner<'a> {
             DiscretionaryOmicronZone::CruciblePantry,
             DiscretionaryOmicronZone::InternalDns,
             DiscretionaryOmicronZone::ExternalDns,
-            DiscretionaryOmicronZone::Nexus,
             DiscretionaryOmicronZone::Oximeter,
+            // Nexus only wants placement if no other zones are pending - leave
+            // it last in this list so it has visibility into the placement of
+            // other discretionary zones.
+            DiscretionaryOmicronZone::Nexus,
         ] {
             // Our goal here is to make sure that if we have less redundancy for
             // discretionary zones than needed, we deploy additional zones.
