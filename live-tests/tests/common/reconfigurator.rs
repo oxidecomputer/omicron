@@ -128,11 +128,12 @@ pub async fn blueprint_edit_current_target(
     Ok((blueprint1, blueprint2))
 }
 
-/// Returns whether the given blueprint's sled configurations appear to be
+/// Checks whether the given blueprint's sled configurations appear to be
 /// propagated to all sleds.
 ///
-/// Returns the inventory collection so that the caller can check additional
-/// details if wanted.
+/// If so, returns the inventory collection so that the caller can check
+/// additional details if wanted.  If not or if we failed to determine the
+/// answer, returns an error.
 pub async fn blueprint_sled_configs_propagated(
     opctx: &OpContext,
     datastore: &DataStore,

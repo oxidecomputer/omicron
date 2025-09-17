@@ -40,7 +40,7 @@ async fn test_nexus_handoff(lc: &LiveTestContext) {
 
     // Make sure we're starting from a known-normal state.
     // First, we have an enabled target blueprint.
-    let blueprint1 = blueprint_load_target_enabled(log, nexus)
+    let blueprint_initial = blueprint_load_target_enabled(log, nexus)
         .await
         .expect("loading initial target blueprint");
     // That blueprint should be propagated to all sleds.  We wait just a bit
@@ -49,7 +49,7 @@ async fn test_nexus_handoff(lc: &LiveTestContext) {
     let collection = blueprint_wait_sled_configs_propagated(
         opctx,
         datastore,
-        &blueprint1,
+        &blueprint_initial,
         nexus,
         Duration::from_secs(15),
     )
@@ -58,7 +58,7 @@ async fn test_nexus_handoff(lc: &LiveTestContext) {
     // Check that there's no Nexus handoff already pending.  That means that
     // there exist no Nexus zones with a generation newer than the blueprint's
     // `nexus_generation`.
-    let new_zones = blueprint1
+    let new_zones = blueprint_initial
         .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
         .filter_map(|(_sled_id, z)| {
             let BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
@@ -68,14 +68,15 @@ async fn test_nexus_handoff(lc: &LiveTestContext) {
             else {
                 return None;
             };
-            (*nexus_generation > blueprint1.nexus_generation).then_some(z.id)
+            (*nexus_generation > blueprint_initial.nexus_generation)
+                .then_some(z.id)
         })
         .collect::<Vec<_>>();
     if !new_zones.is_empty() {
         panic!(
             "handoff in progress!  found zones with generation newer than \
              current blueprint generation ({}): {}",
-            blueprint1.nexus_generation,
+            blueprint_initial.nexus_generation,
             new_zones
                 .into_iter()
                 .map(|s| s.to_string())
@@ -90,7 +91,7 @@ async fn test_nexus_handoff(lc: &LiveTestContext) {
         image_source: &'a BlueprintZoneImageSource,
         cfg: &'a blueprint_zone_type::Nexus,
     }
-    let current_nexus_zones: BTreeMap<OmicronZoneUuid, _> = blueprint1
+    let current_nexus_zones: BTreeMap<OmicronZoneUuid, _> = blueprint_initial
         .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
         .filter_map(|(sled_id, z)| {
             let BlueprintZoneType::Nexus(
@@ -99,16 +100,18 @@ async fn test_nexus_handoff(lc: &LiveTestContext) {
             else {
                 return None;
             };
-            (*nexus_generation == blueprint1.nexus_generation).then(|| {
-                (
-                    z.id,
-                    CurrentNexusZone {
-                        sled_id,
-                        image_source: &z.image_source,
-                        cfg,
-                    },
-                )
-            })
+            (*nexus_generation == blueprint_initial.nexus_generation).then(
+                || {
+                    (
+                        z.id,
+                        CurrentNexusZone {
+                            sled_id,
+                            image_source: &z.image_source,
+                            cfg,
+                        },
+                    )
+                },
+            )
         })
         .collect();
     assert!(
@@ -143,7 +146,7 @@ async fn test_nexus_handoff(lc: &LiveTestContext) {
     //
     // For each zone in the current generation, create a replacement at the next
     // generation.
-    let next_generation = blueprint1.nexus_generation.next();
+    let next_generation = blueprint_initial.nexus_generation.next();
     let planner_config = datastore
         .reconfigurator_config_get_latest(opctx)
         .await
@@ -153,34 +156,35 @@ async fn test_nexus_handoff(lc: &LiveTestContext) {
         PlanningInputFromDb::assemble(opctx, datastore, planner_config)
             .await
             .expect("planning input");
-    let (_blueprint1, blueprint2) = blueprint_edit_current_target(
-        log,
-        &planning_input,
-        &collection,
-        &nexus,
-        &|builder: &mut BlueprintBuilder| {
-            for current_nexus in current_nexus_zones.values() {
-                builder
-                    .sled_add_zone_nexus(
-                        current_nexus.sled_id,
-                        current_nexus.image_source.clone(),
-                        next_generation,
-                    )
-                    .context("adding Nexus zone")?;
-            }
-            Ok(())
-        },
-    )
-    .await
-    .expect("editing blueprint to add zones");
+    let (_blueprint_initial, blueprint_new_nexus) =
+        blueprint_edit_current_target(
+            log,
+            &planning_input,
+            &collection,
+            &nexus,
+            &|builder: &mut BlueprintBuilder| {
+                for current_nexus in current_nexus_zones.values() {
+                    builder
+                        .sled_add_zone_nexus(
+                            current_nexus.sled_id,
+                            current_nexus.image_source.clone(),
+                            next_generation,
+                        )
+                        .context("adding Nexus zone")?;
+                }
+                Ok(())
+            },
+        )
+        .await
+        .expect("editing blueprint to add zones");
     info!(
         log,
         "wrote new target blueprint with new Nexus zones";
-        "blueprint_id" => %blueprint2.id
+        "blueprint_id" => %blueprint_new_nexus.id
     );
 
     // Find the new Nexus zones and make clients for them.
-    let new_nexus_clients = blueprint2
+    let new_nexus_clients = blueprint_new_nexus
         .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
         .filter_map(|(_sled_id, z)| {
             let BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
@@ -199,17 +203,25 @@ async fn test_nexus_handoff(lc: &LiveTestContext) {
     assert_eq!(new_nexus_clients.len(), current_nexus_zones.len());
 
     // Wait for the zones to be running.
-    // (This does not mean that their Nexus instances are running.)
+    //
+    // This does not mean that their Nexus instances are immediately available.
+    // SMF may still be starting up the zone.  Even once the Nexus process
+    // starts, it will become blocked on the "not yet" DbMetadataNexusState,
+    // waiting for handoff.
     let collection = blueprint_wait_sled_configs_propagated(
         opctx,
         datastore,
-        &blueprint2,
+        &blueprint_new_nexus,
         nexus,
         Duration::from_secs(180),
     )
     .await
     .expect("three new Nexus zones running");
-    info!(log, "blueprint configs propagated"; "blueprint_id" => %blueprint2.id);
+    info!(
+        log,
+        "blueprint configs propagated";
+        "blueprint_id" => %blueprint_new_nexus.id
+    );
 
     // Check that the db_metadata_nexus records for the new Nexus instances
     // exist.
@@ -237,22 +249,23 @@ async fn test_nexus_handoff(lc: &LiveTestContext) {
         PlanningInputFromDb::assemble(opctx, datastore, planner_config)
             .await
             .expect("planning input");
-    let (_blueprint2, blueprint3) = blueprint_edit_current_target(
-        log,
-        &planning_input,
-        &collection,
-        &nexus,
-        &|builder: &mut BlueprintBuilder| {
-            builder.set_nexus_generation(next_generation);
-            Ok(())
-        },
-    )
-    .await
-    .expect("editing blueprint to bump nexus_generation");
+    let (_blueprint_new_nexus, blueprint_handoff) =
+        blueprint_edit_current_target(
+            log,
+            &planning_input,
+            &collection,
+            &nexus,
+            &|builder: &mut BlueprintBuilder| {
+                builder.set_nexus_generation(next_generation);
+                Ok(())
+            },
+        )
+        .await
+        .expect("editing blueprint to bump nexus_generation");
     info!(
         log,
         "wrote new target blueprint with new nexus generation";
-        "blueprint_id" => %blueprint3.id
+        "blueprint_id" => %blueprint_handoff.id
     );
 
     // The old Nexus zones should pretty soon report that they're quiescing, but
@@ -375,37 +388,39 @@ async fn test_nexus_handoff(lc: &LiveTestContext) {
             .expect("planning input");
     let new_nexus =
         new_nexus_clients.values().next().expect("one new Nexus client");
-    let (_blueprint3, blueprint4) = blueprint_edit_current_target(
-        log,
-        &planning_input,
-        &collection,
-        new_nexus,
-        &|builder: &mut BlueprintBuilder| {
-            for (id, current_zone) in &current_nexus_zones {
-                builder
-                    .sled_expunge_zone(current_zone.sled_id, *id)
-                    .context("expunging zone")?;
-            }
+    let (_blueprint_handoff, blueprint_cleanup) =
+        blueprint_edit_current_target(
+            log,
+            &planning_input,
+            &collection,
+            new_nexus,
+            &|builder: &mut BlueprintBuilder| {
+                for (id, current_zone) in &current_nexus_zones {
+                    builder
+                        .sled_expunge_zone(current_zone.sled_id, *id)
+                        .context("expunging zone")?;
+                }
 
-            Ok(())
-        },
-    )
-    .await
-    .expect("editing blueprint to expunge old Nexus zones");
+                Ok(())
+            },
+        )
+        .await
+        .expect("editing blueprint to expunge old Nexus zones");
     info!(
         log,
         "wrote new target blueprint with expunged zones";
-        "blueprint_id" => %blueprint4.id
+        "blueprint_id" => %blueprint_cleanup.id
     );
 
-    // Wait for this to get propagated everywhere.
+    // Wait for this to get propagated everywhere.  This way, when the test
+    // completes, the system will be at rest again, not still cleaning up.
     let _latest_collection = blueprint_wait_sled_configs_propagated(
         opctx,
         datastore,
-        &blueprint4,
+        &blueprint_cleanup,
         new_nexus,
         Duration::from_secs(120),
     )
     .await
-    .expect("waiting for blueprint4 sled configs");
+    .expect("waiting for cleanup sled configs");
 }
