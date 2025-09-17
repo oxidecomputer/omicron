@@ -1523,9 +1523,6 @@ pub enum TargetReleaseSource {
 /// View of a system software target release.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 pub struct TargetRelease {
-    /// The target-release generation number.
-    pub generation: i64,
-
     /// The time it was set as the target release.
     pub time_requested: DateTime<Utc>,
 
@@ -1543,6 +1540,22 @@ pub struct UpdatesTrustRoot {
     /// The trusted root role itself, a JSON document as described by The Update
     /// Framework.
     pub root_role: TufSignedRootRole,
+}
+
+// TODO: figure out how to make target release and last blueprint not optional
+
+// TODO: add problems. see PlanningReport and do_plan
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+pub struct UpdateStatus {
+    /// Current target release config
+    pub target_release: TargetRelease,
+
+    /// Count of components running each release version
+    pub components_by_release_version: BTreeMap<String, usize>,
+
+    /// Time when the last blueprint was created
+    pub last_blueprint_time: Option<DateTime<Utc>>,
 }
 
 fn expected_one_of<T: strum::VariantArray + fmt::Display>() -> String {

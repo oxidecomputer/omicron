@@ -37,7 +37,6 @@ async fn get_set_target_release() -> Result<()> {
             .unwrap()
             .parsed_body()
             .unwrap();
-    assert_eq!(target_release.generation, 1);
     assert!(target_release.time_requested < Utc::now());
     assert_eq!(target_release.release_source, TargetReleaseSource::Unspecified);
 
@@ -73,7 +72,6 @@ async fn get_set_target_release() -> Result<()> {
         let target_release =
             set_target_release(client, system_version.clone()).await?;
         let after = Utc::now();
-        assert_eq!(target_release.generation, 2);
         assert!(target_release.time_requested >= before);
         assert!(target_release.time_requested <= after);
         assert_eq!(
@@ -105,7 +103,6 @@ async fn get_set_target_release() -> Result<()> {
         let target_release =
             set_target_release(client, system_version.clone()).await?;
         let after = Utc::now();
-        assert_eq!(target_release.generation, 3);
         assert!(target_release.time_requested >= before);
         assert!(target_release.time_requested <= after);
         assert_eq!(
@@ -124,7 +121,7 @@ async fn get_set_target_release() -> Result<()> {
     Ok(())
 }
 
-async fn set_target_release(
+pub async fn set_target_release(
     client: &ClientTestContext,
     system_version: Version,
 ) -> Result<TargetRelease> {

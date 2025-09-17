@@ -137,6 +137,26 @@ impl DataStore {
         Ok(blueprints.into_iter().map(BlueprintMetadata::from).collect())
     }
 
+    /// Get the time of the most recently created blueprint
+    pub async fn blueprint_get_latest_time(
+        &self,
+        opctx: &OpContext,
+    ) -> Result<Option<DateTime<Utc>>, Error> {
+        use nexus_db_schema::schema::blueprint;
+
+        opctx
+            .authorize(authz::Action::ListChildren, &authz::BLUEPRINT_CONFIG)
+            .await?;
+
+        let latest_time = blueprint::table
+            .select(diesel::dsl::max(blueprint::time_created))
+            .get_result_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        Ok(latest_time)
+    }
+
     /// Store a complete blueprint into the database
     pub async fn blueprint_insert(
         &self,
