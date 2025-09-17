@@ -1181,7 +1181,17 @@ impl<'a> Planner<'a> {
                     self.blueprint.sled_add_zone_external_dns(sled_id, image)?
                 }
                 DiscretionaryOmicronZone::Nexus => {
-                    self.blueprint.sled_add_zone_nexus(sled_id, image)?
+                    // TODO: omicron#8936 will fix this to determine the
+                    // appropriate generation to use here.  For now, we use the
+                    // current generation.  That does mean that in the middle of
+                    // a handoff, we'll deploy the *new* version, but that's a
+                    // very unlikely case to get here and will be fixed by
+                    // omicron#8936.
+                    self.blueprint.sled_add_zone_nexus(
+                        sled_id,
+                        image,
+                        self.blueprint.nexus_generation(),
+                    )?
                 }
                 DiscretionaryOmicronZone::Oximeter => {
                     self.blueprint.sled_add_zone_oximeter(sled_id, image)?
