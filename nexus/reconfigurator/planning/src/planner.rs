@@ -1283,7 +1283,7 @@ impl<'a> Planner<'a> {
                 }
                 DiscretionaryOmicronZone::Nexus => {
                     let nexus_generation =
-                        self.blueprint.determine_nexus_generation(&image)?;
+                        self.determine_nexus_generation(&image)?;
                     self.blueprint.sled_add_zone_nexus(
                         sled_id,
                         image,
@@ -1302,6 +1302,64 @@ impl<'a> Planner<'a> {
         }
 
         Ok(())
+    }
+
+    // Determines the appropriate generation number for a new Nexus zone.
+    // This generation is based on the generation number used by existing
+    // Nexus zones.
+    //
+    // The logic is:
+    // - If any existing Nexus zone has the same image source, reuse its generation
+    // - Otherwise, use the highest existing generation + 1
+    // - If no existing zones exist, return an error
+    //
+    // This function also validates that the determined generation matches the
+    // top-level current blueprint generation.
+    fn determine_nexus_generation(
+        &self,
+        image_source: &BlueprintZoneImageSource,
+    ) -> Result<Generation, Error> {
+        // If any other Nexus in the blueprint has the same image source,
+        // use it. Otherwise, use the highest generation number + 1.
+        let mut highest_seen_generation = None;
+        let mut same_image_nexus_generation = None;
+
+        // Iterate over both existing zones and ones that are actively being placed.
+        for (zone, nexus) in self
+            .blueprint
+            .current_zones(BlueprintZoneDisposition::any)
+            .filter_map(|z| match &z.zone_type {
+                BlueprintZoneType::Nexus(nexus) => Some((z, nexus)),
+                _ => None,
+            })
+        {
+            if zone.image_source == *image_source {
+                // If the image matches exactly, use it.
+                same_image_nexus_generation = Some(nexus.nexus_generation);
+                break;
+            } else if let Some(gen) = highest_seen_generation {
+                // Otherwise, use the generation number if it's the highest
+                // we've seen
+                if nexus.nexus_generation > gen {
+                    highest_seen_generation = Some(nexus.nexus_generation);
+                }
+            } else {
+                // Use it regardless if it's the first generation number we've
+                // seen
+                highest_seen_generation = Some(nexus.nexus_generation);
+            }
+        }
+
+        let determined_generation = match same_image_nexus_generation {
+            Some(gen) => Some(gen),
+            None => highest_seen_generation.map(|gen| gen.next()),
+        };
+
+        let Some(gen) = determined_generation else {
+            return Err(Error::NoNexusZonesInParentBlueprint);
+        };
+
+        Ok(gen)
     }
 
     /// Update at most one MGS-managed device (SP, RoT, etc.), if any are out of
@@ -7702,11 +7760,11 @@ pub(crate) mod test {
 
         // - Bumps the target_release_generation
         // - Sets a new "tuf_repo" as part of the "example.input"
-        // - The system version is hard-coded as "2.0.0"
         // - Sets artifacts in the repo to `artifacts`
         fn set_new_tuf_repo_with_artifacts(
             &mut self,
             artifacts: Vec<TufArtifactMeta>,
+            system_version: Version,
         ) {
             let mut input_builder = self.example.input.clone().into_builder();
             let fake_hash = ArtifactHash([0; 32]);
@@ -7721,7 +7779,7 @@ pub(crate) mod test {
                             hash: fake_hash,
                             targets_role_version: 0,
                             valid_until: Utc::now(),
-                            system_version: Version::new(2, 0, 0),
+                            system_version,
                             file_name: String::from(""),
                         },
                         artifacts,
@@ -7757,6 +7815,22 @@ pub(crate) mod test {
             let bp = planner.plan().expect("planning succeeded");
             verify_blueprint(&bp);
             bp
+        }
+
+        // Creates a new blueprint builder for manually editing a blueprint
+        fn new_blueprint_builder(
+            &mut self,
+            name: &str,
+        ) -> BlueprintBuilder<'_> {
+            BlueprintBuilder::new_based_on(
+                &self.log,
+                &self.blueprint,
+                &self.example.input,
+                &self.example.collection,
+                name,
+                self.rng.next_planner_rng(),
+            )
+            .expect("can't create blueprint builder")
         }
 
         // Asserts that a new blueprint, if generated, will make no changes
@@ -7824,6 +7898,147 @@ pub(crate) mod test {
     }
 
     #[test]
+    fn test_nexus_generation_assignment_multiple_generations() {
+        static TEST_NAME: &str =
+            "test_nexus_generation_assignment_multiple_generations";
+        let logctx = test_setup_log(TEST_NAME);
+
+        // Use our example system with multiple Nexus zones
+        let mut rng = SimRngState::from_seed(TEST_NAME);
+        let (example, blueprint) = ExampleSystemBuilder::new_with_rng(
+            &logctx.log,
+            rng.next_system_rng(),
+        )
+        .nexus_count(3)
+        .build();
+        verify_blueprint(&blueprint);
+
+        let mut bp_generator = BlueprintGenerator::new(
+            logctx.log.clone(),
+            example,
+            blueprint,
+            rng,
+        );
+
+        // We shouldn't try to bump the generation number without a new TUF
+        // repo.
+        let new_bp = bp_generator.plan_new_blueprint("no-op");
+        bp_generator.assert_child_bp_makes_no_changes(&new_bp);
+        bp_generator.assert_child_bp_has_no_report(&new_bp);
+
+        // Set up a TUF repo with new artifacts
+        let artifact_version =
+            ArtifactVersion::new_static("2.0.0-nexus-gen-test")
+                .expect("can't parse artifact version");
+        bp_generator.set_new_tuf_repo_with_artifacts(
+            create_artifacts_at_version(&artifact_version),
+            Version::new(2, 0, 0),
+        );
+        let image_source =
+            BlueprintGenerator::create_image_at_version(&artifact_version);
+
+        // Manually update all non-Nexus zones to the new image source
+        for sled_config in bp_generator.blueprint.sleds.values_mut() {
+            for mut zone in &mut sled_config.zones {
+                if zone.zone_type.kind() != ZoneKind::Nexus {
+                    zone.image_source = image_source.clone();
+                }
+            }
+        }
+        // Also, manually edit the blueprint to expunge one Nexus.
+        //
+        // This tests that we can restore redundancy of the old Nexuses
+        // while we're also deploying the new ones.
+        let (sled, zone, _) = bp_generator
+            .blueprint
+            .all_nexus_zones(BlueprintZoneDisposition::is_in_service)
+            .next()
+            .unwrap();
+        let nexus_id = zone.id;
+
+        let mut bp_builder = bp_generator.new_blueprint_builder("expunge-one");
+        bp_builder.sled_expunge_zone(sled, nexus_id).unwrap();
+        bp_generator.blueprint = bp_builder.build();
+
+        // We should have two old Nexuses, both running with the old generation
+        // and the old image.
+        let nexuses = bp_generator
+            .blueprint
+            .all_nexus_zones(BlueprintZoneDisposition::is_in_service)
+            .collect::<Vec<_>>();
+        assert_eq!(nexuses.len(), 2);
+        for (_, zone, nexus) in nexuses {
+            assert_eq!(
+                zone.image_source,
+                BlueprintZoneImageSource::InstallDataset
+            );
+            assert_eq!(
+                nexus.nexus_generation,
+                bp_generator.blueprint.nexus_generation
+            );
+        }
+
+        bp_generator.update_inventory_from_blueprint();
+
+        let old_generation = bp_generator.blueprint.nexus_generation;
+        let new_bp =
+            bp_generator.plan_new_blueprint("test_blocked_by_new_nexus_db");
+        {
+            assert_eq!(new_bp.nexus_generation, old_generation);
+
+            let summary = new_bp.diff_since_blueprint(&bp_generator.blueprint);
+
+            // This new blueprint does do *something* - it adds new Nexus zones,
+            // even though they aren't sufficiently "up" for the nexus
+            // generation bump.
+            assert_eq!(
+                summary.total_zones_added(),
+                bp_generator.example.input.target_nexus_zone_count() + 1
+            );
+            assert_eq!(summary.total_zones_removed(), 0);
+            assert_eq!(summary.total_zones_modified(), 1);
+            assert!(
+                matches!(
+                    new_bp.report.nexus_generation_bump,
+                    PlanningNexusGenerationBumpReport::WaitingOn(
+                        NexusGenerationBumpWaitingOn::NexusDatabasePropagation
+                    ),
+                ),
+                "Unexpected Nexus Generation report: {:?}",
+                new_bp.report.nexus_generation_bump
+            );
+        }
+        bp_generator.blueprint = new_bp;
+
+        // We should now have 6 nexuses: 3 with the old image using the old
+        // generation, and 3 with the new image using the new image.
+        let nexuses = bp_generator
+            .blueprint
+            .all_nexus_zones(BlueprintZoneDisposition::is_in_service)
+            .collect::<Vec<_>>();
+        assert_eq!(nexuses.len(), 6);
+        for (_, zone, nexus) in nexuses {
+            let bp = &bp_generator.blueprint;
+
+            // Old Nexuses
+            if nexus.nexus_generation == bp.nexus_generation {
+                assert_eq!(
+                    zone.image_source,
+                    BlueprintZoneImageSource::InstallDataset
+                );
+            // New Nexuses
+            } else if nexus.nexus_generation == bp.nexus_generation.next() {
+                assert_ne!(
+                    zone.image_source,
+                    BlueprintZoneImageSource::InstallDataset
+                );
+            } else {
+                panic!("Unexpected nexus generation");
+            }
+        }
+    }
+
+    #[test]
     fn test_nexus_generation_update() {
         static TEST_NAME: &str = "test_nexus_generation_update";
         let logctx = test_setup_log(TEST_NAME);
@@ -7834,7 +8049,7 @@ pub(crate) mod test {
             &logctx.log,
             rng.next_system_rng(),
         )
-        .nexus_count(3) // Ensure we have multiple Nexus zones
+        .nexus_count(3)
         .build();
         verify_blueprint(&blueprint);
 
@@ -7868,6 +8083,7 @@ pub(crate) mod test {
                 .expect("can't parse artifact version");
         bp_generator.set_new_tuf_repo_with_artifacts(
             create_artifacts_at_version(&artifact_version),
+            Version::new(2, 0, 0),
         );
         let image_source =
             BlueprintGenerator::create_image_at_version(&artifact_version);
