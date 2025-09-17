@@ -31,7 +31,6 @@ use serde::Serialize;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::fmt;
-//use std::fmt::Display;
 use std::fmt::Write;
 use std::sync::Arc;
 use thiserror::Error;

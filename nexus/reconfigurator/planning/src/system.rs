@@ -1210,14 +1210,14 @@ pub struct Sled {
     policy: SledPolicy,
     state: SledState,
     resources: SledResources,
-    pub stage0_caboose: Option<Arc<nexus_types::inventory::Caboose>>,
-    pub stage0_next_caboose: Option<Arc<nexus_types::inventory::Caboose>>,
-    pub sp_host_phase_1_active_slot: Option<M2Slot>,
-    pub sp_host_phase_1_hash_flash: BTreeMap<M2Slot, ArtifactHash>,
-    pub sp_active_caboose: Option<Arc<nexus_types::inventory::Caboose>>,
-    pub sp_inactive_caboose: Option<Arc<nexus_types::inventory::Caboose>>,
-    pub rot_slot_a_caboose: Option<Arc<nexus_types::inventory::Caboose>>,
-    pub rot_slot_b_caboose: Option<Arc<nexus_types::inventory::Caboose>>,
+    stage0_caboose: Option<Arc<nexus_types::inventory::Caboose>>,
+    stage0_next_caboose: Option<Arc<nexus_types::inventory::Caboose>>,
+    sp_host_phase_1_active_slot: Option<M2Slot>,
+    sp_host_phase_1_hash_flash: BTreeMap<M2Slot, ArtifactHash>,
+    sp_active_caboose: Option<Arc<nexus_types::inventory::Caboose>>,
+    sp_inactive_caboose: Option<Arc<nexus_types::inventory::Caboose>>,
+    rot_slot_a_caboose: Option<Arc<nexus_types::inventory::Caboose>>,
+    rot_slot_b_caboose: Option<Arc<nexus_types::inventory::Caboose>>,
 }
 
 impl Sled {
