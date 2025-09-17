@@ -108,7 +108,7 @@ use omicron_common::progenitor_operation_retry::ProgenitorOperationRetryError;
 use omicron_common::{
     api::external, progenitor_operation_retry::ProgenitorOperationRetry,
 };
-use omicron_uuid_kinds::{GenericUuid, PropolisUuid, SledUuid, VolumeUuid};
+use omicron_uuid_kinds::{GenericUuid, PropolisUuid, VolumeUuid};
 use rand::{RngCore, SeedableRng, rngs::StdRng};
 use serde::Deserialize;
 use serde::Serialize;
@@ -832,13 +832,12 @@ async fn ssc_send_snapshot_request_to_sled_agent(
     // saga - the user will have to reissue the snapshot request and it will get
     // run on a Pantry.
     let Some((propolis_id, sled_id)) =
-        vmm.as_ref().map(|vmm| (vmm.id, vmm.sled_id))
+        vmm.as_ref().map(|vmm| (vmm.id, vmm.sled_id()))
     else {
         return Err(ActionError::action_failed(Error::unavail(
             "instance no longer has an active VMM!",
         )));
     };
-    let sled_id = SledUuid::from_untyped_uuid(sled_id);
 
     info!(log, "asking for disk snapshot from Propolis via sled agent";
           "disk_id" => %params.disk_id,
@@ -2202,7 +2201,7 @@ mod test {
             .as_ref()
             .expect("starting instance should have a vmm");
         let propolis_id = PropolisUuid::from_untyped_uuid(vmm_state.id);
-        let sled_id = SledUuid::from_untyped_uuid(vmm_state.sled_id);
+        let sled_id = vmm_state.sled_id();
         let sa = nexus.sled_client(&sled_id).await.unwrap();
         sa.vmm_finish_transition(propolis_id).await;
 

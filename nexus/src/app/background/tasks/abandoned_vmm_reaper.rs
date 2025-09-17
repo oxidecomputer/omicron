@@ -207,7 +207,7 @@ mod tests {
     use nexus_test_utils::resource_helpers;
     use nexus_test_utils_macros::nexus_test;
     use omicron_uuid_kinds::InstanceUuid;
-    use uuid::Uuid;
+    use omicron_uuid_kinds::SledUuid;
 
     type ControlPlaneTestContext =
         nexus_test_utils::ControlPlaneTestContext<crate::Server>;
@@ -244,7 +244,7 @@ mod tests {
                         time_created: Utc::now(),
                         time_deleted: None,
                         instance_id: instance.identity.id,
-                        sled_id: Uuid::new_v4(),
+                        sled_id: SledUuid::new_v4().into(),
                         propolis_ip: "::1".parse().unwrap(),
                         propolis_port: 12345.into(),
                         cpu_platform: VmmCpuPlatform::SledDefault,

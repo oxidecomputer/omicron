@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::{ByteCount, Generation, SledState, SqlU16, SqlU32};
+use crate::DbTypedUuid;
 use crate::collection::DatastoreCollectionConfig;
 use crate::ipv6;
 use crate::sled::shared::Baseboard;
@@ -18,7 +19,8 @@ use nexus_types::{
     identity::Asset,
     internal_api::params,
 };
-use omicron_uuid_kinds::{GenericUuid, SledUuid};
+use omicron_uuid_kinds::SledKind;
+use omicron_uuid_kinds::SledUuid;
 use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
 use uuid::Uuid;
@@ -48,7 +50,7 @@ pub struct SledSystemHardware {
 /// Database representation of a Sled.
 #[derive(Queryable, Insertable, Debug, Clone, Selectable, Asset)]
 #[diesel(table_name = sled)]
-// TODO-cleanup: use #[asset(uuid_kind = SledKind)]
+#[asset(uuid_kind = SledKind)]
 pub struct Sled {
     #[diesel(embed)]
     pub identity: SledIdentity,
@@ -161,7 +163,7 @@ impl From<Sled> for views::Sled {
 impl From<Sled> for execution::Sled {
     fn from(sled: Sled) -> Self {
         Self::new(
-            SledUuid::from_untyped_uuid(sled.id()),
+            sled.id(),
             sled.policy(),
             sled.address(),
             *sled.repo_depot_port,
@@ -205,7 +207,7 @@ impl From<Sled> for params::SledAgentInfo {
 }
 
 impl DatastoreCollectionConfig<super::PhysicalDisk> for Sled {
-    type CollectionId = Uuid;
+    type CollectionId = DbTypedUuid<SledKind>;
     type GenerationNumberColumn = sled::dsl::rcgen;
     type CollectionTimeDeletedColumn = sled::dsl::time_deleted;
     type CollectionIdColumn = physical_disk::dsl::id;
@@ -213,7 +215,7 @@ impl DatastoreCollectionConfig<super::PhysicalDisk> for Sled {
 
 // TODO: Can we remove this? We have one for physical disks now.
 impl DatastoreCollectionConfig<super::Zpool> for Sled {
-    type CollectionId = Uuid;
+    type CollectionId = DbTypedUuid<SledKind>;
     type GenerationNumberColumn = sled::dsl::rcgen;
     type CollectionTimeDeletedColumn = sled::dsl::time_deleted;
     type CollectionIdColumn = zpool::dsl::sled_id;
@@ -223,7 +225,7 @@ impl DatastoreCollectionConfig<super::Zpool> for Sled {
 /// columns that are present in `Sled` because sled-agent doesn't control them.
 #[derive(Debug, Clone)]
 pub struct SledUpdate {
-    id: Uuid,
+    id: SledUuid,
 
     pub rack_id: Uuid,
 
@@ -251,7 +253,7 @@ pub struct SledUpdate {
 
 impl SledUpdate {
     pub fn new(
-        id: Uuid,
+        id: SledUuid,
         addr: SocketAddrV6,
         repo_depot_port: u16,
         baseboard: SledBaseboard,
@@ -317,7 +319,7 @@ impl SledUpdate {
         }
     }
 
-    pub fn id(&self) -> Uuid {
+    pub fn id(&self) -> SledUuid {
         self.id
     }
 
@@ -345,7 +347,7 @@ impl SledUpdate {
 /// A set of constraints that can be placed on operations that select a sled.
 #[derive(Clone, Debug)]
 pub struct SledReservationConstraints {
-    must_select_from: Vec<Uuid>,
+    must_select_from: Vec<SledUuid>,
     cpu_families: Vec<SledCpuFamily>,
 }
 
@@ -359,7 +361,7 @@ impl SledReservationConstraints {
     /// from, returns `Some` and a slice containing the members of that set.
     ///
     /// If no "must select from these" constraint exists, returns None.
-    pub fn must_select_from(&self) -> Option<&[Uuid]> {
+    pub fn must_select_from(&self) -> Option<&[SledUuid]> {
         if self.must_select_from.is_empty() {
             None
         } else {
@@ -396,7 +398,7 @@ impl SledReservationConstraintBuilder {
     /// Adds a "must select from the following sled IDs" constraint. If such a
     /// constraint already exists, appends the supplied sled IDs to the "must
     /// select from" list.
-    pub fn must_select_from(mut self, sled_ids: &[Uuid]) -> Self {
+    pub fn must_select_from(mut self, sled_ids: &[SledUuid]) -> Self {
         self.constraints.must_select_from.extend(sled_ids);
         self
     }

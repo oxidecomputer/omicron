@@ -215,7 +215,7 @@ pub(super) async fn instance_ip_get_instance_state(
     let mut propolis_and_sled_id =
         inst_and_vmm.vmm().as_ref().map(|vmm| VmmAndSledIds {
             vmm_id: PropolisUuid::from_untyped_uuid(vmm.id),
-            sled_id: SledUuid::from_untyped_uuid(vmm.sled_id),
+            sled_id: vmm.sled_id(),
         });
 
     slog::debug!(
@@ -358,7 +358,7 @@ pub async fn instance_ip_add_nat(
     // Querying sleds requires fleet access; use the instance allocator context
     // for this.
     let (.., sled) = LookupPath::new(&osagactx.nexus().opctx_alloc, datastore)
-        .sled_id(sled_uuid.into_untyped_uuid())
+        .sled_id(sled_uuid)
         .fetch()
         .await
         .map_err(ActionError::action_failed)?;

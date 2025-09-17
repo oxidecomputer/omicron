@@ -793,9 +793,7 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
         format!("/instances/{}/migrate", &instance_id.to_string());
     let instance = NexusRequest::new(
         RequestBuilder::new(internal_client, Method::POST, &migrate_url)
-            .body(Some(&InstanceMigrateRequest {
-                dst_sled_id: dst_sled_id.into_untyped_uuid(),
-            }))
+            .body(Some(&InstanceMigrateRequest { dst_sled_id }))
             .expect_status(Some(StatusCode::OK)),
     )
     .authn_as(AuthnMode::PrivilegedUser)
@@ -997,9 +995,7 @@ async fn test_instance_migrate_v2p_and_routes(
         format!("/instances/{}/migrate", &instance_id.to_string());
     let _ = NexusRequest::new(
         RequestBuilder::new(internal_client, Method::POST, &migrate_url)
-            .body(Some(&InstanceMigrateRequest {
-                dst_sled_id: dst_sled_id.into_untyped_uuid(),
-            }))
+            .body(Some(&InstanceMigrateRequest { dst_sled_id }))
             .expect_status(Some(StatusCode::OK)),
     )
     .authn_as(AuthnMode::PrivilegedUser)
@@ -1646,7 +1642,7 @@ async fn test_instance_failed_when_on_expunged_sled(
     // Make sure all instances allocate to the first sled - make the second sled
     // agent non-provisionable.
     let (authz_sled, ..) = LookupPath::new(&opctx, datastore)
-        .sled_id(cptestctx.second_sled_id().into_untyped_uuid())
+        .sled_id(cptestctx.second_sled_id())
         .lookup_for(Action::Modify)
         .await
         .expect("lookup authz_sled");
@@ -1732,9 +1728,7 @@ async fn test_instance_failed_when_on_expunged_sled(
         .make_request(
             Method::POST,
             "/sleds/expunge",
-            Some(params::SledSelector {
-                sled: default_sled_id.into_untyped_uuid(),
-            }),
+            Some(params::SledSelector { sled: default_sled_id }),
             StatusCode::OK,
         )
         .await
@@ -2315,9 +2309,7 @@ async fn test_instance_metrics_with_migration(
         format!("/instances/{}/migrate", &instance_id.to_string());
     let _ = NexusRequest::new(
         RequestBuilder::new(internal_client, Method::POST, &migrate_url)
-            .body(Some(&InstanceMigrateRequest {
-                dst_sled_id: dst_sled_id.into_untyped_uuid(),
-            }))
+            .body(Some(&InstanceMigrateRequest { dst_sled_id }))
             .expect_status(Some(StatusCode::OK)),
     )
     .authn_as(AuthnMode::PrivilegedUser)

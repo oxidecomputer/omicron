@@ -450,6 +450,7 @@ mod tests {
     use omicron_common::api::internal::nexus;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::InstanceUuid;
+    use omicron_uuid_kinds::SledUuid;
 
     #[tokio::test]
     async fn test_vmm_and_migration_update_runtime() {
@@ -468,7 +469,7 @@ mod tests {
                     time_created: Utc::now(),
                     time_deleted: None,
                     instance_id: instance_id.into_untyped_uuid(),
-                    sled_id: Uuid::new_v4(),
+                    sled_id: SledUuid::new_v4().into(),
                     propolis_ip: "10.1.9.32".parse().unwrap(),
                     propolis_port: 420.into(),
                     cpu_platform: VmmCpuPlatform::SledDefault,
@@ -490,7 +491,7 @@ mod tests {
                     time_created: Utc::now(),
                     time_deleted: None,
                     instance_id: instance_id.into_untyped_uuid(),
-                    sled_id: Uuid::new_v4(),
+                    sled_id: SledUuid::new_v4().into(),
                     propolis_ip: "10.1.9.42".parse().unwrap(),
                     propolis_port: 420.into(),
                     cpu_platform: VmmCpuPlatform::SledDefault,
@@ -601,7 +602,7 @@ mod tests {
                     time_created: Utc::now(),
                     time_deleted: None,
                     instance_id: instance_id.into_untyped_uuid(),
-                    sled_id: Uuid::new_v4(),
+                    sled_id: SledUuid::new_v4().into(),
                     propolis_ip: "10.1.9.69".parse().unwrap(),
                     propolis_port: 420.into(),
                     cpu_platform: VmmCpuPlatform::SledDefault,

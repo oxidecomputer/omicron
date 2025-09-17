@@ -153,7 +153,7 @@ impl_enum_type!(
     Silo => b"silo"
 );
 
-#[derive(Queryable, Insertable, Selectable, Clone, Debug)]
+#[derive(Queryable, Insertable, Selectable, Clone, Copy, Debug, PartialEq)]
 #[diesel(table_name = ip_pool_resource)]
 pub struct IpPoolResource {
     pub ip_pool_id: Uuid,

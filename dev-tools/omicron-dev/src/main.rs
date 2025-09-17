@@ -103,41 +103,49 @@ impl RunAllArgs {
         // NOTE: The stdout strings here are not intended to be stable, but they
         // are used by the test suite.
         let addr = cptestctx.external_client.bind_address;
-        println!("omicron-dev: nexus external API:    {:?}", addr);
+        println!("omicron-dev: nexus external API:     {:?}", addr);
         println!(
-            "omicron-dev: nexus internal API:    {:?}",
+            "omicron-dev: nexus internal API:     {:?}",
             cptestctx.server.get_http_server_internal_address().await,
         );
         println!(
-            "omicron-dev: cockroachdb pid:       {}",
+            "omicron-dev: cockroachdb pid:        {}",
             cptestctx.database.pid(),
         );
         println!(
-            "omicron-dev: cockroachdb URL:       {}",
+            "omicron-dev: cockroachdb URL:        {}",
             cptestctx.database.pg_config()
         );
         println!(
-            "omicron-dev: cockroachdb directory: {}",
+            "omicron-dev: cockroachdb directory:  {}",
             cptestctx.database.temp_dir().display()
         );
         println!(
-            "omicron-dev: internal DNS HTTP:     http://{}",
+            "omicron-dev: clickhouse native addr: {}",
+            cptestctx.clickhouse.native_address(),
+        );
+        println!(
+            "omicron-dev: clickhouse http addr:   {}",
+            cptestctx.clickhouse.http_address(),
+        );
+        println!(
+            "omicron-dev: internal DNS HTTP:      http://{}",
             cptestctx.internal_dns.dropshot_server.local_addr()
         );
         println!(
-            "omicron-dev: internal DNS:          {}",
+            "omicron-dev: internal DNS:           {}",
             cptestctx.internal_dns.dns_server.local_address()
         );
         println!(
-            "omicron-dev: external DNS name:     {}",
+            "omicron-dev: external DNS name:      {}",
             cptestctx.external_dns_zone_name,
         );
         println!(
-            "omicron-dev: external DNS HTTP:     http://{}",
+            "omicron-dev: external DNS HTTP:      http://{}",
             cptestctx.external_dns.dropshot_server.local_addr()
         );
         println!(
-            "omicron-dev: external DNS:          {}",
+            "omicron-dev: external DNS:           {}",
             cptestctx.external_dns.dns_server.local_address()
         );
         println!(
@@ -149,16 +157,20 @@ impl RunAllArgs {
         );
         for (location, gateway) in &cptestctx.gateway {
             println!(
-                "omicron-dev: management gateway:    {} ({})",
+                "omicron-dev: management gateway:     {} ({})",
                 gateway.client.baseurl(),
                 location,
             );
         }
-        println!("omicron-dev: silo name:             {}", cptestctx.silo_name,);
         println!(
-            "omicron-dev: privileged user name:  {}",
+            "omicron-dev: silo name:              {}",
+            cptestctx.silo_name,
+        );
+        println!(
+            "omicron-dev: privileged user name:   {}",
             cptestctx.user_name.as_ref(),
         );
+        println!("omicron-dev: privileged password:    {}", cptestctx.password);
 
         // Wait for a signal.
         let caught_signal = signal_stream.next().await;

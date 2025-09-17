@@ -407,8 +407,8 @@ mod test {
 
         let quotas_update = SiloQuotasUpdate {
             cpus: Some(24),
-            memory: Some(1 << 40),
-            storage: Some(1 << 50),
+            memory: Some((1 << 40).try_into().unwrap()),
+            storage: Some((1 << 50).try_into().unwrap()),
             time_modified: chrono::Utc::now(),
         };
         let authz_silo = LookupPath::new(&opctx, datastore)

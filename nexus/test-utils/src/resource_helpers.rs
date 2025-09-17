@@ -64,7 +64,6 @@ use omicron_sled_agent::sim::SledAgent;
 use omicron_test_utils::dev::poll::CondCheckError;
 use omicron_test_utils::dev::poll::wait_for_condition;
 use omicron_uuid_kinds::DatasetUuid;
-use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SiloUserUuid;
 use omicron_uuid_kinds::SledUuid;
@@ -167,7 +166,7 @@ where
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
     .await
-    .unwrap()
+    .unwrap_or_else(|err| panic!("Error creating object with {path}: {err}"))
     .parsed_body::<HttpErrorResponseBody>()
     .unwrap()
 }
@@ -1568,14 +1567,14 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
                 model: disk_identity.model.clone(),
                 variant:
                     nexus_types::external_api::params::PhysicalDiskKind::U2,
-                sled_id: sled_id.into_untyped_uuid(),
+                sled_id,
             };
 
         let zpool_request =
             nexus_types::internal_api::params::ZpoolPutRequest {
-                id: zpool.id.into_untyped_uuid(),
+                id: zpool.id,
                 physical_disk_id,
-                sled_id: sled_id.into_untyped_uuid(),
+                sled_id,
             };
 
         // Find the sled on which we're adding a zpool
@@ -1776,9 +1775,9 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
     /// _not_ clean up crucible resources on an expunged disk (due to the "gone"
     /// check that it performs), but it's useful for tests to be able to assert
     /// all crucible resources are cleaned up.
-    pub async fn remove_zpool(&mut self, zpool_id: Uuid) {
+    pub async fn remove_zpool(&mut self, zpool_id: ZpoolUuid) {
         for sled in self.sleds.values_mut() {
-            sled.zpools.retain(|zpool| *zpool.id.as_untyped_uuid() != zpool_id);
+            sled.zpools.retain(|zpool| zpool.id != zpool_id);
         }
     }
 }

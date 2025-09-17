@@ -534,7 +534,7 @@ async fn sis_dpd_ensure(
     // for this.
     let sled_uuid = sagactx.lookup::<SledUuid>("sled_id")?;
     let (.., sled) = LookupPath::new(&osagactx.nexus().opctx_alloc, datastore)
-        .sled_id(sled_uuid.into_untyped_uuid())
+        .sled_id(sled_uuid)
         .fetch()
         .await
         .map_err(ActionError::action_failed)?;

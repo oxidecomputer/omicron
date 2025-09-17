@@ -190,7 +190,7 @@ impl InstanceAndActiveVmm {
     }
 
     pub fn sled_id(&self) -> Option<SledUuid> {
-        self.vmm.as_ref().map(|v| SledUuid::from_untyped_uuid(v.sled_id))
+        self.vmm.as_ref().map(|v| v.sled_id())
     }
 
     /// Returns the operator-visible [external API
@@ -2865,7 +2865,7 @@ mod tests {
                     time_created: Utc::now(),
                     time_deleted: None,
                     instance_id: authz_instance.id(),
-                    sled_id: Uuid::new_v4(),
+                    sled_id: SledUuid::new_v4().into(),
                     propolis_ip: "10.1.9.32".parse().unwrap(),
                     propolis_port: 420.into(),
                     cpu_platform: VmmCpuPlatform::SledDefault,
@@ -2928,7 +2928,7 @@ mod tests {
                     time_created: Utc::now(),
                     time_deleted: None,
                     instance_id: authz_instance.id(),
-                    sled_id: Uuid::new_v4(),
+                    sled_id: SledUuid::new_v4().into(),
                     propolis_ip: "10.1.9.42".parse().unwrap(),
                     propolis_port: 666.into(),
                     cpu_platform: VmmCpuPlatform::SledDefault,
@@ -3026,7 +3026,7 @@ mod tests {
                     time_created: Utc::now(),
                     time_deleted: None,
                     instance_id: authz_instance.id(),
-                    sled_id: Uuid::new_v4(),
+                    sled_id: SledUuid::new_v4().into(),
                     propolis_ip: "10.1.9.32".parse().unwrap(),
                     propolis_port: 420.into(),
                     cpu_platform: VmmCpuPlatform::SledDefault,
@@ -3067,7 +3067,7 @@ mod tests {
                     time_created: Utc::now(),
                     time_deleted: None,
                     instance_id: authz_instance.id(),
-                    sled_id: Uuid::new_v4(),
+                    sled_id: SledUuid::new_v4().into(),
                     propolis_ip: "10.1.9.42".parse().unwrap(),
                     propolis_port: 420.into(),
                     cpu_platform: VmmCpuPlatform::SledDefault,
@@ -3170,7 +3170,7 @@ mod tests {
                     time_created: Utc::now(),
                     time_deleted: None,
                     instance_id: authz_instance.id(),
-                    sled_id: Uuid::new_v4(),
+                    sled_id: SledUuid::new_v4().into(),
                     propolis_ip: "10.1.9.42".parse().unwrap(),
                     propolis_port: 420.into(),
                     cpu_platform: VmmCpuPlatform::SledDefault,
@@ -3286,7 +3286,7 @@ mod tests {
 
         #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
         struct Ids {
-            sled_id: Uuid,
+            sled_id: SledUuid,
             vmm_id: Uuid,
             instance_id: Uuid,
         }
@@ -3317,7 +3317,7 @@ mod tests {
                             time_created: Utc::now(),
                             time_deleted: None,
                             instance_id,
-                            sled_id,
+                            sled_id: sled_id.into(),
                             propolis_ip: "10.1.9.42".parse().unwrap(),
                             propolis_port: 420.into(),
                             cpu_platform: VmmCpuPlatform::SledDefault,
@@ -3394,13 +3394,14 @@ mod tests {
             }
 
             i += 1;
-            paginator =
-                p.found_batch(&batch, &|(sled, _, vmm, _): &(
-                    Sled,
-                    Instance,
-                    Vmm,
-                    Project,
-                )| (sled.id(), vmm.id));
+            paginator = p.found_batch(&batch, &|(sled, _, vmm, _): &(
+                Sled,
+                Instance,
+                Vmm,
+                Project,
+            )| {
+                (sled.id().into_untyped_uuid(), vmm.id)
+            });
         }
 
         assert_eq!(expected_instances, found_instances);
