@@ -73,20 +73,20 @@ impl LiveTestContext {
     pub fn specific_internal_nexus_client(
         &self,
         sockaddr: SocketAddrV6,
-    ) -> nexus_client::Client {
+    ) -> nexus_lockstep_client::Client {
         let url = format!("http://{}", sockaddr);
         let log = self.logctx.log.new(o!("nexus_internal_url" => url.clone()));
-        nexus_client::Client::new(&url, log)
+        nexus_lockstep_client::Client::new(&url, log)
     }
 
     /// Returns a list of clients for the internal APIs for all Nexus instances
     /// found in DNS
     pub async fn all_internal_nexus_clients(
         &self,
-    ) -> Result<Vec<nexus_client::Client>, anyhow::Error> {
+    ) -> Result<Vec<nexus_lockstep_client::Client>, anyhow::Error> {
         Ok(self
             .resolver
-            .lookup_all_socket_v6(ServiceName::Nexus)
+            .lookup_all_socket_v6(ServiceName::NexusLockstep)
             .await
             .context("looking up Nexus in internal DNS")?
             .into_iter()

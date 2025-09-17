@@ -5,11 +5,11 @@
 use dropshot::ResultsPage;
 use http::Method;
 use http::StatusCode;
-use nexus_client::types::SledId;
 use nexus_db_model::SledBaseboard;
 use nexus_db_model::SledCpuFamily as DbSledCpuFamily;
 use nexus_db_model::SledSystemHardware;
 use nexus_db_model::SledUpdate;
+use nexus_lockstep_client::types::SledId;
 use nexus_sled_agent_shared::inventory::SledCpuFamily;
 use nexus_sled_agent_shared::inventory::SledRole;
 use nexus_test_utils::TEST_SUITE_PASSWORD;

@@ -21,6 +21,7 @@ futures.workspace = true
 gateway-messages.workspace = true
 gateway-test-utils.workspace = true
 headers.workspace = true
+hickory-resolver.workspace = true
 http.workspace = true
 http-body-util.workspace = true
 hyper.workspace = true
@@ -28,9 +29,9 @@ id-map.workspace = true
 illumos-utils.workspace = true
 internal-dns-resolver.workspace = true
 internal-dns-types.workspace = true
-nexus-client.workspace = true
 nexus-config.workspace = true
 nexus-db-queries = { workspace = true, features = [ "testing" ] }
+nexus-lockstep-client.workspace = true
 nexus-sled-agent-shared.workspace = true
 nexus-test-interface.workspace = true
 nexus-types.workspace = true
@@ -40,6 +41,7 @@ omicron-passwords.workspace = true
 omicron-sled-agent.workspace = true
 omicron-test-utils.workspace = true
 omicron-uuid-kinds.workspace = true
+omicron-workspace-hack.workspace = true
 oximeter.workspace = true
 oximeter-collector.workspace = true
 oximeter-producer.workspace = true
@@ -54,9 +56,7 @@ slog-error-chain.workspace = true
 tokio.workspace = true
 tokio-postgres = { workspace = true, features = ["with-serde_json-1"] }
 tokio-util.workspace = true
-hickory-resolver.workspace = true
 uuid.workspace = true
-omicron-workspace-hack.workspace = true
 
 [features]
 omicron-dev = ["omicron-test-utils/seed-gen"]

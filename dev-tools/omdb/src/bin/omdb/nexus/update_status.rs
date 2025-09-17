@@ -16,7 +16,7 @@ use tabled::Tabled;
 
 /// Runs `omdb nexus update-status`
 pub async fn cmd_nexus_update_status(
-    client: &nexus_client::Client,
+    client: &nexus_lockstep_client::Client,
 ) -> Result<(), anyhow::Error> {
     let status = client
         .update_status()

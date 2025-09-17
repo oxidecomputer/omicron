@@ -866,9 +866,10 @@ Options:
   -h, --help                   Print help
 
 Connection Options:
-      --nexus-internal-url <NEXUS_INTERNAL_URL>  URL of the Nexus internal API [env:
-                                                 OMDB_NEXUS_URL=]
-      --dns-server <DNS_SERVER>                  [env: OMDB_DNS_SERVER=]
+      --nexus-internal-url <NEXUS_INTERNAL_URL>
+          URL of the Nexus internal lockstep API [env: OMDB_NEXUS_URL=]
+      --dns-server <DNS_SERVER>
+          [env: OMDB_DNS_SERVER=]
 
 Safety Options:
   -w, --destructive  Allow potentially-destructive subcommands
@@ -897,9 +898,10 @@ Options:
   -h, --help                   Print help
 
 Connection Options:
-      --nexus-internal-url <NEXUS_INTERNAL_URL>  URL of the Nexus internal API [env:
-                                                 OMDB_NEXUS_URL=]
-      --dns-server <DNS_SERVER>                  [env: OMDB_DNS_SERVER=]
+      --nexus-internal-url <NEXUS_INTERNAL_URL>
+          URL of the Nexus internal lockstep API [env: OMDB_NEXUS_URL=]
+      --dns-server <DNS_SERVER>
+          [env: OMDB_DNS_SERVER=]
 
 Safety Options:
   -w, --destructive  Allow potentially-destructive subcommands
@@ -942,7 +944,7 @@ Options:
 
 Connection Options:
       --nexus-internal-url <NEXUS_INTERNAL_URL>
-          URL of the Nexus internal API
+          URL of the Nexus internal lockstep API
           
           [env: OMDB_NEXUS_URL=]
 
@@ -981,9 +983,10 @@ Options:
   -h, --help                   Print help
 
 Connection Options:
-      --nexus-internal-url <NEXUS_INTERNAL_URL>  URL of the Nexus internal API [env:
-                                                 OMDB_NEXUS_URL=]
-      --dns-server <DNS_SERVER>                  [env: OMDB_DNS_SERVER=]
+      --nexus-internal-url <NEXUS_INTERNAL_URL>
+          URL of the Nexus internal lockstep API [env: OMDB_NEXUS_URL=]
+      --dns-server <DNS_SERVER>
+          [env: OMDB_DNS_SERVER=]
 
 Safety Options:
   -w, --destructive  Allow potentially-destructive subcommands
@@ -1010,9 +1013,10 @@ Options:
   -h, --help                   Print help
 
 Connection Options:
-      --nexus-internal-url <NEXUS_INTERNAL_URL>  URL of the Nexus internal API [env:
-                                                 OMDB_NEXUS_URL=]
-      --dns-server <DNS_SERVER>                  [env: OMDB_DNS_SERVER=]
+      --nexus-internal-url <NEXUS_INTERNAL_URL>
+          URL of the Nexus internal lockstep API [env: OMDB_NEXUS_URL=]
+      --dns-server <DNS_SERVER>
+          [env: OMDB_DNS_SERVER=]
 
 Safety Options:
   -w, --destructive  Allow potentially-destructive subcommands
@@ -1049,9 +1053,10 @@ Options:
   -h, --help                   Print help
 
 Connection Options:
-      --nexus-internal-url <NEXUS_INTERNAL_URL>  URL of the Nexus internal API [env:
-                                                 OMDB_NEXUS_URL=]
-      --dns-server <DNS_SERVER>                  [env: OMDB_DNS_SERVER=]
+      --nexus-internal-url <NEXUS_INTERNAL_URL>
+          URL of the Nexus internal lockstep API [env: OMDB_NEXUS_URL=]
+      --dns-server <DNS_SERVER>
+          [env: OMDB_DNS_SERVER=]
 
 Safety Options:
   -w, --destructive  Allow potentially-destructive subcommands

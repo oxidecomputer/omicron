@@ -10,7 +10,7 @@ use dropshot::HttpErrorResponseBody;
 use dropshot::test_util::ClientTestContext;
 use http::StatusCode;
 use http::method::Method;
-use nexus_client::types::LastResult;
+use nexus_lockstep_client::types::LastResult;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
@@ -338,7 +338,7 @@ async fn activate_bundle_collection_background_task(
     use nexus_test_utils::background::activate_background_task;
 
     let task = activate_background_task(
-        &cptestctx.internal_client,
+        &cptestctx.lockstep_client,
         "support_bundle_collector",
     )
     .await;

@@ -113,7 +113,7 @@ impl FromStr for ReconfiguratorConfigVersionOrCurrent {
 
 pub async fn cmd_nexus_reconfigurator_config(
     omdb: &Omdb,
-    client: &nexus_client::Client,
+    client: &nexus_lockstep_client::Client,
     args: &ReconfiguratorConfigArgs,
 ) -> Result<(), anyhow::Error> {
     match &args.command {
@@ -127,7 +127,7 @@ pub async fn cmd_nexus_reconfigurator_config(
     }
 }
 async fn reconfigurator_config_show(
-    client: &nexus_client::Client,
+    client: &nexus_lockstep_client::Client,
     args: &ReconfiguratorConfigShowArgs,
 ) -> Result<(), anyhow::Error> {
     let res = match args.version {
@@ -161,7 +161,7 @@ async fn reconfigurator_config_show(
 }
 
 async fn reconfigurator_config_set(
-    client: &nexus_client::Client,
+    client: &nexus_lockstep_client::Client,
     args: &ReconfiguratorConfigSetArgs,
     _destruction_token: DestructiveOperationToken,
 ) -> Result<(), anyhow::Error> {

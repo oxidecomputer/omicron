@@ -10,11 +10,17 @@ workspace = true
 [dependencies]
 chrono.workspace = true
 futures.workspace = true
+iddqd.workspace = true
+nexus-types.workspace = true
+omicron-common.workspace = true
+omicron-uuid-kinds.workspace = true
 omicron-workspace-hack.workspace = true
+oxnet.workspace = true
 progenitor.workspace = true
 regress.workspace = true
 reqwest.workspace = true
 schemars.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 slog.workspace = true
 uuid.workspace = true
