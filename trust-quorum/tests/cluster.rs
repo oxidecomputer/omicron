@@ -576,7 +576,7 @@ impl TestState {
         for id in crashed {
             // We aren't trying to randomize the connection order to
             // test safety due to interleavings here. We just are trying
-            // to drive the system to an equlibrium state.
+            // to drive the system to an equilibrium state.
             let to_connect: Vec<_> = self
                 .tq_state
                 .member_universe
