@@ -1438,10 +1438,19 @@ async fn test_instance_migration_unknown_sled_type(
         .expect("running instance should have a sled");
 
     let original_sled = sled_info.sled_id;
-    let dst_sled_id = if original_sled == first_sled_id {
-        new_sled_id
+    let (dst_sled_id, expected_status) = if original_sled == first_sled_id {
+        // If the instance was placed on the default sled, it has a known CPU
+        // type and the issue we should see is that there is no space to migrate
+        // this instance anywhere else in the test rack - the one other sled is
+        // ineligible because it has an unknown CPU family.
+        (new_sled_id, http::StatusCode::INSUFFICIENT_STORAGE)
     } else {
-        first_sled_id
+        // If the instance was placed on the unknown-family sled, we're unable
+        // to migrate it even if there was capacity; this error actually comes
+        // up earlier than INSUFFICIENT_STORAGE above (when we're putting
+        // together constraints to discover there would be insufficient
+        // storage!)
+        (first_sled_id, http::StatusCode::BAD_REQUEST)
     };
 
     let migrate_url =
@@ -1449,12 +1458,12 @@ async fn test_instance_migration_unknown_sled_type(
     NexusRequest::new(
         RequestBuilder::new(internal_client, Method::POST, &migrate_url)
             .body(Some(&InstanceMigrateRequest { dst_sled_id }))
-            .expect_status(Some(http::StatusCode::INSUFFICIENT_STORAGE)),
+            .expect_status(Some(expected_status)),
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
     .await
-    .expect("expected migration to fail with 507 Insufficient Storage");
+    .expect("expected migration to fail with specific status");
 }
 
 // Verifies that if a request to reboot or stop an instance fails because of a
