@@ -12,6 +12,7 @@ use crate::{
     Alarm, Configuration, Epoch, NodeHandlerCtx, PeerMsgKind, PlatformId,
     RackSecret, Share,
 };
+use daft::{BTreeMapDiff, Diffable, Leaf};
 use slog::{Logger, error, info, o};
 
 #[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]
@@ -27,20 +28,43 @@ pub enum LoadRackSecretError {
 }
 
 /// Manage retrieval of key shares to load various rack secrets
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Diffable)]
 pub struct RackSecretLoader {
+    #[daft(ignore)]
     log: Logger,
     loaded: BTreeMap<Epoch, ReconstructedRackSecret>,
     // We can only collect shares for the latest committed epoch. We then derive
     // a key from the computed rack secret to decrypt rack secrets for prior
     // configurations.
+    #[daft(leaf)]
     collector: Option<ShareCollector>,
+}
+
+impl<'daft> RackSecretLoaderDiff<'daft> {
+    pub fn loaded(
+        &self,
+    ) -> &BTreeMapDiff<'daft, Epoch, ReconstructedRackSecret> {
+        &self.loaded
+    }
+
+    pub fn collector(&self) -> Leaf<&'daft Option<ShareCollector>> {
+        self.collector
+    }
 }
 
 impl RackSecretLoader {
     pub fn new(log: &Logger) -> RackSecretLoader {
         let log = log.new(o!("component" => "tq-rack-secret-loader"));
         RackSecretLoader { log, loaded: BTreeMap::new(), collector: None }
+    }
+
+    pub fn is_collecting_shares_for_rack_secret(&self, epoch: Epoch) -> bool {
+        let Some(c) = &self.collector else {
+            return false;
+        };
+        // We collect for the latest committed epoch which must be greater than
+        // or equal to the epoch for the rack secret we are interested in.
+        c.config.epoch >= epoch
     }
 
     pub fn load(
@@ -60,17 +84,20 @@ impl RackSecretLoader {
             return Err(LoadRackSecretError::NoCommittedConfigurations);
         };
 
+        if epoch > latest_committed_epoch {
+            return Err(LoadRackSecretError::NotCommitted(epoch));
+        }
+
         // If we have loaded the latest committed epoch, then we have loaded all
         // possible rack secrets. Secrets for prior epochs are unavailable.
         if self.loaded.contains_key(&latest_committed_epoch) {
             if epoch < latest_committed_epoch {
                 return Err(LoadRackSecretError::NotAvailable(epoch));
-            } else if epoch > latest_committed_epoch {
-                return Err(LoadRackSecretError::NotCommitted(epoch));
             } else {
                 unreachable!(
-                    "already would have returned rack secret for latest \
-                    committed epoch ({epoch}) if requested"
+                    "epoch comparisons for epoch({epoch}) \
+                    <= latest_committed_epoch({latest_committed_epoch}) \
+                    already handled"
                 );
             }
         }
@@ -107,7 +134,7 @@ impl RackSecretLoader {
                         latest_committed_epoch,
                         collecting_epoch: collector.config.epoch,
                     });
-                    return Err(LoadRackSecretError::Alarm);
+                    Err(LoadRackSecretError::Alarm)
                 }
             }
         }
@@ -154,12 +181,35 @@ impl RackSecretLoader {
     }
 }
 
-#[derive(Debug, Clone)]
-struct ShareCollector {
+// Pub only for use in daft
+#[derive(Debug, Clone, Diffable)]
+pub struct ShareCollector {
+    #[daft(ignore)]
     log: Logger,
     // A copy of the configuration stored in persistent state
+    #[daft(leaf)]
     config: Configuration,
     shares: BTreeMap<PlatformId, Share>,
+}
+
+#[cfg(feature = "danger_partial_eq_ct_wrapper")]
+impl PartialEq for ShareCollector {
+    fn eq(&self, other: &Self) -> bool {
+        self.config == other.config && self.shares == other.shares
+    }
+}
+
+#[cfg(feature = "danger_partial_eq_ct_wrapper")]
+impl Eq for ShareCollector {}
+
+impl<'daft> ShareCollectorDiff<'daft> {
+    pub fn config(&self) -> Leaf<&'daft Configuration> {
+        self.config
+    }
+
+    pub fn shares(&self) -> &BTreeMapDiff<'daft, PlatformId, Share> {
+        &self.shares
+    }
 }
 
 impl ShareCollector {

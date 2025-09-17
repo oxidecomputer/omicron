@@ -651,7 +651,7 @@ WARN cannot issue more MGS-driven updates (no current artifacts)
 generated blueprint af934083-59b5-4bf6-8966-6fb5292c29e1 based on parent blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4
 planning report for blueprint af934083-59b5-4bf6-8966-6fb5292c29e1:
 * discretionary zones placed:
-  * 1 zone on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: internal_dns
+  * internal_dns zone on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c from source install dataset
 * zone updates waiting on discretionary zones
 
 

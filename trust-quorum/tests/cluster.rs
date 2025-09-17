@@ -42,11 +42,11 @@ impl TestState {
         TestState { tq_state: TqState::new(log), skipped_actions: 0 }
     }
 
-    fn initial_config_event(
+    fn initial_config_events(
         &self,
         config: GeneratedConfiguration,
         down_nodes: BTreeSet<usize>,
-    ) -> Event {
+    ) -> Vec<Event> {
         // `tq_state` doesn't create the member universe until the first event is
         // applied. We duplicate it here so we can create that initial config
         // event.
@@ -65,6 +65,11 @@ impl TestState {
         let coordinator =
             members.first().cloned().expect("at least one member");
         let last_committed_epoch = None;
+        let crashed_nodes: BTreeSet<_> = down_nodes
+            .into_iter()
+            .map(|index| member_universe[index].clone())
+            .collect();
+        let should_abort = crashed_nodes.contains(&coordinator);
         let config = NexusConfig::new(
             epoch,
             last_committed_epoch,
@@ -72,15 +77,16 @@ impl TestState {
             members,
             threshold,
         );
-        let crashed_nodes = down_nodes
-            .into_iter()
-            .map(|index| member_universe[index].clone())
-            .collect();
-        Event::InitialSetup {
+        let mut events = vec![Event::InitialSetup {
             member_universe_size: MEMBER_UNIVERSE_SIZE,
             config,
             crashed_nodes,
+        }];
+
+        if should_abort {
+            events.push(Event::AbortConfiguration(epoch));
         }
+        events
     }
 
     // Execute the proptest generated actions
@@ -112,6 +118,15 @@ impl TestState {
             Action::DeliverEnvelope(selector) => {
                 self.action_to_events_deliver_envelope(selector)
             }
+            Action::LoadLatestRackSecret(selector) => {
+                self.action_to_events_load_latest_rack_secret(selector)
+            }
+            Action::LoadRackSecret { config, id } => {
+                self.action_to_events_load_rack_secret(config, id)
+            }
+            Action::ClearSecrets(selector) => {
+                self.action_to_events_clear_secrets(selector)
+            }
             Action::PollPrepareAcks => {
                 self.action_to_events_poll_prepare_acks()
             }
@@ -130,6 +145,10 @@ impl TestState {
                 threshold,
                 coordinator,
             ),
+            Action::CrashNode(index) => self.action_to_events_crash_node(index),
+            Action::RestartNode { id, connection_order } => {
+                self.action_to_events_restart_node(id, connection_order)
+            }
         }
     }
 
@@ -145,6 +164,16 @@ impl TestState {
         let destination =
             selector.select(self.tq_state.bootstrap_network.keys());
 
+        // Envelopes should never be sent on the bootstrap network to crashed nodes
+        // when events are applied in `TqState::apply_event`.
+        //
+        // The rationale is that we don't mutate state here, and so we can't
+        // choose to pop the message that shouldn't be delivered off the
+        // bootstrap network. We could choose not to actually deliver it when
+        // applying the event, but that means we have events that don't actually
+        // do anything in our event log, which is quite misleading.
+        assert!(!self.tq_state.faults.crashed_nodes.contains(destination));
+
         // We pop from the back and push on the front
         let envelope = self
             .tq_state
@@ -158,6 +187,139 @@ impl TestState {
         events
     }
 
+    fn action_to_events_crash_node(&self, selector: Selector) -> Vec<Event> {
+        let mut faultable = self
+            .tq_state
+            .member_universe
+            .iter()
+            .filter(|m| !self.tq_state.faults.crashed_nodes.contains(&m))
+            .peekable();
+
+        if faultable.peek().is_none() {
+            // All nodes are down
+            return vec![];
+        }
+
+        let id = selector.select(faultable).clone();
+        let latest_config = self.tq_state.nexus.latest_config();
+        if id == latest_config.coordinator
+            && latest_config.op == NexusOp::Preparing
+        {
+            // The `AbortConfiguration` simulates Nexus polling and timing
+            // out or receiving an error response on node restart because the
+            // configuration was lost.
+            vec![
+                Event::CrashNode(id.clone()),
+                Event::AbortConfiguration(latest_config.epoch),
+            ]
+        } else {
+            vec![Event::CrashNode(id.clone())]
+        }
+    }
+
+    fn action_to_events_restart_node(
+        &self,
+        id: Selector,
+        connection_order_indexes: Vec<Index>,
+    ) -> Vec<Event> {
+        if self.tq_state.faults.crashed_nodes.is_empty() {
+            return vec![];
+        }
+
+        // Choose the node to restart
+        let id = id.select(self.tq_state.faults.crashed_nodes.iter()).clone();
+
+        // Now order the peer connections
+
+        // First find all the peers we want to connect to.
+        let mut to_connect: Vec<_> = self
+            .tq_state
+            .member_universe
+            .iter()
+            .filter(|id| !self.tq_state.faults.crashed_nodes.contains(id))
+            .cloned()
+            .collect();
+
+        let total_connections = to_connect.len();
+
+        // Then remove them from `to_connect` and put them into `connection_order`.
+        let mut connection_order = vec![];
+        for index in connection_order_indexes {
+            if to_connect.is_empty() {
+                break;
+            }
+            let i = index.index(to_connect.len());
+            let dst = to_connect.swap_remove(i);
+            connection_order.push(dst);
+        }
+
+        // If there is anything left in `to_connect`, then just extend
+        // `connection_order` with it.
+        connection_order.extend_from_slice(&to_connect);
+
+        // Ensure we have exactly the number of connections we want
+        assert_eq!(connection_order.len(), total_connections);
+
+        vec![Event::RestartNode { id, connection_order }]
+    }
+
+    fn action_to_events_load_latest_rack_secret(
+        &self,
+        selector: Selector,
+    ) -> Vec<Event> {
+        let mut events = vec![];
+        if let Some(c) = self.tq_state.nexus.last_committed_config() {
+            let mut loadable = c
+                .members
+                .iter()
+                .filter(|m| !self.tq_state.faults.crashed_nodes.contains(m))
+                .peekable();
+            if loadable.peek().is_some() {
+                let id = selector.select(loadable).clone();
+                events.push(Event::LoadRackSecret(id, c.epoch));
+            }
+        }
+        events
+    }
+
+    fn action_to_events_clear_secrets(&self, selector: Selector) -> Vec<Event> {
+        let mut events = vec![];
+        if let Some(c) = self.tq_state.nexus.last_committed_config() {
+            let id = selector.select(c.members.iter()).clone();
+            events.push(Event::ClearSecrets(id.clone()));
+        }
+        events
+    }
+
+    fn action_to_events_load_rack_secret(
+        &self,
+        config: Selector,
+        id: Selector,
+    ) -> Vec<Event> {
+        let mut committed_configs_iter = self
+            .tq_state
+            .nexus
+            .configs
+            .iter()
+            .filter(|c| c.op == NexusOp::Committed)
+            .peekable();
+        if committed_configs_iter.peek().is_none() {
+            // No committed configurations
+            return vec![];
+        }
+        let c = config.select(committed_configs_iter);
+        let mut loadable = c
+            .members
+            .iter()
+            .filter(|m| !self.tq_state.faults.crashed_nodes.contains(m))
+            .peekable();
+        if loadable.peek().is_none() {
+            return vec![];
+        }
+        let id = id.select(c.members.iter()).clone();
+        vec![Event::LoadRackSecret(id, c.epoch)]
+    }
+
     fn action_to_events_poll_prepare_acks(&self) -> Vec<Event> {
         let mut events = vec![];
         let latest_config = self.tq_state.nexus.latest_config();
@@ -166,8 +328,7 @@ impl TestState {
             return events;
         }
 
-        // If the coordinator has crashed then Nexus should abort.
-        // Crashing is not actually implemented yet, but it will be.
+        // If the coordinator is currently down then Nexus should abort.
         if self
             .tq_state
             .faults
@@ -203,9 +364,9 @@ impl TestState {
         //
         // In a real system this request would go over the network, but would
         // end up at the same place.
-        let cs = coordinator
-            .get_coordinator_state()
-            .expect("coordinator is coordinating");
+        let cs = coordinator.get_coordinator_state().unwrap_or_else(|| {
+            panic!("coordinator is coordinating: {}", ctx.platform_id())
+        });
 
         // Put the reply on the network
         events.push(Event::SendNexusReplyOnUnderlay(
@@ -226,6 +387,7 @@ impl TestState {
         let committable: Vec<_> = latest_config
             .prepared_members
             .difference(&latest_config.committed_members)
+            .filter(|m| !self.tq_state.faults.crashed_nodes.contains(m))
             .collect();
 
         if committable.is_empty() {
@@ -366,11 +528,18 @@ impl TestState {
         let nexus_config = NexusConfig::new(
             epoch,
             last_committed_epoch,
-            coordinator,
+            coordinator.clone(),
             new_members,
             threshold,
         );
-        vec![Event::Reconfigure(nexus_config)]
+        let mut events = vec![Event::Reconfigure(nexus_config)];
+
+        if self.tq_state.faults.crashed_nodes.contains(&coordinator) {
+            // This simulates a timeout on the reply from the coordinator which
+            // triggers an abort.
+            events.push(Event::AbortConfiguration(epoch));
+        }
+        events
     }
 
     /// At every point during the running of the test, invariants over the system
@@ -601,6 +770,24 @@ pub enum Action {
     #[weight(30)]
     DeliverEnvelope(Selector),
 
+    /// Start loading a rack secret for the latest committed configuration at
+    /// the replica determined by the selector into the members of that latest
+    /// configuration.
+    ///
+    /// Latest configuration is determined by looking at `NexusState`.
+    #[weight(5)]
+    LoadLatestRackSecret(Selector),
+
+    /// Start loading a rack secret for an arbitrary committed configuration at
+    /// a node that is a member of that configuration.
+    #[weight(5)]
+    LoadRackSecret { config: Selector, id: Selector },
+
+    /// Clear all rack secrets at the selected node in the latest committed
+    /// configuration if there is one.
+    #[weight(2)]
+    ClearSecrets(Selector),
+
     /// Have Nexus poll the coordinator for the latest configuration if it is
     /// still being prepared.
     ///
@@ -633,6 +820,22 @@ pub enum Action {
         removed_nodes: Vec<Selector>,
         threshold: Index,
         coordinator: Selector,
+    },
+
+    /// Crash a random node in the universe
+    #[weight(2)]
+    CrashNode(Selector),
+
+    /// Restart a crashed node if there is one
+    ///
+    /// We randomize the connection order, because that influences the order
+    /// that messages sent on reconnect will get delivered to the newly
+    /// connected node.
+    #[weight(2)]
+    RestartNode {
+        id: Selector,
+        #[any(size_range(MEMBER_UNIVERSE_SIZE-1..MEMBER_UNIVERSE_SIZE).lift())]
+        connection_order: Vec<Index>,
     },
 }
 
@@ -701,15 +904,18 @@ fn test_trust_quorum_protocol(input: TestInput) {
     let (parent_dir, _) = log_prefix_for_test(logctx.test_name());
     let event_log_path = parent_dir.join(format!("{test_name}.events.json"));
     let mut event_log = EventLog::new(&event_log_path);
+    println!("Event log path: {event_log_path}");
 
     let log = logctx.log.new(o!("component" => "tq-proptest"));
     let mut state = TestState::new(log.clone());
 
     // Perform the initial setup
-    let event = state
-        .initial_config_event(input.initial_config, input.initial_down_nodes);
-    event_log.record(&event);
-    state.tq_state.apply_event(event);
+    let events = state
+        .initial_config_events(input.initial_config, input.initial_down_nodes);
+    for event in events {
+        event_log.record(&event);
+        state.tq_state.apply_event(event);
+    }
 
     // Start executing the actions
     state.run_actions(input.actions, &mut event_log)?;

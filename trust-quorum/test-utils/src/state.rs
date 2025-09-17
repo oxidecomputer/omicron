@@ -15,8 +15,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Display;
 use trust_quorum::{
     Configuration, CoordinatorOperation, CoordinatorStateDiff, Envelope, Epoch,
-    Node, NodeCallerCtx, NodeCommonCtx, NodeCtx, NodeCtxDiff, NodeDiff,
-    PeerMsgKind, PlatformId, ValidatedReconfigureMsgDiff,
+    LoadRackSecretError, Node, NodeCallerCtx, NodeCommonCtx, NodeCtx,
+    NodeCtxDiff, NodeDiff, PeerMsgKind, PlatformId,
+    ValidatedReconfigureMsgDiff,
 };
 
 // The state of our entire system including the system under test and
@@ -90,10 +91,7 @@ impl TqState {
     pub fn send_reconfigure_msg(&mut self) {
         let (coordinator, msg) = self.nexus.reconfigure_msg_for_latest_config();
         let epoch_to_config = msg.epoch;
-        if self.faults.crashed_nodes.contains(coordinator) {
-            // We must abort the configuration. This mimics a timeout.
-            self.nexus.abort_reconfiguration();
-        } else {
+        if !self.faults.crashed_nodes.contains(coordinator) {
             let (node, ctx) = self
                 .sut
                 .nodes
@@ -175,7 +173,11 @@ impl TqState {
 
     pub fn send_envelopes_from(&mut self, id: &PlatformId) {
         let (_, ctx) = self.sut.nodes.get_mut(id).expect("node exists");
-        for envelope in ctx.drain_envelopes() {
+        // Only send envelopes to alive nodes
+        for envelope in ctx
+            .drain_envelopes()
+            .filter(|e| !self.faults.crashed_nodes.contains(&e.to))
+        {
             let msgs =
                 self.bootstrap_network.entry(envelope.to.clone()).or_default();
             msgs.push(envelope);
@@ -204,6 +206,12 @@ impl TqState {
             Event::DeliverEnvelope(envelope) => {
                 self.apply_event_deliver_envelope(envelope);
             }
+            Event::LoadRackSecret(id, epoch) => {
+                self.apply_event_load_rack_secret(id, epoch);
+            }
+            Event::ClearSecrets(id) => {
+                self.apply_event_clear_secrets(id);
+            }
             Event::DeliverNexusReply(reply) => {
                 self.apply_event_deliver_nexus_reply(reply);
             }
@@ -212,6 +220,12 @@ impl TqState {
             }
             Event::Reconfigure(nexus_config) => {
                 self.apply_event_reconfigure(nexus_config)
+            }
+            Event::CrashNode(id) => {
+                self.apply_event_crash_node(id);
+            }
+            Event::RestartNode { id, connection_order } => {
+                self.apply_event_restart_node(id, connection_order);
             }
         }
     }
@@ -258,8 +272,7 @@ impl TqState {
     fn apply_event_commit(&mut self, id: PlatformId) {
         let rack_id = self.nexus.rack_id;
         let latest_config = self.nexus.latest_config();
-        let (node, ctx) =
-            self.sut.nodes.get_mut(&id).expect("destination exists");
+        let (node, ctx) = self.sut.nodes.get_mut(&id).expect("node exists");
         node.commit_configuration(ctx, rack_id, latest_config.epoch)
             .expect("commit succeeded");
 
@@ -269,8 +282,123 @@ impl TqState {
         });
     }
 
+    fn apply_event_load_rack_secret(&mut self, id: PlatformId, epoch: Epoch) {
+        let (node, ctx) = self.sut.nodes.get_mut(&id).expect("node exists");
+
+        // Postcondition checks
+        match node.load_rack_secret(ctx, epoch) {
+            Ok(None) => {
+                assert!(node.is_collecting_shares_for_rack_secret(epoch));
+            }
+            Ok(Some(_)) => {
+                // We may be collecting for a later epoch, but haven't thrown
+                // out the old secret, so we don't check if we are collecting as
+                // in the `Ok(None)` clause above.
+
+                // If we can load a rack secret then we have either committed
+                // for this epoch or a later epoch.
+                assert!(
+                    ctx.persistent_state()
+                        .latest_committed_epoch()
+                        .expect("at least one committed epoch")
+                        >= epoch
+                );
+            }
+            Err(LoadRackSecretError::NoCommittedConfigurations) => {
+                assert!(ctx.persistent_state().is_uninitialized());
+            }
+            Err(LoadRackSecretError::NotCommitted(epoch)) => {
+                assert!(!ctx.persistent_state().commits.contains(&epoch));
+            }
+            Err(LoadRackSecretError::Alarm) => {
+                // We should not see any alarms in this test
+                panic!("alarm seen");
+            }
+            Err(LoadRackSecretError::NotAvailable(_)) => {
+                assert!(
+                    ctx.persistent_state()
+                        .latest_committed_epoch()
+                        .expect("latest committed epoch exists")
+                        > epoch
+                );
+            }
+        }
+    }
+
+    fn apply_event_clear_secrets(&mut self, id: PlatformId) {
+        let (node, _) = self.sut.nodes.get_mut(&id).expect("node exists");
+        node.clear_secrets();
+    }
+
     fn apply_event_send_nexus_reply_on_underlay(&mut self, reply: NexusReply) {
         self.underlay_network.push(reply);
+    }
+
+    fn apply_event_crash_node(&mut self, id: PlatformId) {
+        // We clear all the crashed node's destination messages
+        self.bootstrap_network.remove(&id);
+
+        // Keep track of the crashed node
+        self.faults.crashed_nodes.insert(id.clone());
+
+        // We get to define the semantics of the network with regards to an
+        // inflight message sourced from a crashed node. We have two choices:
+        // drop the message or let it be eventually delivered to the desination
+        // if the destination node doesn't crash before delivery. We choose
+        // the latter mostly for efficiency: we don't want to have to loop over
+        // every destination in the bootstrap network and filter messages.
+        //
+        // However, we do still have to call `node.on_disconnect()` at all
+        // connected nodes, so do that now. For simplicity, we do this at every
+        // alive node in the same step.
+        for (_, (node, ctx)) in self
+            .sut
+            .nodes
+            .iter_mut()
+            .filter(|(id, _)| !self.faults.crashed_nodes.contains(id))
+        {
+            node.on_disconnect(ctx, id.clone());
+        }
+    }
+
+    fn apply_event_restart_node(
+        &mut self,
+        id: PlatformId,
+        connection_order: Vec<PlatformId>,
+    ) {
+        // The node is no longer crashed.
+        self.faults.crashed_nodes.remove(&id);
+
+        // We need to clear the mutable state of the `Node`. We do this by
+        // creating a new `Node` and passing in the existing context which
+        // contains the persistent state.
+        {
+            let (node, ctx) = self.sut.nodes.get_mut(&id).expect("node exists");
+            ctx.clear_mutable_state();
+            *node = Node::new(&self.log, ctx);
+        }
+
+        // We now need to connect to each node in the order given in
+        // `connection_order`. We do this by calling `on_connect` at the
+        // restarted node and the node in `connection_order`;
+        for peer in connection_order {
+            let (peer_node, peer_ctx) =
+                self.sut.nodes.get_mut(&peer).expect("node exists");
+            // Inform the peer of the connection
+            peer_node.on_connect(peer_ctx, id.clone());
+            // Send any messages output as a result of the connection
+            send_envelopes(
+                peer_ctx,
+                &mut self.bootstrap_network,
+                &mut self.faults,
+            );
+
+            let (node, ctx) = self.sut.nodes.get_mut(&id).expect("node exists");
+            // Inform the restarted node of the connection
+            node.on_connect(ctx, peer);
+            // Send any messages output as a result of the connection
+            send_envelopes(ctx, &mut self.bootstrap_network, &self.faults);
+        }
     }
 
     fn apply_event_deliver_nexus_reply(&mut self, recorded_reply: NexusReply) {
@@ -350,7 +478,7 @@ impl TqState {
         }
 
         // Send any messages as a result of handling this message
-        send_envelopes(ctx, &mut self.bootstrap_network);
+        send_envelopes(ctx, &mut self.bootstrap_network, &self.faults);
 
         // Remove any destinations with zero messages in-flight
         self.bootstrap_network.retain(|_, msgs| !msgs.is_empty());
@@ -408,8 +536,11 @@ impl TqState {
 fn send_envelopes(
     ctx: &mut NodeCtx,
     bootstrap_network: &mut BTreeMap<PlatformId, Vec<Envelope>>,
+    faults: &Faults,
 ) {
-    for envelope in ctx.drain_envelopes() {
+    for envelope in
+        ctx.drain_envelopes().filter(|e| !faults.crashed_nodes.contains(&e.to))
+    {
         let envelopes =
             bootstrap_network.entry(envelope.to.clone()).or_default();
         envelopes.push(envelope);
@@ -800,6 +931,19 @@ fn display_node_diff(
                 node_diff.key_share_computer().after.unwrap().config().epoch
             )?;
         }
+    }
+
+    if node_diff.rack_secret_loader().collector().is_modified() {
+        // It's too tedious to do the diff work here right now.
+        writeln!(f, "  Rack secret collector changed")?;
+    }
+    if !node_diff.rack_secret_loader().loaded().added.is_empty() {
+        // It's too tedious to do the diff work here right now.
+        writeln!(f, "  Rack secrets loaded")?;
+    }
+    if !node_diff.rack_secret_loader().loaded().removed.is_empty() {
+        // It's too tedious to do the diff work here right now.
+        writeln!(f, "  Rack secrets cleared")?;
     }
 
     Ok(())

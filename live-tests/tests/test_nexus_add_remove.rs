@@ -2,15 +2,16 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-mod common;
+pub mod common;
 
+use crate::common::reconfigurator::blueprint_wait_sled_configs_propagated;
 use anyhow::Context;
 use common::LiveTestContext;
 use common::reconfigurator::blueprint_edit_current_target;
 use futures::TryStreamExt;
 use live_tests_macros::live_test;
-use nexus_client::types::BackgroundTasksActivateRequest;
 use nexus_client::types::BlueprintTargetSet;
+use nexus_client::types::QuiesceState;
 use nexus_client::types::Saga;
 use nexus_client::types::SagaState;
 use nexus_inventory::CollectionBuilder;
@@ -20,8 +21,10 @@ use nexus_reconfigurator_planning::planner::PlannerRng;
 use nexus_reconfigurator_preparation::PlanningInputFromDb;
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::BlueprintZoneDisposition;
-use nexus_types::deployment::PlannerChickenSwitches;
+use nexus_types::deployment::BlueprintZoneType;
+use nexus_types::deployment::PlannerConfig;
 use nexus_types::deployment::SledFilter;
+use nexus_types::deployment::blueprint_zone_type;
 use omicron_common::address::NEXUS_INTERNAL_PORT;
 use omicron_test_utils::dev::poll::CondCheckError;
 use omicron_test_utils::dev::poll::wait_for_condition;
@@ -46,15 +49,13 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
     let opctx = lc.opctx();
     let datastore = lc.datastore();
 
-    let chicken_switches = datastore
-        .reconfigurator_chicken_switches_get_latest(opctx)
+    let planner_config = datastore
+        .reconfigurator_config_get_latest(opctx)
         .await
-        .expect("obtained latest chicken switches")
-        .map_or_else(PlannerChickenSwitches::default, |cs| {
-            cs.switches.planner_switches
-        });
+        .expect("obtained latest reconfigurator config")
+        .map_or_else(PlannerConfig::default, |c| c.config.planner_config);
     let planning_input =
-        PlanningInputFromDb::assemble(&opctx, &datastore, chicken_switches)
+        PlanningInputFromDb::assemble(&opctx, &datastore, planner_config)
             .await
             .expect("planning input");
     let collection = datastore
@@ -85,7 +86,7 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
             // would only be wrong if there are existing Nexus zones with
             // different image sources, which would only be true in the middle
             // of an update.
-            let image_source = commissioned_sled_ids
+            let (image_source, nexus_generation) = commissioned_sled_ids
                 .iter()
                 .find_map(|&sled_id| {
                     builder
@@ -94,8 +95,17 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
                             BlueprintZoneDisposition::is_in_service,
                         )
                         .find_map(|zone| {
-                            if zone.zone_type.is_nexus() {
-                                Some(zone.image_source.clone())
+                            if let BlueprintZoneType::Nexus(
+                                blueprint_zone_type::Nexus {
+                                    nexus_generation,
+                                    ..
+                                },
+                            ) = &zone.zone_type
+                            {
+                                Some((
+                                    zone.image_source.clone(),
+                                    nexus_generation,
+                                ))
                             } else {
                                 None
                             }
@@ -106,7 +116,7 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
                 )?;
 
             builder
-                .sled_add_zone_nexus(sled_id, image_source)
+                .sled_add_zone_nexus(sled_id, image_source, *nexus_generation)
                 .context("adding Nexus zone")?;
 
             Ok(())
@@ -129,15 +139,27 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
     // Wait for the new Nexus zone to show up and be usable.
     let initial_sagas_list = wait_for_condition(
         || async {
-            list_sagas(&new_zone_client).await.map_err(|e| {
+            let list = list_sagas(&new_zone_client).await.map_err(|e| {
                 debug!(log,
                     "waiting for new Nexus to be available: listing sagas: {e:#}"
                 );
                 CondCheckError::<()>::NotYet
-            })
+            })?;
+            debug!(log, "new Nexus: listing sagas: ok");
+
+            let qq = new_zone_client
+                .quiesce_get()
+                .await
+                .expect("fetching quiesce state from new zone");
+            debug!(log, "new Nexus: quiesce state"; "state" => ?qq);
+            if let QuiesceState::Undetermined = qq.state {
+                Err(CondCheckError::<()>::NotYet)
+            } else {
+                Ok(list)
+            }
         },
         &Duration::from_millis(50),
-        &Duration::from_secs(60),
+        &Duration::from_secs(90),
     )
     .await
     .expect("new Nexus to be usable");
@@ -217,62 +239,37 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
     // For that to happen, inventory must first reflect that the Nexus we
     // expunged is really gone.  Then we must run through another planning
     // round.
-    //
-    // First, kick one Nexus instance's inventory collector.  Otherwise, it
-    // might take a while for the system to notice this zone is gone.  Having
-    // activated the task, it shouldn't take too long to get an inventory
-    info!(log, "activating inventory collector");
-    nexus
-        .bgtask_activate(&BackgroundTasksActivateRequest {
-            bgtask_names: vec![String::from("inventory_collection")],
-        })
-        .await
-        .expect("activating inventory background task");
-    let latest_collection = wait_for_condition(
-        || async {
-            let latest_collection = datastore
-                .inventory_get_latest_collection(opctx)
-                .await
-                .expect("latest inventory collection")
-                .expect("have a latest inventory collection");
-            debug!(log, "got inventory"; "id" => %latest_collection.id);
-            let agent = latest_collection.sled_agents.get(&sled_id).expect(
-                "collection information for the sled we added a Nexus to",
-            );
-            let ledgered_config = agent
-                .ledgered_sled_config
-                .as_ref()
-                .expect("sled should have ledgered config");
-            if ledgered_config.zones.iter().any(|z| z.id == new_zone.id) {
-                debug!(log, "zone still present in ledger");
-                return Err(CondCheckError::<()>::NotYet);
-            }
-
-            let reconciled_config = &agent
-                .last_reconciliation
-                .as_ref()
-                .expect("sled should have reconciled config")
-                .last_reconciled_config;
-            if reconciled_config.zones.iter().any(|z| z.id == new_zone.id) {
-                debug!(log, "zone still present in inventory");
-                return Err(CondCheckError::<()>::NotYet);
-            }
-            if reconciled_config.generation < expunged_generation {
-                debug!(log, "sled's reconciled config is too old");
-                return Err(CondCheckError::<()>::NotYet);
-            }
-            return Ok(latest_collection);
-        },
-        &Duration::from_millis(3000),
-        &Duration::from_secs(90),
+    let latest_collection = blueprint_wait_sled_configs_propagated(
+        opctx,
+        datastore,
+        &blueprint3,
+        nexus,
+        Duration::from_secs(90),
     )
     .await
-    .expect("waiting for zone to be gone from inventory");
+    .expect("waiting for blueprint3 sled configs");
+    // These checks are not necessary, but document our assumptions.
+    let agent = latest_collection
+        .sled_agents
+        .get(&sled_id)
+        .expect("collection information for the sled we added a Nexus to");
+    let ledgered_config = agent
+        .ledgered_sled_config
+        .as_ref()
+        .expect("sled should have ledgered config");
+    assert!(!ledgered_config.zones.iter().any(|z| z.id == new_zone.id));
+    let reconciled_config = &agent
+        .last_reconciliation
+        .as_ref()
+        .expect("sled should have reconciled config")
+        .last_reconciled_config;
+    assert!(!reconciled_config.zones.iter().any(|z| z.id == new_zone.id));
+    assert!(reconciled_config.generation >= expunged_generation);
 
     // Now run through the planner.
     info!(log, "running through planner");
     let planning_input =
-        PlanningInputFromDb::assemble(&opctx, &datastore, chicken_switches)
+        PlanningInputFromDb::assemble(&opctx, &datastore, planner_config)
             .await
             .expect("planning input");
     let (_, parent_blueprint) = datastore

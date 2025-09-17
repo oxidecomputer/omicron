@@ -29,8 +29,8 @@ use nexus_types::deployment::BlueprintTarget;
 use nexus_types::deployment::BlueprintTargetSet;
 use nexus_types::deployment::ClickhousePolicy;
 use nexus_types::deployment::OximeterReadPolicy;
-use nexus_types::deployment::ReconfiguratorChickenSwitchesParam;
-use nexus_types::deployment::ReconfiguratorChickenSwitchesView;
+use nexus_types::deployment::ReconfiguratorConfigParam;
+use nexus_types::deployment::ReconfiguratorConfigView;
 use nexus_types::external_api::headers::RangeRequest;
 use nexus_types::external_api::params::PhysicalDiskPath;
 use nexus_types::external_api::params::SledSelector;
@@ -69,9 +69,7 @@ use omicron_common::api::internal::nexus::RepairFinishInfo;
 use omicron_common::api::internal::nexus::RepairProgress;
 use omicron_common::api::internal::nexus::RepairStartInfo;
 use omicron_common::api::internal::nexus::SledVmmState;
-use omicron_uuid_kinds::GenericUuid;
-use omicron_uuid_kinds::InstanceUuid;
-use omicron_uuid_kinds::SupportBundleUuid;
+use omicron_uuid_kinds::*;
 use range_requests::PotentialRange;
 use std::collections::BTreeMap;
 
@@ -98,10 +96,8 @@ impl NexusInternalApi for NexusInternalApiImpl {
         let path = path_params.into_inner();
         let sled_id = &path.sled_id;
         let handler = async {
-            let (.., sled) = nexus
-                .sled_lookup(&opctx, &sled_id.into_untyped_uuid())?
-                .fetch()
-                .await?;
+            let (.., sled) =
+                nexus.sled_lookup(&opctx, &sled_id)?.fetch().await?;
             Ok(HttpResponseOk(sled.into()))
         };
         apictx
@@ -122,9 +118,7 @@ impl NexusInternalApi for NexusInternalApiImpl {
         let info = sled_info.into_inner();
         let sled_id = &path.sled_id;
         let handler = async {
-            nexus
-                .upsert_sled(&opctx, sled_id.into_untyped_uuid(), info)
-                .await?;
+            nexus.upsert_sled(&opctx, *sled_id, info).await?;
             Ok(HttpResponseUpdatedNoContent())
         };
         apictx
@@ -143,12 +137,7 @@ impl NexusInternalApi for NexusInternalApiImpl {
         let path = path_params.into_inner();
         let sled_id = &path.sled_id;
         let handler = async {
-            nexus
-                .sled_request_firewall_rules(
-                    &opctx,
-                    sled_id.into_untyped_uuid(),
-                )
-                .await?;
+            nexus.sled_request_firewall_rules(&opctx, *sled_id).await?;
             Ok(HttpResponseUpdatedNoContent())
         };
         apictx
@@ -234,11 +223,7 @@ impl NexusInternalApi for NexusInternalApiImpl {
             let opctx =
                 crate::context::op_context_for_internal_api(&rqctx).await;
             let instance = nexus
-                .instance_migrate(
-                    &opctx,
-                    InstanceUuid::from_untyped_uuid(path.instance_id),
-                    migrate,
-                )
+                .instance_migrate(&opctx, path.instance_id, migrate)
                 .await?;
             Ok(HttpResponseOk(instance.into()))
         };
@@ -871,23 +856,19 @@ impl NexusInternalApi for NexusInternalApiImpl {
             .await
     }
 
-    async fn reconfigurator_chicken_switches_show_current(
+    async fn reconfigurator_config_show_current(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<ReconfiguratorChickenSwitchesView>, HttpError>
-    {
+    ) -> Result<HttpResponseOk<ReconfiguratorConfigView>, HttpError> {
         let apictx = &rqctx.context().context;
         let handler = async {
             let datastore = &apictx.nexus.datastore();
             let opctx =
                 crate::context::op_context_for_internal_api(&rqctx).await;
-            match datastore
-                .reconfigurator_chicken_switches_get_latest(&opctx)
-                .await?
-            {
+            match datastore.reconfigurator_config_get_latest(&opctx).await? {
                 Some(switches) => Ok(HttpResponseOk(switches)),
                 None => Err(HttpError::for_not_found(
                     None,
-                    "No chicken switches in database".into(),
+                    "No config in database".into(),
                 )),
             }
         };
@@ -897,27 +878,21 @@ impl NexusInternalApi for NexusInternalApiImpl {
             .await
     }
 
-    async fn reconfigurator_chicken_switches_show(
+    async fn reconfigurator_config_show(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<VersionPathParam>,
-    ) -> Result<HttpResponseOk<ReconfiguratorChickenSwitchesView>, HttpError>
-    {
+    ) -> Result<HttpResponseOk<ReconfiguratorConfigView>, HttpError> {
         let apictx = &rqctx.context().context;
         let handler = async {
             let datastore = &apictx.nexus.datastore();
             let opctx =
                 crate::context::op_context_for_internal_api(&rqctx).await;
             let version = path_params.into_inner().version;
-            match datastore
-                .reconfigurator_chicken_switches_get(&opctx, version)
-                .await?
-            {
+            match datastore.reconfigurator_config_get(&opctx, version).await? {
                 Some(switches) => Ok(HttpResponseOk(switches)),
                 None => Err(HttpError::for_not_found(
                     None,
-                    format!(
-                        "No chicken switches in database at version {version}"
-                    ),
+                    format!("No config in database at version {version}"),
                 )),
             }
         };
@@ -927,9 +902,9 @@ impl NexusInternalApi for NexusInternalApiImpl {
             .await
     }
 
-    async fn reconfigurator_chicken_switches_set(
+    async fn reconfigurator_config_set(
         rqctx: RequestContext<Self::Context>,
-        switches: TypedBody<ReconfiguratorChickenSwitchesParam>,
+        switches: TypedBody<ReconfiguratorConfigParam>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let apictx = &rqctx.context().context;
         let handler = async {
@@ -938,7 +913,7 @@ impl NexusInternalApi for NexusInternalApiImpl {
                 crate::context::op_context_for_internal_api(&rqctx).await;
 
             datastore
-                .reconfigurator_chicken_switches_insert_latest_version(
+                .reconfigurator_config_insert_latest_version(
                     &opctx,
                     switches.into_inner(),
                 )

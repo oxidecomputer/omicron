@@ -16,6 +16,7 @@ use crate::db::model::SledResourceVmm;
 use crate::db::model::SledState;
 use crate::db::model::SledUpdate;
 use crate::db::model::to_db_sled_policy;
+use crate::db::model::to_db_typed_uuid;
 use crate::db::pagination::Paginator;
 use crate::db::pagination::paginated;
 use crate::db::queries::sled_reservation::sled_find_targets_query;
@@ -356,7 +357,7 @@ impl DataStore {
         let sled_exists_and_in_service = diesel::select(diesel::dsl::exists(
             dsl::sled
                 .filter(dsl::time_deleted.is_null())
-                .filter(dsl::id.eq(sled_id.into_untyped_uuid()))
+                .filter(dsl::id.eq(to_db_typed_uuid(sled_id)))
                 .sled_filter(SledFilter::InService),
         ))
         .get_result_async::<bool>(conn)
@@ -409,8 +410,9 @@ impl DataStore {
             let batch = self
                 .sled_list(opctx, &p.current_pagparams(), sled_filter)
                 .await?;
-            paginator =
-                p.found_batch(&batch, &|s: &nexus_db_model::Sled| s.id());
+            paginator = p.found_batch(&batch, &|s: &nexus_db_model::Sled| {
+                s.id().into_untyped_uuid()
+            });
             all_sleds.extend(batch);
         }
         Ok(all_sleds)
@@ -468,12 +470,12 @@ impl DataStore {
             return Ok(old_resource[0].clone());
         }
 
-        let must_use_sleds: HashSet<SledUuid> = constraints
-            .must_select_from()
-            .into_iter()
-            .flatten()
-            .map(|id| SledUuid::from_untyped_uuid(*id))
-            .collect();
+        let must_use_sleds: HashSet<&SledUuid> =
+            if let Some(must_select_from) = constraints.must_select_from() {
+                must_select_from.into_iter().collect()
+            } else {
+                HashSet::default()
+            };
 
         // Query for the set of possible sleds using a CTE.
         //
@@ -504,6 +506,10 @@ impl DataStore {
         for (sled_id, fits, affinity_policy, anti_affinity_policy) in
             possible_sleds
         {
+            // this is required because [`sled_find_targets_query`] returns a
+            // query where the first element in the tuple is
+            // ['`sql_types::Uuid`], and typed uuids can't be returned in
+            // queries like this.
             let sled_id = SledUuid::from_untyped_uuid(sled_id);
 
             if fits
@@ -577,7 +583,7 @@ impl DataStore {
     ) -> DeleteResult {
         use nexus_db_schema::schema::sled_resource_vmm::dsl as resource_dsl;
         diesel::delete(resource_dsl::sled_resource_vmm)
-            .filter(resource_dsl::id.eq(vmm_id.into_untyped_uuid()))
+            .filter(resource_dsl::id.eq(to_db_typed_uuid(vmm_id)))
             .execute_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
@@ -644,7 +650,7 @@ impl DataStore {
     ) -> Result<SledPolicy, TransitionError> {
         opctx.authorize(authz::Action::Modify, authz_sled).await?;
 
-        let sled_id = authz_sled.id();
+        let sled_id = to_db_typed_uuid(authz_sled.id());
         let err = OptionalError::new();
         let conn = self.pool_connection_authorized(opctx).await?;
         let policy = self
@@ -800,7 +806,7 @@ impl DataStore {
 
         opctx.authorize(authz::Action::Modify, authz_sled).await?;
 
-        let sled_id = authz_sled.id();
+        let sled_id = to_db_typed_uuid(authz_sled.id());
         let err = OptionalError::new();
         let conn = self.pool_connection_authorized(opctx).await?;
         let old_state = self
@@ -1192,7 +1198,7 @@ pub(in crate::db::datastore) mod test {
         sled_set_state(
             &opctx,
             &datastore,
-            SledUuid::from_untyped_uuid(observed_sled.id()),
+            observed_sled.id(),
             SledState::Decommissioned,
             ValidateTransition::No,
             Expected::Ok(SledState::Active),
@@ -1264,16 +1270,10 @@ pub(in crate::db::datastore) mod test {
             datastore.sled_upsert(test_new_sled_update()).await.unwrap();
 
         let ineligible_sleds = IneligibleSleds {
-            non_provisionable: SledUuid::from_untyped_uuid(
-                non_provisionable_sled.id(),
-            ),
-            expunged: SledUuid::from_untyped_uuid(expunged_sled.id()),
-            decommissioned: SledUuid::from_untyped_uuid(
-                decommissioned_sled.id(),
-            ),
-            illegal_decommissioned: SledUuid::from_untyped_uuid(
-                illegal_decommissioned_sled.id(),
-            ),
+            non_provisionable: non_provisionable_sled.id(),
+            expunged: expunged_sled.id(),
+            decommissioned: decommissioned_sled.id(),
+            illegal_decommissioned: illegal_decommissioned_sled.id(),
         };
         ineligible_sleds.setup(&opctx, &datastore).await.unwrap();
 
@@ -1317,7 +1317,7 @@ pub(in crate::db::datastore) mod test {
                 .await
                 .unwrap();
             assert_eq!(
-                resource.sled_id.into_untyped_uuid(),
+                resource.sled_id(),
                 provisionable_sled.id(),
                 "resource is always allocated to the provisionable sled"
             );
@@ -1559,8 +1559,8 @@ pub(in crate::db::datastore) mod test {
         }
 
         // Force this instance to be placed on a specific sled
-        fn sled(mut self, sled: Uuid) -> Self {
-            self.force_onto_sled = Some(SledUuid::from_untyped_uuid(sled));
+        fn sled(mut self, sled: SledUuid) -> Self {
+            self.force_onto_sled = Some(sled);
             self
         }
 
@@ -1616,7 +1616,7 @@ pub(in crate::db::datastore) mod test {
         // Pick a specific sled, if requested
         let constraints = db::model::SledReservationConstraintBuilder::new();
         let constraints = if let Some(sled_target) = instance.force_onto_sled {
-            constraints.must_select_from(&[sled_target.into_untyped_uuid()])
+            constraints.must_select_from(&[sled_target])
         } else {
             constraints
         };
@@ -1727,7 +1727,7 @@ pub(in crate::db::datastore) mod test {
             .add_to_groups_and_reserve(&opctx, &datastore, &all_groups)
             .await
             .expect("Should have succeeded allocation");
-        assert_eq!(resource.sled_id.into_untyped_uuid(), sleds[2].id());
+        assert_eq!(resource.sled_id(), sleds[2].id());
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -1774,8 +1774,7 @@ pub(in crate::db::datastore) mod test {
             .await
             .expect("Should have succeeded allocation");
         assert!(
-            [sleds[0].id(), sleds[1].id()]
-                .contains(resource.sled_id.as_untyped_uuid()),
+            [sleds[0].id(), sleds[1].id()].contains(&resource.sled_id()),
             "Should have been provisioned to one of the two viable sleds"
         );
 
@@ -1818,14 +1817,14 @@ pub(in crate::db::datastore) mod test {
             .add_to_groups_and_reserve(&opctx, &datastore, &all_groups)
             .await
             .expect("Should have placed instance");
-        assert_eq!(resource.sled_id.into_untyped_uuid(), sleds[0].id());
+        assert_eq!(resource.sled_id(), sleds[0].id());
 
         let another_test_instance = Instance::new().group("affinity");
         let resource = another_test_instance
             .add_to_groups_and_reserve(&opctx, &datastore, &all_groups)
             .await
             .expect("Should have placed instance (again)");
-        assert_eq!(resource.sled_id.into_untyped_uuid(), sleds[0].id());
+        assert_eq!(resource.sled_id(), sleds[0].id());
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -1985,7 +1984,7 @@ pub(in crate::db::datastore) mod test {
             .add_to_groups_and_reserve(&opctx, &datastore, &all_groups)
             .await
             .expect("Should have made reservation");
-        assert_eq!(reservation.sled_id.into_untyped_uuid(), sleds[1].id());
+        assert_eq!(reservation.sled_id(), sleds[1].id());
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -2106,8 +2105,7 @@ pub(in crate::db::datastore) mod test {
             .await
             .expect("Should have succeeded allocation");
         assert!(
-            [sleds[0].id(), sleds[1].id()]
-                .contains(resource.sled_id.as_untyped_uuid()),
+            [sleds[0].id(), sleds[1].id()].contains(&resource.sled_id()),
             "Should have been provisioned to one of the two viable sleds"
         );
 
@@ -2177,7 +2175,7 @@ pub(in crate::db::datastore) mod test {
             .await
             .expect("Should have succeeded allocation");
 
-        assert_eq!(resource.sled_id.into_untyped_uuid(), sleds[2].id());
+        assert_eq!(resource.sled_id(), sleds[2].id());
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -2245,7 +2243,7 @@ pub(in crate::db::datastore) mod test {
             .await
             .expect("Should have succeeded allocation");
 
-        assert_eq!(resource.sled_id.into_untyped_uuid(), sleds[3].id());
+        assert_eq!(resource.sled_id(), sleds[3].id());
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -2303,7 +2301,7 @@ pub(in crate::db::datastore) mod test {
             .await
             .expect("Should have succeeded allocation");
 
-        assert_eq!(resource.sled_id.into_untyped_uuid(), sleds[1].id());
+        assert_eq!(resource.sled_id(), sleds[1].id());
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -2358,7 +2356,7 @@ pub(in crate::db::datastore) mod test {
             .await
             .expect("Should have succeeded allocation");
 
-        assert_eq!(resource.sled_id.into_untyped_uuid(), sleds[2].id());
+        assert_eq!(resource.sled_id(), sleds[2].id());
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -2427,7 +2425,7 @@ pub(in crate::db::datastore) mod test {
         );
         let affine_sled = possible_sleds
             .iter()
-            .find(|sled| sled.id.into_untyped_uuid() == sleds[0].id())
+            .find(|sled| sled.id == sleds[0].id())
             .unwrap();
         assert!(matches!(
             affine_sled.affinity_policy.expect("Sled 0 should be affine"),
@@ -2442,7 +2440,7 @@ pub(in crate::db::datastore) mod test {
                     .insert_resource(
                         &datastore,
                         PropolisUuid::new_v4(),
-                        SledUuid::from_untyped_uuid(sleds[i].id()),
+                        sleds[i].id(),
                     )
                     .await,
                 "Shouldn't have been able to insert into sled {i}"
@@ -2455,7 +2453,7 @@ pub(in crate::db::datastore) mod test {
                 .insert_resource(
                     &datastore,
                     PropolisUuid::new_v4(),
-                    SledUuid::from_untyped_uuid(sleds[0].id()),
+                    sleds[0].id(),
                 )
                 .await
         );
@@ -2526,7 +2524,7 @@ pub(in crate::db::datastore) mod test {
         );
         let anti_affine_sled = possible_sleds
             .iter()
-            .find(|sled| sled.id.into_untyped_uuid() == sleds[0].id())
+            .find(|sled| sled.id == sleds[0].id())
             .unwrap();
         assert!(matches!(
             anti_affine_sled
@@ -2542,7 +2540,7 @@ pub(in crate::db::datastore) mod test {
                 .insert_resource(
                     &datastore,
                     PropolisUuid::new_v4(),
-                    SledUuid::from_untyped_uuid(sleds[0].id()),
+                    sleds[0].id(),
                 )
                 .await,
             "Shouldn't have been able to insert into sleds[0]"
@@ -2554,7 +2552,7 @@ pub(in crate::db::datastore) mod test {
                 .insert_resource(
                     &datastore,
                     PropolisUuid::new_v4(),
-                    SledUuid::from_untyped_uuid(sleds[1].id()),
+                    sleds[1].id(),
                 )
                 .await
         );
@@ -2616,7 +2614,7 @@ pub(in crate::db::datastore) mod test {
         assert!(possible_sleds[0].affinity_policy.is_none());
         assert!(possible_sleds[0].anti_affinity_policy.is_none());
         assert!(possible_sleds[0].fits);
-        assert_eq!(possible_sleds[0].id.into_untyped_uuid(), sleds[1].id());
+        assert_eq!(possible_sleds[0].id, sleds[1].id());
 
         // Inserting onto sleds[0, 2, 3] should fail - there shouldn't
         // be enough space on these sleds.
@@ -2626,7 +2624,7 @@ pub(in crate::db::datastore) mod test {
                     .insert_resource(
                         &datastore,
                         PropolisUuid::new_v4(),
-                        SledUuid::from_untyped_uuid(sleds[i].id()),
+                        sleds[i].id(),
                     )
                     .await,
                 "Shouldn't have been able to insert into sleds[i]"
@@ -2639,7 +2637,7 @@ pub(in crate::db::datastore) mod test {
                 .insert_resource(
                     &datastore,
                     PropolisUuid::new_v4(),
-                    SledUuid::from_untyped_uuid(sleds[1].id()),
+                    sleds[1].id(),
                 )
                 .await
         );
@@ -2677,7 +2675,7 @@ pub(in crate::db::datastore) mod test {
         // Set up a sled to test against.
         let (sled, _) =
             datastore.sled_upsert(test_new_sled_update()).await.unwrap();
-        let sled_id = SledUuid::from_untyped_uuid(sled.id());
+        let sled_id = sled.id();
 
         // Add a couple disks to this sled.
         //
@@ -2690,7 +2688,7 @@ pub(in crate::db::datastore) mod test {
             "serial1".to_string(),
             "model1".to_string(),
             PhysicalDiskKind::U2,
-            sled_id.into_untyped_uuid(),
+            sled_id,
         );
         let disk2 = PhysicalDisk::new(
             PhysicalDiskUuid::new_v4(),
@@ -2698,7 +2696,7 @@ pub(in crate::db::datastore) mod test {
             "serial2".to_string(),
             "model2".to_string(),
             PhysicalDiskKind::U2,
-            sled_id.into_untyped_uuid(),
+            sled_id,
         );
 
         datastore
@@ -2875,7 +2873,7 @@ pub(in crate::db::datastore) mod test {
             test_sled_state_transitions_once(
                 &opctx,
                 &datastore,
-                SledUuid::from_untyped_uuid(sled_id),
+                sled_id,
                 policy,
                 state,
                 after,
