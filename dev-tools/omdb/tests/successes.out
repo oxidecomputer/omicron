@@ -20,7 +20,7 @@ empty planning report for blueprint ......<REDACTED_BLUEPRINT_ID>........
 stderr:
 note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
 note: database schema version matches expected (<redacted database version>)
-WARNING: planner report debug log was produced by a Nexus on git commit <GIT_COMMIT_REDACTED>, but omdb was built from git commit <GIT_COMMIT_REDACTED>. We will attempt to parse it anyway.
+
 =============================================
 EXECUTING COMMAND: omdb ["db", "disks", "list"]
 termination: Exited(0)

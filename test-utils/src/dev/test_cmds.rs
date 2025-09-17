@@ -260,6 +260,17 @@ impl<'a> Redactor<'a> {
         self
     }
 
+    /// Strip entire lines that match a given regex.
+    ///
+    /// Regexes passed to this method should be very targeted to avoid stripping
+    /// lines unexpectedly.
+    pub fn strip_lines_matching(&mut self, regex: &str) -> &mut Self {
+        let re = regex::Regex::new(&format!(r"(?m)^[^\n]*{regex}[^\n]*$"))
+            .expect("invalid regex");
+        self.extra_regex.push((re, String::new()));
+        self
+    }
+
     pub fn do_redact(&self, input: &str) -> String {
         // Perform extra redactions at the beginning, not the end. This is because
         // some of the built-in redactions in redact_variable might match a

@@ -285,8 +285,14 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
             "cockroachdb_fingerprint",
             &initial_blueprint.cockroachdb_fingerprint,
         )
-        // git commits vary between runs
-        .field("git commit", r"[0-9a-f]{40}(-dirty)?")
+        // when running locally, we'll usually see a warning about the git
+        // commit of Nexus not matching the git commit of omdb (because we treat
+        // a dirty git workspace as not matching), but CI does not emit this
+        // warning. strip it entirely; it's not relevant to our tests.
+        .strip_lines_matching(
+            "WARNING: planner report debug log was \
+                      produced by a Nexus on git commit ",
+        )
         // Error numbers vary between operating systems.
         .field("os error", r"\d+");
 
