@@ -192,12 +192,14 @@ pub struct ShareCollector {
     shares: BTreeMap<PlatformId, Share>,
 }
 
+#[cfg(feature = "danger_partial_eq_ct_wrapper")]
 impl PartialEq for ShareCollector {
     fn eq(&self, other: &Self) -> bool {
         self.config == other.config && self.shares == other.shares
     }
 }
 
+#[cfg(feature = "danger_partial_eq_ct_wrapper")]
 impl Eq for ShareCollector {}
 
 impl<'daft> ShareCollectorDiff<'daft> {
