@@ -87,6 +87,17 @@ impl InternalServer {
         )
         .await?;
 
+        if config.deployment.dropshot_internal.bind_address.ip()
+            != config.deployment.dropshot_lockstep.bind_address.ip()
+        {
+            return Err(format!(
+                "internal server IP ({}) does not equal \
+                lockstep server IP ({})",
+                config.deployment.dropshot_internal.bind_address.ip(),
+                config.deployment.dropshot_lockstep.bind_address.ip()
+            ));
+        }
+
         // Launch the internal server.
         let http_server_internal = match dropshot::ServerBuilder::new(
             internal_api(),
