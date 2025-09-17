@@ -366,7 +366,6 @@ impl ExampleSystemBuilder {
     ///
     /// Return the system, and the initial blueprint that matches it.
     pub fn build(&self) -> (ExampleSystem, Blueprint) {
-        // println!("SLED SETTINGS: {:#?}", self.sled_settings);
         let nexus_count = self.get_nexus_zones();
 
         slog::debug!(
