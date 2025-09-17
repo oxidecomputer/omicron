@@ -744,6 +744,18 @@ impl<'a> BlueprintBuilder<'a> {
         Either::Right(editor.zones(filter))
     }
 
+    pub fn current_zones<F>(
+        &'a self,
+        filter: F,
+    ) -> impl Iterator<Item = &'a BlueprintZoneConfig>
+    where
+        F: FnMut(BlueprintZoneDisposition) -> bool + Clone,
+    {
+        self.sled_ids_with_zones().flat_map(move |sled_id| {
+            self.current_sled_zones(sled_id, filter.clone())
+        })
+    }
+
     pub fn current_sled_disks<F>(
         &self,
         sled_id: SledUuid,
@@ -1582,25 +1594,13 @@ impl<'a> BlueprintBuilder<'a> {
     ) -> Result<Generation, Error> {
         // If any other Nexus in the blueprint has the same image source,
         // use it. Otherwise, use the highest generation number + 1.
-        //
-        // TODO: This will check the parent blueprint, but perhaps should
-        // also be checking all "pending" updates in "sled_editors".
-        // If we are adding "multiple new nexus zones" in a blueprint,
-        // they'll all happen to get a generation number equal to "the previous
-        // highest generation, plus 1". But if, for some weird reason,
-        // we added multiple Nexuses with different new image sources in a single
-        // blueprint, they'd also get assigned the same generation (which should
-        // be a bug).
-        //
-        // In the meantime: There is a blippy check to verify that all Nexus
-        // zones with the same generation have the same image source.
         let mut highest_seen_generation = None;
         let mut same_image_nexus_generation = None;
 
+        // Iterate over both existing zones and ones that are actively being placed.
         for (zone, nexus) in self
-            .parent_blueprint
-            .all_omicron_zones(BlueprintZoneDisposition::any)
-            .filter_map(|(_, z)| match &z.zone_type {
+            .current_zones(BlueprintZoneDisposition::any)
+            .filter_map(|z| match &z.zone_type {
                 BlueprintZoneType::Nexus(nexus) => Some((z, nexus)),
                 _ => None,
             })
