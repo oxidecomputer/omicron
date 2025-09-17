@@ -112,6 +112,15 @@ impl TestState {
             Action::DeliverEnvelope(selector) => {
                 self.action_to_events_deliver_envelope(selector)
             }
+            Action::LoadLatestRackSecret(selector) => {
+                self.action_to_events_load_latest_rack_secret(selector)
+            }
+            Action::LoadRackSecret { config, id } => {
+                self.action_to_events_load_rack_secret(config, id)
+            }
+            Action::ClearSecrets(selector) => {
+                self.action_to_events_clear_secrets(selector)
+            }
             Action::PollPrepareAcks => {
                 self.action_to_events_poll_prepare_acks()
             }
@@ -156,6 +165,48 @@ impl TestState {
             .clone();
         events.push(Event::DeliverEnvelope(envelope));
         events
+    }
+
+    fn action_to_events_load_latest_rack_secret(
+        &self,
+        selector: Selector,
+    ) -> Vec<Event> {
+        let mut events = vec![];
+        if let Some(c) = self.tq_state.nexus.last_committed_config() {
+            let id = selector.select(c.members.iter()).clone();
+            events.push(Event::LoadRackSecret(id, c.epoch));
+        }
+        events
+    }
+
+    fn action_to_events_clear_secrets(&self, selector: Selector) -> Vec<Event> {
+        let mut events = vec![];
+        if let Some(c) = self.tq_state.nexus.last_committed_config() {
+            let id = selector.select(c.members.iter()).clone();
+            events.push(Event::ClearSecrets(id.clone()));
+        }
+        events
+    }
+
+    fn action_to_events_load_rack_secret(
+        &self,
+        config: Selector,
+        id: Selector,
+    ) -> Vec<Event> {
+        let mut committed_configs_iter = self
+            .tq_state
+            .nexus
+            .configs
+            .iter()
+            .filter(|c| c.op == NexusOp::Committed)
+            .peekable();
+        if committed_configs_iter.peek().is_none() {
+            // No committed configurations
+            return vec![];
+        }
+        let c = config.select(committed_configs_iter);
+        let id = id.select(c.members.iter()).clone();
+        vec![Event::LoadRackSecret(id, c.epoch)]
     }
 
     fn action_to_events_poll_prepare_acks(&self) -> Vec<Event> {
@@ -600,6 +651,24 @@ pub enum Action {
     /// `test_state.bootstrap_network`.
     #[weight(30)]
     DeliverEnvelope(Selector),
+
+    /// Start loading a rack secret for the latest committed configuration at
+    /// the replica determined by the selector into the members of that latest
+    /// configuration.
+    ///
+    /// Latest configuration is determined by looking at `NexusState`.
+    #[weight(5)]
+    LoadLatestRackSecret(Selector),
+
+    /// Start loading a rack secret for an arbitrary committed configuration at
+    /// a node that is a member of that configuration.
+    #[weight(5)]
+    LoadRackSecret { config: Selector, id: Selector },
+
+    /// Clear all rack secrets at the selected node in the latest committed
+    /// configuration if there is one.
+    #[weight(2)]
+    ClearSecrets(Selector),
 
     /// Have Nexus poll the coordinator for the latest configuration if it is
     /// still being prepared.

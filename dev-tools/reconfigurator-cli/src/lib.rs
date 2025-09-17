@@ -63,6 +63,7 @@ use omicron_uuid_kinds::VnicUuid;
 use omicron_uuid_kinds::{BlueprintUuid, MupdateOverrideUuid};
 use omicron_uuid_kinds::{CollectionUuid, MupdateUuid};
 use std::borrow::Cow;
+use std::collections::BTreeSet;
 use std::convert::Infallible;
 use std::fmt::{self, Write};
 use std::io::IsTerminal;
@@ -158,6 +159,9 @@ impl ReconfiguratorSim {
         builder.set_internal_dns_version(parent_blueprint.internal_dns_version);
         builder.set_external_dns_version(parent_blueprint.external_dns_version);
 
+        let mut active_nexus_zones = BTreeSet::new();
+        let mut not_yet_nexus_zones = BTreeSet::new();
+
         for (_, zone) in parent_blueprint
             .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
         {
@@ -179,7 +183,26 @@ impl ReconfiguratorSim {
                     .add_omicron_zone_nic(zone.id, nic)
                     .context("adding omicron zone NIC")?;
             }
+
+            match &zone.zone_type {
+                nexus_types::deployment::BlueprintZoneType::Nexus(nexus) => {
+                    if nexus.nexus_generation
+                        == parent_blueprint.nexus_generation
+                    {
+                        active_nexus_zones.insert(zone.id);
+                    } else if nexus.nexus_generation
+                        > parent_blueprint.nexus_generation
+                    {
+                        not_yet_nexus_zones.insert(zone.id);
+                    }
+                }
+                _ => (),
+            }
         }
+
+        builder.set_active_nexus_zones(active_nexus_zones);
+        builder.set_not_yet_nexus_zones(not_yet_nexus_zones);
+
         Ok(builder.build())
     }
 }
@@ -1272,10 +1295,6 @@ struct LoadExampleArgs {
     /// The number of disks per sled in the example system.
     #[clap(short = 'd', long, default_value_t = SledBuilder::DEFAULT_NPOOLS)]
     ndisks_per_sled: u8,
-
-    /// Do not create zones in the example system.
-    #[clap(short = 'Z', long)]
-    no_zones: bool,
 
     /// Do not create entries for disks in the blueprint.
     #[clap(long)]
@@ -2981,7 +3000,6 @@ fn cmd_load_example(
         )
         .external_dns_count(3)
         .context("invalid external DNS zone count")?
-        .create_zones(!args.no_zones)
         .create_disks_in_blueprint(!args.no_disks_in_blueprint);
     for sled_policy in args.sled_policy {
         builder = builder

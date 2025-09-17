@@ -6831,6 +6831,7 @@ dependencies = [
  "internal-dns-resolver",
  "internal-dns-types",
  "ipnet",
+ "ipnetwork",
  "newtype-uuid",
  "nexus-config",
  "nexus-db-lookup",

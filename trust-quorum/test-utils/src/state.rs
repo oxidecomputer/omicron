@@ -15,8 +15,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Display;
 use trust_quorum::{
     Configuration, CoordinatorOperation, CoordinatorStateDiff, Envelope, Epoch,
-    Node, NodeCallerCtx, NodeCommonCtx, NodeCtx, NodeCtxDiff, NodeDiff,
-    PeerMsgKind, PlatformId, ValidatedReconfigureMsgDiff,
+    LoadRackSecretError, Node, NodeCallerCtx, NodeCommonCtx, NodeCtx,
+    NodeCtxDiff, NodeDiff, PeerMsgKind, PlatformId,
+    ValidatedReconfigureMsgDiff,
 };
 
 // The state of our entire system including the system under test and
@@ -204,6 +205,12 @@ impl TqState {
             Event::DeliverEnvelope(envelope) => {
                 self.apply_event_deliver_envelope(envelope);
             }
+            Event::LoadRackSecret(id, epoch) => {
+                self.apply_event_load_rack_secret(id, epoch);
+            }
+            Event::ClearSecrets(id) => {
+                self.apply_event_clear_secrets(id);
+            }
             Event::DeliverNexusReply(reply) => {
                 self.apply_event_deliver_nexus_reply(reply);
             }
@@ -258,8 +265,7 @@ impl TqState {
     fn apply_event_commit(&mut self, id: PlatformId) {
         let rack_id = self.nexus.rack_id;
         let latest_config = self.nexus.latest_config();
-        let (node, ctx) =
-            self.sut.nodes.get_mut(&id).expect("destination exists");
+        let (node, ctx) = self.sut.nodes.get_mut(&id).expect("node exists");
         node.commit_configuration(ctx, rack_id, latest_config.epoch)
             .expect("commit succeeded");
 
@@ -267,6 +273,54 @@ impl TqState {
             from: id,
             epoch: latest_config.epoch,
         });
+    }
+
+    fn apply_event_load_rack_secret(&mut self, id: PlatformId, epoch: Epoch) {
+        let (node, ctx) = self.sut.nodes.get_mut(&id).expect("node exists");
+
+        // Postcondition checks
+        match node.load_rack_secret(ctx, epoch) {
+            Ok(None) => {
+                assert!(node.is_collecting_shares_for_rack_secret(epoch));
+            }
+            Ok(Some(_)) => {
+                // We may be collecting for a later epoch, but haven't thrown
+                // out the old secret, so we don't check if we are collecting as
+                // in the `Ok(None)` clause above.
+
+                // If we can load a rack secret then we have either committed
+                // for this epoch or a later epoch.
+                assert!(
+                    ctx.persistent_state()
+                        .latest_committed_epoch()
+                        .expect("at least one committed epoch")
+                        >= epoch
+                );
+            }
+            Err(LoadRackSecretError::NoCommittedConfigurations) => {
+                assert!(ctx.persistent_state().is_uninitialized());
+            }
+            Err(LoadRackSecretError::NotCommitted(epoch)) => {
+                assert!(!ctx.persistent_state().commits.contains(&epoch));
+            }
+            Err(LoadRackSecretError::Alarm) => {
+                // We should not see any alarms in this test
+                panic!("alarm seen");
+            }
+            Err(LoadRackSecretError::NotAvailable(_)) => {
+                assert!(
+                    ctx.persistent_state()
+                        .latest_committed_epoch()
+                        .expect("latest committed epoch exists")
+                        > epoch
+                );
+            }
+        }
+    }
+
+    fn apply_event_clear_secrets(&mut self, id: PlatformId) {
+        let (node, _) = self.sut.nodes.get_mut(&id).expect("node exists");
+        node.clear_secrets();
     }
 
     fn apply_event_send_nexus_reply_on_underlay(&mut self, reply: NexusReply) {
@@ -800,6 +854,19 @@ fn display_node_diff(
                 node_diff.key_share_computer().after.unwrap().config().epoch
             )?;
         }
+    }
+
+    if node_diff.rack_secret_loader().collector().is_modified() {
+        // It's too tedious to do the diff work here right now.
+        writeln!(f, "  Rack secret collector changed")?;
+    }
+    if !node_diff.rack_secret_loader().loaded().added.is_empty() {
+        // It's too tedious to do the diff work here right now.
+        writeln!(f, "  Rack secrets loaded")?;
+    }
+    if !node_diff.rack_secret_loader().loaded().removed.is_empty() {
+        // It's too tedious to do the diff work here right now.
+        writeln!(f, "  Rack secrets cleared")?;
     }
 
     Ok(())
