@@ -1592,6 +1592,85 @@ mod test {
         logctx.cleanup_successful();
     }
 
+    // Confirm our behaviour for skipped updates
+    #[test]
+    fn test_skipped_updates() {
+        let test_name = "planning_mgs_updates_skipped_updates";
+        let logctx = LogContext::new(
+            test_name,
+            &ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Debug },
+        );
+        let log = &logctx.log;
+        let test_boards = TestBoards::new(test_name);
+
+        // Initial setup: One of every possible SP component will need to be
+        // updated
+        let collection = test_boards
+            .collection_builder()
+            .stage0_version_exception(SpType::Sled, 0, ARTIFACT_VERSION_1)
+            .rot_active_version_exception(SpType::Sled, 0, ARTIFACT_VERSION_1)
+            .sp_active_version_exception(SpType::Sled, 0, ARTIFACT_VERSION_1)
+            .host_active_exception(
+                0,
+                ARTIFACT_HASH_HOST_PHASE_1_V1,
+                ARTIFACT_HASH_HOST_PHASE_2_V1,
+            )
+            .build();
+        let current_updates = PendingMgsUpdates::new();
+        let nmax_updates = 1;
+        let impossible_update_policy = ImpossibleUpdatePolicy::Reevaluate;
+        let repo = test_boards.tuf_repo();
+
+        // Instead of using the baseboards from the collection, we create a new
+        // fake baseboard that the planner will not recognise
+        let mut fake_boards = BTreeSet::new();
+        let fake_board = Arc::new(BaseboardId {
+            part_number: "fake_part".to_string(),
+            serial_number: "fake_serial".to_string(),
+        });
+        fake_boards.insert(fake_board.clone());
+
+        let PlannedMgsUpdates {
+            pending_updates: updates,
+            skipped_mgs_updates,
+            ..
+        } = plan_mgs_updates(
+            log,
+            &collection,
+            &fake_boards,
+            &current_updates,
+            &TargetReleaseDescription::TufRepo(repo.clone()),
+            nmax_updates,
+            impossible_update_policy,
+        );
+
+        // The planner should gather each of the failed updates, and report no
+        // pending updates
+        let mut expected_skipped_updates = SkippedMgsUpdates::new();
+        expected_skipped_updates.push(SkippedMgsUpdate {
+            baseboard_id: fake_board.clone(),
+            component: MgsUpdateComponent::RotBootloader,
+            reason: FailedMgsUpdateReason::SpNotInInventory,
+        });
+        expected_skipped_updates.push(SkippedMgsUpdate {
+            baseboard_id: fake_board.clone(),
+            component: MgsUpdateComponent::Rot,
+            reason: FailedMgsUpdateReason::SpNotInInventory,
+        });
+        expected_skipped_updates.push(SkippedMgsUpdate {
+            baseboard_id: fake_board.clone(),
+            component: MgsUpdateComponent::Sp,
+            reason: FailedMgsUpdateReason::SpNotInInventory,
+        });
+        expected_skipped_updates.push(SkippedMgsUpdate {
+            baseboard_id: fake_board,
+            component: MgsUpdateComponent::HostOs,
+            reason: FailedMgsUpdateReason::SpNotInInventory,
+        });
+        assert_eq!(skipped_mgs_updates, expected_skipped_updates);
+        assert!(updates.is_empty());
+    }
+
     // Confirm our behavior for impossible updates
     #[test]
     fn test_impossible_update_policy() {
