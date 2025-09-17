@@ -710,80 +710,46 @@ has_relation(fleet: Fleet, "parent_fleet", collection: AlertClassList)
 # For silos with this restriction, only Silo Admins can perform networking create/modify/delete actions,
 # while read/list actions remain available to all project collaborators.
 
-# Override networking permissions for VPCs
-has_permission(actor: AuthenticatedActor, "create_child", vpc: Vpc) if
-    has_role(actor, "collaborator", vpc.project) and
-    not vpc.project.silo.restricts_networking();
+# Helper predicate with explicit OR logic
+can_modify_networking_resource(actor: AuthenticatedActor, project: Project) if
+    (has_role(actor, "collaborator", project) and not project.silo.restricts_networking()) or
+    has_role(actor, "admin", project.silo);
 
+# Apply networking restrictions to all networking resources
+# VPCs (project path: vpc.project)
 has_permission(actor: AuthenticatedActor, "create_child", vpc: Vpc) if
-    has_role(actor, "admin", vpc.project.silo);
+    can_modify_networking_resource(actor, vpc.project);
 
 has_permission(actor: AuthenticatedActor, "modify", vpc: Vpc) if
-    has_role(actor, "collaborator", vpc.project) and
-    not vpc.project.silo.restricts_networking();
+    can_modify_networking_resource(actor, vpc.project);
 
-has_permission(actor: AuthenticatedActor, "modify", vpc: Vpc) if
-    has_role(actor, "admin", vpc.project.silo);
-
-# Override networking permissions for VPC Routers
+# VPC Routers (project path: router.vpc.project)
 has_permission(actor: AuthenticatedActor, "create_child", router: VpcRouter) if
-    has_role(actor, "collaborator", router.vpc.project) and
-    not router.vpc.project.silo.restricts_networking();
-
-has_permission(actor: AuthenticatedActor, "create_child", router: VpcRouter) if
-    has_role(actor, "admin", router.vpc.project.silo);
+    can_modify_networking_resource(actor, router.vpc.project);
 
 has_permission(actor: AuthenticatedActor, "modify", router: VpcRouter) if
-    has_role(actor, "collaborator", router.vpc.project) and
-    not router.vpc.project.silo.restricts_networking();
+    can_modify_networking_resource(actor, router.vpc.project);
 
-has_permission(actor: AuthenticatedActor, "modify", router: VpcRouter) if
-    has_role(actor, "admin", router.vpc.project.silo);
-
-# Override networking permissions for VPC Subnets
+# VPC Subnets (project path: subnet.vpc.project)
 has_permission(actor: AuthenticatedActor, "create_child", subnet: VpcSubnet) if
-    has_role(actor, "collaborator", subnet.vpc.project) and
-    not subnet.vpc.project.silo.restricts_networking();
-
-has_permission(actor: AuthenticatedActor, "create_child", subnet: VpcSubnet) if
-    has_role(actor, "admin", subnet.vpc.project.silo);
+    can_modify_networking_resource(actor, subnet.vpc.project);
 
 has_permission(actor: AuthenticatedActor, "modify", subnet: VpcSubnet) if
-    has_role(actor, "collaborator", subnet.vpc.project) and
-    not subnet.vpc.project.silo.restricts_networking();
+    can_modify_networking_resource(actor, subnet.vpc.project);
 
-has_permission(actor: AuthenticatedActor, "modify", subnet: VpcSubnet) if
-    has_role(actor, "admin", subnet.vpc.project.silo);
-
-# Override networking permissions for Internet Gateways
+# Internet Gateways (project path: gateway.vpc.project)
 has_permission(actor: AuthenticatedActor, "create_child", gateway: InternetGateway) if
-    has_role(actor, "collaborator", gateway.vpc.project) and
-    not gateway.vpc.project.silo.restricts_networking();
-
-has_permission(actor: AuthenticatedActor, "create_child", gateway: InternetGateway) if
-    has_role(actor, "admin", gateway.vpc.project.silo);
+    can_modify_networking_resource(actor, gateway.vpc.project);
 
 has_permission(actor: AuthenticatedActor, "modify", gateway: InternetGateway) if
-    has_role(actor, "collaborator", gateway.vpc.project) and
-    not gateway.vpc.project.silo.restricts_networking();
+    can_modify_networking_resource(actor, gateway.vpc.project);
 
-has_permission(actor: AuthenticatedActor, "modify", gateway: InternetGateway) if
-    has_role(actor, "admin", gateway.vpc.project.silo);
-
-# Override networking permissions for Router Routes
+# Router Routes (project path: route.vpc_router.vpc.project)
 has_permission(actor: AuthenticatedActor, "create_child", route: RouterRoute) if
-    has_role(actor, "collaborator", route.vpc_router.vpc.project) and
-    not route.vpc_router.vpc.project.silo.restricts_networking();
-
-has_permission(actor: AuthenticatedActor, "create_child", route: RouterRoute) if
-    has_role(actor, "admin", route.vpc_router.vpc.project.silo);
+    can_modify_networking_resource(actor, route.vpc_router.vpc.project);
 
 has_permission(actor: AuthenticatedActor, "modify", route: RouterRoute) if
-    has_role(actor, "collaborator", route.vpc_router.vpc.project) and
-    not route.vpc_router.vpc.project.silo.restricts_networking();
-
-has_permission(actor: AuthenticatedActor, "modify", route: RouterRoute) if
-    has_role(actor, "admin", route.vpc_router.vpc.project.silo);
+    can_modify_networking_resource(actor, route.vpc_router.vpc.project);
 
 #
 
