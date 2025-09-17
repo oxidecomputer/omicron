@@ -44,13 +44,13 @@ pub(crate) async fn deploy_db_metadata_nexus_records(
 
     let mut active = BTreeSet::new();
     let mut not_yet = BTreeSet::new();
-    for (_, zone, nexus_config) in
+    for (_sled_id, zone_config, nexus_config) in
         blueprint.all_nexus_zones(BlueprintZoneDisposition::is_in_service)
     {
         if nexus_config.nexus_generation == active_generation {
-            active.insert(zone.id);
+            active.insert(zone_config.id);
         } else if nexus_config.nexus_generation > active_generation {
-            not_yet.insert(zone.id);
+            not_yet.insert(zone_config.id);
         }
     }
 
@@ -65,6 +65,7 @@ pub(crate) async fn deploy_db_metadata_nexus_records(
 mod test {
     use super::*;
     use id_map::IdMap;
+    use nexus_db_model::DbMetadataNexus;
     use nexus_db_model::DbMetadataNexusState;
     use nexus_db_queries::db::pub_test_utils::TestDatabase;
     use nexus_inventory::now_db_precision;
@@ -84,6 +85,7 @@ mod test {
     use nexus_types::external_api::views::SledState;
     use nexus_types::inventory::NetworkInterface;
     use nexus_types::inventory::NetworkInterfaceKind;
+    use omicron_common::api::external::Error;
     use omicron_common::api::external::Generation;
     use omicron_common::api::external::MacAddr;
     use omicron_common::api::external::Vni;
@@ -181,6 +183,20 @@ mod test {
         }
     }
 
+    async fn database_nexus_access(
+        opctx: &OpContext,
+        datastore: &DataStore,
+        nexus_id: OmicronZoneUuid,
+    ) -> Result<Option<DbMetadataNexus>, Error> {
+        datastore
+            .database_nexus_access_all(
+                &opctx,
+                &std::iter::once(nexus_id).collect(),
+            )
+            .await
+            .map(|v| v.into_iter().next())
+    }
+
     #[tokio::test]
     async fn test_database_nexus_access_create() {
         let logctx = dev::test_setup_log("test_database_nexus_access_create");
@@ -257,18 +273,16 @@ mod test {
         .expect("Failed to create nexus access");
 
         // Verify records were created for in-service Nexuses.
-        let nexus1_access = datastore
-            .database_nexus_access(nexus1_id)
+        let nexus1_access = database_nexus_access(&opctx, datastore, nexus1_id)
             .await
             .expect("Failed to get nexus1 access");
-        let nexus2_access = datastore
-            .database_nexus_access(nexus2_id)
+        let nexus2_access = database_nexus_access(opctx, datastore, nexus2_id)
             .await
             .expect("Failed to get nexus2 access");
-        let expunged_access = datastore
-            .database_nexus_access(expunged_nexus)
-            .await
-            .expect("Failed to get expunged access");
+        let expunged_access =
+            database_nexus_access(opctx, datastore, expunged_nexus)
+                .await
+                .expect("Failed to get expunged access");
 
         assert!(nexus1_access.is_some(), "nexus1 should have access record");
         assert!(nexus2_access.is_some(), "nexus2 should have access record");
@@ -372,16 +386,13 @@ mod test {
         .expect("Failed to create nexus access");
 
         // Verify records were created for in-service Nexuses.
-        let nexus1_access = datastore
-            .database_nexus_access(nexus1_id)
+        let nexus1_access = database_nexus_access(opctx, datastore, nexus1_id)
             .await
             .expect("Failed to get nexus1 access");
-        let nexus2_access = datastore
-            .database_nexus_access(nexus2_id)
+        let nexus2_access = database_nexus_access(opctx, datastore, nexus2_id)
             .await
             .expect("Failed to get nexus2 access");
-        let nexus3_access = datastore
-            .database_nexus_access(nexus3_id)
+        let nexus3_access = database_nexus_access(opctx, datastore, nexus3_id)
             .await
             .expect("Failed to get nexus3 access");
 
@@ -463,20 +474,32 @@ mod test {
 
         // Verify record was created
         async fn confirm_state(
+            opctx: &OpContext,
             datastore: &DataStore,
             nexus_id: OmicronZoneUuid,
             expected_state: DbMetadataNexusState,
         ) {
-            let state = datastore
-                .database_nexus_access(nexus_id)
+            let state = database_nexus_access(opctx, datastore, nexus_id)
                 .await
                 .expect("Failed to get nexus access after first create")
                 .expect("Entry for Nexus should have been inserted");
             assert_eq!(state.state(), expected_state);
         }
 
-        confirm_state(datastore, nexus1_id, DbMetadataNexusState::Active).await;
-        confirm_state(datastore, nexus2_id, DbMetadataNexusState::Active).await;
+        confirm_state(
+            opctx,
+            datastore,
+            nexus1_id,
+            DbMetadataNexusState::Active,
+        )
+        .await;
+        confirm_state(
+            opctx,
+            datastore,
+            nexus2_id,
+            DbMetadataNexusState::Active,
+        )
+        .await;
 
         // Creating the record again: not an error.
         deploy_db_metadata_nexus_records(
@@ -484,14 +507,40 @@ mod test {
         )
         .await
         .expect("Failed to create nexus access");
-        confirm_state(datastore, nexus1_id, DbMetadataNexusState::Active).await;
-        confirm_state(datastore, nexus2_id, DbMetadataNexusState::Active).await;
+        confirm_state(
+            opctx,
+            datastore,
+            nexus1_id,
+            DbMetadataNexusState::Active,
+        )
+        .await;
+        confirm_state(
+            opctx,
+            datastore,
+            nexus2_id,
+            DbMetadataNexusState::Active,
+        )
+        .await;
 
         // Manually make the record "Quiesced".
-        datastore.database_nexus_access_quiesce(nexus1_id).await.unwrap();
-        confirm_state(datastore, nexus1_id, DbMetadataNexusState::Quiesced)
-            .await;
-        confirm_state(datastore, nexus2_id, DbMetadataNexusState::Active).await;
+        datastore
+            .database_nexus_access_update_quiesced(nexus1_id)
+            .await
+            .unwrap();
+        confirm_state(
+            opctx,
+            datastore,
+            nexus1_id,
+            DbMetadataNexusState::Quiesced,
+        )
+        .await;
+        confirm_state(
+            opctx,
+            datastore,
+            nexus2_id,
+            DbMetadataNexusState::Active,
+        )
+        .await;
 
         // Create nexus access records another time - should be idempotent,
         // but should be "on-conflict, ignore".
@@ -500,9 +549,20 @@ mod test {
         )
         .await
         .expect("Failed to create nexus access");
-        confirm_state(datastore, nexus1_id, DbMetadataNexusState::Quiesced)
-            .await;
-        confirm_state(datastore, nexus2_id, DbMetadataNexusState::Active).await;
+        confirm_state(
+            opctx,
+            datastore,
+            nexus1_id,
+            DbMetadataNexusState::Quiesced,
+        )
+        .await;
+        confirm_state(
+            opctx,
+            datastore,
+            nexus2_id,
+            DbMetadataNexusState::Active,
+        )
+        .await;
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -582,8 +642,7 @@ mod test {
         );
 
         // Verify no records were created for the second nexus
-        let access = datastore
-            .database_nexus_access(nexus2_id)
+        let access = database_nexus_access(opctx, datastore, nexus2_id)
             .await
             .expect("Failed to get nexus access");
         assert!(
@@ -601,10 +660,10 @@ mod test {
         .await
         .expect("Failed to create nexus access");
 
-        let access_after_correct = datastore
-            .database_nexus_access(nexus2_id)
-            .await
-            .expect("Failed to get nexus access after correct blueprint");
+        let access_after_correct =
+            database_nexus_access(opctx, datastore, nexus2_id)
+                .await
+                .expect("Failed to get nexus access after correct blueprint");
         assert!(
             access_after_correct.is_some(),
             "Access record should exist after using correct target blueprint"

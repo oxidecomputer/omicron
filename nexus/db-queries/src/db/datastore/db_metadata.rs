@@ -775,8 +775,8 @@ impl DataStore {
         Ok(count)
     }
 
-    /// Returns the access this Nexus has to the database
-    pub async fn database_nexus_access(
+    // Returns the access this Nexus has to the database
+    async fn database_nexus_access(
         &self,
         nexus_id: OmicronZoneUuid,
     ) -> Result<Option<DbMetadataNexus>, Error> {
