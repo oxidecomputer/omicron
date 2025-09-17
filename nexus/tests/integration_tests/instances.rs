@@ -1182,9 +1182,7 @@ async fn test_instance_migration_compatible_cpu_platforms(
         format!("/instances/{}/migrate", &instance_id.to_string());
     let instance = NexusRequest::new(
         RequestBuilder::new(internal_client, Method::POST, &migrate_url)
-            .body(Some(&InstanceMigrateRequest {
-                dst_sled_id: dst_sled_id.into_untyped_uuid(),
-            }))
+            .body(Some(&InstanceMigrateRequest { dst_sled_id }))
             .expect_status(Some(StatusCode::OK)),
     )
     .authn_as(AuthnMode::PrivilegedUser)
@@ -1371,9 +1369,7 @@ async fn test_instance_migration_incompatible_cpu_platforms(
         format!("/instances/{}/migrate", &instance_id.to_string());
     NexusRequest::new(
         RequestBuilder::new(internal_client, Method::POST, &migrate_url)
-            .body(Some(&InstanceMigrateRequest {
-                dst_sled_id: milan_sled_id.into_untyped_uuid(),
-            }))
+            .body(Some(&InstanceMigrateRequest { dst_sled_id: milan_sled_id }))
             .expect_status(Some(http::StatusCode::INSUFFICIENT_STORAGE)),
     )
     .authn_as(AuthnMode::PrivilegedUser)
@@ -1452,9 +1448,7 @@ async fn test_instance_migration_unknown_sled_type(
         format!("/instances/{}/migrate", &instance_id.to_string());
     NexusRequest::new(
         RequestBuilder::new(internal_client, Method::POST, &migrate_url)
-            .body(Some(&InstanceMigrateRequest {
-                dst_sled_id: dst_sled_id.into_untyped_uuid(),
-            }))
+            .body(Some(&InstanceMigrateRequest { dst_sled_id }))
             .expect_status(Some(http::StatusCode::INSUFFICIENT_STORAGE)),
     )
     .authn_as(AuthnMode::PrivilegedUser)

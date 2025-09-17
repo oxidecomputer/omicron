@@ -13,8 +13,8 @@
 //! sled agent or that sled agent will never update (like the sled ID).
 
 use super::{Generation, VmmState};
-use crate::{SqlU16, VmmCpuPlatform};
 use crate::typed_uuid::DbTypedUuid;
+use crate::{SqlU16, VmmCpuPlatform};
 use chrono::{DateTime, Utc};
 use nexus_db_schema::schema::vmm;
 use omicron_uuid_kinds::*;

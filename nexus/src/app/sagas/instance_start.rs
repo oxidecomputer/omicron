@@ -239,10 +239,7 @@ async fn sis_create_vmm_record(
         } else {
             let (.., sled) = osagactx
                 .nexus()
-                .sled_lookup(
-                    &osagactx.nexus().opctx_alloc,
-                    &sled_id.into_untyped_uuid(),
-                )
+                .sled_lookup(&osagactx.nexus().opctx_alloc, &sled_id)
                 .map_err(ActionError::action_failed)?
                 .fetch()
                 .await
