@@ -529,7 +529,7 @@ impl DataStore {
                         // able to log the debug version of the report isn't
                         // great, but blocking real blueprint insertion on debug
                         // logging issues seems worse.
-                        warn!(
+                        error!(
                             self.log,
                             "could not serialize blueprint planning report";
                             InlineErrorChain::new(&err),
