@@ -636,6 +636,25 @@ impl TestState {
                 // Deliver all envelopes as a result of calling `Commit`
                 self.deliver_all_envelopes(event_log)?;
 
+                // Ensure all nodes are committed
+                for id in &latest_config.members {
+                    let (node, ctx) = self
+                        .tq_state
+                        .sut
+                        .nodes
+                        .get_mut(id)
+                        .expect("node exists");
+
+                    assert!(
+                        ctx.persistent_state()
+                            .commits
+                            .contains(&latest_config.epoch)
+                    );
+
+                    // None of the nodes should be coordinating
+                    assert!(node.get_coordinator_state().is_none());
+                }
+
                 // Trigger loading of rack secrets
                 for id in &latest_config.members {
                     let event =
@@ -764,6 +783,9 @@ impl TestState {
                 latest_config.epoch
             );
         };
+        assert!(
+            !node.is_collecting_shares_for_rack_secret(latest_config.epoch)
+        );
 
         for id in &latest_config.members {
             let (node, ctx) =
@@ -777,6 +799,9 @@ impl TestState {
                 );
             };
             assert_eq!(rs.expose_secret(), rs2.expose_secret());
+            assert!(
+                !node.is_collecting_shares_for_rack_secret(latest_config.epoch)
+            );
         }
     }
 
