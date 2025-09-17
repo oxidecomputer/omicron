@@ -20,13 +20,13 @@ pq-sys = "*"
 reconfigurator-cli.workspace = true
 
 [dev-dependencies]
-camino-tempfile.workspace = true
 camino.workspace = true
-nexus-client.workspace = true
+camino-tempfile.workspace = true
 nexus-db-queries.workspace = true
+nexus-lockstep-client.workspace = true
 nexus-reconfigurator-preparation.workspace = true
-nexus-test-utils-macros.workspace = true
 nexus-test-utils.workspace = true
+nexus-test-utils-macros.workspace = true
 nexus-types.workspace = true
 omicron-common.workspace = true
 omicron-nexus.workspace = true

@@ -1680,8 +1680,8 @@ async fn test_snapshot_expunge(cptestctx: &ControlPlaneTestContext) {
     .await;
 
     // Expunge the sled
-    let int_client = &cptestctx.internal_client;
-    int_client
+    cptestctx
+        .lockstep_client
         .make_request(
             Method::POST,
             "/sleds/expunge",

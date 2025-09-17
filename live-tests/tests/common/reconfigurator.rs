@@ -5,9 +5,11 @@
 //! Helpers common to Reconfigurator tests
 
 use anyhow::{Context, anyhow, bail, ensure};
-use nexus_client::types::{BackgroundTasksActivateRequest, BlueprintTargetSet};
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
+use nexus_lockstep_client::types::{
+    BackgroundTasksActivateRequest, BlueprintTargetSet,
+};
 use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
 use nexus_reconfigurator_planning::planner::PlannerRng;
 use nexus_types::deployment::{Blueprint, BlueprintSource, PlanningInput};
@@ -25,7 +27,7 @@ use std::time::Duration;
 /// don't want to proceed with tests.
 pub async fn blueprint_load_target_enabled(
     log: &slog::Logger,
-    nexus: &nexus_client::Client,
+    nexus: &nexus_lockstep_client::Client,
 ) -> Result<Blueprint, anyhow::Error> {
     // Fetch the current target configuration.
     info!(log, "editing current target blueprint");
@@ -80,7 +82,7 @@ pub async fn blueprint_edit_current_target(
     log: &slog::Logger,
     planning_input: &PlanningInput,
     collection: &Collection,
-    nexus: &nexus_client::Client,
+    nexus: &nexus_lockstep_client::Client,
     edit_fn: &dyn Fn(&mut BlueprintBuilder) -> Result<(), anyhow::Error>,
 ) -> Result<(Blueprint, Blueprint), anyhow::Error> {
     // Fetch the current target configuration.
@@ -183,7 +185,7 @@ pub async fn blueprint_wait_sled_configs_propagated(
     opctx: &OpContext,
     datastore: &DataStore,
     blueprint: &Blueprint,
-    nexus: &nexus_client::Client,
+    nexus: &nexus_lockstep_client::Client,
     timeout: Duration,
 ) -> Result<Collection, anyhow::Error> {
     wait_for_condition(
