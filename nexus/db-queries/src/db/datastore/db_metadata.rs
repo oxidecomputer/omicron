@@ -23,12 +23,13 @@ use nexus_db_model::DbMetadataNexusState;
 use nexus_db_model::EARLIEST_SUPPORTED_VERSION;
 use nexus_db_model::SchemaUpgradeStep;
 use nexus_db_model::SchemaVersion;
-use nexus_types::deployment::BlueprintZoneDisposition;
 use omicron_common::api::external::Error;
+use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use semver::Version;
 use slog::{Logger, error, info, o};
+use std::collections::BTreeSet;
 use std::ops::Bound;
 use std::str::FromStr;
 
@@ -300,6 +301,23 @@ impl DatastoreSetupAction {
 }
 
 impl DataStore {
+    /// Returns [`DbMetadataNexus`] records in any of the supplied states.
+    pub async fn get_db_metadata_nexus_in_state(
+        &self,
+        opctx: &OpContext,
+        states: &[DbMetadataNexusState],
+    ) -> Result<Vec<DbMetadataNexus>, Error> {
+        use nexus_db_schema::schema::db_metadata_nexus::dsl;
+
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+
+        dsl::db_metadata_nexus
+            .filter(dsl::state.eq_any(states.to_vec()))
+            .load_async(&*self.pool_connection_authorized(&opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
     // Checks if the specified Nexus has access to the database.
     async fn check_nexus_access(
         &self,
@@ -686,6 +704,77 @@ impl DataStore {
         Ok(())
     }
 
+    /// Returns information about access for all of the given Nexus ids
+    ///
+    /// This set is assumed to be pretty small.
+    pub async fn database_nexus_access_all(
+        &self,
+        opctx: &OpContext,
+        nexus_ids: &BTreeSet<OmicronZoneUuid>,
+    ) -> Result<Vec<DbMetadataNexus>, Error> {
+        use nexus_db_schema::schema::db_metadata_nexus::dsl;
+
+        let db_nexus_ids: BTreeSet<_> = nexus_ids
+            .iter()
+            .copied()
+            .map(nexus_db_model::to_db_typed_uuid)
+            .collect();
+        dsl::db_metadata_nexus
+            .filter(dsl::nexus_id.eq_any(db_nexus_ids))
+            .load_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// Updates the "last_drained_blueprint_id" for the given Nexus id
+    pub async fn database_nexus_access_update_blueprint(
+        &self,
+        opctx: &OpContext,
+        nexus_id: OmicronZoneUuid,
+        blueprint_id: Option<BlueprintUuid>,
+    ) -> Result<usize, Error> {
+        use nexus_db_schema::schema::db_metadata_nexus::dsl;
+
+        let nexus_id = nexus_db_model::to_db_typed_uuid(nexus_id);
+        let blueprint_id = blueprint_id.map(nexus_db_model::to_db_typed_uuid);
+
+        let conn = self.pool_connection_authorized(opctx).await?;
+        let count = diesel::update(dsl::db_metadata_nexus)
+            .filter(dsl::nexus_id.eq(nexus_id))
+            // To be conservative, we'll only update this value if the record is
+            // currently active.  There's no reason it should ever not be active
+            // if we're calling this function and if there were an easy way to
+            // return an error in that case, we'd just do that.
+            .filter(dsl::state.eq(DbMetadataNexusState::Active))
+            .set(dsl::last_drained_blueprint_id.eq(blueprint_id))
+            .execute_async(&*conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+        Ok(count)
+    }
+
+    /// Updates the state for the given Nexus id to "quiesced"
+    pub async fn database_nexus_access_update_quiesced(
+        &self,
+        nexus_id: OmicronZoneUuid,
+    ) -> Result<usize, Error> {
+        // A traditional authz check is not possible here because we've quiesced
+        // the DataStore, so no further connections are ordinarily available.
+        // (We use the lower-level pool interface to bypass that.)
+        let conn = self.pool.claim_quiesced().await?;
+
+        use nexus_db_schema::schema::db_metadata_nexus::dsl;
+
+        let nexus_id = nexus_db_model::to_db_typed_uuid(nexus_id);
+        let count = diesel::update(dsl::db_metadata_nexus)
+            .filter(dsl::nexus_id.eq(nexus_id))
+            .set(dsl::state.eq(DbMetadataNexusState::Quiesced))
+            .execute_async(&*conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+        Ok(count)
+    }
+
     // Returns the access this Nexus has to the database
     async fn database_nexus_access(
         &self,
@@ -757,24 +846,19 @@ impl DataStore {
     pub async fn database_nexus_access_create(
         &self,
         opctx: &OpContext,
-        blueprint: &nexus_types::deployment::Blueprint,
+        blueprint_id: BlueprintUuid,
+        active: &BTreeSet<OmicronZoneUuid>,
+        not_yet: &BTreeSet<OmicronZoneUuid>,
     ) -> Result<(), Error> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
 
-        // TODO: Without https://github.com/oxidecomputer/omicron/pull/8863, we
-        // treat all Nexuses as active. Some will become "not_yet", depending on
-        // the Nexus Generation, once it exists.
-        let active_nexus_zones = blueprint
-            .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
-            .filter_map(|(_sled, zone_cfg)| {
-                if zone_cfg.zone_type.is_nexus() {
-                    Some(zone_cfg)
-                } else {
-                    None
-                }
-            });
-        let new_nexuses = active_nexus_zones
-            .map(|z| DbMetadataNexus::new(z.id, DbMetadataNexusState::Active))
+        let active_nexuses = active
+            .into_iter()
+            .map(|id| DbMetadataNexus::new(*id, DbMetadataNexusState::Active))
+            .collect::<Vec<_>>();
+        let not_yet_nexuses = not_yet
+            .into_iter()
+            .map(|id| DbMetadataNexus::new(*id, DbMetadataNexusState::NotYet))
             .collect::<Vec<_>>();
 
         let conn = &*self.pool_connection_authorized(&opctx).await?;
@@ -782,14 +866,15 @@ impl DataStore {
             &conn,
             "database_nexus_access_create",
             opctx,
-            blueprint.id,
+            blueprint_id,
             |conn| {
-                let new_nexuses = new_nexuses.clone();
+                let nexus_records =
+                    [&active_nexuses[..], &not_yet_nexuses[..]].concat();
                 async move {
                     use nexus_db_schema::schema::db_metadata_nexus::dsl;
 
                     diesel::insert_into(dsl::db_metadata_nexus)
-                        .values(new_nexuses)
+                        .values(nexus_records)
                         .on_conflict(dsl::nexus_id)
                         .do_nothing()
                         .execute_async(conn)
@@ -1136,35 +1221,8 @@ mod test {
     use crate::db::pub_test_utils::TestDatabase;
     use camino::Utf8Path;
     use camino_tempfile::Utf8TempDir;
-    use id_map::IdMap;
     use nexus_db_model::SCHEMA_VERSION;
-    use nexus_inventory::now_db_precision;
-    use nexus_types::deployment::Blueprint;
-    use nexus_types::deployment::BlueprintHostPhase2DesiredSlots;
-    use nexus_types::deployment::BlueprintSledConfig;
-    use nexus_types::deployment::BlueprintTarget;
-    use nexus_types::deployment::BlueprintZoneConfig;
-    use nexus_types::deployment::BlueprintZoneDisposition;
-    use nexus_types::deployment::BlueprintZoneImageSource;
-    use nexus_types::deployment::BlueprintZoneType;
-    use nexus_types::deployment::CockroachDbPreserveDowngrade;
-    use nexus_types::deployment::OximeterReadMode;
-    use nexus_types::deployment::PendingMgsUpdates;
-    use nexus_types::deployment::PlanningReport;
-    use nexus_types::deployment::blueprint_zone_type;
-    use nexus_types::external_api::views::SledState;
-    use nexus_types::inventory::NetworkInterface;
-    use nexus_types::inventory::NetworkInterfaceKind;
-    use omicron_common::api::external::Generation;
-    use omicron_common::api::external::MacAddr;
-    use omicron_common::api::external::Vni;
-    use omicron_common::zpool_name::ZpoolName;
     use omicron_test_utils::dev;
-    use omicron_uuid_kinds::BlueprintUuid;
-    use omicron_uuid_kinds::ExternalIpUuid;
-    use omicron_uuid_kinds::SledUuid;
-    use omicron_uuid_kinds::ZpoolUuid;
-    use std::collections::BTreeMap;
 
     // Confirms that calling the internal "ensure_schema" function can succeed
     // when the database is already at that version.
@@ -2031,335 +2089,6 @@ mod test {
 
         assert_eq!(action.action(), &DatastoreSetupAction::Update);
         assert_eq!(action.desired_version(), &newer_version);
-
-        db.terminate().await;
-        logctx.cleanup_successful();
-    }
-
-    fn create_test_blueprint(
-        nexus_zones: Vec<(OmicronZoneUuid, BlueprintZoneDisposition)>,
-    ) -> Blueprint {
-        let blueprint_id = BlueprintUuid::new_v4();
-        let sled_id = SledUuid::new_v4();
-
-        let zones: IdMap<BlueprintZoneConfig> = nexus_zones
-            .into_iter()
-            .map(|(zone_id, disposition)| BlueprintZoneConfig {
-                disposition,
-                id: zone_id,
-                filesystem_pool: ZpoolName::new_external(ZpoolUuid::new_v4()),
-                zone_type: BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
-                    internal_address: "[::1]:0".parse().unwrap(),
-                    lockstep_port: 0,
-                    external_dns_servers: Vec::new(),
-                    external_ip: nexus_types::deployment::OmicronZoneExternalFloatingIp {
-                        id: ExternalIpUuid::new_v4(),
-                        ip: std::net::IpAddr::V6(std::net::Ipv6Addr::LOCALHOST),
-                    },
-                    external_tls: true,
-                    nic: NetworkInterface {
-                        id: uuid::Uuid::new_v4(),
-                        kind: NetworkInterfaceKind::Service {
-                            id: zone_id.into_untyped_uuid(),
-                        },
-                        name: "test-nic".parse().unwrap(),
-                        ip: "192.168.1.1".parse().unwrap(),
-                        mac: MacAddr::random_system(),
-                        subnet: ipnetwork::IpNetwork::V4(
-                            "192.168.1.0/24".parse().unwrap()
-                        ).into(),
-                        vni: Vni::try_from(100).unwrap(),
-                        primary: true,
-                        slot: 0,
-                        transit_ips: Vec::new(),
-                    },
-                    nexus_generation: Generation::new(),
-                }),
-                image_source: BlueprintZoneImageSource::InstallDataset,
-            })
-            .collect();
-
-        let mut sleds = BTreeMap::new();
-        sleds.insert(
-            sled_id,
-            BlueprintSledConfig {
-                state: SledState::Active,
-                sled_agent_generation: Generation::new(),
-                zones,
-                disks: IdMap::new(),
-                datasets: IdMap::new(),
-                remove_mupdate_override: None,
-                host_phase_2: BlueprintHostPhase2DesiredSlots::current_contents(
-                ),
-            },
-        );
-
-        Blueprint {
-            id: blueprint_id,
-            sleds,
-            pending_mgs_updates: PendingMgsUpdates::new(),
-            parent_blueprint_id: None,
-            internal_dns_version: Generation::new(),
-            external_dns_version: Generation::new(),
-            target_release_minimum_generation: Generation::new(),
-            nexus_generation: Generation::new(),
-            cockroachdb_fingerprint: String::new(),
-            cockroachdb_setting_preserve_downgrade:
-                CockroachDbPreserveDowngrade::DoNotModify,
-            clickhouse_cluster_config: None,
-            oximeter_read_mode: OximeterReadMode::SingleNode,
-            oximeter_read_version: Generation::new(),
-            time_created: now_db_precision(),
-            creator: "test suite".to_string(),
-            comment: "test blueprint".to_string(),
-            report: PlanningReport::new(blueprint_id),
-        }
-    }
-
-    #[tokio::test]
-    async fn test_database_nexus_access_create() {
-        let logctx = dev::test_setup_log("test_database_nexus_access_create");
-        let db = TestDatabase::new_with_datastore(&logctx.log).await;
-        let datastore = db.datastore();
-        let opctx = db.opctx();
-
-        // Create a blueprint with two in-service Nexus zones,
-        // and one expunged Nexus.
-        let nexus1_id = OmicronZoneUuid::new_v4();
-        let nexus2_id = OmicronZoneUuid::new_v4();
-        let expunged_nexus = OmicronZoneUuid::new_v4();
-        let blueprint = create_test_blueprint(vec![
-            (nexus1_id, BlueprintZoneDisposition::InService),
-            (nexus2_id, BlueprintZoneDisposition::InService),
-            (
-                expunged_nexus,
-                BlueprintZoneDisposition::Expunged {
-                    as_of_generation: Generation::new(),
-                    ready_for_cleanup: true,
-                },
-            ),
-        ]);
-
-        // Insert the blueprint and make it the target
-        datastore
-            .blueprint_insert(&opctx, &blueprint)
-            .await
-            .expect("Failed to insert blueprint");
-        datastore
-            .blueprint_target_set_current(
-                &opctx,
-                BlueprintTarget {
-                    target_id: blueprint.id,
-                    enabled: false,
-                    time_made_target: chrono::Utc::now(),
-                },
-            )
-            .await
-            .expect("Failed to set blueprint target");
-
-        // Create nexus access records
-        datastore
-            .database_nexus_access_create(&opctx, &blueprint)
-            .await
-            .expect("Failed to create nexus access");
-
-        // Verify records were created with Active state
-        let nexus1_access = datastore
-            .database_nexus_access(nexus1_id)
-            .await
-            .expect("Failed to get nexus1 access");
-        let nexus2_access = datastore
-            .database_nexus_access(nexus2_id)
-            .await
-            .expect("Failed to get nexus2 access");
-        let expunged_access = datastore
-            .database_nexus_access(expunged_nexus)
-            .await
-            .expect("Failed to get expunged access");
-
-        assert!(nexus1_access.is_some(), "nexus1 should have access record");
-        assert!(nexus2_access.is_some(), "nexus2 should have access record");
-        assert!(
-            expunged_access.is_none(),
-            "expunged nexus should not have access record"
-        );
-
-        let nexus1_record = nexus1_access.unwrap();
-        let nexus2_record = nexus2_access.unwrap();
-        assert_eq!(nexus1_record.state(), DbMetadataNexusState::Active);
-        assert_eq!(nexus2_record.state(), DbMetadataNexusState::Active);
-
-        db.terminate().await;
-        logctx.cleanup_successful();
-    }
-
-    #[tokio::test]
-    async fn test_database_nexus_access_create_idempotent() {
-        let logctx =
-            dev::test_setup_log("test_database_nexus_access_create_idempotent");
-        let db = TestDatabase::new_with_datastore(&logctx.log).await;
-        let datastore = db.datastore();
-        let opctx = db.opctx();
-
-        // Create a blueprint with one Nexus zone
-        let nexus_id = OmicronZoneUuid::new_v4();
-        let blueprint = create_test_blueprint(vec![(
-            nexus_id,
-            BlueprintZoneDisposition::InService,
-        )]);
-
-        // Insert the blueprint and make it the target
-        datastore
-            .blueprint_insert(&opctx, &blueprint)
-            .await
-            .expect("Failed to insert blueprint");
-        datastore
-            .blueprint_target_set_current(
-                &opctx,
-                BlueprintTarget {
-                    target_id: blueprint.id,
-                    enabled: false,
-                    time_made_target: chrono::Utc::now(),
-                },
-            )
-            .await
-            .expect("Failed to set blueprint target");
-
-        // Create nexus access records (first time)
-        datastore
-            .database_nexus_access_create(&opctx, &blueprint)
-            .await
-            .expect("Failed to create nexus access (first time)");
-
-        // Verify record was created
-        async fn confirm_state(
-            datastore: &DataStore,
-            nexus_id: OmicronZoneUuid,
-            expected_state: DbMetadataNexusState,
-        ) {
-            let state = datastore
-                .database_nexus_access(nexus_id)
-                .await
-                .expect("Failed to get nexus access after first create")
-                .expect("Entry for Nexus should have been inserted");
-            assert_eq!(state.state(), expected_state);
-        }
-
-        confirm_state(datastore, nexus_id, DbMetadataNexusState::Active).await;
-
-        // Creating the record again: not an error.
-        datastore
-            .database_nexus_access_create(&opctx, &blueprint)
-            .await
-            .expect("Failed to create nexus access (first time)");
-        confirm_state(datastore, nexus_id, DbMetadataNexusState::Active).await;
-
-        // Manually make the record "Quiesced".
-        use nexus_db_schema::schema::db_metadata_nexus::dsl;
-        diesel::update(dsl::db_metadata_nexus)
-            .filter(dsl::nexus_id.eq(nexus_id.into_untyped_uuid()))
-            .set(dsl::state.eq(DbMetadataNexusState::Quiesced))
-            .execute_async(
-                &*datastore.pool_connection_unauthorized().await.unwrap(),
-            )
-            .await
-            .expect("Failed to update record");
-        confirm_state(datastore, nexus_id, DbMetadataNexusState::Quiesced)
-            .await;
-
-        // Create nexus access records another time - should be idempotent,
-        // but should be "on-conflict, ignore".
-        datastore
-            .database_nexus_access_create(&opctx, &blueprint)
-            .await
-            .expect("Failed to create nexus access (second time)");
-        confirm_state(datastore, nexus_id, DbMetadataNexusState::Quiesced)
-            .await;
-
-        db.terminate().await;
-        logctx.cleanup_successful();
-    }
-
-    #[tokio::test]
-    async fn test_database_nexus_access_create_fails_wrong_target_blueprint() {
-        let logctx = dev::test_setup_log(
-            "test_database_nexus_access_create_fails_wrong_target_blueprint",
-        );
-        let db = TestDatabase::new_with_datastore(&logctx.log).await;
-        let datastore = db.datastore();
-        let opctx = db.opctx();
-
-        // Create two different blueprints
-        let nexus_id = OmicronZoneUuid::new_v4();
-        let target_blueprint = create_test_blueprint(vec![(
-            nexus_id,
-            BlueprintZoneDisposition::InService,
-        )]);
-        let non_target_blueprint = create_test_blueprint(vec![(
-            nexus_id,
-            BlueprintZoneDisposition::InService,
-        )]);
-
-        // Insert both blueprints
-        datastore
-            .blueprint_insert(&opctx, &target_blueprint)
-            .await
-            .expect("Failed to insert target blueprint");
-        datastore
-            .blueprint_insert(&opctx, &non_target_blueprint)
-            .await
-            .expect("Failed to insert non-target blueprint");
-
-        // Set the first blueprint as the target
-        datastore
-            .blueprint_target_set_current(
-                &opctx,
-                BlueprintTarget {
-                    target_id: target_blueprint.id,
-                    enabled: false,
-                    time_made_target: chrono::Utc::now(),
-                },
-            )
-            .await
-            .expect("Failed to set target blueprint");
-
-        // Try to create nexus access records using the non-target blueprint.
-        // This should fail because the transaction should check if the
-        // blueprint is the current target
-        let result = datastore
-            .database_nexus_access_create(&opctx, &non_target_blueprint)
-            .await;
-        assert!(
-            result.is_err(),
-            "Creating nexus access with wrong target blueprint should fail"
-        );
-
-        // Verify no records were created for the nexus
-        let access = datastore
-            .database_nexus_access(nexus_id)
-            .await
-            .expect("Failed to get nexus access");
-        assert!(
-            access.is_none(),
-            "No access record should exist when wrong blueprint is used"
-        );
-
-        // Verify that using the correct target blueprint works
-        datastore
-            .database_nexus_access_create(&opctx, &target_blueprint)
-            .await
-            .expect(
-                "Creating nexus access with correct blueprint should succeed",
-            );
-
-        let access_after_correct = datastore
-            .database_nexus_access(nexus_id)
-            .await
-            .expect("Failed to get nexus access after correct blueprint");
-        assert!(
-            access_after_correct.is_some(),
-            "Access record should exist after using correct target blueprint"
-        );
 
         db.terminate().await;
         logctx.cleanup_successful();

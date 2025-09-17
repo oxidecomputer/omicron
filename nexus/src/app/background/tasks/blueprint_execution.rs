@@ -428,11 +428,16 @@ mod test {
         let mut task = BlueprintExecutor::new(
             datastore.clone(),
             resolver.clone(),
-            blueprint_rx,
+            blueprint_rx.clone(),
             OmicronZoneUuid::new_v4(),
             Activator::new(),
             dummy_tx,
-            NexusQuiesceHandle::new(&opctx.log, datastore.clone()),
+            NexusQuiesceHandle::new(
+                datastore.clone(),
+                OmicronZoneUuid::new_v4(),
+                blueprint_rx,
+                opctx.child(BTreeMap::new()),
+            ),
         );
 
         // Now we're ready.

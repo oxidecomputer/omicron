@@ -340,7 +340,20 @@ impl Nexus {
             sec_store,
         ));
 
-        let quiesce = NexusQuiesceHandle::new(&log, db_datastore.clone());
+        let (blueprint_load_tx, blueprint_load_rx) = watch::channel(None);
+        let quiesce_log = log.new(o!("component" => "NexusQuiesceHandle"));
+        let quiesce_opctx = OpContext::for_background(
+            quiesce_log,
+            Arc::clone(&authz),
+            authn::Context::internal_api(),
+            Arc::clone(&db_datastore) as Arc<dyn nexus_auth::storage::Storage>,
+        );
+        let quiesce = NexusQuiesceHandle::new(
+            db_datastore.clone(),
+            config.deployment.id,
+            blueprint_load_rx,
+            quiesce_opctx,
+        );
 
         // It's a bit of a red flag to use an unbounded channel.
         //
@@ -605,6 +618,7 @@ impl Nexus {
                     },
                     tuf_artifact_replication_rx,
                     mgs_updates_tx,
+                    blueprint_load_tx,
                 },
             );
 
