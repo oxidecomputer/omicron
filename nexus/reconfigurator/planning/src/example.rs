@@ -407,17 +407,7 @@ impl ExampleSystemBuilder {
                         .policy(settings.policy),
                 )
                 .unwrap();
-            // TODO-K: Remove debugging logs
-            //    let debug_sled = bob.sleds.get(sled_id).unwrap();
-            //    println!("SLED {} STAGE 0 CABOOSE: {:#?}", sled_id, debug_sled.stage0_caboose);
-            //    println!("SLED {} STAGE 0 NEXT CABOOSE: {:#?}", sled_id, debug_sled.stage0_caboose);
-            //    println!("SLED {} ROT A CABOOSE: {:#?}", sled_id, debug_sled.rot_slot_a_caboose);
-            //    println!("SLED {} ROT B CABOOSE: {:#?}", sled_id, debug_sled.rot_slot_b_caboose);
-            //    println!("SLED {} SP ACTIVE CABOOSE: {:#?}", sled_id, debug_sled.sp_active_caboose);
-            //    println!("SLED {} SP INACTIVE CABOOSE: {:#?}", sled_id, debug_sled.sp_active_caboose);
-            //    println!("SLED {} HOST PHASE 1 HASH FLASH: {:#?}", sled_id, debug_sled.sp_host_phase_1_hash_flash);
         }
-        // println!("SYSTEM: {:#?}", system.sleds.values());
 
         let mut input_builder = system
             .to_planning_input_builder()

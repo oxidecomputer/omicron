@@ -5621,33 +5621,7 @@ pub(crate) mod test {
         };
     }
 
-    // TODO-K: Make this nicer
-    fn sp_component_artifact(
-        name: &str,
-        kind: ArtifactKind,
-        board: Option<&str>,
-        sign: Option<Vec<u8>>,
-        version: &ArtifactVersion,
-        hash: Option<ArtifactHash>,
-    ) -> TufArtifactMeta {
-        let hash = match hash {
-            Some(h) => h,
-            None => ArtifactHash([0; 32]),
-        };
-        TufArtifactMeta {
-            id: ArtifactId {
-                name: name.to_string(),
-                version: version.clone(),
-                kind,
-            },
-            hash,
-            size: 0, // unused here
-            board: board.map(|s| s.to_string()),
-            sign,
-        }
-    }
-
-    fn create_artifacts_at_version(
+    fn create_zone_artifacts_at_version(
         version: &ArtifactVersion,
     ) -> Vec<TufArtifactMeta> {
         vec![
@@ -5664,48 +5638,64 @@ pub(crate) mod test {
             fake_zone_artifact!(InternalNtp, version.clone()),
             fake_zone_artifact!(Nexus, version.clone()),
             fake_zone_artifact!(Oximeter, version.clone()),
-            // TODO-K: This makes the updates think the MGS driven updates
-            // are done, but there should be a better way to represent this
-            sp_component_artifact(
-                "host-os-phase-1",
-                ArtifactKind::HOST_PHASE_1,
-                None,
-                None,
-                version,
-                Some(ArtifactHash([1; 32])),
-            ),
-            sp_component_artifact(
-                "host-os-phase-2",
-                ArtifactKind::HOST_PHASE_2,
-                None,
-                None,
-                version,
-                Some(ArtifactHash([0x0a; 32])),
-            ),
-            sp_component_artifact(
-                "SimGimletSp",
-                KnownArtifactKind::GimletSp.into(),
-                Some("SimGimletSp"),
-                None,
-                &ArtifactVersion::new("0.0.1").unwrap(),
-                None,
-            ),
-            sp_component_artifact(
-                "SimRot",
-                ArtifactKind::GIMLET_ROT_IMAGE_B,
-                Some("SimRot"),
-                Some("sign-gimlet".into()),
-                &ArtifactVersion::new("0.0.2").unwrap(),
-                None,
-            ),
-            sp_component_artifact(
-                "SimRot",
-                ArtifactKind::GIMLET_ROT_STAGE0,
-                Some("SimRot"),
-                Some("sign-gimlet".into()),
-                &ArtifactVersion::new("0.0.1").unwrap(),
-                None,
-            ),
+            // We create artifacts with the versions (or hash) set to those of
+            // the example system to simulate an environment that does not need
+            // SP component updates.
+            TufArtifactMeta {
+                id: ArtifactId {
+                    name: "host-os-phase-1".to_string(),
+                    version: version.clone(),
+                    kind: ArtifactKind::HOST_PHASE_1,
+                },
+                hash: ArtifactHash([1; 32]),
+                size: 0,
+                board: None,
+                sign: None,
+            },
+            TufArtifactMeta {
+                id: ArtifactId {
+                    name: "host-os-phase-2".to_string(),
+                    version: version.clone(),
+                    kind: ArtifactKind::HOST_PHASE_2,
+                },
+                hash: ArtifactHash([0x0a; 32]),
+                size: 0,
+                board: None,
+                sign: None,
+            },
+            TufArtifactMeta {
+                id: ArtifactId {
+                    name: sp_sim::SIM_GIMLET_BOARD.to_string(),
+                    version: ArtifactVersion::new("0.0.1").unwrap(),
+                    kind: KnownArtifactKind::GimletSp.into(),
+                },
+                hash: ArtifactHash([0; 32]),
+                size: 0,
+                board: Some(sp_sim::SIM_GIMLET_BOARD.to_string()),
+                sign: None,
+            },
+            TufArtifactMeta {
+                id: ArtifactId {
+                    name: sp_sim::SIM_ROT_BOARD.to_string(),
+                    version: ArtifactVersion::new("0.0.2").unwrap(),
+                    kind: ArtifactKind::GIMLET_ROT_IMAGE_B,
+                },
+                hash: ArtifactHash([0; 32]),
+                size: 0,
+                board: Some(sp_sim::SIM_ROT_BOARD.to_string()),
+                sign: Some("sign-gimlet".into()),
+            },
+            TufArtifactMeta {
+                id: ArtifactId {
+                    name: sp_sim::SIM_ROT_BOARD.to_string(),
+                    version: ArtifactVersion::new("0.0.1").unwrap(),
+                    kind: ArtifactKind::GIMLET_ROT_STAGE0,
+                },
+                hash: ArtifactHash([0; 32]),
+                size: 0,
+                board: Some(sp_sim::SIM_ROT_BOARD.to_string()),
+                sign: Some("sign-gimlet".into()),
+            },
         ]
     }
 
@@ -5725,7 +5715,6 @@ pub(crate) mod test {
         )
         .build();
         verify_blueprint(&blueprint1);
-        //println!("{:#?}", example.collection.cabooses_found);
 
         // We should start with no specified TUF repo and nothing to do.
         assert!(example.input.tuf_repo().description().tuf_repo().is_none());
@@ -5763,7 +5752,7 @@ pub(crate) mod test {
             },
             hash: fake_hash,
         };
-        let artifacts = create_artifacts_at_version(&version);
+        let artifacts = create_zone_artifacts_at_version(&version);
         let target_release_generation = target_release_generation.next();
         input_builder.policy_mut().tuf_repo = TufRepoPolicy {
             target_release_generation,
@@ -5821,7 +5810,10 @@ pub(crate) mod test {
             };
         }
 
-        // Request another Nexus zone.
+        // Request 3 Nexus zones. The blueprint will show changes in each sled
+        // for BlueprintHostPhase2DesiredSlotsDiff even if we are not performing
+        // an update for the Host OS. We need each sled to look identical in the
+        // blueprint, so we add a nexus zone to each sled.
         input_builder.policy_mut().target_nexus_zone_count =
             input_builder.policy_mut().target_nexus_zone_count + 3;
         let input = input_builder.build();
@@ -5842,28 +5834,6 @@ pub(crate) mod test {
         .expect("can't re-plan for new Nexus zone");
         {
             let summary = blueprint2.diff_since_blueprint(&blueprint1);
-            // TODO-K: host phase2 is showing stuff in each of the sleds,
-            // instead of nexus in one sled being the only change
-            //
-            // host_phase_2: BlueprintHostPhase2DesiredSlotsDiff {
-            //     slot_a: Leaf {
-            //         before: CurrentContents,
-            //         after: Artifact {
-            //             version: Available {
-            //                 version: ArtifactVersion(
-            //                     "1.0.0-freeform",
-            //                 ),
-            //             },
-            //             hash: ArtifactHash(
-            //                 "0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
-            //             ),
-            //         },
-            //     },
-            //     slot_b: Leaf {
-            //         before: CurrentContents,
-            //         after: CurrentContents,
-            //     },
-            // },
             for sled in summary.diff.sleds.modified_values_diff() {
                 assert!(sled.zones.removed.is_empty());
                 assert_eq!(sled.zones.added.len(), 1);
@@ -6105,7 +6075,7 @@ pub(crate) mod test {
             },
             hash: fake_hash,
         };
-        let artifacts = create_artifacts_at_version(&version);
+        let artifacts = create_zone_artifacts_at_version(&version);
         let target_release_generation = Generation::from_u32(2);
         input_builder.policy_mut().tuf_repo = TufRepoPolicy {
             target_release_generation,
@@ -6168,9 +6138,9 @@ pub(crate) mod test {
             result
         };
 
-        // First we update the blueprints three times, as the diff will always
-        // report there are changes with the host phase 2 even though the artifact
-        // matches and no update is needed
+        // First we update the blueprint once for each sled, as the diff in the
+        // simulated system will always report there are changes with the host
+        // phase 2 even when no update is needed
         let mut parent = blueprint;
         for i in 2..=4 {
             update_collection_from_blueprint(&mut example, &parent);
@@ -6558,7 +6528,7 @@ pub(crate) mod test {
             },
             hash: fake_hash,
         };
-        let artifacts = create_artifacts_at_version(&version);
+        let artifacts = create_zone_artifacts_at_version(&version);
         let target_release_generation = Generation::from_u32(2);
         input_builder.policy_mut().tuf_repo = TufRepoPolicy {
             target_release_generation,
@@ -6649,9 +6619,9 @@ pub(crate) mod test {
             collection.ntp_timesync = ntp_timesync;
         };
 
-        // First we update the blueprints three times, as the diff will always
-        // report there are changes with the host phase 2 even though the artifact
-        // matches and no update is needed
+        // First we update the blueprint once for each sled, as the diff in the
+        // simulated system will always report there are changes with the host
+        // phase 2 even when no update is needed
         let mut parent = blueprint;
         for i in 2..=4 {
             update_collection_from_blueprint(&mut example, &parent);
@@ -7018,7 +6988,7 @@ pub(crate) mod test {
             },
             hash: fake_hash,
         };
-        let artifacts = create_artifacts_at_version(&version);
+        let artifacts = create_zone_artifacts_at_version(&version);
         let target_release_generation = Generation::from_u32(2);
         input_builder.policy_mut().tuf_repo = TufRepoPolicy {
             target_release_generation,
@@ -7085,9 +7055,9 @@ pub(crate) mod test {
             result
         };
 
-        // First we update the blueprints three times, as the diff will always
-        // report there are changes with the host phase 2 even though the artifact
-        // matches and no update is needed
+        // First we update the blueprint once for each sled, as the diff in the
+        // simulated system will always report there are changes with the host
+        // phase 2 even when no update is needed
         let mut parent = blueprint;
         for i in 2..=4 {
             update_collection_from_blueprint(&mut example, &parent);
@@ -7330,7 +7300,7 @@ pub(crate) mod test {
                         system_version: Version::new(1, 0, 0),
                         file_name: String::from(""),
                     },
-                    artifacts: create_artifacts_at_version(&version),
+                    artifacts: create_zone_artifacts_at_version(&version),
                 },
             ),
         };

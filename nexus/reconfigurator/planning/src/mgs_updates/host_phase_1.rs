@@ -156,8 +156,6 @@ pub(super) fn update_status(
             MgsUpdateStatusError::SledAgentErrorDeterminingBootDisk(err.clone())
         })?;
 
-    // TODO-K: Show boot disk to debug?
-
     // If we find the desired artifact in the active slot _and_ we see that
     // sled-agent has successfully booted from that same slot, we're done.
     if active_phase_1_hash == desired_artifact

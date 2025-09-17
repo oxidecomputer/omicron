@@ -258,7 +258,6 @@ pub(crate) fn plan_mgs_updates(
             skipped_mgs_updates: mut skipped_updates,
         } = try_make_update(log, board, inventory, current_artifacts);
 
-        // TODO-K: Is there a bug here somehow?
         if !updates.is_empty() {
             // We can safely unwrap because we just created the update with the
             // baseboard_id in try_make_update above

@@ -105,8 +105,7 @@ pub struct SystemDescription {
     collector: Option<String>,
     // Arc<Sled> to make cloning cheap. Mutating sleds is uncommon but
     // possible, in which case we'll clone-on-write with Arc::make_mut.
-    // TODO-K: remove puib
-    pub sleds: IndexMap<SledUuid, Arc<Sled>>,
+    sleds: IndexMap<SledUuid, Arc<Sled>>,
     sled_subnets: SubnetIterator,
     available_non_scrimlet_slots: BTreeSet<u16>,
     available_scrimlet_slots: BTreeSet<u16>,
