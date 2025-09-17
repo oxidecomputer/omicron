@@ -247,6 +247,16 @@ impl super::Nexus {
             &inventory,
         );
 
+        // TODO: these versions are TufRepoVersion objects, which includes
+        // Unknown, InstallDataset, and Error variants in addition to the
+        // expected Version variant. This is a problem because these are not
+        // the same thing as the TargetReleaseSource enum we use to represent
+        // the target system version, and they need to be the same kind of
+        // thing because you would not want keys in the counts map that don't
+        // correspond to any possible target release source. Most likely what we
+        // need to do is make these versions line up with TargetReleaseSource by
+        // collapsing all the non-Version ones into Unspecified.
+
         let sled_versions = status.sleds.into_iter().flat_map(|sled| {
             let zone_versions = sled.zones.into_iter().map(|zone| zone.version);
 

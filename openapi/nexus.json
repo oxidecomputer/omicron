@@ -26109,7 +26109,12 @@
             "format": "date-time"
           },
           "target_release": {
-            "$ref": "#/components/schemas/TargetRelease"
+            "description": "Current target release config",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TargetRelease"
+              }
+            ]
           }
         },
         "required": [
