@@ -1052,8 +1052,8 @@ impl<'a> Planner<'a> {
                     // redundancy before the handoff completes.
                     images.push(nexus_in_charge_image);
 
-                    // If all other zones are using the new image, boot this
-                    // image.
+                    // If all other zones are using their new images, boot
+                    // ensure we start Nexus zones from their new image.
                     //
                     // NOTE: Checking `all_non_nexus_zones_updated` shouldn't be
                     // strictly necessary! It should be fine to launch the new
@@ -1891,21 +1891,11 @@ impl<'a> Planner<'a> {
 
         // Check that all in-service zones (other than Nexus) on all
         // sleds have an image source consistent with `new_repo`.
-        for sled_id in self.blueprint.sled_ids_with_zones() {
-            for z in self.blueprint.current_sled_zones(
-                sled_id,
-                BlueprintZoneDisposition::is_in_service,
-            ) {
-                let kind = z.zone_type.kind();
-                if kind != ZoneKind::Nexus
-                    && z.image_source != new_repo.zone_image_source(kind)?
-                {
-                    report.set_waiting_on(
-                        NexusGenerationBumpWaitingOn::NonNexusZoneUpdate,
-                    );
-                    return Ok(report);
-                }
-            }
+        if !self.all_non_nexus_zones_using_new_image()? {
+            report.set_waiting_on(
+                NexusGenerationBumpWaitingOn::NonNexusZoneUpdate,
+            );
+            return Ok(report);
         }
 
         // In order to do a handoff, there must be Nexus instances at the
@@ -2187,7 +2177,9 @@ impl<'a> Planner<'a> {
         zone: &BlueprintZoneConfig,
         report: &mut PlanningZoneUpdatesStepReport,
     ) -> Result<bool, Error> {
-        let safe_to_update = self.can_zone_be_shut_down_safely(zone, report);
+        if !self.can_zone_be_shut_down_safely(zone, report) {
+            return Ok(false);
+        }
 
         let zone_nexus_generation = match &zone.zone_type {
             // For Nexus, we need to confirm that the active generation has
@@ -2196,7 +2188,7 @@ impl<'a> Planner<'a> {
                 // Get the nexus_generation of the zone being considered for shutdown
                 nexus_zone.nexus_generation
             }
-            _ => return Ok(safe_to_update),
+            _ => return Ok(true),
         };
 
         use ZoneWaitingToExpunge::*;
@@ -2236,7 +2228,7 @@ impl<'a> Planner<'a> {
             return Ok(false);
         }
 
-        Ok(safe_to_update)
+        Ok(true)
     }
 
     /// Return `true` iff we believe a zone can safely be shut down; e.g., any
