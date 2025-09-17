@@ -290,6 +290,7 @@ mod test {
         ReconfiguratorConfigView,
     };
     use omicron_uuid_kinds::OmicronZoneUuid;
+    use std::collections::BTreeMap;
 
     type ControlPlaneTestContext =
         nexus_test_utils::ControlPlaneTestContext<crate::Server>;
@@ -305,7 +306,9 @@ mod test {
         );
 
         // Spin up the blueprint loader background task.
-        let mut loader = TargetBlueprintLoader::new(datastore.clone());
+        let (tx_loader, _) = watch::channel(None);
+        let mut loader =
+            TargetBlueprintLoader::new(datastore.clone(), tx_loader);
         let mut rx_loader = loader.watcher();
         loader.activate(&opctx).await;
         let (_initial_target, initial_blueprint) = &*rx_loader
@@ -427,7 +430,12 @@ mod test {
             OmicronZoneUuid::new_v4(),
             Activator::new(),
             dummy_tx,
-            NexusQuiesceHandle::new(&opctx.log, datastore.clone()),
+            NexusQuiesceHandle::new(
+                datastore.clone(),
+                OmicronZoneUuid::new_v4(),
+                rx_loader.clone(),
+                opctx.child(BTreeMap::new()),
+            ),
         );
         let value = executor.activate(&opctx).await;
         let value = value.as_object().expect("response is not a JSON object");
