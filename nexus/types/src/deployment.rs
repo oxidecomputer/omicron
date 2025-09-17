@@ -430,24 +430,39 @@ impl Blueprint {
     }
 
     /// Given a set of Nexus zone UUIDs, returns the "nexus generation"
-    /// of the first one found in the blueprint.
+    /// of these zones in the blueprint.
+    ///
+    /// Returns [`Option::None`] if none of these zones are found.
+    ///
+    /// Returns an error if there are multiple distinct generations for these
+    /// zones.
     pub fn find_generation_for_nexus(
         &self,
         nexus_zones: &BTreeSet<OmicronZoneUuid>,
-    ) -> Option<Generation> {
-        self.all_omicron_zones(BlueprintZoneDisposition::is_in_service)
-            .find_map(|(_, blueprint_zone)| {
-                if nexus_zones.contains(&blueprint_zone.id) {
-                    match &blueprint_zone.zone_type {
-                        BlueprintZoneType::Nexus(nexus_zone) => {
-                            Some(nexus_zone.nexus_generation)
+    ) -> Result<Option<Generation>, anyhow::Error> {
+        let mut gen = None;
+        for (_, blueprint_zone) in
+            self.all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+        {
+            if nexus_zones.contains(&blueprint_zone.id) {
+                match &blueprint_zone.zone_type {
+                    BlueprintZoneType::Nexus(nexus_zone) => {
+                        let found_gen = nexus_zone.nexus_generation;
+                        if let Some(gen) = gen {
+                            if found_gen != gen {
+                                bail!(
+                                    "Multiple generations found for these zones"
+                                );
+                            }
                         }
-                        _ => None,
+                        gen = Some(found_gen);
                     }
-                } else {
-                    None
+                    _ => (),
                 }
-            })
+            }
+        }
+
+        Ok(gen)
     }
 }
 

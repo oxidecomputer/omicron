@@ -1500,14 +1500,17 @@ impl<'a> Planner<'a> {
         // Of the out-of-date zones, filter out zones that can't be updated yet,
         // either because they're not ready or because it wouldn't be safe to
         // bounce them.
-        let mut updateable_zones = out_of_date_zones.iter().filter(
-            |(_sled_id, zone, _new_image_source)| {
-                self.are_zones_ready_for_updates(mgs_updates)
-                    && self.can_zone_be_updated(zone, &mut report)
-            },
-        );
+        let mut updateable_zones = Vec::new();
+        for (sled_id, zone, new_image_source) in out_of_date_zones {
+            if self.are_zones_ready_for_updates(mgs_updates)
+                && self.can_zone_be_updated(&zone, &mut report)?
+            {
+                updateable_zones.push((sled_id, zone, new_image_source));
+            }
+        }
 
-        if let Some((sled_id, zone, new_image_source)) = updateable_zones.next()
+        if let Some((sled_id, zone, new_image_source)) =
+            updateable_zones.first()
         {
             // Update the first out-of-date zone.
             self.update_or_expunge_zone(
@@ -2162,11 +2165,14 @@ impl<'a> Planner<'a> {
             })
     }
 
-    fn lookup_current_nexus_generation(&self) -> Option<Generation> {
+    fn lookup_current_nexus_generation(
+        &self,
+    ) -> Result<Option<Generation>, Error> {
         // Look up the active Nexus zone in the blueprint to get its generation
         self.blueprint
             .parent_blueprint()
             .find_generation_for_nexus(self.input.active_nexus_zones())
+            .map_err(|_| Error::NoActiveNexusZonesInParentBlueprint)
     }
 
     // Returns if the zone is ready to be updated.
@@ -2177,7 +2183,7 @@ impl<'a> Planner<'a> {
         &self,
         zone: &BlueprintZoneConfig,
         report: &mut PlanningZoneUpdatesStepReport,
-    ) -> bool {
+    ) -> Result<bool, Error> {
         let safe_to_update = self.can_zone_be_shut_down_safely(zone, report);
 
         let zone_nexus_generation = match &zone.zone_type {
@@ -2187,7 +2193,7 @@ impl<'a> Planner<'a> {
                 // Get the nexus_generation of the zone being considered for shutdown
                 nexus_zone.nexus_generation
             }
-            _ => return safe_to_update,
+            _ => return Ok(safe_to_update),
         };
 
         use ZoneWaitingToExpunge::*;
@@ -2196,7 +2202,7 @@ impl<'a> Planner<'a> {
         //
         // This presumably includes the currently-executing Nexus where
         // this logic is being considered.
-        let Some(current_gen) = self.lookup_current_nexus_generation() else {
+        let Some(current_gen) = self.lookup_current_nexus_generation()? else {
             // If we don't know the current Nexus zone ID, or its
             // generation, we can't perform the handoff safety check.
             report.waiting_zone(
@@ -2206,7 +2212,7 @@ impl<'a> Planner<'a> {
                     current_nexus_generation: None,
                 },
             );
-            return false;
+            return Ok(false);
         };
 
         // We need to prevent old Nexus zones from shutting themselves
@@ -2224,10 +2230,10 @@ impl<'a> Planner<'a> {
                     current_nexus_generation: Some(current_gen),
                 },
             );
-            return false;
+            return Ok(false);
         }
 
-        safe_to_update
+        Ok(safe_to_update)
     }
 
     /// Return `true` iff we believe a zone can safely be shut down; e.g., any

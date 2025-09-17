@@ -117,6 +117,8 @@ pub enum Error {
     NoNexusZonesInParentBlueprint,
     #[error("no active Nexus zones exist in parent blueprint")]
     NoActiveNexusZonesInParentBlueprint,
+    #[error("conflicting values for active Nexus zones in parent blueprint")]
+    ActiveNexusZoneGenerationConflictInParentBlueprint,
     #[error("no Boundary NTP zones exist in parent blueprint")]
     NoBoundaryNtpZonesInParentBlueprint,
     #[error(
