@@ -3339,13 +3339,11 @@ mod tests {
                     )
                     .expect("ensured disks");
             }
-            let external_tls = false;
-            let external_dns_servers = vec![];
             builder
                 .sled_add_zone_nexus_with_config(
                     sled_ids[2],
-                    external_tls,
-                    external_dns_servers,
+                    false,
+                    Vec::new(),
                     BlueprintZoneImageSource::InstallDataset,
                     bp0.nexus_generation,
                 )
@@ -3417,13 +3415,11 @@ mod tests {
             )
             .expect("created blueprint builder");
             for &sled_id in &sled_ids {
-                let external_tls = false;
-                let external_dns_servers = vec![];
                 builder
                     .sled_add_zone_nexus_with_config(
                         sled_id,
-                        external_tls,
-                        external_dns_servers,
+                        false,
+                        Vec::new(),
                         BlueprintZoneImageSource::InstallDataset,
                         bp2.nexus_generation,
                     )
