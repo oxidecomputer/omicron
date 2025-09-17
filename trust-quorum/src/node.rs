@@ -547,11 +547,9 @@ impl Node {
                 "epoch" => %config.epoch
             );
             ctx.update_persistent_state(|ps| ps.commits.insert(config.epoch));
-            return;
         }
-
         // Do we have the configuration in our persistent state? If not save it.
-        if let Some(existing) =
+        else if let Some(existing) =
             ctx.persistent_state().configuration(config.epoch)
         {
             if existing != &config {
@@ -576,9 +574,10 @@ impl Node {
             });
         }
 
-        // Are we coordinating for an older epoch? If so, cancel.
         if let Some(cs) = &self.coordinator_state {
             let coordinating_epoch = cs.reconfigure_msg().epoch();
+
+            // Are we coordinating for an older epoch? If so, cancel.
             if coordinating_epoch < config.epoch {
                 info!(
                     self.log,
@@ -590,12 +589,19 @@ impl Node {
                 self.coordinator_state = None;
                 // Intentionally fall through
             } else if coordinating_epoch == config.epoch {
+                // We want to cancel coordination here as well. Nexus has
+                // informed the sending node of the commit (or it learned from
+                // another node), and it will eventually inform us. But since
+                // we have committed by updating the persistent state above, the
+                // message from nexus will be a no-op.
                 info!(
                     self.log,
-                    "Received {op} while coordinating for same epoch!";
+                    "Received {op} while coordinating for same epoch. \
+                     Cancelling coordination.";
                     "from" => %from,
                     "epoch" => %config.epoch
                 );
+                self.coordinator_state = None;
                 return;
             } else {
                 info!(
