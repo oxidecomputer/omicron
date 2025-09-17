@@ -216,7 +216,10 @@ async fn sim_reserve_sled_resources(
                 "src_vmm_cpu_platform" => %params.src_vmm.cpu_platform);
         }
         return Err(ActionError::action_failed(Error::invalid_request(
-            "cannot migrate an instance with a VMM CPU platform of SledDefault",
+            &format!(
+                "cannot migrate instance: {} nas no compatible sled families",
+                params.src_vmm.cpu_platform
+            ),
         )));
     };
 
