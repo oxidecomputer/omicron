@@ -13,6 +13,9 @@ fn main() {
     // Define the `VERGEN_GIT_SHA` and `VERGEN_GIT_DIRTY` environment variables
     // (accessible via `env!()`) that note the current git commit and whether
     // the working tree is dirty at the time of this build.
+    //
+    // We use this to check our own git SHA against the git SHA of the Nexus
+    // that generated blueprint planner debug logs.
     let gitcl = GitclBuilder::default()
         .sha(/* short= */ false)
         .dirty(/* include_untracked= */ false)
