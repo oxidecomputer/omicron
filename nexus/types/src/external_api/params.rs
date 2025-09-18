@@ -1301,7 +1301,7 @@ pub struct InstanceUpdate {
 
     /// Name or ID of the disk the instance should be instructed to boot from.
     ///
-    /// If not provided, unset the instance's boot disk.
+    /// A null value unsets the boot disk.
     pub boot_disk: Nullable<NameOrId>,
 
     /// Sets the auto-restart policy for this instance.

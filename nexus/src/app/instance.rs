@@ -367,7 +367,7 @@ impl super::Nexus {
 
         check_instance_cpu_memory_sizes(*ncpus, *memory)?;
 
-        let boot_disk_id = match &**boot_disk {
+        let boot_disk_id = match boot_disk.as_ref() {
             Some(disk) => {
                 let selector = params::DiskSelector {
                     project: match &disk {
