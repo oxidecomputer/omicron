@@ -207,7 +207,7 @@ impl PlanningInputFromDb<'_> {
             datastore
                 .get_db_metadata_nexus_in_state(
                     opctx,
-                    &[
+                    vec![
                         DbMetadataNexusState::Active,
                         DbMetadataNexusState::NotYet,
                     ],

@@ -42,6 +42,9 @@ use clap::ValueEnum;
 use clap::builder::PossibleValue;
 use clap::builder::PossibleValuesParser;
 use clap::builder::TypedValueParser;
+use db_metadata::DbMetadataArgs;
+use db_metadata::DbMetadataCommands;
+use db_metadata::cmd_db_metadata_list_nexus;
 use diesel::BoolExpressionMethods;
 use diesel::ExpressionMethods;
 use diesel::JoinOnDsl;
@@ -61,7 +64,6 @@ use nexus_db_errors::OptionalError;
 use nexus_db_lookup::DataStoreConnection;
 use nexus_db_lookup::LookupPath;
 use nexus_db_model::CrucibleDataset;
-use nexus_db_model::DbMetadataNexusState;
 use nexus_db_model::Disk;
 use nexus_db_model::DnsGroup;
 use nexus_db_model::DnsName;
@@ -145,13 +147,11 @@ use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::MacAddr;
-use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::DownstairsRegionUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
-use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::ParseError;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::PropolisUuid;
@@ -173,6 +173,7 @@ use tabled::Tabled;
 use uuid::Uuid;
 
 mod alert;
+mod db_metadata;
 mod ereport;
 mod saga;
 mod user_data_export;
@@ -399,18 +400,6 @@ enum DbCommands {
     Zpool(ZpoolArgs),
     /// Commands for querying and interacting with user data export objects
     UserDataExport(user_data_export::UserDataExportArgs),
-}
-
-#[derive(Debug, Args, Clone)]
-struct DbMetadataArgs {
-    #[command(subcommand)]
-    command: DbMetadataCommands,
-}
-
-#[derive(Debug, Subcommand, Clone)]
-enum DbMetadataCommands {
-    #[clap(alias = "ls-nexus")]
-    ListNexus,
 }
 
 #[derive(Debug, Args, Clone)]
@@ -1655,128 +1644,6 @@ async fn lookup_project(
         .await
         .optional()
         .with_context(|| format!("loading project {project_id}"))
-}
-
-// DB Metadata
-
-#[derive(Tabled)]
-#[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
-struct DbMetadataNexusRow {
-    id: OmicronZoneUuid,
-    #[tabled(display_with = "option_impl_display")]
-    last_drained_blueprint: Option<BlueprintUuid>,
-
-    // Identifies the state we observe in the database
-    state: String,
-
-    // Identifies the state this Nexus is trying to achieve, based on the target
-    // blueprint, if it's different from the current state
-    #[tabled(display_with = "display_option_blank")]
-    transitioning_to: Option<String>,
-}
-
-fn get_intended_nexus_state(
-    bp_nexus_generation: Generation,
-    bp_nexus_generation_by_zone: &BTreeMap<OmicronZoneUuid, Generation>,
-    id: OmicronZoneUuid,
-) -> Option<DbMetadataNexusState> {
-    let Some(gen) = bp_nexus_generation_by_zone.get(&id) else {
-        return None;
-    };
-
-    Some(if *gen < bp_nexus_generation {
-        // This Nexus is either quiescing, or has already quiesced
-        DbMetadataNexusState::Quiesced
-    } else if *gen == bp_nexus_generation {
-        // This Nexus is either active, or will become active once
-        // the prior generation has quiesced
-        DbMetadataNexusState::Active
-    } else {
-        // This Nexus is not ready to be run yet
-        DbMetadataNexusState::NotYet
-    })
-}
-
-fn get_nexus_state_transition(
-    observed: DbMetadataNexusState,
-    intended: Option<DbMetadataNexusState>,
-) -> Option<String> {
-    match (observed, intended) {
-        (observed, Some(intended)) if observed == intended => None,
-        (_, Some(intended)) => Some(intended.to_string()),
-        (_, None) => Some("Unknown".to_string()),
-    }
-}
-
-async fn get_db_metadata_nexus_rows(
-    opctx: &OpContext,
-    datastore: &DataStore,
-    blueprint: &Blueprint,
-) -> Result<Vec<DbMetadataNexusRow>, anyhow::Error> {
-    let states = [
-        DbMetadataNexusState::Active,
-        DbMetadataNexusState::NotYet,
-        DbMetadataNexusState::Quiesced,
-    ];
-
-    let nexus_generation_by_zone = blueprint
-        .all_nexus_zones(BlueprintZoneDisposition::is_in_service)
-        .map(|(_, zone, nexus_zone)| (zone.id, nexus_zone.nexus_generation))
-        .collect::<BTreeMap<_, _>>();
-
-    Ok(datastore
-        .get_db_metadata_nexus_in_state(opctx, &states)
-        .await?
-        .into_iter()
-        .map(|db_metadata_nexus| {
-            let id = db_metadata_nexus.nexus_id();
-            let last_drained_blueprint =
-                db_metadata_nexus.last_drained_blueprint_id();
-            let state = db_metadata_nexus.state().to_string();
-            let intended_state = get_intended_nexus_state(
-                blueprint.nexus_generation,
-                &nexus_generation_by_zone,
-                id,
-            );
-
-            let transitioning_to = get_nexus_state_transition(
-                db_metadata_nexus.state(),
-                intended_state,
-            );
-
-            DbMetadataNexusRow {
-                id,
-                last_drained_blueprint,
-                state,
-                transitioning_to,
-            }
-        })
-        .collect())
-}
-
-async fn cmd_db_metadata_list_nexus(
-    opctx: &OpContext,
-    datastore: &DataStore,
-) -> Result<(), anyhow::Error> {
-    let (_, current_target_blueprint) = datastore
-        .blueprint_target_get_current_full(opctx)
-        .await
-        .context("loading current target blueprint")?;
-    println!(
-        "Target Blueprint {} @ nexus_generation: {}",
-        current_target_blueprint.id, current_target_blueprint.nexus_generation
-    );
-
-    let rows: Vec<_> =
-        get_db_metadata_nexus_rows(opctx, datastore, &current_target_blueprint)
-            .await?;
-    let table = tabled::Table::new(rows)
-        .with(tabled::settings::Style::psql())
-        .with(tabled::settings::Padding::new(0, 1, 0, 0))
-        .to_string();
-    println!("{}", table);
-
-    Ok(())
 }
 
 // Crucible datasets
