@@ -1064,7 +1064,7 @@ impl SledAgentApi for SledAgentImpl {
                 // policy to "off" if this request came from our switch zone;
                 // i.e., only allow disabling the switch zone if we have at
                 // least some evidence that the _other_ switch zone is up.
-                let (our_switch_zone_ip, _) = sa.switch_zone_underlay_info();
+                let our_switch_zone_ip = sa.switch_zone_underlay_info().ip;
                 if request_context.request.remote_addr().ip()
                     == our_switch_zone_ip
                 {
