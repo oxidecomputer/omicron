@@ -2104,7 +2104,8 @@ fn cmd_blueprint_plan(
 
     let blueprint = planner.plan().context("generating blueprint")?;
     let rv = format!(
-        "generated blueprint {} based on parent blueprint {}\n{}",
+        "generated blueprint {} based on parent blueprint {}\n\
+         blueprint source: {}",
         blueprint.id, parent_blueprint.id, blueprint.source,
     );
     system.add_blueprint(blueprint)?;

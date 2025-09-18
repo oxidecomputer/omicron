@@ -452,7 +452,9 @@ impl fmt::Display for BlueprintSource {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Rss => writeln!(f, "rack setup"),
-            Self::Planner(report) => writeln!(f, "planner\n{report}"),
+            Self::Planner(report) => {
+                writeln!(f, "planner with report:\n{report}")
+            }
             Self::PlannerLoadedFromDatabase => {
                 writeln!(f, "planner (no report available")
             }
