@@ -339,8 +339,9 @@ empty planning report for blueprint 3f00b694-1b16-4aaa-8f78-e6b3a527b434.
 
 
 
-> blueprint-edit 3f00b694-1b16-4aaa-8f78-e6b3a527b434 expunge-zone 8429c772-07e8-40a6-acde-2ed47d16cf84
+> blueprint-edit 3f00b694-1b16-4aaa-8f78-e6b3a527b434 expunge-zones 8429c772-07e8-40a6-acde-2ed47d16cf84
 blueprint 366b0b68-d80e-4bc1-abd3-dc69837847e0 created from blueprint 3f00b694-1b16-4aaa-8f78-e6b3a527b434: expunged zone 8429c772-07e8-40a6-acde-2ed47d16cf84 from sled 711ac7f8-d19e-4572-bdb9-e9b50f6e362a
+
 
 
 > # Diff DNS to see that the expunged zone is no longer has DNS records.
@@ -1346,8 +1347,9 @@ planning report for blueprint 9c998c1d-1a7b-440a-ae0c-40f781dea6e2:
 
 
 > # expunging the new zone should work, then diff again to see the new zone also have its DNS records removed.
-> blueprint-edit 9c998c1d-1a7b-440a-ae0c-40f781dea6e2 expunge-zone 8c0a1969-15b6-4165-ba6d-a27c24151037
+> blueprint-edit 9c998c1d-1a7b-440a-ae0c-40f781dea6e2 expunge-zones 8c0a1969-15b6-4165-ba6d-a27c24151037
 blueprint 2ac8c740-444d-42ff-8d66-9812a7e51288 created from blueprint 9c998c1d-1a7b-440a-ae0c-40f781dea6e2: expunged zone 8c0a1969-15b6-4165-ba6d-a27c24151037 from sled 9dc50690-f9bf-4520-bf80-051d0f465c2c
+
 
 > blueprint-diff 9c998c1d-1a7b-440a-ae0c-40f781dea6e2 2ac8c740-444d-42ff-8d66-9812a7e51288
 from: blueprint 9c998c1d-1a7b-440a-ae0c-40f781dea6e2
