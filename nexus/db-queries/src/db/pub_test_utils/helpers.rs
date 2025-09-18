@@ -236,6 +236,7 @@ pub async fn create_stopped_instance_record(
             external_ips: Vec::new(),
             disks: Vec::new(),
             boot_disk: None,
+            cpu_platform: None,
             ssh_public_keys: None,
             start: false,
             auto_restart_policy: Default::default(),
