@@ -107,6 +107,7 @@ use slog_error_chain::InlineErrorChain;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
+use std::time::Duration;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::Mutex;
 use tokio::sync::oneshot;
@@ -308,6 +309,14 @@ impl From<Error> for omicron_common::api::external::Error {
             },
         }
     }
+}
+
+/// Information describing the underlay network, used when activating the switch
+/// zone.
+#[derive(Debug, Clone)]
+pub struct UnderlayInfo {
+    pub ip: Ipv6Addr,
+    pub rack_network_config: Option<RackNetworkConfig>,
 }
 
 fn display_zone_init_errors(errors: &[(String, Box<Error>)]) -> String {
@@ -550,6 +559,9 @@ enum SwitchZoneState {
         request: SwitchZoneConfig,
         // The currently running zone
         zone: Box<RunningZone>,
+        // A background task which keeps looping until the zone's uplinks are
+        // configured.
+        worker: Option<Task>,
     },
 }
 
@@ -3151,7 +3163,7 @@ impl ServiceManager {
         &self,
         // If we're reconfiguring the switch zone with an underlay address, we
         // also need the rack network config to set tfport uplinks.
-        underlay_info: Option<(Ipv6Addr, Option<&RackNetworkConfig>)>,
+        underlay_info: Option<UnderlayInfo>,
         baseboard: Baseboard,
     ) -> Result<(), Error> {
         info!(self.inner.log, "Ensuring scrimlet services (enabling services)");
@@ -3238,31 +3250,96 @@ impl ServiceManager {
             }
         };
 
-        let mut addresses =
-            if let Some((ip, _)) = underlay_info { vec![ip] } else { vec![] };
+        let mut addresses = if let Some(info) = &underlay_info {
+            vec![info.ip]
+        } else {
+            vec![]
+        };
         addresses.push(Ipv6Addr::LOCALHOST);
 
         let request =
             SwitchZoneConfig { id: Uuid::new_v4(), addresses, services };
 
         self.ensure_switch_zone(
-            // request=
             Some(request),
-            // filesystems=
             filesystems,
-            // data_links=
             data_links,
+            underlay_info,
         )
         .await?;
 
-        // If we've given the switch an underlay address, we also need to inject
-        // SMF properties so that tfport uplinks can be created.
-        if let Some((ip, Some(rack_network_config))) = underlay_info {
-            self.ensure_switch_zone_uplinks_configured(ip, rack_network_config)
-                .await?;
-        }
-
         Ok(())
+    }
+
+    // Retry ensuring switch zone uplinks until success or we're told to stop.
+    //
+    // TODO-correctness: This is not in great shape, and may get stuck in an
+    // infinite retry loop _within_ one attempt, or may succeed even if it
+    // didn't fully configure all switch zone services. See
+    // <https://github.com/oxidecomputer/omicron/issues/8970> for details.
+    async fn ensure_switch_zone_uplinks_configured_loop(
+        &self,
+        underlay_info: &UnderlayInfo,
+        mut exit_rx: oneshot::Receiver<()>,
+    ) {
+        // We don't really expect failures trying to initialize the switch zone
+        // unless something is unhealthy. This timeout is somewhat arbitrary,
+        // but we probably don't want to use backoff here.
+        const RETRY_DELAY: Duration = Duration::from_secs(1);
+
+        // We can only ensure uplinks if we have a rack network config.
+        //
+        // It'd be surprising to have `underlay_info` containing our underlay IP
+        // without a rack network config, but it is technically possible. These
+        // bits of information are ledgered separately, and we could have
+        // ledgered our underlay IP, then crashed before the bootstore gossip
+        // happened to tell us the rack network config, and are now restarting.
+        let Some(rack_network_config) = &underlay_info.rack_network_config
+        else {
+            return;
+        };
+
+        loop {
+            match self
+                .ensure_switch_zone_uplinks_configured(
+                    underlay_info.ip,
+                    &rack_network_config,
+                )
+                .await
+            {
+                Ok(()) => {
+                    info!(self.inner.log, "configured switch zone uplinks");
+                    break;
+                }
+                Err(e) => {
+                    warn!(
+                        self.inner.log,
+                        "Failed to configure switch zone uplinks";
+                        InlineErrorChain::new(&e),
+                    );
+                }
+            }
+
+            tokio::select! {
+                // If we've been told to stop trying, bail.
+                _ = &mut exit_rx => {
+                    info!(
+                        self.inner.log,
+                        "instructed to give up on switch zone uplink \
+                         configuration",
+                    );
+                    return;
+                }
+
+                _ = tokio::time::sleep(RETRY_DELAY) => {
+                    info!(
+                        self.inner.log,
+                        "retrying switch zone uplink configuration",
+                    );
+                    continue;
+                }
+            };
+        }
     }
 
     // Ensure our switch zone (at the given IP address) has its uplinks
@@ -3409,6 +3486,8 @@ impl ServiceManager {
             vec![],
             // data_links=
             vec![],
+            // underlay_info=
+            None,
         )
         .await
     }
@@ -3427,6 +3506,7 @@ impl ServiceManager {
         request: SwitchZoneConfig,
         filesystems: Vec<zone::Fs>,
         data_links: Vec<String>,
+        underlay_info: Option<UnderlayInfo>,
     ) {
         let (exit_tx, exit_rx) = oneshot::channel();
         *zone = SwitchZoneState::Initializing {
@@ -3436,7 +3516,8 @@ impl ServiceManager {
             worker: Some(Task {
                 exit_tx,
                 initializer: tokio::task::spawn(async move {
-                    self.initialize_switch_zone_loop(exit_rx).await
+                    self.initialize_switch_zone_loop(underlay_info, exit_rx)
+                        .await
                 }),
             }),
         };
@@ -3448,6 +3529,7 @@ impl ServiceManager {
         request: Option<SwitchZoneConfig>,
         filesystems: Vec<zone::Fs>,
         data_links: Vec<String>,
+        underlay_info: Option<UnderlayInfo>,
     ) -> Result<(), Error> {
         let log = &self.inner.log;
 
@@ -3462,6 +3544,7 @@ impl ServiceManager {
                     request,
                     filesystems,
                     data_links,
+                    underlay_info,
                 );
             }
             (
@@ -3473,9 +3556,10 @@ impl ServiceManager {
                 // the next request with our new request.
                 *request = new_request;
             }
-            (SwitchZoneState::Running { request, zone }, Some(new_request))
-                if request.addresses != new_request.addresses =>
-            {
+            (
+                SwitchZoneState::Running { request, zone, worker },
+                Some(new_request),
+            ) if request.addresses != new_request.addresses => {
                 // If the switch zone is running but we have new addresses, it
                 // means we're moving from the bootstrap to the underlay
                 // network.  We need to add an underlay address and route in the
@@ -3511,8 +3595,8 @@ impl ServiceManager {
                     );
                 }
 
-                // When the request addresses have changed this means the underlay is
-                // available now as well.
+                // When the request addresses have changed this means the
+                // underlay is available now as well.
                 if let Some(info) = self.inner.sled_info.get() {
                     info!(
                         self.inner.log,
@@ -3823,6 +3907,26 @@ impl ServiceManager {
                         }
                     }
                 }
+
+                // We also need to ensure any uplinks are configured. Spawn a
+                // task that goes into an infinite retry loop until it succeeds.
+                if let Some(underlay_info) = underlay_info {
+                    if let Some(old_worker) = worker.take() {
+                        old_worker.stop().await;
+                    }
+                    let me = self.clone();
+                    let (exit_tx, exit_rx) = oneshot::channel();
+                    *worker = Some(Task {
+                        exit_tx,
+                        initializer: tokio::task::spawn(async move {
+                            me.ensure_switch_zone_uplinks_configured_loop(
+                                &underlay_info,
+                                exit_rx,
+                            )
+                            .await;
+                        }),
+                    });
+                }
             }
             (SwitchZoneState::Running { .. }, Some(_)) => {
                 info!(log, "Enabling {zone_typestr} zone (already complete)");
@@ -3894,6 +3998,7 @@ impl ServiceManager {
         *sled_zone = SwitchZoneState::Running {
             request: request.clone(),
             zone: Box::new(zone),
+            worker: None,
         };
         Ok(())
     }
@@ -3902,28 +4007,61 @@ impl ServiceManager {
     // inititalized, or it has been told to stop.
     async fn initialize_switch_zone_loop(
         &self,
+        underlay_info: Option<UnderlayInfo>,
         mut exit_rx: oneshot::Receiver<()>,
     ) {
+        // We don't really expect failures trying to initialize the switch zone
+        // unless something is unhealthy. This timeout is somewhat arbitrary,
+        // but we probably don't want to use backoff here.
+        const RETRY_DELAY: Duration = Duration::from_secs(1);
+
+        // First, go into a loop to bring up the switch zone; retry until we
+        // succeed or are told to give up via `exit_rx`.
         loop {
             {
                 let mut sled_zone = self.inner.switch_zone.lock().await;
                 match self.try_initialize_switch_zone(&mut sled_zone).await {
-                    Ok(()) => return,
-                    Err(e) => warn!(
-                        self.inner.log,
-                        "Failed to initialize switch zone: {e}"
-                    ),
+                    Ok(()) => {
+                        info!(self.inner.log, "initialized switch zone");
+                        break;
+                    }
+                    Err(e) => {
+                        warn!(
+                            self.inner.log, "Failed to initialize switch zone";
+                            InlineErrorChain::new(&e),
+                        );
+                    }
                 }
             }
 
             tokio::select! {
                 // If we've been told to stop trying, bail.
-                _ = &mut exit_rx => return,
+                _ = &mut exit_rx => {
+                    info!(
+                        self.inner.log,
+                        "instructed to give up on switch zone initialization",
+                    );
+                    return;
+                }
 
-                // Poll for the device every second - this timeout is somewhat
-                // arbitrary, but we probably don't want to use backoff here.
-                _ = tokio::time::sleep(tokio::time::Duration::from_secs(1)) => (),
+                _ = tokio::time::sleep(RETRY_DELAY) => {
+                    info!(
+                        self.inner.log,
+                        "retrying switch zone initialization",
+                    );
+                    continue;
+                }
             };
+        }
+
+        // Then, if we have underlay info, go into a loop trying to configure
+        // our uplinks. As above, retry until we succeed or are told to stop.
+        if let Some(underlay_info) = underlay_info {
+            self.ensure_switch_zone_uplinks_configured_loop(
+                &underlay_info,
+                exit_rx,
+            )
+            .await;
         }
     }
 }
