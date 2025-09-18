@@ -1337,7 +1337,7 @@ Commands:
   set-target-release-minimum-generation
           set the minimum generation for which target releases are accepted [aliases:
           set-target-release-min-gen]
-  expunge-zone
+  expunge-zones
           expunge a zone
   mark-for-cleanup
           mark an expunged zone ready for cleanup
