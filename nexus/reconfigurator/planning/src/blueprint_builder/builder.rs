@@ -115,6 +115,10 @@ pub enum Error {
     NoAvailableZpool { sled_id: SledUuid, kind: ZoneKind },
     #[error("no Nexus zones exist in parent blueprint")]
     NoNexusZonesInParentBlueprint,
+    #[error("no active Nexus zones exist in parent blueprint")]
+    NoActiveNexusZonesInParentBlueprint,
+    #[error("conflicting values for active Nexus zones in parent blueprint")]
+    ActiveNexusZoneGenerationConflictInParentBlueprint,
     #[error("no Boundary NTP zones exist in parent blueprint")]
     NoBoundaryNtpZonesInParentBlueprint,
     #[error(
@@ -726,6 +730,10 @@ impl<'a> BlueprintBuilder<'a> {
         self.sled_editors.keys().copied()
     }
 
+    /// Iterates over all zones on a sled.
+    ///
+    /// This will include both zones from the parent blueprint, as well
+    /// as the changes made within this builder.
     pub fn current_sled_zones<F>(
         &self,
         sled_id: SledUuid,
@@ -738,6 +746,25 @@ impl<'a> BlueprintBuilder<'a> {
             return Either::Left(iter::empty());
         };
         Either::Right(editor.zones(filter))
+    }
+
+    /// Iterates over all zones on all sleds.
+    ///
+    /// Acts like a combination of [`Self::sled_ids_with_zones`] and
+    /// [`Self::current_sled_zones`].
+    ///
+    /// This will include both zones from the parent blueprint, as well
+    /// as the changes made within this builder.
+    pub fn current_zones<F>(
+        &'a self,
+        filter: F,
+    ) -> impl Iterator<Item = &'a BlueprintZoneConfig>
+    where
+        F: FnMut(BlueprintZoneDisposition) -> bool + Clone,
+    {
+        self.sled_ids_with_zones().flat_map(move |sled_id| {
+            self.current_sled_zones(sled_id, filter.clone())
+        })
     }
 
     pub fn current_sled_disks<F>(
@@ -1545,6 +1572,7 @@ impl<'a> BlueprintBuilder<'a> {
         Ok(Ensure::Added)
     }
 
+    /// Adds a nexus zone on this sled.
     pub fn sled_add_zone_nexus(
         &mut self,
         sled_id: SledUuid,
@@ -1573,6 +1601,7 @@ impl<'a> BlueprintBuilder<'a> {
                 _ => None,
             })
             .ok_or(Error::NoNexusZonesInParentBlueprint)?;
+
         self.sled_add_zone_nexus_with_config(
             sled_id,
             external_tls,
@@ -3345,7 +3374,7 @@ pub mod test {
                     .map(|sa| sa.sled_id)
                     .expect("no sleds present"),
                 BlueprintZoneImageSource::InstallDataset,
-                Generation::new(),
+                parent.nexus_generation,
             )
             .unwrap_err();
 
@@ -3718,6 +3747,68 @@ pub mod test {
             "tests/output/zone_image_source_change_1.txt",
             &display.to_string(),
         );
+
+        logctx.cleanup_successful();
+    }
+
+    /// Test nexus generation assignment logic for new zones
+    #[test]
+    fn test_nexus_generation_assignment_new_generation() {
+        static TEST_NAME: &str =
+            "test_nexus_generation_assignment_new_generation";
+        let logctx = test_setup_log(TEST_NAME);
+        let mut rng = SimRngState::from_seed(TEST_NAME);
+
+        // Start with a system that has no Nexus zones
+        let (example_system, blueprint) =
+            ExampleSystemBuilder::new(&logctx.log, TEST_NAME)
+                .nexus_count(0)
+                .build();
+        // NOTE: Technically, this Blueprint is invalid, according to blippy.
+
+        let mut builder = BlueprintBuilder::new_based_on(
+            &logctx.log,
+            &blueprint,
+            &example_system.input,
+            &example_system.collection,
+            "test",
+            rng.next_planner_rng(),
+        )
+        .expect("failed to create builder");
+
+        // Get first sled
+        let sled_id = example_system
+            .input
+            .all_sled_ids(SledFilter::Commissioned)
+            .next()
+            .unwrap();
+        let image_source = BlueprintZoneImageSource::InstallDataset;
+
+        // Add first Nexus zone - should get generation 1
+        builder
+            .sled_add_zone_nexus_with_config(
+                sled_id,
+                false,
+                vec![],
+                image_source.clone(),
+                builder.parent_blueprint().nexus_generation,
+            )
+            .expect("failed to add nexus zone");
+
+        let blueprint1 = builder.build();
+        verify_blueprint(&blueprint1);
+
+        // Find the nexus zone and verify it has generation 1
+        let nexus_zones: Vec<_> = blueprint1
+            .all_omicron_zones(BlueprintZoneDisposition::any)
+            .filter_map(|(_, zone)| match &zone.zone_type {
+                BlueprintZoneType::Nexus(nexus) => Some(nexus),
+                _ => None,
+            })
+            .collect();
+
+        assert_eq!(nexus_zones.len(), 1);
+        assert_eq!(nexus_zones[0].nexus_generation, Generation::new());
 
         logctx.cleanup_successful();
     }

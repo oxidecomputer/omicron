@@ -4,6 +4,7 @@
 
 //! Example blueprints
 
+use std::collections::BTreeSet;
 use std::fmt;
 use std::hash::Hash;
 use std::net::IpAddr;
@@ -16,6 +17,7 @@ use crate::system::SystemDescription;
 use anyhow::bail;
 use nexus_inventory::CollectionBuilderRng;
 use nexus_types::deployment::Blueprint;
+use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneImageSource;
 use nexus_types::deployment::OmicronZoneNic;
 use nexus_types::deployment::PlanningInput;
@@ -547,6 +549,21 @@ impl ExampleSystemBuilder {
         }
 
         let blueprint = builder.build();
+
+        // Find and set the set of active Nexuses
+        let active_nexus_zone_ids: BTreeSet<_> = blueprint
+            .all_nexus_zones(BlueprintZoneDisposition::is_in_service)
+            .filter_map(|(_, zone, nexus_zone)| {
+                if nexus_zone.nexus_generation == blueprint.nexus_generation {
+                    Some(zone.id)
+                } else {
+                    None
+                }
+            })
+            .collect();
+        input_builder.set_active_nexus_zones(active_nexus_zone_ids.clone());
+        system.set_active_nexus_zones(active_nexus_zone_ids);
+
         for sled_cfg in blueprint.sleds.values() {
             for zone in sled_cfg.zones.iter() {
                 let service_id = zone.id;
