@@ -1045,21 +1045,9 @@ impl ZoneUpdatesWaitingOn {
 )]
 #[serde(rename_all = "snake_case", tag = "type")]
 pub enum ZoneUnsafeToShutdown {
-    Cockroachdb {
-        reason: CockroachdbUnsafeToShutdown,
-    },
-    BoundaryNtp {
-        total_boundary_ntp_zones: usize,
-        synchronized_count: usize,
-    },
-    InternalDns {
-        total_internal_dns_zones: usize,
-        synchronized_count: usize,
-    },
-    Nexus {
-        zone_generation: Generation,
-        current_nexus_generation: Option<Generation>,
-    },
+    Cockroachdb { reason: CockroachdbUnsafeToShutdown },
+    BoundaryNtp { total_boundary_ntp_zones: usize, synchronized_count: usize },
+    InternalDns { total_internal_dns_zones: usize, synchronized_count: usize },
 }
 
 impl fmt::Display for ZoneUnsafeToShutdown {
@@ -1074,20 +1062,6 @@ impl fmt::Display for ZoneUnsafeToShutdown {
                 total_internal_dns_zones: t,
                 synchronized_count: s,
             } => write!(f, "only {s}/{t} internal DNS zones are synchronized"),
-            Self::Nexus { zone_generation, current_nexus_generation } => {
-                match current_nexus_generation {
-                    Some(current) => write!(
-                        f,
-                        "zone gen ({zone_generation}) >= currently-running \
-                         Nexus gen ({current})"
-                    ),
-                    None => write!(
-                        f,
-                        "zone gen is {zone_generation}, but currently-running \
-                         Nexus generation is unknown"
-                    ),
-                }
-            }
         }
     }
 }
@@ -1097,27 +1071,25 @@ impl fmt::Display for ZoneUnsafeToShutdown {
 )]
 #[serde(rename_all = "snake_case", tag = "type")]
 pub enum ZoneWaitingToExpunge {
-    Nexus {
-        zone_generation: Generation,
-        current_nexus_generation: Option<Generation>,
-    },
+    Nexus { zone_generation: Generation, current_nexus_generation_known: bool },
 }
 
 impl fmt::Display for ZoneWaitingToExpunge {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Self::Nexus { zone_generation, current_nexus_generation } => {
-                match current_nexus_generation {
-                    Some(current) => write!(
+            Self::Nexus { zone_generation, current_nexus_generation_known } => {
+                if *current_nexus_generation_known {
+                    write!(
                         f,
-                        "zone gen ({zone_generation}) >= currently-running \
-                         Nexus gen ({current})"
-                    ),
-                    None => write!(
+                        "image out-of-date, but zone's nexus_generation \
+                         {zone_generation} is still active"
+                    )
+                } else {
+                    write!(
                         f,
-                        "zone gen is {zone_generation}, but currently-running \
-                         Nexus generation is unknown"
-                    ),
+                        "zone's nexus_generation is {zone_generation}, but \
+                         the currently-running Nexus generation is unknown"
+                    )
                 }
             }
         }

@@ -2226,7 +2226,10 @@ impl<'a> Planner<'a> {
             .map_err(|_| Error::NoActiveNexusZonesInParentBlueprint)
     }
 
-    // Returns if the zone is ready to be updated.
+    // Returns whether the out-of-date zone is ready to be updated.
+    //
+    // For reporting purposes, we assume that we want the supplied
+    // zone to be expunged or updated because it is out-of-date.
     //
     // If the zone should not be updated yet, updates the planner report to
     // identify why it is not ready for update.
@@ -2262,7 +2265,7 @@ impl<'a> Planner<'a> {
                 zone,
                 Nexus {
                     zone_generation: zone_nexus_generation,
-                    current_nexus_generation: None,
+                    current_nexus_generation_known: false,
                 },
             );
             return Ok(false);
@@ -2273,14 +2276,14 @@ impl<'a> Planner<'a> {
         // has occurred.
         //
         // That only happens when the current generation of Nexus (the
-        // one running right now) is greater than the zone we're
+        // one running right now) does not match the zone we're
         // considering expunging.
-        if current_gen <= zone_nexus_generation {
+        if current_gen == zone_nexus_generation {
             report.waiting_zone(
                 zone,
                 Nexus {
                     zone_generation: zone_nexus_generation,
-                    current_nexus_generation: Some(current_gen),
+                    current_nexus_generation_known: true,
                 },
             );
             return Ok(false);
