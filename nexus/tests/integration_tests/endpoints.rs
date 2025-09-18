@@ -688,9 +688,9 @@ pub static DEMO_STOPPED_INSTANCE_CREATE: LazyLock<params::InstanceCreate> =
     });
 pub static DEMO_INSTANCE_UPDATE: LazyLock<params::InstanceUpdate> =
     LazyLock::new(|| params::InstanceUpdate {
-        boot_disk: None,
-        cpu_platform: None,
-        auto_restart_policy: None,
+        boot_disk: Nullable(None),
+        cpu_platform: Nullable(None),
+        auto_restart_policy: Nullable(None),
         ncpus: InstanceCpuCount(1),
         memory: ByteCount::from_gibibytes_u32(16),
     });
