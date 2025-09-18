@@ -527,17 +527,30 @@ impl Node {
             return;
         }
 
-        // We may have already advanced by the time we receive this message.
-        // Let's check.
-        if ctx.persistent_state().commits.contains(&config.epoch) {
-            info!(
-                self.log,
-                "Received {op}, but already committed";
-                "from" => %from,
-                "epoch" => %config.epoch
-            );
-            return;
+        if let Some(latest_committed_epoch) =
+            ctx.persistent_state().latest_committed_epoch()
+        {
+            if latest_committed_epoch > config.epoch {
+                info!(
+                    self.log,
+                    "Received {op}, but already committed at later epoch";
+                    "from" => %from,
+                    "epoch" => %config.epoch,
+                    "latest_committed_epoch" => %latest_committed_epoch
+                );
+                return;
+            } else if latest_committed_epoch == config.epoch {
+                info!(
+                    self.log,
+                    "Received {op}, but already committed";
+                    "from" => %from,
+                    "epoch" => %config.epoch
+                );
+                return;
+            }
         }
+
+        let mut just_committed = false;
         if ctx.persistent_state().has_prepared(config.epoch) {
             // Go ahead and commit
             info!(
@@ -547,31 +560,35 @@ impl Node {
                 "epoch" => %config.epoch
             );
             ctx.update_persistent_state(|ps| ps.commits.insert(config.epoch));
-        }
-        // Do we have the configuration in our persistent state? If not save it.
-        else if let Some(existing) =
-            ctx.persistent_state().configuration(config.epoch)
-        {
-            if existing != &config {
-                error!(
-                    self.log,
-                    "Received a configuration mismatch";
-                    "from" => %from,
-                    "existing_config" => #?existing,
-                    "received_config" => #?config
-                );
-                ctx.raise_alarm(Alarm::MismatchedConfigurations {
-                    config1: (*existing).clone(),
-                    config2: config.clone(),
-                    from: from.to_string(),
-                });
-                return;
-            }
+            just_committed = true;
         } else {
-            ctx.update_persistent_state(|ps| {
-                ps.configs.insert_unique(config.clone()).expect("new config");
-                true
-            });
+            // Do we have the configuration in our persistent state? If not save it.
+            if let Some(existing) =
+                ctx.persistent_state().configuration(config.epoch)
+            {
+                if existing != &config {
+                    error!(
+                        self.log,
+                        "Received a configuration mismatch";
+                        "from" => %from,
+                        "existing_config" => #?existing,
+                        "received_config" => #?config
+                    );
+                    ctx.raise_alarm(Alarm::MismatchedConfigurations {
+                        config1: (*existing).clone(),
+                        config2: config.clone(),
+                        from: from.to_string(),
+                    });
+                    return;
+                }
+            } else {
+                ctx.update_persistent_state(|ps| {
+                    ps.configs
+                        .insert_unique(config.clone())
+                        .expect("new config");
+                    true
+                });
+            }
         }
 
         if let Some(cs) = &self.coordinator_state {
@@ -587,13 +604,12 @@ impl Node {
                     "received_epoch" => %config.epoch
                 );
                 self.coordinator_state = None;
-                // Intentionally fall through
             } else if coordinating_epoch == config.epoch {
                 // We want to cancel coordination here as well. Nexus has
                 // informed the sending node of the commit (or it learned from
-                // another node), and it will eventually inform us. But since
-                // we have committed by updating the persistent state above, the
-                // message from nexus will be a no-op.
+                // another node), and Nexus will eventually inform us. But since
+                // we have committed above by updating the persistent state, the
+                // message from Nexus will be a no-op.
                 info!(
                     self.log,
                     "Received {op} while coordinating for same epoch. \
@@ -602,8 +618,8 @@ impl Node {
                     "epoch" => %config.epoch
                 );
                 self.coordinator_state = None;
-                return;
             } else {
+                // We are coordinating for a later epoch. Continue to do so.
                 info!(
                     self.log,
                     "Received {op} for stale epoch while coordinating";
@@ -611,7 +627,6 @@ impl Node {
                     "received_epoch" => %config.epoch,
                     "coordinating_epoch" => %coordinating_epoch
                 );
-                return;
             }
         }
 
@@ -637,6 +652,9 @@ impl Node {
                     "from" => %from,
                     "epoch" => %config.epoch
                 );
+                if just_committed {
+                    self.key_share_computer = None;
+                }
                 return;
             } else {
                 info!(
@@ -646,14 +664,16 @@ impl Node {
                     "epoch" => %ksc.config().epoch,
                     "received_epoch" => %config.epoch
                 );
+                self.key_share_computer = None;
                 // Intentionally fall through
             }
         }
 
-        // We either were collecting shares for an old epoch or haven't started
-        // yet.
-        self.key_share_computer =
-            Some(KeyShareComputer::new(&self.log, ctx, config));
+        // We need to compute our key share for this epoch if we have gotten here and not committed.
+        if !just_committed {
+            self.key_share_computer =
+                Some(KeyShareComputer::new(&self.log, ctx, config));
+        }
     }
 
     fn handle_get_share(
