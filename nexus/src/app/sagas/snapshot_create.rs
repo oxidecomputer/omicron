@@ -629,7 +629,9 @@ async fn ssc_create_destination_volume_record_undo(
     // resources. It's safe here to perform a volume hard delete without
     // decreasing the crucible resource count because the destination volume is
     // guaranteed to never have read only resources that require that
-    // accounting.
+    // accounting. This is the same reason that volume resource usage records
+    // are not created for the destination volume (they're only created for
+    // read-only resources!)
 
     info!(log, "hard deleting volume {}", destination_volume_id);
 
