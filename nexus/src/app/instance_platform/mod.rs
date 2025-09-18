@@ -67,6 +67,9 @@
 //! backends, this is easily done by using component IDs as backend names, as
 //! described above.
 
+// CPU platforms are broken out only because they're wordy.
+mod cpu_platform;
+
 use std::collections::{BTreeMap, HashMap};
 
 use crate::app::instance::InstanceRegisterReason;
@@ -78,9 +81,10 @@ use omicron_common::api::external::Error;
 use omicron_common::api::internal::shared::NetworkInterface;
 use sled_agent_client::types::{
     BlobStorageBackend, Board, BootOrderEntry, BootSettings, Chipset,
-    ComponentV0, CrucibleStorageBackend, I440Fx, InstanceSpecV0, NvmeDisk,
-    PciPath, QemuPvpanic, SerialPort, SerialPortNumber, SpecKey, VirtioDisk,
-    VirtioNetworkBackend, VirtioNic, VmmSpec,
+    ComponentV0, Cpuid, CpuidVendor, CrucibleStorageBackend, I440Fx,
+    InstanceSpecV0, NvmeDisk, PciPath, QemuPvpanic, SerialPort,
+    SerialPortNumber, SpecKey, VirtioDisk, VirtioNetworkBackend, VirtioNic,
+    VmmSpec,
 };
 use uuid::Uuid;
 
@@ -406,6 +410,7 @@ impl super::Nexus {
         &self,
         reason: &InstanceRegisterReason,
         instance: &db::model::Instance,
+        vmm: &db::model::Vmm,
         disks: &[db::model::Disk],
         nics: &[NetworkInterface],
         ssh_keys: &[db::model::SshKey],
@@ -481,7 +486,7 @@ impl super::Nexus {
         let spec = InstanceSpecV0 {
             board: Board {
                 chipset: Chipset::I440Fx(I440Fx { enable_pcie: false }),
-                cpuid: None,
+                cpuid: cpuid_from_vmm_cpu_platform(vmm.cpu_platform),
                 cpus,
                 guest_hv_interface: None,
                 memory_mb: instance.memory.to_whole_mebibytes(),
@@ -491,4 +496,27 @@ impl super::Nexus {
 
         Ok(VmmSpec(spec))
     }
+}
+
+/// Yields the CPUID configuration to use for a VMM that specifies the supplied
+/// CPU `platform`.
+//
+// This is a free function (and not an `Into` impl on `VmmCpuPlatform`) to keep
+// all of the gnarly CPUID details out of the DB model crate, which defines that
+// type.
+fn cpuid_from_vmm_cpu_platform(
+    platform: db::model::VmmCpuPlatform,
+) -> Option<Cpuid> {
+    let cpuid = match platform {
+        db::model::VmmCpuPlatform::SledDefault => return None,
+        db::model::VmmCpuPlatform::AmdMilan
+        | db::model::VmmCpuPlatform::AmdTurin => Cpuid {
+            entries: cpu_platform::dump_to_cpuid_entries(
+                cpu_platform::milan_rfd314(),
+            ),
+            vendor: CpuidVendor::Amd,
+        },
+    };
+
+    Some(cpuid)
 }

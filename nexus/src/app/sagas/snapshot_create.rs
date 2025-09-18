@@ -2169,6 +2169,7 @@ mod test {
                 network_interfaces:
                     params::InstanceNetworkInterfaceAttachment::None,
                 boot_disk,
+                cpu_platform: None,
                 disks: data_disks,
                 external_ips: vec![],
                 start: true,
