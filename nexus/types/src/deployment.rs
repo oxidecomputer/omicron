@@ -441,24 +441,17 @@ impl Blueprint {
         nexus_zones: &BTreeSet<OmicronZoneUuid>,
     ) -> Result<Option<Generation>, anyhow::Error> {
         let mut gen = None;
-        for (_, blueprint_zone) in
-            self.all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+        for (_, zone, nexus_zone) in
+            self.all_nexus_zones(BlueprintZoneDisposition::is_in_service)
         {
-            if nexus_zones.contains(&blueprint_zone.id) {
-                match &blueprint_zone.zone_type {
-                    BlueprintZoneType::Nexus(nexus_zone) => {
-                        let found_gen = nexus_zone.nexus_generation;
-                        if let Some(gen) = gen {
-                            if found_gen != gen {
-                                bail!(
-                                    "Multiple generations found for these zones"
-                                );
-                            }
-                        }
-                        gen = Some(found_gen);
+            if nexus_zones.contains(&zone.id) {
+                let found_gen = nexus_zone.nexus_generation;
+                if let Some(gen) = gen {
+                    if found_gen != gen {
+                        bail!("Multiple generations found for these zones");
                     }
-                    _ => (),
                 }
+                gen = Some(found_gen);
             }
         }
 

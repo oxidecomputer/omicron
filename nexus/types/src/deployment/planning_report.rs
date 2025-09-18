@@ -1040,6 +1040,8 @@ impl ZoneUpdatesWaitingOn {
     }
 }
 
+/// Zones which should not be shut down, because their lack of availability
+/// could be problematic for the successful functioning of the deployed system.
 #[derive(
     Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Diffable, JsonSchema,
 )]
@@ -1066,6 +1068,10 @@ impl fmt::Display for ZoneUnsafeToShutdown {
     }
 }
 
+/// Out-of-date zones which are not yet ready to be expunged.
+///
+/// For example, out-of-date Nexus zones should not be expunged until
+/// handoff has completed.
 #[derive(
     Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Diffable, JsonSchema,
 )]
@@ -1155,26 +1161,35 @@ impl fmt::Display for PlanningNexusGenerationBumpReport {
 )]
 #[serde(rename_all = "snake_case", tag = "type")]
 pub enum NexusGenerationBumpWaitingOn {
-    /// Waiting for non-Nexus zones to finish updating
-    NonNexusZoneUpdate,
+    /// Waiting for the planner to finish updating all non-Nexus zones
+    FoundOldNonNexusZones,
 
-    /// Waiting for enough new Nexus zones to appear
-    NewNexusBringup,
+    /// Waiting for the planner to deploy new-generation Nexus zones
+    MissingNewNexusInBlueprint,
 
-    /// Waiting for Nexus database records to get populated
-    NexusDatabasePropagation,
+    /// Waiting for `db_metadata_nexus` records to be deployed for
+    /// new-generation Nexus zones
+    MissingNexusDatabaseAccessRecords,
 
-    /// Waiting for zones to propagate to inventory
-    ZonePropagation,
+    /// Waiting for newly deployed Nexus zones to appear to inventory
+    MissingNewNexusInInventory,
 }
 
 impl NexusGenerationBumpWaitingOn {
     pub fn as_str(&self) -> &'static str {
         match self {
-            Self::NonNexusZoneUpdate => "pending non-nexus zone updates",
-            Self::NewNexusBringup => "waiting for new nexus zones",
-            Self::NexusDatabasePropagation => "pending database records",
-            Self::ZonePropagation => "pending zone reconciliation",
+            Self::FoundOldNonNexusZones => {
+                "some non-Nexus zone are not yet updated"
+            }
+            Self::MissingNewNexusInBlueprint => {
+                "new Nexus zones have not been planned yet"
+            }
+            Self::MissingNexusDatabaseAccessRecords => {
+                "new Nexus zones do not have database records yet"
+            }
+            Self::MissingNewNexusInInventory => {
+                "new Nexus zones are not in inventory yet"
+            }
         }
     }
 }

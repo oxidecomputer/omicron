@@ -114,7 +114,8 @@ const NUM_CONCURRENT_MGS_UPDATES: usize = 1;
 /// A receipt that `check_input_validity` has been run prior to planning.
 struct InputChecked;
 
-// Details of why a zone has not yet propagated from blueprint to sled inventory
+// Details of how a zone's status differs between the blueprint and the sled
+// inventory
 #[derive(Debug)]
 #[expect(dead_code)]
 struct ZonePropagationIncomplete<'a> {
@@ -1034,11 +1035,8 @@ impl<'a> Planner<'a> {
                         new_repo.zone_image_source(zone_kind.into())?;
 
                     let mut images = vec![];
-                    let Some(nexus_in_charge_image) =
-                        self.lookup_current_nexus_image()
-                    else {
-                        return Err(Error::NoActiveNexusZonesInParentBlueprint);
-                    };
+                    let nexus_in_charge_image =
+                        self.lookup_current_nexus_image()?;
 
                     let all_non_nexus_zones_updated =
                         report.discretionary_zones_placed.is_empty()
@@ -1052,8 +1050,8 @@ impl<'a> Planner<'a> {
                     // redundancy before the handoff completes.
                     images.push(nexus_in_charge_image);
 
-                    // If all other zones are using their new images, boot
-                    // ensure we start Nexus zones from their new image.
+                    // If all other zones are using their new images, ensure we
+                    // start Nexus zones from their new image.
                     //
                     // NOTE: Checking `all_non_nexus_zones_updated` shouldn't be
                     // strictly necessary! It should be fine to launch the new
@@ -1594,7 +1592,7 @@ impl<'a> Planner<'a> {
         let nexus_updateable_zones = nexus_updateable_zones
             .into_iter()
             .filter_map(|(sled, zone, image)| {
-                match self.should_nexus_zone_be_updated(&zone, &mut report) {
+                match self.should_nexus_zone_be_expunged(&zone, &mut report) {
                     Ok(true) => Some(Ok((sled, zone, image))),
                     Ok(false) => None,
                     Err(err) => Some(Err(err)),
@@ -1982,7 +1980,7 @@ impl<'a> Planner<'a> {
         // sleds have an image source consistent with `new_repo`.
         if !self.all_non_nexus_zones_using_new_image()? {
             report.set_waiting_on(
-                NexusGenerationBumpWaitingOn::NonNexusZoneUpdate,
+                NexusGenerationBumpWaitingOn::FoundOldNonNexusZones,
             );
             return Ok(report);
         }
@@ -2036,8 +2034,9 @@ impl<'a> Planner<'a> {
             // could be a dangerous operation. Blueprint execution should be
             // able to continue even if the new Nexuses haven't started, but to
             // be conservative, we'll wait for the target count.
-            report
-                .set_waiting_on(NexusGenerationBumpWaitingOn::NewNexusBringup);
+            report.set_waiting_on(
+                NexusGenerationBumpWaitingOn::MissingNewNexusInBlueprint,
+            );
             return Ok(report);
         }
 
@@ -2046,7 +2045,7 @@ impl<'a> Planner<'a> {
             // them have records yet. Blueprint execution should fix this, by
             // creating these records.
             report.set_waiting_on(
-                NexusGenerationBumpWaitingOn::NexusDatabasePropagation,
+                NexusGenerationBumpWaitingOn::MissingNexusDatabaseAccessRecords,
             );
             return Ok(report);
         }
@@ -2059,8 +2058,9 @@ impl<'a> Planner<'a> {
                 self.log, "some zones not yet up-to-date";
                 "zones_currently_updating" => ?zones_currently_updating,
             );
-            report
-                .set_waiting_on(NexusGenerationBumpWaitingOn::ZonePropagation);
+            report.set_waiting_on(
+                NexusGenerationBumpWaitingOn::MissingNewNexusInInventory,
+            );
             return Ok(report);
         }
 
@@ -2207,11 +2207,7 @@ impl<'a> Planner<'a> {
         // We return false for all zone kinds if there are still
         // pending updates for components earlier in the update ordering
         // than zones: RoT bootloader / RoT / SP / Host OS.
-        if !mgs_updates.is_empty() {
-            return false;
-        }
-
-        true
+        mgs_updates.is_empty()
     }
 
     fn all_non_nexus_zones_using_new_image(&self) -> Result<bool, Error> {
@@ -2232,9 +2228,12 @@ impl<'a> Planner<'a> {
         return Ok(true);
     }
 
-    fn lookup_current_nexus_image(&self) -> Option<BlueprintZoneImageSource> {
+    fn lookup_current_nexus_image(
+        &self,
+    ) -> Result<BlueprintZoneImageSource, Error> {
         // Look up the active Nexus zone in the blueprint to get its image
-        self.blueprint
+        if let Some(image) = self
+            .blueprint
             .parent_blueprint()
             .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
             .find_map(|(_, blueprint_zone)| {
@@ -2245,6 +2244,11 @@ impl<'a> Planner<'a> {
                     None
                 }
             })
+        {
+            Ok(image)
+        } else {
+            Err(Error::NoActiveNexusZonesInParentBlueprint)
+        }
     }
 
     fn lookup_current_nexus_generation(
@@ -2266,14 +2270,16 @@ impl<'a> Planner<'a> {
     // identify why it is not ready for update.
     //
     // Precondition: zone must be a Nexus zone
-    fn should_nexus_zone_be_updated(
+    fn should_nexus_zone_be_expunged(
         &self,
         zone: &BlueprintZoneConfig,
         report: &mut PlanningZoneUpdatesStepReport,
     ) -> Result<bool, Error> {
         let zone_nexus_generation = match &zone.zone_type {
-            // For Nexus, we need to confirm that the active generation has
-            // moved beyond this zone.
+            // For Nexus, we're only ready to "update" this zone once control
+            // has been handed off to a newer generation of Nexus zones.  (Once
+            // that happens, we're not really going to update this zone, just
+            // expunge it.)
             BlueprintZoneType::Nexus(nexus_zone) => {
                 // Get the nexus_generation of the zone being considered for shutdown
                 nexus_zone.nexus_generation
@@ -8062,7 +8068,7 @@ pub(crate) mod test {
                 matches!(
                     new_bp.report.nexus_generation_bump,
                     PlanningNexusGenerationBumpReport::WaitingOn(
-                        NexusGenerationBumpWaitingOn::NexusDatabasePropagation
+                        NexusGenerationBumpWaitingOn::MissingNexusDatabaseAccessRecords
                     ),
                 ),
                 "Unexpected Nexus Generation report: {:?}",
@@ -8165,7 +8171,7 @@ pub(crate) mod test {
                 matches!(
                     new_bp.report.nexus_generation_bump,
                     PlanningNexusGenerationBumpReport::WaitingOn(
-                        NexusGenerationBumpWaitingOn::NonNexusZoneUpdate
+                        NexusGenerationBumpWaitingOn::FoundOldNonNexusZones
                     ),
                 ),
                 "Unexpected Nexus Generation report: {:?}",
@@ -8216,7 +8222,7 @@ pub(crate) mod test {
                 matches!(
                     new_bp.report.nexus_generation_bump,
                     PlanningNexusGenerationBumpReport::WaitingOn(
-                        NexusGenerationBumpWaitingOn::NexusDatabasePropagation
+                        NexusGenerationBumpWaitingOn::MissingNexusDatabaseAccessRecords
                     ),
                 ),
                 "Unexpected Nexus Generation report: {:?}",
@@ -8271,7 +8277,7 @@ pub(crate) mod test {
                 matches!(
                     new_bp.report.nexus_generation_bump,
                     PlanningNexusGenerationBumpReport::WaitingOn(
-                        NexusGenerationBumpWaitingOn::ZonePropagation
+                        NexusGenerationBumpWaitingOn::MissingNewNexusInInventory
                     ),
                 ),
                 "Unexpected Nexus Generation report: {:?}",
@@ -8306,7 +8312,7 @@ pub(crate) mod test {
                 matches!(
                     new_bp.report.nexus_generation_bump,
                     PlanningNexusGenerationBumpReport::WaitingOn(
-                        NexusGenerationBumpWaitingOn::NexusDatabasePropagation
+                        NexusGenerationBumpWaitingOn::MissingNexusDatabaseAccessRecords
                     ),
                 ),
                 "Unexpected Nexus Generation report: {:?}",
@@ -8351,6 +8357,7 @@ pub(crate) mod test {
             old_generation,
         );
         let new_bp = bp_generator.plan_new_blueprint("dont-expunge-yet");
+        bp_generator.assert_child_bp_makes_no_changes(&new_bp);
         // We should be able to see all three old Neuxs zones refusing to shut
         // down in the planning report.
         let waiting_zones = &new_bp.report.zone_updates.waiting_zones;

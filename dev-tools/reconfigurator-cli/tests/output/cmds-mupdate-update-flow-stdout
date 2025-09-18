@@ -508,7 +508,7 @@ planning report for blueprint a5a8f242-ffa5-473c-8efd-2acf2dc0b736:
   - sleds have remove mupdate override set in blueprint: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, d81c6a84-79b8-4958-ae41-ea46c9b19763
   - sleds have mupdate override errors: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
 * zone updates waiting on zone add blockers
-* waiting to update top-level nexus_generation: pending non-nexus zone updates
+* waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
 
@@ -780,7 +780,7 @@ planning report for blueprint 626487fa-7139-45ec-8416-902271fc730b:
   - sleds have remove mupdate override set in blueprint: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, d81c6a84-79b8-4958-ae41-ea46c9b19763
   - sleds have mupdate override errors: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
 * zone updates waiting on zone add blockers
-* waiting to update top-level nexus_generation: pending non-nexus zone updates
+* waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
 > blueprint-diff latest
@@ -905,7 +905,7 @@ planning report for blueprint c1a0d242-9160-40f4-96ae-61f8f40a0b1b:
   - sleds have remove mupdate override set in blueprint: d81c6a84-79b8-4958-ae41-ea46c9b19763
   - sleds have mupdate override errors: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
 * zone updates waiting on zone add blockers
-* waiting to update top-level nexus_generation: pending non-nexus zone updates
+* waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
 
@@ -1091,7 +1091,7 @@ planning report for blueprint afb09faf-a586-4483-9289-04d4f1d8ba23:
   - current target release generation (3) is lower than minimum required by blueprint (4)
   - sleds have mupdate override errors: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
 * zone updates waiting on zone add blockers
-* waiting to update top-level nexus_generation: pending non-nexus zone updates
+* waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
 > blueprint-show latest
@@ -1267,7 +1267,7 @@ planning report for blueprint afb09faf-a586-4483-9289-04d4f1d8ba23:
   - current target release generation (3) is lower than minimum required by blueprint (4)
   - sleds have mupdate override errors: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
 * zone updates waiting on zone add blockers
-* waiting to update top-level nexus_generation: pending non-nexus zone updates
+* waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
 
@@ -1406,7 +1406,7 @@ planning report for blueprint ce365dff-2cdb-4f35-a186-b15e20e1e700:
 * zone adds and updates are blocked:
   - sleds have mupdate override errors: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
 * zone updates waiting on zone add blockers
-* waiting to update top-level nexus_generation: pending non-nexus zone updates
+* waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
 > blueprint-show latest
@@ -1582,7 +1582,7 @@ planning report for blueprint ce365dff-2cdb-4f35-a186-b15e20e1e700:
 * zone adds and updates are blocked:
   - sleds have mupdate override errors: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
 * zone updates waiting on zone add blockers
-* waiting to update top-level nexus_generation: pending non-nexus zone updates
+* waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
 
@@ -1700,7 +1700,7 @@ planning report for blueprint 8f2d1f39-7c88-4701-aa43-56bf281b28c1:
   * model0:serial0: RotBootloader(PendingMgsUpdateRotBootloaderDetails { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: NoValidVersion })
 * only placed 0/2 desired nexus zones
 * zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
-* waiting to update top-level nexus_generation: pending non-nexus zone updates
+* waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
 > blueprint-show latest
@@ -1882,7 +1882,7 @@ planning report for blueprint 8f2d1f39-7c88-4701-aa43-56bf281b28c1:
   * model0:serial0: RotBootloader(PendingMgsUpdateRotBootloaderDetails { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: NoValidVersion })
 * only placed 0/2 desired nexus zones
 * zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
-* waiting to update top-level nexus_generation: pending non-nexus zone updates
+* waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
 
@@ -2008,7 +2008,7 @@ planning report for blueprint 12d602a6-5ab4-487a-b94e-eb30cdf30300:
 * noop converting host phase 2 slot B to Artifact on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
 * noop converting host phase 2 slot B to Artifact on sled d81c6a84-79b8-4958-ae41-ea46c9b19763
 * only placed 0/2 desired nexus zones
-* waiting to update top-level nexus_generation: pending non-nexus zone updates
+* waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
 > blueprint-diff latest
@@ -2246,7 +2246,7 @@ planning report for blueprint 61a93ea3-c872-48e0-aace-e86b0c52b839:
   - current target release generation (4) is lower than minimum required by blueprint (5)
   - sleds have remove mupdate override set in blueprint: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
 * zone updates waiting on zone add blockers
-* waiting to update top-level nexus_generation: pending non-nexus zone updates
+* waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
 > blueprint-diff latest
@@ -2378,7 +2378,7 @@ planner config:
 * missing NTP zone on sled c3bc4c6d-fdde-4fc4-8493-89d2a1e5ee6b
 * only placed 0/1 desired nexus zones
 * zone updates waiting on zone add blockers
-* waiting to update top-level nexus_generation: pending non-nexus zone updates
+* waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
 > blueprint-diff latest

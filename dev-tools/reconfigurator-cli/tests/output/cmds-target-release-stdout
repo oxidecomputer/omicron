@@ -219,7 +219,7 @@ planning report for blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1:
 * 1 pending MGS update:
   * model0:serial0: RotBootloader(PendingMgsUpdateRotBootloaderDetails { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: NoValidVersion })
 * zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
-* waiting to update top-level nexus_generation: pending non-nexus zone updates
+* waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
 > blueprint-diff latest
@@ -278,7 +278,7 @@ planning report for blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4:
 * 1 pending MGS update:
   * model0:serial0: RotBootloader(PendingMgsUpdateRotBootloaderDetails { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: NoValidVersion })
 * zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
-* waiting to update top-level nexus_generation: pending non-nexus zone updates
+* waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
 > blueprint-diff latest
@@ -339,7 +339,7 @@ planning report for blueprint af934083-59b5-4bf6-8966-6fb5292c29e1:
 * 1 pending MGS update:
   * model0:serial0: Rot(PendingMgsUpdateRotDetails { expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: NoValidVersion, expected_persistent_boot_preference: A, expected_pending_persistent_boot_preference: None, expected_transient_boot_preference: None })
 * zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
-* waiting to update top-level nexus_generation: pending non-nexus zone updates
+* waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
 > blueprint-diff latest
@@ -409,7 +409,7 @@ planning report for blueprint df06bb57-ad42-4431-9206-abff322896c7:
 * 1 pending MGS update:
   * model0:serial0: Sp(PendingMgsUpdateSpDetails { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: NoValidVersion })
 * zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
-* waiting to update top-level nexus_generation: pending non-nexus zone updates
+* waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
 > blueprint-diff latest
@@ -480,7 +480,7 @@ planning report for blueprint 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba:
 * 1 pending MGS update:
   * model0:serial0: HostPhase1(PendingMgsUpdateHostPhase1Details { expected_active_phase_1_slot: A, expected_boot_disk: A, expected_active_phase_1_hash: ArtifactHash("0101010101010101010101010101010101010101010101010101010101010101"), expected_active_phase_2_hash: ArtifactHash("0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a"), expected_inactive_phase_1_hash: ArtifactHash("0202020202020202020202020202020202020202020202020202020202020202"), expected_inactive_phase_2_hash: ArtifactHash("f3dd0c7a1bd4500ea0d8bcf67581f576d47752b2f1998a4cb0f0c3155c483008"), sled_agent_address: [fd00:1122:3344:101::1]:12345 })
 * zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
-* waiting to update top-level nexus_generation: pending non-nexus zone updates
+* waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
 > blueprint-diff latest
@@ -600,7 +600,7 @@ planning report for blueprint 9034c710-3e57-45f3-99e5-4316145e87ac:
 * 1 pending MGS update:
   * model0:serial0: HostPhase1(PendingMgsUpdateHostPhase1Details { expected_active_phase_1_slot: A, expected_boot_disk: A, expected_active_phase_1_hash: ArtifactHash("0101010101010101010101010101010101010101010101010101010101010101"), expected_active_phase_2_hash: ArtifactHash("0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a"), expected_inactive_phase_1_hash: ArtifactHash("0202020202020202020202020202020202020202020202020202020202020202"), expected_inactive_phase_2_hash: ArtifactHash("f3dd0c7a1bd4500ea0d8bcf67581f576d47752b2f1998a4cb0f0c3155c483008"), sled_agent_address: [fd00:1122:3344:101::1]:12345 })
 * zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
-* waiting to update top-level nexus_generation: pending non-nexus zone updates
+* waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
 > blueprint-diff latest
@@ -660,7 +660,7 @@ planning report for blueprint d60afc57-f15d-476c-bd0f-b1071e2bb976:
 * 1 pending MGS update:
   * model0:serial0: HostPhase1(PendingMgsUpdateHostPhase1Details { expected_active_phase_1_slot: A, expected_boot_disk: A, expected_active_phase_1_hash: ArtifactHash("0101010101010101010101010101010101010101010101010101010101010101"), expected_active_phase_2_hash: ArtifactHash("0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a"), expected_inactive_phase_1_hash: ArtifactHash("0202020202020202020202020202020202020202020202020202020202020202"), expected_inactive_phase_2_hash: ArtifactHash("f3dd0c7a1bd4500ea0d8bcf67581f576d47752b2f1998a4cb0f0c3155c483008"), sled_agent_address: [fd00:1122:3344:101::1]:12345 })
 * zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
-* waiting to update top-level nexus_generation: pending non-nexus zone updates
+* waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
 > blueprint-diff latest
@@ -719,7 +719,7 @@ planning report for blueprint a5a8f242-ffa5-473c-8efd-2acf2dc0b736:
 * 1 pending MGS update:
   * model0:serial0: HostPhase1(PendingMgsUpdateHostPhase1Details { expected_active_phase_1_slot: A, expected_boot_disk: A, expected_active_phase_1_hash: ArtifactHash("0101010101010101010101010101010101010101010101010101010101010101"), expected_active_phase_2_hash: ArtifactHash("0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a"), expected_inactive_phase_1_hash: ArtifactHash("0202020202020202020202020202020202020202020202020202020202020202"), expected_inactive_phase_2_hash: ArtifactHash("f3dd0c7a1bd4500ea0d8bcf67581f576d47752b2f1998a4cb0f0c3155c483008"), sled_agent_address: [fd00:1122:3344:101::1]:12345 })
 * zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
-* waiting to update top-level nexus_generation: pending non-nexus zone updates
+* waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
 > blueprint-diff latest
@@ -780,7 +780,7 @@ planning report for blueprint 626487fa-7139-45ec-8416-902271fc730b:
 * 1 pending MGS update:
   * model1:serial1: RotBootloader(PendingMgsUpdateRotBootloaderDetails { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: NoValidVersion })
 * zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
-* waiting to update top-level nexus_generation: pending non-nexus zone updates
+* waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
 > blueprint-diff latest
@@ -852,7 +852,7 @@ planning report for blueprint c1a0d242-9160-40f4-96ae-61f8f40a0b1b:
 * 1 pending MGS update:
   * model1:serial1: RotBootloader(PendingMgsUpdateRotBootloaderDetails { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: Version(ArtifactVersion("0.5.0")) })
 * zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
-* waiting to update top-level nexus_generation: pending non-nexus zone updates
+* waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
 > blueprint-diff latest
@@ -919,7 +919,7 @@ planning report for blueprint afb09faf-a586-4483-9289-04d4f1d8ba23:
 * 1 pending MGS update:
   * model1:serial1: Rot(PendingMgsUpdateRotDetails { expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: NoValidVersion, expected_persistent_boot_preference: A, expected_pending_persistent_boot_preference: None, expected_transient_boot_preference: None })
 * zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
-* waiting to update top-level nexus_generation: pending non-nexus zone updates
+* waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
 > blueprint-diff latest
@@ -990,7 +990,7 @@ planning report for blueprint ce365dff-2cdb-4f35-a186-b15e20e1e700:
 * 1 pending MGS update:
   * model1:serial1: Rot(PendingMgsUpdateRotDetails { expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: Version(ArtifactVersion("0.5.0")), expected_persistent_boot_preference: A, expected_pending_persistent_boot_preference: None, expected_transient_boot_preference: None })
 * zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
-* waiting to update top-level nexus_generation: pending non-nexus zone updates
+* waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
 > blueprint-diff latest
@@ -1057,7 +1057,7 @@ planning report for blueprint 8f2d1f39-7c88-4701-aa43-56bf281b28c1:
 * 1 pending MGS update:
   * model1:serial1: Sp(PendingMgsUpdateSpDetails { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: NoValidVersion })
 * zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
-* waiting to update top-level nexus_generation: pending non-nexus zone updates
+* waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
 > blueprint-diff latest
@@ -1127,7 +1127,7 @@ planning report for blueprint 12d602a6-5ab4-487a-b94e-eb30cdf30300:
 * 1 pending MGS update:
   * model1:serial1: Sp(PendingMgsUpdateSpDetails { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: Version(ArtifactVersion("0.5.0")) })
 * zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
-* waiting to update top-level nexus_generation: pending non-nexus zone updates
+* waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
 > blueprint-diff latest
@@ -1195,7 +1195,7 @@ planning report for blueprint 61a93ea3-c872-48e0-aace-e86b0c52b839:
 * 1 pending MGS update:
   * model1:serial1: HostPhase1(PendingMgsUpdateHostPhase1Details { expected_active_phase_1_slot: A, expected_boot_disk: A, expected_active_phase_1_hash: ArtifactHash("0101010101010101010101010101010101010101010101010101010101010101"), expected_active_phase_2_hash: ArtifactHash("0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a"), expected_inactive_phase_1_hash: ArtifactHash("0202020202020202020202020202020202020202020202020202020202020202"), expected_inactive_phase_2_hash: ArtifactHash("f3dd0c7a1bd4500ea0d8bcf67581f576d47752b2f1998a4cb0f0c3155c483008"), sled_agent_address: [fd00:1122:3344:102::1]:12345 })
 * zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
-* waiting to update top-level nexus_generation: pending non-nexus zone updates
+* waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
 > blueprint-diff latest
@@ -1330,7 +1330,7 @@ planning report for blueprint 27e755bc-dc10-4647-853c-f89bb3a15a2c:
 * 1 pending MGS update:
   * model1:serial1: HostPhase1(PendingMgsUpdateHostPhase1Details { expected_active_phase_1_slot: A, expected_boot_disk: A, expected_active_phase_1_hash: ArtifactHash("0101010101010101010101010101010101010101010101010101010101010101"), expected_active_phase_2_hash: ArtifactHash("0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a"), expected_inactive_phase_1_hash: ArtifactHash("ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"), expected_inactive_phase_2_hash: ArtifactHash("f3dd0c7a1bd4500ea0d8bcf67581f576d47752b2f1998a4cb0f0c3155c483008"), sled_agent_address: [fd00:1122:3344:102::1]:12345 })
 * zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
-* waiting to update top-level nexus_generation: pending non-nexus zone updates
+* waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
 > blueprint-diff latest
@@ -1403,7 +1403,7 @@ planning report for blueprint 9f89efdf-a23e-4137-b7cc-79f4a91cbe1f:
 * 1 pending MGS update:
   * model2:serial2: RotBootloader(PendingMgsUpdateRotBootloaderDetails { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: NoValidVersion })
 * zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
-* waiting to update top-level nexus_generation: pending non-nexus zone updates
+* waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
 > blueprint-diff latest
@@ -1469,7 +1469,7 @@ planning report for blueprint 9a9e6c32-5a84-4020-a159-33dceff18d35:
 * 1 pending MGS update:
   * model2:serial2: Rot(PendingMgsUpdateRotDetails { expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: NoValidVersion, expected_persistent_boot_preference: A, expected_pending_persistent_boot_preference: None, expected_transient_boot_preference: None })
 * zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
-* waiting to update top-level nexus_generation: pending non-nexus zone updates
+* waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
 > blueprint-diff latest
@@ -1539,7 +1539,7 @@ planning report for blueprint 13cfdd24-52ba-4e94-8c83-02e3a48fc746:
 * 1 pending MGS update:
   * model2:serial2: Rot(PendingMgsUpdateRotDetails { expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: Version(ArtifactVersion("1.0.0")), expected_persistent_boot_preference: B, expected_pending_persistent_boot_preference: None, expected_transient_boot_preference: None })
 * zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
-* waiting to update top-level nexus_generation: pending non-nexus zone updates
+* waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
 > blueprint-diff latest
@@ -1611,7 +1611,7 @@ planning report for blueprint b82656b0-a9be-433d-83d0-e2bdf371777a:
 * 1 pending MGS update:
   * model2:serial2: Rot(PendingMgsUpdateRotDetails { expected_active_slot: ExpectedActiveRotSlot { slot: B, version: ArtifactVersion("1.1.0") }, expected_inactive_version: Version(ArtifactVersion("0.0.2")), expected_persistent_boot_preference: B, expected_pending_persistent_boot_preference: Some(B), expected_transient_boot_preference: None })
 * zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
-* waiting to update top-level nexus_generation: pending non-nexus zone updates
+* waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
 > blueprint-diff latest
@@ -1680,7 +1680,7 @@ planning report for blueprint 31c84831-be52-4630-bc3f-128d72cd8f22:
 * 1 pending MGS update:
   * model2:serial2: Rot(PendingMgsUpdateRotDetails { expected_active_slot: ExpectedActiveRotSlot { slot: B, version: ArtifactVersion("1.1.0") }, expected_inactive_version: Version(ArtifactVersion("0.0.2")), expected_persistent_boot_preference: B, expected_pending_persistent_boot_preference: None, expected_transient_boot_preference: Some(B) })
 * zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
-* waiting to update top-level nexus_generation: pending non-nexus zone updates
+* waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
 > blueprint-diff latest
@@ -1747,7 +1747,7 @@ planning report for blueprint 778e3f3a-58b1-4a5e-acff-d23c5d7124c2:
 * 1 pending MGS update:
   * model2:serial2: Sp(PendingMgsUpdateSpDetails { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: NoValidVersion })
 * zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
-* waiting to update top-level nexus_generation: pending non-nexus zone updates
+* waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
 > blueprint-diff latest
@@ -1813,7 +1813,7 @@ planning report for blueprint 386a7ec3-7c2e-43cf-8f00-999e91e1d5e6:
 * 1 pending MGS update:
   * model2:serial2: HostPhase1(PendingMgsUpdateHostPhase1Details { expected_active_phase_1_slot: A, expected_boot_disk: A, expected_active_phase_1_hash: ArtifactHash("0101010101010101010101010101010101010101010101010101010101010101"), expected_active_phase_2_hash: ArtifactHash("0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a"), expected_inactive_phase_1_hash: ArtifactHash("0202020202020202020202020202020202020202020202020202020202020202"), expected_inactive_phase_2_hash: ArtifactHash("f3dd0c7a1bd4500ea0d8bcf67581f576d47752b2f1998a4cb0f0c3155c483008"), sled_agent_address: [fd00:1122:3344:103::1]:12345 })
 * zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
-* waiting to update top-level nexus_generation: pending non-nexus zone updates
+* waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
 > blueprint-diff latest
@@ -1945,7 +1945,7 @@ planning report for blueprint e54a0836-53e1-4948-a3af-0b77165289b5:
 * 1 out-of-date zone updated in-place:
   * sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, zone 353b3b65-20f7-48c3-88f7-495bd5d31545 (clickhouse)
 * 25 remaining out-of-date zones
-* waiting to update top-level nexus_generation: pending non-nexus zone updates
+* waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
 > blueprint-diff latest
@@ -2074,7 +2074,7 @@ planning report for blueprint 459a45a5-616e-421f-873b-2fb08c36205c:
 * 1 out-of-date zone expunged:
   * sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, zone 62620961-fc4a-481e-968b-f5acbac0dc63 (internal_ntp)
 * 24 remaining out-of-date zones
-* waiting to update top-level nexus_generation: pending non-nexus zone updates
+* waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
 > blueprint-diff latest
@@ -2209,7 +2209,7 @@ planning report for blueprint b2295597-5788-482e-acf9-1731ec63fbd2:
 * waiting for NTP zones to appear in inventory on sleds: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
 * sleds getting NTP zones and which have other services already, making them eligible for discretionary zones: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
 * missing NTP zone on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
-* waiting to update top-level nexus_generation: pending non-nexus zone updates
+* waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
 > blueprint-diff latest
@@ -2338,7 +2338,7 @@ planning report for blueprint 6fad8fd4-e825-433f-b76d-495484e068ce:
 * 1 out-of-date zone expunged:
   * sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, zone 6c3ae381-04f7-41ea-b0ac-74db387dbc3a (external_dns)
 * 23 remaining out-of-date zones
-* waiting to update top-level nexus_generation: pending non-nexus zone updates
+* waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
 > blueprint-diff latest
@@ -2483,7 +2483,7 @@ planning report for blueprint 24b6e243-100c-428d-8ea6-35b504226f55:
 * discretionary zones placed:
   * external_dns zone on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c from source artifact: version 1.0.0
 * zone updates waiting on discretionary zones
-* waiting to update top-level nexus_generation: pending non-nexus zone updates
+* waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
 > blueprint-diff latest
@@ -2629,7 +2629,7 @@ planning report for blueprint 79fff7a2-2495-4c75-8465-4dc01bab48ce:
 * 1 out-of-date zone updated in-place:
   * sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, zone 86a22a56-0168-453d-9df1-cb2a7c64b5d3 (crucible)
 * 22 remaining out-of-date zones
-* waiting to update top-level nexus_generation: pending non-nexus zone updates
+* waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
 > blueprint-diff latest
@@ -2753,7 +2753,7 @@ planning report for blueprint 3bcc37b2-0c0b-44d0-b4ed-3bcb605e4312:
 * 1 out-of-date zone expunged:
   * sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, zone 99e2f30b-3174-40bf-a78a-90da8abba8ca (internal_dns)
 * 21 remaining out-of-date zones
-* waiting to update top-level nexus_generation: pending non-nexus zone updates
+* waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
 > blueprint-diff latest
@@ -2901,7 +2901,7 @@ planning report for blueprint 4d2eb6f3-7eb1-443a-8e76-7ecf05da2f6d:
 * discretionary zones placed:
   * internal_dns zone on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c from source artifact: version 1.0.0
 * zone updates waiting on discretionary zones
-* waiting to update top-level nexus_generation: pending non-nexus zone updates
+* waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
 > blueprint-diff latest
@@ -3050,7 +3050,7 @@ planning report for blueprint e2125c83-b255-45c9-bc9b-802cff09a812:
 * 1 out-of-date zone expunged:
   * sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, zone ad6a3a03-8d0f-4504-99a4-cbf73d69b973 (crucible_pantry)
 * 20 remaining out-of-date zones
-* waiting to update top-level nexus_generation: pending non-nexus zone updates
+* waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
 > blueprint-diff latest
@@ -3186,7 +3186,7 @@ planning report for blueprint f4a6848e-d13c-46e1-8c6a-944f886d7ba3:
 * discretionary zones placed:
   * crucible_pantry zone on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c from source artifact: version 1.0.0
 * zone updates waiting on discretionary zones
-* waiting to update top-level nexus_generation: pending non-nexus zone updates
+* waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
 > blueprint-diff latest
@@ -3323,7 +3323,7 @@ planning report for blueprint 834e4dbe-3b71-443d-bd4c-20e8253abc0c:
 * 1 out-of-date zone updated in-place:
   * sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, zone bd354eef-d8a6-4165-9124-283fb5e46d77 (crucible)
 * 19 remaining out-of-date zones
-* waiting to update top-level nexus_generation: pending non-nexus zone updates
+* waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
 > blueprint-diff latest
@@ -3452,7 +3452,7 @@ planning report for blueprint d9c5c5e3-c532-4c45-9ef5-22cb00f6a2e1:
 * 1 out-of-date zone updated in-place:
   * sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, zone e2fdefe7-95b2-4fd2-ae37-56929a06d58c (crucible)
 * 18 remaining out-of-date zones
-* waiting to update top-level nexus_generation: pending non-nexus zone updates
+* waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
 > blueprint-diff latest
@@ -3584,7 +3584,7 @@ planning report for blueprint e2deb7c0-2262-49fe-855f-4250c22afb36:
 * 1 out-of-date zone updated in-place:
   * sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, zone 058fd5f9-60a8-4e11-9302-15172782e17d (crucible)
 * 17 remaining out-of-date zones
-* waiting to update top-level nexus_generation: pending non-nexus zone updates
+* waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
 > blueprint-diff latest
@@ -3701,7 +3701,7 @@ planning report for blueprint 23ce505c-8991-44a5-8863-f2b906fba9cf:
 * 1 out-of-date zone expunged:
   * sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, zone 427ec88f-f467-42fa-9bbb-66a91a36103c (internal_dns)
 * 16 remaining out-of-date zones
-* waiting to update top-level nexus_generation: pending non-nexus zone updates
+* waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
 > blueprint-diff latest
@@ -3838,7 +3838,7 @@ planning report for blueprint c0d81ea6-909c-4efb-964e-beff67f6da0d:
 * discretionary zones placed:
   * internal_dns zone on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 from source artifact: version 1.0.0
 * zone updates waiting on discretionary zones
-* waiting to update top-level nexus_generation: pending non-nexus zone updates
+* waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
 > blueprint-diff latest
@@ -3976,7 +3976,7 @@ planning report for blueprint 60b55d33-5fec-4277-9864-935197eaead7:
 * 1 out-of-date zone updated in-place:
   * sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, zone 5199c033-4cf9-4ab6-8ae7-566bd7606363 (crucible)
 * 15 remaining out-of-date zones
-* waiting to update top-level nexus_generation: pending non-nexus zone updates
+* waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
 > blueprint-diff latest
@@ -4095,7 +4095,7 @@ planning report for blueprint aa13f40f-41ff-4b68-bee1-df2e1f805544:
 * 1 out-of-date zone expunged:
   * sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, zone 6444f8a5-6465-4f0b-a549-1993c113569c (internal_ntp)
 * 14 remaining out-of-date zones
-* waiting to update top-level nexus_generation: pending non-nexus zone updates
+* waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
 > blueprint-diff latest
@@ -4224,7 +4224,7 @@ planning report for blueprint 316ccd9e-5c53-46c3-a2e9-20c3867b7111:
 * waiting for NTP zones to appear in inventory on sleds: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
 * sleds getting NTP zones and which have other services already, making them eligible for discretionary zones: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
 * missing NTP zone on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
-* waiting to update top-level nexus_generation: pending non-nexus zone updates
+* waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
 > blueprint-diff latest
@@ -4353,7 +4353,7 @@ planning report for blueprint 02078c95-3d58-4b7b-a03f-9b160361c50a:
 * 1 out-of-date zone expunged:
   * sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, zone 803bfb63-c246-41db-b0da-d3b87ddfc63d (external_dns)
 * 13 remaining out-of-date zones
-* waiting to update top-level nexus_generation: pending non-nexus zone updates
+* waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
 > blueprint-diff latest
@@ -4495,7 +4495,7 @@ planning report for blueprint e7a01ffc-6b0e-408b-917b-b1efe18b3110:
 * discretionary zones placed:
   * external_dns zone on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 from source artifact: version 1.0.0
 * zone updates waiting on discretionary zones
-* waiting to update top-level nexus_generation: pending non-nexus zone updates
+* waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
 > blueprint-diff latest
@@ -4638,7 +4638,7 @@ planning report for blueprint 880e2ffc-8187-4275-a2f3-1b36aa2f4482:
 * 1 out-of-date zone expunged:
   * sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, zone ba4994a8-23f9-4b1a-a84f-a08d74591389 (crucible_pantry)
 * 12 remaining out-of-date zones
-* waiting to update top-level nexus_generation: pending non-nexus zone updates
+* waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
 > blueprint-diff latest
@@ -4771,7 +4771,7 @@ planning report for blueprint c4a20bcb-1a71-4e88-97b4-36d16f55daec:
 * discretionary zones placed:
   * crucible_pantry zone on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 from source artifact: version 1.0.0
 * zone updates waiting on discretionary zones
-* waiting to update top-level nexus_generation: pending non-nexus zone updates
+* waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
 > blueprint-diff latest
@@ -4905,7 +4905,7 @@ planning report for blueprint a2c6496d-98fc-444d-aa36-99508aa72367:
 * 1 out-of-date zone updated in-place:
   * sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, zone dfac80b4-a887-430a-ae87-a4e065dba787 (crucible)
 * 11 remaining out-of-date zones
-* waiting to update top-level nexus_generation: pending non-nexus zone updates
+* waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
 > blueprint-diff latest
@@ -5034,7 +5034,7 @@ planning report for blueprint 6ed56354-5941-40d1-a06c-b0e940701d52:
 * 1 out-of-date zone updated in-place:
   * sled d81c6a84-79b8-4958-ae41-ea46c9b19763, zone 694bd14f-cb24-4be4-bb19-876e79cda2c8 (crucible)
 * 10 remaining out-of-date zones
-* waiting to update top-level nexus_generation: pending non-nexus zone updates
+* waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
 > blueprint-diff latest
@@ -5151,7 +5151,7 @@ planning report for blueprint 9078c4ba-3a73-4b3f-ac2c-acb501f89cb2:
 * 1 out-of-date zone expunged:
   * sled d81c6a84-79b8-4958-ae41-ea46c9b19763, zone 75b220ba-a0f4-4872-8202-dc7c87f062d0 (crucible_pantry)
 * 9 remaining out-of-date zones
-* waiting to update top-level nexus_generation: pending non-nexus zone updates
+* waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
 > blueprint-diff latest
@@ -5276,7 +5276,7 @@ planning report for blueprint 8763abc1-8a42-4932-b5a7-33109e0e0152:
 * discretionary zones placed:
   * crucible_pantry zone on sled d81c6a84-79b8-4958-ae41-ea46c9b19763 from source artifact: version 1.0.0
 * zone updates waiting on discretionary zones
-* waiting to update top-level nexus_generation: pending non-nexus zone updates
+* waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
 > blueprint-diff latest
@@ -5402,7 +5402,7 @@ planning report for blueprint 2b89e0d7-f15b-4474-8ac4-85959ed1bc88:
 * 1 out-of-date zone updated in-place:
   * sled d81c6a84-79b8-4958-ae41-ea46c9b19763, zone 7c252b64-c5af-4ec1-989e-9a03f3b0f111 (crucible)
 * 8 remaining out-of-date zones
-* waiting to update top-level nexus_generation: pending non-nexus zone updates
+* waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
 > blueprint-diff latest
@@ -5520,7 +5520,7 @@ planning report for blueprint 7f6b7297-c2bc-4f67-b3c0-c8e555ebbdc4:
 * 1 out-of-date zone expunged:
   * sled d81c6a84-79b8-4958-ae41-ea46c9b19763, zone ea5b4030-b52f-44b2-8d70-45f15f987d01 (internal_dns)
 * 7 remaining out-of-date zones
-* waiting to update top-level nexus_generation: pending non-nexus zone updates
+* waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
 > blueprint-diff latest
@@ -5656,7 +5656,7 @@ planning report for blueprint 59630e63-c953-4807-9e84-9e750a79f68e:
 * discretionary zones placed:
   * internal_dns zone on sled d81c6a84-79b8-4958-ae41-ea46c9b19763 from source artifact: version 1.0.0
 * zone updates waiting on discretionary zones
-* waiting to update top-level nexus_generation: pending non-nexus zone updates
+* waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
 > blueprint-diff latest
@@ -5793,7 +5793,7 @@ planning report for blueprint e93650dc-b5ba-4ec7-8550-9171c1ada194:
 * 1 out-of-date zone expunged:
   * sled d81c6a84-79b8-4958-ae41-ea46c9b19763, zone f10a4fb9-759f-4a65-b25e-5794ad2d07d8 (internal_ntp)
 * 6 remaining out-of-date zones
-* waiting to update top-level nexus_generation: pending non-nexus zone updates
+* waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
 > blueprint-diff latest
@@ -5924,7 +5924,7 @@ planning report for blueprint 90650737-8142-47a6-9a48-a10efc487e57:
 * waiting for NTP zones to appear in inventory on sleds: d81c6a84-79b8-4958-ae41-ea46c9b19763
 * sleds getting NTP zones and which have other services already, making them eligible for discretionary zones: d81c6a84-79b8-4958-ae41-ea46c9b19763
 * missing NTP zone on sled d81c6a84-79b8-4958-ae41-ea46c9b19763
-* waiting to update top-level nexus_generation: pending non-nexus zone updates
+* waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
 > blueprint-diff latest
@@ -6055,7 +6055,7 @@ planning report for blueprint 2182613d-dc9f-41eb-9c6a-d33801849caa:
 * 1 out-of-date zone updated in-place:
   * sled d81c6a84-79b8-4958-ae41-ea46c9b19763, zone f55647d4-5500-4ad3-893a-df45bd50d622 (crucible)
 * 5 remaining out-of-date zones
-* waiting to update top-level nexus_generation: pending non-nexus zone updates
+* waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
 > blueprint-diff latest
@@ -6178,7 +6178,7 @@ planning report for blueprint e8b088a8-7da0-480b-a2dc-75ffef068ece:
 * 1 out-of-date zone expunged:
   * sled d81c6a84-79b8-4958-ae41-ea46c9b19763, zone f6ec9c67-946a-4da3-98d5-581f72ce8bf0 (external_dns)
 * 4 remaining out-of-date zones
-* waiting to update top-level nexus_generation: waiting for new nexus zones
+* waiting to update top-level nexus_generation: new Nexus zones have not been planned yet
 
 
 > blueprint-diff latest
@@ -6319,7 +6319,7 @@ planning report for blueprint 810ea95a-4730-43dd-867e-1984aeb9d873:
 * discretionary zones placed:
   * external_dns zone on sled d81c6a84-79b8-4958-ae41-ea46c9b19763 from source artifact: version 1.0.0
 * zone updates waiting on discretionary zones
-* waiting to update top-level nexus_generation: waiting for new nexus zones
+* waiting to update top-level nexus_generation: new Nexus zones have not been planned yet
 
 
 > blueprint-diff latest
@@ -6678,7 +6678,7 @@ planning report for blueprint 810ea95a-4730-43dd-867e-1984aeb9d873:
 * discretionary zones placed:
   * external_dns zone on sled d81c6a84-79b8-4958-ae41-ea46c9b19763 from source artifact: version 1.0.0
 * zone updates waiting on discretionary zones
-* waiting to update top-level nexus_generation: waiting for new nexus zones
+* waiting to update top-level nexus_generation: new Nexus zones have not been planned yet
 
 
 

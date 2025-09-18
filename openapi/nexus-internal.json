@@ -5870,13 +5870,13 @@
       "NexusGenerationBumpWaitingOn": {
         "oneOf": [
           {
-            "description": "Waiting for non-Nexus zones to finish updating",
+            "description": "Waiting for the planner to finish updating all non-Nexus zones",
             "type": "object",
             "properties": {
               "type": {
                 "type": "string",
                 "enum": [
-                  "non_nexus_zone_update"
+                  "found_old_non_nexus_zones"
                 ]
               }
             },
@@ -5885,13 +5885,13 @@
             ]
           },
           {
-            "description": "Waiting for enough new Nexus zones to appear",
+            "description": "Waiting for the planner to deploy new-generation Nexus zones",
             "type": "object",
             "properties": {
               "type": {
                 "type": "string",
                 "enum": [
-                  "new_nexus_bringup"
+                  "missing_new_nexus_in_blueprint"
                 ]
               }
             },
@@ -5900,13 +5900,13 @@
             ]
           },
           {
-            "description": "Waiting for Nexus database records to get populated",
+            "description": "Waiting for `db_metadata_nexus` records to be deployed for new-generation Nexus zones",
             "type": "object",
             "properties": {
               "type": {
                 "type": "string",
                 "enum": [
-                  "nexus_database_propagation"
+                  "missing_nexus_database_access_records"
                 ]
               }
             },
@@ -5915,13 +5915,13 @@
             ]
           },
           {
-            "description": "Waiting for zones to propagate to inventory",
+            "description": "Waiting for newly deployed Nexus zones to appear to inventory",
             "type": "object",
             "properties": {
               "type": {
                 "type": "string",
                 "enum": [
-                  "zone_propagation"
+                  "missing_new_nexus_in_inventory"
                 ]
               }
             },
@@ -9755,6 +9755,7 @@
         ]
       },
       "ZoneUnsafeToShutdown": {
+        "description": "Zones which should not be shut down, because their lack of availability could be problematic for the successful functioning of the deployed system.",
         "oneOf": [
           {
             "type": "object",
@@ -9878,6 +9879,7 @@
         ]
       },
       "ZoneWaitingToExpunge": {
+        "description": "Out-of-date zones which are not yet ready to be expunged.\n\nFor example, out-of-date Nexus zones should not be expunged until handoff has completed.",
         "oneOf": [
           {
             "type": "object",

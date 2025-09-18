@@ -17,6 +17,7 @@ use crate::system::SystemDescription;
 use anyhow::bail;
 use nexus_inventory::CollectionBuilderRng;
 use nexus_types::deployment::Blueprint;
+use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneImageSource;
 use nexus_types::deployment::OmicronZoneNic;
 use nexus_types::deployment::PlanningInput;
@@ -551,14 +552,13 @@ impl ExampleSystemBuilder {
 
         // Find and set the set of active Nexuses
         let active_nexus_zone_ids: BTreeSet<_> = blueprint
-            .sleds
-            .values()
-            .flat_map(|sled_cfg| sled_cfg.zones.iter())
-            .filter_map(|zone| match &zone.zone_type {
-                nexus_types::deployment::BlueprintZoneType::Nexus(_) => {
+            .all_nexus_zones(BlueprintZoneDisposition::is_in_service)
+            .filter_map(|(_, zone, nexus_zone)| {
+                if nexus_zone.nexus_generation == blueprint.nexus_generation {
                     Some(zone.id)
+                } else {
+                    None
                 }
-                _ => None,
             })
             .collect();
         input_builder.set_active_nexus_zones(active_nexus_zone_ids.clone());
