@@ -1214,26 +1214,65 @@ impl<'a> Planner<'a> {
         // For better or worse, switches and PSCs do not have the same idea of
         // being adopted into the control plane.  If they're present, they're
         // part of the system, and we will update them.
-        let included_sled_baseboards: BTreeSet<_> = self
+        let mut included_sled_baseboards: BTreeMap<_, _> = self
             .input
             .all_sleds(SledFilter::SpsUpdatedByReconfigurator)
-            .map(|(_sled_id, details)| &details.baseboard_id)
+            .map(|(sled_id, details)| (&details.baseboard_id, sled_id))
             .collect();
 
-        let included_baseboards =
-            self.inventory
-                .sps
-                .iter()
-                .filter_map(|(baseboard_id, sp_state)| {
-                    let do_include = match sp_state.sp_type {
-                        SpType::Sled => included_sled_baseboards
-                            .contains(baseboard_id.as_ref()),
-                        SpType::Power => true,
-                        SpType::Switch => true,
-                    };
-                    do_include.then_some(baseboard_id.clone())
+        // We only keep sled baseboards that do not contain zones that are
+        // unsafe to shut down
+        included_sled_baseboards.retain(|baseboard_id, sled_id| {
+            let zones = self.blueprint.current_sled_zones(
+                *sled_id,
+                BlueprintZoneDisposition::is_in_service,
+            );
+
+            let unsafe_zones: Vec<_> = zones
+                .into_iter()
+                .filter(|zone| {
+                    // TODO-K: Check what to do with the report, is it even
+                    // necessary in this case?
+                    !self.can_zone_be_shut_down_safely(
+                        zone,
+                        &mut PlanningZoneUpdatesStepReport::new()
+                    )
                 })
                 .collect();
+
+            // TODO-K: Improve or remove log
+            if !unsafe_zones.is_empty() {
+                let unsafe_zone_kinds: Vec<_> = unsafe_zones
+                .iter()
+                .map(|zone| zone.kind())
+                .collect();
+
+                info!(
+                    self.log,
+                    "skipping board for MGS-driven update, serial_number: {}, part_number: {} due to unsafe zones: {:?}",
+                    baseboard_id.serial_number,
+                    baseboard_id.part_number,
+                    unsafe_zone_kinds
+                );
+            }
+
+            unsafe_zones.is_empty()
+        });
+
+        let included_baseboards = self
+            .inventory
+            .sps
+            .iter()
+            .filter_map(|(baseboard_id, sp_state)| {
+                let do_include = match sp_state.sp_type {
+                    SpType::Sled => included_sled_baseboards
+                        .contains_key(baseboard_id.as_ref()),
+                    SpType::Power => true,
+                    SpType::Switch => true,
+                };
+                do_include.then_some(baseboard_id.clone())
+            })
+            .collect();
 
         // Compute the new set of PendingMgsUpdates.
         let current_updates =
@@ -1931,7 +1970,7 @@ impl<'a> Planner<'a> {
         }
     }
 
-    /// Return `true` iff we believe a zone can safely be shut down; e.g., any
+    /// Return `true` if we believe a zone can safely be shut down; e.g., any
     /// data it's responsible for is sufficiently persisted or replicated.
     ///
     /// "shut down" includes both "discretionary expunge" (e.g., if we're

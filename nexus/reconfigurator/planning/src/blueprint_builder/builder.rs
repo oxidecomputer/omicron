@@ -726,6 +726,7 @@ impl<'a> BlueprintBuilder<'a> {
         self.sled_editors.keys().copied()
     }
 
+    // TODO-K: Use this to retrieve zones from sled
     pub fn current_sled_zones<F>(
         &self,
         sled_id: SledUuid,

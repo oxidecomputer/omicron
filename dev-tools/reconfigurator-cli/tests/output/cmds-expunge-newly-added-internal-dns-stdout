@@ -647,6 +647,8 @@ external DNS:
 > # Planning a new blueprint will now replace the expunged zone, with new records for its replacement.
 > blueprint-plan 58d5e830-0884-47d8-a7cd-b2b3751adeb4
 INFO skipping noop image source check for all sleds, reason: no target release is currently set
+INFO skipping board for MGS-driven update, serial_number: serial0, part_number: model0 due to unsafe zones: [InternalDns]
+INFO skipping board for MGS-driven update, serial_number: serial2, part_number: model2 due to unsafe zones: [InternalDns]
 WARN cannot issue more MGS-driven updates (no current artifacts)
 generated blueprint af934083-59b5-4bf6-8966-6fb5292c29e1 based on parent blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4
 planning report for blueprint af934083-59b5-4bf6-8966-6fb5292c29e1:
