@@ -548,6 +548,70 @@ fn milan_ideal() -> CpuIdDump {
     dump
 }
 
+pub fn turin_v1() -> CpuIdDump {
+    // For VMs, a Turin-like CPU is very much like Milan with AVX-512 features,
+    // so start from Milan.
+    let baseline = milan_ideal();
+
+    let mut cpuid = CpuId::with_cpuid_reader(baseline);
+
+    let mut leaf = cpuid.get_extended_feature_info()
+        .expect("baseline Milan defines leaf 7");
+
+    // These are the AVX512 features present on a 9365, when I'd looked in
+    // September, anyway
+    leaf.set_avx512f(true);
+    leaf.set_avx512dq(true);
+    leaf.set_avx512_ifma(true);
+    leaf.set_avx512cd(true);
+    leaf.set_avx512bw(true);
+    leaf.set_avx512vl(true);
+
+    leaf.set_avx512vbmi(true);
+    leaf.set_avx512vbmi2(true);
+    leaf.set_gfni(true);
+    leaf.set_avx512vnni(true);
+    leaf.set_avx512bitalg(true);
+    leaf.set_avx512vpopcntdq(true);
+
+    leaf.set_avx512_bf16(true);
+    leaf.set_avx_vnni(true);
+
+    cpuid.set_extended_feature_info(Some(leaf))
+        .expect("can set leaf 7h");
+
+    let mut leaf = cpuid
+        .get_extended_processor_and_feature_identifiers()
+        .expect("baseline Milan defines leaf 8000_0001");
+    // RDTSCP requires some bhyve and Propolis work to support, so it is masked
+    // off for now.
+    leaf.set_rdtscp(false);
+    cpuid.set_extended_processor_and_feature_identifiers(Some(leaf))
+        .expect("can set leaf 8000_0001h");
+
+    cpuid
+        .set_processor_brand_string(Some(b"Oxide Virtual Turin-like Processor"))
+        .expect("can set vCPU brand string");
+
+    let mut leaf = cpuid
+        .get_processor_capacity_feature_info()
+        .expect("can get leaf 8000_0008h");
+
+    // Support for `wbnoinvd` is hidden in bhyve for the time being. This would
+    // probably be fine to pass through, but it is as-yet untested. Continue
+    // hiding this instruction.
+    leaf.set_wbnoinvd(false);
+
+    cpuid
+        .set_processor_capacity_feature_info(Some(leaf))
+        .expect("can set leaf 8000_0008h");
+
+    // Cache topology leaves are otherwise left zeroed; if we can avoid getting
+    // into it, let's try!
+
+    cpuid.into_source()
+}
+
 pub fn milan_rfd314() -> CpuIdDump {
     // This is the Milan we'd "want" to expose, absent any other constraints.
     let baseline = milan_ideal();
