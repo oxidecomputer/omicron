@@ -348,12 +348,13 @@ impl SledUpdate {
 #[derive(Clone, Debug)]
 pub struct SledReservationConstraints {
     must_select_from: Vec<SledUuid>,
+    cpu_families: Vec<SledCpuFamily>,
 }
 
 impl SledReservationConstraints {
     /// Creates a constraint set with no constraints in it.
     pub fn none() -> Self {
-        Self { must_select_from: Vec::new() }
+        Self { must_select_from: Vec::new(), cpu_families: Vec::new() }
     }
 
     /// If the constraints include a set of sleds that the caller must select
@@ -365,6 +366,19 @@ impl SledReservationConstraints {
             None
         } else {
             Some(&self.must_select_from)
+        }
+    }
+
+    /// If the constraints include a list of acceptable sled CPU families,
+    /// returns `Some` and a slice containing the members of that set.
+    ///
+    /// If no "must select a sled with one of these CPUs" constraint exists,
+    /// returns None.
+    pub fn cpu_families(&self) -> Option<&[SledCpuFamily]> {
+        if self.cpu_families.is_empty() {
+            None
+        } else {
+            Some(&self.cpu_families)
         }
     }
 }
@@ -386,6 +400,11 @@ impl SledReservationConstraintBuilder {
     /// select from" list.
     pub fn must_select_from(mut self, sled_ids: &[SledUuid]) -> Self {
         self.constraints.must_select_from.extend(sled_ids);
+        self
+    }
+
+    pub fn cpu_families(mut self, families: &[SledCpuFamily]) -> Self {
+        self.constraints.cpu_families.extend(families);
         self
     }
 
