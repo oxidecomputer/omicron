@@ -4506,6 +4506,13 @@ CREATE TYPE IF NOT EXISTS omicron.public.bp_physical_disk_disposition AS ENUM (
     'expunged'
 );
 
+CREATE TYPE IF NOT EXISTS omicron.public.bp_source AS ENUM (
+    'rss',
+    'planner',
+    'reconfigurator_cli_edit',
+    'test'
+);
+
 -- list of all blueprints
 CREATE TABLE IF NOT EXISTS omicron.public.blueprint (
     id UUID PRIMARY KEY,
@@ -4559,7 +4566,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.blueprint (
     target_release_minimum_generation INT8 NOT NULL,
 
     -- The generation of the active group of Nexus instances
-    nexus_generation INT8 NOT NULL
+    nexus_generation INT8 NOT NULL,
+
+    -- The source of this blueprint
+    source bp_source NOT NULL
 );
 
 -- table describing both the current and historical target blueprints of the

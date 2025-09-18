@@ -585,6 +585,7 @@ impl DataStore {
             time_created,
             creator,
             comment,
+            source,
         ) = {
             use nexus_db_schema::schema::blueprint::dsl;
 
@@ -612,6 +613,7 @@ impl DataStore {
                 blueprint.time_created,
                 blueprint.creator,
                 blueprint.comment,
+                BlueprintSource::from(blueprint.source),
             )
         };
         let cockroachdb_setting_preserve_downgrade =
@@ -1346,9 +1348,6 @@ impl DataStore {
                 &blueprint_id,
             )?;
         }
-
-        // TODO-john replace with actual column
-        let source = BlueprintSource::PlannerLoadedFromDatabase;
 
         Ok(Blueprint {
             id: blueprint_id,
@@ -4721,8 +4720,12 @@ mod tests {
         let counts = BlueprintTableCounts::new(datastore, blueprint_id).await;
 
         // Exception tables that may be empty in the representative blueprint:
-        // - MGS update tables: only populated when blueprint includes firmware updates
-        // - ClickHouse tables: only populated when blueprint includes ClickHouse configuration
+        // - MGS update tables: only populated when blueprint includes firmware
+        //   updates
+        // - ClickHouse tables: only populated when blueprint includes
+        //   ClickHouse configuration
+        // - debug log for planner reports: only populated when the blueprint
+        //   was produced by the planner (test blueprints generally aren't)
         let exception_tables = [
             "bp_pending_mgs_update_sp",
             "bp_pending_mgs_update_rot",
@@ -4731,6 +4734,7 @@ mod tests {
             "bp_clickhouse_cluster_config",
             "bp_clickhouse_keeper_zone_id_to_node_id",
             "bp_clickhouse_server_zone_id_to_node_id",
+            "debug_log_blueprint_planning",
         ];
 
         // Check that all non-exception tables have at least one row

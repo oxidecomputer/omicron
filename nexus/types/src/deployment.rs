@@ -292,6 +292,7 @@ impl Blueprint {
             time_created: self.time_created,
             creator: self.creator.clone(),
             comment: self.comment.clone(),
+            source: self.source.clone(),
         }
     }
 
@@ -2179,6 +2180,8 @@ pub struct BlueprintMetadata {
     /// human-readable string describing why this blueprint was created
     /// (for debugging)
     pub comment: String,
+    /// source of the blueprint (for debugging)
+    pub source: BlueprintSource,
 }
 
 /// Describes what blueprint, if any, the system is currently working toward

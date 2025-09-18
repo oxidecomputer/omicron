@@ -1983,6 +1983,8 @@ table! {
         target_release_minimum_generation -> Int8,
 
         nexus_generation -> Int8,
+
+        source -> crate::enums::BpSourceEnum,
     }
 }
 
