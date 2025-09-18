@@ -41,7 +41,7 @@ use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::RackInitUuid;
 use sled_agent_config_reconciler::ConfigReconcilerSpawnToken;
 use sled_agent_config_reconciler::InternalDisksReceiver;
-use sled_agent_types::rack_init::RackInitializeRequest;
+use sled_agent_types::rack_init::RackInitializeRequestParams;
 use sled_agent_types::sled::StartSledAgentRequest;
 use sled_hardware::underlay;
 use sled_storage::dataset::CONFIG_DATASET;
@@ -290,7 +290,7 @@ impl Server {
 
     pub fn start_rack_initialize(
         &self,
-        request: RackInitializeRequest,
+        request: RackInitializeRequestParams,
     ) -> Result<RackInitUuid, RssAccessError> {
         self.bootstrap_http_server.app_private().start_rack_initialize(request)
     }
@@ -594,8 +594,8 @@ impl Inner {
                 let initial = server.sled_agent().start_request();
                 let response = if initial != &request {
                     Err(format!(
-                        "Sled Agent already running: 
-                        initital request = {:?}, 
+                        "Sled Agent already running:
+                        initital request = {:?},
                         current request: {:?}",
                         initial, request
                     ))

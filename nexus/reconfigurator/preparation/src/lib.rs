@@ -6,6 +6,7 @@
 
 use anyhow::Context;
 use futures::StreamExt;
+use nexus_db_model::DbMetadataNexusState;
 use nexus_db_model::DnsGroup;
 use nexus_db_model::Generation;
 use nexus_db_queries::context::OpContext;
@@ -84,6 +85,8 @@ pub struct PlanningInputFromDb<'a> {
     pub tuf_repo: TufRepoPolicy,
     pub old_repo: TufRepoPolicy,
     pub planner_config: PlannerConfig,
+    pub active_nexus_zones: BTreeSet<OmicronZoneUuid>,
+    pub not_yet_nexus_zones: BTreeSet<OmicronZoneUuid>,
     pub log: &'a Logger,
 }
 
@@ -200,6 +203,27 @@ impl PlanningInputFromDb<'_> {
             .await
             .internal_context("fetching oximeter read policy")?;
 
+        let (active_nexus_zones, not_yet_nexus_zones): (Vec<_>, Vec<_>) =
+            datastore
+                .get_db_metadata_nexus_in_state(
+                    opctx,
+                    &[
+                        DbMetadataNexusState::Active,
+                        DbMetadataNexusState::NotYet,
+                    ],
+                )
+                .await
+                .internal_context("fetching db_metadata_nexus records")?
+                .into_iter()
+                .partition(|nexus| {
+                    nexus.state() == DbMetadataNexusState::Active
+                });
+
+        let active_nexus_zones =
+            active_nexus_zones.into_iter().map(|n| n.nexus_id()).collect();
+        let not_yet_nexus_zones =
+            not_yet_nexus_zones.into_iter().map(|n| n.nexus_id()).collect();
+
         let planning_input = PlanningInputFromDb {
             sled_rows: &sled_rows,
             zpool_rows: &zpool_rows,
@@ -223,6 +247,8 @@ impl PlanningInputFromDb<'_> {
             tuf_repo,
             old_repo,
             planner_config,
+            active_nexus_zones,
+            not_yet_nexus_zones,
         }
         .build()
         .internal_context("assembling planning_input")?;
@@ -255,6 +281,12 @@ impl PlanningInputFromDb<'_> {
             self.internal_dns_version.into(),
             self.external_dns_version.into(),
             self.cockroachdb_settings.clone(),
+        );
+        builder.set_active_nexus_zones(
+            self.active_nexus_zones.clone().into_iter().collect(),
+        );
+        builder.set_not_yet_nexus_zones(
+            self.not_yet_nexus_zones.clone().into_iter().collect(),
         );
 
         let mut zpools_by_sled_id = {

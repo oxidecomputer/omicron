@@ -4,7 +4,7 @@
 
 //! developer REPL for driving blueprint planning
 
-use anyhow::{Context, anyhow, bail};
+use anyhow::{Context, anyhow, bail, ensure};
 use camino::{Utf8Path, Utf8PathBuf};
 use chrono::{DateTime, Utc};
 use clap::{ArgAction, ValueEnum};
@@ -63,6 +63,7 @@ use omicron_uuid_kinds::VnicUuid;
 use omicron_uuid_kinds::{BlueprintUuid, MupdateOverrideUuid};
 use omicron_uuid_kinds::{CollectionUuid, MupdateUuid};
 use std::borrow::Cow;
+use std::collections::BTreeSet;
 use std::convert::Infallible;
 use std::fmt::{self, Write};
 use std::io::IsTerminal;
@@ -158,6 +159,9 @@ impl ReconfiguratorSim {
         builder.set_internal_dns_version(parent_blueprint.internal_dns_version);
         builder.set_external_dns_version(parent_blueprint.external_dns_version);
 
+        let mut active_nexus_zones = BTreeSet::new();
+        let mut not_yet_nexus_zones = BTreeSet::new();
+
         for (_, zone) in parent_blueprint
             .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
         {
@@ -179,7 +183,26 @@ impl ReconfiguratorSim {
                     .add_omicron_zone_nic(zone.id, nic)
                     .context("adding omicron zone NIC")?;
             }
+
+            match &zone.zone_type {
+                nexus_types::deployment::BlueprintZoneType::Nexus(nexus) => {
+                    if nexus.nexus_generation
+                        == parent_blueprint.nexus_generation
+                    {
+                        active_nexus_zones.insert(zone.id);
+                    } else if nexus.nexus_generation
+                        > parent_blueprint.nexus_generation
+                    {
+                        not_yet_nexus_zones.insert(zone.id);
+                    }
+                }
+                _ => (),
+            }
         }
+
+        builder.set_active_nexus_zones(active_nexus_zones);
+        builder.set_not_yet_nexus_zones(not_yet_nexus_zones);
+
         Ok(builder.build())
     }
 }
@@ -755,7 +778,7 @@ enum BlueprintEditCommands {
         generation: Generation,
     },
     /// expunge a zone
-    ExpungeZone { zone_id: OmicronZoneUuid },
+    ExpungeZones { zone_ids: Vec<OmicronZoneUuid> },
     /// mark an expunged zone ready for cleanup
     MarkForCleanup { zone_id: OmicronZoneUuid },
     /// configure an SP update
@@ -784,6 +807,11 @@ enum BlueprintEditCommands {
         #[command(subcommand)]
         command: BlueprintEditDebugCommands,
     },
+    /// bumps the blueprint's Nexus generation
+    ///
+    /// This initiates a handoff from the current generation of Nexus zones to
+    /// the next generation of Nexus zones.
+    BumpNexusGeneration,
 }
 
 #[derive(Debug, Subcommand)]
@@ -2157,6 +2185,29 @@ fn cmd_blueprint_edit(
                 .context("failed to add CockroachDB zone")?;
             format!("added CockroachDB zone to sled {}", sled_id)
         }
+        BlueprintEditCommands::BumpNexusGeneration => {
+            let current_generation = builder.nexus_generation();
+            let current_max = blueprint
+                .all_nexus_zones(BlueprintZoneDisposition::is_in_service)
+                .fold(
+                    current_generation,
+                    |current_max, (_sled_id, _zone_config, nexus_config)| {
+                        std::cmp::max(
+                            nexus_config.nexus_generation,
+                            current_max,
+                        )
+                    },
+                );
+            ensure!(
+                current_max > current_generation,
+                "cannot bump blueprint generation (currently \
+                 {current_generation}) past highest deployed Nexus \
+                 generation (currently {current_max})",
+            );
+            let next = current_generation.next();
+            builder.set_nexus_generation(next);
+            format!("nexus generation: {current_generation} -> {next}")
+        }
         BlueprintEditCommands::SetRemoveMupdateOverride { sled_id, value } => {
             let sled_id = sled_id.to_sled_id(system.description())?;
             builder
@@ -2212,12 +2263,16 @@ fn cmd_blueprint_edit(
                 .context("failed to set host phase 2 source")?;
             rv
         }
-        BlueprintEditCommands::ExpungeZone { zone_id } => {
-            let sled_id = sled_with_zone(&builder, &zone_id)?;
-            builder
-                .sled_expunge_zone(sled_id, zone_id)
-                .context("failed to expunge zone")?;
-            format!("expunged zone {zone_id} from sled {sled_id}")
+        BlueprintEditCommands::ExpungeZones { zone_ids } => {
+            let mut rv = String::new();
+            for zone_id in zone_ids {
+                let sled_id = sled_with_zone(&builder, &zone_id)?;
+                builder.sled_expunge_zone(sled_id, zone_id).with_context(
+                    || format!("failed to expunge zone {zone_id}"),
+                )?;
+                swriteln!(rv, "expunged zone {zone_id} from sled {sled_id}");
+            }
+            rv
         }
         BlueprintEditCommands::MarkForCleanup { zone_id } => {
             let sled_id = sled_with_zone(&builder, &zone_id)?;

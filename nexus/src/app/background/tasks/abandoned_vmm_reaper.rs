@@ -201,6 +201,7 @@ mod tests {
     use nexus_db_model::Resources;
     use nexus_db_model::SledResourceVmm;
     use nexus_db_model::Vmm;
+    use nexus_db_model::VmmCpuPlatform;
     use nexus_db_model::VmmRuntimeState;
     use nexus_db_model::VmmState;
     use nexus_test_utils::resource_helpers;
@@ -246,6 +247,7 @@ mod tests {
                         sled_id: SledUuid::new_v4().into(),
                         propolis_ip: "::1".parse().unwrap(),
                         propolis_port: 12345.into(),
+                        cpu_platform: VmmCpuPlatform::SledDefault,
                         runtime: VmmRuntimeState {
                             state: VmmState::Destroyed,
                             time_state_updated: Utc::now(),

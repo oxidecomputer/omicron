@@ -13,8 +13,8 @@ use omicron_common::api::external::{
     AddressLotKind, AffinityPolicy, AllowedSourceIps, BfdMode, BgpPeer,
     ByteCount, FailureDomain, Hostname, IdentityMetadataCreateParams,
     IdentityMetadataUpdateParams, InstanceAutoRestartPolicy, InstanceCpuCount,
-    IpVersion, LinkFec, LinkSpeed, Name, NameOrId, Nullable, PaginationOrder,
-    RouteDestination, RouteTarget, UserId,
+    InstanceCpuPlatform, IpVersion, LinkFec, LinkSpeed, Name, NameOrId,
+    Nullable, PaginationOrder, RouteDestination, RouteTarget, UserId,
 };
 use omicron_common::disk::DiskVariant;
 use omicron_uuid_kinds::*;
@@ -1281,6 +1281,13 @@ pub struct InstanceCreate {
     /// Anti-Affinity groups which this instance should be added.
     #[serde(default)]
     pub anti_affinity_groups: Vec<NameOrId>,
+
+    /// The CPU platform to be used for this instance. If this is `null`, the
+    /// instance requires no particular CPU platform; when it is started the
+    /// instance will have the most general CPU platform supported by the sled
+    /// it is initially placed on.
+    #[serde(default)]
+    pub cpu_platform: Option<InstanceCpuPlatform>,
 }
 
 /// Parameters of an `Instance` that can be reconfigured after creation.
@@ -1312,6 +1319,10 @@ pub struct InstanceUpdate {
     /// In that case, any configured default policy will be used if this is
     /// `null`.
     pub auto_restart_policy: Option<InstanceAutoRestartPolicy>,
+
+    /// The CPU platform to be used for this instance. If this is `null`, the
+    /// instance requires no particular CPU platform.
+    pub cpu_platform: Option<InstanceCpuPlatform>,
 }
 
 #[inline]
