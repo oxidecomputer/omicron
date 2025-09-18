@@ -16,6 +16,7 @@ use crate::system::SystemDescription;
 use anyhow::bail;
 use nexus_inventory::CollectionBuilderRng;
 use nexus_types::deployment::Blueprint;
+use nexus_types::deployment::BlueprintSource;
 use nexus_types::deployment::BlueprintZoneImageSource;
 use nexus_types::deployment::OmicronZoneNic;
 use nexus_types::deployment::PlanningInput;
@@ -546,7 +547,7 @@ impl ExampleSystemBuilder {
             builder.sled_ensure_zone_datasets(sled_id).unwrap();
         }
 
-        let blueprint = builder.build();
+        let blueprint = builder.build(BlueprintSource::Test);
         for sled_cfg in blueprint.sleds.values() {
             for zone in sled_cfg.zones.iter() {
                 let service_id = zone.id;

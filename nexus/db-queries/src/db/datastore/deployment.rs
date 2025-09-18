@@ -78,6 +78,7 @@ use nexus_db_schema::enums::SpTypeEnum;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintMetadata;
 use nexus_types::deployment::BlueprintSledConfig;
+use nexus_types::deployment::BlueprintSource;
 use nexus_types::deployment::BlueprintTarget;
 use nexus_types::deployment::ClickhouseClusterConfig;
 use nexus_types::deployment::CockroachDbPreserveDowngrade;
@@ -90,7 +91,6 @@ use nexus_types::deployment::PendingMgsUpdateRotBootloaderDetails;
 use nexus_types::deployment::PendingMgsUpdateRotDetails;
 use nexus_types::deployment::PendingMgsUpdateSpDetails;
 use nexus_types::deployment::PendingMgsUpdates;
-use nexus_types::deployment::PlanningReport;
 use nexus_types::inventory::BaseboardId;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
@@ -510,32 +510,32 @@ impl DataStore {
                 }
 
                 // Serialize and insert a debug log for the planning report
-                // created with this blueprint.
-                match DebugLogBlueprintPlanning::try_from(
-                    blueprint.report.clone(),
-                ) {
-                    Ok(debug_log) => {
-                        use nexus_db_schema::schema::debug_log_blueprint_planning::dsl;
-                        let _ = diesel::insert_into(
-                            dsl::debug_log_blueprint_planning
-                        )
-                            .values(debug_log)
-                            .execute_async(&conn)
-                            .await?;
-                    }
-                    Err(err) => {
-                        // This isn't a fatal error - we've already inserted the
-                        // production-meaningful blueprint content. Not being
-                        // able to log the debug version of the report isn't
-                        // great, but blocking real blueprint insertion on debug
-                        // logging issues seems worse.
-                        error!(
-                            self.log,
-                            "could not serialize blueprint planning report";
-                            InlineErrorChain::new(&err),
-                        );
-                    }
+                // created with this blueprint, if we have one.
+                if let BlueprintSource::Planner(report) = &blueprint.source {
+                    match DebugLogBlueprintPlanning::try_from(report.clone()) {
+                        Ok(debug_log) => {
+                            use nexus_db_schema::schema::debug_log_blueprint_planning::dsl;
+                            let _ = diesel::insert_into(
+                                dsl::debug_log_blueprint_planning
+                            )
+                                .values(debug_log)
+                                .execute_async(&conn)
+                                .await?;
+                        }
+                        Err(err) => {
+                            // This isn't a fatal error - we've already inserted
+                            // the production-meaningful blueprint content. Not
+                            // being able to log the debug version of the report
+                            // isn't great, but blocking real blueprint
+                            // insertion on debug logging issues seems worse.
+                            error!(
+                                self.log,
+                                "could not serialize blueprint planning report";
+                                InlineErrorChain::new(&err),
+                            );
+                        }
 
+                    }
                 }
 
                 Ok(())
@@ -1347,10 +1347,8 @@ impl DataStore {
             )?;
         }
 
-        // We do not load full fidelity reports from the database.
-        //
-        // TODO-cleanup Should we remove this field from `Blueprint` entirely?
-        let report = PlanningReport::new(blueprint_id);
+        // TODO-john replace with actual column
+        let source = BlueprintSource::PlannerLoadedFromDatabase;
 
         Ok(Blueprint {
             id: blueprint_id,
@@ -1369,7 +1367,7 @@ impl DataStore {
             time_created,
             creator,
             comment,
-            report,
+            source,
         })
     }
 

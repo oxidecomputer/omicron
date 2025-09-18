@@ -28,6 +28,7 @@ use nexus_sled_agent_shared::inventory::OmicronZoneType;
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
+use nexus_types::deployment::BlueprintSource;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneImageSource;
@@ -65,6 +66,7 @@ use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::str::FromStr;
+use std::sync::Arc;
 
 pub(crate) use self::image_source::NoopConvertGlobalIneligibleReason;
 pub(crate) use self::image_source::NoopConvertInfo;
@@ -152,8 +154,7 @@ impl<'a> Planner<'a> {
     pub fn plan(mut self) -> Result<Blueprint, Error> {
         let checked = self.check_input_validity()?;
         let report = self.do_plan(checked)?;
-        self.blueprint.set_report(report);
-        Ok(self.blueprint.build())
+        Ok(self.blueprint.build(BlueprintSource::Planner(Arc::new(report))))
     }
 
     fn check_input_validity(&self) -> Result<InputChecked, Error> {

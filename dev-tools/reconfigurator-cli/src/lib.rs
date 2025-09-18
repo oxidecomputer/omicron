@@ -29,7 +29,6 @@ use nexus_reconfigurator_simulation::{BlueprintId, CollectionId, SimState};
 use nexus_reconfigurator_simulation::{SimStateBuilder, SimTufRepoSource};
 use nexus_reconfigurator_simulation::{SimTufRepoDescription, Simulator};
 use nexus_sled_agent_shared::inventory::ZoneKind;
-use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::execution;
 use nexus_types::deployment::execution::blueprint_external_dns_config;
 use nexus_types::deployment::execution::blueprint_internal_dns_config;
@@ -38,6 +37,7 @@ use nexus_types::deployment::{BlueprintArtifactVersion, PendingMgsUpdate};
 use nexus_types::deployment::{
     BlueprintHostPhase2DesiredContents, PlannerConfig,
 };
+use nexus_types::deployment::{BlueprintSource, SledFilter};
 use nexus_types::deployment::{BlueprintZoneDisposition, ExpectedVersion};
 use nexus_types::deployment::{
     BlueprintZoneImageSource, PendingMgsUpdateDetails,
@@ -2105,7 +2105,7 @@ fn cmd_blueprint_plan(
     let blueprint = planner.plan().context("generating blueprint")?;
     let rv = format!(
         "generated blueprint {} based on parent blueprint {}\n{}",
-        blueprint.id, parent_blueprint.id, blueprint.report,
+        blueprint.id, parent_blueprint.id, blueprint.source,
     );
     system.add_blueprint(blueprint)?;
 
@@ -2320,7 +2320,8 @@ fn cmd_blueprint_edit(
         }
     };
 
-    let mut new_blueprint = builder.build();
+    let mut new_blueprint =
+        builder.build(BlueprintSource::ReconfiguratorCliEdit);
 
     // Normally `builder.build()` would construct the cockroach fingerprint
     // based on what we read from CRDB and put into the planning input, but

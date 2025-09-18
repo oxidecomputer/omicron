@@ -1530,10 +1530,10 @@ pub struct DebugLogBlueprintPlanning {
     pub debug_blob: serde_json::Value,
 }
 
-impl TryFrom<PlanningReport> for DebugLogBlueprintPlanning {
+impl TryFrom<Arc<PlanningReport>> for DebugLogBlueprintPlanning {
     type Error = serde_json::Error;
 
-    fn try_from(report: PlanningReport) -> Result<Self, Self::Error> {
+    fn try_from(report: Arc<PlanningReport>) -> Result<Self, Self::Error> {
         let blueprint_id = report.blueprint_id.into();
         let report = serde_json::to_value(report)?;
 
