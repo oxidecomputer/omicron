@@ -1561,29 +1561,60 @@ impl<'a> Planner<'a> {
         // Of the out-of-date zones, filter out zones that can't be updated yet,
         // either because they're not ready or because it wouldn't be safe to
         // bounce them.
-        let mut updateable_zones = Vec::new();
-        for (sled_id, zone, new_image_source) in out_of_date_zones {
-            if self.are_zones_ready_for_updates(mgs_updates)
-                && self.can_zone_be_updated(&zone, &mut report)?
-            {
-                updateable_zones.push((sled_id, zone, new_image_source));
-            }
-        }
+        let (nexus_updateable_zones, non_nexus_updateable_zones): (
+            Vec<_>,
+            Vec<_>,
+        ) = out_of_date_zones
+            .into_iter()
+            .filter(|(_, zone, _)| {
+                self.are_zones_ready_for_updates(mgs_updates)
+                    && self.can_zone_be_shut_down_safely(&zone, &mut report)
+            })
+            .partition(|(_, zone, _)| zone.zone_type.is_nexus());
 
+        // Try to update the first non-Nexus zone
         if let Some((sled_id, zone, new_image_source)) =
-            updateable_zones.first()
+            non_nexus_updateable_zones.first()
         {
-            // Update the first out-of-date zone.
-            self.update_or_expunge_zone(
+            return self.update_or_expunge_zone(
                 *sled_id,
                 zone,
                 new_image_source.clone(),
                 report,
-            )
-        } else {
-            // No zones to update.
-            Ok(report)
+            );
         }
+
+        // If the only remaining out-of-date zones are Nexus, verify that
+        // handoff has occurred before attempting to expunge them.
+        //
+        // We intentionally order this after other zone updates to minimize
+        // the window where we might report "waiting to update Nexus" if
+        // handoff has not occurred yet, and we iterate over all Nexus
+        // zones with out-of-date images to fill out the planning report.
+        let nexus_updateable_zones = nexus_updateable_zones
+            .into_iter()
+            .filter_map(|(sled, zone, image)| {
+                match self.should_nexus_zone_be_updated(&zone, &mut report) {
+                    Ok(true) => Some(Ok((sled, zone, image))),
+                    Ok(false) => None,
+                    Err(err) => Some(Err(err)),
+                }
+            })
+            .collect::<Result<Vec<_>, Error>>()?;
+
+        if let Some((sled_id, zone, new_image_source)) =
+            nexus_updateable_zones.first()
+        {
+            return self.update_or_expunge_zone(
+                *sled_id,
+                zone,
+                new_image_source.clone(),
+                report,
+            );
+        }
+
+        // No zones to update.
+        Ok(report)
     }
 
     // Returns zones that should (eventually) be updated because their image
@@ -2226,22 +2257,20 @@ impl<'a> Planner<'a> {
             .map_err(|_| Error::NoActiveNexusZonesInParentBlueprint)
     }
 
-    // Returns whether the out-of-date zone is ready to be updated.
+    // Returns whether the out-of-date Nexus zone is ready to be updated.
     //
     // For reporting purposes, we assume that we want the supplied
     // zone to be expunged or updated because it is out-of-date.
     //
     // If the zone should not be updated yet, updates the planner report to
     // identify why it is not ready for update.
-    fn can_zone_be_updated(
+    //
+    // Precondition: zone must be a Nexus zone
+    fn should_nexus_zone_be_updated(
         &self,
         zone: &BlueprintZoneConfig,
         report: &mut PlanningZoneUpdatesStepReport,
     ) -> Result<bool, Error> {
-        if !self.can_zone_be_shut_down_safely(zone, report) {
-            return Ok(false);
-        }
-
         let zone_nexus_generation = match &zone.zone_type {
             // For Nexus, we need to confirm that the active generation has
             // moved beyond this zone.
@@ -2249,7 +2278,7 @@ impl<'a> Planner<'a> {
                 // Get the nexus_generation of the zone being considered for shutdown
                 nexus_zone.nexus_generation
             }
-            _ => return Ok(true),
+            _ => panic!("Not a Nexus zone"),
         };
 
         use ZoneWaitingToExpunge::*;
@@ -5987,12 +6016,22 @@ pub(crate) mod test {
         example.collection =
             example.system.to_collection_builder().unwrap().build();
 
+        update_input_with_nexus_at_generation(
+            example,
+            blueprint,
+            blueprint.nexus_generation,
+        )
+    }
+
+    fn update_input_with_nexus_at_generation(
+        example: &mut ExampleSystem,
+        blueprint: &Blueprint,
+        active_generation: Generation,
+    ) {
         let active_nexus_zones =
-            get_nexus_ids_at_generation(&blueprint, blueprint.nexus_generation);
-        let not_yet_nexus_zones = get_nexus_ids_at_generation(
-            &blueprint,
-            blueprint.nexus_generation.next(),
-        );
+            get_nexus_ids_at_generation(&blueprint, active_generation);
+        let not_yet_nexus_zones =
+            get_nexus_ids_at_generation(&blueprint, active_generation.next());
 
         let mut input = std::mem::replace(
             &mut example.input,
@@ -8052,6 +8091,8 @@ pub(crate) mod test {
                 panic!("Unexpected nexus generation");
             }
         }
+
+        logctx.cleanup_successful();
     }
 
     #[test]
@@ -8301,8 +8342,40 @@ pub(crate) mod test {
         assert_eq!(*observed_next_gen, new_generation);
         bp_generator.blueprint = new_bp;
 
-        // Check: After the generation bump, we should begin expunging
-        // the old Nexus zones.
+        // After the nexus generation bump, if we're still running from an old
+        // Nexus, we should refuse to expunge ourselves.
+        bp_generator.update_inventory_from_blueprint();
+        update_input_with_nexus_at_generation(
+            &mut bp_generator.example,
+            &bp_generator.blueprint,
+            old_generation,
+        );
+        let new_bp = bp_generator.plan_new_blueprint("dont-expunge-yet");
+        // We should be able to see all three old Neuxs zones refusing to shut
+        // down in the planning report.
+        let waiting_zones = &new_bp.report.zone_updates.waiting_zones;
+        assert_eq!(
+            waiting_zones.len(),
+            3,
+            "Unexpected zone update report: {:#?}",
+            new_bp.report.zone_updates
+        );
+        for why in waiting_zones.values() {
+            assert_eq!(
+                why,
+                &ZoneWaitingToExpunge::Nexus {
+                    zone_generation: old_generation,
+                    current_nexus_generation_known: true,
+                },
+                "Unexpected waiting zones report: {:#?}",
+                waiting_zones,
+            );
+        }
+
+        // Update our input to run from the new Nexuses.
+        //
+        // After the generation bump, we should begin expunging the old Nexus
+        // zones.
         bp_generator.update_inventory_from_blueprint();
         // Old Nexuses which are in-service
         let mut old_nexuses =

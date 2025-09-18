@@ -1945,10 +1945,6 @@ planning report for blueprint e54a0836-53e1-4948-a3af-0b77165289b5:
 * 1 out-of-date zone updated in-place:
   * sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, zone 353b3b65-20f7-48c3-88f7-495bd5d31545 (clickhouse)
 * 25 remaining out-of-date zones
-* 3 zones waiting to be expunged:
-  * zone 0c71b3b2-6ceb-4e8f-b020-b08675e83038 (nexus): image out-of-date, but zone's nexus_generation 1 is still active
-  * zone 3eeb8d49-eb1a-43f8-bb64-c2338421c2c6 (nexus): image out-of-date, but zone's nexus_generation 1 is still active
-  * zone 466a9f29-62bf-4e63-924a-b9efdb86afec (nexus): image out-of-date, but zone's nexus_generation 1 is still active
 * waiting to update top-level nexus_generation: pending non-nexus zone updates
 
 
@@ -2078,10 +2074,6 @@ planning report for blueprint 459a45a5-616e-421f-873b-2fb08c36205c:
 * 1 out-of-date zone expunged:
   * sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, zone 62620961-fc4a-481e-968b-f5acbac0dc63 (internal_ntp)
 * 24 remaining out-of-date zones
-* 3 zones waiting to be expunged:
-  * zone 0c71b3b2-6ceb-4e8f-b020-b08675e83038 (nexus): image out-of-date, but zone's nexus_generation 1 is still active
-  * zone 3eeb8d49-eb1a-43f8-bb64-c2338421c2c6 (nexus): image out-of-date, but zone's nexus_generation 1 is still active
-  * zone 466a9f29-62bf-4e63-924a-b9efdb86afec (nexus): image out-of-date, but zone's nexus_generation 1 is still active
 * waiting to update top-level nexus_generation: pending non-nexus zone updates
 
 
@@ -2346,10 +2338,6 @@ planning report for blueprint 6fad8fd4-e825-433f-b76d-495484e068ce:
 * 1 out-of-date zone expunged:
   * sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, zone 6c3ae381-04f7-41ea-b0ac-74db387dbc3a (external_dns)
 * 23 remaining out-of-date zones
-* 3 zones waiting to be expunged:
-  * zone 0c71b3b2-6ceb-4e8f-b020-b08675e83038 (nexus): image out-of-date, but zone's nexus_generation 1 is still active
-  * zone 3eeb8d49-eb1a-43f8-bb64-c2338421c2c6 (nexus): image out-of-date, but zone's nexus_generation 1 is still active
-  * zone 466a9f29-62bf-4e63-924a-b9efdb86afec (nexus): image out-of-date, but zone's nexus_generation 1 is still active
 * waiting to update top-level nexus_generation: pending non-nexus zone updates
 
 
@@ -2641,10 +2629,6 @@ planning report for blueprint 79fff7a2-2495-4c75-8465-4dc01bab48ce:
 * 1 out-of-date zone updated in-place:
   * sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, zone 86a22a56-0168-453d-9df1-cb2a7c64b5d3 (crucible)
 * 22 remaining out-of-date zones
-* 3 zones waiting to be expunged:
-  * zone 0c71b3b2-6ceb-4e8f-b020-b08675e83038 (nexus): image out-of-date, but zone's nexus_generation 1 is still active
-  * zone 3eeb8d49-eb1a-43f8-bb64-c2338421c2c6 (nexus): image out-of-date, but zone's nexus_generation 1 is still active
-  * zone 466a9f29-62bf-4e63-924a-b9efdb86afec (nexus): image out-of-date, but zone's nexus_generation 1 is still active
 * waiting to update top-level nexus_generation: pending non-nexus zone updates
 
 
@@ -2769,10 +2753,6 @@ planning report for blueprint 3bcc37b2-0c0b-44d0-b4ed-3bcb605e4312:
 * 1 out-of-date zone expunged:
   * sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, zone 99e2f30b-3174-40bf-a78a-90da8abba8ca (internal_dns)
 * 21 remaining out-of-date zones
-* 3 zones waiting to be expunged:
-  * zone 0c71b3b2-6ceb-4e8f-b020-b08675e83038 (nexus): image out-of-date, but zone's nexus_generation 1 is still active
-  * zone 3eeb8d49-eb1a-43f8-bb64-c2338421c2c6 (nexus): image out-of-date, but zone's nexus_generation 1 is still active
-  * zone 466a9f29-62bf-4e63-924a-b9efdb86afec (nexus): image out-of-date, but zone's nexus_generation 1 is still active
 * waiting to update top-level nexus_generation: pending non-nexus zone updates
 
 
@@ -3070,10 +3050,6 @@ planning report for blueprint e2125c83-b255-45c9-bc9b-802cff09a812:
 * 1 out-of-date zone expunged:
   * sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, zone ad6a3a03-8d0f-4504-99a4-cbf73d69b973 (crucible_pantry)
 * 20 remaining out-of-date zones
-* 3 zones waiting to be expunged:
-  * zone 0c71b3b2-6ceb-4e8f-b020-b08675e83038 (nexus): image out-of-date, but zone's nexus_generation 1 is still active
-  * zone 3eeb8d49-eb1a-43f8-bb64-c2338421c2c6 (nexus): image out-of-date, but zone's nexus_generation 1 is still active
-  * zone 466a9f29-62bf-4e63-924a-b9efdb86afec (nexus): image out-of-date, but zone's nexus_generation 1 is still active
 * waiting to update top-level nexus_generation: pending non-nexus zone updates
 
 
@@ -3347,10 +3323,6 @@ planning report for blueprint 834e4dbe-3b71-443d-bd4c-20e8253abc0c:
 * 1 out-of-date zone updated in-place:
   * sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, zone bd354eef-d8a6-4165-9124-283fb5e46d77 (crucible)
 * 19 remaining out-of-date zones
-* 3 zones waiting to be expunged:
-  * zone 0c71b3b2-6ceb-4e8f-b020-b08675e83038 (nexus): image out-of-date, but zone's nexus_generation 1 is still active
-  * zone 3eeb8d49-eb1a-43f8-bb64-c2338421c2c6 (nexus): image out-of-date, but zone's nexus_generation 1 is still active
-  * zone 466a9f29-62bf-4e63-924a-b9efdb86afec (nexus): image out-of-date, but zone's nexus_generation 1 is still active
 * waiting to update top-level nexus_generation: pending non-nexus zone updates
 
 
@@ -3480,10 +3452,6 @@ planning report for blueprint d9c5c5e3-c532-4c45-9ef5-22cb00f6a2e1:
 * 1 out-of-date zone updated in-place:
   * sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, zone e2fdefe7-95b2-4fd2-ae37-56929a06d58c (crucible)
 * 18 remaining out-of-date zones
-* 3 zones waiting to be expunged:
-  * zone 0c71b3b2-6ceb-4e8f-b020-b08675e83038 (nexus): image out-of-date, but zone's nexus_generation 1 is still active
-  * zone 3eeb8d49-eb1a-43f8-bb64-c2338421c2c6 (nexus): image out-of-date, but zone's nexus_generation 1 is still active
-  * zone 466a9f29-62bf-4e63-924a-b9efdb86afec (nexus): image out-of-date, but zone's nexus_generation 1 is still active
 * waiting to update top-level nexus_generation: pending non-nexus zone updates
 
 
@@ -3616,10 +3584,6 @@ planning report for blueprint e2deb7c0-2262-49fe-855f-4250c22afb36:
 * 1 out-of-date zone updated in-place:
   * sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, zone 058fd5f9-60a8-4e11-9302-15172782e17d (crucible)
 * 17 remaining out-of-date zones
-* 3 zones waiting to be expunged:
-  * zone 0c71b3b2-6ceb-4e8f-b020-b08675e83038 (nexus): image out-of-date, but zone's nexus_generation 1 is still active
-  * zone 3eeb8d49-eb1a-43f8-bb64-c2338421c2c6 (nexus): image out-of-date, but zone's nexus_generation 1 is still active
-  * zone 466a9f29-62bf-4e63-924a-b9efdb86afec (nexus): image out-of-date, but zone's nexus_generation 1 is still active
 * waiting to update top-level nexus_generation: pending non-nexus zone updates
 
 
@@ -3737,10 +3701,6 @@ planning report for blueprint 23ce505c-8991-44a5-8863-f2b906fba9cf:
 * 1 out-of-date zone expunged:
   * sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, zone 427ec88f-f467-42fa-9bbb-66a91a36103c (internal_dns)
 * 16 remaining out-of-date zones
-* 3 zones waiting to be expunged:
-  * zone 0c71b3b2-6ceb-4e8f-b020-b08675e83038 (nexus): image out-of-date, but zone's nexus_generation 1 is still active
-  * zone 3eeb8d49-eb1a-43f8-bb64-c2338421c2c6 (nexus): image out-of-date, but zone's nexus_generation 1 is still active
-  * zone 466a9f29-62bf-4e63-924a-b9efdb86afec (nexus): image out-of-date, but zone's nexus_generation 1 is still active
 * waiting to update top-level nexus_generation: pending non-nexus zone updates
 
 
@@ -4016,10 +3976,6 @@ planning report for blueprint 60b55d33-5fec-4277-9864-935197eaead7:
 * 1 out-of-date zone updated in-place:
   * sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, zone 5199c033-4cf9-4ab6-8ae7-566bd7606363 (crucible)
 * 15 remaining out-of-date zones
-* 3 zones waiting to be expunged:
-  * zone 0c71b3b2-6ceb-4e8f-b020-b08675e83038 (nexus): image out-of-date, but zone's nexus_generation 1 is still active
-  * zone 3eeb8d49-eb1a-43f8-bb64-c2338421c2c6 (nexus): image out-of-date, but zone's nexus_generation 1 is still active
-  * zone 466a9f29-62bf-4e63-924a-b9efdb86afec (nexus): image out-of-date, but zone's nexus_generation 1 is still active
 * waiting to update top-level nexus_generation: pending non-nexus zone updates
 
 
@@ -4139,10 +4095,6 @@ planning report for blueprint aa13f40f-41ff-4b68-bee1-df2e1f805544:
 * 1 out-of-date zone expunged:
   * sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, zone 6444f8a5-6465-4f0b-a549-1993c113569c (internal_ntp)
 * 14 remaining out-of-date zones
-* 3 zones waiting to be expunged:
-  * zone 0c71b3b2-6ceb-4e8f-b020-b08675e83038 (nexus): image out-of-date, but zone's nexus_generation 1 is still active
-  * zone 3eeb8d49-eb1a-43f8-bb64-c2338421c2c6 (nexus): image out-of-date, but zone's nexus_generation 1 is still active
-  * zone 466a9f29-62bf-4e63-924a-b9efdb86afec (nexus): image out-of-date, but zone's nexus_generation 1 is still active
 * waiting to update top-level nexus_generation: pending non-nexus zone updates
 
 
@@ -4401,10 +4353,6 @@ planning report for blueprint 02078c95-3d58-4b7b-a03f-9b160361c50a:
 * 1 out-of-date zone expunged:
   * sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, zone 803bfb63-c246-41db-b0da-d3b87ddfc63d (external_dns)
 * 13 remaining out-of-date zones
-* 3 zones waiting to be expunged:
-  * zone 0c71b3b2-6ceb-4e8f-b020-b08675e83038 (nexus): image out-of-date, but zone's nexus_generation 1 is still active
-  * zone 3eeb8d49-eb1a-43f8-bb64-c2338421c2c6 (nexus): image out-of-date, but zone's nexus_generation 1 is still active
-  * zone 466a9f29-62bf-4e63-924a-b9efdb86afec (nexus): image out-of-date, but zone's nexus_generation 1 is still active
 * waiting to update top-level nexus_generation: pending non-nexus zone updates
 
 
@@ -4690,10 +4638,6 @@ planning report for blueprint 880e2ffc-8187-4275-a2f3-1b36aa2f4482:
 * 1 out-of-date zone expunged:
   * sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, zone ba4994a8-23f9-4b1a-a84f-a08d74591389 (crucible_pantry)
 * 12 remaining out-of-date zones
-* 3 zones waiting to be expunged:
-  * zone 0c71b3b2-6ceb-4e8f-b020-b08675e83038 (nexus): image out-of-date, but zone's nexus_generation 1 is still active
-  * zone 3eeb8d49-eb1a-43f8-bb64-c2338421c2c6 (nexus): image out-of-date, but zone's nexus_generation 1 is still active
-  * zone 466a9f29-62bf-4e63-924a-b9efdb86afec (nexus): image out-of-date, but zone's nexus_generation 1 is still active
 * waiting to update top-level nexus_generation: pending non-nexus zone updates
 
 
@@ -4961,10 +4905,6 @@ planning report for blueprint a2c6496d-98fc-444d-aa36-99508aa72367:
 * 1 out-of-date zone updated in-place:
   * sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, zone dfac80b4-a887-430a-ae87-a4e065dba787 (crucible)
 * 11 remaining out-of-date zones
-* 3 zones waiting to be expunged:
-  * zone 0c71b3b2-6ceb-4e8f-b020-b08675e83038 (nexus): image out-of-date, but zone's nexus_generation 1 is still active
-  * zone 3eeb8d49-eb1a-43f8-bb64-c2338421c2c6 (nexus): image out-of-date, but zone's nexus_generation 1 is still active
-  * zone 466a9f29-62bf-4e63-924a-b9efdb86afec (nexus): image out-of-date, but zone's nexus_generation 1 is still active
 * waiting to update top-level nexus_generation: pending non-nexus zone updates
 
 
@@ -5094,10 +5034,6 @@ planning report for blueprint 6ed56354-5941-40d1-a06c-b0e940701d52:
 * 1 out-of-date zone updated in-place:
   * sled d81c6a84-79b8-4958-ae41-ea46c9b19763, zone 694bd14f-cb24-4be4-bb19-876e79cda2c8 (crucible)
 * 10 remaining out-of-date zones
-* 3 zones waiting to be expunged:
-  * zone 0c71b3b2-6ceb-4e8f-b020-b08675e83038 (nexus): image out-of-date, but zone's nexus_generation 1 is still active
-  * zone 3eeb8d49-eb1a-43f8-bb64-c2338421c2c6 (nexus): image out-of-date, but zone's nexus_generation 1 is still active
-  * zone 466a9f29-62bf-4e63-924a-b9efdb86afec (nexus): image out-of-date, but zone's nexus_generation 1 is still active
 * waiting to update top-level nexus_generation: pending non-nexus zone updates
 
 
@@ -5215,10 +5151,6 @@ planning report for blueprint 9078c4ba-3a73-4b3f-ac2c-acb501f89cb2:
 * 1 out-of-date zone expunged:
   * sled d81c6a84-79b8-4958-ae41-ea46c9b19763, zone 75b220ba-a0f4-4872-8202-dc7c87f062d0 (crucible_pantry)
 * 9 remaining out-of-date zones
-* 3 zones waiting to be expunged:
-  * zone 0c71b3b2-6ceb-4e8f-b020-b08675e83038 (nexus): image out-of-date, but zone's nexus_generation 1 is still active
-  * zone 3eeb8d49-eb1a-43f8-bb64-c2338421c2c6 (nexus): image out-of-date, but zone's nexus_generation 1 is still active
-  * zone 466a9f29-62bf-4e63-924a-b9efdb86afec (nexus): image out-of-date, but zone's nexus_generation 1 is still active
 * waiting to update top-level nexus_generation: pending non-nexus zone updates
 
 
@@ -5470,10 +5402,6 @@ planning report for blueprint 2b89e0d7-f15b-4474-8ac4-85959ed1bc88:
 * 1 out-of-date zone updated in-place:
   * sled d81c6a84-79b8-4958-ae41-ea46c9b19763, zone 7c252b64-c5af-4ec1-989e-9a03f3b0f111 (crucible)
 * 8 remaining out-of-date zones
-* 3 zones waiting to be expunged:
-  * zone 0c71b3b2-6ceb-4e8f-b020-b08675e83038 (nexus): image out-of-date, but zone's nexus_generation 1 is still active
-  * zone 3eeb8d49-eb1a-43f8-bb64-c2338421c2c6 (nexus): image out-of-date, but zone's nexus_generation 1 is still active
-  * zone 466a9f29-62bf-4e63-924a-b9efdb86afec (nexus): image out-of-date, but zone's nexus_generation 1 is still active
 * waiting to update top-level nexus_generation: pending non-nexus zone updates
 
 
@@ -5592,10 +5520,6 @@ planning report for blueprint 7f6b7297-c2bc-4f67-b3c0-c8e555ebbdc4:
 * 1 out-of-date zone expunged:
   * sled d81c6a84-79b8-4958-ae41-ea46c9b19763, zone ea5b4030-b52f-44b2-8d70-45f15f987d01 (internal_dns)
 * 7 remaining out-of-date zones
-* 3 zones waiting to be expunged:
-  * zone 0c71b3b2-6ceb-4e8f-b020-b08675e83038 (nexus): image out-of-date, but zone's nexus_generation 1 is still active
-  * zone 3eeb8d49-eb1a-43f8-bb64-c2338421c2c6 (nexus): image out-of-date, but zone's nexus_generation 1 is still active
-  * zone 466a9f29-62bf-4e63-924a-b9efdb86afec (nexus): image out-of-date, but zone's nexus_generation 1 is still active
 * waiting to update top-level nexus_generation: pending non-nexus zone updates
 
 
@@ -5869,10 +5793,6 @@ planning report for blueprint e93650dc-b5ba-4ec7-8550-9171c1ada194:
 * 1 out-of-date zone expunged:
   * sled d81c6a84-79b8-4958-ae41-ea46c9b19763, zone f10a4fb9-759f-4a65-b25e-5794ad2d07d8 (internal_ntp)
 * 6 remaining out-of-date zones
-* 3 zones waiting to be expunged:
-  * zone 0c71b3b2-6ceb-4e8f-b020-b08675e83038 (nexus): image out-of-date, but zone's nexus_generation 1 is still active
-  * zone 3eeb8d49-eb1a-43f8-bb64-c2338421c2c6 (nexus): image out-of-date, but zone's nexus_generation 1 is still active
-  * zone 466a9f29-62bf-4e63-924a-b9efdb86afec (nexus): image out-of-date, but zone's nexus_generation 1 is still active
 * waiting to update top-level nexus_generation: pending non-nexus zone updates
 
 
@@ -6135,10 +6055,6 @@ planning report for blueprint 2182613d-dc9f-41eb-9c6a-d33801849caa:
 * 1 out-of-date zone updated in-place:
   * sled d81c6a84-79b8-4958-ae41-ea46c9b19763, zone f55647d4-5500-4ad3-893a-df45bd50d622 (crucible)
 * 5 remaining out-of-date zones
-* 3 zones waiting to be expunged:
-  * zone 0c71b3b2-6ceb-4e8f-b020-b08675e83038 (nexus): image out-of-date, but zone's nexus_generation 1 is still active
-  * zone 3eeb8d49-eb1a-43f8-bb64-c2338421c2c6 (nexus): image out-of-date, but zone's nexus_generation 1 is still active
-  * zone 466a9f29-62bf-4e63-924a-b9efdb86afec (nexus): image out-of-date, but zone's nexus_generation 1 is still active
 * waiting to update top-level nexus_generation: pending non-nexus zone updates
 
 
@@ -6262,10 +6178,6 @@ planning report for blueprint e8b088a8-7da0-480b-a2dc-75ffef068ece:
 * 1 out-of-date zone expunged:
   * sled d81c6a84-79b8-4958-ae41-ea46c9b19763, zone f6ec9c67-946a-4da3-98d5-581f72ce8bf0 (external_dns)
 * 4 remaining out-of-date zones
-* 3 zones waiting to be expunged:
-  * zone 0c71b3b2-6ceb-4e8f-b020-b08675e83038 (nexus): image out-of-date, but zone's nexus_generation 1 is still active
-  * zone 3eeb8d49-eb1a-43f8-bb64-c2338421c2c6 (nexus): image out-of-date, but zone's nexus_generation 1 is still active
-  * zone 466a9f29-62bf-4e63-924a-b9efdb86afec (nexus): image out-of-date, but zone's nexus_generation 1 is still active
 * waiting to update top-level nexus_generation: waiting for new nexus zones
 
 
