@@ -72,6 +72,9 @@ pub enum ReconfigurationError {
     #[error("upgrade from LRTQ required")]
     UpgradeFromLrtqRequired,
 
+    #[error("upgrade from LRTQ in progress")]
+    UpgradeFromLrtqInProgress,
+
     #[error(
         "number of members: {num_members:?} must be greater than threshold: \
         {threshold:?}"
@@ -171,6 +174,9 @@ pub enum LrtqUpgradeError {
         and cannot prepare another at a smaller or equivalent epoch {new:?}"
     )]
     PreparedEpochMismatch { existing: Epoch, new: Epoch },
+
+    #[error("epoch must be at least 2 as the LRTQ epoch is 1. got {0}")]
+    EpochMustBeAtLeast2(Epoch),
 }
 
 /// A `ReconfigureMsg` that has been determined to be valid for the remainder
@@ -530,6 +536,10 @@ impl ValidatedLrtqUpgradeMsg {
         })
     }
 
+    pub fn epoch(&self) -> Epoch {
+        self.epoch
+    }
+
     /// Verify that the cluster membership and threshold sizes are within
     /// constraints.
     ///
@@ -562,6 +572,11 @@ impl ValidatedLrtqUpgradeMsg {
         ctx: &mut impl NodeHandlerCtx,
         msg: &LrtqUpgradeMsg,
     ) -> Result<(), LrtqUpgradeError> {
+        // Epochs for LRTQ upgrades must start at 2, as the LRTQ epoch is always 1.
+        if msg.epoch < Epoch(2) {
+            return Err(LrtqUpgradeError::EpochMustBeAtLeast2(msg.epoch));
+        }
+
         // Ensure that we haven't seen a newer configuration
         if let Some(latest_config) = ctx.persistent_state().latest_config() {
             if msg.epoch <= latest_config.epoch {
@@ -633,6 +648,31 @@ impl ValidatedLrtqUpgradeMsg {
         Ok(false)
     }
 }
+
+// For diffs we want to allow access to all fields, but not make them public in
+// the `ValidatedLrtqUpgradeMsg` type itself.
+impl<'daft> ValidatedLrtqUpgradeMsgDiff<'daft> {
+    pub fn rack_id(&self) -> Leaf<&RackUuid> {
+        self.rack_id
+    }
+
+    pub fn epoch(&self) -> Leaf<&Epoch> {
+        self.epoch
+    }
+
+    pub fn members(&self) -> &BTreeSetDiff<'daft, PlatformId> {
+        &self.members
+    }
+
+    pub fn threshold(&self) -> Leaf<&Threshold> {
+        self.threshold
+    }
+
+    pub fn coordinator_id(&self) -> Leaf<&PlatformId> {
+        self.coordinator_id
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

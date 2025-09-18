@@ -4,16 +4,34 @@
 
 //! State of a reconfiguration coordinator inside a [`crate::Node`]
 
+use crate::NodeHandlerCtx;
 use crate::configuration::ConfigurationDiff;
 use crate::crypto::{LrtqShare, PlaintextRackSecrets, ShareDigestLrtq};
-use crate::validators::{ReconfigurationError, ValidatedReconfigureMsg};
+use crate::validators::{
+    ReconfigurationError, ValidatedLrtqUpgradeMsg, ValidatedReconfigureMsg,
+};
 use crate::{Configuration, Epoch, PeerMsgKind, PlatformId, RackSecret};
-use crate::{NodeHandlerCtx, ValidatedReconfigureMsgDiff};
 use daft::{Diffable, Leaf};
 use gfss::shamir::Share;
 use slog::{Logger, error, info, o, warn};
 use std::collections::{BTreeMap, BTreeSet};
 use std::mem;
+
+// A coordinator can be upgrading from LRTQ or reconfiguring a TQ config.
+#[derive(Clone, Debug, PartialEq, Eq, Diffable)]
+pub enum CoordinatingMsg {
+    Upgrade(ValidatedLrtqUpgradeMsg),
+    Reconfig(ValidatedReconfigureMsg),
+}
+
+impl CoordinatingMsg {
+    pub fn epoch(&self) -> Epoch {
+        match self {
+            Self::Upgrade(msg) => msg.epoch(),
+            Self::Reconfig(msg) => msg.epoch(),
+        }
+    }
+}
 
 /// The state of a reconfiguration coordinator.
 ///
@@ -23,17 +41,15 @@ use std::mem;
 /// when the control plane is up, as we use Nexus to persist prepares and ensure
 /// commitment happens, even if the system crashes while committing. If a
 /// rack crash (such as a power outage) occurs before nexus is informed of the
-/// prepares, nexus will  skip the epoch and start a new reconfiguration. This
+/// prepare acks, nexus will skip the epoch and start a new reconfiguration. This
 /// allows progress to always be made with a full linearization of epochs.
-///
-/// We allow some unused fields before we complete the coordination code
 #[derive(Clone, Debug, Diffable)]
 pub struct CoordinatorState {
     #[daft(ignore)]
     log: Logger,
 
-    /// A copy of the message used to start this reconfiguration
-    reconfigure_msg: ValidatedReconfigureMsg,
+    /// A copy of the message used to start this coordination
+    msg: CoordinatingMsg,
 
     /// Configuration that will get persisted inside a `Prepare` message in a
     /// `Node`s `PersistentState`, once it is possible to create the Prepare.
@@ -46,8 +62,8 @@ pub struct CoordinatorState {
 // For diffs we want to allow access to all fields, but not make them public in
 // the `CoordinatorState` type itself.
 impl<'daft> CoordinatorStateDiff<'daft> {
-    pub fn reconfigure_msg(&self) -> &ValidatedReconfigureMsgDiff<'daft> {
-        &self.reconfigure_msg
+    pub fn msg(&self) -> Leaf<&CoordinatingMsg> {
+        self.msg
     }
 
     pub fn configuration(&self) -> &ConfigurationDiff<'daft> {
@@ -62,7 +78,7 @@ impl<'daft> CoordinatorStateDiff<'daft> {
 #[cfg(feature = "danger_partial_eq_ct_wrapper")]
 impl PartialEq for CoordinatorState {
     fn eq(&self, other: &Self) -> bool {
-        self.reconfigure_msg == other.reconfigure_msg
+        self.msg == other.msg
             && self.configuration == other.configuration
             && self.op == other.op
     }
@@ -163,15 +179,15 @@ impl CoordinatorState {
     ) -> CoordinatorState {
         CoordinatorState {
             log: log.new(o!("component" => "tq-coordinator-state")),
-            reconfigure_msg,
+            msg: CoordinatingMsg::Reconfig(reconfigure_msg),
             configuration,
             op,
         }
     }
 
-    /// Return the `ValidatedReconfigureMsg` that started this reconfiguration
-    pub fn reconfigure_msg(&self) -> &ValidatedReconfigureMsg {
-        &self.reconfigure_msg
+    /// Return the validated msg that started this reconfiguration
+    pub fn msg(&self) -> &CoordinatingMsg {
+        &self.msg
     }
 
     pub fn op(&self) -> &CoordinatorOperation {

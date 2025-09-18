@@ -16,13 +16,14 @@
 //! Node, and so this should not be problematic.
 
 use crate::compute_key_share::KeyShareComputer;
+use crate::coordinator_state::CoordinatingMsg;
 use crate::crypto::ReconstructedRackSecret;
 use crate::rack_secret_loader::{
     LoadRackSecretError, RackSecretLoader, RackSecretLoaderDiff,
 };
 use crate::validators::{
     LrtqUpgradeError, MismatchedRackIdError, ReconfigurationError,
-    ValidatedLrtqUpgradeMsg, ValidatedReconfigureMsg,
+    ValidatedReconfigureMsg,
 };
 use crate::{
     Alarm, Configuration, CoordinatorState, Epoch, ExpungedMetadata,
@@ -126,12 +127,25 @@ impl Node {
         ctx: &mut impl NodeHandlerCtx,
         msg: ReconfigureMsg,
     ) -> Result<(), ReconfigurationError> {
+        let last_reconfig_msg = if let Some(cs) = &self.coordinator_state {
+            match cs.msg() {
+                CoordinatingMsg::Upgrade(_) => {
+                    return Err(
+                        ReconfigurationError::UpgradeFromLrtqInProgress,
+                    );
+                }
+                CoordinatingMsg::Reconfig(msg) => Some(msg),
+            }
+        } else {
+            None
+        };
+
         let Some(validated_msg) = ValidatedReconfigureMsg::new(
             &self.log,
             ctx.platform_id(),
             msg,
             ctx.persistent_state().into(),
-            self.coordinator_state.as_ref().map(|cs| cs.reconfigure_msg()),
+            last_reconfig_msg,
         )?
         else {
             // This was an idempotent (duplicate) request.
@@ -166,46 +180,6 @@ impl Node {
         ctx: &mut impl NodeHandlerCtx,
         msg: LrtqUpgradeMsg,
     ) -> Result<(), LrtqUpgradeError> {
-        let ps = ctx.persistent_state();
-
-        if let Some(expunged) = &ps.expunged {
-            error!(
-                self.log,
-                "LRTQ upgrade attempted on expunged node";
-                "expunged_epoch" => %expunged.epoch,
-                "expunging_node" => %expunged.from
-            );
-            return Err(LrtqUpgradeError::Expunged {
-                epoch: expunged.epoch,
-                from: expunged.from.clone(),
-            });
-        }
-
-        // If we have an LRTQ share, the rack id must match the one from Nexus
-        if let Some(ps_rack_id) = ps.rack_id() {
-            if msg.rack_id != ps_rack_id {
-                error!(
-                    self.log,
-                    "LRTQ upgrade attempted with invalid rack_id";
-                    "expected" => %ps_rack_id,
-                    "got" => %msg.rack_id
-                );
-                return Err(MismatchedRackIdError {
-                    expected: ps_rack_id,
-                    got: msg.rack_id,
-                }
-                .into());
-            }
-        }
-
-        if ps.lrtq.is_none() {
-            return Err(LrtqUpgradeError::NoLrtqShare);
-        }
-
-        if let Some(epoch) = ps.latest_committed_epoch() {
-            return Err(LrtqUpgradeError::AlreadyUpgraded(epoch));
-        }
-
         // TODO: Put the above in the validator
 
         Ok(())
@@ -355,7 +329,7 @@ impl Node {
         // Are we currently coordinating for this epoch?
         // Stop coordinating if we are.
         if let Some(cs) = &self.coordinator_state {
-            if cs.reconfigure_msg().epoch() == epoch {
+            if cs.msg().epoch() == epoch {
                 info!(
                     self.log,
                     "Stopping coordination due to commit";
@@ -455,7 +429,7 @@ impl Node {
     fn handle_prepare_ack(&mut self, from: PlatformId, epoch: Epoch) {
         // Are we coordinating for this epoch?
         if let Some(cs) = &mut self.coordinator_state {
-            let current_epoch = cs.reconfigure_msg().epoch();
+            let current_epoch = cs.msg().epoch();
             if current_epoch == epoch {
                 info!(self.log, "Received prepare ack";
                      "from" => %from,
@@ -644,7 +618,7 @@ impl Node {
         }
 
         if let Some(cs) = &self.coordinator_state {
-            let coordinating_epoch = cs.reconfigure_msg().epoch();
+            let coordinating_epoch = cs.msg().epoch();
 
             // Are we coordinating for an older epoch? If so, cancel.
             if coordinating_epoch < config.epoch {
@@ -905,7 +879,7 @@ impl Node {
         // Nexus. In either case the rest of the system has moved on and we
         // should stop coordinating.
         if let Some(cs) = &self.coordinator_state {
-            if msg_epoch > cs.reconfigure_msg().epoch() {
+            if msg_epoch > cs.msg().epoch() {
                 // This prepare is for a newer configuration than the one we are
                 // currently coordinating. We must cancel our coordination as Nexus
                 // has moved on.
@@ -915,7 +889,7 @@ impl Node {
                 );
                 info!(self.log, "{cancel_msg}";
                     "msg_epoch" => %msg_epoch,
-                    "epoch" => %cs.reconfigure_msg().epoch(),
+                    "epoch" => %cs.msg().epoch(),
                     "from" => %from
                 );
                 self.coordinator_state = None;
