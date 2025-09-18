@@ -7791,6 +7791,7 @@ pub(crate) mod test {
             self.example.input = input_builder.build();
         }
 
+        // Sets the old tuf repo to the current target repo
         fn set_old_tuf_repo_to_target(&mut self) {
             let mut input_builder = self.example.input.clone().into_builder();
             input_builder.policy_mut().old_repo =
@@ -7927,24 +7928,49 @@ pub(crate) mod test {
         bp_generator.assert_child_bp_has_no_report(&new_bp);
 
         // Set up a TUF repo with new artifacts
-        let artifact_version =
+        let artifact_version_1 =
+            ArtifactVersion::new_static("1.0.0-nexus-gen-test")
+                .expect("can't parse artifact version");
+        let artifact_version_2 =
             ArtifactVersion::new_static("2.0.0-nexus-gen-test")
                 .expect("can't parse artifact version");
+
+        // First: Make everything use artifacts from version "1.0.0".
+        // Treat this as the starting point instead of InstallDataset,
+        // as this has an ambiguous version, and typically requires
+        // image resolution to occur first before zones can be added.
+        //
+        // Next: Set the target to "2.0.0", upgrade everything except
+        // Nexus.
         bp_generator.set_new_tuf_repo_with_artifacts(
-            create_artifacts_at_version(&artifact_version),
+            create_artifacts_at_version(&artifact_version_1),
+            Version::new(1, 0, 0),
+        );
+        bp_generator.set_old_tuf_repo_to_target();
+        bp_generator.set_new_tuf_repo_with_artifacts(
+            create_artifacts_at_version(&artifact_version_2),
             Version::new(2, 0, 0),
         );
-        let image_source =
-            BlueprintGenerator::create_image_at_version(&artifact_version);
+        let image_source_1 =
+            BlueprintGenerator::create_image_at_version(&artifact_version_1);
+        let image_source_2 =
+            BlueprintGenerator::create_image_at_version(&artifact_version_2);
+        assert_ne!(image_source_1, image_source_2);
 
         // Manually update all non-Nexus zones to the new image source
+        //
+        // Manually make the Nexus zones all become "1.0.0" so they're
+        // not using the install dataset.
         for sled_config in bp_generator.blueprint.sleds.values_mut() {
             for mut zone in &mut sled_config.zones {
                 if zone.zone_type.kind() != ZoneKind::Nexus {
-                    zone.image_source = image_source.clone();
+                    zone.image_source = image_source_2.clone();
+                } else {
+                    zone.image_source = image_source_1.clone();
                 }
             }
         }
+
         // Also, manually edit the blueprint to expunge one Nexus.
         //
         // This tests that we can restore redundancy of the old Nexuses
@@ -7955,7 +7981,6 @@ pub(crate) mod test {
             .next()
             .unwrap();
         let nexus_id = zone.id;
-
         let mut bp_builder = bp_generator.new_blueprint_builder("expunge-one");
         bp_builder.sled_expunge_zone(sled, nexus_id).unwrap();
         bp_generator.blueprint = bp_builder.build();
@@ -7968,18 +7993,16 @@ pub(crate) mod test {
             .collect::<Vec<_>>();
         assert_eq!(nexuses.len(), 2);
         for (_, zone, nexus) in nexuses {
-            assert_eq!(
-                zone.image_source,
-                BlueprintZoneImageSource::InstallDataset
-            );
+            assert_eq!(zone.image_source, image_source_1,);
             assert_eq!(
                 nexus.nexus_generation,
                 bp_generator.blueprint.nexus_generation
             );
         }
 
+        // Plan a new blueprint, which will provision new Nexus zones
+        // and restore redundancy of the expunged old Nexus zone.
         bp_generator.update_inventory_from_blueprint();
-
         let old_generation = bp_generator.blueprint.nexus_generation;
         let new_bp =
             bp_generator.plan_new_blueprint("test_blocked_by_new_nexus_db");
@@ -7987,10 +8010,6 @@ pub(crate) mod test {
             assert_eq!(new_bp.nexus_generation, old_generation);
 
             let summary = new_bp.diff_since_blueprint(&bp_generator.blueprint);
-
-            // This new blueprint does do *something* - it adds new Nexus zones,
-            // even though they aren't sufficiently "up" for the nexus
-            // generation bump.
             assert_eq!(
                 summary.total_zones_added(),
                 bp_generator.example.input.target_nexus_zone_count() + 1
@@ -8022,16 +8041,10 @@ pub(crate) mod test {
 
             // Old Nexuses
             if nexus.nexus_generation == bp.nexus_generation {
-                assert_eq!(
-                    zone.image_source,
-                    BlueprintZoneImageSource::InstallDataset
-                );
+                assert_eq!(zone.image_source, image_source_1,);
             // New Nexuses
             } else if nexus.nexus_generation == bp.nexus_generation.next() {
-                assert_ne!(
-                    zone.image_source,
-                    BlueprintZoneImageSource::InstallDataset
-                );
+                assert_eq!(zone.image_source, image_source_2,);
             } else {
                 panic!("Unexpected nexus generation");
             }
@@ -8078,15 +8091,25 @@ pub(crate) mod test {
         );
 
         // Set up a TUF repo with new artifacts
-        let artifact_version =
+        let artifact_version_1 =
+            ArtifactVersion::new_static("1.0.0-nexus-gen-test")
+                .expect("can't parse artifact version");
+        let artifact_version_2 =
             ArtifactVersion::new_static("2.0.0-nexus-gen-test")
                 .expect("can't parse artifact version");
         bp_generator.set_new_tuf_repo_with_artifacts(
-            create_artifacts_at_version(&artifact_version),
+            create_artifacts_at_version(&artifact_version_1),
+            Version::new(1, 0, 0),
+        );
+        bp_generator.set_old_tuf_repo_to_target();
+        bp_generator.set_new_tuf_repo_with_artifacts(
+            create_artifacts_at_version(&artifact_version_2),
             Version::new(2, 0, 0),
         );
-        let image_source =
-            BlueprintGenerator::create_image_at_version(&artifact_version);
+        let image_source_1 =
+            BlueprintGenerator::create_image_at_version(&artifact_version_1);
+        let image_source_2 =
+            BlueprintGenerator::create_image_at_version(&artifact_version_2);
 
         // Check: Initially, nexus generation update should be blocked because
         // non-Nexus zones haven't been updated yet
@@ -8107,10 +8130,15 @@ pub(crate) mod test {
         }
 
         // Manually update all non-Nexus zones to the new image source
+        //
+        // Manually make the Nexus zones all become "1.0.0" so they're
+        // not using the install dataset.
         for sled_config in bp_generator.blueprint.sleds.values_mut() {
             for mut zone in &mut sled_config.zones {
                 if zone.zone_type.kind() != ZoneKind::Nexus {
-                    zone.image_source = image_source.clone();
+                    zone.image_source = image_source_2.clone();
+                } else {
+                    zone.image_source = image_source_1.clone();
                 }
             }
         }
