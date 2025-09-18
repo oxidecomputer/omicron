@@ -6,7 +6,10 @@
 
 use crate::configuration::ConfigurationError;
 use crate::messages::ReconfigureMsg;
-use crate::{Epoch, PersistentStateSummary, PlatformId, Threshold};
+use crate::{
+    Epoch, LrtqUpgradeMsg, NodeHandlerCtx, PersistentStateSummary, PlatformId,
+    Threshold,
+};
 use daft::{BTreeSetDiff, Diffable, Leaf};
 use omicron_uuid_kinds::RackUuid;
 use slog::{Logger, error, info, warn};
@@ -70,7 +73,8 @@ pub enum ReconfigurationError {
     UpgradeFromLrtqRequired,
 
     #[error(
-        "number of members: {num_members:?} must be greater than threshold: {threshold:?}"
+        "number of members: {num_members:?} must be greater than threshold: \
+        {threshold:?}"
     )]
     ThresholdMismatch { num_members: usize, threshold: Threshold },
 
@@ -85,7 +89,8 @@ pub enum ReconfigurationError {
     InvalidThreshold(Threshold),
 
     #[error(
-        "Node has last committed epoch of {node_epoch:?}, message contains {msg_epoch:?}"
+        "Node has last committed epoch of {node_epoch:?}, \
+        message contains {msg_epoch:?}"
     )]
     LastCommittedEpochMismatch {
         node_epoch: Option<Epoch>,
@@ -93,7 +98,8 @@ pub enum ReconfigurationError {
     },
 
     #[error(
-        "sled has already prepared a request at epoch {existing:?}, and cannot prepare another at a smaller or equivalent epoch {new:?}"
+        "sled has already prepared a request at epoch {existing:?}, \
+        and cannot prepare another at a smaller or equivalent epoch {new:?}"
     )]
     PreparedEpochMismatch { existing: Epoch, new: Epoch },
 
@@ -111,7 +117,8 @@ pub enum ReconfigurationError {
         SledExpungedError,
     ),
     #[error(
-        "reconfiguration in progress at epoch {current_epoch:?}: cannot reconfigure for older epoch {msg_epoch:?}"
+        "reconfiguration in progress at epoch {current_epoch:?}: cannot \
+        reconfigure for older epoch {msg_epoch:?}"
     )]
     ReconfigurationInProgress { current_epoch: Epoch, msg_epoch: Epoch },
 
@@ -120,6 +127,50 @@ pub enum ReconfigurationError {
 
     #[error(transparent)]
     Configuration(#[from] ConfigurationError),
+}
+
+#[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]
+pub enum LrtqUpgradeError {
+    #[error("invalid rack id")]
+    InvalidRackId(
+        #[from]
+        #[source]
+        MismatchedRackIdError,
+    ),
+
+    #[error("cannot commit: expunged at epoch {epoch} by {from}")]
+    Expunged { epoch: Epoch, from: PlatformId },
+
+    #[error("not an lrtq node - no lrtq key share")]
+    NoLrtqShare,
+
+    #[error("already upgraded from lrtq: committed epoch {0}")]
+    AlreadyUpgraded(Epoch),
+
+    #[error("reconfiguration coordinator must be a member of the new group")]
+    CoordinatorMustBeAMemberOfNewGroup,
+
+    #[error(
+        "number of members: {num_members:?} must be greater than threshold: \
+        {threshold:?}"
+    )]
+    ThresholdMismatch { num_members: usize, threshold: Threshold },
+
+    #[error(
+        "invalid membership size: {0:?}: must be between 3 and 32 inclusive"
+    )]
+    InvalidMembershipSize(usize),
+
+    #[error(
+        "invalid threshold: {0:?}: threshold must be between 2 and 31 inclusive"
+    )]
+    InvalidThreshold(Threshold),
+
+    #[error(
+        "sled has already prepared a request at epoch {existing:?}, \
+        and cannot prepare another at a smaller or equivalent epoch {new:?}"
+    )]
+    PreparedEpochMismatch { existing: Epoch, new: Epoch },
 }
 
 /// A `ReconfigureMsg` that has been determined to be valid for the remainder
@@ -389,6 +440,199 @@ impl ValidatedReconfigureMsg {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Diffable)]
+pub struct ValidatedLrtqUpgradeMsg {
+    rack_id: RackUuid,
+    epoch: Epoch,
+    members: BTreeSet<PlatformId>,
+    threshold: Threshold,
+
+    // This is not included in the original `LrtqUpgradeMsg`. It's implicit in
+    // the node that Nexus sends the request to.
+    coordinator_id: PlatformId,
+}
+
+impl ValidatedLrtqUpgradeMsg {
+    /// Ensure that the `LrtqUpgradeMsg` is valid and return a
+    /// `ValidatedLrtqUpgradeMsg` if it is.
+    ///
+    /// LRTQ upgrade does not accept idempotent requests. If a configuration has
+    /// been seen for a given epoch, then an error is returned. TODO: This might
+    /// be the right behavior for normal reconfigurations as well. Nexus is
+    /// not going to send a request more than once for the same epoch. For now
+    /// though, we leave things as is.
+    pub fn new(
+        log: &Logger,
+        ctx: &mut impl NodeHandlerCtx,
+        msg: LrtqUpgradeMsg,
+    ) -> Result<Self, LrtqUpgradeError> {
+        let ps = ctx.persistent_state();
+
+        if let Some(expunged) = &ps.expunged {
+            error!(
+                log,
+                "LRTQ upgrade attempted on expunged node";
+                "expunged_epoch" => %expunged.epoch,
+                "expunging_node" => %expunged.from
+            );
+            return Err(LrtqUpgradeError::Expunged {
+                epoch: expunged.epoch,
+                from: expunged.from.clone(),
+            });
+        }
+
+        // If we have an LRTQ share, the rack id must match the one from Nexus
+        if let Some(ps_rack_id) = ps.rack_id() {
+            if msg.rack_id != ps_rack_id {
+                error!(
+                    log,
+                    "LRTQ upgrade attempted with invalid rack_id";
+                    "expected" => %ps_rack_id,
+                    "got" => %msg.rack_id
+                );
+                return Err(MismatchedRackIdError {
+                    expected: ps_rack_id,
+                    got: msg.rack_id,
+                }
+                .into());
+            }
+        }
+
+        if ps.lrtq.is_none() {
+            error!(log, "LRTQ upgrade attempted on node without LRTQ share");
+            return Err(LrtqUpgradeError::NoLrtqShare);
+        }
+
+        if let Some(epoch) = ps.latest_committed_epoch() {
+            error!(
+                log,
+                "LRTQ upgrade attempted when already upgraded";
+                "committed_epoch" => %epoch
+            );
+            return Err(LrtqUpgradeError::AlreadyUpgraded(epoch));
+        }
+
+        if !msg.members.contains(ctx.platform_id()) {
+            return Err(LrtqUpgradeError::CoordinatorMustBeAMemberOfNewGroup);
+        }
+
+        Self::check_membership_sizes(&msg)?;
+        Self::check_epoch(ctx, &msg)?;
+
+        let LrtqUpgradeMsg { rack_id, epoch, members, threshold } = msg;
+
+        Ok(ValidatedLrtqUpgradeMsg {
+            rack_id,
+            epoch,
+            members,
+            threshold,
+            coordinator_id: ctx.platform_id().clone(),
+        })
+    }
+
+    /// Verify that the cluster membership and threshold sizes are within
+    /// constraints.
+    ///
+    /// This is essentially a copy of the  method for `ValidatedReconfigureMsg`,
+    /// but with different types.
+    fn check_membership_sizes(
+        msg: &LrtqUpgradeMsg,
+    ) -> Result<(), LrtqUpgradeError> {
+        let num_members = msg.members.len();
+        if num_members <= msg.threshold.0 as usize {
+            return Err(LrtqUpgradeError::ThresholdMismatch {
+                num_members,
+                threshold: msg.threshold,
+            });
+        }
+
+        if num_members < 3 || num_members > 32 {
+            return Err(LrtqUpgradeError::InvalidMembershipSize(num_members));
+        }
+
+        if msg.threshold.0 < 2 || msg.threshold.0 > 31 {
+            return Err(LrtqUpgradeError::InvalidThreshold(msg.threshold));
+        }
+
+        Ok(())
+    }
+
+    // Ensure that the epoch for this LRTQ upgrade is valid
+    fn check_epoch(
+        ctx: &mut impl NodeHandlerCtx,
+        msg: &LrtqUpgradeMsg,
+    ) -> Result<(), LrtqUpgradeError> {
+        // Ensure that we haven't seen a newer configuration
+        if let Some(latest_config) = ctx.persistent_state().latest_config() {
+            if msg.epoch <= latest_config.epoch {
+                return Err(LrtqUpgradeError::PreparedEpochMismatch {
+                    existing: latest_config.epoch,
+                    new: msg.epoch,
+                });
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Ensure that if this node is currently coordinating a reconfiguration,
+    /// that this request is at least as new as the last one.
+    ///
+    /// Return `Ok(false)` if the configuration is new, and `Ok(true)` if it
+    /// is idempotent.
+    fn check_existing_coordination(
+        log: &Logger,
+        new_msg: &ReconfigureMsg,
+        last_reconfig_msg: Option<&ValidatedReconfigureMsg>,
+    ) -> Result<bool, ReconfigurationError> {
+        let Some(existing_msg) = last_reconfig_msg else {
+            return Ok(false);
+        };
+        let current_epoch = existing_msg.epoch;
+        if current_epoch > new_msg.epoch {
+            warn!(
+                log,
+                "Reconfiguration in progress: rejecting stale attempt";
+                "current_epoch" => current_epoch.to_string(),
+                "msg_epoch" => new_msg.epoch.to_string()
+            );
+            return Err(ReconfigurationError::ReconfigurationInProgress {
+                current_epoch: existing_msg.epoch,
+                msg_epoch: new_msg.epoch,
+            });
+        }
+
+        if current_epoch == new_msg.epoch {
+            if existing_msg != new_msg {
+                error!(
+                    log,
+                    concat!(
+                        "Reconfiguration in progress for same epoch, ",
+                        "but messages differ");
+                    "epoch" => new_msg.epoch.to_string(),
+                );
+                return Err(
+                    ReconfigurationError::MismatchedReconfigurationForSameEpoch(
+                        new_msg.epoch,
+                    ),
+                );
+            }
+
+            // Idempotent request
+            return Ok(true);
+        }
+
+        info!(
+            log,
+            "Configuration being coordinated changed";
+            "previous_epoch" => current_epoch.to_string(),
+            "new_epoch" => new_msg.epoch.to_string()
+        );
+
+        // Valid new request
+        Ok(false)
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -21,7 +21,8 @@ use crate::rack_secret_loader::{
     LoadRackSecretError, RackSecretLoader, RackSecretLoaderDiff,
 };
 use crate::validators::{
-    MismatchedRackIdError, ReconfigurationError, ValidatedReconfigureMsg,
+    LrtqUpgradeError, MismatchedRackIdError, ReconfigurationError,
+    ValidatedLrtqUpgradeMsg, ValidatedReconfigureMsg,
 };
 use crate::{
     Alarm, Configuration, CoordinatorState, Epoch, ExpungedMetadata,
@@ -156,6 +157,57 @@ impl Node {
 
         self.set_coordinator_state(ctx, validated_msg)?;
         self.send_coordinator_msgs(ctx);
+        Ok(())
+    }
+
+    /// Start coordinating an upgrade from LRTQ
+    pub fn coordinate_upgrade_from_lrtq(
+        &mut self,
+        ctx: &mut impl NodeHandlerCtx,
+        msg: LrtqUpgradeMsg,
+    ) -> Result<(), LrtqUpgradeError> {
+        let ps = ctx.persistent_state();
+
+        if let Some(expunged) = &ps.expunged {
+            error!(
+                self.log,
+                "LRTQ upgrade attempted on expunged node";
+                "expunged_epoch" => %expunged.epoch,
+                "expunging_node" => %expunged.from
+            );
+            return Err(LrtqUpgradeError::Expunged {
+                epoch: expunged.epoch,
+                from: expunged.from.clone(),
+            });
+        }
+
+        // If we have an LRTQ share, the rack id must match the one from Nexus
+        if let Some(ps_rack_id) = ps.rack_id() {
+            if msg.rack_id != ps_rack_id {
+                error!(
+                    self.log,
+                    "LRTQ upgrade attempted with invalid rack_id";
+                    "expected" => %ps_rack_id,
+                    "got" => %msg.rack_id
+                );
+                return Err(MismatchedRackIdError {
+                    expected: ps_rack_id,
+                    got: msg.rack_id,
+                }
+                .into());
+            }
+        }
+
+        if ps.lrtq.is_none() {
+            return Err(LrtqUpgradeError::NoLrtqShare);
+        }
+
+        if let Some(epoch) = ps.latest_committed_epoch() {
+            return Err(LrtqUpgradeError::AlreadyUpgraded(epoch));
+        }
+
+        // TODO: Put the above in the validator
+
         Ok(())
     }
 

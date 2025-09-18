@@ -22,6 +22,20 @@ pub struct ReconfigureMsg {
     pub threshold: Threshold,
 }
 
+/// A request from nexus informing a node to start coordinating an upgrade from
+/// LRTQ
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LrtqUpgradeMsg {
+    pub rack_id: RackUuid,
+    pub epoch: Epoch,
+    // The members of the LRTQ cluster must be the same as the members of the
+    // upgraded trust quorum cluster. This is implicit, as the membership of the
+    // LRTQ cluster is computed based on the existing control plane sleds known
+    // to Nexus.
+    pub members: BTreeSet<PlatformId>,
+    pub threshold: Threshold,
+}
+
 /// Messages sent between trust quorum members over a sprockets channel
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "danger_partial_eq_ct_wrapper", derive(PartialEq, Eq))]
