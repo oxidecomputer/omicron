@@ -2818,7 +2818,7 @@ pub mod test {
             }
         }
 
-        let blueprint2 = builder.build();
+        let blueprint2 = builder.build(BlueprintSource::Test);
         verify_blueprint(&blueprint2);
         let summary = blueprint2.diff_since_blueprint(&blueprint1);
         println!(
@@ -2867,7 +2867,7 @@ pub mod test {
         }
         builder.sled_ensure_zone_datasets(new_sled_id).unwrap();
 
-        let blueprint3 = builder.build();
+        let blueprint3 = builder.build(BlueprintSource::Test);
         verify_blueprint(&blueprint3);
         let summary = blueprint3.diff_since_blueprint(&blueprint2);
         println!(
@@ -3014,7 +3014,7 @@ pub mod test {
             rng.next_planner_rng(),
         )
         .expect("created builder")
-        .build();
+        .build(BlueprintSource::Test);
         verify_blueprint(&blueprint2);
 
         // We carried forward the desired state.
@@ -3052,7 +3052,7 @@ pub mod test {
             rng.next_planner_rng(),
         )
         .expect("created builder")
-        .build();
+        .build(BlueprintSource::Test);
         verify_blueprint(&blueprint3);
         assert_eq!(
             blueprint3.sleds.get(&decommision_sled_id).map(|c| c.state),
@@ -3233,7 +3233,7 @@ pub mod test {
         let r = builder.sled_ensure_zone_datasets(sled_id).unwrap();
         assert_eq!(r, EnsureMultiple::NotNeeded);
 
-        let blueprint = builder.build();
+        let blueprint = builder.build(BlueprintSource::Test);
         verify_blueprint(&blueprint);
 
         let mut builder = BlueprintBuilder::new_based_on(
@@ -3251,7 +3251,7 @@ pub mod test {
         let r = builder.sled_ensure_zone_datasets(sled_id).unwrap();
         assert_eq!(r, EnsureMultiple::NotNeeded);
 
-        let blueprint = builder.build();
+        let blueprint = builder.build(BlueprintSource::Test);
         verify_blueprint(&blueprint);
 
         // Find the datasets we've expunged in the blueprint
@@ -3587,7 +3587,7 @@ pub mod test {
         }
         builder.sled_ensure_zone_datasets(target_sled_id).unwrap();
 
-        let blueprint = builder.build();
+        let blueprint = builder.build(BlueprintSource::Test);
         verify_blueprint(&blueprint);
         assert_eq!(
             blueprint
@@ -3703,7 +3703,7 @@ pub mod test {
                 .expect("set zone image source successfully");
         }
 
-        let blueprint2 = blueprint_builder.build();
+        let blueprint2 = blueprint_builder.build(BlueprintSource::Test);
         let diff = blueprint2.diff_since_blueprint(&blueprint1);
         let display = diff.display();
         assert_contents(

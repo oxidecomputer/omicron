@@ -3580,7 +3580,7 @@ mod tests {
         let num_new_crucible_zones = new_sled_zpools.len();
         let num_new_sled_zones = num_new_ntp_zones + num_new_crucible_zones;
 
-        let blueprint2 = builder.build();
+        let blueprint2 = builder.build(BlueprintSource::Test);
         let authz_blueprint2 = authz_blueprint_from_id(blueprint2.id);
 
         let diff = blueprint2.diff_since_blueprint(&blueprint1);
@@ -3708,7 +3708,7 @@ mod tests {
             artifact_hash: ArtifactHash([72; 32]),
             artifact_version: "2.0.0".parse().unwrap(),
         });
-        let blueprint3 = builder.build();
+        let blueprint3 = builder.build(BlueprintSource::Test);
         let authz_blueprint3 = authz_blueprint_from_id(blueprint3.id);
         datastore
             .blueprint_insert(&opctx, &blueprint3)
@@ -3762,7 +3762,7 @@ mod tests {
             artifact_hash: ArtifactHash([72; 32]),
             artifact_version: "2.0.0".parse().unwrap(),
         });
-        let blueprint4 = builder.build();
+        let blueprint4 = builder.build(BlueprintSource::Test);
         let authz_blueprint4 = authz_blueprint_from_id(blueprint4.id);
         datastore
             .blueprint_insert(&opctx, &blueprint4)
@@ -3820,7 +3820,7 @@ mod tests {
             artifact_hash: ArtifactHash([72; 32]),
             artifact_version: "2.0.0".parse().unwrap(),
         });
-        let blueprint5 = builder.build();
+        let blueprint5 = builder.build(BlueprintSource::Test);
         let authz_blueprint5 = authz_blueprint_from_id(blueprint5.id);
         datastore
             .blueprint_insert(&opctx, &blueprint5)
@@ -3856,7 +3856,7 @@ mod tests {
             PlannerRng::from_entropy(),
         )
         .expect("failed to create builder")
-        .build();
+        .build(BlueprintSource::Test);
         datastore
             .blueprint_insert(&opctx, &blueprint6)
             .await
@@ -3934,7 +3934,7 @@ mod tests {
             PlannerRng::from_entropy(),
         )
         .expect("failed to create builder")
-        .build();
+        .build(BlueprintSource::Test);
         let blueprint3 = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint1,
@@ -3944,7 +3944,7 @@ mod tests {
             PlannerRng::from_entropy(),
         )
         .expect("failed to create builder")
-        .build();
+        .build(BlueprintSource::Test);
         assert_eq!(blueprint1.parent_blueprint_id, None);
         assert_eq!(blueprint2.parent_blueprint_id, Some(blueprint1.id));
         assert_eq!(blueprint3.parent_blueprint_id, Some(blueprint1.id));
@@ -4045,7 +4045,7 @@ mod tests {
             PlannerRng::from_entropy(),
         )
         .expect("failed to create builder")
-        .build();
+        .build(BlueprintSource::Test);
         assert_eq!(blueprint4.parent_blueprint_id, Some(blueprint3.id));
         datastore.blueprint_insert(&opctx, &blueprint4).await.unwrap();
         let bp4_target = BlueprintTarget {
@@ -4091,7 +4091,7 @@ mod tests {
             PlannerRng::from_entropy(),
         )
         .expect("failed to create builder")
-        .build();
+        .build(BlueprintSource::Test);
         assert_eq!(blueprint1.parent_blueprint_id, None);
         assert_eq!(blueprint2.parent_blueprint_id, Some(blueprint1.id));
 
@@ -4330,7 +4330,7 @@ mod tests {
             PlannerRng::from_entropy(),
         )
         .expect("failed to create builder")
-        .build();
+        .build(BlueprintSource::Test);
 
         // Insert an IP pool range covering the one Nexus IP.
         let nexus_ip = blueprint1
