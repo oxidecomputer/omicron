@@ -99,7 +99,7 @@ use sled_agent_types::zone_images::{
 use sled_agent_zone_images::{ZoneImageSourceResolver, ramdisk_file_source};
 use sled_hardware::DendriteAsic;
 use sled_hardware::SledMode;
-use sled_hardware::is_gimlet;
+use sled_hardware::is_oxide_sled;
 use sled_hardware::underlay;
 use sled_hardware_types::Baseboard;
 use slog::Logger;
@@ -954,7 +954,7 @@ impl ServiceManager {
     ) -> Result<Vec<(Link, bool)>, Error> {
         let mut links: Vec<(Link, bool)> = Vec::new();
 
-        let is_gimlet = is_gimlet().map_err(|e| {
+        let is_oxide_sled = is_oxide_sled().map_err(|e| {
             Error::Underlay(underlay::Error::SystemDetection(e))
         })?;
 
@@ -977,7 +977,7 @@ impl ServiceManager {
                             links.push((link, false));
                         }
                         Err(_) => {
-                            if is_gimlet {
+                            if is_oxide_sled {
                                 return Err(Error::MissingDevice {
                                     device: pkt_source.to_string(),
                                 });
@@ -2785,11 +2785,11 @@ impl ServiceManager {
                         );
                     }
 
-                    let is_gimlet = is_gimlet().map_err(|e| {
+                    let is_oxide_sled = is_oxide_sled().map_err(|e| {
                         Error::Underlay(underlay::Error::SystemDetection(e))
                     })?;
 
-                    if is_gimlet {
+                    if is_oxide_sled {
                         // Collect the prefixes for each techport.
                         let nameaddr = bootstrap_name_and_address.as_ref();
                         let techport_prefixes = match nameaddr {
@@ -2818,7 +2818,7 @@ impl ServiceManager {
                         }
                     };
 
-                    if is_gimlet
+                    if is_oxide_sled
                         || asic == &DendriteAsic::SoftNpuPropolisDevice
                         || asic == &DendriteAsic::TofinoAsic
                     {
@@ -2986,11 +2986,12 @@ impl ServiceManager {
                         }
                     }
 
-                    let is_gimlet = is_gimlet().map_err(|e| {
+                    let is_oxide_sled = is_oxide_sled().map_err(|e| {
                         Error::Underlay(underlay::Error::SystemDetection(e))
                     })?;
 
-                    let maghemite_interfaces: Vec<AddrObject> = if is_gimlet {
+                    let maghemite_interfaces: Vec<AddrObject> = if is_oxide_sled
+                    {
                         (0..32)
                             .map(|i| {
                                 // See the `tfport_name` function
@@ -3034,7 +3035,7 @@ impl ServiceManager {
                         );
                     }
 
-                    if is_gimlet {
+                    if is_oxide_sled {
                         mg_ddm_config = mg_ddm_config
                             .add_property("dpd_host", "astring", "[::1]")
                             .add_property(
@@ -3171,9 +3172,9 @@ impl ServiceManager {
         let mut data_links: Vec<String> = vec![];
 
         let services = match self.inner.sled_mode {
-            // A pure gimlet sled should not be trying to activate a switch
-            // zone.
-            SledMode::Gimlet => {
+            // A sled that is not a scrimlet should not try to activate a
+            // switch zone.
+            SledMode::Sled => {
                 return Err(Error::SwitchZone(anyhow::anyhow!(
                     "attempted to activate switch zone on non-scrimlet sled"
                 )));
