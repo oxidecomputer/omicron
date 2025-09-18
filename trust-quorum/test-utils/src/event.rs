@@ -38,6 +38,7 @@ pub enum Event {
         id: PlatformId,
         connection_order: Vec<PlatformId>,
     },
+    PrepareAndCommit(PlatformId),
 }
 
 impl Event {
@@ -61,6 +62,7 @@ impl Event {
                 nodes.push(id.clone());
                 nodes
             }
+            Self::PrepareAndCommit(id) => vec![id.clone()],
         }
     }
 }
