@@ -110,6 +110,7 @@ impl ResourceAllocator {
                 external_ips: Vec::<params::ExternalIpCreate>::new(),
                 disks: Vec::<params::InstanceDiskAttachment>::new(),
                 boot_disk: None,
+                cpu_platform: None,
                 start: false,
                 auto_restart_policy: Default::default(),
                 anti_affinity_groups: Vec::new(),

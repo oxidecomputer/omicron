@@ -4001,6 +4001,7 @@ mod tests {
                         external_ips: vec![],
                         disks: vec![],
                         boot_disk: None,
+                        cpu_platform: None,
                         ssh_public_keys: None,
                         start: false,
                         auto_restart_policy: Default::default(),
