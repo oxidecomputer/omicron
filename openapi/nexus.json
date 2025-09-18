@@ -20876,6 +20876,9 @@
           }
         },
         "required": [
+          "auto_restart_policy",
+          "boot_disk",
+          "cpu_platform",
           "memory",
           "ncpus"
         ]
