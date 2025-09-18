@@ -5,8 +5,8 @@
 //! State of a reconfiguration coordinator inside a [`crate::Node`]
 
 use crate::NodeHandlerCtx;
-use crate::configuration::ConfigurationDiff;
-use crate::crypto::{LrtqShare, PlaintextRackSecrets, ShareDigestLrtq};
+use crate::configuration::{ConfigurationDiff, ConfigurationError};
+use crate::crypto::{LrtqShare, PlaintextRackSecrets};
 use crate::validators::{
     ReconfigurationError, ValidatedLrtqUpgradeMsg, ValidatedReconfigureMsg,
 };
@@ -93,12 +93,13 @@ impl CoordinatorState {
     /// Return the newly constructed `CoordinatorState` along with this node's
     /// `PrepareMsg` so that it can be persisted.
     pub fn new_uninitialized(
-        log: Logger,
+        log: &Logger,
         msg: ValidatedReconfigureMsg,
     ) -> Result<(CoordinatorState, Configuration, Share), ReconfigurationError>
     {
+        let log = log.new(o!("component" => "tq-coordinator-state"));
         // Create a configuration for this epoch
-        let (config, shares) = Configuration::new(&msg)?;
+        let (config, shares) = Configuration::new((&msg).into())?;
 
         let mut prepares = BTreeMap::new();
         // `my_share` is optional only so that we can fill it in via the
@@ -137,12 +138,13 @@ impl CoordinatorState {
 
     /// A reconfiguration from one group to another
     pub fn new_reconfiguration(
-        log: Logger,
+        log: &Logger,
         msg: ValidatedReconfigureMsg,
         latest_committed_config: &Configuration,
         our_latest_committed_share: Share,
     ) -> Result<CoordinatorState, ReconfigurationError> {
-        let (config, new_shares) = Configuration::new(&msg)?;
+        let log = log.new(o!("component" => "tq-coordinator-state"));
+        let (config, new_shares) = Configuration::new((&msg).into())?;
 
         info!(
             log,
@@ -165,6 +167,45 @@ impl CoordinatorState {
         };
 
         Ok(CoordinatorState::new(log, msg, config, op))
+    }
+
+    pub fn new_upgrade_from_lrtq(
+        log: &Logger,
+        ctx: &mut impl NodeHandlerCtx,
+        msg: ValidatedLrtqUpgradeMsg,
+    ) -> Result<CoordinatorState, ConfigurationError> {
+        let log = log.new(o!("component" => "tq-coordinator-state"));
+        let (configuration, new_shares) = Configuration::new((&msg).into())?;
+
+        info!(
+            log,
+            "Starting coordination for LRTQ upgrade on existing node";
+            "epoch" => %configuration.epoch
+        );
+
+        // We must collect the LRTQ shares so we can recompute the LRTQ rack
+        // secret.
+        let op = CoordinatorOperation::CollectLrtqShares {
+            collected_lrtq_shares: BTreeMap::from([(
+                msg.coordinator_id().clone(),
+                LrtqShare::new(
+                    ctx.persistent_state()
+                        .lrtq
+                        .as_ref()
+                        .expect("lrtq config exists")
+                        .share
+                        .clone(),
+                ),
+            )]),
+            new_shares,
+        };
+
+        Ok(CoordinatorState {
+            log,
+            msg: CoordinatingMsg::Upgrade(msg),
+            configuration,
+            op,
+        })
     }
 
     // Intentionally private!
@@ -212,9 +253,9 @@ impl CoordinatorState {
                     .expect("config exists")
                     .members
                     .keys()
-                    .filter(|&m| {
-                        !old_collected_shares.contains_key(m)
-                            && ctx.connected().contains(m)
+                    .filter(|&id| {
+                        !old_collected_shares.contains_key(id)
+                            && ctx.connected().contains(id)
                     })
                     .cloned()
                     .collect();
@@ -222,8 +263,24 @@ impl CoordinatorState {
                     ctx.send(to, PeerMsgKind::GetShare(*old_epoch));
                 }
             }
-            #[expect(unused)]
-            CoordinatorOperation::CollectLrtqShares { members, shares } => {}
+            CoordinatorOperation::CollectLrtqShares {
+                collected_lrtq_shares,
+                ..
+            } => {
+                let destinations: Vec<_> = self
+                    .configuration
+                    .members
+                    .keys()
+                    .filter(|&id| {
+                        !collected_lrtq_shares.contains_key(id)
+                            && ctx.connected().contains(id)
+                    })
+                    .cloned()
+                    .collect();
+                for to in destinations {
+                    ctx.send(to, PeerMsgKind::GetLrtqShare);
+                }
+            }
             CoordinatorOperation::Prepare { prepares, .. } => {
                 for (platform_id, (config, share)) in prepares.iter() {
                     if ctx.connected().contains(&platform_id) {
@@ -241,8 +298,6 @@ impl CoordinatorState {
     }
 
     // Send any required messages to a newly connected node
-    // This method is "in progress" - allow unused parameters for now
-    #[expect(unused)]
     pub fn send_msgs_to(
         &mut self,
         ctx: &mut impl NodeHandlerCtx,
@@ -266,8 +321,18 @@ impl CoordinatorState {
                     ctx.send(to, PeerMsgKind::GetShare(*old_epoch));
                 }
             }
-            CoordinatorOperation::CollectLrtqShares { members, shares } => {}
-            CoordinatorOperation::Prepare { prepares, prepare_acks } => {
+            CoordinatorOperation::CollectLrtqShares {
+                collected_lrtq_shares,
+                ..
+            } => {
+                if !collected_lrtq_shares.contains_key(&to)
+                    && ctx.connected().contains(&to)
+                    && self.configuration.members.contains_key(&to)
+                {
+                    ctx.send(to, PeerMsgKind::GetLrtqShare);
+                }
+            }
+            CoordinatorOperation::Prepare { prepares, .. } => {
                 if let Some((config, share)) = prepares.get(&to) {
                     ctx.send(
                         to,
@@ -518,11 +583,12 @@ pub enum CoordinatorOperation {
         // until we get to `CoordinatorOperation::Prepare`
         new_shares: BTreeMap<PlatformId, Share>,
     },
-    // We haven't started implementing this yet
-    // Epoch is always 0
     CollectLrtqShares {
-        members: BTreeMap<PlatformId, ShareDigestLrtq>,
-        shares: BTreeMap<PlatformId, LrtqShare>,
+        collected_lrtq_shares: BTreeMap<PlatformId, LrtqShare>,
+
+        // These are new shares that the coordinator created that we carry along
+        // until we get to `CoordinatorOperation::Prepare`
+        new_shares: BTreeMap<PlatformId, Share>,
     },
     Prepare {
         /// The set of Prepares to send to each node

@@ -81,7 +81,7 @@ pub enum PeerMsgKind {
         share: Share,
     },
 
-    // LRTQ shares are always at epoch 0
+    // LRTQ shares are always at epoch 1
     GetLrtqShare,
 
     LrtqShare(LrtqShare),

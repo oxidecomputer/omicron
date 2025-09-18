@@ -4,7 +4,7 @@
 
 //! Various validation functions to be used by a [`crate::Node`]
 
-use crate::configuration::ConfigurationError;
+use crate::configuration::{ConfigurationError, NewConfigParams};
 use crate::messages::ReconfigureMsg;
 use crate::{
     Epoch, LrtqUpgradeMsg, NodeHandlerCtx, PersistentStateSummary, PlatformId,
@@ -177,6 +177,21 @@ pub enum LrtqUpgradeError {
 
     #[error("epoch must be at least 2 as the LRTQ epoch is 1. got {0}")]
     EpochMustBeAtLeast2(Epoch),
+
+    #[error(transparent)]
+    Configuration(#[from] ConfigurationError),
+}
+
+impl<'a> From<&'a ValidatedReconfigureMsg> for NewConfigParams<'a> {
+    fn from(value: &'a ValidatedReconfigureMsg) -> Self {
+        Self {
+            rack_id: value.rack_id,
+            epoch: value.epoch,
+            members: &value.members,
+            threshold: value.threshold,
+            coordinator_id: &value.coordinator_id,
+        }
+    }
 }
 
 /// A `ReconfigureMsg` that has been determined to be valid for the remainder
@@ -446,6 +461,18 @@ impl ValidatedReconfigureMsg {
     }
 }
 
+impl<'a> From<&'a ValidatedLrtqUpgradeMsg> for NewConfigParams<'a> {
+    fn from(value: &'a ValidatedLrtqUpgradeMsg) -> Self {
+        Self {
+            rack_id: value.rack_id,
+            epoch: value.epoch,
+            members: &value.members,
+            threshold: value.threshold,
+            coordinator_id: &value.coordinator_id,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Diffable)]
 pub struct ValidatedLrtqUpgradeMsg {
     rack_id: RackUuid,
@@ -540,6 +567,10 @@ impl ValidatedLrtqUpgradeMsg {
         self.epoch
     }
 
+    pub fn coordinator_id(&self) -> &PlatformId {
+        &self.coordinator_id
+    }
+
     /// Verify that the cluster membership and threshold sizes are within
     /// constraints.
     ///
@@ -588,64 +619,6 @@ impl ValidatedLrtqUpgradeMsg {
         }
 
         Ok(())
-    }
-
-    /// Ensure that if this node is currently coordinating a reconfiguration,
-    /// that this request is at least as new as the last one.
-    ///
-    /// Return `Ok(false)` if the configuration is new, and `Ok(true)` if it
-    /// is idempotent.
-    fn check_existing_coordination(
-        log: &Logger,
-        new_msg: &ReconfigureMsg,
-        last_reconfig_msg: Option<&ValidatedReconfigureMsg>,
-    ) -> Result<bool, ReconfigurationError> {
-        let Some(existing_msg) = last_reconfig_msg else {
-            return Ok(false);
-        };
-        let current_epoch = existing_msg.epoch;
-        if current_epoch > new_msg.epoch {
-            warn!(
-                log,
-                "Reconfiguration in progress: rejecting stale attempt";
-                "current_epoch" => current_epoch.to_string(),
-                "msg_epoch" => new_msg.epoch.to_string()
-            );
-            return Err(ReconfigurationError::ReconfigurationInProgress {
-                current_epoch: existing_msg.epoch,
-                msg_epoch: new_msg.epoch,
-            });
-        }
-
-        if current_epoch == new_msg.epoch {
-            if existing_msg != new_msg {
-                error!(
-                    log,
-                    concat!(
-                        "Reconfiguration in progress for same epoch, ",
-                        "but messages differ");
-                    "epoch" => new_msg.epoch.to_string(),
-                );
-                return Err(
-                    ReconfigurationError::MismatchedReconfigurationForSameEpoch(
-                        new_msg.epoch,
-                    ),
-                );
-            }
-
-            // Idempotent request
-            return Ok(true);
-        }
-
-        info!(
-            log,
-            "Configuration being coordinated changed";
-            "previous_epoch" => current_epoch.to_string(),
-            "new_epoch" => new_msg.epoch.to_string()
-        );
-
-        // Valid new request
-        Ok(false)
     }
 }
 

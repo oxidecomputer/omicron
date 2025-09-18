@@ -23,7 +23,7 @@ use crate::rack_secret_loader::{
 };
 use crate::validators::{
     LrtqUpgradeError, MismatchedRackIdError, ReconfigurationError,
-    ValidatedReconfigureMsg,
+    ValidatedLrtqUpgradeMsg, ValidatedReconfigureMsg,
 };
 use crate::{
     Alarm, Configuration, CoordinatorState, Epoch, ExpungedMetadata,
@@ -180,7 +180,29 @@ impl Node {
         ctx: &mut impl NodeHandlerCtx,
         msg: LrtqUpgradeMsg,
     ) -> Result<(), LrtqUpgradeError> {
-        // TODO: Put the above in the validator
+        let validated_msg = ValidatedLrtqUpgradeMsg::new(&self.log, ctx, msg)?;
+        if let Some(kcs) = &self.key_share_computer {
+            // We know from our `ValidatedLrtqUpgradeMsg` that we haven't seen
+            // a newer configuration and we have the correct last committed
+            // configuration. Therefore if we are computing a key share, we must
+            // be doing it for a stale commit and should cancel it.
+            //
+            // I don't think it's actually possible to hit this condition, but
+            // we check anyway.
+            info!(
+                self.log,
+                "Reconfiguration started. Cancelling key share compute";
+                "reconfiguration_epoch" => %validated_msg.epoch(),
+                "key_share_compute_epoch" => %kcs.config().epoch
+            );
+            self.key_share_computer = None;
+        }
+
+        self.coordinator_state = Some(CoordinatorState::new_upgrade_from_lrtq(
+            &self.log,
+            ctx,
+            validated_msg,
+        )?);
 
         Ok(())
     }
@@ -932,12 +954,10 @@ impl Node {
         ctx: &mut impl NodeHandlerCtx,
         msg: ValidatedReconfigureMsg,
     ) -> Result<(), ReconfigurationError> {
-        let log = self.log.new(o!("component" => "tq-coordinator-state"));
-
         // We have no committed configuration or lrtq ledger
         if ctx.persistent_state().is_uninitialized() {
             let (coordinator_state, my_config, my_share) =
-                CoordinatorState::new_uninitialized(log, msg)?;
+                CoordinatorState::new_uninitialized(&self.log, msg)?;
             self.coordinator_state = Some(coordinator_state);
             ctx.update_persistent_state(move |ps| {
                 ps.shares.insert(my_config.epoch, my_share);
@@ -955,7 +975,7 @@ impl Node {
             .expect("committed configuration exists");
 
         self.coordinator_state = Some(CoordinatorState::new_reconfiguration(
-            log,
+            &self.log,
             msg,
             config,
             our_share.clone(),
