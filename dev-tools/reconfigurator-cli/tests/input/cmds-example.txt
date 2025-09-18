@@ -15,7 +15,7 @@ blueprint-show ade5749d-bdf3-4fab-a8ae-00bea01b3a5a
 inventory-generate
 
 wipe system
-load-example --seed test-basic --nsleds 1 --ndisks-per-sled 4 --no-zones
+load-example --seed test-basic --nsleds 1 --ndisks-per-sled 4
 
 sled-list
 inventory-list
@@ -31,7 +31,7 @@ blueprint-show ade5749d-bdf3-4fab-a8ae-00bea01b3a5a
 # the rest of the diff output small.
 
 wipe all
-load-example --seed test-basic --nsleds 1 --ndisks-per-sled 4 --no-zones
+load-example --seed test-basic --nsleds 1 --ndisks-per-sled 4
 
 blueprint-list
 blueprint-plan ade5749d-bdf3-4fab-a8ae-00bea01b3a5a
@@ -59,10 +59,10 @@ inventory-show latest all
 blueprint-plan latest
 blueprint-diff ade5749d-bdf3-4fab-a8ae-00bea01b3a5a latest
 
-# Set chicken switches.
-set chicken-switches --add-zones-with-mupdate-override false
-set chicken-switches --add-zones-with-mupdate-override true
-set chicken-switches --add-zones-with-mupdate-override true
+# Set planner config.
+set planner-config --add-zones-with-mupdate-override false
+set planner-config --add-zones-with-mupdate-override true
+set planner-config --add-zones-with-mupdate-override true
 
 # Sled index out of bounds, will error out.
 wipe all

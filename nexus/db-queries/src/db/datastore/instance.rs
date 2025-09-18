@@ -21,6 +21,7 @@ use crate::db::model::Instance;
 use crate::db::model::InstanceAutoRestart;
 use crate::db::model::InstanceAutoRestartPolicy;
 use crate::db::model::InstanceCpuCount;
+use crate::db::model::InstanceCpuPlatform;
 use crate::db::model::InstanceIntendedState;
 use crate::db::model::InstanceRuntimeState;
 use crate::db::model::InstanceState;
@@ -189,7 +190,7 @@ impl InstanceAndActiveVmm {
     }
 
     pub fn sled_id(&self) -> Option<SledUuid> {
-        self.vmm.as_ref().map(|v| SledUuid::from_untyped_uuid(v.sled_id))
+        self.vmm.as_ref().map(|v| v.sled_id())
     }
 
     /// Returns the operator-visible [external API
@@ -265,6 +266,7 @@ impl From<InstanceAndActiveVmm> for external::Instance {
                 .parse()
                 .expect("found invalid hostname in the database"),
             boot_disk_id: value.instance.boot_disk_id,
+            cpu_platform: value.instance.cpu_platform.map(Into::into),
             runtime: external::InstanceRuntimeState {
                 run_state: value.effective_state(),
                 time_run_state_updated,
@@ -1096,6 +1098,7 @@ impl DataStore {
                     auto_restart_policy,
                     ncpus,
                     memory,
+                    cpu_platform,
                 } = update.clone();
                 async move {
                     // Set the auto-restart policy.
@@ -1109,12 +1112,13 @@ impl DataStore {
                         .await?;
 
                     // Set vCPUs and memory size.
-                    self.instance_set_size_on_conn(
+                    self.instance_set_cpu_and_mem_on_conn(
                         &conn,
                         &err,
                         &authz_instance,
                         ncpus,
                         memory,
+                        cpu_platform,
                     )
                     .await?;
 
@@ -1281,51 +1285,66 @@ impl DataStore {
         }
     }
 
-    /// Set an instance's CPU count and memory size to the provided values,
+    /// Set an instance's CPU/memory configuration to the provided values,
     /// within an existing transaction.
     ///
     /// The instance must be in an updatable state for this update to succeed.
     /// If the instance is not updatable, return `Error::Conflict`.
     ///
-    /// To update an instance's CPU or memory sizes an instance must not be
-    /// incarnated by a VMM. This constraint ensures that the sizes recorded in
-    /// Nexus sum to the actual peak possible resource usage of running
-    /// instances.
-    ///
-    /// Does not allow setting sizes of running instances to ensure that if an
-    /// instance is running, its resource reservation matches what we record in
-    /// the database.
-    async fn instance_set_size_on_conn(
+    /// These parameters all currently require the instance to not be incarnated
+    /// by a VMM to be changed. This is to ensure that if the instance is
+    /// running, its real allocation and platform are aligned with the
+    /// instance's database record.
+    async fn instance_set_cpu_and_mem_on_conn(
         &self,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         err: &OptionalError<Error>,
         authz_instance: &authz::Instance,
         ncpus: InstanceCpuCount,
         memory: ByteCount,
+        cpu_platform: Option<InstanceCpuPlatform>,
     ) -> Result<(), diesel::result::Error> {
         use nexus_db_schema::schema::instance::dsl as instance_dsl;
 
-        let r = diesel::update(instance_dsl::instance)
+        let query = diesel::update(instance_dsl::instance)
+            .into_boxed()
             .filter(instance_dsl::id.eq(authz_instance.id()))
             .filter(
                 instance_dsl::state
                     .eq_any(InstanceState::NOT_INCARNATED_STATES),
-            )
-            .filter(
+            );
+
+        let query = if cpu_platform.is_some() {
+            query.filter(
                 instance_dsl::ncpus
                     .ne(ncpus)
-                    .or(instance_dsl::memory.ne(memory)),
+                    .or(instance_dsl::memory.ne(memory))
+                    .or(instance_dsl::cpu_platform.ne(cpu_platform))
+                    .or(instance_dsl::cpu_platform.is_null()),
             )
+        } else {
+            query.filter(
+                instance_dsl::ncpus
+                    .ne(ncpus)
+                    .or(instance_dsl::memory.ne(memory))
+                    .or(instance_dsl::cpu_platform.is_not_null()),
+            )
+        };
+
+        let r = query
             .set((
                 instance_dsl::ncpus.eq(ncpus),
                 instance_dsl::memory.eq(memory),
+                instance_dsl::cpu_platform.eq(cpu_platform),
             ))
             .check_if_exists::<Instance>(authz_instance.id())
             .execute_and_check(&conn)
             .await?;
         match r.status {
             UpdateStatus::NotUpdatedButExists => {
-                if (r.found.ncpus, r.found.memory) == (ncpus, memory) {
+                if (r.found.ncpus, r.found.memory, r.found.cpu_platform)
+                    == (ncpus, memory, cpu_platform)
+                {
                     // Not updated, because the update is no change..
                     return Ok(());
                 }
@@ -1334,21 +1353,22 @@ impl DataStore {
                     .contains(&r.found.runtime().nexus_state)
                 {
                     return Err(err.bail(Error::conflict(
-                        "instance must be stopped to be resized",
+                        "instance must be stopped to change CPU or memory",
                     )));
                 }
 
                 // There should be no other reason the update fails on an
                 // existing instance.
                 warn!(
-                    self.log, "failed to instance_set_size_on_conn on an \
+                    self.log, "failed to instance_set_cpu_and_mem_on_conn on an \
                     instance that should have been updatable";
                     "instance_id" => %r.found.id(),
                     "new ncpus" => ?ncpus,
                     "new memory" => ?memory,
+                    "new CPU platform" => ?cpu_platform,
                 );
                 return Err(err.bail(Error::internal_error(
-                    "unable to reconfigure instance size",
+                    "unable to change instance CPU or memory",
                 )));
             }
             UpdateStatus::Updated => Ok(()),
@@ -2171,6 +2191,7 @@ mod tests {
     use nexus_db_lookup::LookupPath;
     use nexus_db_model::InstanceState;
     use nexus_db_model::Project;
+    use nexus_db_model::VmmCpuPlatform;
     use nexus_db_model::VmmRuntimeState;
     use nexus_db_model::VmmState;
     use nexus_types::external_api::params;
@@ -2234,6 +2255,7 @@ mod tests {
                         external_ips: Vec::new(),
                         disks: Vec::new(),
                         boot_disk: None,
+                        cpu_platform: None,
                         ssh_public_keys: None,
                         start: false,
                         auto_restart_policy: Default::default(),
@@ -2843,9 +2865,10 @@ mod tests {
                     time_created: Utc::now(),
                     time_deleted: None,
                     instance_id: authz_instance.id(),
-                    sled_id: Uuid::new_v4(),
+                    sled_id: SledUuid::new_v4().into(),
                     propolis_ip: "10.1.9.32".parse().unwrap(),
                     propolis_port: 420.into(),
+                    cpu_platform: VmmCpuPlatform::SledDefault,
                     runtime: VmmRuntimeState {
                         time_state_updated: Utc::now(),
                         gen: Generation::new(),
@@ -2905,9 +2928,10 @@ mod tests {
                     time_created: Utc::now(),
                     time_deleted: None,
                     instance_id: authz_instance.id(),
-                    sled_id: Uuid::new_v4(),
+                    sled_id: SledUuid::new_v4().into(),
                     propolis_ip: "10.1.9.42".parse().unwrap(),
                     propolis_port: 666.into(),
+                    cpu_platform: VmmCpuPlatform::SledDefault,
                     runtime: VmmRuntimeState {
                         time_state_updated: Utc::now(),
                         gen: Generation::new(),
@@ -3002,9 +3026,10 @@ mod tests {
                     time_created: Utc::now(),
                     time_deleted: None,
                     instance_id: authz_instance.id(),
-                    sled_id: Uuid::new_v4(),
+                    sled_id: SledUuid::new_v4().into(),
                     propolis_ip: "10.1.9.32".parse().unwrap(),
                     propolis_port: 420.into(),
+                    cpu_platform: VmmCpuPlatform::SledDefault,
                     runtime: VmmRuntimeState {
                         time_state_updated: Utc::now(),
                         r#gen: Generation::new(),
@@ -3042,9 +3067,10 @@ mod tests {
                     time_created: Utc::now(),
                     time_deleted: None,
                     instance_id: authz_instance.id(),
-                    sled_id: Uuid::new_v4(),
+                    sled_id: SledUuid::new_v4().into(),
                     propolis_ip: "10.1.9.42".parse().unwrap(),
                     propolis_port: 420.into(),
+                    cpu_platform: VmmCpuPlatform::SledDefault,
                     runtime: VmmRuntimeState {
                         time_state_updated: Utc::now(),
                         r#gen: Generation::new(),
@@ -3144,9 +3170,10 @@ mod tests {
                     time_created: Utc::now(),
                     time_deleted: None,
                     instance_id: authz_instance.id(),
-                    sled_id: Uuid::new_v4(),
+                    sled_id: SledUuid::new_v4().into(),
                     propolis_ip: "10.1.9.42".parse().unwrap(),
                     propolis_port: 420.into(),
+                    cpu_platform: VmmCpuPlatform::SledDefault,
                     runtime: VmmRuntimeState {
                         time_state_updated: Utc::now(),
                         r#gen: Generation::new(),
@@ -3259,7 +3286,7 @@ mod tests {
 
         #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
         struct Ids {
-            sled_id: Uuid,
+            sled_id: SledUuid,
             vmm_id: Uuid,
             instance_id: Uuid,
         }
@@ -3290,9 +3317,10 @@ mod tests {
                             time_created: Utc::now(),
                             time_deleted: None,
                             instance_id,
-                            sled_id,
+                            sled_id: sled_id.into(),
                             propolis_ip: "10.1.9.42".parse().unwrap(),
                             propolis_port: 420.into(),
+                            cpu_platform: VmmCpuPlatform::SledDefault,
                             runtime: VmmRuntimeState {
                                 time_state_updated: Utc::now(),
                                 r#gen: Generation::new(),
@@ -3366,13 +3394,14 @@ mod tests {
             }
 
             i += 1;
-            paginator =
-                p.found_batch(&batch, &|(sled, _, vmm, _): &(
-                    Sled,
-                    Instance,
-                    Vmm,
-                    Project,
-                )| (sled.id(), vmm.id));
+            paginator = p.found_batch(&batch, &|(sled, _, vmm, _): &(
+                Sled,
+                Instance,
+                Vmm,
+                Project,
+            )| {
+                (sled.id().into_untyped_uuid(), vmm.id)
+            });
         }
 
         assert_eq!(expected_instances, found_instances);

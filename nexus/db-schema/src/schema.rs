@@ -424,6 +424,7 @@ table! {
         auto_restart_policy -> Nullable<crate::enums::InstanceAutoRestartPolicyEnum>,
         auto_restart_cooldown -> Nullable<Interval>,
         boot_disk_id -> Nullable<Uuid>,
+        cpu_platform -> Nullable<crate::enums::InstanceCpuPlatformEnum>,
         time_state_updated -> Timestamptz,
         state_generation -> Int8,
         active_propolis_id -> Nullable<Uuid>,
@@ -448,6 +449,7 @@ table! {
         sled_id -> Uuid,
         propolis_ip -> Inet,
         propolis_port -> Int4,
+        cpu_platform -> crate::enums::VmmCpuPlatformEnum,
         time_state_updated -> Timestamptz,
         state_generation -> Int8,
         state -> crate::enums::VmmStateEnum,
@@ -1918,7 +1920,7 @@ table! {
 }
 
 table! {
-    reconfigurator_chicken_switches (version) {
+    reconfigurator_config (version) {
         version -> Int8,
         planner_enabled -> Bool,
         time_modified -> Timestamptz,

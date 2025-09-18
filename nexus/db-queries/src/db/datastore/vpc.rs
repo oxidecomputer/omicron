@@ -15,6 +15,7 @@ use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
 use crate::db::identity::Resource;
 use crate::db::model::ApplySledFilterExt;
+use crate::db::model::DbTypedUuid;
 use crate::db::model::IncompleteVpc;
 use crate::db::model::InstanceNetworkInterface;
 use crate::db::model::Name;
@@ -32,6 +33,7 @@ use crate::db::model::VpcRouterUpdate;
 use crate::db::model::VpcSubnet;
 use crate::db::model::VpcSubnetUpdate;
 use crate::db::model::VpcUpdate;
+use crate::db::model::to_db_typed_uuid;
 use crate::db::model::{Ipv4Net, Ipv6Net};
 use crate::db::pagination::Paginator;
 use crate::db::pagination::paginated;
@@ -85,6 +87,7 @@ use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::internal::shared::InternetGatewayRouterTarget;
 use omicron_common::api::internal::shared::ResolvedVpcRoute;
 use omicron_common::api::internal::shared::RouterTarget;
+use omicron_uuid_kinds::SledUuid;
 use oxnet::IpNet;
 use ref_cast::RefCast;
 use std::collections::BTreeMap;
@@ -832,7 +835,7 @@ impl DataStore {
     pub async fn vpc_resolve_to_sleds(
         &self,
         vpc_id: Uuid,
-        sleds_filter: &[Uuid],
+        sleds_filter: &[SledUuid],
     ) -> Result<Vec<Sled>, Error> {
         // Resolve each VNIC in the VPC to the Sled it's on, so we know which
         // Sleds to notify when firewall rules change.
@@ -903,7 +906,14 @@ impl DataStore {
             .sled_filter(SledFilter::VpcFirewall)
             .into_boxed();
         if !sleds_filter.is_empty() {
-            sleds = sleds.filter(sled::id.eq_any(sleds_filter.to_vec()));
+            sleds = sleds.filter(
+                sled::id.eq_any(
+                    sleds_filter
+                        .iter()
+                        .map(|id| to_db_typed_uuid(*id))
+                        .collect::<Vec<DbTypedUuid<_>>>(),
+                ),
+            );
         }
 
         let conn = self.pool_connection_unauthorized().await?;
@@ -2462,7 +2472,7 @@ impl DataStore {
     pub async fn vpc_resolve_sled_external_ips_to_gateways(
         &self,
         opctx: &OpContext,
-        sled_id: Uuid,
+        sled_id: SledUuid,
     ) -> Result<HashMap<Uuid, HashMap<IpAddr, HashSet<Uuid>>>, Error> {
         // TODO: give GW-bound addresses preferential treatment.
         use nexus_db_schema::schema::external_ip as eip;
@@ -2489,7 +2499,7 @@ impl DataStore {
                 vmm::table.on(vmm::instance_id
                     .nullable()
                     .eq(eip::parent_id)
-                    .and(vmm::sled_id.eq(sled_id))),
+                    .and(vmm::sled_id.eq(to_db_typed_uuid(sled_id)))),
             )
             .inner_join(
                 ni::table.on(ni::parent_id.nullable().eq(eip::parent_id)),
@@ -2983,7 +2993,6 @@ mod tests {
     use omicron_uuid_kinds::BlueprintUuid;
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::InstanceUuid;
-    use omicron_uuid_kinds::SledUuid;
     use oxnet::IpNet;
     use oxnet::Ipv4Net;
     use slog::info;
@@ -3215,7 +3224,7 @@ mod tests {
             .await
             .expect("failed to resolve to sleds")
             .into_iter()
-            .map(|sled| SledUuid::from_untyped_uuid(sled.id()))
+            .map(|sled| sled.id())
             .collect::<Vec<_>>();
         service_sled_ids.sort();
         assert_eq!(expected_sled_ids, service_sled_ids);
@@ -3336,6 +3345,7 @@ mod tests {
                     false,
                     Vec::new(),
                     BlueprintZoneImageSource::InstallDataset,
+                    bp0.nexus_generation,
                 )
                 .expect("added nexus to third sled");
             builder.build()
@@ -3411,6 +3421,7 @@ mod tests {
                         false,
                         Vec::new(),
                         BlueprintZoneImageSource::InstallDataset,
+                        bp2.nexus_generation,
                     )
                     .expect("added nexus to third sled");
             }
@@ -3979,6 +3990,7 @@ mod tests {
                         external_ips: vec![],
                         disks: vec![],
                         boot_disk: None,
+                        cpu_platform: None,
                         ssh_public_keys: None,
                         start: false,
                         auto_restart_policy: Default::default(),

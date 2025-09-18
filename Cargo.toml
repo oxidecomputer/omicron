@@ -378,7 +378,7 @@ bootstrap-agent-client = { path = "clients/bootstrap-agent-client" }
 buf-list = { version = "1.0.3", features = ["tokio1"] }
 byteorder = "1.5.0"
 bytes = "1.10.1"
-camino = { version = "1.1.12", features = ["serde1"] }
+camino = { version = "1.2.0", features = ["serde1"] }
 camino-tempfile = "1.4.1"
 camino-tempfile-ext = { version = "0.3.2", features = ["assert-color"] }
 cancel-safe-futures = "0.1.5"
@@ -491,7 +491,7 @@ hyper = "1.6.0"
 hyper-util = "0.1.16"
 hyper-rustls = "0.27.7"
 hyper-staticfile = "0.10.1"
-iddqd = { version = "0.3.9", features = ["daft", "serde", "schemars08"] }
+iddqd = { version = "0.3.13", features = ["daft", "serde", "schemars08"] }
 id-map = { path = "id-map" }
 illumos-utils = { path = "illumos-utils" }
 iana-time-zone = "0.1.63"
@@ -653,6 +653,7 @@ rand_distr = "0.5.1"
 rand_seeder = "0.4.0"
 range-requests = { path = "range-requests" }
 ratatui = "0.29.0"
+raw-cpuid = { git = "https://github.com/oxidecomputer/rust-cpuid.git", rev = "0a8dbd2311263f6a59ea58089e33c8331436ff3a" }
 rayon = "1.10"
 rcgen = "0.12.1"
 reconfigurator-cli = { path = "dev-tools/reconfigurator-cli" }
