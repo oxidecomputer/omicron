@@ -430,6 +430,7 @@ impl Blueprint {
 #[derive(
     Clone, Debug, Eq, PartialEq, JsonSchema, Deserialize, Serialize, Diffable,
 )]
+#[serde(tag = "source", rename_all = "snake_case")]
 pub enum BlueprintSource {
     /// The initial blueprint created by the rack setup service.
     Rss,

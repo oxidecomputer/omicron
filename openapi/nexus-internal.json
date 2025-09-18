@@ -2609,20 +2609,20 @@
               }
             ]
           },
-          "report": {
-            "description": "Report on the planning session that resulted in this blueprint",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/PlanningReport"
-              }
-            ]
-          },
           "sleds": {
             "description": "A map of sled id -> desired configuration of the sled.",
             "type": "object",
             "additionalProperties": {
               "$ref": "#/components/schemas/BlueprintSledConfig"
             }
+          },
+          "source": {
+            "description": "Source of this blueprint",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BlueprintSource"
+              }
+            ]
           },
           "target_release_minimum_generation": {
             "description": "The minimum release generation to accept for target release configuration. Target release configuration with a generation less than this number will be ignored.\n\nFor example, let's say that the current target release generation is 5. Then, when reconfigurator detects a MUPdate:\n\n* the target release is ignored in favor of the install dataset * this field is set to 6\n\nOnce an operator sets a new target release, its generation will be 6 or higher. Reconfigurator will then know that it is back in charge of driving the system to the target release.",
@@ -2650,8 +2650,8 @@
           "oximeter_read_mode",
           "oximeter_read_version",
           "pending_mgs_updates",
-          "report",
           "sleds",
+          "source",
           "target_release_minimum_generation",
           "time_created"
         ]
@@ -3051,6 +3051,132 @@
           "sled_agent_generation",
           "state",
           "zones"
+        ]
+      },
+      "BlueprintSource": {
+        "description": "Description of the source of a blueprint.",
+        "oneOf": [
+          {
+            "description": "The initial blueprint created by the rack setup service.",
+            "type": "object",
+            "properties": {
+              "source": {
+                "type": "string",
+                "enum": [
+                  "rss"
+                ]
+              }
+            },
+            "required": [
+              "source"
+            ]
+          },
+          {
+            "description": "A blueprint created by the planner, and we still have the associated planning report.",
+            "type": "object",
+            "properties": {
+              "add": {
+                "$ref": "#/components/schemas/PlanningAddStepReport"
+              },
+              "blueprint_id": {
+                "description": "The blueprint produced by the planning run this report describes.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/TypedUuidForBlueprintKind"
+                  }
+                ]
+              },
+              "cockroachdb_settings": {
+                "$ref": "#/components/schemas/PlanningCockroachdbSettingsStepReport"
+              },
+              "decommission": {
+                "$ref": "#/components/schemas/PlanningDecommissionStepReport"
+              },
+              "expunge": {
+                "$ref": "#/components/schemas/PlanningExpungeStepReport"
+              },
+              "mgs_updates": {
+                "$ref": "#/components/schemas/PlanningMgsUpdatesStepReport"
+              },
+              "noop_image_source": {
+                "$ref": "#/components/schemas/PlanningNoopImageSourceStepReport"
+              },
+              "planner_config": {
+                "description": "The configuration in effect for this planning run.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/PlannerConfig"
+                  }
+                ]
+              },
+              "source": {
+                "type": "string",
+                "enum": [
+                  "planner"
+                ]
+              },
+              "zone_updates": {
+                "$ref": "#/components/schemas/PlanningZoneUpdatesStepReport"
+              }
+            },
+            "required": [
+              "add",
+              "blueprint_id",
+              "cockroachdb_settings",
+              "decommission",
+              "expunge",
+              "mgs_updates",
+              "noop_image_source",
+              "planner_config",
+              "source",
+              "zone_updates"
+            ]
+          },
+          {
+            "description": "A blueprint created by the planner but loaded from the database, so we no longer have the associated planning report.",
+            "type": "object",
+            "properties": {
+              "source": {
+                "type": "string",
+                "enum": [
+                  "planner_loaded_from_database"
+                ]
+              }
+            },
+            "required": [
+              "source"
+            ]
+          },
+          {
+            "description": "This blueprint was created by one of `reconfigurator-cli`'s blueprint editing subcommands.",
+            "type": "object",
+            "properties": {
+              "source": {
+                "type": "string",
+                "enum": [
+                  "reconfigurator_cli_edit"
+                ]
+              }
+            },
+            "required": [
+              "source"
+            ]
+          },
+          {
+            "description": "This blueprint was created by a test.",
+            "type": "object",
+            "properties": {
+              "source": {
+                "type": "string",
+                "enum": [
+                  "test"
+                ]
+              }
+            },
+            "required": [
+              "source"
+            ]
+          }
         ]
       },
       "BlueprintTarget": {
@@ -7249,60 +7375,6 @@
         "required": [
           "desired_image_source",
           "zone_config"
-        ]
-      },
-      "PlanningReport": {
-        "description": "A full blueprint planning report. Other than the blueprint ID, each field corresponds to a step in the update planner, i.e., a subroutine of `omicron_nexus::reconfigurator::planning::Planner::do_plan`.\n\nThe intent of a planning report is to capture information useful to an operator or developer about the planning process itself, especially if it has become \"stuck\" (unable to proceed with an update). It is *not* a summary of the plan (blueprint), but rather a description of non-fatal conditions the planner is waiting on, unexpected or invalid configurations encountered during planning, etc. The planner may make internal decisions based on the step reports; the intent is that an operator may make administrative decisions based on the full report.\n\nOnly successful planning runs are currently covered by this report. Failures to plan (i.e., to generate a valid blueprint) are represented by `nexus-reconfigurator-planning::blueprint_builder::Error`.",
-        "type": "object",
-        "properties": {
-          "add": {
-            "$ref": "#/components/schemas/PlanningAddStepReport"
-          },
-          "blueprint_id": {
-            "description": "The blueprint produced by the planning run this report describes.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/TypedUuidForBlueprintKind"
-              }
-            ]
-          },
-          "cockroachdb_settings": {
-            "$ref": "#/components/schemas/PlanningCockroachdbSettingsStepReport"
-          },
-          "decommission": {
-            "$ref": "#/components/schemas/PlanningDecommissionStepReport"
-          },
-          "expunge": {
-            "$ref": "#/components/schemas/PlanningExpungeStepReport"
-          },
-          "mgs_updates": {
-            "$ref": "#/components/schemas/PlanningMgsUpdatesStepReport"
-          },
-          "noop_image_source": {
-            "$ref": "#/components/schemas/PlanningNoopImageSourceStepReport"
-          },
-          "planner_config": {
-            "description": "The configuration in effect for this planning run.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/PlannerConfig"
-              }
-            ]
-          },
-          "zone_updates": {
-            "$ref": "#/components/schemas/PlanningZoneUpdatesStepReport"
-          }
-        },
-        "required": [
-          "add",
-          "blueprint_id",
-          "cockroachdb_settings",
-          "decommission",
-          "expunge",
-          "mgs_updates",
-          "noop_image_source",
-          "planner_config",
-          "zone_updates"
         ]
       },
       "PlanningZoneUpdatesStepReport": {
