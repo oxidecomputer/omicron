@@ -135,6 +135,7 @@ oxide-tokio-rt.workspace = true
 oximeter.workspace = true
 oximeter-instruments = { workspace = true, features = ["http-instruments"] }
 oximeter-producer.workspace = true
+raw-cpuid = { workspace = true, features = ["std"] }
 rustls = { workspace = true }
 rustls-pemfile = { workspace = true }
 update-common.workspace = true

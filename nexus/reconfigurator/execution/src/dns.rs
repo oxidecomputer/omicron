@@ -1509,7 +1509,7 @@ mod test {
         let active_nexus_zones = datastore
             .get_db_metadata_nexus_in_state(
                 &opctx,
-                &[DbMetadataNexusState::Active],
+                vec![DbMetadataNexusState::Active],
             )
             .await
             .internal_context("fetching active nexuses")

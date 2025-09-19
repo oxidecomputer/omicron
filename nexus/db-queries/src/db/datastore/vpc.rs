@@ -3375,6 +3375,7 @@ mod tests {
         let bp2 = {
             let mut bp2 = bp1.clone();
             bp2.id = BlueprintUuid::new_v4();
+            bp2.report.blueprint_id = bp2.id;
             bp2.parent_blueprint_id = Some(bp1.id);
             let sled2 =
                 bp2.sleds.get_mut(&sled_ids[2]).expect("config for third sled");
@@ -3481,6 +3482,7 @@ mod tests {
         let bp4 = {
             let mut bp4 = bp3.clone();
             bp4.id = BlueprintUuid::new_v4();
+            bp4.report.blueprint_id = bp4.id;
             bp4.parent_blueprint_id = Some(bp3.id);
 
             // Sled index 3's zone is expunged (should be excluded).
@@ -3990,6 +3992,7 @@ mod tests {
                         external_ips: vec![],
                         disks: vec![],
                         boot_disk: None,
+                        cpu_platform: None,
                         ssh_public_keys: None,
                         start: false,
                         auto_restart_policy: Default::default(),

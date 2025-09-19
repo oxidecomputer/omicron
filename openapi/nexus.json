@@ -20132,6 +20132,15 @@
             "type": "string",
             "format": "uuid"
           },
+          "cpu_platform": {
+            "nullable": true,
+            "description": "The CPU platform for this instance. If this is `null`, the instance requires no particular CPU platform.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/InstanceCpuPlatform"
+              }
+            ]
+          },
           "description": {
             "description": "human-readable free-form text about a resource",
             "type": "string"
@@ -20238,6 +20247,25 @@
         "format": "uint16",
         "minimum": 0
       },
+      "InstanceCpuPlatform": {
+        "description": "A required CPU platform for an instance.\n\nWhen an instance specifies a required CPU platform:\n\n- The system may expose (to the VM) new CPU features that are only present on that platform (or on newer platforms of the same lineage that also support those features). - The instance must run on hosts that have CPUs that support all the features of the supplied platform.\n\nThat is, the instance is restricted to hosts that have the CPUs which support all features of the required platform, but in exchange the CPU features exposed by the platform are available for the guest to use. Note that this may prevent an instance from starting (if the hosts that could run it are full but there is capacity on other incompatible hosts).\n\nIf an instance does not specify a required CPU platform, then when it starts, the control plane selects a host for the instance and then supplies the guest with the \"minimum\" CPU platform supported by that host. This maximizes the number of hosts that can run the VM if it later needs to migrate to another host.\n\nIn all cases, the CPU features presented by a given CPU platform are a subset of what the corresponding hardware may actually support; features which cannot be used from a virtual environment or do not have full hypervisor support may be masked off. See RFD 314 for specific CPU features in a CPU platform.",
+        "oneOf": [
+          {
+            "description": "An AMD Milan-like CPU platform.",
+            "type": "string",
+            "enum": [
+              "amd_milan"
+            ]
+          },
+          {
+            "description": "An AMD Turin-like CPU platform.",
+            "type": "string",
+            "enum": [
+              "amd_turin"
+            ]
+          }
+        ]
+      },
       "InstanceCreate": {
         "description": "Create-time parameters for an `Instance`",
         "type": "object",
@@ -20267,6 +20295,16 @@
             "allOf": [
               {
                 "$ref": "#/components/schemas/InstanceDiskAttachment"
+              }
+            ]
+          },
+          "cpu_platform": {
+            "nullable": true,
+            "description": "The CPU platform to be used for this instance. If this is `null`, the instance requires no particular CPU platform; when it is started the instance will have the most general CPU platform supported by the sled it is initially placed on.",
+            "default": null,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/InstanceCpuPlatform"
               }
             ]
           },
@@ -20804,10 +20842,19 @@
           },
           "boot_disk": {
             "nullable": true,
-            "description": "Name or ID of the disk the instance should be instructed to boot from.\n\nIf not provided, unset the instance's boot disk.",
+            "description": "Name or ID of the disk the instance should be instructed to boot from.\n\nA null value unsets the boot disk.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/NameOrId"
+              }
+            ]
+          },
+          "cpu_platform": {
+            "nullable": true,
+            "description": "The CPU platform to be used for this instance. If this is `null`, the instance requires no particular CPU platform.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/InstanceCpuPlatform"
               }
             ]
           },
@@ -20829,6 +20876,9 @@
           }
         },
         "required": [
+          "auto_restart_policy",
+          "boot_disk",
+          "cpu_platform",
           "memory",
           "ncpus"
         ]
