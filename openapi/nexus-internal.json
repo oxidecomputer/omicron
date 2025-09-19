@@ -2888,6 +2888,14 @@
               }
             ]
           },
+          "source": {
+            "description": "source of the blueprint (for debugging)",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BlueprintSource"
+              }
+            ]
+          },
           "target_release_minimum_generation": {
             "description": "The minimum generation for the target release.\n\nSee [`Blueprint::target_release_minimum_generation`].",
             "allOf": [
@@ -2910,6 +2918,7 @@
           "id",
           "internal_dns_version",
           "nexus_generation",
+          "source",
           "target_release_minimum_generation",
           "time_created"
         ]
