@@ -104,6 +104,12 @@ pub fn functionally_same(base: CpuIdDump, target: CpuIdDump) -> bool {
             if base_info.has_fp256() != target_info.has_fp256() {
                 return false;
             }
+
+            // TODO: same as above: we probably just need to require "base" has
+            // the same or wider FPU datapath than "target"
+            if base_info.has_fp512() != target_info.has_fp512() {
+                return false;
+            }
         }
         _ => {
             // Specific cases here may be acceptable, but for expediency (and
@@ -500,8 +506,8 @@ fn milan_ideal() -> CpuIdDump {
 
     // Set up processor optimization info (leaf 8000_001Ah)
     let mut leaf = PerformanceOptimizationInfo::empty();
-    leaf.set_movu(true); // TODO: BREAKING
-    leaf.set_fp256(true); // TODO: BREAKINGISH?
+    leaf.set_movu(true);
+    leaf.set_fp256(true);
     cpuid
         .set_performance_optimization_info(Some(leaf))
         .expect("can set leaf 8000_001Ah");
@@ -555,11 +561,21 @@ pub fn turin_v1() -> CpuIdDump {
 
     let mut cpuid = CpuId::with_cpuid_reader(baseline);
 
-    let mut leaf = cpuid.get_extended_feature_info()
+    let mut leaf = cpuid
+        .get_extended_feature_info()
         .expect("baseline Milan defines leaf 7");
 
-    // These are the AVX512 features present on a 9365, when I'd looked in
-    // September, anyway
+    // Turin supports the TSC_ADJUST MSR but guest plumbing is not present for
+    // it and it's not clear what a guest would productively do with it anyway.
+    leaf.set_tsc_adjust_msr(false);
+
+    // Turin supports MOVDIR64B and MOVDIRI. These instructions should just work
+    // in guests, but it would be nice to test this before committing to passing
+    // them.
+    leaf.set_movdir64b(false);
+    leaf.set_movdiri(false);
+
+    // These AVX512 features are present for all Turin processors.
     leaf.set_avx512f(true);
     leaf.set_avx512dq(true);
     leaf.set_avx512_ifma(true);
@@ -573,12 +589,68 @@ pub fn turin_v1() -> CpuIdDump {
     leaf.set_avx512vnni(true);
     leaf.set_avx512bitalg(true);
     leaf.set_avx512vpopcntdq(true);
+    // While hardware supports 57-bit virtual addresses, the bhyve support is
+    // not there yet.
+    leaf.set_la57(false);
+
+    leaf.set_avx512_vp2intersect(true);
 
     leaf.set_avx512_bf16(true);
     leaf.set_avx_vnni(true);
 
-    cpuid.set_extended_feature_info(Some(leaf))
-        .expect("can set leaf 7h");
+    cpuid.set_extended_feature_info(Some(leaf)).expect("can set leaf 7h");
+
+    // This is the same information for leaf D as in Milan, but with the new
+    // AVX-512 bits in Turin.
+    // TODO: kind of gross to have to pass an empty `CpuIdDump` here...
+    let mut state = ExtendedStateInfo::empty(CpuIdDump::new());
+    state.set_xcr0_supports_legacy_x87(true);
+    state.set_xcr0_supports_sse_128(true);
+    state.set_xcr0_supports_avx_256(true);
+    // Update leaf D for the larger XCR0 set
+    state.set_xcr0_supports_avx512_opmask(true);
+    state.set_xcr0_supports_avx512_zmm_hi256(true);
+    state.set_xcr0_supports_avx512_zmm_hi16(true);
+    // Managed dynamically in practice.
+    state.set_xsave_area_size_enabled_features(0x980);
+    // `Core::X86::Cpuid::ProcExtStateEnumEcx00`, but minus the MPK support we
+    // don't make available to guests.
+    state.set_xsave_area_size_supported_features(0x980);
+
+    state.set_xsaveopt(true);
+    state.set_xsavec(true);
+    state.set_xgetbv(true);
+    state.set_xsave_size(0x980);
+
+    let mut leaves = state.into_leaves().to_vec();
+    let mut ymm_state = ExtendedState::empty();
+    ymm_state.set_size(0x100);
+    ymm_state.set_offset(0x240);
+    leaves.push(Some(ymm_state.into_leaf()));
+    // level 3
+    leaves.push(None);
+    // level 4
+    leaves.push(None);
+    // levels 5, 6, and 7 are described in the PPR:
+    // `Core::X86::Cpuid::ProcExtStateEnumEax06`
+    //
+    // level 5
+    let mut kregs_state = ExtendedState::empty();
+    kregs_state.set_size(0x040);
+    kregs_state.set_offset(0x340);
+    leaves.push(Some(kregs_state.into_leaf()));
+    // level 6
+    let mut zmmhi_state = ExtendedState::empty();
+    zmmhi_state.set_size(0x200);
+    zmmhi_state.set_offset(0x380);
+    leaves.push(Some(zmmhi_state.into_leaf()));
+    // level 7
+    let mut zmmhi16_state = ExtendedState::empty();
+    zmmhi16_state.set_size(0x400);
+    zmmhi16_state.set_offset(0x580);
+    leaves.push(Some(zmmhi16_state.into_leaf()));
+
+    cpuid.set_extended_state_info(Some(&leaves[..])).expect("can set leaf Dh");
 
     let mut leaf = cpuid
         .get_extended_processor_and_feature_identifiers()
@@ -586,7 +658,8 @@ pub fn turin_v1() -> CpuIdDump {
     // RDTSCP requires some bhyve and Propolis work to support, so it is masked
     // off for now.
     leaf.set_rdtscp(false);
-    cpuid.set_extended_processor_and_feature_identifiers(Some(leaf))
+    cpuid
+        .set_extended_processor_and_feature_identifiers(Some(leaf))
         .expect("can set leaf 8000_0001h");
 
     cpuid
@@ -602,9 +675,56 @@ pub fn turin_v1() -> CpuIdDump {
     // hiding this instruction.
     leaf.set_wbnoinvd(false);
 
+    // "Processor is not vulnerable to Branch Type Confusion"
+    // This is 1 for all Turin processors and does not require particular MSR
+    // settings or hypervisor support, so pass it along.
+    leaf.set_btc_no(true);
+
+    // BSFD, SSBD, STIBP, and IBRS, are all supported on Turin, but guests
+    // are not yet allowed to access SPEC_CTRL to enable (or confirm they are
+    // enabled).
+    leaf.set_psfd(false);
+    leaf.set_ssbd(false);
+    leaf.set_stibp(false);
+    leaf.set_ibrs(false);
+
     cpuid
         .set_processor_capacity_feature_info(Some(leaf))
         .expect("can set leaf 8000_0008h");
+
+    let mut leaf = cpuid
+        .get_performance_optimization_info()
+        .expect("baseline Milan defines 8000_001Ah");
+    leaf.set_fp256(false);
+    leaf.set_fp512(true);
+    cpuid
+        .set_performance_optimization_info(Some(leaf))
+        .expect("can set leaf 8000_001Ah");
+
+    let mut leaf = cpuid
+        .get_extended_feature_identification_2()
+        .expect("can get leaf 8000_0021h");
+
+    // FP512 downgrade is configurable via MSR, but the MSR is not made
+    // available to guests. The other bits are present on all Turin processors.
+    leaf.set_fp512_downgrade(false);
+    leaf.set_fast_rep_scasb(true);
+    leaf.set_epsf(true);
+    leaf.set_opcode_0f_017_reclaim(true);
+    leaf.set_amd_ermsb(true);
+    leaf.set_fast_short_repe_cmpsb(true);
+    leaf.set_fast_short_rep_stosb(true);
+    // The EFER write is permitted in bhyve, so this *should* work?
+    leaf.set_automatic_ibrs(true);
+    // The EFER write is permitted in bhyve, so this *should* work? But the
+    // forward utility of this bit is not as clear, so hide it.
+    leaf.set_upper_address_ignore(false);
+    // Architectural behavior, so we should pass this through.
+    leaf.set_fs_gs_base_write_not_serializing(true);
+
+    cpuid
+        .set_extended_feature_identification_2(Some(leaf))
+        .expect("can set leaf 8000_0021h");
 
     // Cache topology leaves are otherwise left zeroed; if we can avoid getting
     // into it, let's try!
@@ -817,7 +937,7 @@ pub fn dump_to_cpuid_entries(dump: CpuIdDump) -> Vec<CpuidEntry> {
 #[cfg(test)]
 mod test {
     use crate::app::instance_platform::cpu_platform::{
-        dump_to_cpuid_entries, milan_rfd314,
+        dump_to_cpuid_entries, milan_rfd314, turin_v1,
     };
     use raw_cpuid::{
         CpuId, CpuIdReader, CpuIdResult, CpuIdWriter, L1CacheTlbInfo,
@@ -909,6 +1029,77 @@ mod test {
         cpuid_leaf!(0x8000001F, 0x00000000, 0x00000000, 0x00000000, 0x00000000),
         cpuid_leaf!(0x80000021, 0x00000045, 0x00000000, 0x00000000, 0x00000000),
     ];
+
+    // This CPUID leaf blob is some small tweaks on top of the "ideal Milan",
+    // maintaining some details that are disabled due to needed bhyve support
+    // and including Turin-specific features as supported and relevant to
+    // guests.
+    const TURIN_V1_CPUID: [CpuidEntry; 26] = [
+        cpuid_leaf!(0x0, 0x0000000D, 0x68747541, 0x444D4163, 0x69746E65),
+        cpuid_leaf!(0x1, 0x00A00F11, 0x00000800, 0xF6D83203, 0x078BFBFF),
+        cpuid_leaf!(0x5, 0x00000000, 0x00000000, 0x00000000, 0x00000000),
+        cpuid_leaf!(0x6, 0x00000004, 0x00000000, 0x00000000, 0x00000000),
+        cpuid_subleaf!(
+            0x7, 0x0, 0x00000001, 0xF1BF03A9, 0x00005F42, 0x00000110
+        ),
+        cpuid_subleaf!(
+            0x7, 0x1, 0x00000030, 0x00000000, 0x00000000, 0x00000000
+        ),
+        cpuid_subleaf!(
+            0xD, 0x0, 0x000000E7, 0x00000980, 0x00000980, 0x00000000
+        ),
+        cpuid_subleaf!(
+            0xD, 0x1, 0x00000007, 0x00000980, 0x00000000, 0x00000000
+        ),
+        cpuid_subleaf!(
+            0xD, 0x2, 0x00000100, 0x00000240, 0x00000000, 0x00000000
+        ),
+        /*
+         * subleaves 3 and 4 are all-zero
+         */
+        cpuid_subleaf!(
+            0xD, 0x5, 0x00000040, 0x00000340, 0x00000000, 0x00000000
+        ),
+        cpuid_subleaf!(
+            0xD, 0x6, 0x00000200, 0x00000380, 0x00000000, 0x00000000
+        ),
+        cpuid_subleaf!(
+            0xD, 0x7, 0x00000400, 0x00000580, 0x00000000, 0x00000000
+        ),
+        cpuid_leaf!(0x80000000, 0x80000021, 0x68747541, 0x444D4163, 0x69746E65),
+        cpuid_leaf!(0x80000001, 0x00A00F11, 0x40000000, 0x44C001F1, 0x25D3FBFF),
+        cpuid_leaf!(0x80000002, 0x6469784F, 0x69562065, 0x61757472, 0x7554206C),
+        cpuid_leaf!(0x80000003, 0x2D6E6972, 0x656B696C, 0x6F725020, 0x73736563),
+        cpuid_leaf!(0x80000004, 0x2020726F, 0x20202020, 0x20202020, 0x00202020),
+        cpuid_leaf!(0x80000007, 0x00000000, 0x00000000, 0x00000000, 0x00000100),
+        cpuid_leaf!(0x80000008, 0x00003030, 0x20000005, 0x00000000, 0x00000000),
+        cpuid_leaf!(0x8000000A, 0x00000000, 0x00000000, 0x00000000, 0x00000000),
+        cpuid_leaf!(0x8000001A, 0x0000000A, 0x00000000, 0x00000000, 0x00000000),
+        cpuid_leaf!(0x8000001B, 0x00000000, 0x00000000, 0x00000000, 0x00000000),
+        cpuid_leaf!(0x8000001C, 0x00000000, 0x00000000, 0x00000000, 0x00000000),
+        cpuid_leaf!(0x8000001E, 0x00000000, 0x00000100, 0x00000000, 0x00000000),
+        cpuid_leaf!(0x8000001F, 0x00000000, 0x00000000, 0x00000000, 0x00000000),
+        cpuid_leaf!(0x80000021, 0x000D8D47, 0x00000000, 0x00000000, 0x00000000),
+    ];
+
+    // Test that Turin V1 matches the predetermined CPUID leaves written above
+    // (e.g. that the collection of builders behind `turin_v1` produce this
+    // profile as used for testing and elsewhere).
+    //
+    // This is largely "baseline Milan" with Turin-specific additions.
+    #[test]
+    fn turin_v1_is_as_described() {
+        let computed = dump_to_cpuid_entries(turin_v1());
+
+        for (l, r) in TURIN_V1_CPUID.iter().zip(computed.as_slice().iter()) {
+            eprintln!("comparing {:#08x}.{:?}", l.leaf, l.subleaf);
+            assert_eq!(
+                l, r,
+                "leaf 0x{:08x} (subleaf? {:?}) did not match",
+                l.leaf, l.subleaf
+            );
+        }
+    }
 
     // Test that the initial RFD 314 definition matches what we compute as the
     // CPUID profile with that configuration in `milan_rfd314()`.
