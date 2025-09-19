@@ -40,6 +40,7 @@ use gateway_types::component::SpState;
 use gateway_types::component_details::SpComponentDetails;
 use gateway_types::host::ComponentFirmwareHashStatus;
 use gateway_types::host::HostStartupOptions;
+use gateway_types::ignition;
 use gateway_types::ignition::SpIgnitionInfo;
 use gateway_types::rot::RotCfpa;
 use gateway_types::rot::RotCfpaSlot;
@@ -825,6 +826,27 @@ impl GatewayApi for GatewayImpl {
         apictx.latencies.instrument_dropshot_handler(&rqctx, handler).await
     }
 
+    async fn ignition_list_v1(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Vec<ignition::v1::SpIgnitionInfo>>, HttpError>
+    {
+        let apictx = rqctx.context();
+        let mgmt_switch = &apictx.mgmt_switch;
+        let handler = async {
+            let out = mgmt_switch
+                .bulk_ignition_state()
+                .await?
+                .map(|(id, state)| ignition::v1::SpIgnitionInfo {
+                    id: id.into(),
+                    details: state.into(),
+                })
+                .collect();
+
+            Ok(HttpResponseOk(out))
+        };
+        apictx.latencies.instrument_dropshot_handler(&rqctx, handler).await
+    }
+
     async fn ignition_list(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<Vec<SpIgnitionInfo>>, HttpError> {
@@ -841,6 +863,35 @@ impl GatewayApi for GatewayImpl {
                 .collect();
 
             Ok(HttpResponseOk(out))
+        };
+        apictx.latencies.instrument_dropshot_handler(&rqctx, handler).await
+    }
+
+    async fn ignition_get_v1(
+        rqctx: RequestContext<Self::Context>,
+        path: Path<PathSp>,
+    ) -> Result<HttpResponseOk<ignition::v1::SpIgnitionInfo>, HttpError> {
+        let apictx = rqctx.context();
+        let mgmt_switch = &apictx.mgmt_switch;
+
+        let sp_id = path.into_inner().sp.into();
+        let handler = async {
+            let ignition_target = mgmt_switch.ignition_target(sp_id)?;
+
+            let state = mgmt_switch
+                .ignition_controller()
+                .ignition_state(ignition_target)
+                .await
+                .map_err(|err| SpCommsError::SpCommunicationFailed {
+                    sp: sp_id,
+                    err,
+                })?;
+
+            let info = ignition::v1::SpIgnitionInfo {
+                id: sp_id.into(),
+                details: state.into(),
+            };
+            Ok(HttpResponseOk(info))
         };
         apictx.latencies.instrument_dropshot_handler(&rqctx, handler).await
     }
