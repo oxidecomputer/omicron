@@ -750,6 +750,3 @@ has_permission(actor: AuthenticatedActor, "create_child", route: RouterRoute) if
 
 has_permission(actor: AuthenticatedActor, "modify", route: RouterRoute) if
     can_modify_networking_resource(actor, route.vpc_router.vpc.project);
-
-#
-
