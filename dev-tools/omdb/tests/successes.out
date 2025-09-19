@@ -1,3 +1,16 @@
+EXECUTING COMMAND: omdb ["db", "db-metadata", "ls-nexus"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+Target Blueprint ......<REDACTED_BLUEPRINT_ID>....... @ nexus_generation: 1
+ID                                   |LAST_DRAINED_BLUEPRINT |STATE  |TRANSITIONING_TO 
+-------------------------------------+-----------------------+-------+-----------------
+..........<REDACTED_UUID>........... |                       |active |                 
+---------------------------------------------
+stderr:
+note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
+note: database schema version matches expected (<redacted database version>)
+=============================================
 EXECUTING COMMAND: omdb ["db", "disks", "list"]
 termination: Exited(0)
 ---------------------------------------------
@@ -231,7 +244,7 @@ SP DETAILS: type "Switch" slot 1
 
 ---------------------------------------------
 stderr:
-note: using MGS URL http://[::1]:REDACTED_PORT/
+note: using MGS URL http://[::1]:REDACTED_PORT
 =============================================
 EXECUTING COMMAND: omdb ["nexus", "background-tasks", "doc"]
 termination: Exited(0)
@@ -266,10 +279,6 @@ task: "blueprint_planner"
 task: "blueprint_rendezvous"
     reconciles blueprints and inventory collection, updating Reconfigurator-
     owned rendezvous tables that other subsystems consume
-
-
-task: "chicken_switches_watcher"
-    watch db for chicken switch changes
 
 
 task: "crdb_node_id_collector"
@@ -355,6 +364,10 @@ task: "physical_disk_adoption"
 
 task: "read_only_region_replacement_start"
     detect if read-only regions need replacement and begin the process
+
+
+task: "reconfigurator_config_watcher"
+    watch db for reconfigurator config changes
 
 
 task: "region_replacement"
@@ -491,13 +504,19 @@ task: "blueprint_loader"
   configured period: every <REDACTED_DURATION>m <REDACTED_DURATION>s
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    last completion reported error: failed to read target blueprint: Internal Error: no target blueprint set
+    target blueprint: ......<REDACTED_BLUEPRINT_ID>.......
+    execution:        disabled
+    created at:       <REDACTED_TIMESTAMP>
+    status:           first target blueprint
 
 task: "blueprint_executor"
   configured period: every <REDACTED_DURATION>m
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    last completion reported error: no blueprint
+    target blueprint: ......<REDACTED_BLUEPRINT_ID>....... 
+    execution:        disabled                             
+    status:           (no event report found)              
+    error:            (none)                               
 
 task: "abandoned_vmm_reaper"
   configured period: every <REDACTED_DURATION>m
@@ -531,19 +550,24 @@ task: "blueprint_rendezvous"
   configured period: every <REDACTED_DURATION>m
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    last completion reported error: no blueprint
-
-task: "chicken_switches_watcher"
-  configured period: every <REDACTED_DURATION>s
-  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
-    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-warning: unknown background task: "chicken_switches_watcher" (don't know how to interpret details: Object {"chicken_switches_updated": Bool(false)})
+    target blueprint:     ......<REDACTED_BLUEPRINT_ID>.......
+    inventory collection: ..........<REDACTED_UUID>...........
+    debug_dataset rendezvous counts:
+        num_inserted:           0
+        num_already_exist:      0
+        num_not_in_inventory:   0
+        num_tombstoned:         0
+        num_already_tombstoned: 0
+    crucible_dataset rendezvous counts:
+        num_inserted:         0
+        num_already_exist:    0
+        num_not_in_inventory: 0
 
 task: "crdb_node_id_collector"
   configured period: every <REDACTED_DURATION>m
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    last completion reported error: no blueprint
+warning: unknown background task: "crdb_node_id_collector" (don't know how to interpret details: Object {"errors": Array [Object {"err": String("failed to fetch node ID for zone ..........<REDACTED_UUID>........... at http://[::1]:REDACTED_PORT: Communication Error: error sending request for url (http://[::1]:REDACTED_PORT/node/id): error sending request for url (http://[::1]:REDACTED_PORT/node/id): client error (Connect): tcp connect error: Connection refused (os error <OS_ERROR_REDACTED>)"), "zone_id": String("..........<REDACTED_UUID>...........")}], "nsuccess": Number(0)})
 
 task: "decommissioned_disk_cleaner"
   configured period: every <REDACTED_DURATION>m
@@ -638,14 +662,20 @@ task: "physical_disk_adoption"
     last completion reported error: task disabled
 
 task: "read_only_region_replacement_start"
-  configured period: every <REDACTED_DURATION>m
+  configured period: every <REDACTED_DURATION>days <REDACTED_DURATION>h <REDACTED_DURATION>m <REDACTED_DURATION>s
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     total requests created ok: 0
     errors: 0
 
+task: "reconfigurator_config_watcher"
+  configured period: every <REDACTED_DURATION>s
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+warning: unknown background task: "reconfigurator_config_watcher" (don't know how to interpret details: Object {"config_updated": Bool(false)})
+
 task: "region_replacement"
-  configured period: every <REDACTED_DURATION>m
+  configured period: every <REDACTED_DURATION>days <REDACTED_DURATION>h <REDACTED_DURATION>m <REDACTED_DURATION>s
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     region replacement requests created ok: 0
@@ -654,7 +684,7 @@ task: "region_replacement"
     errors: 0
 
 task: "region_replacement_driver"
-  configured period: every <REDACTED_DURATION>m
+  configured period: every <REDACTED_DURATION>days <REDACTED_DURATION>h <REDACTED_DURATION>m <REDACTED_DURATION>s
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     region replacement drive sagas started ok: 0
@@ -662,21 +692,21 @@ task: "region_replacement_driver"
     errors: 0
 
 task: "region_snapshot_replacement_finish"
-  configured period: every <REDACTED_DURATION>m
+  configured period: every <REDACTED_DURATION>days <REDACTED_DURATION>h <REDACTED_DURATION>m <REDACTED_DURATION>s
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     region snapshot replacement finish sagas started ok: 0
     errors: 0
 
 task: "region_snapshot_replacement_garbage_collection"
-  configured period: every <REDACTED_DURATION>m
+  configured period: every <REDACTED_DURATION>days <REDACTED_DURATION>h <REDACTED_DURATION>m <REDACTED_DURATION>s
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     total garbage collections requested: 0
     errors: 0
 
 task: "region_snapshot_replacement_start"
-  configured period: every <REDACTED_DURATION>m
+  configured period: every <REDACTED_DURATION>days <REDACTED_DURATION>h <REDACTED_DURATION>m <REDACTED_DURATION>s
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     total requests created ok: 0
@@ -685,7 +715,7 @@ task: "region_snapshot_replacement_start"
     errors: 0
 
 task: "region_snapshot_replacement_step"
-  configured period: every <REDACTED_DURATION>m
+  configured period: every <REDACTED_DURATION>days <REDACTED_DURATION>h <REDACTED_DURATION>m <REDACTED_DURATION>s
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     total step records created ok: 0
@@ -844,13 +874,19 @@ task: "blueprint_loader"
   configured period: every <REDACTED_DURATION>m <REDACTED_DURATION>s
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    last completion reported error: failed to read target blueprint: Internal Error: no target blueprint set
+    target blueprint: ......<REDACTED_BLUEPRINT_ID>.......
+    execution:        disabled
+    created at:       <REDACTED_TIMESTAMP>
+    status:           first target blueprint
 
 task: "blueprint_executor"
   configured period: every <REDACTED_DURATION>m
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    last completion reported error: no blueprint
+    target blueprint: ......<REDACTED_BLUEPRINT_ID>....... 
+    execution:        disabled                             
+    status:           (no event report found)              
+    error:            (none)                               
 
 ---------------------------------------------
 stderr:
@@ -986,13 +1022,19 @@ task: "blueprint_loader"
   configured period: every <REDACTED_DURATION>m <REDACTED_DURATION>s
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    last completion reported error: failed to read target blueprint: Internal Error: no target blueprint set
+    target blueprint: ......<REDACTED_BLUEPRINT_ID>.......
+    execution:        disabled
+    created at:       <REDACTED_TIMESTAMP>
+    status:           first target blueprint
 
 task: "blueprint_executor"
   configured period: every <REDACTED_DURATION>m
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    last completion reported error: no blueprint
+    target blueprint: ......<REDACTED_BLUEPRINT_ID>....... 
+    execution:        disabled                             
+    status:           (no event report found)              
+    error:            (none)                               
 
 task: "abandoned_vmm_reaper"
   configured period: every <REDACTED_DURATION>m
@@ -1026,19 +1068,24 @@ task: "blueprint_rendezvous"
   configured period: every <REDACTED_DURATION>m
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    last completion reported error: no blueprint
-
-task: "chicken_switches_watcher"
-  configured period: every <REDACTED_DURATION>s
-  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
-    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-warning: unknown background task: "chicken_switches_watcher" (don't know how to interpret details: Object {"chicken_switches_updated": Bool(false)})
+    target blueprint:     ......<REDACTED_BLUEPRINT_ID>.......
+    inventory collection: ..........<REDACTED_UUID>...........
+    debug_dataset rendezvous counts:
+        num_inserted:           0
+        num_already_exist:      0
+        num_not_in_inventory:   0
+        num_tombstoned:         0
+        num_already_tombstoned: 0
+    crucible_dataset rendezvous counts:
+        num_inserted:         0
+        num_already_exist:    0
+        num_not_in_inventory: 0
 
 task: "crdb_node_id_collector"
   configured period: every <REDACTED_DURATION>m
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    last completion reported error: no blueprint
+warning: unknown background task: "crdb_node_id_collector" (don't know how to interpret details: Object {"errors": Array [Object {"err": String("failed to fetch node ID for zone ..........<REDACTED_UUID>........... at http://[::1]:REDACTED_PORT: Communication Error: error sending request for url (http://[::1]:REDACTED_PORT/node/id): error sending request for url (http://[::1]:REDACTED_PORT/node/id): client error (Connect): tcp connect error: Connection refused (os error <OS_ERROR_REDACTED>)"), "zone_id": String("..........<REDACTED_UUID>...........")}], "nsuccess": Number(0)})
 
 task: "decommissioned_disk_cleaner"
   configured period: every <REDACTED_DURATION>m
@@ -1133,14 +1180,20 @@ task: "physical_disk_adoption"
     last completion reported error: task disabled
 
 task: "read_only_region_replacement_start"
-  configured period: every <REDACTED_DURATION>m
+  configured period: every <REDACTED_DURATION>days <REDACTED_DURATION>h <REDACTED_DURATION>m <REDACTED_DURATION>s
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     total requests created ok: 0
     errors: 0
 
+task: "reconfigurator_config_watcher"
+  configured period: every <REDACTED_DURATION>s
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+warning: unknown background task: "reconfigurator_config_watcher" (don't know how to interpret details: Object {"config_updated": Bool(false)})
+
 task: "region_replacement"
-  configured period: every <REDACTED_DURATION>m
+  configured period: every <REDACTED_DURATION>days <REDACTED_DURATION>h <REDACTED_DURATION>m <REDACTED_DURATION>s
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     region replacement requests created ok: 0
@@ -1149,7 +1202,7 @@ task: "region_replacement"
     errors: 0
 
 task: "region_replacement_driver"
-  configured period: every <REDACTED_DURATION>m
+  configured period: every <REDACTED_DURATION>days <REDACTED_DURATION>h <REDACTED_DURATION>m <REDACTED_DURATION>s
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     region replacement drive sagas started ok: 0
@@ -1157,21 +1210,21 @@ task: "region_replacement_driver"
     errors: 0
 
 task: "region_snapshot_replacement_finish"
-  configured period: every <REDACTED_DURATION>m
+  configured period: every <REDACTED_DURATION>days <REDACTED_DURATION>h <REDACTED_DURATION>m <REDACTED_DURATION>s
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     region snapshot replacement finish sagas started ok: 0
     errors: 0
 
 task: "region_snapshot_replacement_garbage_collection"
-  configured period: every <REDACTED_DURATION>m
+  configured period: every <REDACTED_DURATION>days <REDACTED_DURATION>h <REDACTED_DURATION>m <REDACTED_DURATION>s
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     total garbage collections requested: 0
     errors: 0
 
 task: "region_snapshot_replacement_start"
-  configured period: every <REDACTED_DURATION>m
+  configured period: every <REDACTED_DURATION>days <REDACTED_DURATION>h <REDACTED_DURATION>m <REDACTED_DURATION>s
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     total requests created ok: 0
@@ -1180,7 +1233,7 @@ task: "region_snapshot_replacement_start"
     errors: 0
 
 task: "region_snapshot_replacement_step"
-  configured period: every <REDACTED_DURATION>m
+  configured period: every <REDACTED_DURATION>days <REDACTED_DURATION>h <REDACTED_DURATION>m <REDACTED_DURATION>s
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     total step records created ok: 0
@@ -1299,53 +1352,6 @@ task: "webhook_deliverator"
     already delivered by another Nexus:   0
     in progress by another Nexus:         0
 
----------------------------------------------
-stderr:
-note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
-=============================================
-EXECUTING COMMAND: omdb ["nexus", "chicken-switches", "show", "current"]
-termination: Exited(0)
----------------------------------------------
-stdout:
-No chicken switches enabled
----------------------------------------------
-stderr:
-note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
-=============================================
-EXECUTING COMMAND: omdb ["-w", "nexus", "chicken-switches", "set", "--planner-enabled", "true"]
-termination: Exited(0)
----------------------------------------------
-stdout:
-chicken switches updated to version 1:
-    planner enabled: true
-    planner switches:
-        add zones with mupdate override:   true
----------------------------------------------
-stderr:
-note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
-=============================================
-EXECUTING COMMAND: omdb ["-w", "nexus", "chicken-switches", "set", "--add-zones-with-mupdate-override", "false"]
-termination: Exited(0)
----------------------------------------------
-stdout:
-chicken switches updated to version 2:
-    planner enabled:   true (unchanged)
-    planner switches:
-    *   add zones with mupdate override:   true -> false
----------------------------------------------
-stderr:
-note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
-=============================================
-EXECUTING COMMAND: omdb ["nexus", "chicken-switches", "show", "current"]
-termination: Exited(0)
----------------------------------------------
-stdout:
-Reconfigurator chicken switches:
-    version: 2
-    modified time: <REDACTED_TIMESTAMP>
-    planner enabled: true
-    planner switches:
-        add zones with mupdate override:   false
 ---------------------------------------------
 stderr:
 note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
@@ -1517,6 +1523,7 @@ parent:    <none>
     internal DNS version:::   1
     external DNS version:::   2
     target release min gen:   1
+    nexus gen::::::::::::::   1
 
  PENDING MGS-MANAGED UPDATES: 0
 
@@ -1640,6 +1647,7 @@ parent:    <none>
     internal DNS version:::   1
     external DNS version:::   2
     target release min gen:   1
+    nexus gen::::::::::::::   1
 
  PENDING MGS-MANAGED UPDATES: 0
 
@@ -1665,6 +1673,7 @@ to:   blueprint ......<REDACTED_BLUEPRINT_ID>.......
     internal DNS version:::   1 (unchanged)
     external DNS version:::   2 (unchanged)
     target release min gen:   1 (unchanged)
+    nexus gen::::::::::::::   1 (unchanged)
 
  OXIMETER SETTINGS:
     generation:   1 (unchanged)
@@ -1683,6 +1692,58 @@ stdout:
 stderr:
 note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
 Error: `blueprint2_id` was not specified and blueprint1 has no parent
+=============================================
+EXECUTING COMMAND: omdb ["nexus", "reconfigurator-config", "show", "current"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+Reconfigurator config:
+    version: 1
+    modified time: <REDACTED_TIMESTAMP>
+    planner enabled: false
+    planner config:
+        add zones with mupdate override:   false
+---------------------------------------------
+stderr:
+note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
+=============================================
+EXECUTING COMMAND: omdb ["-w", "nexus", "reconfigurator-config", "set", "--planner-enabled", "true"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+reconfigurator config updated to version 2:
+*   planner enabled:   false -> true
+    planner config:
+        add zones with mupdate override:   false (unchanged)
+---------------------------------------------
+stderr:
+note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
+=============================================
+EXECUTING COMMAND: omdb ["-w", "nexus", "reconfigurator-config", "set", "--add-zones-with-mupdate-override", "true"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+reconfigurator config updated to version 3:
+    planner enabled:   true (unchanged)
+    planner config:
+    *   add zones with mupdate override:   false -> true
+---------------------------------------------
+stderr:
+note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
+=============================================
+EXECUTING COMMAND: omdb ["nexus", "reconfigurator-config", "show", "current"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+Reconfigurator config:
+    version: 3
+    modified time: <REDACTED_TIMESTAMP>
+    planner enabled: true
+    planner config:
+        add zones with mupdate override:   true
+---------------------------------------------
+stderr:
+note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
 =============================================
 EXECUTING COMMAND: omdb ["reconfigurator", "export", "<TMP_PATH_REDACTED>"]
 termination: Exited(0)

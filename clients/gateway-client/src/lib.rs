@@ -48,7 +48,7 @@ use types::ComponentFirmwareHashStatus;
 // call into each other. Since `gateway` is a lower-level service and never
 // calls into Nexus, the current scheme is okay.)
 progenitor::generate_api!(
-    spec = "../../openapi/gateway.json",
+    spec = "../../openapi/gateway/gateway-latest.json",
     interface = Positional,
     inner_type = slog::Logger,
     pre_hook = (|log: &slog::Logger, request: &reqwest::Request| {
@@ -70,6 +70,7 @@ progenitor::generate_api!(
         RotImageError = { derives = [ thiserror::Error, PartialEq, Eq, PartialOrd, Ord] },
         RotState = { derives = [PartialEq, Eq, PartialOrd, Ord] },
         SpComponentCaboose = { derives = [PartialEq, Eq] },
+        SpComponentInfo = { derives = [PartialEq, Eq] },
         SpIdentifier = { derives = [Copy, PartialEq, Hash, Eq] },
         SpIgnition = { derives = [PartialEq, Eq, PartialOrd, Ord] },
         SpIgnitionSystemType = { derives = [Copy, PartialEq, Eq, PartialOrd, Ord] },
@@ -82,6 +83,8 @@ progenitor::generate_api!(
         RotSlot = gateway_types::rot::RotSlot,
         Ena = ereport_types::Ena,
         Ereport = ereport_types::Ereport,
+        Ereports = ereport_types::Ereports,
+        TaskDump = gateway_types::task_dump::TaskDump,
         TypedUuidForEreporterRestartKind = omicron_uuid_kinds::EreporterRestartUuid,
         TypedUuidForMupdateKind = omicron_uuid_kinds::MupdateUuid,
     },

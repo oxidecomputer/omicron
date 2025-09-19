@@ -4,7 +4,10 @@
 
 //! Background task for realizing a plan blueprint
 
-use crate::app::background::{Activator, BackgroundTask};
+use crate::app::{
+    background::{Activator, BackgroundTask},
+    quiesce::NexusQuiesceHandle,
+};
 use futures::FutureExt;
 use futures::future::BoxFuture;
 use internal_dns_resolver::Resolver;
@@ -13,14 +16,12 @@ use nexus_db_queries::db::DataStore;
 use nexus_reconfigurator_execution::{
     RealizeBlueprintOutput, RequiredRealizeArgs,
 };
-use nexus_types::{
-    deployment::{
-        Blueprint, BlueprintTarget, PendingMgsUpdates, execution::EventBuffer,
-    },
-    quiesce::SagaQuiesceHandle,
+use nexus_types::deployment::{
+    Blueprint, BlueprintTarget, PendingMgsUpdates, execution::EventBuffer,
 };
 use omicron_uuid_kinds::OmicronZoneUuid;
 use serde_json::json;
+use slog_error_chain::InlineErrorChain;
 use std::sync::Arc;
 use tokio::sync::watch;
 use update_engine::NestedError;
@@ -35,7 +36,7 @@ pub struct BlueprintExecutor {
     tx: watch::Sender<usize>,
     saga_recovery: Activator,
     mgs_update_tx: watch::Sender<PendingMgsUpdates>,
-    saga_quiesce: SagaQuiesceHandle,
+    nexus_quiesce: NexusQuiesceHandle,
 }
 
 impl BlueprintExecutor {
@@ -48,7 +49,7 @@ impl BlueprintExecutor {
         nexus_id: OmicronZoneUuid,
         saga_recovery: Activator,
         mgs_update_tx: watch::Sender<PendingMgsUpdates>,
-        saga_quiesce: SagaQuiesceHandle,
+        nexus_quiesce: NexusQuiesceHandle,
     ) -> BlueprintExecutor {
         let (tx, _) = watch::channel(0);
         BlueprintExecutor {
@@ -59,7 +60,7 @@ impl BlueprintExecutor {
             tx,
             saga_recovery,
             mgs_update_tx,
-            saga_quiesce,
+            nexus_quiesce,
         }
     }
 
@@ -87,6 +88,47 @@ impl BlueprintExecutor {
         };
 
         let (bp_target, blueprint) = &*update;
+
+        // Regardless of anything else: propagate whatever this blueprint
+        // says about our quiescing state.
+        //
+        // During startup under normal operation, the blueprint will reflect
+        // that we're not quiescing.  Propagating this will enable sagas to
+        // be created elsewhere in Nexus.
+        //
+        // At some point during an upgrade, we'll encounter a blueprint that
+        // reflects that we are quiescing.  Propagating this will disable sagas
+        // from being created.
+        //
+        // In all other cases, this will have no effect.
+        //
+        // We do this now, before doing anything else, for two reasons: (1)
+        // during startup, we want to do this ASAP to minimize unnecessary saga
+        // creation failures (i.e., don't wait until we try to execute the
+        // blueprint before enabling sagas, since we already know if we're
+        // quiescing or not); and (2) because we want to do it even if blueprint
+        // execution is disabled.
+        match blueprint.is_nexus_quiescing(self.nexus_id) {
+            Ok(quiescing) => {
+                debug!(
+                    &opctx.log,
+                    "blueprint execution: quiesce check";
+                    "quiescing" => quiescing
+                );
+                self.nexus_quiesce.set_quiescing(quiescing);
+            }
+            Err(error) => {
+                // This should be impossible.  But it doesn't really affect
+                // anything else so there's no reason to stop execution.
+                error!(
+                    &opctx.log,
+                    "blueprint execution: failed to determine if this Nexus \
+                     is quiescing";
+                    InlineErrorChain::new(&*error)
+                );
+            }
+        };
+
         if !bp_target.enabled {
             warn!(&opctx.log,
                       "Blueprint execution: skipped";
@@ -119,7 +161,7 @@ impl BlueprintExecutor {
                 blueprint,
                 sender,
                 mgs_updates: self.mgs_update_tx.clone(),
-                saga_quiesce: self.saga_quiesce.clone(),
+                saga_quiesce: self.nexus_quiesce.sagas(),
             }
             .as_nexus(self.nexus_id),
         )
@@ -181,6 +223,7 @@ impl BackgroundTask for BlueprintExecutor {
 mod test {
     use super::BlueprintExecutor;
     use crate::app::background::{Activator, BackgroundTask};
+    use crate::app::quiesce::NexusQuiesceHandle;
     use httptest::Expectation;
     use httptest::matchers::{not, request};
     use httptest::responders::status_code;
@@ -207,12 +250,11 @@ mod test {
         PlanningReport, blueprint_zone_type,
     };
     use nexus_types::external_api::views::SledState;
-    use nexus_types::quiesce::SagaQuiesceHandle;
     use omicron_common::api::external;
     use omicron_common::api::external::Generation;
     use omicron_common::zpool_name::ZpoolName;
     use omicron_uuid_kinds::BlueprintUuid;
-    use omicron_uuid_kinds::GenericUuid;
+
     use omicron_uuid_kinds::OmicronZoneUuid;
     use omicron_uuid_kinds::PhysicalDiskUuid;
     use omicron_uuid_kinds::SledUuid;
@@ -278,6 +320,7 @@ mod test {
             internal_dns_version: dns_version,
             external_dns_version: dns_version,
             target_release_minimum_generation: Generation::new(),
+            nexus_generation: Generation::new(),
             cockroachdb_fingerprint: String::new(),
             clickhouse_cluster_config: None,
             oximeter_read_version: Generation::new(),
@@ -356,7 +399,7 @@ mod test {
             };
             let bogus_repo_depot_port = 0;
             let update = SledUpdate::new(
-                sled_id.into_untyped_uuid(),
+                *sled_id,
                 addr,
                 bogus_repo_depot_port,
                 SledBaseboard {
@@ -385,11 +428,16 @@ mod test {
         let mut task = BlueprintExecutor::new(
             datastore.clone(),
             resolver.clone(),
-            blueprint_rx,
+            blueprint_rx.clone(),
             OmicronZoneUuid::new_v4(),
             Activator::new(),
             dummy_tx,
-            SagaQuiesceHandle::new(opctx.log.clone()),
+            NexusQuiesceHandle::new(
+                datastore.clone(),
+                OmicronZoneUuid::new_v4(),
+                blueprint_rx,
+                opctx.child(BTreeMap::new()),
+            ),
         );
 
         // Now we're ready.
@@ -482,8 +530,8 @@ mod test {
 
             let pool_id = dataset.dataset.pool_name.id();
             let zpool = Zpool::new(
-                pool_id.into_untyped_uuid(),
-                sled_id.into_untyped_uuid(),
+                pool_id,
+                sled_id,
                 PhysicalDiskUuid::new_v4(),
                 external::ByteCount::from(0).into(),
             );

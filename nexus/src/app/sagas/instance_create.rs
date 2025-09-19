@@ -391,7 +391,8 @@ async fn sic_associate_ssh_keys(
         .map_err(ActionError::action_failed)?;
 
     let (.., authz_user) = LookupPath::new(&opctx, datastore)
-        .silo_user_id(actor.actor_id())
+        .silo_user_actor(&actor)
+        .map_err(ActionError::action_failed)?
         .lookup_for(authz::Action::ListChildren)
         .await
         .map_err(ActionError::action_failed)?;
@@ -1297,6 +1298,7 @@ pub mod test {
                         name: DISK_NAME.parse().unwrap(),
                     },
                 )),
+                cpu_platform: None,
                 disks: Vec::new(),
                 start: false,
                 auto_restart_policy: Default::default(),

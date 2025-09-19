@@ -42,6 +42,9 @@ use clap::ValueEnum;
 use clap::builder::PossibleValue;
 use clap::builder::PossibleValuesParser;
 use clap::builder::TypedValueParser;
+use db_metadata::DbMetadataArgs;
+use db_metadata::DbMetadataCommands;
+use db_metadata::cmd_db_metadata_list_nexus;
 use diesel::BoolExpressionMethods;
 use diesel::ExpressionMethods;
 use diesel::JoinOnDsl;
@@ -170,6 +173,7 @@ use tabled::Tabled;
 use uuid::Uuid;
 
 mod alert;
+mod db_metadata;
 mod ereport;
 mod saga;
 mod user_data_export;
@@ -338,6 +342,8 @@ pub struct DbFetchOptions {
 /// Subcommands that query or update the database
 #[derive(Debug, Subcommand, Clone)]
 enum DbCommands {
+    /// Commands for database metadata
+    DbMetadata(DbMetadataArgs),
     /// Commands relevant to Crucible datasets
     CrucibleDataset(CrucibleDatasetArgs),
     /// Print any Crucible resources that are located on expunged physical disks
@@ -455,14 +461,14 @@ enum DiskCommands {
 
 #[derive(Debug, Args, Clone)]
 struct DiskInfoArgs {
-    /// The UUID of the volume
+    /// The UUID of the disk
     uuid: Uuid,
 }
 
 #[derive(Debug, Args, Clone)]
 struct DiskPhysicalArgs {
     /// The UUID of the physical disk
-    uuid: Uuid,
+    uuid: PhysicalDiskUuid,
 }
 
 #[derive(Debug, Args, Clone)]
@@ -1128,6 +1134,11 @@ impl DbArgs {
         self.db_url_opts.with_datastore(omdb, log, |opctx, datastore| {
             async move {
                 match &self.command {
+                    DbCommands::DbMetadata(DbMetadataArgs {
+                        command: DbMetadataCommands::ListNexus,
+                    }) => {
+                        cmd_db_metadata_list_nexus(&opctx, &datastore).await
+                    }
                     DbCommands::CrucibleDataset(CrucibleDatasetArgs {
                         command: CrucibleDatasetCommands::List,
                     }) => {
@@ -1641,9 +1652,9 @@ async fn lookup_project(
 #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
 struct CrucibleDatasetRow {
     // dataset fields
-    id: Uuid,
+    id: DatasetUuid,
     time_deleted: String,
-    pool_id: Uuid,
+    pool_id: ZpoolUuid,
     address: String,
     size_used: i64,
     no_provision: bool,
@@ -1679,20 +1690,19 @@ async fn get_crucible_dataset_rows(
         bail!("no latest inventory found!");
     };
 
-    let mut zpool_total_size: HashMap<Uuid, i64> = HashMap::new();
+    let mut zpool_total_size: HashMap<ZpoolUuid, i64> = HashMap::new();
 
     for sled_agent in latest_collection.sled_agents {
         for zpool in sled_agent.zpools {
-            zpool_total_size
-                .insert(zpool.id.into_untyped_uuid(), zpool.total_size.into());
+            zpool_total_size.insert(zpool.id, zpool.total_size.into());
         }
     }
 
-    let zpools: HashMap<Uuid, Zpool> = datastore
+    let zpools: HashMap<ZpoolUuid, Zpool> = datastore
         .zpool_list_all_external_batched(opctx)
         .await?
         .into_iter()
-        .map(|(zpool, _)| (zpool.id().into_untyped_uuid(), zpool))
+        .map(|(zpool, _)| (zpool.id(), zpool))
         .collect();
 
     let mut result: Vec<CrucibleDatasetRow> =
@@ -1700,22 +1710,22 @@ async fn get_crucible_dataset_rows(
 
     for d in crucible_datasets {
         let control_plane_storage_buffer: Option<i64> = match zpools
-            .get(&d.pool_id)
+            .get(&d.pool_id())
         {
             Some(zpool) => Some(zpool.control_plane_storage_buffer().into()),
             None => None,
         };
 
-        let pool_total_size = zpool_total_size.get(&d.pool_id);
+        let pool_total_size = zpool_total_size.get(&d.pool_id());
 
         result.push(CrucibleDatasetRow {
             // dataset fields
-            id: d.id().into_untyped_uuid(),
+            id: d.id(),
             time_deleted: match d.time_deleted() {
                 Some(t) => t.to_string(),
                 None => String::from(""),
             },
-            pool_id: d.pool_id,
+            pool_id: d.pool_id(),
             address: d.address().to_string(),
             size_used: d.size_used,
             no_provision: d.no_provision(),
@@ -2085,6 +2095,7 @@ async fn cmd_db_disk_info(
         propolis_zone: String,
         volume_id: String,
         disk_state: String,
+        import_address: String,
     }
 
     // The rows describing the downstairs regions for this disk/volume
@@ -2151,11 +2162,15 @@ async fn cmd_db_disk_info(
             let my_sled_id = instance.sled_id().unwrap();
 
             let (_, my_sled) = LookupPath::new(opctx, datastore)
-                .sled_id(my_sled_id.into_untyped_uuid())
+                .sled_id(my_sled_id)
                 .fetch()
                 .await
                 .context("failed to look up sled")?;
 
+            let import_address = match disk.pantry_address {
+                Some(ref pa) => pa.clone().to_string(),
+                None => "-".to_string(),
+            };
             UpstairsRow {
                 host_serial: my_sled.serial_number().to_string(),
                 disk_name,
@@ -2163,8 +2178,13 @@ async fn cmd_db_disk_info(
                 propolis_zone: format!("oxz_propolis-server_{}", propolis_id),
                 volume_id: disk.volume_id().to_string(),
                 disk_state: disk.runtime_state.disk_state.to_string(),
+                import_address,
             }
         } else {
+            let import_address = match disk.pantry_address {
+                Some(ref pa) => pa.clone().to_string(),
+                None => "-".to_string(),
+            };
             UpstairsRow {
                 host_serial: NOT_ON_SLED_MSG.to_string(),
                 disk_name,
@@ -2172,11 +2192,16 @@ async fn cmd_db_disk_info(
                 propolis_zone: NO_ACTIVE_PROPOLIS_MSG.to_string(),
                 volume_id: disk.volume_id().to_string(),
                 disk_state: disk.runtime_state.disk_state.to_string(),
+                import_address,
             }
         }
     } else {
         // If the disk is not attached to anything, just print empty
         // fields.
+        let import_address = match disk.pantry_address {
+            Some(ref pa) => pa.clone().to_string(),
+            None => "-".to_string(),
+        };
         UpstairsRow {
             host_serial: "-".to_string(),
             disk_name: disk.name().to_string(),
@@ -2184,6 +2209,7 @@ async fn cmd_db_disk_info(
             propolis_zone: "-".to_string(),
             volume_id: disk.volume_id().to_string(),
             disk_state: disk.runtime_state.disk_state.to_string(),
+            import_address,
         }
     };
     rows.push(usr);
@@ -2200,14 +2226,14 @@ async fn cmd_db_disk_info(
 
     let mut rows = Vec::with_capacity(3);
     for (dataset, region) in regions {
-        let my_pool_id = dataset.pool_id;
+        let my_pool_id = dataset.pool_id();
         let (_, my_zpool) = LookupPath::new(opctx, datastore)
             .zpool_id(my_pool_id)
             .fetch()
             .await
             .context("failed to look up zpool")?;
 
-        let my_sled_id = my_zpool.sled_id;
+        let my_sled_id = my_zpool.sled_id();
 
         let (_, my_sled) = LookupPath::new(opctx, datastore)
             .sled_id(my_sled_id)
@@ -2219,7 +2245,7 @@ async fn cmd_db_disk_info(
             host_serial: my_sled.serial_number().to_string(),
             region: region.id().to_string(),
             dataset: dataset.id().to_string(),
-            physical_disk: my_zpool.physical_disk_id.to_string(),
+            physical_disk: my_zpool.physical_disk_id().to_string(),
         });
     }
 
@@ -2282,7 +2308,7 @@ async fn cmd_db_disk_physical(
     }
 
     let zpools = query
-        .filter(zpool_dsl::physical_disk_id.eq(args.uuid))
+        .filter(zpool_dsl::physical_disk_id.eq(to_db_typed_uuid(args.uuid)))
         .select(Zpool::as_select())
         .load_async(&*conn)
         .await
@@ -2301,7 +2327,7 @@ async fn cmd_db_disk_physical(
     // changes, this code will still work.
     for zp in zpools {
         // zpool has the sled id, record that so we can find the serial number.
-        sled_ids.insert(zp.sled_id);
+        sled_ids.insert(zp.sled_id());
 
         // Next, we find all the Crucible datasets that are on our zpool.
         use nexus_db_schema::schema::crucible_dataset::dsl as dataset_dsl;
@@ -2311,7 +2337,7 @@ async fn cmd_db_disk_physical(
         }
 
         let datasets = query
-            .filter(dataset_dsl::pool_id.eq(zp.id()))
+            .filter(dataset_dsl::pool_id.eq(to_db_typed_uuid(zp.id())))
             .select(CrucibleDataset::as_select())
             .load_async(&*conn)
             .await
@@ -2514,7 +2540,7 @@ struct PhysicalDiskRow {
     serial: String,
     vendor: String,
     model: String,
-    sled_id: Uuid,
+    sled_id: SledUuid,
     policy: PhysicalDiskPolicy,
     state: PhysicalDiskState,
 }
@@ -2526,7 +2552,7 @@ impl From<PhysicalDisk> for PhysicalDiskRow {
             serial: d.serial.clone(),
             vendor: d.vendor.clone(),
             model: d.model.clone(),
-            sled_id: d.sled_id,
+            sled_id: d.sled_id(),
             policy: d.disk_policy.into(),
             state: d.disk_state.into(),
         }
@@ -2739,14 +2765,14 @@ async fn cmd_db_snapshot_info(
     } else {
         let mut rows = Vec::with_capacity(3);
         for (dataset, region) in regions {
-            let my_pool_id = dataset.pool_id;
+            let my_pool_id = dataset.pool_id();
             let (_, my_zpool) = LookupPath::new(opctx, datastore)
                 .zpool_id(my_pool_id)
                 .fetch()
                 .await
                 .context("failed to look up zpool")?;
 
-            let my_sled_id = my_zpool.sled_id;
+            let my_sled_id = my_zpool.sled_id();
 
             let (_, my_sled) = LookupPath::new(opctx, datastore)
                 .sled_id(my_sled_id)
@@ -2758,7 +2784,7 @@ async fn cmd_db_snapshot_info(
                 host_serial: my_sled.serial_number().to_string(),
                 region: region.id().to_string(),
                 dataset: dataset.id().to_string(),
-                physical_disk: my_zpool.physical_disk_id.to_string(),
+                physical_disk: my_zpool.physical_disk_id().to_string(),
             });
         }
 
@@ -2779,14 +2805,14 @@ async fn cmd_db_snapshot_info(
 
     let mut rows = Vec::with_capacity(3);
     for (dataset, region) in regions {
-        let my_pool_id = dataset.pool_id;
+        let my_pool_id = dataset.pool_id();
         let (_, my_zpool) = LookupPath::new(opctx, datastore)
             .zpool_id(my_pool_id)
             .fetch()
             .await
             .context("failed to look up zpool")?;
 
-        let my_sled_id = my_zpool.sled_id;
+        let my_sled_id = my_zpool.sled_id();
 
         let (_, my_sled) = LookupPath::new(opctx, datastore)
             .sled_id(my_sled_id)
@@ -2798,7 +2824,7 @@ async fn cmd_db_snapshot_info(
             host_serial: my_sled.serial_number().to_string(),
             region: region.id().to_string(),
             dataset: dataset.id().to_string(),
-            physical_disk: my_zpool.physical_disk_id.to_string(),
+            physical_disk: my_zpool.physical_disk_id().to_string(),
         });
     }
 
@@ -3829,10 +3855,10 @@ async fn cmd_db_dry_run_region_allocation(
     struct Row {
         pub region_id: Uuid,
 
-        pub dataset_id: Uuid,
+        pub dataset_id: DatasetUuid,
         pub size_used: i64,
 
-        pub pool_id: Uuid,
+        pub pool_id: ZpoolUuid,
 
         #[tabled(display_with = "option_impl_display")]
         pub total_size: Option<i64>,
@@ -3852,22 +3878,21 @@ async fn cmd_db_dry_run_region_allocation(
         );
     };
 
-    let mut zpool_total_size: HashMap<Uuid, i64> = HashMap::new();
+    let mut zpool_total_size: HashMap<ZpoolUuid, i64> = HashMap::new();
 
     for sled_agent in latest_collection.sled_agents {
         for zpool in sled_agent.zpools {
-            zpool_total_size
-                .insert(zpool.id.into_untyped_uuid(), zpool.total_size.into());
+            zpool_total_size.insert(zpool.id, zpool.total_size.into());
         }
     }
 
     for (dataset, region) in datasets_and_regions {
-        let pool_id = dataset.pool_id.into_untyped_uuid();
+        let pool_id = dataset.pool_id();
         let total_size = zpool_total_size.get(&pool_id);
         rows.push(Row {
             region_id: region.id(),
 
-            dataset_id: dataset.id().into_untyped_uuid(),
+            dataset_id: dataset.id(),
             size_used: dataset.size_used,
 
             pool_id,
@@ -4235,7 +4260,7 @@ struct SledRow {
     role: &'static str,
     policy: SledPolicy,
     state: SledState,
-    id: Uuid,
+    id: SledUuid,
 }
 
 impl From<Sled> for SledRow {
@@ -4733,7 +4758,7 @@ async fn cmd_db_instance_info(
         struct VmmRow {
             #[tabled(inline)]
             state: VmmStateRow,
-            sled_id: Uuid,
+            sled_id: SledUuid,
             #[tabled(display_with = "datetime_rfc3339_concise")]
             time_created: chrono::DateTime<Utc>,
             #[tabled(display_with = "datetime_opt_rfc3339_concise")]
@@ -4760,6 +4785,7 @@ async fn cmd_db_instance_info(
                     propolis_ip: _,
                     propolis_port: _,
                     instance_id: _,
+                    cpu_platform: _,
                     time_created,
                     time_deleted,
                     runtime:
@@ -4775,7 +4801,7 @@ async fn cmd_db_instance_info(
                         state,
                         generation: r#gen.0.into(),
                     },
-                    sled_id,
+                    sled_id: sled_id.into(),
                     time_created,
                     time_deleted,
                 }
@@ -4859,7 +4885,7 @@ async fn cmd_db_instances(
                 h_to_s.entry(i.sled_id().unwrap())
             {
                 let (_, my_sled) = LookupPath::new(opctx, datastore)
-                    .sled_id(i.sled_id().unwrap().into_untyped_uuid())
+                    .sled_id(i.sled_id().unwrap())
                     .fetch()
                     .await
                     .context("failed to look up sled")?;
@@ -5016,7 +5042,7 @@ async fn cmd_db_dns_diff(
         // Load the added and removed items.
         use nexus_db_schema::schema::dns_name::dsl;
 
-        let added = dsl::dns_name
+        let mut added = dsl::dns_name
             .filter(dsl::dns_zone_id.eq(zone.id))
             .filter(dsl::version_added.eq(version.version))
             .limit(i64::from(u32::from(limit)))
@@ -5026,7 +5052,7 @@ async fn cmd_db_dns_diff(
             .context("loading added names")?;
         check_limit(&added, limit, || "loading added names");
 
-        let removed = dsl::dns_name
+        let mut removed = dsl::dns_name
             .filter(dsl::dns_zone_id.eq(zone.id))
             .filter(dsl::version_removed.eq(version.version))
             .limit(i64::from(u32::from(limit)))
@@ -5041,6 +5067,11 @@ async fn cmd_db_dns_diff(
             removed.len()
         );
         println!("");
+
+        // This is kind of stupid-expensive, but there aren't a lot of records
+        // here and it's helpful for this output to be stable.
+        added.sort_by_cached_key(|k| format!("{} {:?}", k.name, k.records()));
+        removed.sort_by_cached_key(|k| format!("{} {:?}", k.name, k.records()));
 
         for a in added {
             print_name("+", &a.name, a.records().context("parsing records"));
@@ -5097,7 +5128,8 @@ async fn cmd_db_dns_names(
             }
         });
 
-        for (name, records) in names {
+        for (name, mut records) in names {
+            records.sort();
             print_name("", &name, Ok(records));
         }
     }
@@ -7223,13 +7255,13 @@ async fn cmd_db_vmm_info(
         .next()
         .ok_or_else(|| anyhow::anyhow!("no VMM found with ID {uuid}"))?;
     let sled_result =
-        LookupPath::new(opctx, datastore).sled_id(vmm.sled_id).fetch().await;
+        LookupPath::new(opctx, datastore).sled_id(vmm.sled_id()).fetch().await;
     let sled = match sled_result {
         Ok((_, sled)) => Some(sled),
         Err(err) => {
             eprintln!(
                 "WARN: failed to fetch sled with ID {}: {err}",
-                vmm.sled_id
+                vmm.sled_id()
             );
             None
         }
@@ -7356,6 +7388,7 @@ fn prettyprint_vmm(
     const INSTANCE_ID: &'static str = "instance ID";
     const SLED_ID: &'static str = "sled ID";
     const SLED_SERIAL: &'static str = "sled serial";
+    const CPU_PLATFORM: &'static str = "CPU platform";
     const ADDRESS: &'static str = "propolis address";
     const STATE: &'static str = "state";
     const WIDTH: usize = const_max_len(&[
@@ -7366,6 +7399,7 @@ fn prettyprint_vmm(
         INSTANCE_ID,
         SLED_ID,
         SLED_SERIAL,
+        CPU_PLATFORM,
         STATE,
         ADDRESS,
     ]);
@@ -7379,6 +7413,7 @@ fn prettyprint_vmm(
         sled_id,
         propolis_ip,
         propolis_port,
+        cpu_platform,
         runtime: db::model::VmmRuntimeState { state, r#gen, time_state_updated },
     } = vmm;
 
@@ -7405,6 +7440,7 @@ fn prettyprint_vmm(
     if let Some(serial) = sled_serial {
         println!("{indent}{SLED_SERIAL:>width$}: {serial}");
     }
+    println!("{indent}{CPU_PLATFORM:>width$}: {cpu_platform}");
 }
 
 async fn cmd_db_vmm_list(
@@ -7480,6 +7516,7 @@ async fn cmd_db_vmm_list(
                 sled_id,
                 propolis_ip: _,
                 propolis_port: _,
+                cpu_platform: _,
                 runtime:
                     db::model::VmmRuntimeState {
                         state,
@@ -7507,7 +7544,7 @@ async fn cmd_db_vmm_list(
     struct VerboseVmmRow<'a> {
         #[tabled(inline)]
         inner: VmmRow<'a>,
-        sled_id: Uuid,
+        sled_id: SledUuid,
         address: std::net::SocketAddr,
         #[tabled(display_with = "datetime_rfc3339_concise")]
         time_created: DateTime<Utc>,
@@ -7527,7 +7564,7 @@ async fn cmd_db_vmm_list(
                 ..
             } = it.0;
             VerboseVmmRow {
-                sled_id,
+                sled_id: sled_id.into(),
                 inner: VmmRow::from(it),
                 address: std::net::SocketAddr::new(
                     propolis_ip.ip(),
@@ -7694,22 +7731,21 @@ async fn cmd_db_zpool_list(
         bail!("no latest inventory found!");
     };
 
-    let mut zpool_total_size: HashMap<Uuid, i64> = HashMap::new();
+    let mut zpool_total_size: HashMap<ZpoolUuid, i64> = HashMap::new();
 
     for sled_agent in latest_collection.sled_agents {
         for zpool in sled_agent.zpools {
-            zpool_total_size
-                .insert(zpool.id.into_untyped_uuid(), zpool.total_size.into());
+            zpool_total_size.insert(zpool.id, zpool.total_size.into());
         }
     }
 
     #[derive(Tabled)]
     #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
     struct ZpoolRow {
-        id: Uuid,
+        id: ZpoolUuid,
         time_deleted: String,
-        sled_id: Uuid,
-        physical_disk_id: Uuid,
+        sled_id: SledUuid,
+        physical_disk_id: PhysicalDiskUuid,
         #[tabled(display_with = "option_impl_display")]
         total_size: Option<i64>,
         control_plane_storage_buffer: i64,
@@ -7718,15 +7754,15 @@ async fn cmd_db_zpool_list(
     let rows: Vec<ZpoolRow> = zpools
         .into_iter()
         .map(|(p, _)| {
-            let zpool_id = p.id().into_untyped_uuid();
+            let zpool_id = p.id();
             Ok(ZpoolRow {
                 id: zpool_id,
                 time_deleted: match p.time_deleted() {
                     Some(t) => t.to_string(),
                     None => String::from(""),
                 },
-                sled_id: p.sled_id,
-                physical_disk_id: p.physical_disk_id.into_untyped_uuid(),
+                sled_id: p.sled_id(),
+                physical_disk_id: p.physical_disk_id(),
                 total_size: zpool_total_size.get(&zpool_id).cloned(),
                 control_plane_storage_buffer: p
                     .control_plane_storage_buffer()

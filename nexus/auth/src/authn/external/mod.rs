@@ -10,6 +10,7 @@ use crate::authn;
 use crate::probes;
 use async_trait::async_trait;
 use authn::Reason;
+use omicron_uuid_kinds::SiloUserUuid;
 use slog::trace;
 use std::borrow::Borrow;
 use uuid::Uuid;
@@ -153,7 +154,10 @@ pub enum SchemeResult {
 /// A context that can look up a Silo user's Silo.
 #[async_trait]
 pub trait SiloUserSilo {
-    async fn silo_user_silo(&self, silo_user_id: Uuid) -> Result<Uuid, Reason>;
+    async fn silo_user_silo(
+        &self,
+        silo_user_id: SiloUserUuid,
+    ) -> Result<Uuid, Reason>;
 }
 
 #[cfg(test)]

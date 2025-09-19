@@ -22,6 +22,7 @@ use nexus_test_utils::resource_helpers::test_params;
 use nexus_types::external_api::params;
 use nexus_types::external_api::shared;
 use nexus_types::external_api::shared::IpRange;
+use nexus_types::external_api::shared::IpVersion;
 use nexus_types::external_api::shared::Ipv4Range;
 use nexus_types::external_api::views::SledProvisionPolicy;
 use omicron_common::api::external::AddressLotKind;
@@ -657,6 +658,7 @@ pub static DEMO_INSTANCE_CREATE: LazyLock<params::InstanceCreate> =
         }],
         disks: vec![],
         boot_disk: None,
+        cpu_platform: None,
         start: true,
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
@@ -678,14 +680,16 @@ pub static DEMO_STOPPED_INSTANCE_CREATE: LazyLock<params::InstanceCreate> =
         }],
         disks: vec![],
         boot_disk: None,
+        cpu_platform: None,
         start: true,
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
     });
 pub static DEMO_INSTANCE_UPDATE: LazyLock<params::InstanceUpdate> =
     LazyLock::new(|| params::InstanceUpdate {
-        boot_disk: None,
-        auto_restart_policy: None,
+        boot_disk: Nullable(None),
+        cpu_platform: Nullable(None),
+        auto_restart_policy: Nullable(None),
         ncpus: InstanceCpuCount(1),
         memory: ByteCount::from_gibibytes_u32(16),
     });
@@ -929,6 +933,7 @@ pub static DEMO_IP_POOL_CREATE: LazyLock<params::IpPoolCreate> =
             name: DEMO_IP_POOL_NAME.clone(),
             description: String::from("an IP pool"),
         },
+        ip_version: IpVersion::V4,
     });
 pub static DEMO_IP_POOL_PROJ_URL: LazyLock<String> = LazyLock::new(|| {
     format!(

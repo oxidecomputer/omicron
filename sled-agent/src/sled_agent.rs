@@ -8,6 +8,7 @@ use crate::artifact_store::ArtifactStore;
 use crate::bootstrap::config::BOOTSTRAP_AGENT_RACK_INIT_PORT;
 use crate::bootstrap::early_networking::EarlyNetworkSetupError;
 use crate::config::Config;
+use crate::hardware_monitor::HardwareMonitorHandle;
 use crate::instance_manager::InstanceManager;
 use crate::long_running_tasks::LongRunningTaskHandles;
 use crate::metrics::{MetricsManager, MetricsRequestQueue};
@@ -15,7 +16,7 @@ use crate::nexus::{
     NexusClient, NexusNotifierHandle, NexusNotifierInput, NexusNotifierTask,
 };
 use crate::probe_manager::ProbeManager;
-use crate::services::{self, ServiceManager};
+use crate::services::{self, ServiceManager, UnderlayInfo};
 use crate::support_bundle::logs::SupportBundleLogs;
 use crate::support_bundle::storage::SupportBundleManager;
 use crate::vmm_reservoir::{ReservoirMode, VmmReservoirManager};
@@ -362,6 +363,9 @@ struct SledAgentInner {
     // A handle to the bootstore.
     bootstore: bootstore::NodeHandle,
 
+    // A handle to the hardware monitor.
+    hardware_monitor: HardwareMonitorHandle,
+
     // Object handling production of metrics for oximeter.
     _metrics_manager: MetricsManager,
 
@@ -672,6 +676,9 @@ impl SledAgent {
                 rack_network_config,
                 zone_bundler: long_running_task_handles.zone_bundler.clone(),
                 bootstore: long_running_task_handles.bootstore.clone(),
+                hardware_monitor: long_running_task_handles
+                    .hardware_monitor
+                    .clone(),
                 _metrics_manager: metrics_manager,
                 repo_depot,
             }),
@@ -703,10 +710,11 @@ impl SledAgent {
         )
     }
 
-    pub(crate) fn switch_zone_underlay_info(
-        &self,
-    ) -> (Ipv6Addr, Option<&RackNetworkConfig>) {
-        (self.inner.switch_zone_ip(), self.inner.rack_network_config.as_ref())
+    pub(crate) fn switch_zone_underlay_info(&self) -> UnderlayInfo {
+        UnderlayInfo {
+            ip: self.inner.switch_zone_ip(),
+            rack_network_config: self.inner.rack_network_config.clone(),
+        }
     }
 
     pub fn id(&self) -> SledUuid {
@@ -723,6 +731,10 @@ impl SledAgent {
 
     pub fn sprockets(&self) -> SprocketsConfig {
         self.sprockets.clone()
+    }
+
+    pub(crate) fn hardware_monitor(&self) -> &HardwareMonitorHandle {
+        &self.inner.hardware_monitor
     }
 
     /// Trigger a request to Nexus informing it that the current sled exists,

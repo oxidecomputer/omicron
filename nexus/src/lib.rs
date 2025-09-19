@@ -7,8 +7,6 @@
 // We only use rustdoc for internal documentation, including private items, so
 // it's expected that we'll have links to private items in the docs.
 #![allow(rustdoc::private_intra_doc_links)]
-// TODO(#40): Remove this exception once resolved.
-#![allow(clippy::unnecessary_wraps)]
 
 pub mod app; // Public for documentation examples
 mod cidata;
@@ -46,8 +44,6 @@ use omicron_common::api::internal::shared::{
 use omicron_common::disk::DatasetKind;
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::DatasetUuid;
-use omicron_uuid_kinds::GenericUuid as _;
-use omicron_uuid_kinds::ZpoolUuid;
 use oximeter::types::ProducerRegistry;
 use oximeter_producer::Server as ProducerServer;
 use slog::Logger;
@@ -137,6 +133,15 @@ impl Server {
         // definitely implemented our source IP allowlist for making requests to
         // the external server we're about to start.
         apictx.context.nexus.await_ip_allowlist_plumbing().await;
+
+        // Wait until Nexus has determined if sagas are supposed to be quiesced.
+        // This is not strictly necessary.  The goal here is to prevent 503
+        // errors to clients that reach this Nexus while it's starting up and
+        // before it's figured out that it doesn't need to quiesce.  The risk of
+        // doing this is that Nexus gets stuck here, but that should only happen
+        // if it's unable to load the current blueprint, in which case
+        // something's pretty wrong and it's likely pretty stuck anyway.
+        apictx.context.nexus.wait_for_saga_determination().await;
 
         // Launch the external server.
         let tls_config = apictx
@@ -328,9 +333,20 @@ impl nexus_test_interface::NexusServer for Server {
                     },
                     allowed_source_ips: AllowedSourceIps::Any,
                 },
+                false, // blueprint_execution_enabled
             )
             .await
             .expect("Could not initialize rack");
+
+        // Now that we have a blueprint, determine whether sagas should be
+        // quiesced.  Wait for that so that tests can assume they can
+        // immediately kick off sagas.
+        internal_server
+            .apictx
+            .context
+            .nexus
+            .wait_for_saga_determination()
+            .await;
 
         // Start the Nexus external API.
         Server::start(internal_server).await.unwrap()
@@ -392,7 +408,7 @@ impl nexus_test_interface::NexusServer for Server {
                         &opctx,
                         RendezvousDebugDataset::new(
                             dataset_id,
-                            ZpoolUuid::from_untyped_uuid(zpool_id),
+                            zpool_id,
                             BlueprintUuid::new_v4(),
                         ),
                     )

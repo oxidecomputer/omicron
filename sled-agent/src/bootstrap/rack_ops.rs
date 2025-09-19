@@ -10,7 +10,7 @@ use bootstore::schemes::v0 as bootstore;
 use omicron_uuid_kinds::RackInitUuid;
 use omicron_uuid_kinds::RackResetUuid;
 use sled_agent_config_reconciler::InternalDisksReceiver;
-use sled_agent_types::rack_init::RackInitializeRequest;
+use sled_agent_types::rack_init::RackInitializeRequestParams;
 use sled_agent_types::rack_ops::{RackOperationStatus, RssStep};
 use slog::Logger;
 use sprockets_tls::keys::SprocketsConfig;
@@ -148,7 +148,7 @@ impl RssAccess {
         global_zone_bootstrap_ip: Ipv6Addr,
         internal_disks_rx: &InternalDisksReceiver,
         bootstore_node_handle: &bootstore::NodeHandle,
-        request: RackInitializeRequest,
+        request: RackInitializeRequestParams,
     ) -> Result<RackInitUuid, RssAccessError> {
         let mut status = self.status.lock().unwrap();
 
@@ -330,7 +330,7 @@ async fn rack_initialize(
     global_zone_bootstrap_ip: Ipv6Addr,
     internal_disks_rx: InternalDisksReceiver,
     bootstore_node_handle: bootstore::NodeHandle,
-    request: RackInitializeRequest,
+    request: RackInitializeRequestParams,
     step_tx: watch::Sender<RssStep>,
 ) -> Result<(), SetupServiceError> {
     RssHandle::run_rss(

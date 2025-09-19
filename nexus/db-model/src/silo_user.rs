@@ -6,11 +6,13 @@ use db_macros::Asset;
 use nexus_db_schema::schema::silo_user;
 use nexus_types::external_api::views;
 use nexus_types::identity::Asset;
+use omicron_uuid_kinds::SiloUserUuid;
 use uuid::Uuid;
 
 /// Describes a silo user within the database.
 #[derive(Asset, Queryable, Insertable, Debug, Selectable)]
 #[diesel(table_name = silo_user)]
+#[asset(uuid_kind = SiloUserKind)]
 pub struct SiloUser {
     #[diesel(embed)]
     identity: SiloUserIdentity,
@@ -23,7 +25,11 @@ pub struct SiloUser {
 }
 
 impl SiloUser {
-    pub fn new(silo_id: Uuid, user_id: Uuid, external_id: String) -> Self {
+    pub fn new(
+        silo_id: Uuid,
+        user_id: SiloUserUuid,
+        external_id: String,
+    ) -> Self {
         Self {
             identity: SiloUserIdentity::new(user_id),
             time_deleted: None,

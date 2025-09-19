@@ -24,11 +24,14 @@ mod messages;
 mod node;
 mod node_ctx;
 mod persistent_state;
+#[allow(unused)]
+mod rack_secret_loader;
 mod validators;
 pub use configuration::Configuration;
 pub use coordinator_state::{
     CoordinatorOperation, CoordinatorState, CoordinatorStateDiff,
 };
+pub use rack_secret_loader::{LoadRackSecretError, RackSecretLoaderDiff};
 pub use validators::ValidatedReconfigureMsgDiff;
 mod alarm;
 
@@ -39,7 +42,9 @@ pub use node::{Node, NodeDiff};
 // public only for docs.
 pub use node_ctx::NodeHandlerCtx;
 pub use node_ctx::{NodeCallerCtx, NodeCommonCtx, NodeCtx, NodeCtxDiff};
-pub use persistent_state::{PersistentState, PersistentStateSummary};
+pub use persistent_state::{
+    ExpungedMetadata, PersistentState, PersistentStateSummary,
+};
 
 #[derive(
     Debug,
@@ -135,6 +140,15 @@ pub struct Envelope {
     pub to: PlatformId,
     pub from: PlatformId,
     pub msg: PeerMsg,
+}
+
+#[cfg(feature = "testing")]
+impl Envelope {
+    pub fn equal_except_for_crypto_data(&self, other: &Self) -> bool {
+        self.to == other.to
+            && self.from == other.from
+            && self.msg.equal_except_for_crypto_data(&other.msg)
+    }
 }
 
 /// Check if a received share is valid for a given configuration

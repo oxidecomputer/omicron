@@ -31,7 +31,7 @@ pub struct PersistentState {
 
     // Has the node been informed that it is no longer part of the trust quorum?
     //
-    // If at any time this gets set, than the it remains true for the lifetime
+    // If at any time this gets set, then the it remains true for the lifetime
     // of the node. The sled corresponding to the node must be factory reset by
     // wiping its storage.
     pub expunged: Option<ExpungedMetadata>,
@@ -62,11 +62,13 @@ impl PersistentState {
         self.lrtq.is_some() && self.latest_committed_epoch().is_none()
     }
 
-    // Are there any committed configurations or lrtq data?
+    /// Are there any committed configurations or lrtq data?
     pub fn is_uninitialized(&self) -> bool {
         self.lrtq.is_none() && self.latest_committed_epoch().is_none()
     }
 
+    /// The latest configuration that we know about, regardless of whether it
+    /// has been committed.
     pub fn latest_config(&self) -> Option<&Configuration> {
         self.configs.iter().last()
     }
@@ -107,6 +109,11 @@ impl PersistentState {
     // Do we have a configuration and share for this epoch?
     pub fn has_prepared(&self, epoch: Epoch) -> bool {
         self.configs.contains_key(&epoch) && self.shares.contains_key(&epoch)
+    }
+
+    /// Has this node been expunged?
+    pub fn is_expunged(&self) -> bool {
+        self.expunged.is_some()
     }
 }
 

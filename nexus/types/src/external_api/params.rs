@@ -13,10 +13,11 @@ use omicron_common::api::external::{
     AddressLotKind, AffinityPolicy, AllowedSourceIps, BfdMode, BgpPeer,
     ByteCount, FailureDomain, Hostname, IdentityMetadataCreateParams,
     IdentityMetadataUpdateParams, InstanceAutoRestartPolicy, InstanceCpuCount,
-    LinkFec, LinkSpeed, Name, NameOrId, Nullable, PaginationOrder,
-    RouteDestination, RouteTarget, UserId,
+    InstanceCpuPlatform, IpVersion, LinkFec, LinkSpeed, Name, NameOrId,
+    Nullable, PaginationOrder, RouteDestination, RouteTarget, UserId,
 };
 use omicron_common::disk::DiskVariant;
+use omicron_uuid_kinds::*;
 use oxnet::{IpNet, Ipv4Net, Ipv6Net};
 use parse_display::Display;
 use schemars::JsonSchema;
@@ -45,11 +46,16 @@ macro_rules! path_param {
 
 macro_rules! id_path_param {
     ($struct:ident, $param:ident, $name:tt) => {
+        id_path_param!($struct, $param, $name, Uuid);
+    };
+
+    ($struct:ident, $param:ident, $name:tt, $uuid_type:ident) => {
         #[derive(Serialize, Deserialize, JsonSchema)]
         pub struct $struct {
             #[doc = "ID of the "]
             #[doc = $name]
-            pub $param: Uuid,
+            #[schemars(with = "Uuid")]
+            pub $param: $uuid_type,
         }
     };
 }
@@ -95,15 +101,15 @@ path_param!(ProbePath, probe, "probe");
 path_param!(CertificatePath, certificate, "certificate");
 
 id_path_param!(SupportBundlePath, bundle_id, "support bundle");
-id_path_param!(GroupPath, group_id, "group");
-id_path_param!(UserPath, user_id, "user");
+id_path_param!(GroupPath, group_id, "group", SiloGroupUuid);
+id_path_param!(UserPath, user_id, "user", SiloUserUuid);
 id_path_param!(TokenPath, token_id, "token");
 id_path_param!(TufTrustRootPath, trust_root_id, "trust root");
 
 // TODO: The hardware resources should be represented by its UUID or a hardware
 // ID that can be used to deterministically generate the UUID.
 id_path_param!(RackPath, rack_id, "rack");
-id_path_param!(SledPath, sled_id, "sled");
+id_path_param!(SledPath, sled_id, "sled", SledUuid);
 id_path_param!(SwitchPath, switch_id, "switch");
 id_path_param!(PhysicalDiskPath, disk_id, "physical disk");
 
@@ -113,7 +119,8 @@ id_path_param!(BlueprintPath, blueprint_id, "blueprint");
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct SledSelector {
     /// ID of the sled
-    pub sled: Uuid,
+    #[schemars(with = "Uuid")]
+    pub sled: SledUuid,
 }
 
 /// Parameters for `sled_set_provision_policy`.
@@ -181,7 +188,8 @@ pub struct OptionalSiloSelector {
 #[derive(Deserialize, JsonSchema)]
 pub struct UserParam {
     /// The user's internal ID
-    pub user_id: Uuid,
+    #[schemars(with = "Uuid")]
+    pub user_id: SiloUserUuid,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
@@ -198,7 +206,8 @@ pub struct SamlIdentityProviderSelector {
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct SshKeySelector {
     /// ID of the silo user
-    pub silo_user_id: Uuid,
+    #[schemars(with = "Uuid")]
+    pub silo_user_id: SiloUserUuid,
     /// Name or ID of the SSH key
     pub ssh_key: NameOrId,
 }
@@ -993,6 +1002,11 @@ impl std::fmt::Debug for CertificateCreate {
 pub struct IpPoolCreate {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
+    /// The IP version of the pool.
+    ///
+    /// The default is IPv4.
+    #[serde(default = "IpVersion::v4")]
+    pub ip_version: IpVersion,
 }
 
 /// Parameters for updating an IP Pool
@@ -1267,6 +1281,13 @@ pub struct InstanceCreate {
     /// Anti-Affinity groups which this instance should be added.
     #[serde(default)]
     pub anti_affinity_groups: Vec<NameOrId>,
+
+    /// The CPU platform to be used for this instance. If this is `null`, the
+    /// instance requires no particular CPU platform; when it is started the
+    /// instance will have the most general CPU platform supported by the sled
+    /// it is initially placed on.
+    #[serde(default)]
+    pub cpu_platform: Option<InstanceCpuPlatform>,
 }
 
 /// Parameters of an `Instance` that can be reconfigured after creation.
@@ -1280,8 +1301,8 @@ pub struct InstanceUpdate {
 
     /// Name or ID of the disk the instance should be instructed to boot from.
     ///
-    /// If not provided, unset the instance's boot disk.
-    pub boot_disk: Option<NameOrId>,
+    /// A null value unsets the boot disk.
+    pub boot_disk: Nullable<NameOrId>,
 
     /// Sets the auto-restart policy for this instance.
     ///
@@ -1297,7 +1318,11 @@ pub struct InstanceUpdate {
     /// configurable through other mechanisms, such as on a per-project basis.
     /// In that case, any configured default policy will be used if this is
     /// `null`.
-    pub auto_restart_policy: Option<InstanceAutoRestartPolicy>,
+    pub auto_restart_policy: Nullable<InstanceAutoRestartPolicy>,
+
+    /// The CPU platform to be used for this instance. If this is `null`, the
+    /// instance requires no particular CPU platform.
+    pub cpu_platform: Nullable<InstanceCpuPlatform>,
 }
 
 #[inline]
@@ -2295,7 +2320,8 @@ pub struct SnapshotCreate {
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct OptionalGroupSelector {
-    pub group: Option<Uuid>,
+    #[schemars(with = "Option<Uuid>")]
+    pub group: Option<SiloGroupUuid>,
 }
 
 // BUILT-IN USERS
@@ -2389,7 +2415,8 @@ pub struct SetTargetReleaseParams {
 pub struct ProbeCreate {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
-    pub sled: Uuid,
+    #[schemars(with = "Uuid")]
+    pub sled: SledUuid,
     pub ip_pool: Option<NameOrId>,
 }
 

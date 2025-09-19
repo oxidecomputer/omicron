@@ -237,7 +237,19 @@ impl CoordinatorState {
                 old_epoch,
                 old_collected_shares,
                 ..
-            } => {}
+            } => {
+                if !old_collected_shares.contains_key(&to)
+                    && ctx.connected().contains(&to)
+                    && ctx
+                        .persistent_state()
+                        .configuration(*old_epoch)
+                        .expect("config exists")
+                        .members
+                        .contains_key(&to)
+                {
+                    ctx.send(to, PeerMsgKind::GetShare(*old_epoch));
+                }
+            }
             CoordinatorOperation::CollectLrtqShares { members, shares } => {}
             CoordinatorOperation::Prepare { prepares, prepare_acks } => {
                 if let Some((config, share)) = prepares.get(&to) {

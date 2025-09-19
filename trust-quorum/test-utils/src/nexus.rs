@@ -113,7 +113,9 @@ pub struct NexusState {
 impl NexusState {
     #[allow(clippy::new_without_default)]
     pub fn new() -> NexusState {
-        NexusState { rack_id: RackUuid::new_v4(), configs: IdOrdMap::new() }
+        // We end up replaying events in tqdb, and can't use a random rack
+        // uuid.
+        NexusState { rack_id: RackUuid::nil(), configs: IdOrdMap::new() }
     }
 
     // Create a `ReconfigureMsg` for the latest nexus config
@@ -122,13 +124,6 @@ impl NexusState {
     ) -> (&PlatformId, ReconfigureMsg) {
         let config = self.configs.iter().last().expect("at least one config");
         (&config.coordinator, config.to_reconfigure_msg(self.rack_id))
-    }
-
-    /// Abort the latest reconfiguration attempt
-    pub fn abort_reconfiguration(&mut self) {
-        let config = self.configs.iter().last().expect("at least one config");
-        // Can only abort while preparing
-        assert_eq!(config.op, NexusOp::Preparing);
     }
 
     pub fn latest_config(&self) -> &NexusConfig {

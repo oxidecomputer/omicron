@@ -293,9 +293,6 @@ pub async fn wait_for_boot_info(
             .await
         {
             Ok(state) => match state.clone() {
-                // The minimum we will ever return is v3.
-                // Additionally, V2 does not report image errors, so we cannot
-                // know with certainty if a signature check came back with errors
                 RotState::V2 { .. } | RotState::V3 { .. } => {
                     debug!(log, "successfuly retrieved boot info");
                     return Ok(state.into_inner());

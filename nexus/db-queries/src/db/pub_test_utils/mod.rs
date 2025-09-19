@@ -12,6 +12,7 @@ use crate::authz;
 use crate::context::OpContext;
 use crate::db;
 use crate::db::DataStore;
+use crate::db::datastore::IdentityCheckPolicy;
 use omicron_test_utils::dev::db::CockroachInstance;
 use slog::Logger;
 use std::sync::Arc;
@@ -114,7 +115,14 @@ impl TestDatabaseBuilder {
                     Interface::Datastore => {
                         let pool = new_pool(log, &db);
                         let datastore = Arc::new(
-                            DataStore::new(&log, pool, None).await.unwrap(),
+                            DataStore::new(
+                                &log,
+                                pool,
+                                None,
+                                IdentityCheckPolicy::DontCare,
+                            )
+                            .await
+                            .unwrap(),
                         );
                         TestDatabase {
                             db,
@@ -239,6 +247,21 @@ impl TestDatabase {
         }
     }
 
+    /// Returns a new independent datastore atop a new pool atop the same
+    /// database
+    ///
+    /// This is normally not necessary.  You can clone the `Arc<DataStore>`
+    /// returned by `datastore()`.  However, this is important for tests that
+    /// need separate datastores to test their separate quiesce behaviors.
+    pub async fn extra_datastore(&self, log: &Logger) -> Arc<DataStore> {
+        let pool = new_pool(log, &self.db);
+        Arc::new(
+            DataStore::new(&log, pool, None, IdentityCheckPolicy::DontCare)
+                .await
+                .unwrap(),
+        )
+    }
+
     pub fn opctx(&self) -> &OpContext {
         match &self.kind {
             TestKind::NoPool
@@ -300,7 +323,11 @@ async fn datastore_test(
 
     let cfg = db::Config { url: db.pg_config().clone() };
     let pool = Arc::new(db::Pool::new_single_host(&log, &cfg));
-    let datastore = Arc::new(DataStore::new(&log, pool, None).await.unwrap());
+    let datastore = Arc::new(
+        DataStore::new(&log, pool, None, IdentityCheckPolicy::DontCare)
+            .await
+            .unwrap(),
+    );
 
     // Create an OpContext with the credentials of "db-init" just for the
     // purpose of loading the built-in users, roles, and assignments.

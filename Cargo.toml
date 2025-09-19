@@ -365,7 +365,7 @@ approx = "0.5.1"
 assert_matches = "1.5.0"
 assert_cmd = "2.0.17"
 async-bb8-diesel = "0.2"
-async-trait = "0.1.88"
+async-trait = "0.1.89"
 atomicwrites = "0.4.4"
 authz-macros = { path = "nexus/authz-macros" }
 backoff = { version = "0.4.0", features = [ "tokio" ] }
@@ -378,7 +378,7 @@ bootstrap-agent-client = { path = "clients/bootstrap-agent-client" }
 buf-list = { version = "1.0.3", features = ["tokio1"] }
 byteorder = "1.5.0"
 bytes = "1.10.1"
-camino = { version = "1.1.11", features = ["serde1"] }
+camino = { version = "1.2.0", features = ["serde1"] }
 camino-tempfile = "1.4.1"
 camino-tempfile-ext = { version = "0.3.2", features = ["assert-color"] }
 cancel-safe-futures = "0.1.5"
@@ -432,7 +432,7 @@ digest = "0.10.7"
 dns-server = { path = "dns-server" }
 dns-server-api = { path = "dns-server-api" }
 dns-service-client = { path = "clients/dns-service-client" }
-dpd-client = { git = "https://github.com/oxidecomputer/dendrite", rev = "6e666520620e26432333d9060bc7d249ba9fa92e" }
+dpd-client = { git = "https://github.com/oxidecomputer/dendrite", rev = "738c80d18d5e94eda367440ade7743e9d9f124de" }
 dropshot = { version = "0.16.3", features = [ "usdt-probes" ] }
 dyn-clone = "1.0.20"
 either = "1.15.0"
@@ -491,7 +491,7 @@ hyper = "1.6.0"
 hyper-util = "0.1.16"
 hyper-rustls = "0.27.7"
 hyper-staticfile = "0.10.1"
-iddqd = { version = "0.3.9", features = ["daft", "serde", "schemars08"] }
+iddqd = { version = "0.3.13", features = ["daft", "serde", "schemars08"] }
 id-map = { path = "id-map" }
 illumos-utils = { path = "illumos-utils" }
 iana-time-zone = "0.1.63"
@@ -528,8 +528,8 @@ newtype_derive = "0.1.6"
 ntp-admin-api = { path = "ntp-admin/api" }
 ntp-admin-client = { path = "clients/ntp-admin-client" }
 ntp-admin-types = { path = "ntp-admin/types" }
-mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "fa5f15cdcd5864161a929e2ec01534f70dfba216" }
-ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "fa5f15cdcd5864161a929e2ec01534f70dfba216" }
+mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "e3c587a47039a6c7aff6cc53b8e72e5328d57fc0" }
+ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "e3c587a47039a6c7aff6cc53b8e72e5328d57fc0" }
 multimap = "0.10.1"
 nexus-auth = { path = "nexus/auth" }
 nexus-background-task-interface = { path = "nexus/background-task-interface" }
@@ -586,7 +586,7 @@ omicron-workspace-hack = "0.1.0"
 omicron-zone-package = "0.12.2"
 oxide-client = { path = "clients/oxide-client" }
 oxide-tokio-rt = "0.1.2"
-oxide-vpc = { git = "https://github.com/oxidecomputer/opte", rev = "6a5d3f336685a2aeb291962ae7f583b9355f3022", features = [ "api", "std" ] }
+oxide-vpc = { git = "https://github.com/oxidecomputer/opte", rev = "77f1ff9ceea1afe5733f0003f73f806b8c8c58ae", features = [ "api", "std" ] }
 oxlog = { path = "dev-tools/oxlog" }
 oxnet = "0.1.3"
 once_cell = "1.21.3"
@@ -596,7 +596,7 @@ openapiv3 = "2.2.0"
 # must match samael's crate!
 openssl = "0.10"
 openssl-sys = "0.9"
-opte-ioctl = { git = "https://github.com/oxidecomputer/opte", rev = "6a5d3f336685a2aeb291962ae7f583b9355f3022" }
+opte-ioctl = { git = "https://github.com/oxidecomputer/opte", rev = "77f1ff9ceea1afe5733f0003f73f806b8c8c58ae" }
 oso = "0.27"
 owo-colors = "4.2.2"
 oximeter = { path = "oximeter/oximeter" }
@@ -653,6 +653,7 @@ rand_distr = "0.5.1"
 rand_seeder = "0.4.0"
 range-requests = { path = "range-requests" }
 ratatui = "0.29.0"
+raw-cpuid = { git = "https://github.com/oxidecomputer/rust-cpuid.git", rev = "0a8dbd2311263f6a59ea58089e33c8331436ff3a" }
 rayon = "1.10"
 rcgen = "0.12.1"
 reconfigurator-cli = { path = "dev-tools/reconfigurator-cli" }
@@ -840,6 +841,11 @@ panic = "abort"
 opt-level = 3
 
 [profile.dev.package.bootstore]
+opt-level = 3
+
+[profile.dev.package.trust-quorum]
+opt-level = 3
+[profile.dev.package.trust-quorum-test-utils]
 opt-level = 3
 
 # Crypto stuff always needs optimizations

@@ -1,5 +1,6 @@
 use crate::{Ipv6Addr, MacAddr, Vni};
 use ipnetwork::IpNetwork;
+use omicron_uuid_kinds::SledUuid;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -10,7 +11,7 @@ use uuid::Uuid;
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct V2PMappingView {
     pub nic_id: Uuid,
-    pub sled_id: Uuid,
+    pub sled_id: SledUuid,
     pub sled_ip: Ipv6Addr,
     pub vni: Vni,
     pub mac: MacAddr,

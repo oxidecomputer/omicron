@@ -353,6 +353,10 @@ pub(crate) enum Operation {
         num_datasets_expunged: usize,
         num_zones_expunged: usize,
     },
+    SetNexusGeneration {
+        current_generation: Generation,
+        new_generation: Generation,
+    },
     SetTargetReleaseMinimumGeneration {
         current_generation: Generation,
         new_generation: Generation,
@@ -465,6 +469,13 @@ impl fmt::Display for Operation {
                      {current_generation} to {new_generation}"
                 )
             }
+            Self::SetNexusGeneration { current_generation, new_generation } => {
+                write!(
+                    f,
+                    "updated nexus generation from \
+                     {current_generation} to {new_generation}"
+                )
+            }
         }
     }
 }
@@ -515,6 +526,7 @@ pub struct BlueprintBuilder<'a> {
     sled_editors: BTreeMap<SledUuid, SledEditor>,
     cockroachdb_setting_preserve_downgrade: CockroachDbPreserveDowngrade,
     target_release_minimum_generation: Generation,
+    nexus_generation: Generation,
     report: Option<PlanningReport>,
 
     creator: String,
@@ -582,6 +594,7 @@ impl<'a> BlueprintBuilder<'a> {
             internal_dns_version: Generation::new(),
             external_dns_version: Generation::new(),
             target_release_minimum_generation: Generation::new(),
+            nexus_generation: Generation::new(),
             cockroachdb_fingerprint: String::new(),
             cockroachdb_setting_preserve_downgrade:
                 CockroachDbPreserveDowngrade::DoNotModify,
@@ -663,6 +676,7 @@ impl<'a> BlueprintBuilder<'a> {
             pending_mgs_updates: parent_blueprint.pending_mgs_updates.clone(),
             target_release_minimum_generation: parent_blueprint
                 .target_release_minimum_generation,
+            nexus_generation: parent_blueprint.nexus_generation,
             report: None,
             creator: creator.to_owned(),
             operations: Vec::new(),
@@ -857,6 +871,7 @@ impl<'a> BlueprintBuilder<'a> {
             external_dns_version: self.input.external_dns_version(),
             target_release_minimum_generation: self
                 .target_release_minimum_generation,
+            nexus_generation: self.nexus_generation,
             cockroachdb_fingerprint: self
                 .input
                 .cockroachdb_settings()
@@ -1534,6 +1549,7 @@ impl<'a> BlueprintBuilder<'a> {
         &mut self,
         sled_id: SledUuid,
         image_source: BlueprintZoneImageSource,
+        nexus_generation: Generation,
     ) -> Result<(), Error> {
         // Whether Nexus should use TLS and what the external DNS servers it
         // should use are currently provided at rack-setup time, and should be
@@ -1562,6 +1578,7 @@ impl<'a> BlueprintBuilder<'a> {
             external_tls,
             external_dns_servers,
             image_source,
+            nexus_generation,
         )
     }
 
@@ -1571,6 +1588,7 @@ impl<'a> BlueprintBuilder<'a> {
         external_tls: bool,
         external_dns_servers: Vec<IpAddr>,
         image_source: BlueprintZoneImageSource,
+        nexus_generation: Generation,
     ) -> Result<(), Error> {
         let nexus_id = self.rng.sled_rng(sled_id).next_zone();
         let ExternalNetworkingChoice {
@@ -1608,6 +1626,7 @@ impl<'a> BlueprintBuilder<'a> {
             nic,
             external_tls,
             external_dns_servers: external_dns_servers.clone(),
+            nexus_generation,
         });
         let filesystem_pool =
             self.sled_select_zpool(sled_id, zone_type.kind())?;
@@ -2180,6 +2199,22 @@ impl<'a> BlueprintBuilder<'a> {
             new_generation,
         });
         Ok(())
+    }
+
+    /// Get the value of `nexus_generation`.
+    pub fn nexus_generation(&self) -> Generation {
+        self.nexus_generation
+    }
+
+    /// Given the current value of `nexus_generation`, set the new value for
+    /// this blueprint.
+    pub fn set_nexus_generation(&mut self, new_generation: Generation) {
+        let current_generation = self.nexus_generation;
+        self.nexus_generation = new_generation;
+        self.record_operation(Operation::SetNexusGeneration {
+            current_generation,
+            new_generation,
+        });
     }
 
     /// Allow a test to manually add an external DNS address, which could
@@ -3310,6 +3345,7 @@ pub mod test {
                     .map(|sa| sa.sled_id)
                     .expect("no sleds present"),
                 BlueprintZoneImageSource::InstallDataset,
+                Generation::new(),
             )
             .unwrap_err();
 
@@ -3412,6 +3448,7 @@ pub mod test {
                 .sled_add_zone_nexus(
                     sled_id,
                     BlueprintZoneImageSource::InstallDataset,
+                    parent.nexus_generation,
                 )
                 .expect("added nexus zone");
         }
@@ -3434,6 +3471,7 @@ pub mod test {
                     .sled_add_zone_nexus(
                         sled_id,
                         BlueprintZoneImageSource::InstallDataset,
+                        parent.nexus_generation,
                     )
                     .expect("added nexus zone");
             }
@@ -3473,6 +3511,7 @@ pub mod test {
                 .sled_add_zone_nexus(
                     sled_id,
                     BlueprintZoneImageSource::InstallDataset,
+                    parent.nexus_generation,
                 )
                 .unwrap_err();
 
