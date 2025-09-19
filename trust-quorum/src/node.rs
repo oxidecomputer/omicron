@@ -17,7 +17,7 @@
 
 use crate::compute_key_share::KeyShareComputer;
 use crate::coordinator_state::CoordinatingMsg;
-use crate::crypto::ReconstructedRackSecret;
+use crate::crypto::{LrtqShare, ReconstructedRackSecret};
 use crate::rack_secret_loader::{
     LoadRackSecretError, RackSecretLoader, RackSecretLoaderDiff,
 };
@@ -436,6 +436,9 @@ impl Node {
             }
             PeerMsgKind::Expunged(epoch) => {
                 self.handle_expunged(ctx, from, epoch);
+            }
+            PeerMsgKind::GetLrtqShare => {
+                self.handle_get_lrtq_share(ctx, from);
             }
             _ => todo!(
                 "cannot handle message variant yet - not implemented: {msg:?}"
@@ -920,6 +923,70 @@ impl Node {
 
         // Ack regardless of whether this is a new or idempotent request
         ctx.send(from, PeerMsgKind::PrepareAck(msg_epoch));
+    }
+
+    fn handle_get_lrtq_share(
+        &mut self,
+        ctx: &mut impl NodeHandlerCtx,
+        from: PlatformId,
+    ) {
+        // Have we already committed a TQ config?
+        if let Some(latest_committed_config) =
+            ctx.persistent_state().latest_committed_configuration()
+        {
+            if !latest_committed_config.members.contains_key(&from) {
+                info!(
+                    self.log,
+                    "Received a GetLrtqShare message from expunged node";
+                    "from" => %from,
+                    "latest_committed_epoch" =>
+                        %latest_committed_config.epoch,
+                );
+                ctx.send(
+                    from,
+                    PeerMsgKind::Expunged(latest_committed_config.epoch),
+                );
+                return;
+            }
+            info!(
+                self.log,
+                concat!(
+                    "Received 'GetLrtqShare' from stale node. ",
+                    "Responded with 'CommitAdvance'."
+                );
+                "from" => %from,
+                "latest_committed_epoch" => %latest_committed_config.epoch,
+            );
+            ctx.send(
+                from,
+                PeerMsgKind::CommitAdvance(latest_committed_config.clone()),
+            );
+            return;
+        }
+
+        // Do we have the LRTQ share?
+        //
+        // We always return an LRTQ share to anyone who asks if we have it. This
+        // matches the LRTQ protocol.
+        if let Some(lrtq_share_data) = &ctx.persistent_state().lrtq {
+            info!(
+                self.log,
+                "Received 'GetLrtqShare'. Responded with 'LrtqShare'.";
+                "from" => %from,
+            );
+            ctx.send(
+                from,
+                PeerMsgKind::LrtqShare(LrtqShare::new(
+                    lrtq_share_data.share.clone(),
+                )),
+            );
+        } else {
+            info!(
+                self.log,
+                "Received 'GetLrtqShare', but it's missing.";
+                "from" => %from,
+            );
+        }
     }
 
     // Send any required messages as a reconfiguration coordinator
