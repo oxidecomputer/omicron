@@ -59,7 +59,7 @@ fn verify_max_upsampling_ratio(
 }
 
 struct MetricWindow<'a> {
-    start_times: &'a[DateTime<Utc>],
+    start_times: Option<&'a[DateTime<Utc>]>,
     timestamps: &'a[DateTime<Utc>],
     input_points: &'a[Option<f64>],
     start: DateTime<Utc>,
@@ -251,7 +251,7 @@ fn align_and_aggregate<F>(
             }
 
             let window = MetricWindow{
-                start_times: points.start_times().unwrap(),
+                start_times: points.start_times(),
                 timestamps: points.timestamps(),
                 input_points: &input_points,
                 start: window_start,
@@ -319,7 +319,7 @@ fn mean_value_in_window(
         )
     } else {
         mean_delta_value_in_window(
-            window.start_times,
+            window.start_times?,
             window.timestamps,
             window.input_points,
             window.start,
@@ -484,10 +484,12 @@ fn rate_in_window(
     // Since the start times are <= the timestamps, we can take the min of those
     // two to get the first point that overlaps at all, and the max to get the
     // last.
+    
+    let start_times = window.start_times?;
     let first_timestamp = window.timestamps.partition_point(|t| t <= &window.start);
     let last_timestamp = window.timestamps.partition_point(|t| t <= &window.end);
-    let first_start_time = window.start_times.partition_point(|t| t <= &window.start);
-    let last_start_time = window.start_times.partition_point(|t| t <= &window.end);
+    let first_start_time = start_times.partition_point(|t| t <= &window.start);
+    let last_start_time = start_times.partition_point(|t| t <= &window.end);
     let first_index = first_timestamp.min(first_start_time);
     let last_index = last_timestamp.max(last_start_time);
 
@@ -504,7 +506,7 @@ fn rate_in_window(
     // entirely after the window.
     if first_index == last_index {
         let t = *window.timestamps.get(first_timestamp)?;
-        let s = *window.start_times.get(first_timestamp)?;
+        let s = *start_times.get(first_timestamp)?;
         if t < window.start || s > window.end {
             return None;
         }
@@ -512,7 +514,7 @@ fn rate_in_window(
             return None;
         };
         let fraction = fraction_overlap_with_window(
-            window.start_times[first_start_time],
+            start_times[first_start_time],
             window.timestamps[first_timestamp],
             window.start,
             window.end,
@@ -521,7 +523,7 @@ fn rate_in_window(
     }
 
     // Compute the overlap for all points which have some overlap.
-    let starts = &window.start_times[first_index..last_index];
+    let starts = &start_times[first_index..last_index];
     let times = &window.timestamps[first_index..last_index];
     let vals = &window.input_points[first_index..last_index];
     let iter = starts
@@ -604,7 +606,7 @@ mod tests {
     impl OwnedMetricWindow {
         fn metric_window(&self) -> MetricWindow<'_> {
             MetricWindow{
-                start_times: &self.start_times,
+                start_times: Some(&self.start_times),
                 timestamps: &self.timestamps,
                 input_points: &self.input_points,
                 start: self.start,
