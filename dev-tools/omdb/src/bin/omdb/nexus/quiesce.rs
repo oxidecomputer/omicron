@@ -11,10 +11,10 @@ use chrono::TimeDelta;
 use chrono::Utc;
 use clap::Args;
 use clap::Subcommand;
-use nexus_client::types::PendingRecovery;
-use nexus_client::types::QuiesceState;
-use nexus_client::types::QuiesceStatus;
-use nexus_client::types::SagaQuiesceStatus;
+use nexus_lockstep_client::types::PendingRecovery;
+use nexus_lockstep_client::types::QuiesceState;
+use nexus_lockstep_client::types::QuiesceStatus;
+use nexus_lockstep_client::types::SagaQuiesceStatus;
 use std::time::Duration;
 
 #[derive(Debug, Args)]
@@ -41,7 +41,7 @@ pub struct QuiesceShowArgs {
 
 pub async fn cmd_nexus_quiesce(
     omdb: &Omdb,
-    client: &nexus_client::Client,
+    client: &nexus_lockstep_client::Client,
     args: &QuiesceArgs,
 ) -> Result<(), anyhow::Error> {
     match &args.command {
@@ -54,7 +54,7 @@ pub async fn cmd_nexus_quiesce(
 }
 
 async fn quiesce_show(
-    client: &nexus_client::Client,
+    client: &nexus_lockstep_client::Client,
     args: &QuiesceShowArgs,
 ) -> Result<(), anyhow::Error> {
     let now = Utc::now();
@@ -237,7 +237,7 @@ async fn quiesce_show(
 }
 
 async fn quiesce_start(
-    client: &nexus_client::Client,
+    client: &nexus_lockstep_client::Client,
     _token: DestructiveOperationToken,
 ) -> Result<(), anyhow::Error> {
     client.quiesce_start().await.context("quiescing Nexus")?;

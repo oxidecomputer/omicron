@@ -5,8 +5,8 @@
 //! Smoke test for the demo saga
 
 use futures::TryStreamExt;
-use nexus_client::types::Saga;
-use nexus_client::types::SagaState;
+use nexus_lockstep_client::types::Saga;
+use nexus_lockstep_client::types::SagaState;
 use nexus_test_interface::NexusServer;
 use nexus_test_utils_macros::nexus_test;
 use omicron_test_utils::dev::poll::CondCheckError;
@@ -21,12 +21,12 @@ type ControlPlaneTestContext =
 #[nexus_test]
 async fn test_demo_saga(cptestctx: &ControlPlaneTestContext) {
     let log = &cptestctx.logctx.log;
-    let nexus_internal_url = format!(
+    let nexus_lockstep_url = format!(
         "http://{}",
-        cptestctx.server.get_http_server_internal_address().await
+        cptestctx.server.get_http_server_lockstep_address().await
     );
     let nexus_client =
-        nexus_client::Client::new(&nexus_internal_url, log.clone());
+        nexus_lockstep_client::Client::new(&nexus_lockstep_url, log.clone());
 
     let sagas_before = list_sagas(&nexus_client).await;
     eprintln!("found sagas (before): {:?}", sagas_before);
@@ -69,6 +69,6 @@ async fn test_demo_saga(cptestctx: &ControlPlaneTestContext) {
     assert!(matches!(found.state, SagaState::Succeeded));
 }
 
-async fn list_sagas(client: &nexus_client::Client) -> Vec<Saga> {
+async fn list_sagas(client: &nexus_lockstep_client::Client) -> Vec<Saga> {
     client.saga_list_stream(None, None).try_collect::<Vec<_>>().await.unwrap()
 }

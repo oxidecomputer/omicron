@@ -6,9 +6,9 @@
 
 use crate::http_testing::NexusRequest;
 use dropshot::test_util::ClientTestContext;
-use nexus_client::types::BackgroundTask;
-use nexus_client::types::CurrentStatus;
-use nexus_client::types::LastResult;
+use nexus_lockstep_client::types::BackgroundTask;
+use nexus_lockstep_client::types::CurrentStatus;
+use nexus_lockstep_client::types::LastResult;
 use nexus_types::internal_api::background::*;
 use omicron_test_utils::dev::poll::{CondCheckError, wait_for_condition};
 use slog::info;
@@ -18,14 +18,14 @@ use std::time::Duration;
 /// running, then return the last polled `BackgroundTask` object. Panics if the
 /// task has never been activated.
 pub async fn wait_background_task(
-    internal_client: &ClientTestContext,
+    lockstep_client: &ClientTestContext,
     task_name: &str,
 ) -> BackgroundTask {
     // Wait for the task to finish
     let last_task_poll = wait_for_condition(
         || async {
             let task = NexusRequest::object_get(
-                internal_client,
+                lockstep_client,
                 &format!("/bgtasks/view/{task_name}"),
             )
             .execute_and_parse_unwrap::<BackgroundTask>()
@@ -55,7 +55,7 @@ pub async fn wait_background_task(
 /// Given the name of a background task, activate it, then wait for it to
 /// complete. Return the `BackgroundTask` object from this invocation.
 pub async fn activate_background_task(
-    internal_client: &ClientTestContext,
+    lockstep_client: &ClientTestContext,
     task_name: &str,
 ) -> BackgroundTask {
     // If it is running, wait for an existing task to complete - this function
@@ -65,7 +65,7 @@ pub async fn activate_background_task(
     let previous_task = wait_for_condition(
         || async {
             let task = NexusRequest::object_get(
-                internal_client,
+                lockstep_client,
                 &format!("/bgtasks/view/{task_name}"),
             )
             .execute_and_parse_unwrap::<BackgroundTask>()
@@ -76,7 +76,7 @@ pub async fn activate_background_task(
             }
 
             info!(
-                internal_client.client_log,
+                lockstep_client.client_log,
                 "waiting for {task_name} to go idle",
             );
 
@@ -88,7 +88,7 @@ pub async fn activate_background_task(
     .await
     .expect("task never went to idle");
 
-    internal_client
+    lockstep_client
         .make_request(
             http::Method::POST,
             "/bgtasks/activate",
@@ -110,7 +110,7 @@ pub async fn activate_background_task(
     let last_task_poll = wait_for_condition(
         || async {
             let task = NexusRequest::object_get(
-                internal_client,
+                lockstep_client,
                 &format!("/bgtasks/view/{task_name}"),
             )
             .execute_and_parse_unwrap::<BackgroundTask>()
@@ -174,10 +174,10 @@ pub async fn activate_background_task(
 /// Run the region_replacement background task, returning how many actions
 /// were taken
 pub async fn run_region_replacement(
-    internal_client: &ClientTestContext,
+    lockstep_client: &ClientTestContext,
 ) -> usize {
     let last_background_task =
-        activate_background_task(&internal_client, "region_replacement").await;
+        activate_background_task(&lockstep_client, "region_replacement").await;
 
     let LastResult::Completed(last_result_completed) =
         last_background_task.last
@@ -203,10 +203,10 @@ pub async fn run_region_replacement(
 /// Run the region_replacement_driver background task, returning how many actions
 /// were taken
 pub async fn run_region_replacement_driver(
-    internal_client: &ClientTestContext,
+    lockstep_client: &ClientTestContext,
 ) -> usize {
     let last_background_task =
-        activate_background_task(&internal_client, "region_replacement_driver")
+        activate_background_task(&lockstep_client, "region_replacement_driver")
             .await;
 
     let LastResult::Completed(last_result_completed) =
@@ -231,10 +231,10 @@ pub async fn run_region_replacement_driver(
 /// Run the region_snapshot_replacement_start background task, returning how many
 /// actions were taken
 pub async fn run_region_snapshot_replacement_start(
-    internal_client: &ClientTestContext,
+    lockstep_client: &ClientTestContext,
 ) -> usize {
     let last_background_task = activate_background_task(
-        &internal_client,
+        &lockstep_client,
         "region_snapshot_replacement_start",
     )
     .await;
@@ -263,10 +263,10 @@ pub async fn run_region_snapshot_replacement_start(
 /// Run the region_snapshot_replacement_garbage_collection background task,
 /// returning how many actions were taken
 pub async fn run_region_snapshot_replacement_garbage_collection(
-    internal_client: &ClientTestContext,
+    lockstep_client: &ClientTestContext,
 ) -> usize {
     let last_background_task = activate_background_task(
-        &internal_client,
+        &lockstep_client,
         "region_snapshot_replacement_garbage_collection",
     )
     .await;
@@ -294,10 +294,10 @@ pub async fn run_region_snapshot_replacement_garbage_collection(
 /// Run the region_snapshot_replacement_step background task, returning how many
 /// actions were taken
 pub async fn run_region_snapshot_replacement_step(
-    internal_client: &ClientTestContext,
+    lockstep_client: &ClientTestContext,
 ) -> usize {
     let last_background_task = activate_background_task(
-        &internal_client,
+        &lockstep_client,
         "region_snapshot_replacement_step",
     )
     .await;
@@ -327,10 +327,10 @@ pub async fn run_region_snapshot_replacement_step(
 /// Run the region_snapshot_replacement_finish background task, returning how many
 /// actions were taken
 pub async fn run_region_snapshot_replacement_finish(
-    internal_client: &ClientTestContext,
+    lockstep_client: &ClientTestContext,
 ) -> usize {
     let last_background_task = activate_background_task(
-        &internal_client,
+        &lockstep_client,
         "region_snapshot_replacement_finish",
     )
     .await;
@@ -359,10 +359,10 @@ pub async fn run_region_snapshot_replacement_finish(
 /// Run the read_only_region_replacement_start background task, returning how
 /// many actions were taken
 pub async fn run_read_only_region_replacement_start(
-    internal_client: &ClientTestContext,
+    lockstep_client: &ClientTestContext,
 ) -> usize {
     let last_background_task = activate_background_task(
-        &internal_client,
+        &lockstep_client,
         "read_only_region_replacement_start",
     )
     .await;
@@ -391,24 +391,24 @@ pub async fn run_read_only_region_replacement_start(
 /// Run all replacement related background tasks and return how many actions
 /// were taken.
 pub async fn run_all_crucible_replacement_tasks(
-    internal_client: &ClientTestContext,
+    lockstep_client: &ClientTestContext,
 ) -> usize {
     // region replacement related
-    run_region_replacement(internal_client).await +
-    run_region_replacement_driver(internal_client).await +
+    run_region_replacement(lockstep_client).await +
+    run_region_replacement_driver(lockstep_client).await +
     // region snapshot replacement related
-    run_region_snapshot_replacement_start(internal_client).await +
-    run_region_snapshot_replacement_garbage_collection(internal_client).await +
-    run_region_snapshot_replacement_step(internal_client).await +
-    run_region_snapshot_replacement_finish(internal_client).await +
-    run_read_only_region_replacement_start(internal_client).await
+    run_region_snapshot_replacement_start(lockstep_client).await +
+    run_region_snapshot_replacement_garbage_collection(lockstep_client).await +
+    run_region_snapshot_replacement_step(lockstep_client).await +
+    run_region_snapshot_replacement_finish(lockstep_client).await +
+    run_read_only_region_replacement_start(lockstep_client).await
 }
 
 pub async fn wait_tuf_artifact_replication_step(
-    internal_client: &ClientTestContext,
+    lockstep_client: &ClientTestContext,
 ) -> TufArtifactReplicationStatus {
     let last_background_task =
-        wait_background_task(&internal_client, "tuf_artifact_replication")
+        wait_background_task(&lockstep_client, "tuf_artifact_replication")
             .await;
 
     let LastResult::Completed(last_result_completed) =
@@ -429,10 +429,10 @@ pub async fn wait_tuf_artifact_replication_step(
 }
 
 pub async fn run_tuf_artifact_replication_step(
-    internal_client: &ClientTestContext,
+    lockstep_client: &ClientTestContext,
 ) -> TufArtifactReplicationStatus {
     let last_background_task =
-        activate_background_task(&internal_client, "tuf_artifact_replication")
+        activate_background_task(&lockstep_client, "tuf_artifact_replication")
             .await;
 
     let LastResult::Completed(last_result_completed) =

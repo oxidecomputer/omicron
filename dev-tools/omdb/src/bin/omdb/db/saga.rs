@@ -607,7 +607,7 @@ async fn get_saga_sec_status(
         }
     };
 
-    let client = nexus_client::Client::new(
+    let client = nexus_lockstep_client::Client::new(
         &format!("http://[{addr}]:{port}/"),
         opctx.log.clone(),
     );
@@ -618,21 +618,21 @@ async fn get_saga_sec_status(
         }
 
         Err(e) => match e {
-            nexus_client::Error::InvalidRequest(_)
-            | nexus_client::Error::InvalidUpgrade(_)
-            | nexus_client::Error::ErrorResponse(_)
-            | nexus_client::Error::ResponseBodyError(_)
-            | nexus_client::Error::InvalidResponsePayload(_, _)
-            | nexus_client::Error::UnexpectedResponse(_)
-            | nexus_client::Error::PreHookError(_)
-            | nexus_client::Error::PostHookError(_) => {
+            nexus_lockstep_client::Error::InvalidRequest(_)
+            | nexus_lockstep_client::Error::InvalidUpgrade(_)
+            | nexus_lockstep_client::Error::ErrorResponse(_)
+            | nexus_lockstep_client::Error::ResponseBodyError(_)
+            | nexus_lockstep_client::Error::InvalidResponsePayload(_, _)
+            | nexus_lockstep_client::Error::UnexpectedResponse(_)
+            | nexus_lockstep_client::Error::PreHookError(_)
+            | nexus_lockstep_client::Error::PostHookError(_) => {
                 return SagaSecStatus::SecPingError {
                     sec_id: current_sec,
                     observed_error: e.to_string(),
                 };
             }
 
-            nexus_client::Error::CommunicationError(_) => {
+            nexus_lockstep_client::Error::CommunicationError(_) => {
                 // Assume communication error means that it could not be
                 // contacted.
                 //

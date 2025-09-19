@@ -744,7 +744,7 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
     }
 
     let client = &cptestctx.external_client;
-    let internal_client = &cptestctx.internal_client;
+    let lockstep_client = &cptestctx.lockstep_client;
     let apictx = &cptestctx.server.server_context();
     let nexus = &apictx.nexus;
     let instance_name = "bird-ecology";
@@ -793,7 +793,7 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
     let migrate_url =
         format!("/instances/{}/migrate", &instance_id.to_string());
     let instance = NexusRequest::new(
-        RequestBuilder::new(internal_client, Method::POST, &migrate_url)
+        RequestBuilder::new(lockstep_client, Method::POST, &migrate_url)
             .body(Some(&InstanceMigrateRequest { dst_sled_id }))
             .expect_status(Some(StatusCode::OK)),
     )
@@ -916,7 +916,7 @@ async fn test_instance_migrate_v2p_and_routes(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let internal_client = &cptestctx.internal_client;
+    let lockstep_client = &cptestctx.lockstep_client;
     let apictx = &cptestctx.server.server_context();
     let nexus = &apictx.nexus;
     let datastore = nexus.datastore();
@@ -995,7 +995,7 @@ async fn test_instance_migrate_v2p_and_routes(
     let migrate_url =
         format!("/instances/{}/migrate", &instance_id.to_string());
     let _ = NexusRequest::new(
-        RequestBuilder::new(internal_client, Method::POST, &migrate_url)
+        RequestBuilder::new(lockstep_client, Method::POST, &migrate_url)
             .body(Some(&InstanceMigrateRequest { dst_sled_id }))
             .expect_status(Some(StatusCode::OK)),
     )
@@ -1588,7 +1588,7 @@ async fn test_instance_failed_by_instance_watcher_can_be_deleted(
     .await;
 
     nexus_test_utils::background::activate_background_task(
-        &cptestctx.internal_client,
+        &cptestctx.lockstep_client,
         "instance_watcher",
     )
     .await;
@@ -1617,7 +1617,7 @@ async fn test_instance_failed_by_instance_watcher_can_be_restarted(
     .await;
 
     nexus_test_utils::background::activate_background_task(
-        &cptestctx.internal_client,
+        &cptestctx.lockstep_client,
         "instance_watcher",
     )
     .await;
@@ -1727,8 +1727,8 @@ async fn test_instance_failed_when_on_expunged_sled(
         "expunging sled";
         "sled_id" => %default_sled_id,
     );
-    let int_client = &cptestctx.internal_client;
-    int_client
+    cptestctx
+        .lockstep_client
         .make_request(
             Method::POST,
             "/sleds/expunge",
@@ -1784,7 +1784,7 @@ async fn test_instance_failed_by_instance_watcher_automatically_reincarnates(
 
     dbg!(
         nexus_test_utils::background::activate_background_task(
-            &cptestctx.internal_client,
+            &cptestctx.lockstep_client,
             "instance_watcher",
         )
         .await
@@ -1858,7 +1858,7 @@ async fn test_instance_failed_by_stop_request_does_not_reincarnate(
     // Activate the reincarnation task.
     dbg!(
         nexus_test_utils::background::activate_background_task(
-            &cptestctx.internal_client,
+            &cptestctx.lockstep_client,
             "instance_reincarnation",
         )
         .await
@@ -1995,7 +1995,7 @@ async fn test_instances_are_not_marked_failed_on_other_sled_agent_errors_by_inst
         .await;
 
     nexus_test_utils::background::activate_background_task(
-        &cptestctx.internal_client,
+        &cptestctx.lockstep_client,
         "instance_watcher",
     )
     .await;
@@ -2228,7 +2228,7 @@ async fn test_instance_metrics_with_migration(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let internal_client = &cptestctx.internal_client;
+    let lockstep_client = &cptestctx.lockstep_client;
     let apictx = &cptestctx.server.server_context();
     let nexus = &apictx.nexus;
     let instance_name = "bird-ecology";
@@ -2312,7 +2312,7 @@ async fn test_instance_metrics_with_migration(
     let migrate_url =
         format!("/instances/{}/migrate", &instance_id.to_string());
     let _ = NexusRequest::new(
-        RequestBuilder::new(internal_client, Method::POST, &migrate_url)
+        RequestBuilder::new(lockstep_client, Method::POST, &migrate_url)
             .body(Some(&InstanceMigrateRequest { dst_sled_id }))
             .expect_status(Some(StatusCode::OK)),
     )

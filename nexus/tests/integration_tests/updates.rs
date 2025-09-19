@@ -152,7 +152,7 @@ async fn test_repo_upload_unconfigured() -> Result<()> {
 
     // The artifact replication background task should have nothing to do.
     let status =
-        run_tuf_artifact_replication_step(&cptestctx.internal_client).await;
+        run_tuf_artifact_replication_step(&cptestctx.lockstep_client).await;
     assert_eq!(
         status.last_run_counters.put_ok + status.last_run_counters.copy_ok,
         0
@@ -248,7 +248,7 @@ async fn test_repo_upload() -> Result<()> {
     // The artifact replication background task should have been activated, and
     // we should see a local repo and successful PUTs.
     let status =
-        wait_tuf_artifact_replication_step(&cptestctx.internal_client).await;
+        wait_tuf_artifact_replication_step(&cptestctx.lockstep_client).await;
     eprintln!("{status:?}");
     assert_eq!(status.generation, 2u32.into());
     assert_eq!(status.last_run_counters.put_config_ok, 4);
@@ -267,7 +267,7 @@ async fn test_repo_upload() -> Result<()> {
     // Run the replication background task again; the local repos should be
     // dropped.
     let status =
-        run_tuf_artifact_replication_step(&cptestctx.internal_client).await;
+        run_tuf_artifact_replication_step(&cptestctx.lockstep_client).await;
     eprintln!("{status:?}");
     assert_eq!(status.last_run_counters.put_config_ok, 4);
     assert_eq!(status.last_run_counters.list_ok, 4);
@@ -516,7 +516,7 @@ async fn test_repo_upload() -> Result<()> {
     );
     // ... and the task will have one artifact to replicate.
     let status =
-        wait_tuf_artifact_replication_step(&cptestctx.internal_client).await;
+        wait_tuf_artifact_replication_step(&cptestctx.lockstep_client).await;
     eprintln!("{status:?}");
     assert_eq!(status.generation, 3u32.into());
     assert_eq!(status.last_run_counters.list_ok, 4);

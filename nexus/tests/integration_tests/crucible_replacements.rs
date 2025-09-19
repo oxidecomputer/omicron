@@ -8,7 +8,6 @@ use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::ExpressionMethods;
 use diesel::QueryDsl;
 use dropshot::test_util::ClientTestContext;
-use nexus_client::types::LastResult;
 use nexus_db_lookup::LookupPath;
 use nexus_db_model::PhysicalDiskPolicy;
 use nexus_db_model::ReadOnlyTargetReplacement;
@@ -17,6 +16,7 @@ use nexus_db_model::RegionSnapshotReplacementState;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore::region_snapshot_replacement::*;
+use nexus_lockstep_client::types::LastResult;
 use nexus_test_utils::background::*;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
@@ -95,13 +95,13 @@ where
 
 pub(crate) async fn wait_for_all_replacements(
     datastore: &Arc<DataStore>,
-    internal_client: &ClientTestContext,
+    lockstep_client: &ClientTestContext,
 ) {
     wait_for_condition(
         || {
             let datastore = datastore.clone();
             let opctx = OpContext::for_tests(
-                internal_client.client_log.new(o!()),
+                lockstep_client.client_log.new(o!()),
                 datastore.clone(),
             );
 
@@ -120,7 +120,7 @@ pub(crate) async fn wait_for_all_replacements(
                 // can tell you that something is _currently_ moving but not
                 // that all work is done.
 
-                run_all_crucible_replacement_tasks(internal_client).await;
+                run_all_crucible_replacement_tasks(lockstep_client).await;
 
                 let ro_left_to_do = datastore
                     .find_read_only_regions_on_expunged_physical_disks(&opctx)
@@ -142,7 +142,7 @@ pub(crate) async fn wait_for_all_replacements(
 
                 if ro_left_to_do + rw_left_to_do + rs_left_to_do > 0 {
                     info!(
-                        &internal_client.client_log,
+                        &lockstep_client.client_log,
                         "wait_for_all_replacements: ro {} rw {} rs {}",
                         ro_left_to_do,
                         rw_left_to_do,
@@ -189,7 +189,7 @@ pub(crate) async fn wait_for_all_replacements(
                     > 0
                 {
                     info!(
-                        &internal_client.client_log,
+                        &lockstep_client.client_log,
                         "wait_for_all_replacements: rr {} rsr {}",
                         region_replacement_left,
                         region_snapshot_replacement_left,
@@ -271,10 +271,10 @@ async fn test_region_replacement_does_not_create_freed_region(
     // Now, run the first part of region replacement: this will move the deleted
     // region into a temporary volume.
 
-    let internal_client = &cptestctx.internal_client;
+    let lockstep_client = &cptestctx.lockstep_client;
 
     let _ =
-        activate_background_task(&internal_client, "region_replacement").await;
+        activate_background_task(&lockstep_client, "region_replacement").await;
 
     // Assert there are no freed crucible regions that result from that
     assert!(datastore.find_deleted_volume_regions().await.unwrap().is_empty());
@@ -297,7 +297,7 @@ mod region_replacement {
         datastore: Arc<DataStore>,
         disk_test: DiskTest<'a>,
         client: ClientTestContext,
-        internal_client: ClientTestContext,
+        lockstep_client: ClientTestContext,
         replacement_request_id: Uuid,
     }
 
@@ -315,7 +315,7 @@ mod region_replacement {
                 .await;
 
             let client = &cptestctx.external_client;
-            let internal_client = &cptestctx.internal_client;
+            let lockstep_client = &cptestctx.lockstep_client;
             let datastore = nexus.datastore().clone();
 
             let opctx = OpContext::for_tests(
@@ -370,7 +370,7 @@ mod region_replacement {
                 datastore,
                 disk_test,
                 client: client.clone(),
-                internal_client: internal_client.clone(),
+                lockstep_client: lockstep_client.clone(),
                 replacement_request_id,
             }
         }
@@ -397,7 +397,7 @@ mod region_replacement {
         pub async fn finish_test(&self) {
             // Make sure that all the background tasks can run to completion.
 
-            wait_for_all_replacements(&self.datastore, &self.internal_client)
+            wait_for_all_replacements(&self.datastore, &self.lockstep_client)
                 .await;
 
             // Assert the request is in state Complete
@@ -510,7 +510,7 @@ mod region_replacement {
         pub async fn transition_request_to_running(&self) {
             // Activate the "region replacement" background task
 
-            run_region_replacement(&self.internal_client).await;
+            run_region_replacement(&self.lockstep_client).await;
 
             // The activation above could only have started the associated saga,
             // so wait until the request is in state Running.
@@ -529,7 +529,7 @@ mod region_replacement {
             // Run the "region replacement driver" task to attach the associated
             // volume to the simulated pantry.
 
-            run_region_replacement_driver(&self.internal_client).await;
+            run_region_replacement_driver(&self.lockstep_client).await;
 
             // The activation above could only have started the associated saga,
             // so wait until the request is in the expected end state.
@@ -619,7 +619,7 @@ mod region_replacement {
         pub async fn transition_request_to_replacement_done(&self) {
             // Run the "region replacement driver" task
 
-            run_region_replacement_driver(&self.internal_client).await;
+            run_region_replacement_driver(&self.lockstep_client).await;
 
             // The activation above could only have started the associated saga,
             // so wait until the request is in the expected end state.
@@ -865,10 +865,10 @@ async fn test_racing_replacements_for_soft_deleted_disk_volume(
     // 1) region replacement will allocate a new region and swap it into the
     //    disk volume.
 
-    let internal_client = &cptestctx.internal_client;
+    let lockstep_client = &cptestctx.lockstep_client;
 
     let _ =
-        activate_background_task(&internal_client, "region_replacement").await;
+        activate_background_task(&lockstep_client, "region_replacement").await;
 
     // After that task invocation, there should be one running region
     // replacement for the disk's region. Filter out the replacement request for
@@ -920,7 +920,7 @@ async fn test_racing_replacements_for_soft_deleted_disk_volume(
     //    the snapshot volume
 
     let _ = activate_background_task(
-        &internal_client,
+        &lockstep_client,
         "region_snapshot_replacement_start",
     )
     .await;
@@ -1004,7 +1004,7 @@ async fn test_racing_replacements_for_soft_deleted_disk_volume(
     //    reference count to zero.
 
     let _ = activate_background_task(
-        &internal_client,
+        &lockstep_client,
         "region_snapshot_replacement_garbage_collection",
     )
     .await;
@@ -1067,7 +1067,7 @@ async fn test_racing_replacements_for_soft_deleted_disk_volume(
     // ReplacementDone
 
     let last_background_task =
-        activate_background_task(&internal_client, "region_replacement_driver")
+        activate_background_task(&lockstep_client, "region_replacement_driver")
             .await;
 
     assert!(match last_background_task.last {
@@ -1147,7 +1147,7 @@ async fn test_racing_replacements_for_soft_deleted_disk_volume(
     let mut count = 0;
     loop {
         let actions_taken =
-            run_region_snapshot_replacement_step(&internal_client).await;
+            run_region_snapshot_replacement_step(&lockstep_client).await;
 
         if actions_taken == 0 {
             break;
@@ -1161,7 +1161,7 @@ async fn test_racing_replacements_for_soft_deleted_disk_volume(
     }
 
     let _ = activate_background_task(
-        &internal_client,
+        &lockstep_client,
         "region_snapshot_replacement_finish",
     )
     .await;
@@ -1225,7 +1225,7 @@ async fn test_racing_replacements_for_soft_deleted_disk_volume(
 
     // Make sure that all the background tasks can run to completion.
 
-    wait_for_all_replacements(datastore, &internal_client).await;
+    wait_for_all_replacements(datastore, &lockstep_client).await;
 
     // The disk volume should be deleted by the snapshot delete: wait until this
     // happens
@@ -1280,6 +1280,7 @@ mod region_snapshot_replacement {
         disk_test: DiskTest<'a>,
         client: ClientTestContext,
         internal_client: ClientTestContext,
+        lockstep_client: ClientTestContext,
         replacement_request_id: Uuid,
         snapshot_socket_addr: SocketAddr,
     }
@@ -1299,6 +1300,7 @@ mod region_snapshot_replacement {
 
             let client = &cptestctx.external_client;
             let internal_client = &cptestctx.internal_client;
+            let lockstep_client = &cptestctx.lockstep_client;
             let datastore = nexus.datastore().clone();
 
             let opctx = OpContext::for_tests(
@@ -1416,6 +1418,7 @@ mod region_snapshot_replacement {
                 disk_test,
                 client: client.clone(),
                 internal_client: internal_client.clone(),
+                lockstep_client: lockstep_client.clone(),
                 replacement_request_id,
                 snapshot_socket_addr,
             }
@@ -1463,7 +1466,7 @@ mod region_snapshot_replacement {
         pub async fn finish_test(&self) {
             // Make sure that all the background tasks can run to completion.
 
-            wait_for_all_replacements(&self.datastore, &self.internal_client)
+            wait_for_all_replacements(&self.datastore, &self.lockstep_client)
                 .await;
 
             // Assert the request is in state Complete
@@ -1571,7 +1574,7 @@ mod region_snapshot_replacement {
         pub async fn transition_request_to_replacement_done(&self) {
             // Activate the "region snapshot replacement start" background task
 
-            run_region_snapshot_replacement_start(&self.internal_client).await;
+            run_region_snapshot_replacement_start(&self.lockstep_client).await;
 
             // The activation above could only have started the associated saga,
             // so wait until the request is in state Running.
@@ -1595,7 +1598,7 @@ mod region_snapshot_replacement {
             // background task
 
             run_region_snapshot_replacement_garbage_collection(
-                &self.internal_client,
+                &self.lockstep_client,
             )
             .await;
 
@@ -2045,8 +2048,8 @@ async fn test_replacement_sanity(cptestctx: &ControlPlaneTestContext) {
         .set_auto_activate_volumes();
 
     // Now, run all replacement tasks to completion
-    let internal_client = &cptestctx.internal_client;
-    wait_for_all_replacements(&datastore, &internal_client).await;
+    let lockstep_client = &cptestctx.lockstep_client;
+    wait_for_all_replacements(&datastore, &lockstep_client).await;
 
     // Validate all regions are on non-expunged physical disks
     assert!(
@@ -2122,7 +2125,7 @@ async fn test_region_replacement_triple_sanity(
         .await
         .unwrap();
 
-    let internal_client = &cptestctx.internal_client;
+    let lockstep_client = &cptestctx.lockstep_client;
 
     let disk_allocated_regions =
         datastore.get_allocated_regions(db_disk.volume_id()).await.unwrap();
@@ -2156,7 +2159,7 @@ async fn test_region_replacement_triple_sanity(
             .unwrap();
 
         // Now, run all replacement tasks to completion
-        wait_for_all_replacements(&datastore, &internal_client).await;
+        wait_for_all_replacements(&datastore, &lockstep_client).await;
     }
 
     let disk_allocated_regions =
@@ -2248,7 +2251,7 @@ async fn test_region_replacement_triple_sanity_2(
         .await
         .unwrap();
 
-    let internal_client = &cptestctx.internal_client;
+    let lockstep_client = &cptestctx.lockstep_client;
 
     let disk_allocated_regions =
         datastore.get_allocated_regions(db_disk.volume_id()).await.unwrap();
@@ -2288,7 +2291,7 @@ async fn test_region_replacement_triple_sanity_2(
     info!(log, "waiting for all replacements");
 
     // Now, run all replacement tasks to completion
-    wait_for_all_replacements(&datastore, &internal_client).await;
+    wait_for_all_replacements(&datastore, &lockstep_client).await;
 
     // Expunge the last physical disk
     {
@@ -2320,7 +2323,7 @@ async fn test_region_replacement_triple_sanity_2(
     info!(log, "waiting for all replacements");
 
     // Now, run all replacement tasks to completion
-    wait_for_all_replacements(&datastore, &internal_client).await;
+    wait_for_all_replacements(&datastore, &lockstep_client).await;
 
     let disk_allocated_regions =
         datastore.get_allocated_regions(db_disk.volume_id()).await.unwrap();
@@ -2360,7 +2363,7 @@ async fn test_replacement_sanity_twice(cptestctx: &ControlPlaneTestContext) {
     let datastore = nexus.datastore();
     let opctx =
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
-    let internal_client = &cptestctx.internal_client;
+    let lockstep_client = &cptestctx.lockstep_client;
 
     // Create one zpool per sled, each with one dataset. This is required for
     // region and region snapshot replacement to have somewhere to move the
@@ -2428,7 +2431,7 @@ async fn test_replacement_sanity_twice(cptestctx: &ControlPlaneTestContext) {
             .await
             .unwrap();
 
-        wait_for_all_replacements(&datastore, &internal_client).await;
+        wait_for_all_replacements(&datastore, &lockstep_client).await;
     }
 
     // Now, do it again, except this time specifying the read-only regions
@@ -2453,7 +2456,7 @@ async fn test_replacement_sanity_twice(cptestctx: &ControlPlaneTestContext) {
             .await
             .unwrap();
 
-        wait_for_all_replacements(&datastore, &internal_client).await;
+        wait_for_all_replacements(&datastore, &lockstep_client).await;
     }
 }
 
@@ -2467,7 +2470,7 @@ async fn test_read_only_replacement_sanity(
     let datastore = nexus.datastore();
     let opctx =
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
-    let internal_client = &cptestctx.internal_client;
+    let lockstep_client = &cptestctx.lockstep_client;
 
     // Create one zpool per sled, each with one dataset. This is required for
     // region and region snapshot replacement to have somewhere to move the
@@ -2535,7 +2538,7 @@ async fn test_read_only_replacement_sanity(
             .await
             .unwrap();
 
-        wait_for_all_replacements(&datastore, &internal_client).await;
+        wait_for_all_replacements(&datastore, &lockstep_client).await;
     }
 
     // Now expunge a sled with read-only regions on it.
@@ -2569,7 +2572,7 @@ async fn test_read_only_replacement_sanity(
         .await
         .unwrap();
 
-    wait_for_all_replacements(&datastore, &internal_client).await;
+    wait_for_all_replacements(&datastore, &lockstep_client).await;
 
     // Validate all regions are on non-expunged physical disks
     assert!(
@@ -2598,7 +2601,7 @@ async fn test_replacement_sanity_twice_after_snapshot_delete(
     let datastore = nexus.datastore();
     let opctx =
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
-    let internal_client = &cptestctx.internal_client;
+    let lockstep_client = &cptestctx.lockstep_client;
 
     // Create one zpool per sled, each with one dataset. This is required for
     // region and region snapshot replacement to have somewhere to move the
@@ -2703,7 +2706,7 @@ async fn test_replacement_sanity_twice_after_snapshot_delete(
             .await
             .unwrap();
 
-        wait_for_all_replacements(&datastore, &internal_client).await;
+        wait_for_all_replacements(&datastore, &lockstep_client).await;
     }
 
     // Now, do it again, except this time specifying the read-only regions
@@ -2728,6 +2731,6 @@ async fn test_replacement_sanity_twice_after_snapshot_delete(
             .await
             .unwrap();
 
-        wait_for_all_replacements(&datastore, &internal_client).await;
+        wait_for_all_replacements(&datastore, &lockstep_client).await;
     }
 }
