@@ -1536,9 +1536,7 @@ pub(crate) mod test {
         let opctx = test_opctx(cptestctx);
 
         let db_request = datastore
-            .get_region_snapshot_replacement_request_by_id(
-                &opctx, request.id,
-            )
+            .get_region_snapshot_replacement_request_by_id(&opctx, request.id)
             .await
             .unwrap();
 
