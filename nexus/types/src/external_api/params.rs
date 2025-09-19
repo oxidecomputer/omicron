@@ -1301,8 +1301,8 @@ pub struct InstanceUpdate {
 
     /// Name or ID of the disk the instance should be instructed to boot from.
     ///
-    /// If not provided, unset the instance's boot disk.
-    pub boot_disk: Option<NameOrId>,
+    /// A null value unsets the boot disk.
+    pub boot_disk: Nullable<NameOrId>,
 
     /// Sets the auto-restart policy for this instance.
     ///
@@ -1318,11 +1318,11 @@ pub struct InstanceUpdate {
     /// configurable through other mechanisms, such as on a per-project basis.
     /// In that case, any configured default policy will be used if this is
     /// `null`.
-    pub auto_restart_policy: Option<InstanceAutoRestartPolicy>,
+    pub auto_restart_policy: Nullable<InstanceAutoRestartPolicy>,
 
     /// The CPU platform to be used for this instance. If this is `null`, the
     /// instance requires no particular CPU platform.
-    pub cpu_platform: Option<InstanceCpuPlatform>,
+    pub cpu_platform: Nullable<InstanceCpuPlatform>,
 }
 
 #[inline]
