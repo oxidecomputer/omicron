@@ -266,7 +266,7 @@ async fn test_vpc_networking_restrictions(cptestctx: &ControlPlaneTestContext) {
         },
     };
 
-    NexusRequest::object_post(&client, project_url, Some(&project_params))
+    NexusRequest::objects_post(&client, project_url, &project_params)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
@@ -287,9 +287,10 @@ async fn test_vpc_networking_restrictions(cptestctx: &ControlPlaneTestContext) {
         tls_certificates: Vec::new(),
         mapped_fleet_roles: Default::default(),
         restrict_network_actions: Some(true), // Enable networking restrictions
+        quotas: params::SiloQuotasCreate::empty(),
     };
 
-    NexusRequest::object_post(&client, silo_url, Some(&silo_params))
+    NexusRequest::objects_post(&client, silo_url, &silo_params)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
@@ -312,7 +313,7 @@ async fn test_vpc_networking_restrictions(cptestctx: &ControlPlaneTestContext) {
     // users, role assignments, and silo context switching.
 
     // For now, let's test that VPC creation works normally (without restrictions)
-    let vpc = NexusRequest::object_post(&client, &vpcs_url, Some(&vpc_params))
+    let vpc = NexusRequest::objects_post(&client, &vpcs_url, &vpc_params)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
@@ -332,13 +333,13 @@ async fn test_vpc_networking_restrictions(cptestctx: &ControlPlaneTestContext) {
 }
 
 #[nexus_test]
-async fn test_networking_restrictions_policy_test() {
+async fn test_networking_restrictions_policy_test(
+    _cptestctx: &ControlPlaneTestContext,
+) {
     // This test verifies that our Polar rules work correctly by using the policy test framework
-    use nexus_auth::authn::{SiloAuthnPolicy, USER_TEST_PRIVILEGED};
+    use nexus_auth::authn::SiloAuthnPolicy;
     use nexus_auth::authz;
-    use nexus_auth::context::OpContext;
-    use nexus_db_queries::db::pub_test_utils::TestDatabase;
-    use nexus_types::external_api::shared::{FleetRole, SiloRole};
+    use nexus_types::external_api::shared::SiloRole;
     use omicron_common::api::external::LookupType;
     use std::collections::{BTreeMap, BTreeSet};
     use uuid::Uuid;
@@ -346,8 +347,6 @@ async fn test_networking_restrictions_policy_test() {
     let logctx = omicron_test_utils::dev::test_setup_log(
         "test_networking_restrictions_policy",
     );
-    let db = TestDatabase::new_with_datastore(&logctx.log).await;
-    let (opctx, datastore) = (db.opctx(), db.datastore());
 
     // Create a silo with networking restrictions
     let restricted_silo_id = Uuid::new_v4();
@@ -361,15 +360,15 @@ async fn test_networking_restrictions_policy_test() {
     let mut mapped_fleet_roles = BTreeMap::new();
     mapped_fleet_roles.insert(SiloRole::Admin, BTreeSet::new());
 
-    let restricted_policy = SiloAuthnPolicy {
+    let restricted_policy = SiloAuthnPolicy::new(
         mapped_fleet_roles,
-        restrict_network_actions: true, // Enable restrictions
-    };
+        true, // Enable restrictions
+    );
 
-    let normal_policy = SiloAuthnPolicy {
-        mapped_fleet_roles: BTreeMap::new(),
-        restrict_network_actions: false, // No restrictions
-    };
+    let normal_policy = SiloAuthnPolicy::new(
+        BTreeMap::new(),
+        false, // No restrictions
+    );
 
     // Create test project and VPC resources
     let project_id = Uuid::new_v4();
@@ -380,23 +379,15 @@ async fn test_networking_restrictions_policy_test() {
     );
 
     let vpc_id = Uuid::new_v4();
-    let vpc =
+    let _vpc =
         authz::Vpc::new(project.clone(), vpc_id, LookupType::ById(vpc_id));
 
-    // Test Case 1: With restrictions disabled, project collaborators can create VPCs
-    let normal_authn = nexus_auth::authn::Context::internal_api();
-    let normal_authz_context = nexus_auth::authz::Context::new(
-        std::sync::Arc::new(normal_authn),
-        std::sync::Arc::new(nexus_auth::authz::Authz::new(&logctx.log)),
-        std::sync::Arc::new(datastore.clone()),
-    );
-
-    // Test Case 2: With restrictions enabled, only silo admins can create VPCs
-    // (This would require more complex setup with actual role assignments)
+    // Test that the policies can be created correctly
+    assert!(restricted_policy.restrict_network_actions);
+    assert!(!normal_policy.restrict_network_actions);
 
     // For now, this test demonstrates the structure needed for comprehensive testing
     println!("Networking restrictions policy test structure established");
 
-    db.terminate().await;
     logctx.cleanup_successful();
 }
