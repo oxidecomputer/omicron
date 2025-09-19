@@ -17777,6 +17777,9 @@
           "device_path": {
             "type": "string"
           },
+          "disk_type": {
+            "$ref": "#/components/schemas/DiskType"
+          },
           "id": {
             "description": "unique, immutable, system-controlled identifier for each resource",
             "type": "string",
@@ -17827,6 +17830,7 @@
           "block_size",
           "description",
           "device_path",
+          "disk_type",
           "id",
           "name",
           "project_id",
@@ -18193,6 +18197,12 @@
               "state"
             ]
           }
+        ]
+      },
+      "DiskType": {
+        "type": "string",
+        "enum": [
+          "crucible"
         ]
       },
       "Distributiondouble": {

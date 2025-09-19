@@ -10,8 +10,8 @@ use crate::app::sagas::declare_saga_actions;
 use crate::app::sagas::volume_delete;
 use nexus_db_queries::authn;
 use nexus_db_queries::db;
+use nexus_db_queries::db::datastore;
 use omicron_common::api::external::DiskState;
-use omicron_uuid_kinds::VolumeUuid;
 use serde::Deserialize;
 use serde::Serialize;
 use steno::ActionError;
@@ -24,8 +24,7 @@ use uuid::Uuid;
 pub(crate) struct Params {
     pub serialized_authn: authn::saga::Serialized,
     pub project_id: Uuid,
-    pub disk_id: Uuid,
-    pub volume_id: VolumeUuid,
+    pub disk: datastore::CrucibleDisk,
 }
 
 // disk delete saga: actions
@@ -63,7 +62,7 @@ impl NexusSaga for SagaDiskDelete {
 
         let subsaga_params = volume_delete::Params {
             serialized_authn: params.serialized_authn.clone(),
-            volume_id: params.volume_id,
+            volume_id: params.disk.volume_id(),
         };
 
         let subsaga_dag = {
@@ -107,7 +106,7 @@ async fn sdd_delete_disk_record(
     let disk = osagactx
         .datastore()
         .project_delete_disk_no_auth(
-            &params.disk_id,
+            &params.disk.id(),
             &[DiskState::Detached, DiskState::Faulted],
         )
         .await
@@ -124,7 +123,7 @@ async fn sdd_delete_disk_record_undo(
 
     osagactx
         .datastore()
-        .project_undelete_disk_set_faulted_no_auth(&params.disk_id)
+        .project_undelete_disk_set_faulted_no_auth(&params.disk.id())
         .await
         .map_err(ActionError::action_failed)?;
 
@@ -185,9 +184,10 @@ pub(crate) mod test {
         app::saga::create_saga_dag, app::sagas::disk_delete::Params,
         app::sagas::disk_delete::SagaDiskDelete,
     };
-    use nexus_db_model::Disk;
     use nexus_db_queries::authn::saga::Serialized;
     use nexus_db_queries::context::OpContext;
+    use nexus_db_queries::db::datastore::CrucibleDisk;
+    use nexus_db_queries::db::datastore::Disk;
     use nexus_test_utils::resource_helpers::DiskTest;
     use nexus_test_utils::resource_helpers::create_project;
     use nexus_test_utils_macros::nexus_test;
@@ -206,24 +206,29 @@ pub(crate) mod test {
         )
     }
 
-    async fn create_disk(cptestctx: &ControlPlaneTestContext) -> Disk {
+    async fn create_disk(cptestctx: &ControlPlaneTestContext) -> CrucibleDisk {
         let nexus = &cptestctx.server.server_context().nexus;
         let opctx = test_opctx(&cptestctx);
 
         let project_selector = params::ProjectSelector {
             project: Name::try_from(PROJECT_NAME.to_string()).unwrap().into(),
         };
+
         let project_lookup =
             nexus.project_lookup(&opctx, project_selector).unwrap();
 
-        nexus
+        let disk = nexus
             .project_create_disk(
                 &opctx,
                 &project_lookup,
                 &crate::app::sagas::disk_create::test::new_disk_create_params(),
             )
             .await
-            .expect("Failed to create disk")
+            .expect("Failed to create disk");
+
+        match disk {
+            Disk::Crucible(disk) => disk,
+        }
     }
 
     #[nexus_test(server = crate::Server)]
@@ -242,9 +247,9 @@ pub(crate) mod test {
         let params = Params {
             serialized_authn: Serialized::for_opctx(&opctx),
             project_id,
-            disk_id: disk.id(),
-            volume_id: disk.volume_id(),
+            disk,
         };
+
         nexus.sagas.saga_execute::<SagaDiskDelete>(params).await.unwrap();
     }
 
@@ -264,9 +269,9 @@ pub(crate) mod test {
         let params = Params {
             serialized_authn: Serialized::for_opctx(&opctx),
             project_id,
-            disk_id: disk.id(),
-            volume_id: disk.volume_id(),
+            disk,
         };
+
         let dag = create_saga_dag::<SagaDiskDelete>(params).unwrap();
         crate::app::sagas::test_helpers::actions_succeed_idempotently(
             nexus, dag,
