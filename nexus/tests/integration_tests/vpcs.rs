@@ -325,7 +325,10 @@ async fn test_vpc_networking_restrictions(cptestctx: &ControlPlaneTestContext) {
 
     // Test 2: VPC deletion should also respect networking restrictions
     // First delete the default subnet, then the VPC
-    let default_subnet_url = format!("/v1/vpc-subnets/default?project={}&vpc=test-vpc", project_name);
+    let default_subnet_url = format!(
+        "/v1/vpc-subnets/default?project={}&vpc=test-vpc",
+        project_name
+    );
     NexusRequest::object_delete(&client, &default_subnet_url)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
