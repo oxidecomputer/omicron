@@ -443,9 +443,6 @@ impl Node {
             PeerMsgKind::LrtqShare(share) => {
                 self.handle_lrtq_share(ctx, from, share);
             }
-            _ => todo!(
-                "cannot handle message variant yet - not implemented: {msg:?}"
-            ),
         }
     }
 

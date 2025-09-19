@@ -64,14 +64,6 @@ pub enum PeerMsgKind {
     /// Acknowledge a successful prepare from a coordinator
     PrepareAck(Epoch),
 
-    /// Retrieve a configuration for a given epoch from a node. Nodes only
-    /// respond if this is the current configuration and the requesting node is
-    /// a member of the configuration.
-    GetConfig(Epoch),
-
-    /// A configuration returned in response to `GetConfig`
-    Config(Configuration),
-
     /// Request a node's key share for the given epoch from that node
     GetShare(Epoch),
 
@@ -104,8 +96,6 @@ impl PeerMsgKind {
         match self {
             Self::Prepare { .. } => "prepare",
             Self::PrepareAck(_) => "prepare_ack",
-            Self::GetConfig(_) => "get_config",
-            Self::Config(_) => "config",
             Self::GetShare(_) => "get_share",
             Self::Share { .. } => "share",
             Self::GetLrtqShare => "get_lrtq_share",
@@ -124,9 +114,6 @@ impl PeerMsgKind {
                 Self::Prepare { config: config1, .. },
                 Self::Prepare { config: config2, .. },
             ) => config1.equal_except_for_crypto_data(config2),
-            (Self::Config(config1), Self::Config(config2)) => {
-                config1.equal_except_for_crypto_data(config2)
-            }
             (
                 Self::Share { epoch: epoch1, .. },
                 Self::Share { epoch: epoch2, .. },
