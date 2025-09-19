@@ -602,7 +602,7 @@ INFO skipping noop image source check for all sleds, reason: no target release i
 WARN cannot issue more MGS-driven updates (no current artifacts)
 generated blueprint 86db3308-f817-4626-8838-4085949a6a41 based on parent blueprint ade5749d-bdf3-4fab-a8ae-00bea01b3a5a
 blueprint source: planner with report:
-empty planning report for blueprint 86db3308-f817-4626-8838-4085949a6a41.
+empty planning report
 
 
 
@@ -1842,7 +1842,7 @@ INFO skipping noop image source check for all sleds, reason: no target release i
 WARN cannot issue more MGS-driven updates (no current artifacts)
 generated blueprint 86db3308-f817-4626-8838-4085949a6a41 based on parent blueprint ade5749d-bdf3-4fab-a8ae-00bea01b3a5a
 blueprint source: planner with report:
-empty planning report for blueprint 86db3308-f817-4626-8838-4085949a6a41.
+empty planning report
 
 
 

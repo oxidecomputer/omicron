@@ -268,9 +268,7 @@ impl BlueprintPlanner {
             BlueprintSource::Rss
             | BlueprintSource::PlannerLoadedFromDatabase
             | BlueprintSource::ReconfiguratorCliEdit
-            | BlueprintSource::Test => {
-                Arc::new(PlanningReport::new(blueprint.id))
-            }
+            | BlueprintSource::Test => Arc::new(PlanningReport::new()),
         };
         self.tx_blueprint.send_replace(Some(Arc::new((target, blueprint))));
         BlueprintPlannerStatus::Targeted {
@@ -378,10 +376,9 @@ mod test {
             BlueprintPlannerStatus::Targeted {
                 parent_blueprint_id,
                 blueprint_id,
-                report,
+                report: _,
             } if parent_blueprint_id == initial_blueprint.id
-                && blueprint_id != initial_blueprint.id
-                && blueprint_id == report.blueprint_id =>
+                && blueprint_id != initial_blueprint.id =>
             {
                 blueprint_id
             }
