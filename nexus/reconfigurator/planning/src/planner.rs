@@ -41,6 +41,7 @@ use nexus_types::deployment::SledDetails;
 use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::TufRepoContentsError;
 use nexus_types::deployment::ZpoolFilter;
+use nexus_types::deployment::planning_report::SkippedMgsUpdates;
 use nexus_types::deployment::{
     CockroachdbUnsafeToShutdown, PlanningAddStepReport,
     PlanningCockroachdbSettingsStepReport, PlanningDecommissionStepReport,
@@ -194,7 +195,10 @@ impl<'a> Planner<'a> {
         let mgs_updates = if add_update_blocked_reasons.is_empty() {
             self.do_plan_mgs_updates()?
         } else {
-            PlanningMgsUpdatesStepReport::new(PendingMgsUpdates::new())
+            PlanningMgsUpdatesStepReport::new(
+                PendingMgsUpdates::new(),
+                SkippedMgsUpdates::new(),
+            )
         };
 
         // Likewise for zone additions, unless overridden by the config.
@@ -216,12 +220,17 @@ impl<'a> Planner<'a> {
             PlanningZoneUpdatesStepReport::waiting_on(
                 ZoneUpdatesWaitingOn::DiscretionaryZones,
             )
-        } else if !mgs_updates.is_empty() {
+        } else if !mgs_updates.pending_mgs_updates.is_empty() {
             // ... or if there are still pending updates for the RoT / SP /
             // Host OS / etc. ...
-            // TODO This is not quite right.  See oxidecomputer/omicron#8285.
             PlanningZoneUpdatesStepReport::waiting_on(
                 ZoneUpdatesWaitingOn::PendingMgsUpdates,
+            )
+        } else if !mgs_updates.skipped_mgs_updates.is_empty() {
+            // ... or if there are skipped updates for the RoT / SP / Host OS /
+            // RoT bootloader.
+            PlanningZoneUpdatesStepReport::waiting_on(
+                ZoneUpdatesWaitingOn::SkippedMgsUpdates,
             )
         } else if !add.add_update_blocked_reasons.is_empty() {
             // ... or if there are pending zone add blockers.
@@ -1247,16 +1256,19 @@ impl<'a> Planner<'a> {
             } else {
                 ImpossibleUpdatePolicy::Reevaluate
             };
-        let PlannedMgsUpdates { pending_updates, pending_host_phase_2_changes } =
-            plan_mgs_updates(
-                &self.log,
-                &self.inventory,
-                &included_baseboards,
-                current_updates,
-                current_artifacts,
-                NUM_CONCURRENT_MGS_UPDATES,
-                impossible_update_policy,
-            );
+        let PlannedMgsUpdates {
+            pending_updates,
+            pending_host_phase_2_changes,
+            skipped_mgs_updates,
+        } = plan_mgs_updates(
+            &self.log,
+            &self.inventory,
+            &included_baseboards,
+            current_updates,
+            current_artifacts,
+            NUM_CONCURRENT_MGS_UPDATES,
+            impossible_update_policy,
+        );
         if pending_updates != *current_updates {
             // This will only add comments if our set of updates changed _and_
             // we have at least one update. If we went from "some updates" to
@@ -1270,7 +1282,10 @@ impl<'a> Planner<'a> {
             .apply_pending_host_phase_2_changes(pending_host_phase_2_changes)?;
 
         self.blueprint.pending_mgs_updates_replace_all(pending_updates.clone());
-        Ok(PlanningMgsUpdatesStepReport::new(pending_updates))
+        Ok(PlanningMgsUpdatesStepReport::new(
+            pending_updates,
+            skipped_mgs_updates,
+        ))
     }
 
     /// Update at most one existing zone to use a new image source.
@@ -1881,7 +1896,7 @@ impl<'a> Planner<'a> {
         source_repo.zone_image_source(zone_kind)
     }
 
-    /// Return `true` iff a zone of the given kind is ready to be updated;
+    /// Return `true` if a zone of the given kind is ready to be updated;
     /// i.e., its dependencies have been updated.
     fn is_zone_ready_for_update(
         &self,
@@ -1889,8 +1904,8 @@ impl<'a> Planner<'a> {
         mgs_updates: &PlanningMgsUpdatesStepReport,
     ) -> Result<bool, TufRepoContentsError> {
         // We return false regardless of `zone_kind` if there are still
-        // pending updates for components earlier in the update ordering
-        // than zones: RoT bootloader / RoT / SP / Host OS.
+        // pending or skipped updates for components earlier in the update
+        // ordering than zones: RoT bootloader / RoT / SP / Host OS.
         if !mgs_updates.is_empty() {
             return Ok(false);
         }
@@ -5616,7 +5631,7 @@ pub(crate) mod test {
         };
     }
 
-    fn create_artifacts_at_version(
+    fn create_zone_artifacts_at_version(
         version: &ArtifactVersion,
     ) -> Vec<TufArtifactMeta> {
         vec![
@@ -5633,6 +5648,64 @@ pub(crate) mod test {
             fake_zone_artifact!(InternalNtp, version.clone()),
             fake_zone_artifact!(Nexus, version.clone()),
             fake_zone_artifact!(Oximeter, version.clone()),
+            // We create artifacts with the versions (or hash) set to those of
+            // the example system to simulate an environment that does not need
+            // SP component updates.
+            TufArtifactMeta {
+                id: ArtifactId {
+                    name: "host-os-phase-1".to_string(),
+                    version: version.clone(),
+                    kind: ArtifactKind::HOST_PHASE_1,
+                },
+                hash: ArtifactHash([1; 32]),
+                size: 0,
+                board: None,
+                sign: None,
+            },
+            TufArtifactMeta {
+                id: ArtifactId {
+                    name: "host-os-phase-2".to_string(),
+                    version: version.clone(),
+                    kind: ArtifactKind::HOST_PHASE_2,
+                },
+                hash: ArtifactHash([0x0a; 32]),
+                size: 0,
+                board: None,
+                sign: None,
+            },
+            TufArtifactMeta {
+                id: ArtifactId {
+                    name: sp_sim::SIM_GIMLET_BOARD.to_string(),
+                    version: ArtifactVersion::new("0.0.1").unwrap(),
+                    kind: KnownArtifactKind::GimletSp.into(),
+                },
+                hash: ArtifactHash([0; 32]),
+                size: 0,
+                board: Some(sp_sim::SIM_GIMLET_BOARD.to_string()),
+                sign: None,
+            },
+            TufArtifactMeta {
+                id: ArtifactId {
+                    name: sp_sim::SIM_ROT_BOARD.to_string(),
+                    version: ArtifactVersion::new("0.0.2").unwrap(),
+                    kind: ArtifactKind::GIMLET_ROT_IMAGE_B,
+                },
+                hash: ArtifactHash([0; 32]),
+                size: 0,
+                board: Some(sp_sim::SIM_ROT_BOARD.to_string()),
+                sign: Some("sign-gimlet".into()),
+            },
+            TufArtifactMeta {
+                id: ArtifactId {
+                    name: sp_sim::SIM_ROT_BOARD.to_string(),
+                    version: ArtifactVersion::new("0.0.1").unwrap(),
+                    kind: ArtifactKind::GIMLET_ROT_STAGE0,
+                },
+                hash: ArtifactHash([0; 32]),
+                size: 0,
+                board: Some(sp_sim::SIM_ROT_BOARD.to_string()),
+                sign: Some("sign-gimlet".into()),
+            },
         ]
     }
 
@@ -5689,7 +5762,7 @@ pub(crate) mod test {
             },
             hash: fake_hash,
         };
-        let artifacts = create_artifacts_at_version(&version);
+        let artifacts = create_zone_artifacts_at_version(&version);
         let target_release_generation = target_release_generation.next();
         input_builder.policy_mut().tuf_repo = TufRepoPolicy {
             target_release_generation,
@@ -5747,9 +5820,12 @@ pub(crate) mod test {
             };
         }
 
-        // Request another Nexus zone.
+        // Request 3 Nexus zones. The blueprint will show changes in each sled
+        // for BlueprintHostPhase2DesiredSlotsDiff even if we are not performing
+        // an update for the Host OS. We need each sled to look identical in the
+        // blueprint, so we add a nexus zone to each sled.
         input_builder.policy_mut().target_nexus_zone_count =
-            input_builder.policy_mut().target_nexus_zone_count + 1;
+            input_builder.policy_mut().target_nexus_zone_count + 3;
         let input = input_builder.build();
 
         // Check that there is a new nexus zone that does *not* use the new
@@ -5864,10 +5940,10 @@ pub(crate) mod test {
                 .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
                 .filter(|(_, z)| is_old_nexus(z))
                 .count(),
-            NEXUS_REDUNDANCY + 1,
+            NEXUS_REDUNDANCY + 3,
         );
         let mut parent = blueprint8;
-        for i in 9..=16 {
+        for i in 9..=20 {
             update_collection_from_blueprint(&mut example, &parent);
 
             let blueprint_name = format!("blueprint{i}");
@@ -5906,19 +5982,19 @@ pub(crate) mod test {
         }
 
         // Everything's up-to-date in Kansas City!
-        let blueprint16 = parent;
+        let blueprint20 = parent;
         assert_eq!(
-            blueprint16
+            blueprint20
                 .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
                 .filter(|(_, z)| is_up_to_date_nexus(z))
                 .count(),
-            NEXUS_REDUNDANCY + 1,
+            NEXUS_REDUNDANCY + 3,
         );
 
-        update_collection_from_blueprint(&mut example, &blueprint16);
+        update_collection_from_blueprint(&mut example, &blueprint20);
         assert_planning_makes_no_changes(
             &logctx.log,
-            &blueprint16,
+            &blueprint20,
             &input,
             &example.collection,
             TEST_NAME,
@@ -6009,7 +6085,7 @@ pub(crate) mod test {
             },
             hash: fake_hash,
         };
-        let artifacts = create_artifacts_at_version(&version);
+        let artifacts = create_zone_artifacts_at_version(&version);
         let target_release_generation = Generation::from_u32(2);
         input_builder.policy_mut().tuf_repo = TufRepoPolicy {
             target_release_generation,
@@ -6071,6 +6147,38 @@ pub(crate) mod test {
             }
             result
         };
+
+        // First we update the blueprint once for each sled, as the diff in the
+        // simulated system will always report there are changes with the host
+        // phase 2 even when no update is needed
+        let mut parent = blueprint;
+        for i in 2..=4 {
+            update_collection_from_blueprint(&mut example, &parent);
+
+            let blueprint_name = format!("blueprint{i}");
+            let blueprint = Planner::new_based_on(
+                log.clone(),
+                &parent,
+                &example.input,
+                &blueprint_name,
+                &example.collection,
+                PlannerRng::from_seed((TEST_NAME, &blueprint_name)),
+            )
+            .expect("can't create planner")
+            .plan()
+            .unwrap_or_else(|_| panic!("can't re-plan after {i} iterations"));
+
+            {
+                let summary = blueprint.diff_since_blueprint(&parent);
+                for sled in summary.diff.sleds.modified_values_diff() {
+                    assert!(sled.zones.added.is_empty());
+                    assert!(sled.zones.removed.is_empty());
+                }
+            }
+
+            parent = blueprint;
+        }
+        let mut blueprint = parent;
 
         // If we have missing info in our inventory, the
         // planner will not update any Cockroach zones.
@@ -6430,7 +6538,7 @@ pub(crate) mod test {
             },
             hash: fake_hash,
         };
-        let artifacts = create_artifacts_at_version(&version);
+        let artifacts = create_zone_artifacts_at_version(&version);
         let target_release_generation = Generation::from_u32(2);
         input_builder.policy_mut().tuf_repo = TufRepoPolicy {
             target_release_generation,
@@ -6521,12 +6629,44 @@ pub(crate) mod test {
             collection.ntp_timesync = ntp_timesync;
         };
 
+        // First we update the blueprint once for each sled, as the diff in the
+        // simulated system will always report there are changes with the host
+        // phase 2 even when no update is needed
+        let mut parent = blueprint;
+        for i in 2..=4 {
+            update_collection_from_blueprint(&mut example, &parent);
+
+            let blueprint_name = format!("blueprint{i}");
+            let blueprint = Planner::new_based_on(
+                log.clone(),
+                &parent,
+                &example.input,
+                &blueprint_name,
+                &example.collection,
+                PlannerRng::from_seed((TEST_NAME, &blueprint_name)),
+            )
+            .expect("can't create planner")
+            .plan()
+            .unwrap_or_else(|_| panic!("can't re-plan after {i} iterations"));
+
+            {
+                let summary = blueprint.diff_since_blueprint(&parent);
+                for sled in summary.diff.sleds.modified_values_diff() {
+                    assert!(sled.zones.added.is_empty());
+                    assert!(sled.zones.removed.is_empty());
+                }
+            }
+
+            parent = blueprint;
+        }
+        let blueprint4 = parent;
+
         // If we have missing info in our inventory, the
         // planner will not update any boundary NTP zones.
         example.collection.ntp_timesync = IdOrdMap::new();
         assert_planning_makes_no_changes(
             &log,
-            &blueprint,
+            &blueprint4,
             &example.input,
             &example.collection,
             TEST_NAME,
@@ -6549,7 +6689,7 @@ pub(crate) mod test {
         example.collection.ntp_timesync.remove(&boundary_ntp_zone);
         assert_planning_makes_no_changes(
             &log,
-            &blueprint,
+            &blueprint4,
             &example.input,
             &example.collection,
             TEST_NAME,
@@ -6577,7 +6717,7 @@ pub(crate) mod test {
             .synced = false;
         assert_planning_makes_no_changes(
             &log,
-            &blueprint,
+            &blueprint4,
             &example.input,
             &example.collection,
             TEST_NAME,
@@ -6597,7 +6737,7 @@ pub(crate) mod test {
         //
         let new_blueprint = Planner::new_based_on(
             log.clone(),
-            &blueprint,
+            &blueprint4,
             &example.input,
             "test_blueprint_expunge_old_boundary_ntp",
             &example.collection,
@@ -6607,7 +6747,7 @@ pub(crate) mod test {
         .plan()
         .expect("plan for trivial TUF repo");
         {
-            let summary = new_blueprint.diff_since_blueprint(&blueprint);
+            let summary = new_blueprint.diff_since_blueprint(&blueprint4);
             eprintln!(
                 "diff between blueprints (should be expunging boundary NTP using install dataset):\n{}",
                 summary.display()
@@ -6858,7 +6998,7 @@ pub(crate) mod test {
             },
             hash: fake_hash,
         };
-        let artifacts = create_artifacts_at_version(&version);
+        let artifacts = create_zone_artifacts_at_version(&version);
         let target_release_generation = Generation::from_u32(2);
         input_builder.policy_mut().tuf_repo = TufRepoPolicy {
             target_release_generation,
@@ -6924,6 +7064,40 @@ pub(crate) mod test {
             }
             result
         };
+
+        // First we update the blueprint once for each sled, as the diff in the
+        // simulated system will always report there are changes with the host
+        // phase 2 even when no update is needed
+        let mut parent = blueprint;
+        for i in 2..=4 {
+            update_collection_from_blueprint(&mut example, &parent);
+
+            let blueprint_name = format!("blueprint{i}");
+            // We make sure we don't update any internal DNS zones yet
+            example.collection.internal_dns_generation_status = IdOrdMap::new();
+            let blueprint = Planner::new_based_on(
+                log.clone(),
+                &parent,
+                &example.input,
+                &blueprint_name,
+                &example.collection,
+                PlannerRng::from_seed((TEST_NAME, &blueprint_name)),
+            )
+            .expect("can't create planner")
+            .plan()
+            .unwrap_or_else(|_| panic!("can't re-plan after {i} iterations"));
+
+            {
+                let summary = blueprint.diff_since_blueprint(&parent);
+                for sled in summary.diff.sleds.modified_values_diff() {
+                    assert!(sled.zones.added.is_empty());
+                    assert!(sled.zones.removed.is_empty());
+                }
+            }
+
+            parent = blueprint;
+        }
+        let mut blueprint = parent;
 
         // If we have missing info in our inventory, the
         // planner will not update any Internal DNS zones.
@@ -7136,7 +7310,7 @@ pub(crate) mod test {
                         system_version: Version::new(1, 0, 0),
                         file_name: String::from(""),
                     },
-                    artifacts: create_artifacts_at_version(&version),
+                    artifacts: create_zone_artifacts_at_version(&version),
                 },
             ),
         };

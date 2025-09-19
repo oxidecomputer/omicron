@@ -2140,6 +2140,8 @@ impl fmt::Display for BlueprintDiffDisplay<'_, '_> {
             writeln!(f, "{}", table)?;
         }
 
+        // TODO-K: Add skipped updates in a follow up PR
+
         Ok(())
     }
 }
