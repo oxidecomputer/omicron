@@ -906,8 +906,8 @@ mod tests {
 
     #[test]
     fn test_min_and_max_in_window() {
-        let window = parse_example_data(&[
-            ("2025-08-12T19:17:00.0000Z", "2025-08-12T19:17:10.0000Z", 2000f64),
+        let mut window = parse_example_data(&[
+            ("2025-08-12T19:17:00.0000Z", "2025-08-12T19:17:10.0000Z", 5000f64),
             ("2025-08-12T19:17:10.0000Z", "2025-08-12T19:17:20.0000Z", 1000f64),
             ("2025-08-12T19:17:20.0000Z", "2025-08-12T19:17:30.0000Z", 3000f64),
             ("2025-08-12T19:17:30.0000Z", "2025-08-12T19:17:40.0000Z", 4000f64),
@@ -915,13 +915,26 @@ mod tests {
             ("2025-08-12T19:17:50.0000Z", "2025-08-12T19:18:00.0000Z", 2000f64),
         ]);
 
+        // Test the full window
         let min = min_value_in_window(&MetricType::Gauge, &window.metric_window()).unwrap();
         let expected = 1000.0;
         assert!((min - expected).abs() < 1e-6, "min={min}, expected={expected}");
 
         let max = max_value_in_window(&MetricType::Gauge, &window.metric_window()).unwrap();
+        let expected = 5000.0;
+        assert!((max - expected).abs() < 1e-6, "max={max}, expected={expected}");
+
+        // Test a partial window
+        window.start = "2025-08-12T19:17:25.0000Z".parse().unwrap();
+        window.end = "2025-08-12T19:17:45.0000Z".parse().unwrap();
+        let min = min_value_in_window(&MetricType::Gauge, &window.metric_window()).unwrap();
+        let expected = 3000.0;
+        assert!((min - expected).abs() < 1e-6, "min={min}, expected={expected}");
+
+        let max = max_value_in_window(&MetricType::Gauge, &window.metric_window()).unwrap();
         let expected = 4000.0;
         assert!((max - expected).abs() < 1e-6, "max={max}, expected={expected}");
+
     }
 
     #[test]
