@@ -7,6 +7,16 @@ use serde::{Deserialize, Serialize};
 
 use crate::component::SpIdentifier;
 
+#[derive(Deserialize, JsonSchema)]
+pub struct PathSpIgnitionCommand {
+    /// ID for the SP that the gateway service translates into the appropriate
+    /// port for communicating with the given SP.
+    #[serde(flatten)]
+    pub sp: SpIdentifier,
+    /// Ignition command to perform on the targeted SP.
+    pub command: IgnitionCommand,
+}
+
 #[derive(
     Debug,
     Clone,
@@ -135,6 +145,7 @@ impl From<gateway_messages::ignition::SystemType> for SpIgnitionSystemType {
             SystemType::Sidecar => Self::Sidecar,
             SystemType::Psc => Self::Psc,
             SystemType::Unknown(id) => Self::Unknown { id },
+            SystemType::Cosmo => Self::Unknown { id: 0x4 },
         }
     }
 }

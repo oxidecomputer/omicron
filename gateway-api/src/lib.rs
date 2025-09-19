@@ -17,7 +17,8 @@ use gateway_types::{
     },
     component_details::SpComponentDetails,
     host::{ComponentFirmwareHashStatus, HostStartupOptions},
-    ignition::{IgnitionCommand, SpIgnitionInfo},
+    ignition,
+    //ignition::{IgnitionCommand, SpIgnitionInfo},
     rot::{RotCfpa, RotCfpaSlot, RotCmpa, RotState},
     sensor::SpSensorReading,
     task_dump::TaskDump,
@@ -45,6 +46,7 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
+    (2, COSMO),
     (1, INITIAL),
 ]);
 
@@ -407,10 +409,27 @@ pub trait GatewayApi {
     #[endpoint {
         method = GET,
         path = "/ignition",
+        operation_id = "ignition_list",
+        versions = VERSION_INITIAL..VERSION_COSMO
     }]
-    async fn ignition_list(
+    async fn ignition_list_v1(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<Vec<SpIgnitionInfo>>, HttpError>;
+    ) -> Result<HttpResponseOk<Vec<ignition::v1::SpIgnitionInfo>>, HttpError>;
+
+    /// List SPs via Ignition
+    ///
+    /// Retreive information for all SPs via the Ignition controller. This is
+    /// lower latency and has fewer possible failure modes than querying the SP
+    /// over the management network.
+    #[endpoint {
+        method = GET,
+        path = "/ignition",
+        operation_id = "ignition_list",
+        versions = VERSION_COSMO..
+    }]
+    async fn ignition_list_v2(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Vec<ignition::v2::SpIgnitionInfo>>, HttpError>;
 
     /// Get SP info via Ignition
     ///
@@ -420,11 +439,29 @@ pub trait GatewayApi {
     #[endpoint {
         method = GET,
         path = "/ignition/{type}/{slot}",
+        operation_id = "ignition_get",
+        versions = VERSION_INITIAL..VERSION_COSMO
     }]
-    async fn ignition_get(
+    async fn ignition_get_v1(
         rqctx: RequestContext<Self::Context>,
         path: Path<PathSp>,
-    ) -> Result<HttpResponseOk<SpIgnitionInfo>, HttpError>;
+    ) -> Result<HttpResponseOk<ignition::v1::SpIgnitionInfo>, HttpError>;
+
+    /// Get SP info via Ignition
+    ///
+    /// Retreive information for an SP via the Ignition controller. This is
+    /// lower latency and has fewer possible failure modes than querying the SP
+    /// over the management network.
+    #[endpoint {
+        method = GET,
+        path = "/ignition/{type}/{slot}",
+        operation_id = "ignition_get",
+        versions = VERSION_COSMO..
+    }]
+    async fn ignition_get_v2(
+        rqctx: RequestContext<Self::Context>,
+        path: Path<PathSp>,
+    ) -> Result<HttpResponseOk<ignition::v2::SpIgnitionInfo>, HttpError>;
 
     /// Send an ignition command targeting a specific SP.
     ///
@@ -437,10 +474,31 @@ pub trait GatewayApi {
     #[endpoint {
         method = POST,
         path = "/ignition/{type}/{slot}/{command}",
+        operation_id = "ignition_command",
+        versions = VERSION_INITIAL..VERSION_COSMO
     }]
-    async fn ignition_command(
+    async fn ignition_command_v1(
         rqctx: RequestContext<Self::Context>,
-        path: Path<PathSpIgnitionCommand>,
+        path: Path<ignition::v1::PathSpIgnitionCommand>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Send an ignition command targeting a specific SP.
+    ///
+    /// This endpoint can be used to transition a target between A2 and A3 (via
+    /// power-on / power-off) or reset it.
+    ///
+    /// The management network traffic caused by requests to this endpoint is
+    /// between this MGS instance and its local ignition controller, _not_ the
+    /// SP targeted by the command.
+    #[endpoint {
+        method = POST,
+        path = "/ignition/{type}/{slot}/{command}",
+        operation_id = "ignition_command",
+        versions = VERSION_COSMO..
+    }]
+    async fn ignition_command_v2(
+        rqctx: RequestContext<Self::Context>,
+        path: Path<ignition::v2::PathSpIgnitionCommand>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
     /// Get the current power state of a sled via its SP.
@@ -682,14 +740,4 @@ pub struct GetCfpaParams {
 )]
 pub struct GetRotBootInfoParams {
     pub version: u8,
-}
-
-#[derive(Deserialize, JsonSchema)]
-pub struct PathSpIgnitionCommand {
-    /// ID for the SP that the gateway service translates into the appropriate
-    /// port for communicating with the given SP.
-    #[serde(flatten)]
-    pub sp: SpIdentifier,
-    /// Ignition command to perform on the targeted SP.
-    pub command: IgnitionCommand,
 }
