@@ -6870,7 +6870,10 @@ name = "nexus-reconfigurator-planning"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "camino",
+ "camino-tempfile",
  "chrono",
+ "clap",
  "clickhouse-admin-types",
  "cockroach-admin-types",
  "daft",
@@ -6910,8 +6913,12 @@ dependencies = [
  "swrite",
  "test-strategy",
  "thiserror 2.0.16",
+ "tokio",
+ "tufaceous",
  "tufaceous-artifact",
+ "tufaceous-lib",
  "typed-rng",
+ "update-common",
  "uuid",
 ]
 
