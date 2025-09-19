@@ -39,6 +39,7 @@ use installinator_common::WriteOutput;
 use omicron_common::disk::M2Slot;
 use omicron_uuid_kinds::MupdateUuid;
 use semver::Version;
+use sled_hardware_types::OxideSled;
 use slog::Logger;
 use slog::error;
 use slog::info;
@@ -830,23 +831,6 @@ impl Drop for SetTrueOnDrop {
     }
 }
 
-#[derive(Clone)]
-enum InternalHostType {
-    Gimlet,
-    Cosmo,
-}
-
-impl InternalHostType {
-    fn from_model(model: &str) -> Result<Self, UpdateTerminalError> {
-        // The source for these model numbers comes from RFD 562
-        match model {
-            "913-0000023" => Ok(InternalHostType::Cosmo),
-            "913-0000019" => Ok(InternalHostType::Gimlet),
-            _ => Err(UpdateTerminalError::UnknownHost(model.to_string())),
-        }
-    }
-}
-
 #[derive(Debug)]
 struct UpdateDriver {}
 
@@ -1253,9 +1237,11 @@ impl UpdateDriver {
                             error,
                         })?;
 
-                    StepSuccess::new(InternalHostType::from_model(
-                        &state.model,
-                    )?)
+                    StepSuccess::new(
+                        OxideSled::try_from_model(&state.model).ok_or(
+                            UpdateTerminalError::UnknownHost(state.model),
+                        )?,
+                    )
                     .into()
                 },
             )
@@ -1342,7 +1328,7 @@ impl UpdateDriver {
         update_cx: &'a UpdateContext,
         registrar: &mut ComponentRegistrar<'_, 'a>,
         plan: &'a UpdatePlan,
-        host_type: SharedStepHandle<InternalHostType>,
+        host_type: SharedStepHandle<OxideSled>,
     ) -> StepHandle<HostPhase2RecoveryImageId> {
         // We arbitrarily choose to store the trampoline phase 1 in host boot
         // slot 0. We put this in a set for compatibility with the later step
@@ -1535,7 +1521,7 @@ impl UpdateDriver {
         registrar: &mut ComponentRegistrar<'engine, 'a>,
         plan: &'a UpdatePlan,
         slots_to_update: StepHandle<BTreeSet<u16>>,
-        host_type: SharedStepHandle<InternalHostType>,
+        host_type: SharedStepHandle<OxideSled>,
     ) {
         // Installinator is done - set the stage for the real host to boot.
 
@@ -1660,7 +1646,7 @@ impl UpdateDriver {
         cosmo_artifact: &'a ArtifactIdData,
         kind: &str, // "host" or "trampoline"
         slots_to_update: SharedStepHandle<BTreeSet<u16>>,
-        host_type: SharedStepHandle<InternalHostType>,
+        host_type: SharedStepHandle<OxideSled>,
     ) {
         registrar
             .new_step(
@@ -1684,8 +1670,8 @@ impl UpdateDriver {
                         slots_to_update.into_value(cx.token()).await;
 
                     let artifact = match host_type {
-                        InternalHostType::Cosmo => cosmo_artifact,
-                        InternalHostType::Gimlet => gimlet_artifact,
+                        OxideSled::Cosmo => cosmo_artifact,
+                        OxideSled::Gimlet => gimlet_artifact,
                     };
 
                     for boot_slot in slots_to_update {
