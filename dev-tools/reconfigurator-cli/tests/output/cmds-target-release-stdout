@@ -2862,9 +2862,9 @@ INFO performed noop zone image source checks on sled, sled_id: 98e6b7c2-2efa-41c
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO performed noop zone image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 8, num_already_artifact: 0, num_eligible: 0, num_ineligible: 8
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
-INFO skipping board for MGS-driven update, serial_number: serial0, part_number: model0
+INFO skipping board for MGS-driven update, serial_number: serial0, part_number: model0 due to unsafe zones: [InternalDns]
+INFO skipping board for MGS-driven update, serial_number: serial2, part_number: model2 due to unsafe zones: [InternalDns]
 INFO skipping board for MGS-driven update, serial_number: serial1, part_number: model1
-INFO skipping board for MGS-driven update, serial_number: serial2, part_number: model2
 INFO ran out of boards for MGS-driven update
 generated blueprint 4d2eb6f3-7eb1-443a-8e76-7ecf05da2f6d based on parent blueprint 3bcc37b2-0c0b-44d0-b4ed-3bcb605e4312
 planning report for blueprint 4d2eb6f3-7eb1-443a-8e76-7ecf05da2f6d:
@@ -3792,9 +3792,9 @@ INFO performed noop zone image source checks on sled, sled_id: 98e6b7c2-2efa-41c
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO performed noop zone image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 8, num_already_artifact: 0, num_eligible: 0, num_ineligible: 8
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
+INFO skipping board for MGS-driven update, serial_number: serial1, part_number: model1 due to unsafe zones: [InternalDns]
+INFO skipping board for MGS-driven update, serial_number: serial2, part_number: model2 due to unsafe zones: [InternalDns]
 INFO skipping board for MGS-driven update, serial_number: serial0, part_number: model0
-INFO skipping board for MGS-driven update, serial_number: serial1, part_number: model1
-INFO skipping board for MGS-driven update, serial_number: serial2, part_number: model2
 INFO ran out of boards for MGS-driven update
 generated blueprint c0d81ea6-909c-4efb-964e-beff67f6da0d based on parent blueprint 23ce505c-8991-44a5-8863-f2b906fba9cf
 planning report for blueprint c0d81ea6-909c-4efb-964e-beff67f6da0d:
@@ -5596,8 +5596,8 @@ INFO performed noop zone image source checks on sled, sled_id: 98e6b7c2-2efa-41c
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO performed noop zone image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 7, num_already_artifact: 3, num_eligible: 0, num_ineligible: 4
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
-INFO skipping board for MGS-driven update, serial_number: serial0, part_number: model0
-INFO skipping board for MGS-driven update, serial_number: serial1, part_number: model1
+INFO skipping board for MGS-driven update, serial_number: serial0, part_number: model0 due to unsafe zones: [InternalDns]
+INFO skipping board for MGS-driven update, serial_number: serial1, part_number: model1 due to unsafe zones: [InternalDns]
 INFO skipping board for MGS-driven update, serial_number: serial2, part_number: model2
 INFO ran out of boards for MGS-driven update
 generated blueprint 59630e63-c953-4807-9e84-9e750a79f68e based on parent blueprint 7f6b7297-c2bc-4f67-b3c0-c8e555ebbdc4
