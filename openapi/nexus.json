@@ -23642,6 +23642,10 @@
               }
             ]
           },
+          "restrict_network_actions": {
+            "description": "When true, restricts networking actions (VPC, subnet, etc.) to Silo Admins only. When false (default), Project Collaborators can perform networking actions.",
+            "type": "boolean"
+          },
           "time_created": {
             "description": "timestamp when this resource was created",
             "type": "string",
@@ -23660,6 +23664,7 @@
           "identity_mode",
           "mapped_fleet_roles",
           "name",
+          "restrict_network_actions",
           "time_created",
           "time_modified"
         ]
@@ -23740,6 +23745,12 @@
                 "$ref": "#/components/schemas/SiloQuotasCreate"
               }
             ]
+          },
+          "restrict_network_actions": {
+            "nullable": true,
+            "description": "When set to true, restricts networking actions (VPC, subnet, etc.) to Silo Admins only. When false or unset (default), Project Collaborators can perform networking actions.",
+            "default": null,
+            "type": "boolean"
           },
           "tls_certificates": {
             "description": "Initial TLS certificates to be used for the new Silo's console and API endpoints.  These should be valid for the Silo's DNS name(s).",
