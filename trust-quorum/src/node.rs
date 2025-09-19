@@ -440,6 +440,9 @@ impl Node {
             PeerMsgKind::GetLrtqShare => {
                 self.handle_get_lrtq_share(ctx, from);
             }
+            PeerMsgKind::LrtqShare(share) => {
+                self.handle_lrtq_share(ctx, from, share);
+            }
             _ => todo!(
                 "cannot handle message variant yet - not implemented: {msg:?}"
             ),
@@ -981,12 +984,25 @@ impl Node {
                 )),
             );
         } else {
-            info!(
+            warn!(
                 self.log,
                 "Received 'GetLrtqShare', but it's missing.";
                 "from" => %from,
             );
         }
+    }
+
+    fn handle_lrtq_share(
+        &mut self,
+        ctx: &mut impl NodeHandlerCtx,
+        from: PlatformId,
+        share: LrtqShare,
+    ) {
+        if let Some(cs) = &mut self.coordinator_state {
+            cs.handle_lrtq_share(ctx, from.clone(), share.clone());
+        }
+
+        self.rack_secret_loader.handle_lrtq_share(ctx, from, share);
     }
 
     // Send any required messages as a reconfiguration coordinator

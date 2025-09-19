@@ -6,11 +6,12 @@
 
 use crate::NodeHandlerCtx;
 use crate::configuration::{ConfigurationDiff, ConfigurationError};
-use crate::crypto::{LrtqShare, PlaintextRackSecrets};
+use crate::crypto::{LrtqShare, PlaintextRackSecrets, ReconstructedRackSecret};
 use crate::validators::{
     ReconfigurationError, ValidatedLrtqUpgradeMsg, ValidatedReconfigureMsg,
 };
 use crate::{Configuration, Epoch, PeerMsgKind, PlatformId, RackSecret};
+use bootstore::trust_quorum::RackSecret as LrtqRackSecret;
 use daft::{Diffable, Leaf};
 use gfss::shamir::Share;
 use slog::{Logger, error, info, o, warn};
@@ -451,27 +452,6 @@ impl CoordinatorState {
                     }
                 };
 
-                // Reconstruct the new rack secret from the shares we created
-                // at coordination start time.
-                let shares: Vec<_> = new_shares.values().cloned().collect();
-                let new_rack_secret = match RackSecret::reconstruct(&shares) {
-                    Ok(secret) => {
-                        info!(
-                            log,
-                            "Successfully reconstructed new rack secret"
-                        );
-                        secret
-                    }
-                    Err(err) => {
-                        error!(
-                            log,
-                            "Failed to reconstruct new rack secret";
-                            &err
-                        );
-                        return;
-                    }
-                };
-
                 // Decrypt the encrypted rack secrets from the old config so
                 // that we can add `old_rack_secret` to that set for use in the
                 // new configuration.
@@ -494,69 +474,17 @@ impl CoordinatorState {
                 };
                 plaintext_secrets.insert(*old_epoch, old_rack_secret);
 
-                // Now encrypt the set of old rack secrets with the new rack
-                // secret.
-                let new_encrypted_rack_secrets = match plaintext_secrets
-                    .encrypt(
-                        self.configuration.rack_id,
-                        new_epoch,
-                        &new_rack_secret,
-                    ) {
-                    Ok(ciphertext) => ciphertext,
-                    Err(_) => {
-                        error!(log, "Failed to encrypt plaintext rack secrets");
-                        return;
-                    }
-                };
-
-                // Save the encrypted rack secrets in the current configuration
-                //
-                // A new configuration is always created with a `None` value
-                // for `encrypted_rack_secrets`, as it gets filled in here.
-                //
-                // If we change that it's a programmer error that will be caught
-                // immediately by our tests.
-                assert!(self.configuration.encrypted_rack_secrets.is_none());
-                self.configuration.encrypted_rack_secrets =
-                    Some(new_encrypted_rack_secrets);
-
                 // Take `new_shares` out of `self.op` so we can include them in
                 // `Prepare` messages;
-                let mut new_shares = mem::take(new_shares);
+                let new_shares = mem::take(new_shares);
 
-                // Update our persistent state
-                //
-                // We remove ourself because we don't send a `Prepare` message
-                // to ourself.
-                //
-                // SAFETY: our share already exists at this point and has been
-                // validated as part of the `Configuration` construction.
-                let share = new_shares
-                    .remove(ctx.platform_id())
-                    .expect("my share exists");
-                ctx.update_persistent_state(|ps| {
-                    ps.shares.insert(new_epoch, share);
-                    ps.configs
-                        .insert_unique(self.configuration.clone())
-                        .expect("no existing configuration");
-                    true
-                });
-
-                // Now transition to `CoordinatorOperation::Prepare`
-                let prepares: BTreeMap<_, _> = new_shares
-                    .into_iter()
-                    .map(|(id, share)| {
-                        (id, (self.configuration.clone(), share))
-                    })
-                    .collect();
-                self.op = CoordinatorOperation::Prepare {
-                    prepares,
-                    // Always include ourself
-                    prepare_acks: BTreeSet::from([ctx.platform_id().clone()]),
-                };
-
-                info!(log, "Starting to prepare after collecting shares");
-                self.send_msgs(ctx);
+                // Start Preparing
+                self.transition_to_preparing(
+                    ctx,
+                    log,
+                    new_shares,
+                    plaintext_secrets,
+                );
             }
             op => {
                 warn!(
@@ -564,6 +492,215 @@ impl CoordinatorState {
                     "Share received when coordinator is not expecting it";
                     "op" => op.name(),
                     "epoch" => %epoch,
+                    "from" => %from
+                );
+            }
+        }
+    }
+
+    // Make the jump from collecting shares or lrtq shares to sending out
+    // prepare messages and waiting for acks.
+    fn transition_to_preparing(
+        &mut self,
+        ctx: &mut impl NodeHandlerCtx,
+        log: Logger,
+        mut new_shares: BTreeMap<PlatformId, Share>,
+        plaintext_secrets: PlaintextRackSecrets,
+    ) {
+        let new_epoch = self.configuration.epoch;
+
+        // Reconstruct the new rack secret from the shares we created
+        // at coordination start time.
+        let shares: Vec<_> = new_shares.values().cloned().collect();
+        let new_rack_secret = match RackSecret::reconstruct(&shares) {
+            Ok(secret) => {
+                info!(log, "Successfully reconstructed new rack secret");
+                secret
+            }
+            Err(err) => {
+                error!(
+                    log,
+                    "Failed to reconstruct new rack secret";
+                    &err
+                );
+                return;
+            }
+        };
+
+        // Now encrypt the set of old rack secrets with the new rack
+        // secret.
+        let new_encrypted_rack_secrets = match plaintext_secrets.encrypt(
+            self.configuration.rack_id,
+            new_epoch,
+            &new_rack_secret,
+        ) {
+            Ok(ciphertext) => ciphertext,
+            Err(_) => {
+                error!(log, "Failed to encrypt plaintext rack secrets");
+                return;
+            }
+        };
+
+        // Save the encrypted rack secrets in the current configuration
+        //
+        // A new configuration is always created with a `None` value
+        // for `encrypted_rack_secrets`, as it gets filled in here.
+        //
+        // If we change that it's a programmer error that will be caught
+        // immediately by our tests.
+        assert!(self.configuration.encrypted_rack_secrets.is_none());
+        self.configuration.encrypted_rack_secrets =
+            Some(new_encrypted_rack_secrets);
+
+        // Update our persistent state
+        //
+        // We remove ourself because we don't send a `Prepare` message
+        // to ourself.
+        //
+        // SAFETY: our share already exists at this point and has been
+        // validated as part of the `Configuration` construction.
+        let share =
+            new_shares.remove(ctx.platform_id()).expect("my share exists");
+        ctx.update_persistent_state(|ps| {
+            ps.shares.insert(new_epoch, share);
+            ps.configs
+                .insert_unique(self.configuration.clone())
+                .expect("no existing configuration");
+            true
+        });
+
+        // Now transition to `CoordinatorOperation::Prepare`
+        let prepares: BTreeMap<_, _> = new_shares
+            .into_iter()
+            .map(|(id, share)| (id, (self.configuration.clone(), share)))
+            .collect();
+        self.op = CoordinatorOperation::Prepare {
+            prepares,
+            // Always include ourself
+            prepare_acks: BTreeSet::from([ctx.platform_id().clone()]),
+        };
+
+        info!(log, "Starting to prepare after collecting shares");
+        self.send_msgs(ctx);
+    }
+
+    pub fn handle_lrtq_share(
+        &mut self,
+        ctx: &mut impl NodeHandlerCtx,
+        from: PlatformId,
+        share: LrtqShare,
+    ) {
+        match &mut self.op {
+            CoordinatorOperation::CollectLrtqShares {
+                collected_lrtq_shares,
+                new_shares,
+            } => {
+                let log = self.log.new(o!(
+                    "last_committed_epoch" => "lrtq",
+                    "new_epoch" => self.configuration.epoch.to_string()
+                ));
+
+                // Do we already have a share from this node?
+                if collected_lrtq_shares.contains_key(&from) {
+                    return;
+                }
+
+                // SAFETY: If we are collecting LRTQ shares it means we have
+                // `LrtqShareData` in our `PersistentState`.
+                let lrtq_share_data = ctx
+                    .persistent_state()
+                    .lrtq
+                    .as_ref()
+                    .expect("lrtq share data exists");
+
+                // We don't know which share digest corresponds to which node
+                // and so we check to ensure that the digest of the share is one
+                // of the valid digests we expect.
+                let digest = share.digest().into();
+                if !lrtq_share_data.share_digests.contains(&digest) {
+                    error!(
+                        log,
+                        "Received LrtqShare with invalid digest";
+                        "from" => %from
+                    );
+                    return;
+                }
+
+                // We double check to ensure that a different node didn't send
+                // the same share. This should never happen, or LRTQ would be
+                // busted on existing racks, but we sanity check here anyway.
+                if let Some((matching_id, _)) =
+                    collected_lrtq_shares.iter().find(|(_, s)| {
+                        let computed: bootstore::Sha3_256Digest =
+                            s.digest().into();
+                        computed == digest
+                    })
+                {
+                    error!(
+                        log,
+                        "Received share with digest matching another node";
+                        "from" => %from,
+                        "matching_node" => %matching_id
+                    );
+                    return;
+                }
+
+                // We have a new, unique, LRTQ share. Save it.
+                collected_lrtq_shares.insert(from, share);
+
+                // Do we have enough shares to recompute the LRTQ rack secret?
+                if collected_lrtq_shares.len()
+                    < lrtq_share_data.threshold as usize
+                {
+                    return;
+                }
+
+                // Reconstruct the LRTQ rack secret
+                let shares: Vec<_> = collected_lrtq_shares
+                    .values()
+                    .map(|s| s.inner().clone())
+                    .collect();
+                let lrtq_rack_secret: ReconstructedRackSecret =
+                    match LrtqRackSecret::combine_shares(&shares) {
+                        Ok(secret) => {
+                            info!(
+                                log,
+                                "Successfully reconstructed LRTQ rack secret"
+                            );
+                            secret.into()
+                        }
+                        Err(err) => {
+                            error!(
+                                self.log,
+                                "Failed to reconstruct LRTQ rack secret";
+                                "err" => err.to_string()
+                            );
+                            return;
+                        }
+                    };
+
+                // There are no old encrytped rack secrets for LRTQ
+                // LRTQ is always at Epoch 1
+                let mut plaintext_secrets = PlaintextRackSecrets::new();
+                plaintext_secrets.insert(Epoch(1), lrtq_rack_secret);
+
+                // Take `new_shares` out of `self.op` so we can include them in
+                // `Prepare` messages;
+                let new_shares = mem::take(new_shares);
+
+                // Start Preparing
+                self.transition_to_preparing(
+                    ctx,
+                    log,
+                    new_shares,
+                    plaintext_secrets,
+                );
+            }
+            op => {
+                warn!(
+                    self.log,
+                    "LrtqShare received when coordinator is not expecting it";
+                    "op" => op.name(),
                     "from" => %from
                 );
             }
