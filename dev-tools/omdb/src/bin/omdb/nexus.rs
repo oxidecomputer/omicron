@@ -2945,6 +2945,7 @@ fn print_ereporter_status_totals<'status>(
         HTTP_REQUESTS,
         ERRORS,
         REPORTERS_WITH_EREPORTS,
+        REPORTERS_WITH_ERRORS,
     ]) + 1;
     const NUM_WIDTH: usize = 4;
 
