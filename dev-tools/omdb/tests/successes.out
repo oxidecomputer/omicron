@@ -759,14 +759,12 @@ task: "sp_ereport_ingester"
   configured period: every <REDACTED_DURATION>s
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-/!\ errors:                  1
-      - failed to resolve MGS addresses: proto error: no records found for Query { name: Name("_mgs._tcp.control-plane.oxide.internal."), query_type: SRV, query_class: IN }
-    total ereports received:      0
-      new ereports ingested:      0
-    total HTTP requests sent:     0
-      total collection errors:    0
-    reporters with ereports:      0
-    reporters with collection errors:   0
+    total ereports received:             <TOTAL_EREPORTS_RECEIVED_REDACTED>
+      new ereports ingested:             <NEW_EREPORTS_INGESTED_REDACTED>
+    total HTTP requests sent:            <TOTAL_HTTP_REQUESTS_SENT_REDACTED>
+      total collection errors:           <TOTAL_COLLECTION_ERRORS_REDACTED>
+    reporters with ereports:             <REPORTERS_WITH_EREPORTS_REDACTED>
+    reporters with collection errors:    <REPORTERS_WITH_COLLECTION_ERRORS_REDACTED>
 
 task: "support_bundle_collector"
   configured period: every <REDACTED_DURATION>days <REDACTED_DURATION>h <REDACTED_DURATION>m <REDACTED_DURATION>s
@@ -1277,14 +1275,12 @@ task: "sp_ereport_ingester"
   configured period: every <REDACTED_DURATION>s
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-/!\ errors:                  1
-      - failed to resolve MGS addresses: proto error: no records found for Query { name: Name("_mgs._tcp.control-plane.oxide.internal."), query_type: SRV, query_class: IN }
-    total ereports received:      0
-      new ereports ingested:      0
-    total HTTP requests sent:     0
-      total collection errors:    0
-    reporters with ereports:      0
-    reporters with collection errors:   0
+    total ereports received:             <TOTAL_EREPORTS_RECEIVED_REDACTED>
+      new ereports ingested:             <NEW_EREPORTS_INGESTED_REDACTED>
+    total HTTP requests sent:            <TOTAL_HTTP_REQUESTS_SENT_REDACTED>
+      total collection errors:           <TOTAL_COLLECTION_ERRORS_REDACTED>
+    reporters with ereports:             <REPORTERS_WITH_EREPORTS_REDACTED>
+    reporters with collection errors:    <REPORTERS_WITH_COLLECTION_ERRORS_REDACTED>
 
 task: "support_bundle_collector"
   configured period: every <REDACTED_DURATION>days <REDACTED_DURATION>h <REDACTED_DURATION>m <REDACTED_DURATION>s

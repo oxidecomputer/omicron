@@ -303,6 +303,26 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
         .field("triggered by", r"[\w ]+")
         .section(&["task: \"tuf_artifact_replication\"", "request ringbuf:"]);
 
+    // The `sp_ereport_ingester` task's output depends on how many simulated
+    // sled agents ahppen to register with Nexus before its first execution.
+    // These redactions work around the issue described in
+    // https://github.com/oxidecomputer/omicron/issues/8979
+    redactor
+        .field("total ereports received:", r"\d+")
+        .field("new ereports ingested:", r"\d+")
+        .field("total HTTP requests sent:", r"\d+")
+        .field("total collection errors:", r"\d+")
+        .field("reporters with ereports:", r"\d+")
+        .field("reporters with collection errors:", r"\d+")
+        .totally_annihilate_section(&[
+            "task: \"sp_ereport_ingester\"",
+            "errors listing reporters:",
+        ])
+        .totally_annihilate_section(&[
+            "task: \"sp_ereport_ingester\"",
+            "service processors:",
+        ]);
+
     for args in invocations {
         println!("running commands with args: {:?}", args);
         let p = postgres_url.to_string();
