@@ -1128,6 +1128,15 @@ table! {
 allow_tables_to_appear_in_same_query!(zpool, crucible_dataset);
 
 table! {
+    debug_log_blueprint_planning (blueprint_id) {
+        blueprint_id -> Uuid,
+        debug_blob -> Jsonb,
+    }
+}
+
+allow_tables_to_appear_in_same_query!(blueprint, debug_log_blueprint_planning);
+
+table! {
     rendezvous_debug_dataset (id) {
         id -> Uuid,
         time_created -> Timestamptz,
