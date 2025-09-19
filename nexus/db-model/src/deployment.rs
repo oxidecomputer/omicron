@@ -1573,11 +1573,11 @@ pub struct DebugLogBlueprintPlanning {
     pub debug_blob: serde_json::Value,
 }
 
-impl TryFrom<Arc<PlanningReport>> for DebugLogBlueprintPlanning {
-    type Error = serde_json::Error;
-
-    fn try_from(report: Arc<PlanningReport>) -> Result<Self, Self::Error> {
-        let blueprint_id = report.blueprint_id.into();
+impl DebugLogBlueprintPlanning {
+    pub fn new(
+        blueprint_id: BlueprintUuid,
+        report: Arc<PlanningReport>,
+    ) -> Result<Self, serde_json::Error> {
         let report = serde_json::to_value(report)?;
 
         // We explicitly _don't_ define a struct describing the format of
@@ -1595,6 +1595,6 @@ impl TryFrom<Arc<PlanningReport>> for DebugLogBlueprintPlanning {
             "report": report,
         });
 
-        Ok(Self { blueprint_id, debug_blob })
+        Ok(Self { blueprint_id: blueprint_id.into(), debug_blob })
     }
 }

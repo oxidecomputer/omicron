@@ -275,7 +275,7 @@ impl BlueprintPlanner {
                      generating an empty planning report";
                     "source" => ?&blueprint.source,
                 );
-                Arc::new(PlanningReport::new(blueprint.id))
+                Arc::new(PlanningReport::new())
             }
         };
         self.tx_blueprint.send_replace(Some(Arc::new((target, blueprint))));
@@ -391,10 +391,9 @@ mod test {
             BlueprintPlannerStatus::Targeted {
                 parent_blueprint_id,
                 blueprint_id,
-                report,
+                report: _,
             } if parent_blueprint_id == initial_blueprint.id
-                && blueprint_id != initial_blueprint.id
-                && blueprint_id == report.blueprint_id =>
+                && blueprint_id != initial_blueprint.id =>
             {
                 blueprint_id
             }

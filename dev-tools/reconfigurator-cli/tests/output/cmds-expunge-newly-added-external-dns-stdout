@@ -851,7 +851,7 @@ planner config updated:
 INFO skipping noop image source check for all sleds, reason: no target release is currently set
 generated blueprint 9c998c1d-1a7b-440a-ae0c-40f781dea6e2 based on parent blueprint 366b0b68-d80e-4bc1-abd3-dc69837847e0
 blueprint source: planner with report:
-planning report for blueprint 9c998c1d-1a7b-440a-ae0c-40f781dea6e2:
+planning report:
 planner config:
     add zones with mupdate override:   true
 
@@ -1360,7 +1360,7 @@ parent:    366b0b68-d80e-4bc1-abd3-dc69837847e0
  PENDING MGS-MANAGED UPDATES: 0
 
 blueprint source: planner with report:
-planning report for blueprint 9c998c1d-1a7b-440a-ae0c-40f781dea6e2:
+planning report:
 planner config:
     add zones with mupdate override:   true
 
