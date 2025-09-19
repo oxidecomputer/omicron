@@ -20842,7 +20842,7 @@
           },
           "boot_disk": {
             "nullable": true,
-            "description": "Name or ID of the disk the instance should be instructed to boot from.\n\nIf not provided, unset the instance's boot disk.",
+            "description": "Name or ID of the disk the instance should be instructed to boot from.\n\nA null value unsets the boot disk.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/NameOrId"
@@ -20876,6 +20876,9 @@
           }
         },
         "required": [
+          "auto_restart_policy",
+          "boot_disk",
+          "cpu_platform",
           "memory",
           "ncpus"
         ]

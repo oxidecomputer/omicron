@@ -43,6 +43,9 @@ use clap::ValueEnum;
 use clap::builder::PossibleValue;
 use clap::builder::PossibleValuesParser;
 use clap::builder::TypedValueParser;
+use db_metadata::DbMetadataArgs;
+use db_metadata::DbMetadataCommands;
+use db_metadata::cmd_db_metadata_list_nexus;
 use diesel::BoolExpressionMethods;
 use diesel::ExpressionMethods;
 use diesel::JoinOnDsl;
@@ -172,6 +175,7 @@ use uuid::Uuid;
 
 mod alert;
 mod blueprints;
+mod db_metadata;
 mod ereport;
 mod saga;
 mod user_data_export;
@@ -344,6 +348,8 @@ enum DbCommands {
     ///
     /// Most blueprint information is available via `omdb nexus`, not `omdb db`.
     Blueprints(blueprints::BlueprintsArgs),
+    /// Commands for database metadata
+    DbMetadata(DbMetadataArgs),
     /// Commands relevant to Crucible datasets
     CrucibleDataset(CrucibleDatasetArgs),
     /// Print any Crucible resources that are located on expunged physical disks
@@ -1136,6 +1142,11 @@ impl DbArgs {
                 match &self.command {
                     DbCommands::Blueprints(args) => {
                         cmd_db_blueprints(&opctx, &datastore, &fetch_opts, &args).await
+                    }
+                    DbCommands::DbMetadata(DbMetadataArgs {
+                        command: DbMetadataCommands::ListNexus,
+                    }) => {
+                        cmd_db_metadata_list_nexus(&opctx, &datastore).await
                     }
                     DbCommands::CrucibleDataset(CrucibleDatasetArgs {
                         command: CrucibleDatasetCommands::List,

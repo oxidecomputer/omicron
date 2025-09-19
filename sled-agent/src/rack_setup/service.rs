@@ -129,6 +129,7 @@ use sled_agent_types::early_networking::{
 };
 use sled_agent_types::rack_init::{
     BootstrapAddressDiscovery, RackInitializeRequest as Config,
+    RackInitializeRequestParams,
 };
 use sled_agent_types::rack_ops::RssStep;
 use sled_agent_types::sled::StartSledAgentRequest;
@@ -273,7 +274,7 @@ impl RackSetupService {
     /// - `bootstore` - A handle to call bootstore APIs
     pub(crate) fn new(
         log: Logger,
-        config: Config,
+        request: RackInitializeRequestParams,
         internal_disks_rx: InternalDisksReceiver,
         local_bootstrap_agent: BootstrapAgentHandle,
         bootstore: bootstore::NodeHandle,
@@ -283,7 +284,7 @@ impl RackSetupService {
             let svc = ServiceInner::new(log.clone());
             if let Err(e) = svc
                 .run(
-                    &config,
+                    &request,
                     &internal_disks_rx,
                     local_bootstrap_agent,
                     bootstore,
@@ -1170,14 +1171,16 @@ impl ServiceInner {
     //    remaining is to handoff to Nexus.
     async fn run(
         &self,
-        config: &Config,
+        request: &RackInitializeRequestParams,
         internal_disks_rx: &InternalDisksReceiver,
         local_bootstrap_agent: BootstrapAgentHandle,
         bootstore: bootstore::NodeHandle,
         step_tx: watch::Sender<RssStep>,
     ) -> Result<(), SetupServiceError> {
-        info!(self.log, "Injecting RSS configuration: {:#?}", config);
+        info!(self.log, "Injecting RSS configuration: {:#?}", request);
         let mut rss_step = RssProgress::new(step_tx);
+        let config = &request.rack_initialize_request;
+        let skip_timesync = request.skip_timesync;
 
         let resolver = DnsResolver::new_from_subnet(
             self.log.new(o!("component" => "DnsResolver")),
@@ -1384,24 +1387,27 @@ impl ServiceInner {
             })
             .collect();
 
-        let ntp_clients = ntp_addresses
-            .into_iter()
-            .map(|address| {
-                let dur = std::time::Duration::from_secs(60);
-                let client = reqwest::ClientBuilder::new()
-                    .connect_timeout(dur)
-                    .timeout(dur)
-                    .build()
-                    .map_err(SetupServiceError::HttpClient)?;
-                let client = NtpAdminClient::new_with_client(
-                    &format!("http://{}", address),
-                    client,
-                    self.log.new(o!("NtpAdminClient" => address.to_string())),
-                );
-                Ok(client)
-            })
-            .collect::<Result<Vec<_>, SetupServiceError>>()?;
-        self.wait_for_timesync(&ntp_clients).await?;
+        if !skip_timesync {
+            let ntp_clients = ntp_addresses
+                .into_iter()
+                .map(|address| {
+                    let dur = std::time::Duration::from_secs(60);
+                    let client = reqwest::ClientBuilder::new()
+                        .connect_timeout(dur)
+                        .timeout(dur)
+                        .build()
+                        .map_err(SetupServiceError::HttpClient)?;
+                    let client = NtpAdminClient::new_with_client(
+                        &format!("http://{}", address),
+                        client,
+                        self.log
+                            .new(o!("NtpAdminClient" => address.to_string())),
+                    );
+                    Ok(client)
+                })
+                .collect::<Result<Vec<_>, SetupServiceError>>()?;
+            self.wait_for_timesync(&ntp_clients).await?;
+        }
 
         info!(self.log, "Finished setting up Internal DNS and NTP");
 
