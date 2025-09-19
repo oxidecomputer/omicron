@@ -2981,6 +2981,7 @@ mod tests {
     use nexus_reconfigurator_planning::system::SledBuilder;
     use nexus_reconfigurator_planning::system::SystemDescription;
     use nexus_types::deployment::Blueprint;
+    use nexus_types::deployment::BlueprintSource;
     use nexus_types::deployment::BlueprintTarget;
     use nexus_types::deployment::BlueprintZoneConfig;
     use nexus_types::deployment::BlueprintZoneDisposition;
@@ -3348,7 +3349,7 @@ mod tests {
                     bp0.nexus_generation,
                 )
                 .expect("added nexus to third sled");
-            builder.build()
+            builder.build(BlueprintSource::Test)
         };
         bp_insert_and_make_target(&opctx, &datastore, &bp1).await;
 
@@ -3375,7 +3376,6 @@ mod tests {
         let bp2 = {
             let mut bp2 = bp1.clone();
             bp2.id = BlueprintUuid::new_v4();
-            bp2.report.blueprint_id = bp2.id;
             bp2.parent_blueprint_id = Some(bp1.id);
             let sled2 =
                 bp2.sleds.get_mut(&sled_ids[2]).expect("config for third sled");
@@ -3426,7 +3426,7 @@ mod tests {
                     )
                     .expect("added nexus to third sled");
             }
-            builder.build()
+            builder.build(BlueprintSource::Test)
         };
 
         // Insert the service NIC records for all the Nexuses.
@@ -3482,7 +3482,6 @@ mod tests {
         let bp4 = {
             let mut bp4 = bp3.clone();
             bp4.id = BlueprintUuid::new_v4();
-            bp4.report.blueprint_id = bp4.id;
             bp4.parent_blueprint_id = Some(bp3.id);
 
             // Sled index 3's zone is expunged (should be excluded).

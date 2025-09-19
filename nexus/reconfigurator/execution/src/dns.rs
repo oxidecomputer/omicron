@@ -337,6 +337,7 @@ mod test {
     use nexus_types::deployment::Blueprint;
     use nexus_types::deployment::BlueprintHostPhase2DesiredSlots;
     use nexus_types::deployment::BlueprintSledConfig;
+    use nexus_types::deployment::BlueprintSource;
     use nexus_types::deployment::BlueprintTarget;
     use nexus_types::deployment::BlueprintZoneConfig;
     use nexus_types::deployment::BlueprintZoneDisposition;
@@ -352,7 +353,6 @@ mod test {
     use nexus_types::deployment::OximeterReadPolicy;
     use nexus_types::deployment::PendingMgsUpdates;
     use nexus_types::deployment::PlannerConfig;
-    use nexus_types::deployment::PlanningReport;
     use nexus_types::deployment::SledFilter;
     use nexus_types::deployment::TufRepoPolicy;
     use nexus_types::deployment::blueprint_zone_type;
@@ -730,7 +730,7 @@ mod test {
             time_created: now_db_precision(),
             creator: "test-suite".to_string(),
             comment: "test blueprint".to_string(),
-            report: PlanningReport::new(blueprint_id),
+            source: BlueprintSource::Test,
         };
 
         // To make things slightly more interesting, let's add a zone that's
@@ -1574,7 +1574,7 @@ mod test {
                 blueprint.nexus_generation,
             )
             .unwrap();
-        let blueprint2 = builder.build();
+        let blueprint2 = builder.build(BlueprintSource::Test);
         eprintln!("blueprint2: {}", blueprint2.display());
         // Figure out the id of the new zone.
         let zones_before = blueprint

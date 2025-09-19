@@ -10,7 +10,7 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
 use nexus_reconfigurator_planning::planner::PlannerRng;
-use nexus_types::deployment::{Blueprint, PlanningInput};
+use nexus_types::deployment::{Blueprint, BlueprintSource, PlanningInput};
 use nexus_types::external_api::views::SledState;
 use nexus_types::inventory::Collection;
 use omicron_test_utils::dev::poll::{CondCheckError, wait_for_condition};
@@ -101,7 +101,7 @@ pub async fn blueprint_edit_current_target(
     edit_fn(&mut builder)?;
 
     // Assemble the new blueprint, import it, and make it the new target.
-    let blueprint2 = builder.build();
+    let blueprint2 = builder.build(BlueprintSource::Test);
     info!(log, "assembled new blueprint based on target";
         "current_target_id" => %blueprint1.id,
         "new_blueprint_id" => %blueprint2.id,

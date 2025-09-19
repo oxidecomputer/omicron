@@ -78,6 +78,7 @@ use nexus_db_schema::enums::SpTypeEnum;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintMetadata;
 use nexus_types::deployment::BlueprintSledConfig;
+use nexus_types::deployment::BlueprintSource;
 use nexus_types::deployment::BlueprintTarget;
 use nexus_types::deployment::ClickhouseClusterConfig;
 use nexus_types::deployment::CockroachDbPreserveDowngrade;
@@ -90,7 +91,6 @@ use nexus_types::deployment::PendingMgsUpdateRotBootloaderDetails;
 use nexus_types::deployment::PendingMgsUpdateRotDetails;
 use nexus_types::deployment::PendingMgsUpdateSpDetails;
 use nexus_types::deployment::PendingMgsUpdates;
-use nexus_types::deployment::PlanningReport;
 use nexus_types::inventory::BaseboardId;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
@@ -510,32 +510,32 @@ impl DataStore {
                 }
 
                 // Serialize and insert a debug log for the planning report
-                // created with this blueprint.
-                match DebugLogBlueprintPlanning::try_from(
-                    blueprint.report.clone(),
-                ) {
-                    Ok(debug_log) => {
-                        use nexus_db_schema::schema::debug_log_blueprint_planning::dsl;
-                        let _ = diesel::insert_into(
-                            dsl::debug_log_blueprint_planning
-                        )
-                            .values(debug_log)
-                            .execute_async(&conn)
-                            .await?;
-                    }
-                    Err(err) => {
-                        // This isn't a fatal error - we've already inserted the
-                        // production-meaningful blueprint content. Not being
-                        // able to log the debug version of the report isn't
-                        // great, but blocking real blueprint insertion on debug
-                        // logging issues seems worse.
-                        error!(
-                            self.log,
-                            "could not serialize blueprint planning report";
-                            InlineErrorChain::new(&err),
-                        );
-                    }
+                // created with this blueprint, if we have one.
+                if let BlueprintSource::Planner(report) = &blueprint.source {
+                    match DebugLogBlueprintPlanning::try_from(report.clone()) {
+                        Ok(debug_log) => {
+                            use nexus_db_schema::schema::debug_log_blueprint_planning::dsl;
+                            let _ = diesel::insert_into(
+                                dsl::debug_log_blueprint_planning
+                            )
+                                .values(debug_log)
+                                .execute_async(&conn)
+                                .await?;
+                        }
+                        Err(err) => {
+                            // This isn't a fatal error - we've already inserted
+                            // the production-meaningful blueprint content. Not
+                            // being able to log the debug version of the report
+                            // isn't great, but blocking real blueprint
+                            // insertion on debug logging issues seems worse.
+                            error!(
+                                self.log,
+                                "could not serialize blueprint planning report";
+                                InlineErrorChain::new(&err),
+                            );
+                        }
 
+                    }
                 }
 
                 Ok(())
@@ -585,6 +585,7 @@ impl DataStore {
             time_created,
             creator,
             comment,
+            source,
         ) = {
             use nexus_db_schema::schema::blueprint::dsl;
 
@@ -612,6 +613,7 @@ impl DataStore {
                 blueprint.time_created,
                 blueprint.creator,
                 blueprint.comment,
+                BlueprintSource::from(blueprint.source),
             )
         };
         let cockroachdb_setting_preserve_downgrade =
@@ -1347,11 +1349,6 @@ impl DataStore {
             )?;
         }
 
-        // We do not load full fidelity reports from the database.
-        //
-        // TODO-cleanup Should we remove this field from `Blueprint` entirely?
-        let report = PlanningReport::new(blueprint_id);
-
         Ok(Blueprint {
             id: blueprint_id,
             pending_mgs_updates,
@@ -1369,7 +1366,7 @@ impl DataStore {
             time_created,
             creator,
             comment,
-            report,
+            source,
         })
     }
 
@@ -3582,7 +3579,7 @@ mod tests {
         let num_new_crucible_zones = new_sled_zpools.len();
         let num_new_sled_zones = num_new_ntp_zones + num_new_crucible_zones;
 
-        let blueprint2 = builder.build();
+        let blueprint2 = builder.build(BlueprintSource::Test);
         let authz_blueprint2 = authz_blueprint_from_id(blueprint2.id);
 
         let diff = blueprint2.diff_since_blueprint(&blueprint1);
@@ -3710,7 +3707,7 @@ mod tests {
             artifact_hash: ArtifactHash([72; 32]),
             artifact_version: "2.0.0".parse().unwrap(),
         });
-        let blueprint3 = builder.build();
+        let blueprint3 = builder.build(BlueprintSource::Test);
         let authz_blueprint3 = authz_blueprint_from_id(blueprint3.id);
         datastore
             .blueprint_insert(&opctx, &blueprint3)
@@ -3764,7 +3761,7 @@ mod tests {
             artifact_hash: ArtifactHash([72; 32]),
             artifact_version: "2.0.0".parse().unwrap(),
         });
-        let blueprint4 = builder.build();
+        let blueprint4 = builder.build(BlueprintSource::Test);
         let authz_blueprint4 = authz_blueprint_from_id(blueprint4.id);
         datastore
             .blueprint_insert(&opctx, &blueprint4)
@@ -3822,7 +3819,7 @@ mod tests {
             artifact_hash: ArtifactHash([72; 32]),
             artifact_version: "2.0.0".parse().unwrap(),
         });
-        let blueprint5 = builder.build();
+        let blueprint5 = builder.build(BlueprintSource::Test);
         let authz_blueprint5 = authz_blueprint_from_id(blueprint5.id);
         datastore
             .blueprint_insert(&opctx, &blueprint5)
@@ -3858,7 +3855,7 @@ mod tests {
             PlannerRng::from_entropy(),
         )
         .expect("failed to create builder")
-        .build();
+        .build(BlueprintSource::Test);
         datastore
             .blueprint_insert(&opctx, &blueprint6)
             .await
@@ -3936,7 +3933,7 @@ mod tests {
             PlannerRng::from_entropy(),
         )
         .expect("failed to create builder")
-        .build();
+        .build(BlueprintSource::Test);
         let blueprint3 = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint1,
@@ -3946,7 +3943,7 @@ mod tests {
             PlannerRng::from_entropy(),
         )
         .expect("failed to create builder")
-        .build();
+        .build(BlueprintSource::Test);
         assert_eq!(blueprint1.parent_blueprint_id, None);
         assert_eq!(blueprint2.parent_blueprint_id, Some(blueprint1.id));
         assert_eq!(blueprint3.parent_blueprint_id, Some(blueprint1.id));
@@ -4047,7 +4044,7 @@ mod tests {
             PlannerRng::from_entropy(),
         )
         .expect("failed to create builder")
-        .build();
+        .build(BlueprintSource::Test);
         assert_eq!(blueprint4.parent_blueprint_id, Some(blueprint3.id));
         datastore.blueprint_insert(&opctx, &blueprint4).await.unwrap();
         let bp4_target = BlueprintTarget {
@@ -4093,7 +4090,7 @@ mod tests {
             PlannerRng::from_entropy(),
         )
         .expect("failed to create builder")
-        .build();
+        .build(BlueprintSource::Test);
         assert_eq!(blueprint1.parent_blueprint_id, None);
         assert_eq!(blueprint2.parent_blueprint_id, Some(blueprint1.id));
 
@@ -4332,7 +4329,7 @@ mod tests {
             PlannerRng::from_entropy(),
         )
         .expect("failed to create builder")
-        .build();
+        .build(BlueprintSource::Test);
 
         // Insert an IP pool range covering the one Nexus IP.
         let nexus_ip = blueprint1
@@ -4723,8 +4720,12 @@ mod tests {
         let counts = BlueprintTableCounts::new(datastore, blueprint_id).await;
 
         // Exception tables that may be empty in the representative blueprint:
-        // - MGS update tables: only populated when blueprint includes firmware updates
-        // - ClickHouse tables: only populated when blueprint includes ClickHouse configuration
+        // - MGS update tables: only populated when blueprint includes firmware
+        //   updates
+        // - ClickHouse tables: only populated when blueprint includes
+        //   ClickHouse configuration
+        // - debug log for planner reports: only populated when the blueprint
+        //   was produced by the planner (test blueprints generally aren't)
         let exception_tables = [
             "bp_pending_mgs_update_sp",
             "bp_pending_mgs_update_rot",
@@ -4733,6 +4734,7 @@ mod tests {
             "bp_clickhouse_cluster_config",
             "bp_clickhouse_keeper_zone_id_to_node_id",
             "bp_clickhouse_server_zone_id_to_node_id",
+            "debug_log_blueprint_planning",
         ];
 
         // Check that all non-exception tables have at least one row

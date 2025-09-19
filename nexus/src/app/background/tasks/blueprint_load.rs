@@ -196,8 +196,8 @@ mod test {
     use nexus_inventory::now_db_precision;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::{
-        Blueprint, BlueprintTarget, CockroachDbPreserveDowngrade,
-        OximeterReadMode, PendingMgsUpdates, PlanningReport,
+        Blueprint, BlueprintSource, BlueprintTarget,
+        CockroachDbPreserveDowngrade, OximeterReadMode, PendingMgsUpdates,
     };
     use omicron_common::api::external::Generation;
     use omicron_uuid_kinds::BlueprintUuid;
@@ -235,7 +235,7 @@ mod test {
                 time_created: now_db_precision(),
                 creator: "test".to_string(),
                 comment: "test blueprint".to_string(),
-                report: PlanningReport::new(id),
+                source: BlueprintSource::Test,
             },
         )
     }

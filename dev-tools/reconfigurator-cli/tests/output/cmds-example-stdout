@@ -403,7 +403,7 @@ parent:    02697f74-b14a-4418-90f0-c28b2a3a6aa9
 
  PENDING MGS-MANAGED UPDATES: 0
 
-empty planning report for blueprint ade5749d-bdf3-4fab-a8ae-00bea01b3a5a.
+blueprint source: test
 
 
 
@@ -570,7 +570,7 @@ parent:    02697f74-b14a-4418-90f0-c28b2a3a6aa9
 
  PENDING MGS-MANAGED UPDATES: 0
 
-empty planning report for blueprint ade5749d-bdf3-4fab-a8ae-00bea01b3a5a.
+blueprint source: test
 
 
 
@@ -601,7 +601,9 @@ T ENA ID                                   PARENT                               
 INFO skipping noop image source check for all sleds, reason: no target release is currently set
 WARN cannot issue more MGS-driven updates (no current artifacts)
 generated blueprint 86db3308-f817-4626-8838-4085949a6a41 based on parent blueprint ade5749d-bdf3-4fab-a8ae-00bea01b3a5a
+blueprint source: planner with report:
 empty planning report for blueprint 86db3308-f817-4626-8838-4085949a6a41.
+
 
 
 > blueprint-list
@@ -1289,7 +1291,7 @@ parent:    02697f74-b14a-4418-90f0-c28b2a3a6aa9
 
  PENDING MGS-MANAGED UPDATES: 0
 
-empty planning report for blueprint ade5749d-bdf3-4fab-a8ae-00bea01b3a5a.
+blueprint source: test
 
 
 
@@ -1839,7 +1841,9 @@ INTERNAL DNS STATUS
 INFO skipping noop image source check for all sleds, reason: no target release is currently set
 WARN cannot issue more MGS-driven updates (no current artifacts)
 generated blueprint 86db3308-f817-4626-8838-4085949a6a41 based on parent blueprint ade5749d-bdf3-4fab-a8ae-00bea01b3a5a
+blueprint source: planner with report:
 empty planning report for blueprint 86db3308-f817-4626-8838-4085949a6a41.
+
 
 
 > blueprint-diff ade5749d-bdf3-4fab-a8ae-00bea01b3a5a latest

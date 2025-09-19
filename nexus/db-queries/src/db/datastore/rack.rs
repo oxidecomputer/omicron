@@ -1048,6 +1048,7 @@ mod test {
     use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
     use nexus_types::deployment::BlueprintHostPhase2DesiredSlots;
     use nexus_types::deployment::BlueprintSledConfig;
+    use nexus_types::deployment::BlueprintSource;
     use nexus_types::deployment::CockroachDbPreserveDowngrade;
     use nexus_types::deployment::PendingMgsUpdates;
     use nexus_types::deployment::{
@@ -1056,7 +1057,7 @@ mod test {
     };
     use nexus_types::deployment::{
         BlueprintZoneDisposition, BlueprintZoneImageSource,
-        OmicronZoneExternalSnatIp, OximeterReadMode, PlanningReport,
+        OmicronZoneExternalSnatIp, OximeterReadMode,
     };
     use nexus_types::external_api::shared::SiloIdentityMode;
     use nexus_types::external_api::views::SledState;
@@ -1113,7 +1114,7 @@ mod test {
                     time_created: Utc::now(),
                     creator: "test suite".to_string(),
                     comment: "test suite".to_string(),
-                    report: PlanningReport::new(blueprint_id),
+                    source: BlueprintSource::Test,
                 },
                 blueprint_execution_enabled: false,
                 physical_disks: vec![],
@@ -1604,7 +1605,7 @@ mod test {
             time_created: now_db_precision(),
             creator: "test suite".to_string(),
             comment: "test blueprint".to_string(),
-            report: PlanningReport::new(blueprint_id),
+            source: BlueprintSource::Test,
         };
 
         let rack = datastore
@@ -1870,7 +1871,7 @@ mod test {
             time_created: now_db_precision(),
             creator: "test suite".to_string(),
             comment: "test blueprint".to_string(),
-            report: PlanningReport::new(blueprint_id),
+            source: BlueprintSource::Test,
         };
 
         let rack = datastore
@@ -2118,7 +2119,7 @@ mod test {
             time_created: now_db_precision(),
             creator: "test suite".to_string(),
             comment: "test blueprint".to_string(),
-            report: PlanningReport::new(blueprint_id),
+            source: BlueprintSource::Test,
             nexus_generation: *Generation::new(),
         };
 
@@ -2318,7 +2319,7 @@ mod test {
             time_created: now_db_precision(),
             creator: "test suite".to_string(),
             comment: "test blueprint".to_string(),
-            report: PlanningReport::new(blueprint_id),
+            source: BlueprintSource::Test,
         };
 
         let result = datastore
@@ -2460,7 +2461,7 @@ mod test {
             time_created: now_db_precision(),
             creator: "test suite".to_string(),
             comment: "test blueprint".to_string(),
-            report: PlanningReport::new(blueprint_id),
+            source: BlueprintSource::Test,
         };
 
         let result = datastore

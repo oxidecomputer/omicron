@@ -1096,7 +1096,6 @@ mod test {
         let bp2 = {
             let mut bp2 = bp1.clone();
             bp2.id = BlueprintUuid::new_v4();
-            bp2.report.blueprint_id = bp2.id;
             bp2.parent_blueprint_id = Some(bp1.id);
             expunge_dataset_for_bundle(&mut bp2, &bundle);
             bp2
@@ -1213,7 +1212,6 @@ mod test {
         let bp2 = {
             let mut bp2 = bp1.clone();
             bp2.id = BlueprintUuid::new_v4();
-            bp2.report.blueprint_id = bp2.id;
             bp2.parent_blueprint_id = Some(bp1.id);
             expunge_dataset_for_bundle(&mut bp2, &bundle);
             bp2
@@ -1297,7 +1295,6 @@ mod test {
         let bp2 = {
             let mut bp2 = bp1.clone();
             bp2.id = BlueprintUuid::new_v4();
-            bp2.report.blueprint_id = bp2.id;
             bp2.parent_blueprint_id = Some(bp1.id);
             expunge_dataset_for_bundle(&mut bp2, &bundle);
             bp2
@@ -1332,7 +1329,6 @@ mod test {
         let bp3 = {
             let mut bp3 = bp2.clone();
             bp3.id = BlueprintUuid::new_v4();
-            bp3.report.blueprint_id = bp3.id;
             bp3.parent_blueprint_id = Some(bp2.id);
             expunge_nexus_for_bundle(&mut bp3, &bundle);
             bp3
@@ -1433,7 +1429,6 @@ mod test {
         let bp2 = {
             let mut bp2 = bp1.clone();
             bp2.id = BlueprintUuid::new_v4();
-            bp2.report.blueprint_id = bp2.id;
             bp2.parent_blueprint_id = Some(bp1.id);
             expunge_nexus_for_bundle(&mut bp2, &bundle);
             bp2
