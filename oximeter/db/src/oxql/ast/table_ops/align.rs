@@ -550,7 +550,12 @@ fn max_value_in_window(
     _metric_type: &MetricType,
     window: &MetricWindow,
 ) -> Option<f64> {
-    window.input_points.iter()
+    let start_index = window.timestamps.partition_point(|t| t <= &window.start);
+    let output_index = window.timestamps.partition_point(|t| t <= &window.end);
+    assert!(output_index >= start_index);
+
+    window.input_points[start_index..output_index]
+        .iter()
         .filter_map(|&x| x)
         .fold(None, |acc, x| {
         match acc {
@@ -564,7 +569,12 @@ fn min_value_in_window(
     _metric_type: &MetricType,
     window: &MetricWindow,
 ) -> Option<f64> {
-    window.input_points.iter()
+    let start_index = window.timestamps.partition_point(|t| t <= &window.start);
+    let output_index = window.timestamps.partition_point(|t| t <= &window.end);
+    assert!(output_index >= start_index);
+
+    window.input_points[start_index..output_index]
+        .iter()
         .filter_map(|&x| x)
         .fold(None, |acc, x| {
         match acc {
