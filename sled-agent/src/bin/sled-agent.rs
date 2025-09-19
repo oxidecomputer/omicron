@@ -62,13 +62,18 @@ async fn do_run() -> Result<(), CmdError> {
                 rss_config_path.push("config-rss.toml");
                 rss_config_path
             };
-            let rss_config = rss_config_path.exists().then_some({
+            let rss_config = if rss_config_path.exists() {
                 let rss_config =
                     RackInitializeRequest::from_file(rss_config_path)
                         .map_err(|e| CmdError::Failure(anyhow!(e)))?;
                 let skip_timesync = config.skip_timesync.unwrap_or(false);
-                RackInitializeRequestParams::new(rss_config, skip_timesync)
-            });
+                Some(RackInitializeRequestParams::new(
+                    rss_config,
+                    skip_timesync,
+                ))
+            } else {
+                None
+            };
 
             let server = bootstrap_server::Server::start(config)
                 .await
