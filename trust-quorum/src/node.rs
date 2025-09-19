@@ -1001,8 +1001,6 @@ impl Node {
         if let Some(cs) = &mut self.coordinator_state {
             cs.handle_lrtq_share(ctx, from.clone(), share.clone());
         }
-
-        self.rack_secret_loader.handle_lrtq_share(ctx, from, share);
     }
 
     // Send any required messages as a reconfiguration coordinator
