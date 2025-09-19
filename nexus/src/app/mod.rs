@@ -193,6 +193,9 @@ pub struct Nexus {
     /// Internal dropshot server
     internal_server: std::sync::Mutex<Option<DropshotServer>>,
 
+    /// Lockstep dropshot server
+    lockstep_server: std::sync::Mutex<Option<DropshotServer>>,
+
     /// Status of background task to populate database
     populate_status: watch::Receiver<PopulateStatus>,
 
@@ -488,6 +491,7 @@ impl Nexus {
             external_server: std::sync::Mutex::new(None),
             techport_external_server: std::sync::Mutex::new(None),
             internal_server: std::sync::Mutex::new(None),
+            lockstep_server: std::sync::Mutex::new(None),
             producer_server: std::sync::Mutex::new(None),
             populate_status,
             reqwest_client,
@@ -705,6 +709,7 @@ impl Nexus {
         external_server: DropshotServer,
         techport_external_server: DropshotServer,
         internal_server: DropshotServer,
+        lockstep_server: DropshotServer,
         producer_server: ProducerServer,
     ) {
         // If any servers already exist, close them.
@@ -717,6 +722,7 @@ impl Nexus {
             .unwrap()
             .replace(techport_external_server);
         self.internal_server.lock().unwrap().replace(internal_server);
+        self.lockstep_server.lock().unwrap().replace(lockstep_server);
         self.producer_server.lock().unwrap().replace(producer_server);
     }
 
@@ -761,6 +767,10 @@ impl Nexus {
         }
         let internal_server = self.internal_server.lock().unwrap().take();
         if let Some(server) = internal_server {
+            extend_err(&mut res, server.close().await);
+        }
+        let lockstep_server = self.lockstep_server.lock().unwrap().take();
+        if let Some(server) = lockstep_server {
             extend_err(&mut res, server.close().await);
         }
         let producer_server = self.producer_server.lock().unwrap().take();
@@ -818,6 +828,16 @@ impl Nexus {
         &self,
     ) -> Option<std::net::SocketAddr> {
         self.internal_server
+            .lock()
+            .unwrap()
+            .as_ref()
+            .map(|server| server.local_addr())
+    }
+
+    pub(crate) async fn get_lockstep_server_address(
+        &self,
+    ) -> Option<std::net::SocketAddr> {
+        self.lockstep_server
             .lock()
             .unwrap()
             .as_ref()

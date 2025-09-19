@@ -69,6 +69,13 @@ default_request_body_max_bytes = 1048576
 bind_address = "[::1]:12223"
 default_request_body_max_bytes = 1048576
 
+[deployment.dropshot_lockstep]
+# IP Address and TCP port on which to listen for the lockstep API
+# This config file uses 12233 to avoid colliding with the usual 12232 that's
+# used by `omicron-dev run-all`
+bind_address = "[::1]:12233"
+default_request_body_max_bytes = 1048576
+
 #[deployment.internal_dns]
 ## These values are overridden at the bottom of this file.
 #type = "from_address"

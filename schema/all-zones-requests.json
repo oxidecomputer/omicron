@@ -642,6 +642,13 @@
               "description": "The address at which the internal nexus server is reachable.",
               "type": "string"
             },
+            "lockstep_port": {
+              "description": "The port at which the internal lockstep server is reachable. This shares the same IP address with `internal_address`.",
+              "default": 12232,
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0.0
+            },
             "nic": {
               "description": "The service vNIC providing external connectivity using OPTE.",
               "allOf": [

@@ -2410,6 +2410,7 @@ pub struct InvOmicronSledConfigZone {
     pub filesystem_pool: Option<DbTypedUuid<ZpoolKind>>,
     pub image_source: InvZoneImageSource,
     pub image_artifact_sha256: Option<ArtifactHash>,
+    pub nexus_lockstep_port: Option<SqlU16>,
 }
 
 impl InvOmicronSledConfigZone {
@@ -2463,6 +2464,7 @@ impl InvOmicronSledConfigZone {
             snat_last_port: None,
             image_source,
             image_artifact_sha256,
+            nexus_lockstep_port: None,
         };
 
         match &zone.zone_type {
@@ -2568,6 +2570,7 @@ impl InvOmicronSledConfigZone {
             }
             OmicronZoneType::Nexus {
                 internal_address,
+                lockstep_port,
                 external_ip,
                 nic,
                 external_tls,
@@ -2589,6 +2592,8 @@ impl InvOmicronSledConfigZone {
                         .map(IpNetwork::from)
                         .collect(),
                 );
+                inv_omicron_zone.nexus_lockstep_port =
+                    Some(SqlU16::from(*lockstep_port));
             }
             OmicronZoneType::Oximeter { address } => {
                 // Set the common fields
@@ -2730,6 +2735,9 @@ impl InvOmicronSledConfigZone {
             }
             ZoneType::Nexus => OmicronZoneType::Nexus {
                 internal_address: primary_address,
+                lockstep_port: *self
+                    .nexus_lockstep_port
+                    .ok_or_else(|| anyhow!("expected 'nexus_lockstep_port'"))?,
                 external_ip: self
                     .second_service_ip
                     .ok_or_else(|| anyhow!("expected second service IP"))?

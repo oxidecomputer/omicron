@@ -340,6 +340,15 @@ versioned_how = "client"
 versioned_how_reason = "Circular dependencies between Nexus and other services"
 
 [[apis]]
+client_package_name = "nexus-lockstep-client"
+label = "Nexus Internal Lockstep API"
+server_package_name = "nexus-lockstep-api"
+# nexus-lockstep-client has to be client-versioned because it's got a cyclic
+# dependency with sled-agent-client, which is server-versioned.
+versioned_how = "client"
+versioned_how_reason = "Circular dependencies between Nexus and other services"
+
+[[apis]]
 client_package_name = "oxide-client"
 label = "External API"
 server_package_name = "nexus-external-api"
