@@ -335,8 +335,8 @@ impl BackgroundTask for SwitchPortSettingsManager {
                 };
 
                 // TODO https://github.com/oxidecomputer/omicron/issues/5201
-                // build sled agent clients
-                let sled_agent_clients = build_sled_agent_clients(&mappings, &log);
+                // build sled agent clients for sleds that are connected to the switches
+                let scrimlet_sled_agent_clients = build_sled_agent_clients(&mappings, &log);
 
                 // TODO https://github.com/oxidecomputer/omicron/issues/5201
                 // build dpd clients
@@ -455,7 +455,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                 // yeet the messages
                 for (location, config) in &uplinks {
                     let client: &sled_agent_client::Client =
-                        match sled_agent_clients.get(location) {
+                        match scrimlet_sled_agent_clients.get(location) {
                             Some(client) => client,
                             None => {
                                 error!(log, "sled-agent client is missing, cannot send updates"; "location" => %location);
@@ -844,7 +844,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
 
                 // Since we update the first scrimlet we can reach (we failover to the second one
                 // if updating the first one fails) we need to check them both.
-                for (_location, client) in &sled_agent_clients {
+                for (_location, client) in &scrimlet_sled_agent_clients {
                     let scrimlet_cfg  = match client.read_network_bootstore_config_cache().await {
                         Ok(config) => config,
                         Err(e) => {
@@ -1286,7 +1286,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                     // push the updates to both scrimlets
                     // if both scrimlets are down, bootstore updates aren't happening anyway
                     let mut one_succeeded = false;
-                    for (location, client) in &sled_agent_clients {
+                    for (location, client) in &scrimlet_sled_agent_clients {
                         if let Err(e) = client.write_network_bootstore_config(&desired_config).await {
                             error!(
                                 log,
