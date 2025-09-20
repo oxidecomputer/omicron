@@ -255,6 +255,7 @@ impl Connection {
     ) -> Result<QueryResult, Error> {
         let mut query_result = QueryResult {
             id: query_id,
+            query: String::from(query),
             progress: Progress::default(),
             data: None,
             profile_info: None,

@@ -339,7 +339,7 @@ impl<'a, N> MetricsQuerier<'a, N> {
         query: String,
     ) -> TimeseriesQueryResult {
         // Issue the query.
-        let body = params::TimeseriesQuery { query };
+        let body = params::TimeseriesQuery { query, include_summaries: false };
         let query = &body.query;
         let rsp = NexusRequest::new(
             RequestBuilder::new(
