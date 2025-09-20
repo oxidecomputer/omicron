@@ -529,7 +529,7 @@ async fn basic_failures() {
         let message = InlineErrorChain::new(error).to_string();
         eprintln!("{}", message);
         assert!(message.contains(&format!(
-            "expected to find active host_phase_1 artifact {bad_hash}, \
+            "expected to find active gimlet_host_phase_1 artifact {bad_hash}, \
              but found {active_phase_1_hash}"
         )));
 
@@ -563,7 +563,7 @@ async fn basic_failures() {
         let message = InlineErrorChain::new(error).to_string();
         eprintln!("{}", message);
         assert!(message.contains(&format!(
-            "expected to find inactive host_phase_1 artifact {bad_hash}, \
+            "expected to find inactive gimlet_host_phase_1 artifact {bad_hash}, \
              but found {inactive_phase_1_hash}"
         )));
 

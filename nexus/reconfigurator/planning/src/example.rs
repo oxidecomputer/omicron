@@ -762,7 +762,7 @@ impl ExampleSystemBuilder {
                 .version
                 .clone();
             let host_phase_1_hash = artifacts_by_kind
-                .get(&ArtifactKind::HOST_PHASE_1)
+                .get(&ArtifactKind::GIMLET_HOST_PHASE_1)
                 .unwrap()
                 .hash;
             let host_phase_2_hash = artifacts_by_kind
