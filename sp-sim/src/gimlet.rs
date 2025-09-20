@@ -31,6 +31,7 @@ use gateway_messages::DumpTask;
 use gateway_messages::Header;
 use gateway_messages::MgsRequest;
 use gateway_messages::MgsResponse;
+use gateway_messages::MonorailError;
 use gateway_messages::PowerStateTransition;
 use gateway_messages::RotBootInfo;
 use gateway_messages::RotRequest;
@@ -40,6 +41,8 @@ use gateway_messages::SpError;
 use gateway_messages::SpPort;
 use gateway_messages::SpRequest;
 use gateway_messages::SpStateV2;
+use gateway_messages::UnlockChallenge;
+use gateway_messages::UnlockResponse;
 use gateway_messages::ignition::{self, LinkEvents};
 use gateway_messages::sp_impl::Sender;
 use gateway_messages::sp_impl::SpHandler;
@@ -1721,6 +1724,16 @@ impl SpHandler for Handler {
 
     fn get_host_flash_hash(&mut self, slot: u16) -> Result<[u8; 32], SpError> {
         self.update_state.get_host_flash_hash(slot)
+    }
+
+    fn unlock(
+        &mut self,
+        _vid: Self::VLanId,
+        _challenge: UnlockChallenge,
+        _response: UnlockResponse,
+        _time_sec: u32,
+    ) -> Result<(), MonorailError> {
+        Err(MonorailError::UnlockFailed)
     }
 }
 
