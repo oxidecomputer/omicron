@@ -30,12 +30,14 @@ function usage
 }
 
 ASSUME_YES="false"
+OMIT_SUDO="false"
 RETRY_ATTEMPTS=3
-while getopts ypr: flag
+while getopts ypsr: flag
 do
   case "${flag}" in
     y) ASSUME_YES="true" ;;
     p) continue ;;
+    s) OMIT_SUDO="true" ;;
     r) RETRY_ATTEMPTS=${OPTARG} ;;
     *) usage
   esac
@@ -139,11 +141,16 @@ function install_packages {
       'libssl3'
       'libxmlsec1-openssl'
     )
-    sudo apt-get update
-    if [[ "${ASSUME_YES}" == "true" ]]; then
-      sudo apt-get install -y "${packages[@]}"
+    if [[ "${OMIT_SUDO}" == "false" ]]; then
+      maybe_sudo="sudo"
     else
-      confirm "Install (or update) [${packages[*]}]?" && sudo apt-get install "${packages[@]}"
+      maybe_sudo=""
+    fi
+    $maybe_sudo apt-get update
+    if [[ "${ASSUME_YES}" == "true" ]]; then
+      $maybe_sudo apt-get install -y "${packages[@]}"
+    else
+      confirm "Install (or update) [${packages[*]}]?" && $maybe_sudo apt-get install "${packages[@]}"
     fi
   else
     echo "Unsupported OS: ${HOST_OS}"
