@@ -22,7 +22,9 @@ name = "fake-host"
 version = "0.0.1"
 [artifact.host.source]
 kind = "composite-host"
-phase_1 = { kind = "fake", size = "512KiB" }
+gimlet_phase_1 = { kind = "fake", size = "512KiB" }
+cosmo_phase_1 = { kind = "fake", size = "512KiB" }
+
 phase_2 = { kind = "fake", size = "1MiB" }
 
 [[artifact.trampoline]]
@@ -30,7 +32,8 @@ name = "fake-trampoline"
 version = "0.0.1"
 [artifact.trampoline.source]
 kind = "composite-host"
-phase_1 = { kind = "fake", size = "512KiB" }
+gimlet_phase_1 = { kind = "fake", size = "512KiB" }
+cosmo_phase_1 = { kind = "fake", size = "512KiB" }
 phase_2 = { kind = "fake", size = "1MiB" }
 
 [[artifact.control_plane]]
