@@ -393,8 +393,8 @@ external DNS:
 
 
 
-> # The above run would have triggered an SP update, which we should delete (we want to start
-> # from a fresh state).
+> # The above blueprint includes a pending MGS update, which we should delete
+> # (we want to start from a fresh state).
 > blueprint-edit latest delete-sp-update serial0
 blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4 created from latest blueprint (8da82a8e-bf97-4fbd-8ddd-9f6462732cf1): deleted configured update for serial serial0
 

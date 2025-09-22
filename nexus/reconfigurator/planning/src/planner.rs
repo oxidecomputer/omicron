@@ -3382,10 +3382,15 @@ pub(crate) mod test {
         let logctx = test_setup_log(TEST_NAME);
 
         // Create an example system with a single sled
-        let (example, blueprint1) =
+        let (mut example, blueprint1) =
             ExampleSystemBuilder::new(&logctx.log, TEST_NAME).nsleds(1).build();
         let mut collection = example.collection;
-        let input = example.input;
+
+        // Set this chicken switch so that zones are added even though image
+        // sources are currently InstallDataset.
+        let mut config = example.system.get_planner_config();
+        config.add_zones_with_mupdate_override = true;
+        example.system.set_planner_config(config);
 
         // The initial blueprint configuration has generation 2
         let (sled_id, sled_config) =
@@ -3400,7 +3405,10 @@ pub(crate) mod test {
             );
         }
 
-        let mut builder = input.into_builder();
+        let mut builder = example
+            .system
+            .to_planning_input_builder()
+            .expect("created PlanningInputBuilder");
 
         // Let's expunge a disk. Its disposition should change to `Expunged`
         // but its state should remain active.

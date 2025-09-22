@@ -9,7 +9,6 @@
 pub(crate) mod dbwrite;
 #[cfg(any(feature = "oxql", test))]
 pub(crate) mod oxql;
-pub(crate) mod query_summary;
 #[cfg(any(feature = "sql", test))]
 mod sql;
 
@@ -23,7 +22,6 @@ use crate::Timeseries;
 use crate::TimeseriesPageSelector;
 use crate::TimeseriesScanParams;
 use crate::TimeseriesSchema;
-use crate::client::query_summary::QuerySummary;
 use crate::model::columns;
 use crate::model::fields::FieldSelectRow;
 use crate::model::from_block::FromBlock;
@@ -1035,8 +1033,10 @@ impl Client {
         handle: &mut Handle,
         field_query: &str,
         schema: &TimeseriesSchema,
-    ) -> Result<(QuerySummary, BTreeMap<TimeseriesKey, (Target, Metric)>), Error>
-    {
+    ) -> Result<
+        (oxql_types::QuerySummary, BTreeMap<TimeseriesKey, (Target, Metric)>),
+        Error,
+    > {
         let result = self.execute_with_block(handle, field_query).await?;
         let summary = result.query_summary();
         let Some(block) = &result.data else {
