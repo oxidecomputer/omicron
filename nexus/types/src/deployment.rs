@@ -270,7 +270,7 @@ pub struct Blueprint {
     /// (for debugging)
     pub comment: String,
 
-    /// Source of this blueprint
+    /// Source of this blueprint (can include planning report)
     pub source: BlueprintSource,
 }
 
@@ -444,7 +444,7 @@ pub enum BlueprintSource {
     /// This blueprint was created by one of `reconfigurator-cli`'s blueprint
     /// editing subcommands.
     ReconfiguratorCliEdit,
-    /// This blueprint was created by a test.
+    /// This blueprint was constructed by hand by an automated test.
     Test,
 }
 
@@ -456,10 +456,12 @@ impl fmt::Display for BlueprintSource {
                 writeln!(f, "planner with report:\n{report}")
             }
             Self::PlannerLoadedFromDatabase => {
-                writeln!(f, "planner (no report available")
+                writeln!(f, "planner (no report available)")
             }
-            Self::ReconfiguratorCliEdit => writeln!(f, "reconfigurator-cli"),
-            Self::Test => writeln!(f, "test"),
+            Self::ReconfiguratorCliEdit => {
+                writeln!(f, "edited directly with reconfigurator-cli")
+            }
+            Self::Test => writeln!(f, "constructed by an automated test"),
         }
     }
 }

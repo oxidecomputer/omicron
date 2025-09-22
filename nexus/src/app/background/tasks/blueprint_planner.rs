@@ -269,6 +269,12 @@ impl BlueprintPlanner {
             | BlueprintSource::PlannerLoadedFromDatabase
             | BlueprintSource::ReconfiguratorCliEdit
             | BlueprintSource::Test => {
+                warn!(
+                    &opctx.log,
+                    "ran planner, but got unexpected blueprint source; \
+                     generating an empty planning report";
+                    "source" => ?&blueprint.source,
+                );
                 Arc::new(PlanningReport::new(blueprint.id))
             }
         };
