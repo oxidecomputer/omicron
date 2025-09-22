@@ -403,7 +403,7 @@ parent:    02697f74-b14a-4418-90f0-c28b2a3a6aa9
 
  PENDING MGS-MANAGED UPDATES: 0
 
-blueprint source: test
+blueprint source: constructed by an automated test
 
 
 
@@ -570,7 +570,7 @@ parent:    02697f74-b14a-4418-90f0-c28b2a3a6aa9
 
  PENDING MGS-MANAGED UPDATES: 0
 
-blueprint source: test
+blueprint source: constructed by an automated test
 
 
 
@@ -1291,7 +1291,7 @@ parent:    02697f74-b14a-4418-90f0-c28b2a3a6aa9
 
  PENDING MGS-MANAGED UPDATES: 0
 
-blueprint source: test
+blueprint source: constructed by an automated test
 
 
 

@@ -1527,7 +1527,7 @@ parent:    <none>
 
  PENDING MGS-MANAGED UPDATES: 0
 
-blueprint source: test
+blueprint source: constructed by an automated test
 
 
 ---------------------------------------------
@@ -1651,7 +1651,7 @@ parent:    <none>
 
  PENDING MGS-MANAGED UPDATES: 0
 
-blueprint source: test
+blueprint source: constructed by an automated test
 
 
 ---------------------------------------------

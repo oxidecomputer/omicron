@@ -333,7 +333,7 @@ parent:    184f10b3-61cb-41ef-9b93-3489b2bac559
 
  PENDING MGS-MANAGED UPDATES: 0
 
-blueprint source: test
+blueprint source: constructed by an automated test
 
 
 

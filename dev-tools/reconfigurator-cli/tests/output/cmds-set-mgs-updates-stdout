@@ -209,7 +209,7 @@ parent:    6ccc786b-17f1-4562-958f-5a7d9a5a15fd
 
  PENDING MGS-MANAGED UPDATES: 0
 
-blueprint source: test
+blueprint source: constructed by an automated test
 
 
 
@@ -427,7 +427,7 @@ parent:    ad97e762-7bf1-45a6-a98f-60afb7e491c0
     sled      2      model2        serial2         e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855   1.1.0              Sp(PendingMgsUpdateSpDetails { expected_active_version: ArtifactVersion("1.0.0"), expected_inactive_version: Version(ArtifactVersion("1.0.1")) })
 
 
-blueprint source: reconfigurator-cli
+blueprint source: edited directly with reconfigurator-cli
 
 
 
@@ -721,7 +721,7 @@ parent:    cca24b71-09b5-4042-9185-b33e9f2ebba0
     sled      2      model2        serial2         e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855   newest             Sp(PendingMgsUpdateSpDetails { expected_active_version: ArtifactVersion("newer"), expected_inactive_version: Version(ArtifactVersion("older")) })
 
 
-blueprint source: reconfigurator-cli
+blueprint source: edited directly with reconfigurator-cli
 
 
 
@@ -1019,7 +1019,7 @@ parent:    5bf974f3-81f9-455b-b24e-3099f765664c
     sled      2      model2        serial2         e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855   newest             Sp(PendingMgsUpdateSpDetails { expected_active_version: ArtifactVersion("newer"), expected_inactive_version: Version(ArtifactVersion("older")) })
 
 
-blueprint source: reconfigurator-cli
+blueprint source: edited directly with reconfigurator-cli
 
 
 
@@ -1274,7 +1274,7 @@ parent:    1b837a27-3be1-4fcb-8499-a921c839e1d0
     sled      0      model0        serial0         e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855   three              Sp(PendingMgsUpdateSpDetails { expected_active_version: ArtifactVersion("two"), expected_inactive_version: NoValidVersion })
 
 
-blueprint source: reconfigurator-cli
+blueprint source: edited directly with reconfigurator-cli
 
 
 

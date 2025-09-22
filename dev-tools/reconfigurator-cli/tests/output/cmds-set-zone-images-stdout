@@ -111,7 +111,7 @@ parent:    1b013011-2062-4b48-b544-a32b23bce83a
 
  PENDING MGS-MANAGED UPDATES: 0
 
-blueprint source: test
+blueprint source: constructed by an automated test
 
 
 
@@ -230,7 +230,7 @@ parent:    9766ca20-38d4-4380-b005-e7c43c797e7c
 
  PENDING MGS-MANAGED UPDATES: 0
 
-blueprint source: reconfigurator-cli
+blueprint source: edited directly with reconfigurator-cli
 
 
 
@@ -462,7 +462,7 @@ parent:    bb128f06-a2e1-44c1-8874-4f789d0ff896
 
  PENDING MGS-MANAGED UPDATES: 0
 
-blueprint source: reconfigurator-cli
+blueprint source: edited directly with reconfigurator-cli
 
 
 
