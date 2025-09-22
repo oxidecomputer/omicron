@@ -41,6 +41,7 @@ impl LiveTestContext {
         let datastore = create_datastore(&log, &resolver).await?;
         let opctx = OpContext::for_tests(log.clone(), datastore.clone());
         check_hardware_environment(&opctx, &datastore).await?;
+        check_configuration(&opctx, &datastore).await?;
         Ok(LiveTestContext { logctx, opctx, resolver, datastore })
     }
 
@@ -253,5 +254,27 @@ async fn check_hardware_environment(
             "refusing to operate in an environment with an unknown system: {}",
             scary_sleds.join(", ")
         ))
+    }
+}
+
+/// Performs checks on the system configuration to determine if it's appropriate
+/// for live tests
+///
+/// Currently, this just verifies that the planner is off.
+async fn check_configuration(
+    opctx: &OpContext,
+    datastore: &DataStore,
+) -> Result<(), anyhow::Error> {
+    let reconfigurator_config = datastore
+        .reconfigurator_config_get_latest(opctx)
+        .await
+        .expect("obtained latest reconfigurator config")
+        .unwrap_or_default();
+    if reconfigurator_config.config.planner_enabled {
+        Err(anyhow!(
+            "refusing to operate on a system with blueprint planning enabled"
+        ))
+    } else {
+        Ok(())
     }
 }

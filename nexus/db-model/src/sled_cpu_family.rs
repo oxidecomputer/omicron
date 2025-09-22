@@ -26,6 +26,26 @@ impl_enum_type!(
     AmdTurinDense => b"amd_turin_dense"
 );
 
+impl SledCpuFamily {
+    /// Yields the minimum compatible instance CPU platform that can run on this
+    /// sled.
+    ///
+    /// Each instance CPU platform has a set `C` of sled CPU families that can
+    /// host it. The "minimum compatible platform" is the instance CPU platform
+    /// for which (a) `self` is in `C`, and (b) `C` is of maximum cardinality.
+    /// That is: the minimum compatible platform is chosen so that a VMM that
+    /// uses it can run on sleds of this family and as many other families as
+    /// possible.
+    pub fn minimum_compatible_platform(&self) -> crate::VmmCpuPlatform {
+        match self {
+            Self::Unknown => crate::VmmCpuPlatform::SledDefault,
+            Self::AmdMilan => crate::VmmCpuPlatform::AmdMilan,
+            Self::AmdTurin => crate::VmmCpuPlatform::AmdMilan,
+            Self::AmdTurinDense => crate::VmmCpuPlatform::AmdMilan,
+        }
+    }
+}
+
 impl From<nexus_sled_agent_shared::inventory::SledCpuFamily> for SledCpuFamily {
     fn from(value: nexus_sled_agent_shared::inventory::SledCpuFamily) -> Self {
         use nexus_sled_agent_shared::inventory::SledCpuFamily as InputFamily;

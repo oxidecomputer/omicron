@@ -28,6 +28,7 @@ use nexus_sled_agent_shared::inventory::OmicronZoneType;
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
+use nexus_types::deployment::BlueprintSource;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneImageSource;
@@ -68,6 +69,7 @@ use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::str::FromStr;
+use std::sync::Arc;
 
 pub(crate) use self::image_source::NoopConvertGlobalIneligibleReason;
 pub(crate) use self::image_source::NoopConvertInfo;
@@ -190,8 +192,7 @@ impl<'a> Planner<'a> {
     pub fn plan(mut self) -> Result<Blueprint, Error> {
         let checked = self.check_input_validity()?;
         let report = self.do_plan(checked)?;
-        self.blueprint.set_report(report);
-        Ok(self.blueprint.build())
+        Ok(self.blueprint.build(BlueprintSource::Planner(Arc::new(report))))
     }
 
     fn check_input_validity(&self) -> Result<InputChecked, Error> {
@@ -3344,7 +3345,7 @@ pub(crate) mod test {
             )
             .expect("added external DNS zone");
 
-        let blueprint1a = blueprint_builder.build();
+        let blueprint1a = blueprint_builder.build(BlueprintSource::Test);
         assert_eq!(
             blueprint1a
                 .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
@@ -6122,13 +6123,7 @@ pub(crate) mod test {
                 ))
         );
 
-        // This generation is successively incremented for each TUF repo. We use
-        // generation 2 to represent the first generation with a TUF repo
-        // attached.
-        let target_release_generation = Generation::from_u32(2);
-
         // Manually specify a TUF repo with fake zone images.
-        let mut input_builder = example.input.clone().into_builder();
         let version = ArtifactVersion::new_static("1.0.0-freeform")
             .expect("can't parse artifact version");
         let fake_hash = ArtifactHash([0; 32]);
@@ -6139,22 +6134,23 @@ pub(crate) mod test {
             hash: fake_hash,
         };
         let artifacts = create_artifacts_at_version(&version);
-        let target_release_generation = target_release_generation.next();
-        input_builder.policy_mut().tuf_repo = TufRepoPolicy {
-            target_release_generation,
-            description: TargetReleaseDescription::TufRepo(
-                TufRepoDescription {
-                    repo: TufRepoMeta {
-                        hash: fake_hash,
-                        targets_role_version: 0,
-                        valid_until: Utc::now(),
-                        system_version: Version::new(1, 0, 0),
-                        file_name: String::from(""),
-                    },
-                    artifacts,
+        let description =
+            TargetReleaseDescription::TufRepo(TufRepoDescription {
+                repo: TufRepoMeta {
+                    hash: fake_hash,
+                    targets_role_version: 0,
+                    valid_until: Utc::now(),
+                    system_version: Version::new(1, 0, 0),
+                    file_name: String::from(""),
                 },
-            ),
-        };
+                artifacts,
+            });
+        example.system.set_target_release_and_old_repo(description);
+
+        let mut input_builder = example
+            .system
+            .to_planning_input_builder()
+            .expect("created PlanningInputBuilder");
 
         // Some helper predicates for the assertions below.
         let is_old_nexus = |zone: &BlueprintZoneConfig| -> bool {
@@ -6500,6 +6496,8 @@ pub(crate) mod test {
             &logctx.log,
             rng.next_system_rng(),
         )
+        .with_target_release_0_0_1()
+        .expect("set target release to 0.0.1")
         .build();
         verify_blueprint(&blueprint);
 
@@ -6543,13 +6541,18 @@ pub(crate) mod test {
             TEST_NAME,
         );
 
-        // All zones should be sourced from the install dataset by default.
+        // All zones should be sourced from the initial 0.0.1 target release by
+        // default.
+        eprintln!("{}", blueprint.display());
         assert!(
             blueprint
                 .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
                 .all(|(_, z)| matches!(
-                    z.image_source,
-                    BlueprintZoneImageSource::InstallDataset
+                    &z.image_source,
+                    BlueprintZoneImageSource::Artifact { version, hash: _ }
+                        if version == &BlueprintArtifactVersion::Available {
+                            version: ArtifactVersion::new_const("0.0.1")
+                        }
                 ))
         );
 
@@ -6560,7 +6563,6 @@ pub(crate) mod test {
         // The planner should avoid doing this update until it has confirmation
         // from inventory that the cluster is healthy.
 
-        let mut input_builder = example.input.clone().into_builder();
         let version = ArtifactVersion::new_static("1.0.0-freeform")
             .expect("can't parse artifact version");
         let fake_hash = ArtifactHash([0; 32]);
@@ -6571,23 +6573,24 @@ pub(crate) mod test {
             hash: fake_hash,
         };
         let artifacts = create_artifacts_at_version(&version);
-        let target_release_generation = Generation::from_u32(2);
-        input_builder.policy_mut().tuf_repo = TufRepoPolicy {
-            target_release_generation,
-            description: TargetReleaseDescription::TufRepo(
-                TufRepoDescription {
-                    repo: TufRepoMeta {
-                        hash: fake_hash,
-                        targets_role_version: 0,
-                        valid_until: Utc::now(),
-                        system_version: Version::new(1, 0, 0),
-                        file_name: String::from(""),
-                    },
-                    artifacts,
+        let description =
+            TargetReleaseDescription::TufRepo(TufRepoDescription {
+                repo: TufRepoMeta {
+                    hash: fake_hash,
+                    targets_role_version: 0,
+                    valid_until: Utc::now(),
+                    system_version: Version::new(1, 0, 0),
+                    file_name: String::from(""),
                 },
-            ),
-        };
-        example.input = input_builder.build();
+                artifacts,
+            });
+        example.system.set_target_release_and_old_repo(description);
+
+        example.input = example
+            .system
+            .to_planning_input_builder()
+            .expect("created PlanningInputBuilder")
+            .build();
 
         // Manually update all zones except Cockroach
         //
@@ -6612,8 +6615,11 @@ pub(crate) mod test {
         let is_old_cockroach = |zone: &BlueprintZoneConfig| -> bool {
             zone.zone_type.is_cockroach()
                 && matches!(
-                    zone.image_source,
-                    BlueprintZoneImageSource::InstallDataset
+                    &zone.image_source,
+                    BlueprintZoneImageSource::Artifact { version, hash: _ }
+                        if version == &BlueprintArtifactVersion::Available {
+                            version: ArtifactVersion::new_const("0.0.1")
+                        }
                 )
         };
         let is_up_to_date_cockroach = |zone: &BlueprintZoneConfig| -> bool {
@@ -6887,10 +6893,12 @@ pub(crate) mod test {
         );
 
         // Use that boundary NTP zone to promote others.
-        let mut input_builder = example.input.clone().into_builder();
-        input_builder.policy_mut().target_boundary_ntp_zone_count =
-            BOUNDARY_NTP_REDUNDANCY;
-        example.input = input_builder.build();
+        example.system.target_boundary_ntp_zone_count(BOUNDARY_NTP_REDUNDANCY);
+        example.input = example
+            .system
+            .to_planning_input_builder()
+            .expect("created PlanningInputBuilder")
+            .build();
         let blueprint_name = "blueprint_with_boundary_ntp";
         let new_blueprint = Planner::new_based_on(
             log.clone(),
@@ -6981,7 +6989,6 @@ pub(crate) mod test {
         // The planner should avoid doing this update until it has confirmation
         // from inventory that the cluster is healthy.
 
-        let mut input_builder = example.input.clone().into_builder();
         let version = ArtifactVersion::new_static("1.0.0-freeform")
             .expect("can't parse artifact version");
         let fake_hash = ArtifactHash([0; 32]);
@@ -6992,23 +6999,24 @@ pub(crate) mod test {
             hash: fake_hash,
         };
         let artifacts = create_artifacts_at_version(&version);
-        let target_release_generation = Generation::from_u32(2);
-        input_builder.policy_mut().tuf_repo = TufRepoPolicy {
-            target_release_generation,
-            description: TargetReleaseDescription::TufRepo(
-                TufRepoDescription {
-                    repo: TufRepoMeta {
-                        hash: fake_hash,
-                        targets_role_version: 0,
-                        valid_until: Utc::now(),
-                        system_version: Version::new(1, 0, 0),
-                        file_name: String::from(""),
-                    },
-                    artifacts,
+        let description =
+            TargetReleaseDescription::TufRepo(TufRepoDescription {
+                repo: TufRepoMeta {
+                    hash: fake_hash,
+                    targets_role_version: 0,
+                    valid_until: Utc::now(),
+                    system_version: Version::new(1, 0, 0),
+                    file_name: String::from(""),
                 },
-            ),
-        };
-        example.input = input_builder.build();
+                artifacts,
+            });
+        example.system.set_target_release_and_old_repo(description);
+
+        example.input = example
+            .system
+            .to_planning_input_builder()
+            .expect("created PlanningInputBuilder")
+            .build();
 
         // Manually update all zones except boundary NTP
         //
@@ -7173,7 +7181,7 @@ pub(crate) mod test {
                 "diff between blueprints (should be expunging boundary NTP using install dataset):\n{}",
                 summary.display()
             );
-            eprintln!("{}", new_blueprint.report);
+            eprintln!("{}", new_blueprint.source);
 
             assert_eq!(summary.total_zones_added(), 0);
             assert_eq!(summary.total_zones_removed(), 0);
@@ -7222,7 +7230,7 @@ pub(crate) mod test {
                 "diff between blueprints (should be adding one internal NTP and promoting another to boundary):\n{}",
                 summary.display()
             );
-            eprintln!("{}", new_blueprint.report);
+            eprintln!("{}", new_blueprint.source);
 
             assert_eq!(summary.total_zones_added(), 2);
             assert_eq!(summary.total_zones_removed(), 0);
@@ -7262,7 +7270,7 @@ pub(crate) mod test {
                 "diff between blueprints (should be expunging another boundary NTP):\n{}",
                 summary.display()
             );
-            eprintln!("{}", new_blueprint.report);
+            eprintln!("{}", new_blueprint.source);
 
             assert_eq!(summary.total_zones_added(), 0);
             assert_eq!(summary.total_zones_removed(), 0);
@@ -7303,7 +7311,7 @@ pub(crate) mod test {
                 "diff between blueprints (should be adding promoting internal -> boundary NTP):\n{}",
                 summary.display()
             );
-            eprintln!("{}", new_blueprint.report);
+            eprintln!("{}", new_blueprint.source);
 
             assert_eq!(summary.total_zones_added(), 2);
             assert_eq!(summary.total_zones_removed(), 0);
@@ -7340,7 +7348,7 @@ pub(crate) mod test {
                 "diff between blueprints (should be adding wrapping up internal NTP expungement):\n{}",
                 summary.display()
             );
-            eprintln!("{}", new_blueprint.report);
+            eprintln!("{}", new_blueprint.source);
 
             assert_eq!(summary.total_zones_added(), 0);
             assert_eq!(summary.total_zones_removed(), 0);
@@ -7409,7 +7417,6 @@ pub(crate) mod test {
         // The planner should avoid doing this update until it has confirmation
         // from inventory that the Internal DNS servers are ready.
 
-        let mut input_builder = example.input.clone().into_builder();
         let version = ArtifactVersion::new_static("1.0.0-freeform")
             .expect("can't parse artifact version");
         let fake_hash = ArtifactHash([0; 32]);
@@ -7420,23 +7427,25 @@ pub(crate) mod test {
             hash: fake_hash,
         };
         let artifacts = create_artifacts_at_version(&version);
-        let target_release_generation = Generation::from_u32(2);
-        input_builder.policy_mut().tuf_repo = TufRepoPolicy {
-            target_release_generation,
-            description: TargetReleaseDescription::TufRepo(
-                TufRepoDescription {
-                    repo: TufRepoMeta {
-                        hash: fake_hash,
-                        targets_role_version: 0,
-                        valid_until: Utc::now(),
-                        system_version: Version::new(1, 0, 0),
-                        file_name: String::from(""),
-                    },
-                    artifacts,
+
+        let description =
+            TargetReleaseDescription::TufRepo(TufRepoDescription {
+                repo: TufRepoMeta {
+                    hash: fake_hash,
+                    targets_role_version: 0,
+                    valid_until: Utc::now(),
+                    system_version: Version::new(1, 0, 0),
+                    file_name: String::from(""),
                 },
-            ),
-        };
-        example.input = input_builder.build();
+                artifacts,
+            });
+        example.system.set_target_release_and_old_repo(description);
+
+        example.input = example
+            .system
+            .to_planning_input_builder()
+            .expect("created PlanningInputBuilder")
+            .build();
 
         // Manually update all zones except Internal DNS
         //
@@ -7673,7 +7682,6 @@ pub(crate) mod test {
 
         // Manually specify a TUF repo with fake images for all zones.
         // Only the name and kind of the artifacts matter.
-        let mut input_builder = example.input.clone().into_builder();
         let version = ArtifactVersion::new_static("2.0.0-freeform")
             .expect("can't parse artifact version");
         let fake_hash = ArtifactHash([0; 32]);
@@ -7683,25 +7691,24 @@ pub(crate) mod test {
             },
             hash: fake_hash,
         };
-        // We use generation 2 to represent the first generation with a TUF repo
-        // attached.
-        let target_release_generation = Generation::new().next();
-        let tuf_repo = TufRepoPolicy {
-            target_release_generation,
-            description: TargetReleaseDescription::TufRepo(
-                TufRepoDescription {
-                    repo: TufRepoMeta {
-                        hash: fake_hash,
-                        targets_role_version: 0,
-                        valid_until: Utc::now(),
-                        system_version: Version::new(1, 0, 0),
-                        file_name: String::from(""),
-                    },
-                    artifacts: create_artifacts_at_version(&version),
+
+        let description =
+            TargetReleaseDescription::TufRepo(TufRepoDescription {
+                repo: TufRepoMeta {
+                    hash: fake_hash,
+                    targets_role_version: 0,
+                    valid_until: Utc::now(),
+                    system_version: Version::new(1, 0, 0),
+                    file_name: String::from(""),
                 },
-            ),
-        };
-        input_builder.policy_mut().tuf_repo = tuf_repo;
+                artifacts: create_artifacts_at_version(&version),
+            });
+        example.system.set_target_release_and_old_repo(description);
+
+        let input_builder = example
+            .system
+            .to_planning_input_builder()
+            .expect("created PlanningInputBuilder");
         example.input = input_builder.build();
 
         /// Expected number of planner iterations required to converge.
@@ -7733,8 +7740,11 @@ pub(crate) mod test {
                 panic!("can't re-plan after {i} iterations: {err}")
             });
 
-            assert_eq!(blueprint.report.blueprint_id, blueprint.id);
-            eprintln!("{}\n", blueprint.report);
+            let BlueprintSource::Planner(report) = &blueprint.source else {
+                panic!("unexpected source: {:?}", blueprint.source);
+            };
+            assert_eq!(report.blueprint_id, blueprint.id);
+            eprintln!("{report}\n");
             // TODO: more report testing
 
             {
@@ -7922,18 +7932,23 @@ pub(crate) mod test {
             verify_blueprint(&child_blueprint);
             let summary = child_blueprint.diff_since_blueprint(&self.blueprint);
 
+            let BlueprintSource::Planner(report) = &child_blueprint.source
+            else {
+                panic!("Child blueprint has no associated report");
+            };
+
             assert!(
-                child_blueprint.report.expunge.is_empty()
-                    && child_blueprint.report.decommission.is_empty()
-                    && child_blueprint.report.mgs_updates.is_empty()
-                    && child_blueprint.report.add.is_empty()
-                    && child_blueprint.report.zone_updates.is_empty()
-                    && child_blueprint.report.nexus_generation_bump.is_empty()
-                    && child_blueprint.report.cockroachdb_settings.is_empty(),
+                report.expunge.is_empty()
+                    && report.decommission.is_empty()
+                    && report.mgs_updates.is_empty()
+                    && report.add.is_empty()
+                    && report.zone_updates.is_empty()
+                    && report.nexus_generation_bump.is_empty()
+                    && report.cockroachdb_settings.is_empty(),
                 "Blueprint Summary: {}\n
                  Planning report is not empty: {}",
                 summary.display(),
-                child_blueprint.report,
+                report,
             );
         }
 
@@ -8031,7 +8046,7 @@ pub(crate) mod test {
         let nexus_id = zone.id;
         let mut bp_builder = bp_generator.new_blueprint_builder("expunge-one");
         bp_builder.sled_expunge_zone(sled, nexus_id).unwrap();
-        bp_generator.blueprint = bp_builder.build();
+        bp_generator.blueprint = bp_builder.build(BlueprintSource::Test);
 
         // We should have two old Nexuses, both running with the old generation
         // and the old image.
@@ -8064,15 +8079,19 @@ pub(crate) mod test {
             );
             assert_eq!(summary.total_zones_removed(), 0);
             assert_eq!(summary.total_zones_modified(), 1);
+
+            let BlueprintSource::Planner(report) = &new_bp.source else {
+                panic!("blueprint has no associated report");
+            };
             assert!(
                 matches!(
-                    new_bp.report.nexus_generation_bump,
+                    report.nexus_generation_bump,
                     PlanningNexusGenerationBumpReport::WaitingOn(
                         NexusGenerationBumpWaitingOn::MissingNexusDatabaseAccessRecords
                     ),
                 ),
                 "Unexpected Nexus Generation report: {:?}",
-                new_bp.report.nexus_generation_bump
+                report.nexus_generation_bump
             );
         }
         bp_generator.blueprint = new_bp;
@@ -8166,16 +8185,20 @@ pub(crate) mod test {
         {
             let new_bp =
                 bp_generator.plan_new_blueprint("test_blocked_by_non_nexus");
+
+            let BlueprintSource::Planner(report) = &new_bp.source else {
+                panic!("blueprint has no associated report");
+            };
             // The blueprint should have a report showing what's blocked
             assert!(
                 matches!(
-                    new_bp.report.nexus_generation_bump,
+                    report.nexus_generation_bump,
                     PlanningNexusGenerationBumpReport::WaitingOn(
                         NexusGenerationBumpWaitingOn::FoundOldNonNexusZones
                     ),
                 ),
                 "Unexpected Nexus Generation report: {:?}",
-                new_bp.report.nexus_generation_bump
+                report.nexus_generation_bump
             );
         }
 
@@ -8218,15 +8241,18 @@ pub(crate) mod test {
             );
             assert_eq!(summary.total_zones_removed(), 0);
             assert_eq!(summary.total_zones_modified(), 0);
+            let BlueprintSource::Planner(report) = &new_bp.source else {
+                panic!("blueprint has no associated report");
+            };
             assert!(
                 matches!(
-                    new_bp.report.nexus_generation_bump,
+                    report.nexus_generation_bump,
                     PlanningNexusGenerationBumpReport::WaitingOn(
                         NexusGenerationBumpWaitingOn::MissingNexusDatabaseAccessRecords
                     ),
                 ),
                 "Unexpected Nexus Generation report: {:?}",
-                new_bp.report.nexus_generation_bump
+                report.nexus_generation_bump
             );
         }
         bp_generator.blueprint = new_bp;
@@ -8273,15 +8299,18 @@ pub(crate) mod test {
             assert_eq!(summary.total_zones_added(), 0);
             assert_eq!(summary.total_zones_removed(), 0);
             assert_eq!(summary.total_zones_modified(), 0);
+            let BlueprintSource::Planner(report) = &new_bp.source else {
+                panic!("blueprint has no associated report");
+            };
             assert!(
                 matches!(
-                    new_bp.report.nexus_generation_bump,
+                    report.nexus_generation_bump,
                     PlanningNexusGenerationBumpReport::WaitingOn(
                         NexusGenerationBumpWaitingOn::MissingNewNexusInInventory
                     ),
                 ),
                 "Unexpected Nexus Generation report: {:?}",
-                new_bp.report.nexus_generation_bump
+                report.nexus_generation_bump
             );
         }
 
@@ -8308,15 +8337,18 @@ pub(crate) mod test {
 
             let summary = new_bp.diff_since_blueprint(&bp_generator.blueprint);
             assert!(!summary.has_changes());
+            let BlueprintSource::Planner(report) = &new_bp.source else {
+                panic!("blueprint has no associated report");
+            };
             assert!(
                 matches!(
-                    new_bp.report.nexus_generation_bump,
+                    report.nexus_generation_bump,
                     PlanningNexusGenerationBumpReport::WaitingOn(
                         NexusGenerationBumpWaitingOn::MissingNexusDatabaseAccessRecords
                     ),
                 ),
                 "Unexpected Nexus Generation report: {:?}",
-                new_bp.report.nexus_generation_bump
+                report.nexus_generation_bump
             );
         }
         let mut input = std::mem::replace(
@@ -8333,14 +8365,17 @@ pub(crate) mod test {
         // ✔ The new Nexus Zones have db records
         // ✔ The new Nexus Zones are in inventory.
         let new_bp = bp_generator.plan_new_blueprint("update_generation");
+        let BlueprintSource::Planner(report) = &new_bp.source else {
+            panic!("blueprint has no associated report");
+        };
         // Finally, the top-level Nexus generation should get bumped.
         let PlanningNexusGenerationBumpReport::BumpingGeneration(
             observed_next_gen,
-        ) = &new_bp.report.nexus_generation_bump
+        ) = &report.nexus_generation_bump
         else {
             panic!(
                 "Unexpected nexus generation report: {:?}",
-                new_bp.report.nexus_generation_bump,
+                report.nexus_generation_bump,
             );
         };
 
@@ -8357,15 +8392,18 @@ pub(crate) mod test {
             old_generation,
         );
         let new_bp = bp_generator.plan_new_blueprint("dont-expunge-yet");
+        let BlueprintSource::Planner(report) = &new_bp.source else {
+            panic!("blueprint has no associated report");
+        };
         bp_generator.assert_child_bp_makes_no_changes(&new_bp);
-        // We should be able to see all three old Neuxs zones refusing to shut
+        // We should be able to see all three old Nexus zones refusing to shut
         // down in the planning report.
-        let waiting_zones = &new_bp.report.zone_updates.waiting_zones;
+        let waiting_zones = &report.zone_updates.waiting_zones;
         assert_eq!(
             waiting_zones.len(),
             3,
             "Unexpected zone update report: {:#?}",
-            new_bp.report.zone_updates
+            report.zone_updates
         );
         for why in waiting_zones.values() {
             assert_eq!(

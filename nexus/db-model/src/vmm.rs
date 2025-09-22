@@ -13,8 +13,8 @@
 //! sled agent or that sled agent will never update (like the sled ID).
 
 use super::{Generation, VmmState};
-use crate::SqlU16;
 use crate::typed_uuid::DbTypedUuid;
+use crate::{SqlU16, VmmCpuPlatform};
 use chrono::{DateTime, Utc};
 use nexus_db_schema::schema::vmm;
 use omicron_uuid_kinds::*;
@@ -56,6 +56,11 @@ pub struct Vmm {
     /// The socket port on which this VMM is serving the Propolis server API.
     pub propolis_port: SqlU16,
 
+    /// The CPU platform for this VMM. This may be chosen implicitly by the
+    /// control plane if this VMM's instance didn't specify a required platform
+    /// when it was started.
+    pub cpu_platform: VmmCpuPlatform,
+
     /// Runtime state for the VMM.
     #[diesel(embed)]
     pub runtime: VmmRuntimeState,
@@ -72,6 +77,7 @@ impl Vmm {
         sled_id: SledUuid,
         propolis_ip: ipnetwork::IpNetwork,
         propolis_port: u16,
+        cpu_platform: VmmCpuPlatform,
     ) -> Self {
         let now = Utc::now();
 
@@ -83,6 +89,7 @@ impl Vmm {
             sled_id: sled_id.into(),
             propolis_ip,
             propolis_port: SqlU16(propolis_port),
+            cpu_platform,
             runtime: VmmRuntimeState {
                 state: VmmState::Creating,
                 time_state_updated: now,

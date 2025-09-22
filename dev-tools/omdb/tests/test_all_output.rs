@@ -177,6 +177,7 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
     let mut output = String::new();
 
     let invocations: &[&[&str]] = &[
+        &["db", "db-metadata", "ls-nexus"],
         &["db", "disks", "list"],
         &["db", "dns", "show"],
         &["db", "dns", "diff", "external", "2"],

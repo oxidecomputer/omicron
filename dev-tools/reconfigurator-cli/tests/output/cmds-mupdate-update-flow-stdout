@@ -21,10 +21,12 @@ INFO added artifact, name: fake-gimlet-sp, kind: gimlet_sp, version: 1.0.0, hash
 INFO added artifact, name: fake-rot, kind: gimlet_rot_image_a, version: 1.0.0, hash: d11e65f934bf0de51df2e5b484f61ee72072417b43ac87f33e958008428e7b02, length: 783
 INFO added artifact, name: fake-rot, kind: gimlet_rot_image_b, version: 1.0.0, hash: d11e65f934bf0de51df2e5b484f61ee72072417b43ac87f33e958008428e7b02, length: 783
 INFO added artifact, name: fake-rot-bootloader, kind: gimlet_rot_bootloader, version: 1.0.0, hash: 5b0f601b1fbb8674db9c751a02f8b14f8e6d4e8470f4f7b686fecb2c49ec11f9, length: 797
-INFO added artifact, name: fake-host, kind: host_phase_1, version: 1.0.0, hash: 2053f8594971bbf0a7326c833e2ffc12b065b9d823b9c0b967d275fa595e4e89, length: 524288
-INFO added artifact, name: fake-host, kind: host_phase_2, version: 1.0.0, hash: f3dd0c7a1bd4500ea0d8bcf67581f576d47752b2f1998a4cb0f0c3155c483008, length: 1048576
-INFO added artifact, name: fake-trampoline, kind: trampoline_phase_1, version: 1.0.0, hash: 9b7575cad720f017e936fe5994fc4e21fe040acaaf83c2edd86132aa3d667c7b, length: 524288
-INFO added artifact, name: fake-trampoline, kind: trampoline_phase_2, version: 1.0.0, hash: f355fb8429a7e0f0716dad035f9a06c799168d6c0ffcde85b1a96fef21d4b53e, length: 1048576
+INFO added artifact, name: fake-host, kind: gimlet_host_phase_1, version: 1.0.0, hash: b99d5273ba1418bebb19d74b701d716896409566d41de76ada71bded4c9b166b, length: 524288
+INFO added artifact, name: fake-host, kind: cosmo_host_phase_1, version: 1.0.0, hash: 9525f567106549a3fc32df870a74803d77e51dcc44190b218e227a2c5d444f58, length: 524288
+INFO added artifact, name: fake-host, kind: host_phase_2, version: 1.0.0, hash: d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47, length: 1048576
+INFO added artifact, name: fake-trampoline, kind: gimlet_trampoline_phase_1, version: 1.0.0, hash: bcb27520ee5a56e19f6df9662c66d69ac681fbd873a97547be5f6a5ae3d250c4, length: 524288
+INFO added artifact, name: fake-trampoline, kind: cosmo_trampoline_phase_1, version: 1.0.0, hash: e235b8afb58ee69d966853bd5efe7c7e904da84b9035a332b3e691dc1d5cdbd0, length: 524288
+INFO added artifact, name: fake-trampoline, kind: trampoline_phase_2, version: 1.0.0, hash: a5dfcc4bc69b791f1c509df499e9e72cce844cb2b53a56d8bb357b264bdf13b6, length: 1048576
 INFO added artifact, name: clickhouse, kind: zone, version: 1.0.0, hash: 52b1eb4daff6f9140491d547b11248392920230db3db0eef5f5fa5333fe9e659, length: 1686
 INFO added artifact, name: clickhouse_keeper, kind: zone, version: 1.0.0, hash: cda702919449d86663be97295043aeca0ead69ae5db3bbdb20053972254a27a3, length: 1690
 INFO added artifact, name: clickhouse_server, kind: zone, version: 1.0.0, hash: 5f9ae6a9821bbe8ff0bf60feddf8b167902fe5f3e2c98bd21edd1ec9d969a001, length: 1690
@@ -44,7 +46,7 @@ INFO added artifact, name: fake-switch-sp, kind: switch_sp, version: 1.0.0, hash
 INFO added artifact, name: fake-switch-rot, kind: switch_rot_image_a, version: 1.0.0, hash: 32307d6d75c9707e8499ba4a4d379f99c0358237b6e190ff6a8024b470f62342, length: 774
 INFO added artifact, name: fake-switch-rot, kind: switch_rot_image_b, version: 1.0.0, hash: 32307d6d75c9707e8499ba4a4d379f99c0358237b6e190ff6a8024b470f62342, length: 774
 INFO added artifact, name: fake-switch-rot-bootloader, kind: switch_rot_bootloader, version: 1.0.0, hash: 70836d170abd5621f95bb4225987b27b3d3dd6168e73cd60e44309bdfeb94e98, length: 804
-INFO added artifact, name: installinator_document, kind: installinator_document, version: 1.0.0, hash: c6ae866031d1183094c92cde9d9d1fd5f18356abc81a842ce31471b473fd5582, length: 367
+INFO added artifact, name: installinator_document, kind: installinator_document, version: 1.0.0, hash: a6a636b5d57813578766b3f1c2559abf9af5d8c86187538167937c476beeefa3, length: 367
 set target release based on repo-1.0.0.zip
 
 
@@ -501,6 +503,7 @@ WARN skipped noop image source check on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4
 INFO skipped noop image source check on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, reason: remove_mupdate_override is set in the blueprint (6123eac1-ec5b-42ba-b73f-9845105a9971)
 INFO skipped noop image source check on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, reason: remove_mupdate_override is set in the blueprint (203fa72c-85c1-466a-8ed3-338ee029530d)
 generated blueprint a5a8f242-ffa5-473c-8efd-2acf2dc0b736 based on parent blueprint d60afc57-f15d-476c-bd0f-b1071e2bb976
+blueprint source: planner with report:
 planning report for blueprint a5a8f242-ffa5-473c-8efd-2acf2dc0b736:
 * zone adds waiting on blockers
 * zone adds and updates are blocked:
@@ -509,6 +512,7 @@ planning report for blueprint a5a8f242-ffa5-473c-8efd-2acf2dc0b736:
   - sleds have mupdate override errors: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
 * zone updates waiting on zone add blockers
 * waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
+
 
 
 
@@ -730,10 +734,12 @@ INFO added artifact, name: fake-gimlet-sp, kind: gimlet_sp, version: 1.0.0, hash
 INFO added artifact, name: fake-rot, kind: gimlet_rot_image_a, version: 1.0.0, hash: d11e65f934bf0de51df2e5b484f61ee72072417b43ac87f33e958008428e7b02, length: 783
 INFO added artifact, name: fake-rot, kind: gimlet_rot_image_b, version: 1.0.0, hash: d11e65f934bf0de51df2e5b484f61ee72072417b43ac87f33e958008428e7b02, length: 783
 INFO added artifact, name: fake-rot-bootloader, kind: gimlet_rot_bootloader, version: 1.0.0, hash: 5b0f601b1fbb8674db9c751a02f8b14f8e6d4e8470f4f7b686fecb2c49ec11f9, length: 797
-INFO added artifact, name: fake-host, kind: host_phase_1, version: 1.0.0, hash: 2053f8594971bbf0a7326c833e2ffc12b065b9d823b9c0b967d275fa595e4e89, length: 524288
-INFO added artifact, name: fake-host, kind: host_phase_2, version: 1.0.0, hash: f3dd0c7a1bd4500ea0d8bcf67581f576d47752b2f1998a4cb0f0c3155c483008, length: 1048576
-INFO added artifact, name: fake-trampoline, kind: trampoline_phase_1, version: 1.0.0, hash: 9b7575cad720f017e936fe5994fc4e21fe040acaaf83c2edd86132aa3d667c7b, length: 524288
-INFO added artifact, name: fake-trampoline, kind: trampoline_phase_2, version: 1.0.0, hash: f355fb8429a7e0f0716dad035f9a06c799168d6c0ffcde85b1a96fef21d4b53e, length: 1048576
+INFO added artifact, name: fake-host, kind: gimlet_host_phase_1, version: 1.0.0, hash: b99d5273ba1418bebb19d74b701d716896409566d41de76ada71bded4c9b166b, length: 524288
+INFO added artifact, name: fake-host, kind: cosmo_host_phase_1, version: 1.0.0, hash: 9525f567106549a3fc32df870a74803d77e51dcc44190b218e227a2c5d444f58, length: 524288
+INFO added artifact, name: fake-host, kind: host_phase_2, version: 1.0.0, hash: d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47, length: 1048576
+INFO added artifact, name: fake-trampoline, kind: gimlet_trampoline_phase_1, version: 1.0.0, hash: bcb27520ee5a56e19f6df9662c66d69ac681fbd873a97547be5f6a5ae3d250c4, length: 524288
+INFO added artifact, name: fake-trampoline, kind: cosmo_trampoline_phase_1, version: 1.0.0, hash: e235b8afb58ee69d966853bd5efe7c7e904da84b9035a332b3e691dc1d5cdbd0, length: 524288
+INFO added artifact, name: fake-trampoline, kind: trampoline_phase_2, version: 1.0.0, hash: a5dfcc4bc69b791f1c509df499e9e72cce844cb2b53a56d8bb357b264bdf13b6, length: 1048576
 INFO added artifact, name: clickhouse, kind: zone, version: 1.0.0, hash: 52b1eb4daff6f9140491d547b11248392920230db3db0eef5f5fa5333fe9e659, length: 1686
 INFO added artifact, name: clickhouse_keeper, kind: zone, version: 1.0.0, hash: cda702919449d86663be97295043aeca0ead69ae5db3bbdb20053972254a27a3, length: 1690
 INFO added artifact, name: clickhouse_server, kind: zone, version: 1.0.0, hash: 5f9ae6a9821bbe8ff0bf60feddf8b167902fe5f3e2c98bd21edd1ec9d969a001, length: 1690
@@ -753,7 +759,7 @@ INFO added artifact, name: fake-switch-sp, kind: switch_sp, version: 1.0.0, hash
 INFO added artifact, name: fake-switch-rot, kind: switch_rot_image_a, version: 1.0.0, hash: 32307d6d75c9707e8499ba4a4d379f99c0358237b6e190ff6a8024b470f62342, length: 774
 INFO added artifact, name: fake-switch-rot, kind: switch_rot_image_b, version: 1.0.0, hash: 32307d6d75c9707e8499ba4a4d379f99c0358237b6e190ff6a8024b470f62342, length: 774
 INFO added artifact, name: fake-switch-rot-bootloader, kind: switch_rot_bootloader, version: 1.0.0, hash: 70836d170abd5621f95bb4225987b27b3d3dd6168e73cd60e44309bdfeb94e98, length: 804
-INFO added artifact, name: installinator_document, kind: installinator_document, version: 1.0.0, hash: c6ae866031d1183094c92cde9d9d1fd5f18356abc81a842ce31471b473fd5582, length: 367
+INFO added artifact, name: installinator_document, kind: installinator_document, version: 1.0.0, hash: a6a636b5d57813578766b3f1c2559abf9af5d8c86187538167937c476beeefa3, length: 367
 set target release based on repo-1.0.0.zip
 
 
@@ -774,6 +780,7 @@ WARN skipped noop image source check on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4
 INFO skipped noop image source check on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, reason: sled not found in inventory
 INFO skipped noop image source check on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, reason: remove_mupdate_override is set in the blueprint (203fa72c-85c1-466a-8ed3-338ee029530d)
 generated blueprint 626487fa-7139-45ec-8416-902271fc730b based on parent blueprint a5a8f242-ffa5-473c-8efd-2acf2dc0b736
+blueprint source: planner with report:
 planning report for blueprint 626487fa-7139-45ec-8416-902271fc730b:
 * zone adds waiting on blockers
 * zone adds and updates are blocked:
@@ -781,6 +788,7 @@ planning report for blueprint 626487fa-7139-45ec-8416-902271fc730b:
   - sleds have mupdate override errors: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
 * zone updates waiting on zone add blockers
 * waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
+
 
 
 > blueprint-diff latest
@@ -837,10 +845,12 @@ INFO added artifact, name: fake-gimlet-sp, kind: gimlet_sp, version: 2.0.0, hash
 INFO added artifact, name: fake-gimlet-rot, kind: gimlet_rot_image_a, version: 2.0.0, hash: 3ab29e804bcbf382370f9f071b2f0ed71e5bb6af8b01474fcc2a414caccfc9be, length: 782
 INFO added artifact, name: fake-gimlet-rot, kind: gimlet_rot_image_b, version: 2.0.0, hash: 3ab29e804bcbf382370f9f071b2f0ed71e5bb6af8b01474fcc2a414caccfc9be, length: 782
 INFO added artifact, name: fake-gimlet-rot-bootloader, kind: gimlet_rot_bootloader, version: 2.0.0, hash: 8f89bf8bc5f3271650ad72a26fc0d116c910161ca143731473a2b20fb82653cc, length: 800
-INFO added artifact, name: fake-host, kind: host_phase_1, version: 2.0.0, hash: 44714733af7600b30a50bfd2cbaf707ff7ee9724073ff70a6732e55a88864cf6, length: 524288
-INFO added artifact, name: fake-host, kind: host_phase_2, version: 2.0.0, hash: 0c0362b640cece5b9a5e86d8fa683bd2eb84c3e7f90731f597197d604ffa76e3, length: 1048576
-INFO added artifact, name: fake-trampoline, kind: trampoline_phase_1, version: non-semver, hash: 24f8ca0d52da5238644b11964c6feda854c7530820713efefa7ac91683b3fc76, length: 524288
-INFO added artifact, name: fake-trampoline, kind: trampoline_phase_2, version: non-semver, hash: 5fceee33d358aacb8a34ca93a30e28354bd8f341f6e3e895a2cafe83904f3d80, length: 1048576
+INFO added artifact, name: fake-host, kind: gimlet_host_phase_1, version: 2.0.0, hash: 1eba0d79ea9d34558fb3f923a06614bd740649eeb0ca6e5086529dc60cd6f729, length: 524288
+INFO added artifact, name: fake-host, kind: cosmo_host_phase_1, version: 2.0.0, hash: acde77f1a4ee5cf719841b21bb04fd652ddf61387bdbc95a67cc1006009ad611, length: 524288
+INFO added artifact, name: fake-host, kind: host_phase_2, version: 2.0.0, hash: 9ff631b5b7229604ab7c5aae2ee4a34a64772736b332540d38077b3aea6952df, length: 1048576
+INFO added artifact, name: fake-trampoline, kind: gimlet_trampoline_phase_1, version: non-semver, hash: 4c854917481a7bcb7b7c1e63833296b3ac1f8687aae5b950ece75a08cf27f35f, length: 524288
+INFO added artifact, name: fake-trampoline, kind: cosmo_trampoline_phase_1, version: non-semver, hash: 6b4ace7210d67fa3a63b14e007d99fbcad1b4e27e78025c8e467c2341f67c2ba, length: 524288
+INFO added artifact, name: fake-trampoline, kind: trampoline_phase_2, version: non-semver, hash: d7cdc8e1bfd15a830cfdc67868a7c05828090aefc42c8af44aa1104900d09fe5, length: 1048576
 INFO added artifact, name: clickhouse, kind: zone, version: 2.0.0, hash: bb2d1ff02d11f72bc9049ae57f27536207519a1859d29f8d7a90ab3b44d56b08, length: 1687
 INFO added artifact, name: clickhouse_keeper, kind: zone, version: 2.0.0, hash: 1eb9f24be68f13c274aa0ac9b863cec520dbfe762620c328431728d75bfd2198, length: 1691
 INFO added artifact, name: clickhouse_server, kind: zone, version: 2.0.0, hash: 50fe271948672a9af1ba5f96c9d87ff2736fa72d78dfef598a79fa0cc8a00474, length: 1691
@@ -860,7 +870,7 @@ INFO added artifact, name: fake-switch-sp, kind: switch_sp, version: 2.0.0, hash
 INFO added artifact, name: fake-switch-rot, kind: switch_rot_image_a, version: 2.0.0, hash: ad32d98232043a39d076b5b90b506fad406767e0ce1298507e1733bc4e576740, length: 791
 INFO added artifact, name: fake-switch-rot, kind: switch_rot_image_b, version: 2.0.0, hash: ad32d98232043a39d076b5b90b506fad406767e0ce1298507e1733bc4e576740, length: 791
 INFO added artifact, name: fake-switch-rot-bootloader, kind: switch_rot_bootloader, version: non-semver-2, hash: ceae102fa428d81aa6c5d9e1c742fb9ca1091ce5b2797ed0bb14615cf678d342, length: 811
-INFO added artifact, name: installinator_document, kind: installinator_document, version: 2.0.0, hash: 065b2b7cde09474c9a1bcf98a8f9c93129f617e074404c6aa76164f440a5627f, length: 367
+INFO added artifact, name: installinator_document, kind: installinator_document, version: 2.0.0, hash: 13bb3382a02d1f908137cfa356f1434995de15539341a6d8f52a8f2614c52d6c, length: 367
 sled d81c6a84-79b8-4958-ae41-ea46c9b19763: install dataset updated: from repo at repo-2.0.0.zip (system version 2.0.0)
 
 > sled-set serial2 mupdate-override 1c0ce176-6dc8-4a90-adea-d4a8000751da
@@ -897,6 +907,7 @@ INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noo
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
 INFO skipped noop image source check on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, reason: remove_mupdate_override is set in the blueprint (1c0ce176-6dc8-4a90-adea-d4a8000751da)
 generated blueprint c1a0d242-9160-40f4-96ae-61f8f40a0b1b based on parent blueprint 626487fa-7139-45ec-8416-902271fc730b
+blueprint source: planner with report:
 planning report for blueprint c1a0d242-9160-40f4-96ae-61f8f40a0b1b:
 * noop converting 6/6 install-dataset zones to artifact store on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
 * zone adds waiting on blockers
@@ -906,6 +917,7 @@ planning report for blueprint c1a0d242-9160-40f4-96ae-61f8f40a0b1b:
   - sleds have mupdate override errors: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
 * zone updates waiting on zone add blockers
 * waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
+
 
 
 
@@ -1084,6 +1096,7 @@ INFO install dataset artifact hash not found in TUF repo, ignoring for noop chec
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
 generated blueprint afb09faf-a586-4483-9289-04d4f1d8ba23 based on parent blueprint c1a0d242-9160-40f4-96ae-61f8f40a0b1b
+blueprint source: planner with report:
 planning report for blueprint afb09faf-a586-4483-9289-04d4f1d8ba23:
 * skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 6 zones are already from artifacts
 * zone adds waiting on blockers
@@ -1092,6 +1105,7 @@ planning report for blueprint afb09faf-a586-4483-9289-04d4f1d8ba23:
   - sleds have mupdate override errors: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
 * zone updates waiting on zone add blockers
 * waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
+
 
 
 > blueprint-show latest
@@ -1260,6 +1274,7 @@ parent:    c1a0d242-9160-40f4-96ae-61f8f40a0b1b
 
  PENDING MGS-MANAGED UPDATES: 0
 
+blueprint source: planner with report:
 planning report for blueprint afb09faf-a586-4483-9289-04d4f1d8ba23:
 * skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 6 zones are already from artifacts
 * zone adds waiting on blockers
@@ -1268,6 +1283,7 @@ planning report for blueprint afb09faf-a586-4483-9289-04d4f1d8ba23:
   - sleds have mupdate override errors: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
 * zone updates waiting on zone add blockers
 * waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
+
 
 
 
@@ -1359,10 +1375,12 @@ INFO added artifact, name: fake-gimlet-sp, kind: gimlet_sp, version: 2.0.0, hash
 INFO added artifact, name: fake-gimlet-rot, kind: gimlet_rot_image_a, version: 2.0.0, hash: 3ab29e804bcbf382370f9f071b2f0ed71e5bb6af8b01474fcc2a414caccfc9be, length: 782
 INFO added artifact, name: fake-gimlet-rot, kind: gimlet_rot_image_b, version: 2.0.0, hash: 3ab29e804bcbf382370f9f071b2f0ed71e5bb6af8b01474fcc2a414caccfc9be, length: 782
 INFO added artifact, name: fake-gimlet-rot-bootloader, kind: gimlet_rot_bootloader, version: 2.0.0, hash: 8f89bf8bc5f3271650ad72a26fc0d116c910161ca143731473a2b20fb82653cc, length: 800
-INFO added artifact, name: fake-host, kind: host_phase_1, version: 2.0.0, hash: 44714733af7600b30a50bfd2cbaf707ff7ee9724073ff70a6732e55a88864cf6, length: 524288
-INFO added artifact, name: fake-host, kind: host_phase_2, version: 2.0.0, hash: 0c0362b640cece5b9a5e86d8fa683bd2eb84c3e7f90731f597197d604ffa76e3, length: 1048576
-INFO added artifact, name: fake-trampoline, kind: trampoline_phase_1, version: non-semver, hash: 24f8ca0d52da5238644b11964c6feda854c7530820713efefa7ac91683b3fc76, length: 524288
-INFO added artifact, name: fake-trampoline, kind: trampoline_phase_2, version: non-semver, hash: 5fceee33d358aacb8a34ca93a30e28354bd8f341f6e3e895a2cafe83904f3d80, length: 1048576
+INFO added artifact, name: fake-host, kind: gimlet_host_phase_1, version: 2.0.0, hash: 1eba0d79ea9d34558fb3f923a06614bd740649eeb0ca6e5086529dc60cd6f729, length: 524288
+INFO added artifact, name: fake-host, kind: cosmo_host_phase_1, version: 2.0.0, hash: acde77f1a4ee5cf719841b21bb04fd652ddf61387bdbc95a67cc1006009ad611, length: 524288
+INFO added artifact, name: fake-host, kind: host_phase_2, version: 2.0.0, hash: 9ff631b5b7229604ab7c5aae2ee4a34a64772736b332540d38077b3aea6952df, length: 1048576
+INFO added artifact, name: fake-trampoline, kind: gimlet_trampoline_phase_1, version: non-semver, hash: 4c854917481a7bcb7b7c1e63833296b3ac1f8687aae5b950ece75a08cf27f35f, length: 524288
+INFO added artifact, name: fake-trampoline, kind: cosmo_trampoline_phase_1, version: non-semver, hash: 6b4ace7210d67fa3a63b14e007d99fbcad1b4e27e78025c8e467c2341f67c2ba, length: 524288
+INFO added artifact, name: fake-trampoline, kind: trampoline_phase_2, version: non-semver, hash: d7cdc8e1bfd15a830cfdc67868a7c05828090aefc42c8af44aa1104900d09fe5, length: 1048576
 INFO added artifact, name: clickhouse, kind: zone, version: 2.0.0, hash: bb2d1ff02d11f72bc9049ae57f27536207519a1859d29f8d7a90ab3b44d56b08, length: 1687
 INFO added artifact, name: clickhouse_keeper, kind: zone, version: 2.0.0, hash: 1eb9f24be68f13c274aa0ac9b863cec520dbfe762620c328431728d75bfd2198, length: 1691
 INFO added artifact, name: clickhouse_server, kind: zone, version: 2.0.0, hash: 50fe271948672a9af1ba5f96c9d87ff2736fa72d78dfef598a79fa0cc8a00474, length: 1691
@@ -1382,7 +1400,7 @@ INFO added artifact, name: fake-switch-sp, kind: switch_sp, version: 2.0.0, hash
 INFO added artifact, name: fake-switch-rot, kind: switch_rot_image_a, version: 2.0.0, hash: ad32d98232043a39d076b5b90b506fad406767e0ce1298507e1733bc4e576740, length: 791
 INFO added artifact, name: fake-switch-rot, kind: switch_rot_image_b, version: 2.0.0, hash: ad32d98232043a39d076b5b90b506fad406767e0ce1298507e1733bc4e576740, length: 791
 INFO added artifact, name: fake-switch-rot-bootloader, kind: switch_rot_bootloader, version: non-semver-2, hash: ceae102fa428d81aa6c5d9e1c742fb9ca1091ce5b2797ed0bb14615cf678d342, length: 811
-INFO added artifact, name: installinator_document, kind: installinator_document, version: 2.0.0, hash: 065b2b7cde09474c9a1bcf98a8f9c93129f617e074404c6aa76164f440a5627f, length: 367
+INFO added artifact, name: installinator_document, kind: installinator_document, version: 2.0.0, hash: 13bb3382a02d1f908137cfa356f1434995de15539341a6d8f52a8f2614c52d6c, length: 367
 set target release based on repo-2.0.0.zip
 
 > blueprint-plan latest latest
@@ -1399,6 +1417,7 @@ INFO performed noop zone image source checks on sled, sled_id: d81c6a84-79b8-495
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
 generated blueprint ce365dff-2cdb-4f35-a186-b15e20e1e700 based on parent blueprint afb09faf-a586-4483-9289-04d4f1d8ba23
+blueprint source: planner with report:
 planning report for blueprint ce365dff-2cdb-4f35-a186-b15e20e1e700:
 * skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 6 zones are already from artifacts
 * noop converting 6/6 install-dataset zones to artifact store on sled d81c6a84-79b8-4958-ae41-ea46c9b19763
@@ -1407,6 +1426,7 @@ planning report for blueprint ce365dff-2cdb-4f35-a186-b15e20e1e700:
   - sleds have mupdate override errors: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
 * zone updates waiting on zone add blockers
 * waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
+
 
 
 > blueprint-show latest
@@ -1575,6 +1595,7 @@ parent:    afb09faf-a586-4483-9289-04d4f1d8ba23
 
  PENDING MGS-MANAGED UPDATES: 0
 
+blueprint source: planner with report:
 planning report for blueprint ce365dff-2cdb-4f35-a186-b15e20e1e700:
 * skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 6 zones are already from artifacts
 * noop converting 6/6 install-dataset zones to artifact store on sled d81c6a84-79b8-4958-ae41-ea46c9b19763
@@ -1583,6 +1604,7 @@ planning report for blueprint ce365dff-2cdb-4f35-a186-b15e20e1e700:
   - sleds have mupdate override errors: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
 * zone updates waiting on zone add blockers
 * waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
+
 
 
 
@@ -1693,6 +1715,7 @@ INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noo
 INFO configuring MGS-driven update, artifact_version: 2.0.0, artifact_hash: 8f89bf8bc5f3271650ad72a26fc0d116c910161ca143731473a2b20fb82653cc, expected_stage0_next_version: NoValidVersion, expected_stage0_version: 0.0.1, component: rot_bootloader, sp_slot: 0, sp_type: Sled, serial_number: serial0, part_number: model0
 INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint 8f2d1f39-7c88-4701-aa43-56bf281b28c1 based on parent blueprint ce365dff-2cdb-4f35-a186-b15e20e1e700
+blueprint source: planner with report:
 planning report for blueprint 8f2d1f39-7c88-4701-aa43-56bf281b28c1:
 * skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 6 zones are already from artifacts
 * skipping noop zone image source check on sled d81c6a84-79b8-4958-ae41-ea46c9b19763: all 6 zones are already from artifacts
@@ -1701,6 +1724,7 @@ planning report for blueprint 8f2d1f39-7c88-4701-aa43-56bf281b28c1:
 * only placed 0/2 desired nexus zones
 * zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
 * waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
+
 
 
 > blueprint-show latest
@@ -1875,6 +1899,7 @@ parent:    ce365dff-2cdb-4f35-a186-b15e20e1e700
     sled      0      model0        serial0         8f89bf8bc5f3271650ad72a26fc0d116c910161ca143731473a2b20fb82653cc   2.0.0              RotBootloader(PendingMgsUpdateRotBootloaderDetails { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: NoValidVersion })
 
 
+blueprint source: planner with report:
 planning report for blueprint 8f2d1f39-7c88-4701-aa43-56bf281b28c1:
 * skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 6 zones are already from artifacts
 * skipping noop zone image source check on sled d81c6a84-79b8-4958-ae41-ea46c9b19763: all 6 zones are already from artifacts
@@ -1883,6 +1908,7 @@ planning report for blueprint 8f2d1f39-7c88-4701-aa43-56bf281b28c1:
 * only placed 0/2 desired nexus zones
 * zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
 * waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
+
 
 
 
@@ -1942,11 +1968,11 @@ set sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 RoT settings: slot a -> 2.0.0
 > sled-update-sp serial0 --active 2.0.0
 set sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 SP versions: active -> 2.0.0
 
-> sled-update-host-phase2 serial0 --boot-disk B --slot-b 0c0362b640cece5b9a5e86d8fa683bd2eb84c3e7f90731f597197d604ffa76e3
-set sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 host phase 2 details: boot_disk -> B, B -> 0c0362b640cece5b9a5e86d8fa683bd2eb84c3e7f90731f597197d604ffa76e3
+> sled-update-host-phase2 serial0 --boot-disk B --slot-b 9ff631b5b7229604ab7c5aae2ee4a34a64772736b332540d38077b3aea6952df
+set sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 host phase 2 details: boot_disk -> B, B -> 9ff631b5b7229604ab7c5aae2ee4a34a64772736b332540d38077b3aea6952df
 
-> sled-update-host-phase1 serial0 --active B --slot-b 44714733af7600b30a50bfd2cbaf707ff7ee9724073ff70a6732e55a88864cf6
-set sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 host phase 1 details: active -> B, B -> 44714733af7600b30a50bfd2cbaf707ff7ee9724073ff70a6732e55a88864cf6
+> sled-update-host-phase1 serial0 --active B --slot-b 1eba0d79ea9d34558fb3f923a06614bd740649eeb0ca6e5086529dc60cd6f729
+set sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 host phase 1 details: active -> B, B -> 1eba0d79ea9d34558fb3f923a06614bd740649eeb0ca6e5086529dc60cd6f729
 
 
 > # All the MGS-based updates on sled 1.
@@ -1959,11 +1985,11 @@ set sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c RoT settings: slot a -> 2.0.0
 > sled-update-sp serial1 --active 2.0.0
 set sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c SP versions: active -> 2.0.0
 
-> sled-update-host-phase2 serial1 --boot-disk B --slot-b 0c0362b640cece5b9a5e86d8fa683bd2eb84c3e7f90731f597197d604ffa76e3
-set sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c host phase 2 details: boot_disk -> B, B -> 0c0362b640cece5b9a5e86d8fa683bd2eb84c3e7f90731f597197d604ffa76e3
+> sled-update-host-phase2 serial1 --boot-disk B --slot-b 9ff631b5b7229604ab7c5aae2ee4a34a64772736b332540d38077b3aea6952df
+set sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c host phase 2 details: boot_disk -> B, B -> 9ff631b5b7229604ab7c5aae2ee4a34a64772736b332540d38077b3aea6952df
 
-> sled-update-host-phase1 serial1 --active B --slot-b 44714733af7600b30a50bfd2cbaf707ff7ee9724073ff70a6732e55a88864cf6
-set sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c host phase 1 details: active -> B, B -> 44714733af7600b30a50bfd2cbaf707ff7ee9724073ff70a6732e55a88864cf6
+> sled-update-host-phase1 serial1 --active B --slot-b 1eba0d79ea9d34558fb3f923a06614bd740649eeb0ca6e5086529dc60cd6f729
+set sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c host phase 1 details: active -> B, B -> 1eba0d79ea9d34558fb3f923a06614bd740649eeb0ca6e5086529dc60cd6f729
 
 
 > # All the MGS-based updates on sled 2.
@@ -1976,11 +2002,11 @@ set sled d81c6a84-79b8-4958-ae41-ea46c9b19763 RoT settings: slot a -> 2.0.0
 > sled-update-sp serial2 --active 2.0.0
 set sled d81c6a84-79b8-4958-ae41-ea46c9b19763 SP versions: active -> 2.0.0
 
-> sled-update-host-phase2 serial2 --boot-disk B --slot-b 0c0362b640cece5b9a5e86d8fa683bd2eb84c3e7f90731f597197d604ffa76e3
-set sled d81c6a84-79b8-4958-ae41-ea46c9b19763 host phase 2 details: boot_disk -> B, B -> 0c0362b640cece5b9a5e86d8fa683bd2eb84c3e7f90731f597197d604ffa76e3
+> sled-update-host-phase2 serial2 --boot-disk B --slot-b 9ff631b5b7229604ab7c5aae2ee4a34a64772736b332540d38077b3aea6952df
+set sled d81c6a84-79b8-4958-ae41-ea46c9b19763 host phase 2 details: boot_disk -> B, B -> 9ff631b5b7229604ab7c5aae2ee4a34a64772736b332540d38077b3aea6952df
 
-> sled-update-host-phase1 serial2 --active B --slot-b 44714733af7600b30a50bfd2cbaf707ff7ee9724073ff70a6732e55a88864cf6
-set sled d81c6a84-79b8-4958-ae41-ea46c9b19763 host phase 1 details: active -> B, B -> 44714733af7600b30a50bfd2cbaf707ff7ee9724073ff70a6732e55a88864cf6
+> sled-update-host-phase1 serial2 --active B --slot-b 1eba0d79ea9d34558fb3f923a06614bd740649eeb0ca6e5086529dc60cd6f729
+set sled d81c6a84-79b8-4958-ae41-ea46c9b19763 host phase 1 details: active -> B, B -> 1eba0d79ea9d34558fb3f923a06614bd740649eeb0ca6e5086529dc60cd6f729
 
 
 > # All MGS-based updates complete.
@@ -2001,6 +2027,7 @@ INFO skipping board for MGS-driven update, serial_number: serial2, part_number: 
 INFO ran out of boards for MGS-driven update
 INFO some zones not yet up-to-date, zones_currently_updating: [ZonePropagationIncomplete { zone_id: 0c71b3b2-6ceb-4e8f-b020-b08675e83038 (service), zone_kind: Nexus, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("0e32b4a3e5d3668bb1d6a16fb06b74dc60b973fa479dcee0aae3adbb52bf1388") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: 427ec88f-f467-42fa-9bbb-66a91a36103c (service), zone_kind: InternalDns, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("ffbf1373f7ee08dddd74c53ed2a94e7c4c572a982d3a9bc94000c6956b700c6a") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: 5199c033-4cf9-4ab6-8ae7-566bd7606363 (service), zone_kind: Crucible, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("6f17cf65fb5a5bec5542dd07c03cd0acc01e59130f02c532c8d848ecae810047") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: 6444f8a5-6465-4f0b-a549-1993c113569c (service), zone_kind: InternalNtp, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("67593d686ed04a1709f93972b71f4ebc148a9362120f65d239943e814a9a7439") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: 803bfb63-c246-41db-b0da-d3b87ddfc63d (service), zone_kind: ExternalDns, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("ccca13ed19b8731f9adaf0d6203b02ea3b9ede4fa426b9fac0a07ce95440046d") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: ba4994a8-23f9-4b1a-a84f-a08d74591389 (service), zone_kind: CruciblePantry, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("21f0ada306859c23917361f2e0b9235806c32607ec689c7e8cf16bb898bc5a02") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: 3eeb8d49-eb1a-43f8-bb64-c2338421c2c6 (service), zone_kind: Nexus, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("2.0.0") }, hash: ArtifactHash("e9b7035f41848a987a798c15ac424cc91dd662b1af0920d58d8aa1ebad7467b6") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: 75b220ba-a0f4-4872-8202-dc7c87f062d0 (service), zone_kind: CruciblePantry, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("2.0.0") }, hash: ArtifactHash("3ff26dad96faa8f67251f5de40458b4f809d536bfe8572134da0e42c2fa12674") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: ea5b4030-b52f-44b2-8d70-45f15f987d01 (service), zone_kind: InternalDns, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("2.0.0") }, hash: ArtifactHash("de30657a72b066b8ef1f56351a0a5d4d7000da0a62c4be9b2e949a107ca8a389") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: f10a4fb9-759f-4a65-b25e-5794ad2d07d8 (service), zone_kind: InternalNtp, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("2.0.0") }, hash: ArtifactHash("d76e26198daed69cdae04490d7477f8c842e0dbe37d463eac0d0a8d3fb803095") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: f55647d4-5500-4ad3-893a-df45bd50d622 (service), zone_kind: Crucible, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("2.0.0") }, hash: ArtifactHash("866f6a7c2e51c056fb722b5113e80181cc9cd8b712a0d3dbf1edc4ce29e5229e") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: f6ec9c67-946a-4da3-98d5-581f72ce8bf0 (service), zone_kind: ExternalDns, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("2.0.0") }, hash: ArtifactHash("f282c45771429f7bebf71f0cc668521066db57c6bb07fcfccdfb44825d3d930f") }, inv_image_source: InstallDataset } }]
 generated blueprint 12d602a6-5ab4-487a-b94e-eb30cdf30300 based on parent blueprint 8f2d1f39-7c88-4701-aa43-56bf281b28c1
+blueprint source: planner with report:
 planning report for blueprint 12d602a6-5ab4-487a-b94e-eb30cdf30300:
 * skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 6 zones are already from artifacts
 * skipping noop zone image source check on sled d81c6a84-79b8-4958-ae41-ea46c9b19763: all 6 zones are already from artifacts
@@ -2009,6 +2036,7 @@ planning report for blueprint 12d602a6-5ab4-487a-b94e-eb30cdf30300:
 * noop converting host phase 2 slot B to Artifact on sled d81c6a84-79b8-4958-ae41-ea46c9b19763
 * only placed 0/2 desired nexus zones
 * waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
+
 
 
 > blueprint-diff latest
@@ -2225,7 +2253,7 @@ INFO blueprint mupdate override updated to match inventory, phase: do_plan_mupda
   - zone ba4994a8-23f9-4b1a-a84f-a08d74591389 (CruciblePantry) updated from artifact: version 1.0.0 to install dataset
 , host_phase_2: 
   - host phase 2 slot A: current contents (unchanged)
-  - host phase 2 slot B: updated from artifact (version version 2.0.0, hash 0c0362b640cece5b9a5e86d8fa683bd2eb84c3e7f90731f597197d604ffa76e3) to preserving current contents
+  - host phase 2 slot B: updated from artifact (version version 2.0.0, hash 9ff631b5b7229604ab7c5aae2ee4a34a64772736b332540d38077b3aea6952df) to preserving current contents
 
 INFO no previous MGS update found as part of updating blueprint mupdate override to match inventory, phase: do_plan_mupdate_override, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
 INFO updating target release minimum generation based on new set-override actions, phase: do_plan_mupdate_override, current_generation: 4, new_generation: 5
@@ -2238,6 +2266,7 @@ INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noo
 INFO performed noop zone image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 6, num_already_artifact: 6, num_eligible: 0, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 generated blueprint 61a93ea3-c872-48e0-aace-e86b0c52b839 based on parent blueprint 12d602a6-5ab4-487a-b94e-eb30cdf30300
+blueprint source: planner with report:
 planning report for blueprint 61a93ea3-c872-48e0-aace-e86b0c52b839:
 * skipping noop zone image source check on sled c3bc4c6d-fdde-4fc4-8493-89d2a1e5ee6b: all 0 zones are already from artifacts
 * skipping noop zone image source check on sled d81c6a84-79b8-4958-ae41-ea46c9b19763: all 6 zones are already from artifacts
@@ -2247,6 +2276,7 @@ planning report for blueprint 61a93ea3-c872-48e0-aace-e86b0c52b839:
   - sleds have remove mupdate override set in blueprint: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
 * zone updates waiting on zone add blockers
 * waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
+
 
 
 > blueprint-diff latest
@@ -2364,6 +2394,7 @@ INFO performed noop zone image source checks on sled, sled_id: d81c6a84-79b8-495
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO altered physical disks, sled_id: c3bc4c6d-fdde-4fc4-8493-89d2a1e5ee6b, sled_edits: SledEditCounts { disks: EditCounts { added: 10, updated: 0, expunged: 0, removed: 0 }, datasets: EditCounts { added: 20, updated: 0, expunged: 0, removed: 0 }, zones: EditCounts { added: 0, updated: 0, expunged: 0, removed: 0 } }
 generated blueprint 27e755bc-dc10-4647-853c-f89bb3a15a2c based on parent blueprint 61a93ea3-c872-48e0-aace-e86b0c52b839
+blueprint source: planner with report:
 planning report for blueprint 27e755bc-dc10-4647-853c-f89bb3a15a2c:
 planner config:
     add zones with mupdate override:   true
@@ -2379,6 +2410,7 @@ planner config:
 * only placed 0/1 desired nexus zones
 * zone updates waiting on zone add blockers
 * waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
+
 
 
 > blueprint-diff latest
@@ -2506,7 +2538,7 @@ INFO blueprint mupdate override updated to match inventory, phase: do_plan_mupda
   - zone bd354eef-d8a6-4165-9124-283fb5e46d77 (Crucible) left unchanged, image source: install dataset
 , host_phase_2: 
   - host phase 2 slot A: current contents (unchanged)
-  - host phase 2 slot B: updated from artifact (version version 2.0.0, hash 0c0362b640cece5b9a5e86d8fa683bd2eb84c3e7f90731f597197d604ffa76e3) to preserving current contents
+  - host phase 2 slot B: updated from artifact (version version 2.0.0, hash 9ff631b5b7229604ab7c5aae2ee4a34a64772736b332540d38077b3aea6952df) to preserving current contents
 
 INFO no previous MGS update found as part of updating blueprint mupdate override to match inventory, phase: do_plan_mupdate_override, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
 error: generating blueprint: target release minimum generation was set to 1000, but we tried to set it to the older generation 5, indicating a possible table rollback which should not happen
