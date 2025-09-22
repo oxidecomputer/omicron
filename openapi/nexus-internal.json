@@ -2617,7 +2617,7 @@
             }
           },
           "source": {
-            "description": "Source of this blueprint",
+            "description": "Source of this blueprint (can include planning report)",
             "allOf": [
               {
                 "$ref": "#/components/schemas/BlueprintSource"
@@ -3172,7 +3172,7 @@
             ]
           },
           {
-            "description": "This blueprint was created by a test.",
+            "description": "This blueprint was constructed by hand by an automated test.",
             "type": "object",
             "properties": {
               "source": {
