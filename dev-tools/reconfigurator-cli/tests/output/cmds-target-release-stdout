@@ -38,10 +38,12 @@ INFO added artifact, name: fake-gimlet-sp, kind: gimlet_sp, version: 0.0.1, hash
 INFO added artifact, name: fake-rot, kind: gimlet_rot_image_a, version: 0.0.1, hash: 244d553f832cf74043bbcc8a747c8d05384a0f89f7809dcab28c3f707b11f985, length: 787
 INFO added artifact, name: fake-rot, kind: gimlet_rot_image_b, version: 0.0.1, hash: 244d553f832cf74043bbcc8a747c8d05384a0f89f7809dcab28c3f707b11f985, length: 787
 INFO added artifact, name: fake-rot-bootloader, kind: gimlet_rot_bootloader, version: 0.0.1, hash: 5bfb2fef5a25100e7813636699bd365bbcd623980ae00e876ad705ef591feded, length: 794
-INFO added artifact, name: fake-host, kind: host_phase_1, version: 0.0.1, hash: c5df11f1e813d9cb2310ccdd9331e9ef6af86b808db615bf377d7c079df1d104, length: 524288
-INFO added artifact, name: fake-host, kind: host_phase_2, version: 0.0.1, hash: d3f5caca1c1c3e666cf82ebc2c5ba90210b49a8af58ccffb5f9f1b112649d11e, length: 1048576
-INFO added artifact, name: fake-trampoline, kind: trampoline_phase_1, version: 0.0.1, hash: f1f25a5d081cfdcfbd4fcd3471d6f21598ae53668c7137544bc06685e9524096, length: 524288
-INFO added artifact, name: fake-trampoline, kind: trampoline_phase_2, version: 0.0.1, hash: 66ebb08f54ea59476948efe82863eeff9d0fd4d92450c57dfca9f36b6de05397, length: 1048576
+INFO added artifact, name: fake-host, kind: gimlet_host_phase_1, version: 0.0.1, hash: 143aa9751a0bb16ab3d2c8b56d2874eeab14e1ac3413aa0edf1dbf56900f3fcc, length: 524288
+INFO added artifact, name: fake-host, kind: cosmo_host_phase_1, version: 0.0.1, hash: 0c43c53453b1113d8ec83d0e3cb8139094b6f4594c304645a33248863141bac6, length: 524288
+INFO added artifact, name: fake-host, kind: host_phase_2, version: 0.0.1, hash: 7cd830e1682d50620de0f5c24b8cca15937eb10d2a415ade6ad28c0d314408eb, length: 1048576
+INFO added artifact, name: fake-trampoline, kind: gimlet_trampoline_phase_1, version: 0.0.1, hash: 040e9ffbd212b790da4fc3a6376c9ff102c852c4ac1f1a1bc84c7d8edc64029f, length: 524288
+INFO added artifact, name: fake-trampoline, kind: cosmo_trampoline_phase_1, version: 0.0.1, hash: bfc7d2bf0d2e5dde41b8ea85beca7f01262688297f438727fdeb8543c1ceb25e, length: 524288
+INFO added artifact, name: fake-trampoline, kind: trampoline_phase_2, version: 0.0.1, hash: a05417d8d03400b9d556b63563c9958da983a0cdcc3259669966ad45e395c277, length: 1048576
 INFO added artifact, name: clickhouse, kind: zone, version: 0.0.1, hash: 0cc283162daad1dd9d63cd20a484f4e0157b6895c179defa8a99fd220323a6c5, length: 1687
 INFO added artifact, name: clickhouse_keeper, kind: zone, version: 0.0.1, hash: f27ef7d2ce10696c4583ea194cdf61c3907f2143f666af964b8ed3bee1346be0, length: 1691
 INFO added artifact, name: clickhouse_server, kind: zone, version: 0.0.1, hash: bc35f79e04956e284c230f324fe7475ad5cb2ede08e6b4a77addcd9e6f50d33b, length: 1691
@@ -61,7 +63,7 @@ INFO added artifact, name: fake-switch-sp, kind: switch_sp, version: 0.0.1, hash
 INFO added artifact, name: fake-switch-rot, kind: switch_rot_image_a, version: 0.0.1, hash: 7776db817d1f1b1a2f578050742e33bd4e805a4c76f36bce84dcb509b900249c, length: 776
 INFO added artifact, name: fake-switch-rot, kind: switch_rot_image_b, version: 0.0.1, hash: 7776db817d1f1b1a2f578050742e33bd4e805a4c76f36bce84dcb509b900249c, length: 776
 INFO added artifact, name: fake-switch-rot-bootloader, kind: switch_rot_bootloader, version: 0.0.1, hash: 0686443d50db2247077dc70b6543cea9a90a9792de00e06c06cff4c91fa5a4a8, length: 792
-INFO added artifact, name: installinator_document, kind: installinator_document, version: 0.0.1, hash: f4e31ffc698e99e96b7deda98e1c1bd30bca18fa6007b8fac5a2d2d7117e7e4b, length: 367
+INFO added artifact, name: installinator_document, kind: installinator_document, version: 0.0.1, hash: 657aaebc9c2f451446af0411a67a4bd057f39fa1b8a7fdc429ca4a2facd9344c, length: 367
 set target release based on repo-0.0.1.zip
 
 
@@ -77,10 +79,12 @@ target release (generation 2): 0.0.1 (system-update-v0.0.1.zip)
     artifact: 244d553f832cf74043bbcc8a747c8d05384a0f89f7809dcab28c3f707b11f985 gimlet_rot_image_a (fake-rot version 0.0.1)
     artifact: 244d553f832cf74043bbcc8a747c8d05384a0f89f7809dcab28c3f707b11f985 gimlet_rot_image_b (fake-rot version 0.0.1)
     artifact: 5bfb2fef5a25100e7813636699bd365bbcd623980ae00e876ad705ef591feded gimlet_rot_bootloader (fake-rot-bootloader version 0.0.1)
-    artifact: c5df11f1e813d9cb2310ccdd9331e9ef6af86b808db615bf377d7c079df1d104 host_phase_1 (fake-host version 0.0.1)
-    artifact: d3f5caca1c1c3e666cf82ebc2c5ba90210b49a8af58ccffb5f9f1b112649d11e host_phase_2 (fake-host version 0.0.1)
-    artifact: f1f25a5d081cfdcfbd4fcd3471d6f21598ae53668c7137544bc06685e9524096 trampoline_phase_1 (fake-trampoline version 0.0.1)
-    artifact: 66ebb08f54ea59476948efe82863eeff9d0fd4d92450c57dfca9f36b6de05397 trampoline_phase_2 (fake-trampoline version 0.0.1)
+    artifact: 143aa9751a0bb16ab3d2c8b56d2874eeab14e1ac3413aa0edf1dbf56900f3fcc gimlet_host_phase_1 (fake-host version 0.0.1)
+    artifact: 0c43c53453b1113d8ec83d0e3cb8139094b6f4594c304645a33248863141bac6 cosmo_host_phase_1 (fake-host version 0.0.1)
+    artifact: 7cd830e1682d50620de0f5c24b8cca15937eb10d2a415ade6ad28c0d314408eb host_phase_2 (fake-host version 0.0.1)
+    artifact: 040e9ffbd212b790da4fc3a6376c9ff102c852c4ac1f1a1bc84c7d8edc64029f gimlet_trampoline_phase_1 (fake-trampoline version 0.0.1)
+    artifact: bfc7d2bf0d2e5dde41b8ea85beca7f01262688297f438727fdeb8543c1ceb25e cosmo_trampoline_phase_1 (fake-trampoline version 0.0.1)
+    artifact: a05417d8d03400b9d556b63563c9958da983a0cdcc3259669966ad45e395c277 trampoline_phase_2 (fake-trampoline version 0.0.1)
     artifact: 0cc283162daad1dd9d63cd20a484f4e0157b6895c179defa8a99fd220323a6c5 zone (clickhouse version 0.0.1)
     artifact: f27ef7d2ce10696c4583ea194cdf61c3907f2143f666af964b8ed3bee1346be0 zone (clickhouse_keeper version 0.0.1)
     artifact: bc35f79e04956e284c230f324fe7475ad5cb2ede08e6b4a77addcd9e6f50d33b zone (clickhouse_server version 0.0.1)
@@ -100,7 +104,7 @@ target release (generation 2): 0.0.1 (system-update-v0.0.1.zip)
     artifact: 7776db817d1f1b1a2f578050742e33bd4e805a4c76f36bce84dcb509b900249c switch_rot_image_a (fake-switch-rot version 0.0.1)
     artifact: 7776db817d1f1b1a2f578050742e33bd4e805a4c76f36bce84dcb509b900249c switch_rot_image_b (fake-switch-rot version 0.0.1)
     artifact: 0686443d50db2247077dc70b6543cea9a90a9792de00e06c06cff4c91fa5a4a8 switch_rot_bootloader (fake-switch-rot-bootloader version 0.0.1)
-    artifact: f4e31ffc698e99e96b7deda98e1c1bd30bca18fa6007b8fac5a2d2d7117e7e4b installinator_document (installinator_document version 0.0.1)
+    artifact: 657aaebc9c2f451446af0411a67a4bd057f39fa1b8a7fdc429ca4a2facd9344c installinator_document (installinator_document version 0.0.1)
 planner config:
     add zones with mupdate override:   false
 
@@ -137,6 +141,7 @@ INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noo
 INFO configuring MGS-driven update, artifact_version: 0.0.1, artifact_hash: 244d553f832cf74043bbcc8a747c8d05384a0f89f7809dcab28c3f707b11f985, expected_transient_boot_preference: None, expected_pending_persistent_boot_preference: None, expected_persistent_boot_preference: A, expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: NoValidVersion, component: rot, sp_slot: 0, sp_type: Sled, serial_number: serial0, part_number: model0
 INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1 based on parent blueprint dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21
+blueprint source: planner with report:
 planning report for blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1:
 * noop converting 9/9 install-dataset zones to artifact store on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
 * noop converting 8/8 install-dataset zones to artifact store on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
@@ -144,6 +149,7 @@ planning report for blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1:
 * 1 pending MGS update:
   * model0:serial0: Rot(PendingMgsUpdateRotDetails { expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: NoValidVersion, expected_persistent_boot_preference: A, expected_pending_persistent_boot_preference: None, expected_transient_boot_preference: None })
 * zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+
 
 
 > blueprint-diff latest
@@ -921,10 +927,12 @@ INFO added artifact, name: fake-gimlet-sp, kind: gimlet_sp, version: 1.0.0, hash
 INFO added artifact, name: fake-rot, kind: gimlet_rot_image_a, version: 1.0.0, hash: d11e65f934bf0de51df2e5b484f61ee72072417b43ac87f33e958008428e7b02, length: 783
 INFO added artifact, name: fake-rot, kind: gimlet_rot_image_b, version: 1.0.0, hash: d11e65f934bf0de51df2e5b484f61ee72072417b43ac87f33e958008428e7b02, length: 783
 INFO added artifact, name: fake-rot-bootloader, kind: gimlet_rot_bootloader, version: 1.0.0, hash: 5b0f601b1fbb8674db9c751a02f8b14f8e6d4e8470f4f7b686fecb2c49ec11f9, length: 797
-INFO added artifact, name: fake-host, kind: host_phase_1, version: 1.0.0, hash: 2053f8594971bbf0a7326c833e2ffc12b065b9d823b9c0b967d275fa595e4e89, length: 524288
-INFO added artifact, name: fake-host, kind: host_phase_2, version: 1.0.0, hash: f3dd0c7a1bd4500ea0d8bcf67581f576d47752b2f1998a4cb0f0c3155c483008, length: 1048576
-INFO added artifact, name: fake-trampoline, kind: trampoline_phase_1, version: 1.0.0, hash: 9b7575cad720f017e936fe5994fc4e21fe040acaaf83c2edd86132aa3d667c7b, length: 524288
-INFO added artifact, name: fake-trampoline, kind: trampoline_phase_2, version: 1.0.0, hash: f355fb8429a7e0f0716dad035f9a06c799168d6c0ffcde85b1a96fef21d4b53e, length: 1048576
+INFO added artifact, name: fake-host, kind: gimlet_host_phase_1, version: 1.0.0, hash: b99d5273ba1418bebb19d74b701d716896409566d41de76ada71bded4c9b166b, length: 524288
+INFO added artifact, name: fake-host, kind: cosmo_host_phase_1, version: 1.0.0, hash: 9525f567106549a3fc32df870a74803d77e51dcc44190b218e227a2c5d444f58, length: 524288
+INFO added artifact, name: fake-host, kind: host_phase_2, version: 1.0.0, hash: d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47, length: 1048576
+INFO added artifact, name: fake-trampoline, kind: gimlet_trampoline_phase_1, version: 1.0.0, hash: bcb27520ee5a56e19f6df9662c66d69ac681fbd873a97547be5f6a5ae3d250c4, length: 524288
+INFO added artifact, name: fake-trampoline, kind: cosmo_trampoline_phase_1, version: 1.0.0, hash: e235b8afb58ee69d966853bd5efe7c7e904da84b9035a332b3e691dc1d5cdbd0, length: 524288
+INFO added artifact, name: fake-trampoline, kind: trampoline_phase_2, version: 1.0.0, hash: a5dfcc4bc69b791f1c509df499e9e72cce844cb2b53a56d8bb357b264bdf13b6, length: 1048576
 INFO added artifact, name: clickhouse, kind: zone, version: 1.0.0, hash: 52b1eb4daff6f9140491d547b11248392920230db3db0eef5f5fa5333fe9e659, length: 1686
 INFO added artifact, name: clickhouse_keeper, kind: zone, version: 1.0.0, hash: cda702919449d86663be97295043aeca0ead69ae5db3bbdb20053972254a27a3, length: 1690
 INFO added artifact, name: clickhouse_server, kind: zone, version: 1.0.0, hash: 5f9ae6a9821bbe8ff0bf60feddf8b167902fe5f3e2c98bd21edd1ec9d969a001, length: 1690
@@ -944,7 +952,7 @@ INFO added artifact, name: fake-switch-sp, kind: switch_sp, version: 1.0.0, hash
 INFO added artifact, name: fake-switch-rot, kind: switch_rot_image_a, version: 1.0.0, hash: 32307d6d75c9707e8499ba4a4d379f99c0358237b6e190ff6a8024b470f62342, length: 774
 INFO added artifact, name: fake-switch-rot, kind: switch_rot_image_b, version: 1.0.0, hash: 32307d6d75c9707e8499ba4a4d379f99c0358237b6e190ff6a8024b470f62342, length: 774
 INFO added artifact, name: fake-switch-rot-bootloader, kind: switch_rot_bootloader, version: 1.0.0, hash: 70836d170abd5621f95bb4225987b27b3d3dd6168e73cd60e44309bdfeb94e98, length: 804
-INFO added artifact, name: installinator_document, kind: installinator_document, version: 1.0.0, hash: c6ae866031d1183094c92cde9d9d1fd5f18356abc81a842ce31471b473fd5582, length: 367
+INFO added artifact, name: installinator_document, kind: installinator_document, version: 1.0.0, hash: a6a636b5d57813578766b3f1c2559abf9af5d8c86187538167937c476beeefa3, length: 367
 set target release based on repo-1.0.0.zip
 
 
@@ -960,10 +968,12 @@ target release (generation 3): 1.0.0 (system-update-v1.0.0.zip)
     artifact: d11e65f934bf0de51df2e5b484f61ee72072417b43ac87f33e958008428e7b02 gimlet_rot_image_a (fake-rot version 1.0.0)
     artifact: d11e65f934bf0de51df2e5b484f61ee72072417b43ac87f33e958008428e7b02 gimlet_rot_image_b (fake-rot version 1.0.0)
     artifact: 5b0f601b1fbb8674db9c751a02f8b14f8e6d4e8470f4f7b686fecb2c49ec11f9 gimlet_rot_bootloader (fake-rot-bootloader version 1.0.0)
-    artifact: 2053f8594971bbf0a7326c833e2ffc12b065b9d823b9c0b967d275fa595e4e89 host_phase_1 (fake-host version 1.0.0)
-    artifact: f3dd0c7a1bd4500ea0d8bcf67581f576d47752b2f1998a4cb0f0c3155c483008 host_phase_2 (fake-host version 1.0.0)
-    artifact: 9b7575cad720f017e936fe5994fc4e21fe040acaaf83c2edd86132aa3d667c7b trampoline_phase_1 (fake-trampoline version 1.0.0)
-    artifact: f355fb8429a7e0f0716dad035f9a06c799168d6c0ffcde85b1a96fef21d4b53e trampoline_phase_2 (fake-trampoline version 1.0.0)
+    artifact: b99d5273ba1418bebb19d74b701d716896409566d41de76ada71bded4c9b166b gimlet_host_phase_1 (fake-host version 1.0.0)
+    artifact: 9525f567106549a3fc32df870a74803d77e51dcc44190b218e227a2c5d444f58 cosmo_host_phase_1 (fake-host version 1.0.0)
+    artifact: d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47 host_phase_2 (fake-host version 1.0.0)
+    artifact: bcb27520ee5a56e19f6df9662c66d69ac681fbd873a97547be5f6a5ae3d250c4 gimlet_trampoline_phase_1 (fake-trampoline version 1.0.0)
+    artifact: e235b8afb58ee69d966853bd5efe7c7e904da84b9035a332b3e691dc1d5cdbd0 cosmo_trampoline_phase_1 (fake-trampoline version 1.0.0)
+    artifact: a5dfcc4bc69b791f1c509df499e9e72cce844cb2b53a56d8bb357b264bdf13b6 trampoline_phase_2 (fake-trampoline version 1.0.0)
     artifact: 52b1eb4daff6f9140491d547b11248392920230db3db0eef5f5fa5333fe9e659 zone (clickhouse version 1.0.0)
     artifact: cda702919449d86663be97295043aeca0ead69ae5db3bbdb20053972254a27a3 zone (clickhouse_keeper version 1.0.0)
     artifact: 5f9ae6a9821bbe8ff0bf60feddf8b167902fe5f3e2c98bd21edd1ec9d969a001 zone (clickhouse_server version 1.0.0)
@@ -983,7 +993,7 @@ target release (generation 3): 1.0.0 (system-update-v1.0.0.zip)
     artifact: 32307d6d75c9707e8499ba4a4d379f99c0358237b6e190ff6a8024b470f62342 switch_rot_image_a (fake-switch-rot version 1.0.0)
     artifact: 32307d6d75c9707e8499ba4a4d379f99c0358237b6e190ff6a8024b470f62342 switch_rot_image_b (fake-switch-rot version 1.0.0)
     artifact: 70836d170abd5621f95bb4225987b27b3d3dd6168e73cd60e44309bdfeb94e98 switch_rot_bootloader (fake-switch-rot-bootloader version 1.0.0)
-    artifact: c6ae866031d1183094c92cde9d9d1fd5f18356abc81a842ce31471b473fd5582 installinator_document (installinator_document version 1.0.0)
+    artifact: a6a636b5d57813578766b3f1c2559abf9af5d8c86187538167937c476beeefa3 installinator_document (installinator_document version 1.0.0)
 planner config:
     add zones with mupdate override:   false
 
@@ -1036,10 +1046,12 @@ target release (generation 3): 1.0.0 (system-update-v1.0.0.zip)
     artifact: d11e65f934bf0de51df2e5b484f61ee72072417b43ac87f33e958008428e7b02 gimlet_rot_image_a (fake-rot version 1.0.0)
     artifact: d11e65f934bf0de51df2e5b484f61ee72072417b43ac87f33e958008428e7b02 gimlet_rot_image_b (fake-rot version 1.0.0)
     artifact: 5b0f601b1fbb8674db9c751a02f8b14f8e6d4e8470f4f7b686fecb2c49ec11f9 gimlet_rot_bootloader (fake-rot-bootloader version 1.0.0)
-    artifact: 2053f8594971bbf0a7326c833e2ffc12b065b9d823b9c0b967d275fa595e4e89 host_phase_1 (fake-host version 1.0.0)
-    artifact: f3dd0c7a1bd4500ea0d8bcf67581f576d47752b2f1998a4cb0f0c3155c483008 host_phase_2 (fake-host version 1.0.0)
-    artifact: 9b7575cad720f017e936fe5994fc4e21fe040acaaf83c2edd86132aa3d667c7b trampoline_phase_1 (fake-trampoline version 1.0.0)
-    artifact: f355fb8429a7e0f0716dad035f9a06c799168d6c0ffcde85b1a96fef21d4b53e trampoline_phase_2 (fake-trampoline version 1.0.0)
+    artifact: b99d5273ba1418bebb19d74b701d716896409566d41de76ada71bded4c9b166b gimlet_host_phase_1 (fake-host version 1.0.0)
+    artifact: 9525f567106549a3fc32df870a74803d77e51dcc44190b218e227a2c5d444f58 cosmo_host_phase_1 (fake-host version 1.0.0)
+    artifact: d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47 host_phase_2 (fake-host version 1.0.0)
+    artifact: bcb27520ee5a56e19f6df9662c66d69ac681fbd873a97547be5f6a5ae3d250c4 gimlet_trampoline_phase_1 (fake-trampoline version 1.0.0)
+    artifact: e235b8afb58ee69d966853bd5efe7c7e904da84b9035a332b3e691dc1d5cdbd0 cosmo_trampoline_phase_1 (fake-trampoline version 1.0.0)
+    artifact: a5dfcc4bc69b791f1c509df499e9e72cce844cb2b53a56d8bb357b264bdf13b6 trampoline_phase_2 (fake-trampoline version 1.0.0)
     artifact: 52b1eb4daff6f9140491d547b11248392920230db3db0eef5f5fa5333fe9e659 zone (clickhouse version 1.0.0)
     artifact: cda702919449d86663be97295043aeca0ead69ae5db3bbdb20053972254a27a3 zone (clickhouse_keeper version 1.0.0)
     artifact: 5f9ae6a9821bbe8ff0bf60feddf8b167902fe5f3e2c98bd21edd1ec9d969a001 zone (clickhouse_server version 1.0.0)
@@ -1059,7 +1071,7 @@ target release (generation 3): 1.0.0 (system-update-v1.0.0.zip)
     artifact: 32307d6d75c9707e8499ba4a4d379f99c0358237b6e190ff6a8024b470f62342 switch_rot_image_a (fake-switch-rot version 1.0.0)
     artifact: 32307d6d75c9707e8499ba4a4d379f99c0358237b6e190ff6a8024b470f62342 switch_rot_image_b (fake-switch-rot version 1.0.0)
     artifact: 70836d170abd5621f95bb4225987b27b3d3dd6168e73cd60e44309bdfeb94e98 switch_rot_bootloader (fake-switch-rot-bootloader version 1.0.0)
-    artifact: c6ae866031d1183094c92cde9d9d1fd5f18356abc81a842ce31471b473fd5582 installinator_document (installinator_document version 1.0.0)
+    artifact: a6a636b5d57813578766b3f1c2559abf9af5d8c86187538167937c476beeefa3 installinator_document (installinator_document version 1.0.0)
 planner config:
     add zones with mupdate override:   false
 
@@ -1101,6 +1113,7 @@ INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noo
 INFO configuring MGS-driven update, artifact_version: 1.0.0, artifact_hash: 5b0f601b1fbb8674db9c751a02f8b14f8e6d4e8470f4f7b686fecb2c49ec11f9, expected_stage0_next_version: NoValidVersion, expected_stage0_version: 0.0.1, component: rot_bootloader, sp_slot: 0, sp_type: Sled, serial_number: serial0, part_number: model0
 INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint af934083-59b5-4bf6-8966-6fb5292c29e1 based on parent blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4
+blueprint source: planner with report:
 planning report for blueprint af934083-59b5-4bf6-8966-6fb5292c29e1:
 * skipping noop zone image source check on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: all 9 zones are already from artifacts
 * skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 8 zones are already from artifacts
@@ -1108,6 +1121,7 @@ planning report for blueprint af934083-59b5-4bf6-8966-6fb5292c29e1:
 * 1 pending MGS update:
   * model0:serial0: RotBootloader(PendingMgsUpdateRotBootloaderDetails { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: NoValidVersion })
 * zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+
 
 
 > blueprint-diff latest
@@ -1162,6 +1176,7 @@ INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noo
 INFO MGS-driven update not yet completed (will keep it), artifact_version: 1.0.0, artifact_hash: 5b0f601b1fbb8674db9c751a02f8b14f8e6d4e8470f4f7b686fecb2c49ec11f9, expected_stage0_next_version: NoValidVersion, expected_stage0_version: 0.0.1, component: rot_bootloader, sp_slot: 0, sp_type: Sled, serial_number: serial0, part_number: model0
 INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint df06bb57-ad42-4431-9206-abff322896c7 based on parent blueprint af934083-59b5-4bf6-8966-6fb5292c29e1
+blueprint source: planner with report:
 planning report for blueprint df06bb57-ad42-4431-9206-abff322896c7:
 * skipping noop zone image source check on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: all 9 zones are already from artifacts
 * skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 8 zones are already from artifacts
@@ -1169,6 +1184,7 @@ planning report for blueprint df06bb57-ad42-4431-9206-abff322896c7:
 * 1 pending MGS update:
   * model0:serial0: RotBootloader(PendingMgsUpdateRotBootloaderDetails { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: NoValidVersion })
 * zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+
 
 
 > blueprint-diff latest
@@ -1225,6 +1241,7 @@ INFO MGS-driven update completed (will remove it and re-evaluate board), artifac
 INFO configuring MGS-driven update, artifact_version: 1.0.0, artifact_hash: d11e65f934bf0de51df2e5b484f61ee72072417b43ac87f33e958008428e7b02, expected_transient_boot_preference: None, expected_pending_persistent_boot_preference: None, expected_persistent_boot_preference: A, expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: NoValidVersion, component: rot, sp_slot: 0, sp_type: Sled, serial_number: serial0, part_number: model0
 INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba based on parent blueprint df06bb57-ad42-4431-9206-abff322896c7
+blueprint source: planner with report:
 planning report for blueprint 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba:
 * skipping noop zone image source check on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: all 9 zones are already from artifacts
 * skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 8 zones are already from artifacts
@@ -1232,6 +1249,7 @@ planning report for blueprint 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba:
 * 1 pending MGS update:
   * model0:serial0: Rot(PendingMgsUpdateRotDetails { expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: NoValidVersion, expected_persistent_boot_preference: A, expected_pending_persistent_boot_preference: None, expected_transient_boot_preference: None })
 * zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+
 
 
 > blueprint-diff latest
@@ -1297,6 +1315,7 @@ INFO MGS-driven update completed (will remove it and re-evaluate board), artifac
 INFO configuring MGS-driven update, artifact_version: 1.0.0, artifact_hash: 68465b8e3f808f475510b525cfd62086d37ddd57688bd854184fdafb2b2198a4, expected_inactive_version: NoValidVersion, expected_active_version: 0.0.1, component: sp, sp_slot: 0, sp_type: Sled, serial_number: serial0, part_number: model0
 INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint 9034c710-3e57-45f3-99e5-4316145e87ac based on parent blueprint 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba
+blueprint source: planner with report:
 planning report for blueprint 9034c710-3e57-45f3-99e5-4316145e87ac:
 * skipping noop zone image source check on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: all 9 zones are already from artifacts
 * skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 8 zones are already from artifacts
@@ -1304,6 +1323,7 @@ planning report for blueprint 9034c710-3e57-45f3-99e5-4316145e87ac:
 * 1 pending MGS update:
   * model0:serial0: Sp(PendingMgsUpdateSpDetails { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: NoValidVersion })
 * zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+
 
 
 > blueprint-diff latest
@@ -1367,16 +1387,18 @@ INFO performed noop zone image source checks on sled, sled_id: d81c6a84-79b8-495
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
 INFO MGS-driven update completed (will remove it and re-evaluate board), artifact_version: 1.0.0, artifact_hash: 68465b8e3f808f475510b525cfd62086d37ddd57688bd854184fdafb2b2198a4, expected_inactive_version: NoValidVersion, expected_active_version: 0.0.1, component: sp, sp_slot: 0, sp_type: Sled, serial_number: serial0, part_number: model0
-INFO configuring MGS-driven update, artifact_version: 1.0.0, artifact_hash: 2053f8594971bbf0a7326c833e2ffc12b065b9d823b9c0b967d275fa595e4e89, sled_agent_address: [fd00:1122:3344:101::1]:12345, expected_inactive_phase_2_hash: f3dd0c7a1bd4500ea0d8bcf67581f576d47752b2f1998a4cb0f0c3155c483008, expected_inactive_phase_1_hash: 0202020202020202020202020202020202020202020202020202020202020202, expected_active_phase_2_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a, expected_active_phase_1_hash: 0101010101010101010101010101010101010101010101010101010101010101, expected_boot_disk: A, expected_active_phase_1_slot: A, component: host_phase_1, sp_slot: 0, sp_type: Sled, serial_number: serial0, part_number: model0
+INFO configuring MGS-driven update, artifact_version: 1.0.0, artifact_hash: b99d5273ba1418bebb19d74b701d716896409566d41de76ada71bded4c9b166b, sled_agent_address: [fd00:1122:3344:101::1]:12345, expected_inactive_phase_2_hash: d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47, expected_inactive_phase_1_hash: 0202020202020202020202020202020202020202020202020202020202020202, expected_active_phase_2_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a, expected_active_phase_1_hash: 0101010101010101010101010101010101010101010101010101010101010101, expected_boot_disk: A, expected_active_phase_1_slot: A, component: host_phase_1, sp_slot: 0, sp_type: Sled, serial_number: serial0, part_number: model0
 INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint d60afc57-f15d-476c-bd0f-b1071e2bb976 based on parent blueprint 9034c710-3e57-45f3-99e5-4316145e87ac
+blueprint source: planner with report:
 planning report for blueprint d60afc57-f15d-476c-bd0f-b1071e2bb976:
 * skipping noop zone image source check on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: all 9 zones are already from artifacts
 * skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 8 zones are already from artifacts
 * skipping noop zone image source check on sled d81c6a84-79b8-4958-ae41-ea46c9b19763: all 8 zones are already from artifacts
 * 1 pending MGS update:
-  * model0:serial0: HostPhase1(PendingMgsUpdateHostPhase1Details { expected_active_phase_1_slot: A, expected_boot_disk: A, expected_active_phase_1_hash: ArtifactHash("0101010101010101010101010101010101010101010101010101010101010101"), expected_active_phase_2_hash: ArtifactHash("0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a"), expected_inactive_phase_1_hash: ArtifactHash("0202020202020202020202020202020202020202020202020202020202020202"), expected_inactive_phase_2_hash: ArtifactHash("f3dd0c7a1bd4500ea0d8bcf67581f576d47752b2f1998a4cb0f0c3155c483008"), sled_agent_address: [fd00:1122:3344:101::1]:12345 })
+  * model0:serial0: HostPhase1(PendingMgsUpdateHostPhase1Details { expected_active_phase_1_slot: A, expected_boot_disk: A, expected_active_phase_1_hash: ArtifactHash("0101010101010101010101010101010101010101010101010101010101010101"), expected_active_phase_2_hash: ArtifactHash("0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a"), expected_inactive_phase_1_hash: ArtifactHash("0202020202020202020202020202020202020202020202020202020202020202"), expected_inactive_phase_2_hash: ArtifactHash("d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47"), sled_agent_address: [fd00:1122:3344:101::1]:12345 })
 * zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+
 
 
 > blueprint-diff latest
@@ -1465,7 +1487,7 @@ to:   blueprint d60afc57-f15d-476c-bd0f-b1071e2bb976
     sp_type   slot   part_number   serial_number   artifact_hash                                                        artifact_version   details                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          
     ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 *   sled      0      model0        serial0         - 68465b8e3f808f475510b525cfd62086d37ddd57688bd854184fdafb2b2198a4   1.0.0              - Sp(PendingMgsUpdateSpDetails { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: NoValidVersion })                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 
-     └─                                            + 2053f8594971bbf0a7326c833e2ffc12b065b9d823b9c0b967d275fa595e4e89                      + HostPhase1(PendingMgsUpdateHostPhase1Details { expected_active_phase_1_slot: A, expected_boot_disk: A, expected_active_phase_1_hash: ArtifactHash("0101010101010101010101010101010101010101010101010101010101010101"), expected_active_phase_2_hash: ArtifactHash("0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a"), expected_inactive_phase_1_hash: ArtifactHash("0202020202020202020202020202020202020202020202020202020202020202"), expected_inactive_phase_2_hash: ArtifactHash("f3dd0c7a1bd4500ea0d8bcf67581f576d47752b2f1998a4cb0f0c3155c483008"), sled_agent_address: [fd00:1122:3344:101::1]:12345 })
+     └─                                            + b99d5273ba1418bebb19d74b701d716896409566d41de76ada71bded4c9b166b                      + HostPhase1(PendingMgsUpdateHostPhase1Details { expected_active_phase_1_slot: A, expected_boot_disk: A, expected_active_phase_1_hash: ArtifactHash("0101010101010101010101010101010101010101010101010101010101010101"), expected_active_phase_2_hash: ArtifactHash("0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a"), expected_inactive_phase_1_hash: ArtifactHash("0202020202020202020202020202020202020202020202020202020202020202"), expected_inactive_phase_2_hash: ArtifactHash("d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47"), sled_agent_address: [fd00:1122:3344:101::1]:12345 })
 
 
 internal DNS:
@@ -1489,16 +1511,18 @@ INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noo
 INFO performed noop zone image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 8, num_already_artifact: 8, num_eligible: 0, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
-INFO MGS-driven update not yet completed (will keep it), artifact_version: 1.0.0, artifact_hash: 2053f8594971bbf0a7326c833e2ffc12b065b9d823b9c0b967d275fa595e4e89, sled_agent_address: [fd00:1122:3344:101::1]:12345, expected_inactive_phase_2_hash: f3dd0c7a1bd4500ea0d8bcf67581f576d47752b2f1998a4cb0f0c3155c483008, expected_inactive_phase_1_hash: 0202020202020202020202020202020202020202020202020202020202020202, expected_active_phase_2_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a, expected_active_phase_1_hash: 0101010101010101010101010101010101010101010101010101010101010101, expected_boot_disk: A, expected_active_phase_1_slot: A, component: host_phase_1, sp_slot: 0, sp_type: Sled, serial_number: serial0, part_number: model0
+INFO MGS-driven update not yet completed (will keep it), artifact_version: 1.0.0, artifact_hash: b99d5273ba1418bebb19d74b701d716896409566d41de76ada71bded4c9b166b, sled_agent_address: [fd00:1122:3344:101::1]:12345, expected_inactive_phase_2_hash: d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47, expected_inactive_phase_1_hash: 0202020202020202020202020202020202020202020202020202020202020202, expected_active_phase_2_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a, expected_active_phase_1_hash: 0101010101010101010101010101010101010101010101010101010101010101, expected_boot_disk: A, expected_active_phase_1_slot: A, component: host_phase_1, sp_slot: 0, sp_type: Sled, serial_number: serial0, part_number: model0
 INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint a5a8f242-ffa5-473c-8efd-2acf2dc0b736 based on parent blueprint d60afc57-f15d-476c-bd0f-b1071e2bb976
+blueprint source: planner with report:
 planning report for blueprint a5a8f242-ffa5-473c-8efd-2acf2dc0b736:
 * skipping noop zone image source check on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: all 9 zones are already from artifacts
 * skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 8 zones are already from artifacts
 * skipping noop zone image source check on sled d81c6a84-79b8-4958-ae41-ea46c9b19763: all 8 zones are already from artifacts
 * 1 pending MGS update:
-  * model0:serial0: HostPhase1(PendingMgsUpdateHostPhase1Details { expected_active_phase_1_slot: A, expected_boot_disk: A, expected_active_phase_1_hash: ArtifactHash("0101010101010101010101010101010101010101010101010101010101010101"), expected_active_phase_2_hash: ArtifactHash("0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a"), expected_inactive_phase_1_hash: ArtifactHash("0202020202020202020202020202020202020202020202020202020202020202"), expected_inactive_phase_2_hash: ArtifactHash("f3dd0c7a1bd4500ea0d8bcf67581f576d47752b2f1998a4cb0f0c3155c483008"), sled_agent_address: [fd00:1122:3344:101::1]:12345 })
+  * model0:serial0: HostPhase1(PendingMgsUpdateHostPhase1Details { expected_active_phase_1_slot: A, expected_boot_disk: A, expected_active_phase_1_hash: ArtifactHash("0101010101010101010101010101010101010101010101010101010101010101"), expected_active_phase_2_hash: ArtifactHash("0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a"), expected_inactive_phase_1_hash: ArtifactHash("0202020202020202020202020202020202020202020202020202020202020202"), expected_inactive_phase_2_hash: ArtifactHash("d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47"), sled_agent_address: [fd00:1122:3344:101::1]:12345 })
 * zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+
 
 
 > blueprint-diff latest
@@ -1533,8 +1557,8 @@ external DNS:
 
 > # Update only the simulated host phase 2; this is a prerequisite for updating
 > # the phase 1, and must be done first.
-> sled-update-host-phase2 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 --slot-b f3dd0c7a1bd4500ea0d8bcf67581f576d47752b2f1998a4cb0f0c3155c483008
-set sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 host phase 2 details: B -> f3dd0c7a1bd4500ea0d8bcf67581f576d47752b2f1998a4cb0f0c3155c483008
+> sled-update-host-phase2 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 --slot-b d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47 
+set sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 host phase 2 details: B -> d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47
 
 > inventory-generate
 generated inventory collection 78f72e8d-46a9-40a9-8618-602f54454d80 from configured sleds
@@ -1551,16 +1575,18 @@ INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noo
 INFO performed noop zone image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 8, num_already_artifact: 8, num_eligible: 0, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
-INFO MGS-driven update not yet completed (will keep it), artifact_version: 1.0.0, artifact_hash: 2053f8594971bbf0a7326c833e2ffc12b065b9d823b9c0b967d275fa595e4e89, sled_agent_address: [fd00:1122:3344:101::1]:12345, expected_inactive_phase_2_hash: f3dd0c7a1bd4500ea0d8bcf67581f576d47752b2f1998a4cb0f0c3155c483008, expected_inactive_phase_1_hash: 0202020202020202020202020202020202020202020202020202020202020202, expected_active_phase_2_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a, expected_active_phase_1_hash: 0101010101010101010101010101010101010101010101010101010101010101, expected_boot_disk: A, expected_active_phase_1_slot: A, component: host_phase_1, sp_slot: 0, sp_type: Sled, serial_number: serial0, part_number: model0
+INFO MGS-driven update not yet completed (will keep it), artifact_version: 1.0.0, artifact_hash: b99d5273ba1418bebb19d74b701d716896409566d41de76ada71bded4c9b166b, sled_agent_address: [fd00:1122:3344:101::1]:12345, expected_inactive_phase_2_hash: d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47, expected_inactive_phase_1_hash: 0202020202020202020202020202020202020202020202020202020202020202, expected_active_phase_2_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a, expected_active_phase_1_hash: 0101010101010101010101010101010101010101010101010101010101010101, expected_boot_disk: A, expected_active_phase_1_slot: A, component: host_phase_1, sp_slot: 0, sp_type: Sled, serial_number: serial0, part_number: model0
 INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint 626487fa-7139-45ec-8416-902271fc730b based on parent blueprint a5a8f242-ffa5-473c-8efd-2acf2dc0b736
+blueprint source: planner with report:
 planning report for blueprint 626487fa-7139-45ec-8416-902271fc730b:
 * skipping noop zone image source check on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: all 9 zones are already from artifacts
 * skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 8 zones are already from artifacts
 * skipping noop zone image source check on sled d81c6a84-79b8-4958-ae41-ea46c9b19763: all 8 zones are already from artifacts
 * 1 pending MGS update:
-  * model0:serial0: HostPhase1(PendingMgsUpdateHostPhase1Details { expected_active_phase_1_slot: A, expected_boot_disk: A, expected_active_phase_1_hash: ArtifactHash("0101010101010101010101010101010101010101010101010101010101010101"), expected_active_phase_2_hash: ArtifactHash("0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a"), expected_inactive_phase_1_hash: ArtifactHash("0202020202020202020202020202020202020202020202020202020202020202"), expected_inactive_phase_2_hash: ArtifactHash("f3dd0c7a1bd4500ea0d8bcf67581f576d47752b2f1998a4cb0f0c3155c483008"), sled_agent_address: [fd00:1122:3344:101::1]:12345 })
+  * model0:serial0: HostPhase1(PendingMgsUpdateHostPhase1Details { expected_active_phase_1_slot: A, expected_boot_disk: A, expected_active_phase_1_hash: ArtifactHash("0101010101010101010101010101010101010101010101010101010101010101"), expected_active_phase_2_hash: ArtifactHash("0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a"), expected_inactive_phase_1_hash: ArtifactHash("0202020202020202020202020202020202020202020202020202020202020202"), expected_inactive_phase_2_hash: ArtifactHash("d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47"), sled_agent_address: [fd00:1122:3344:101::1]:12345 })
 * zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+
 
 
 > blueprint-diff latest
@@ -1594,8 +1620,8 @@ external DNS:
 
 
 > # Now update the simulated SP to reflect that the phase 1 update is done.
-> sled-update-host-phase1 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 --active B --slot-b 2053f8594971bbf0a7326c833e2ffc12b065b9d823b9c0b967d275fa595e4e89
-set sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 host phase 1 details: active -> B, B -> 2053f8594971bbf0a7326c833e2ffc12b065b9d823b9c0b967d275fa595e4e89
+> sled-update-host-phase1 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 --active B --slot-b b99d5273ba1418bebb19d74b701d716896409566d41de76ada71bded4c9b166b 
+set sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 host phase 1 details: active -> B, B -> b99d5273ba1418bebb19d74b701d716896409566d41de76ada71bded4c9b166b
 
 > inventory-generate
 generated inventory collection 39363465-89ae-4ac2-9be1-099068da9d45 from configured sleds
@@ -1612,16 +1638,18 @@ INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noo
 INFO performed noop zone image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 8, num_already_artifact: 8, num_eligible: 0, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
-INFO keeping apparently-impossible MGS-driven update (waiting for recent update to be applied), artifact_version: 1.0.0, artifact_hash: 2053f8594971bbf0a7326c833e2ffc12b065b9d823b9c0b967d275fa595e4e89, sled_agent_address: [fd00:1122:3344:101::1]:12345, expected_inactive_phase_2_hash: f3dd0c7a1bd4500ea0d8bcf67581f576d47752b2f1998a4cb0f0c3155c483008, expected_inactive_phase_1_hash: 0202020202020202020202020202020202020202020202020202020202020202, expected_active_phase_2_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a, expected_active_phase_1_hash: 0101010101010101010101010101010101010101010101010101010101010101, expected_boot_disk: A, expected_active_phase_1_slot: A, component: host_phase_1, sp_slot: 0, sp_type: Sled, serial_number: serial0, part_number: model0
+INFO keeping apparently-impossible MGS-driven update (waiting for recent update to be applied), artifact_version: 1.0.0, artifact_hash: b99d5273ba1418bebb19d74b701d716896409566d41de76ada71bded4c9b166b, sled_agent_address: [fd00:1122:3344:101::1]:12345, expected_inactive_phase_2_hash: d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47, expected_inactive_phase_1_hash: 0202020202020202020202020202020202020202020202020202020202020202, expected_active_phase_2_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a, expected_active_phase_1_hash: 0101010101010101010101010101010101010101010101010101010101010101, expected_boot_disk: A, expected_active_phase_1_slot: A, component: host_phase_1, sp_slot: 0, sp_type: Sled, serial_number: serial0, part_number: model0
 INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint c1a0d242-9160-40f4-96ae-61f8f40a0b1b based on parent blueprint 626487fa-7139-45ec-8416-902271fc730b
+blueprint source: planner with report:
 planning report for blueprint c1a0d242-9160-40f4-96ae-61f8f40a0b1b:
 * skipping noop zone image source check on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: all 9 zones are already from artifacts
 * skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 8 zones are already from artifacts
 * skipping noop zone image source check on sled d81c6a84-79b8-4958-ae41-ea46c9b19763: all 8 zones are already from artifacts
 * 1 pending MGS update:
-  * model0:serial0: HostPhase1(PendingMgsUpdateHostPhase1Details { expected_active_phase_1_slot: A, expected_boot_disk: A, expected_active_phase_1_hash: ArtifactHash("0101010101010101010101010101010101010101010101010101010101010101"), expected_active_phase_2_hash: ArtifactHash("0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a"), expected_inactive_phase_1_hash: ArtifactHash("0202020202020202020202020202020202020202020202020202020202020202"), expected_inactive_phase_2_hash: ArtifactHash("f3dd0c7a1bd4500ea0d8bcf67581f576d47752b2f1998a4cb0f0c3155c483008"), sled_agent_address: [fd00:1122:3344:101::1]:12345 })
+  * model0:serial0: HostPhase1(PendingMgsUpdateHostPhase1Details { expected_active_phase_1_slot: A, expected_boot_disk: A, expected_active_phase_1_hash: ArtifactHash("0101010101010101010101010101010101010101010101010101010101010101"), expected_active_phase_2_hash: ArtifactHash("0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a"), expected_inactive_phase_1_hash: ArtifactHash("0202020202020202020202020202020202020202020202020202020202020202"), expected_inactive_phase_2_hash: ArtifactHash("d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47"), sled_agent_address: [fd00:1122:3344:101::1]:12345 })
 * zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+
 
 
 > blueprint-diff latest
@@ -1673,11 +1701,12 @@ INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noo
 INFO performed noop zone image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 8, num_already_artifact: 8, num_eligible: 0, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
-INFO MGS-driven update completed (will remove it and re-evaluate board), artifact_version: 1.0.0, artifact_hash: 2053f8594971bbf0a7326c833e2ffc12b065b9d823b9c0b967d275fa595e4e89, sled_agent_address: [fd00:1122:3344:101::1]:12345, expected_inactive_phase_2_hash: f3dd0c7a1bd4500ea0d8bcf67581f576d47752b2f1998a4cb0f0c3155c483008, expected_inactive_phase_1_hash: 0202020202020202020202020202020202020202020202020202020202020202, expected_active_phase_2_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a, expected_active_phase_1_hash: 0101010101010101010101010101010101010101010101010101010101010101, expected_boot_disk: A, expected_active_phase_1_slot: A, component: host_phase_1, sp_slot: 0, sp_type: Sled, serial_number: serial0, part_number: model0
+INFO MGS-driven update completed (will remove it and re-evaluate board), artifact_version: 1.0.0, artifact_hash: b99d5273ba1418bebb19d74b701d716896409566d41de76ada71bded4c9b166b, sled_agent_address: [fd00:1122:3344:101::1]:12345, expected_inactive_phase_2_hash: d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47, expected_inactive_phase_1_hash: 0202020202020202020202020202020202020202020202020202020202020202, expected_active_phase_2_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a, expected_active_phase_1_hash: 0101010101010101010101010101010101010101010101010101010101010101, expected_boot_disk: A, expected_active_phase_1_slot: A, component: host_phase_1, sp_slot: 0, sp_type: Sled, serial_number: serial0, part_number: model0
 INFO skipping board for MGS-driven update, serial_number: serial0, part_number: model0
 INFO configuring MGS-driven update, artifact_version: 1.0.0, artifact_hash: 5b0f601b1fbb8674db9c751a02f8b14f8e6d4e8470f4f7b686fecb2c49ec11f9, expected_stage0_next_version: NoValidVersion, expected_stage0_version: 0.0.1, component: rot_bootloader, sp_slot: 1, sp_type: Sled, serial_number: serial1, part_number: model1
 INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint afb09faf-a586-4483-9289-04d4f1d8ba23 based on parent blueprint c1a0d242-9160-40f4-96ae-61f8f40a0b1b
+blueprint source: planner with report:
 planning report for blueprint afb09faf-a586-4483-9289-04d4f1d8ba23:
 * skipping noop zone image source check on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: all 9 zones are already from artifacts
 * skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 8 zones are already from artifacts
@@ -1685,6 +1714,7 @@ planning report for blueprint afb09faf-a586-4483-9289-04d4f1d8ba23:
 * 1 pending MGS update:
   * model1:serial1: RotBootloader(PendingMgsUpdateRotBootloaderDetails { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: NoValidVersion })
 * zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+
 
 
 > blueprint-diff latest
@@ -1711,7 +1741,7 @@ to:   blueprint afb09faf-a586-4483-9289-04d4f1d8ba23
     --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
     sp_type   slot   part_number   serial_number   artifact_hash                                                      artifact_version   details                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        
     --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
--   sled      0      model0        serial0         2053f8594971bbf0a7326c833e2ffc12b065b9d823b9c0b967d275fa595e4e89   1.0.0              HostPhase1(PendingMgsUpdateHostPhase1Details { expected_active_phase_1_slot: A, expected_boot_disk: A, expected_active_phase_1_hash: ArtifactHash("0101010101010101010101010101010101010101010101010101010101010101"), expected_active_phase_2_hash: ArtifactHash("0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a"), expected_inactive_phase_1_hash: ArtifactHash("0202020202020202020202020202020202020202020202020202020202020202"), expected_inactive_phase_2_hash: ArtifactHash("f3dd0c7a1bd4500ea0d8bcf67581f576d47752b2f1998a4cb0f0c3155c483008"), sled_agent_address: [fd00:1122:3344:101::1]:12345 })
+-   sled      0      model0        serial0         b99d5273ba1418bebb19d74b701d716896409566d41de76ada71bded4c9b166b   1.0.0              HostPhase1(PendingMgsUpdateHostPhase1Details { expected_active_phase_1_slot: A, expected_boot_disk: A, expected_active_phase_1_hash: ArtifactHash("0101010101010101010101010101010101010101010101010101010101010101"), expected_active_phase_2_hash: ArtifactHash("0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a"), expected_inactive_phase_1_hash: ArtifactHash("0202020202020202020202020202020202020202020202020202020202020202"), expected_inactive_phase_2_hash: ArtifactHash("d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47"), sled_agent_address: [fd00:1122:3344:101::1]:12345 })
 +   sled      1      model1        serial1         5b0f601b1fbb8674db9c751a02f8b14f8e6d4e8470f4f7b686fecb2c49ec11f9   1.0.0              RotBootloader(PendingMgsUpdateRotBootloaderDetails { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: NoValidVersion })                                                                                                                                                                                                                                                                                                                                                                                                                                                                        
 
 
@@ -1752,6 +1782,7 @@ INFO MGS-driven update impossible (will remove it and re-evaluate board), artifa
 INFO configuring MGS-driven update, artifact_version: 1.0.0, artifact_hash: 5b0f601b1fbb8674db9c751a02f8b14f8e6d4e8470f4f7b686fecb2c49ec11f9, expected_stage0_next_version: Version(ArtifactVersion("0.5.0")), expected_stage0_version: 0.0.1, component: rot_bootloader, sp_slot: 1, sp_type: Sled, serial_number: serial1, part_number: model1
 INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint ce365dff-2cdb-4f35-a186-b15e20e1e700 based on parent blueprint afb09faf-a586-4483-9289-04d4f1d8ba23
+blueprint source: planner with report:
 planning report for blueprint ce365dff-2cdb-4f35-a186-b15e20e1e700:
 * skipping noop zone image source check on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: all 9 zones are already from artifacts
 * skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 8 zones are already from artifacts
@@ -1759,6 +1790,7 @@ planning report for blueprint ce365dff-2cdb-4f35-a186-b15e20e1e700:
 * 1 pending MGS update:
   * model1:serial1: RotBootloader(PendingMgsUpdateRotBootloaderDetails { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: Version(ArtifactVersion("0.5.0")) })
 * zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+
 
 
 > blueprint-diff latest
@@ -1821,6 +1853,7 @@ INFO MGS-driven update completed (will remove it and re-evaluate board), artifac
 INFO configuring MGS-driven update, artifact_version: 1.0.0, artifact_hash: d11e65f934bf0de51df2e5b484f61ee72072417b43ac87f33e958008428e7b02, expected_transient_boot_preference: None, expected_pending_persistent_boot_preference: None, expected_persistent_boot_preference: A, expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: NoValidVersion, component: rot, sp_slot: 1, sp_type: Sled, serial_number: serial1, part_number: model1
 INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint 8f2d1f39-7c88-4701-aa43-56bf281b28c1 based on parent blueprint ce365dff-2cdb-4f35-a186-b15e20e1e700
+blueprint source: planner with report:
 planning report for blueprint 8f2d1f39-7c88-4701-aa43-56bf281b28c1:
 * skipping noop zone image source check on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: all 9 zones are already from artifacts
 * skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 8 zones are already from artifacts
@@ -1828,6 +1861,7 @@ planning report for blueprint 8f2d1f39-7c88-4701-aa43-56bf281b28c1:
 * 1 pending MGS update:
   * model1:serial1: Rot(PendingMgsUpdateRotDetails { expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: NoValidVersion, expected_persistent_boot_preference: A, expected_pending_persistent_boot_preference: None, expected_transient_boot_preference: None })
 * zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+
 
 
 > blueprint-diff latest
@@ -1894,6 +1928,7 @@ INFO MGS-driven update impossible (will remove it and re-evaluate board), artifa
 INFO configuring MGS-driven update, artifact_version: 1.0.0, artifact_hash: d11e65f934bf0de51df2e5b484f61ee72072417b43ac87f33e958008428e7b02, expected_transient_boot_preference: None, expected_pending_persistent_boot_preference: None, expected_persistent_boot_preference: A, expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: Version(ArtifactVersion("0.5.0")), component: rot, sp_slot: 1, sp_type: Sled, serial_number: serial1, part_number: model1
 INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint 12d602a6-5ab4-487a-b94e-eb30cdf30300 based on parent blueprint 8f2d1f39-7c88-4701-aa43-56bf281b28c1
+blueprint source: planner with report:
 planning report for blueprint 12d602a6-5ab4-487a-b94e-eb30cdf30300:
 * skipping noop zone image source check on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: all 9 zones are already from artifacts
 * skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 8 zones are already from artifacts
@@ -1901,6 +1936,7 @@ planning report for blueprint 12d602a6-5ab4-487a-b94e-eb30cdf30300:
 * 1 pending MGS update:
   * model1:serial1: Rot(PendingMgsUpdateRotDetails { expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: Version(ArtifactVersion("0.5.0")), expected_persistent_boot_preference: A, expected_pending_persistent_boot_preference: None, expected_transient_boot_preference: None })
 * zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+
 
 
 > blueprint-diff latest
@@ -1963,6 +1999,7 @@ INFO MGS-driven update completed (will remove it and re-evaluate board), artifac
 INFO configuring MGS-driven update, artifact_version: 1.0.0, artifact_hash: 68465b8e3f808f475510b525cfd62086d37ddd57688bd854184fdafb2b2198a4, expected_inactive_version: NoValidVersion, expected_active_version: 0.0.1, component: sp, sp_slot: 1, sp_type: Sled, serial_number: serial1, part_number: model1
 INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint 61a93ea3-c872-48e0-aace-e86b0c52b839 based on parent blueprint 12d602a6-5ab4-487a-b94e-eb30cdf30300
+blueprint source: planner with report:
 planning report for blueprint 61a93ea3-c872-48e0-aace-e86b0c52b839:
 * skipping noop zone image source check on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: all 9 zones are already from artifacts
 * skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 8 zones are already from artifacts
@@ -1970,6 +2007,7 @@ planning report for blueprint 61a93ea3-c872-48e0-aace-e86b0c52b839:
 * 1 pending MGS update:
   * model1:serial1: Sp(PendingMgsUpdateSpDetails { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: NoValidVersion })
 * zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+
 
 
 > blueprint-diff latest
@@ -2035,6 +2073,7 @@ INFO MGS-driven update impossible (will remove it and re-evaluate board), artifa
 INFO configuring MGS-driven update, artifact_version: 1.0.0, artifact_hash: 68465b8e3f808f475510b525cfd62086d37ddd57688bd854184fdafb2b2198a4, expected_inactive_version: Version(ArtifactVersion("0.5.0")), expected_active_version: 0.0.1, component: sp, sp_slot: 1, sp_type: Sled, serial_number: serial1, part_number: model1
 INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint 27e755bc-dc10-4647-853c-f89bb3a15a2c based on parent blueprint 61a93ea3-c872-48e0-aace-e86b0c52b839
+blueprint source: planner with report:
 planning report for blueprint 27e755bc-dc10-4647-853c-f89bb3a15a2c:
 * skipping noop zone image source check on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: all 9 zones are already from artifacts
 * skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 8 zones are already from artifacts
@@ -2042,6 +2081,7 @@ planning report for blueprint 27e755bc-dc10-4647-853c-f89bb3a15a2c:
 * 1 pending MGS update:
   * model1:serial1: Sp(PendingMgsUpdateSpDetails { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: Version(ArtifactVersion("0.5.0")) })
 * zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+
 
 
 > blueprint-diff latest
@@ -2102,16 +2142,18 @@ INFO performed noop zone image source checks on sled, sled_id: d81c6a84-79b8-495
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
 INFO MGS-driven update completed (will remove it and re-evaluate board), artifact_version: 1.0.0, artifact_hash: 68465b8e3f808f475510b525cfd62086d37ddd57688bd854184fdafb2b2198a4, expected_inactive_version: Version(ArtifactVersion("0.5.0")), expected_active_version: 0.0.1, component: sp, sp_slot: 1, sp_type: Sled, serial_number: serial1, part_number: model1
-INFO configuring MGS-driven update, artifact_version: 1.0.0, artifact_hash: 2053f8594971bbf0a7326c833e2ffc12b065b9d823b9c0b967d275fa595e4e89, sled_agent_address: [fd00:1122:3344:102::1]:12345, expected_inactive_phase_2_hash: f3dd0c7a1bd4500ea0d8bcf67581f576d47752b2f1998a4cb0f0c3155c483008, expected_inactive_phase_1_hash: 0202020202020202020202020202020202020202020202020202020202020202, expected_active_phase_2_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a, expected_active_phase_1_hash: 0101010101010101010101010101010101010101010101010101010101010101, expected_boot_disk: A, expected_active_phase_1_slot: A, component: host_phase_1, sp_slot: 1, sp_type: Sled, serial_number: serial1, part_number: model1
+INFO configuring MGS-driven update, artifact_version: 1.0.0, artifact_hash: b99d5273ba1418bebb19d74b701d716896409566d41de76ada71bded4c9b166b, sled_agent_address: [fd00:1122:3344:102::1]:12345, expected_inactive_phase_2_hash: d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47, expected_inactive_phase_1_hash: 0202020202020202020202020202020202020202020202020202020202020202, expected_active_phase_2_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a, expected_active_phase_1_hash: 0101010101010101010101010101010101010101010101010101010101010101, expected_boot_disk: A, expected_active_phase_1_slot: A, component: host_phase_1, sp_slot: 1, sp_type: Sled, serial_number: serial1, part_number: model1
 INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint 9f89efdf-a23e-4137-b7cc-79f4a91cbe1f based on parent blueprint 27e755bc-dc10-4647-853c-f89bb3a15a2c
+blueprint source: planner with report:
 planning report for blueprint 9f89efdf-a23e-4137-b7cc-79f4a91cbe1f:
 * skipping noop zone image source check on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: all 9 zones are already from artifacts
 * skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 8 zones are already from artifacts
 * skipping noop zone image source check on sled d81c6a84-79b8-4958-ae41-ea46c9b19763: all 8 zones are already from artifacts
 * 1 pending MGS update:
-  * model1:serial1: HostPhase1(PendingMgsUpdateHostPhase1Details { expected_active_phase_1_slot: A, expected_boot_disk: A, expected_active_phase_1_hash: ArtifactHash("0101010101010101010101010101010101010101010101010101010101010101"), expected_active_phase_2_hash: ArtifactHash("0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a"), expected_inactive_phase_1_hash: ArtifactHash("0202020202020202020202020202020202020202020202020202020202020202"), expected_inactive_phase_2_hash: ArtifactHash("f3dd0c7a1bd4500ea0d8bcf67581f576d47752b2f1998a4cb0f0c3155c483008"), sled_agent_address: [fd00:1122:3344:102::1]:12345 })
+  * model1:serial1: HostPhase1(PendingMgsUpdateHostPhase1Details { expected_active_phase_1_slot: A, expected_boot_disk: A, expected_active_phase_1_hash: ArtifactHash("0101010101010101010101010101010101010101010101010101010101010101"), expected_active_phase_2_hash: ArtifactHash("0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a"), expected_inactive_phase_1_hash: ArtifactHash("0202020202020202020202020202020202020202020202020202020202020202"), expected_inactive_phase_2_hash: ArtifactHash("d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47"), sled_agent_address: [fd00:1122:3344:102::1]:12345 })
 * zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+
 
 
 > blueprint-diff latest
@@ -2203,7 +2245,7 @@ to:   blueprint 9f89efdf-a23e-4137-b7cc-79f4a91cbe1f
     sp_type   slot   part_number   serial_number   artifact_hash                                                        artifact_version   details                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          
     ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 *   sled      1      model1        serial1         - 68465b8e3f808f475510b525cfd62086d37ddd57688bd854184fdafb2b2198a4   1.0.0              - Sp(PendingMgsUpdateSpDetails { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: Version(ArtifactVersion("0.5.0")) })                                                                                                                                                                                                                                                                                                                                                                                                                                                                              
-     └─                                            + 2053f8594971bbf0a7326c833e2ffc12b065b9d823b9c0b967d275fa595e4e89                      + HostPhase1(PendingMgsUpdateHostPhase1Details { expected_active_phase_1_slot: A, expected_boot_disk: A, expected_active_phase_1_hash: ArtifactHash("0101010101010101010101010101010101010101010101010101010101010101"), expected_active_phase_2_hash: ArtifactHash("0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a"), expected_inactive_phase_1_hash: ArtifactHash("0202020202020202020202020202020202020202020202020202020202020202"), expected_inactive_phase_2_hash: ArtifactHash("f3dd0c7a1bd4500ea0d8bcf67581f576d47752b2f1998a4cb0f0c3155c483008"), sled_agent_address: [fd00:1122:3344:102::1]:12345 })
+     └─                                            + b99d5273ba1418bebb19d74b701d716896409566d41de76ada71bded4c9b166b                      + HostPhase1(PendingMgsUpdateHostPhase1Details { expected_active_phase_1_slot: A, expected_boot_disk: A, expected_active_phase_1_hash: ArtifactHash("0101010101010101010101010101010101010101010101010101010101010101"), expected_active_phase_2_hash: ArtifactHash("0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a"), expected_inactive_phase_1_hash: ArtifactHash("0202020202020202020202020202020202020202020202020202020202020202"), expected_inactive_phase_2_hash: ArtifactHash("d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47"), sled_agent_address: [fd00:1122:3344:102::1]:12345 })
 
 
 internal DNS:
@@ -2238,17 +2280,19 @@ INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noo
 INFO performed noop zone image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 8, num_already_artifact: 8, num_eligible: 0, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
-INFO MGS-driven update impossible (will remove it and re-evaluate board), artifact_version: 1.0.0, artifact_hash: 2053f8594971bbf0a7326c833e2ffc12b065b9d823b9c0b967d275fa595e4e89, sled_agent_address: [fd00:1122:3344:102::1]:12345, expected_inactive_phase_2_hash: f3dd0c7a1bd4500ea0d8bcf67581f576d47752b2f1998a4cb0f0c3155c483008, expected_inactive_phase_1_hash: 0202020202020202020202020202020202020202020202020202020202020202, expected_active_phase_2_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a, expected_active_phase_1_hash: 0101010101010101010101010101010101010101010101010101010101010101, expected_boot_disk: A, expected_active_phase_1_slot: A, component: host_phase_1, sp_slot: 1, sp_type: Sled, serial_number: serial1, part_number: model1
-INFO configuring MGS-driven update, artifact_version: 1.0.0, artifact_hash: 2053f8594971bbf0a7326c833e2ffc12b065b9d823b9c0b967d275fa595e4e89, sled_agent_address: [fd00:1122:3344:102::1]:12345, expected_inactive_phase_2_hash: f3dd0c7a1bd4500ea0d8bcf67581f576d47752b2f1998a4cb0f0c3155c483008, expected_inactive_phase_1_hash: ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff, expected_active_phase_2_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a, expected_active_phase_1_hash: 0101010101010101010101010101010101010101010101010101010101010101, expected_boot_disk: A, expected_active_phase_1_slot: A, component: host_phase_1, sp_slot: 1, sp_type: Sled, serial_number: serial1, part_number: model1
+INFO MGS-driven update impossible (will remove it and re-evaluate board), artifact_version: 1.0.0, artifact_hash: b99d5273ba1418bebb19d74b701d716896409566d41de76ada71bded4c9b166b, sled_agent_address: [fd00:1122:3344:102::1]:12345, expected_inactive_phase_2_hash: d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47, expected_inactive_phase_1_hash: 0202020202020202020202020202020202020202020202020202020202020202, expected_active_phase_2_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a, expected_active_phase_1_hash: 0101010101010101010101010101010101010101010101010101010101010101, expected_boot_disk: A, expected_active_phase_1_slot: A, component: host_phase_1, sp_slot: 1, sp_type: Sled, serial_number: serial1, part_number: model1
+INFO configuring MGS-driven update, artifact_version: 1.0.0, artifact_hash: b99d5273ba1418bebb19d74b701d716896409566d41de76ada71bded4c9b166b, sled_agent_address: [fd00:1122:3344:102::1]:12345, expected_inactive_phase_2_hash: d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47, expected_inactive_phase_1_hash: ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff, expected_active_phase_2_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a, expected_active_phase_1_hash: 0101010101010101010101010101010101010101010101010101010101010101, expected_boot_disk: A, expected_active_phase_1_slot: A, component: host_phase_1, sp_slot: 1, sp_type: Sled, serial_number: serial1, part_number: model1
 INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint 9a9e6c32-5a84-4020-a159-33dceff18d35 based on parent blueprint 9f89efdf-a23e-4137-b7cc-79f4a91cbe1f
+blueprint source: planner with report:
 planning report for blueprint 9a9e6c32-5a84-4020-a159-33dceff18d35:
 * skipping noop zone image source check on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: all 9 zones are already from artifacts
 * skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 8 zones are already from artifacts
 * skipping noop zone image source check on sled d81c6a84-79b8-4958-ae41-ea46c9b19763: all 8 zones are already from artifacts
 * 1 pending MGS update:
-  * model1:serial1: HostPhase1(PendingMgsUpdateHostPhase1Details { expected_active_phase_1_slot: A, expected_boot_disk: A, expected_active_phase_1_hash: ArtifactHash("0101010101010101010101010101010101010101010101010101010101010101"), expected_active_phase_2_hash: ArtifactHash("0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a"), expected_inactive_phase_1_hash: ArtifactHash("ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"), expected_inactive_phase_2_hash: ArtifactHash("f3dd0c7a1bd4500ea0d8bcf67581f576d47752b2f1998a4cb0f0c3155c483008"), sled_agent_address: [fd00:1122:3344:102::1]:12345 })
+  * model1:serial1: HostPhase1(PendingMgsUpdateHostPhase1Details { expected_active_phase_1_slot: A, expected_boot_disk: A, expected_active_phase_1_hash: ArtifactHash("0101010101010101010101010101010101010101010101010101010101010101"), expected_active_phase_2_hash: ArtifactHash("0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a"), expected_inactive_phase_1_hash: ArtifactHash("ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"), expected_inactive_phase_2_hash: ArtifactHash("d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47"), sled_agent_address: [fd00:1122:3344:102::1]:12345 })
 * zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+
 
 
 > blueprint-diff latest
@@ -2275,8 +2319,8 @@ to:   blueprint 9a9e6c32-5a84-4020-a159-33dceff18d35
     ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
     sp_type   slot   part_number   serial_number   artifact_hash                                                      artifact_version   details                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          
     ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-*   sled      1      model1        serial1         2053f8594971bbf0a7326c833e2ffc12b065b9d823b9c0b967d275fa595e4e89   1.0.0              - HostPhase1(PendingMgsUpdateHostPhase1Details { expected_active_phase_1_slot: A, expected_boot_disk: A, expected_active_phase_1_hash: ArtifactHash("0101010101010101010101010101010101010101010101010101010101010101"), expected_active_phase_2_hash: ArtifactHash("0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a"), expected_inactive_phase_1_hash: ArtifactHash("0202020202020202020202020202020202020202020202020202020202020202"), expected_inactive_phase_2_hash: ArtifactHash("f3dd0c7a1bd4500ea0d8bcf67581f576d47752b2f1998a4cb0f0c3155c483008"), sled_agent_address: [fd00:1122:3344:102::1]:12345 })
-     └─                                                                                                                                  + HostPhase1(PendingMgsUpdateHostPhase1Details { expected_active_phase_1_slot: A, expected_boot_disk: A, expected_active_phase_1_hash: ArtifactHash("0101010101010101010101010101010101010101010101010101010101010101"), expected_active_phase_2_hash: ArtifactHash("0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a"), expected_inactive_phase_1_hash: ArtifactHash("ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"), expected_inactive_phase_2_hash: ArtifactHash("f3dd0c7a1bd4500ea0d8bcf67581f576d47752b2f1998a4cb0f0c3155c483008"), sled_agent_address: [fd00:1122:3344:102::1]:12345 })
+*   sled      1      model1        serial1         b99d5273ba1418bebb19d74b701d716896409566d41de76ada71bded4c9b166b   1.0.0              - HostPhase1(PendingMgsUpdateHostPhase1Details { expected_active_phase_1_slot: A, expected_boot_disk: A, expected_active_phase_1_hash: ArtifactHash("0101010101010101010101010101010101010101010101010101010101010101"), expected_active_phase_2_hash: ArtifactHash("0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a"), expected_inactive_phase_1_hash: ArtifactHash("0202020202020202020202020202020202020202020202020202020202020202"), expected_inactive_phase_2_hash: ArtifactHash("d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47"), sled_agent_address: [fd00:1122:3344:102::1]:12345 })
+     └─                                                                                                                                  + HostPhase1(PendingMgsUpdateHostPhase1Details { expected_active_phase_1_slot: A, expected_boot_disk: A, expected_active_phase_1_hash: ArtifactHash("0101010101010101010101010101010101010101010101010101010101010101"), expected_active_phase_2_hash: ArtifactHash("0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a"), expected_inactive_phase_1_hash: ArtifactHash("ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"), expected_inactive_phase_2_hash: ArtifactHash("d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47"), sled_agent_address: [fd00:1122:3344:102::1]:12345 })
 
 
 internal DNS:
@@ -2291,11 +2335,11 @@ external DNS:
 
 
 > # Now simulate the update completing successfully.
-> sled-update-host-phase2 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c --boot-disk B --slot-b f3dd0c7a1bd4500ea0d8bcf67581f576d47752b2f1998a4cb0f0c3155c483008
-set sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c host phase 2 details: boot_disk -> B, B -> f3dd0c7a1bd4500ea0d8bcf67581f576d47752b2f1998a4cb0f0c3155c483008
+> sled-update-host-phase2 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c --boot-disk B --slot-b d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47 
+set sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c host phase 2 details: boot_disk -> B, B -> d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47
 
-> sled-update-host-phase1 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c --active B --slot-b 2053f8594971bbf0a7326c833e2ffc12b065b9d823b9c0b967d275fa595e4e89
-set sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c host phase 1 details: active -> B, B -> 2053f8594971bbf0a7326c833e2ffc12b065b9d823b9c0b967d275fa595e4e89
+> sled-update-host-phase1 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c --active B --slot-b b99d5273ba1418bebb19d74b701d716896409566d41de76ada71bded4c9b166b 
+set sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c host phase 1 details: active -> B, B -> b99d5273ba1418bebb19d74b701d716896409566d41de76ada71bded4c9b166b
 
 > inventory-generate
 generated inventory collection 34c3258c-b2ab-4da9-9720-41a3a703c3d7 from configured sleds
@@ -2311,12 +2355,13 @@ INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noo
 INFO performed noop zone image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 8, num_already_artifact: 8, num_eligible: 0, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
-INFO MGS-driven update completed (will remove it and re-evaluate board), artifact_version: 1.0.0, artifact_hash: 2053f8594971bbf0a7326c833e2ffc12b065b9d823b9c0b967d275fa595e4e89, sled_agent_address: [fd00:1122:3344:102::1]:12345, expected_inactive_phase_2_hash: f3dd0c7a1bd4500ea0d8bcf67581f576d47752b2f1998a4cb0f0c3155c483008, expected_inactive_phase_1_hash: ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff, expected_active_phase_2_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a, expected_active_phase_1_hash: 0101010101010101010101010101010101010101010101010101010101010101, expected_boot_disk: A, expected_active_phase_1_slot: A, component: host_phase_1, sp_slot: 1, sp_type: Sled, serial_number: serial1, part_number: model1
+INFO MGS-driven update completed (will remove it and re-evaluate board), artifact_version: 1.0.0, artifact_hash: b99d5273ba1418bebb19d74b701d716896409566d41de76ada71bded4c9b166b, sled_agent_address: [fd00:1122:3344:102::1]:12345, expected_inactive_phase_2_hash: d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47, expected_inactive_phase_1_hash: ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff, expected_active_phase_2_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a, expected_active_phase_1_hash: 0101010101010101010101010101010101010101010101010101010101010101, expected_boot_disk: A, expected_active_phase_1_slot: A, component: host_phase_1, sp_slot: 1, sp_type: Sled, serial_number: serial1, part_number: model1
 INFO skipping board for MGS-driven update, serial_number: serial1, part_number: model1
 INFO skipping board for MGS-driven update, serial_number: serial0, part_number: model0
 INFO configuring MGS-driven update, artifact_version: 1.0.0, artifact_hash: 5b0f601b1fbb8674db9c751a02f8b14f8e6d4e8470f4f7b686fecb2c49ec11f9, expected_stage0_next_version: NoValidVersion, expected_stage0_version: 0.0.1, component: rot_bootloader, sp_slot: 2, sp_type: Sled, serial_number: serial2, part_number: model2
 INFO ran out of boards for MGS-driven update
 generated blueprint 13cfdd24-52ba-4e94-8c83-02e3a48fc746 based on parent blueprint 9a9e6c32-5a84-4020-a159-33dceff18d35
+blueprint source: planner with report:
 planning report for blueprint 13cfdd24-52ba-4e94-8c83-02e3a48fc746:
 * skipping noop zone image source check on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: all 9 zones are already from artifacts
 * skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 8 zones are already from artifacts
@@ -2324,6 +2369,7 @@ planning report for blueprint 13cfdd24-52ba-4e94-8c83-02e3a48fc746:
 * 1 pending MGS update:
   * model2:serial2: RotBootloader(PendingMgsUpdateRotBootloaderDetails { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: NoValidVersion })
 * zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+
 
 
 > blueprint-diff latest
@@ -2350,7 +2396,7 @@ to:   blueprint 13cfdd24-52ba-4e94-8c83-02e3a48fc746
     --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
     sp_type   slot   part_number   serial_number   artifact_hash                                                      artifact_version   details                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        
     --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
--   sled      1      model1        serial1         2053f8594971bbf0a7326c833e2ffc12b065b9d823b9c0b967d275fa595e4e89   1.0.0              HostPhase1(PendingMgsUpdateHostPhase1Details { expected_active_phase_1_slot: A, expected_boot_disk: A, expected_active_phase_1_hash: ArtifactHash("0101010101010101010101010101010101010101010101010101010101010101"), expected_active_phase_2_hash: ArtifactHash("0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a"), expected_inactive_phase_1_hash: ArtifactHash("ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"), expected_inactive_phase_2_hash: ArtifactHash("f3dd0c7a1bd4500ea0d8bcf67581f576d47752b2f1998a4cb0f0c3155c483008"), sled_agent_address: [fd00:1122:3344:102::1]:12345 })
+-   sled      1      model1        serial1         b99d5273ba1418bebb19d74b701d716896409566d41de76ada71bded4c9b166b   1.0.0              HostPhase1(PendingMgsUpdateHostPhase1Details { expected_active_phase_1_slot: A, expected_boot_disk: A, expected_active_phase_1_hash: ArtifactHash("0101010101010101010101010101010101010101010101010101010101010101"), expected_active_phase_2_hash: ArtifactHash("0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a"), expected_inactive_phase_1_hash: ArtifactHash("ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"), expected_inactive_phase_2_hash: ArtifactHash("d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47"), sled_agent_address: [fd00:1122:3344:102::1]:12345 })
 +   sled      2      model2        serial2         5b0f601b1fbb8674db9c751a02f8b14f8e6d4e8470f4f7b686fecb2c49ec11f9   1.0.0              RotBootloader(PendingMgsUpdateRotBootloaderDetails { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: NoValidVersion })                                                                                                                                                                                                                                                                                                                                                                                                                                                                        
 
 
@@ -2385,6 +2431,7 @@ INFO MGS-driven update completed (will remove it and re-evaluate board), artifac
 INFO configuring MGS-driven update, artifact_version: 1.0.0, artifact_hash: d11e65f934bf0de51df2e5b484f61ee72072417b43ac87f33e958008428e7b02, expected_transient_boot_preference: None, expected_pending_persistent_boot_preference: None, expected_persistent_boot_preference: A, expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: NoValidVersion, component: rot, sp_slot: 2, sp_type: Sled, serial_number: serial2, part_number: model2
 INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint b82656b0-a9be-433d-83d0-e2bdf371777a based on parent blueprint 13cfdd24-52ba-4e94-8c83-02e3a48fc746
+blueprint source: planner with report:
 planning report for blueprint b82656b0-a9be-433d-83d0-e2bdf371777a:
 * skipping noop zone image source check on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: all 9 zones are already from artifacts
 * skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 8 zones are already from artifacts
@@ -2392,6 +2439,7 @@ planning report for blueprint b82656b0-a9be-433d-83d0-e2bdf371777a:
 * 1 pending MGS update:
   * model2:serial2: Rot(PendingMgsUpdateRotDetails { expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: NoValidVersion, expected_persistent_boot_preference: A, expected_pending_persistent_boot_preference: None, expected_transient_boot_preference: None })
 * zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+
 
 
 > blueprint-diff latest
@@ -2457,6 +2505,7 @@ INFO MGS-driven update impossible (will remove it and re-evaluate board), artifa
 INFO configuring MGS-driven update, artifact_version: 1.0.0, artifact_hash: d11e65f934bf0de51df2e5b484f61ee72072417b43ac87f33e958008428e7b02, expected_transient_boot_preference: None, expected_pending_persistent_boot_preference: None, expected_persistent_boot_preference: B, expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: Version(ArtifactVersion("1.0.0")), component: rot, sp_slot: 2, sp_type: Sled, serial_number: serial2, part_number: model2
 INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint 31c84831-be52-4630-bc3f-128d72cd8f22 based on parent blueprint b82656b0-a9be-433d-83d0-e2bdf371777a
+blueprint source: planner with report:
 planning report for blueprint 31c84831-be52-4630-bc3f-128d72cd8f22:
 * skipping noop zone image source check on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: all 9 zones are already from artifacts
 * skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 8 zones are already from artifacts
@@ -2464,6 +2513,7 @@ planning report for blueprint 31c84831-be52-4630-bc3f-128d72cd8f22:
 * 1 pending MGS update:
   * model2:serial2: Rot(PendingMgsUpdateRotDetails { expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: Version(ArtifactVersion("1.0.0")), expected_persistent_boot_preference: B, expected_pending_persistent_boot_preference: None, expected_transient_boot_preference: None })
 * zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+
 
 
 > blueprint-diff latest
@@ -2531,6 +2581,7 @@ INFO MGS-driven update impossible (will remove it and re-evaluate board), artifa
 INFO configuring MGS-driven update, artifact_version: 1.0.0, artifact_hash: d11e65f934bf0de51df2e5b484f61ee72072417b43ac87f33e958008428e7b02, expected_transient_boot_preference: None, expected_pending_persistent_boot_preference: Some(B), expected_persistent_boot_preference: B, expected_active_slot: ExpectedActiveRotSlot { slot: B, version: ArtifactVersion("1.1.0") }, expected_inactive_version: Version(ArtifactVersion("0.0.2")), component: rot, sp_slot: 2, sp_type: Sled, serial_number: serial2, part_number: model2
 INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint 778e3f3a-58b1-4a5e-acff-d23c5d7124c2 based on parent blueprint 31c84831-be52-4630-bc3f-128d72cd8f22
+blueprint source: planner with report:
 planning report for blueprint 778e3f3a-58b1-4a5e-acff-d23c5d7124c2:
 * skipping noop zone image source check on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: all 9 zones are already from artifacts
 * skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 8 zones are already from artifacts
@@ -2538,6 +2589,7 @@ planning report for blueprint 778e3f3a-58b1-4a5e-acff-d23c5d7124c2:
 * 1 pending MGS update:
   * model2:serial2: Rot(PendingMgsUpdateRotDetails { expected_active_slot: ExpectedActiveRotSlot { slot: B, version: ArtifactVersion("1.1.0") }, expected_inactive_version: Version(ArtifactVersion("0.0.2")), expected_persistent_boot_preference: B, expected_pending_persistent_boot_preference: Some(B), expected_transient_boot_preference: None })
 * zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+
 
 
 > blueprint-diff latest
@@ -2602,6 +2654,7 @@ INFO MGS-driven update impossible (will remove it and re-evaluate board), artifa
 INFO configuring MGS-driven update, artifact_version: 1.0.0, artifact_hash: d11e65f934bf0de51df2e5b484f61ee72072417b43ac87f33e958008428e7b02, expected_transient_boot_preference: Some(B), expected_pending_persistent_boot_preference: None, expected_persistent_boot_preference: B, expected_active_slot: ExpectedActiveRotSlot { slot: B, version: ArtifactVersion("1.1.0") }, expected_inactive_version: Version(ArtifactVersion("0.0.2")), component: rot, sp_slot: 2, sp_type: Sled, serial_number: serial2, part_number: model2
 INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint 386a7ec3-7c2e-43cf-8f00-999e91e1d5e6 based on parent blueprint 778e3f3a-58b1-4a5e-acff-d23c5d7124c2
+blueprint source: planner with report:
 planning report for blueprint 386a7ec3-7c2e-43cf-8f00-999e91e1d5e6:
 * skipping noop zone image source check on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: all 9 zones are already from artifacts
 * skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 8 zones are already from artifacts
@@ -2609,6 +2662,7 @@ planning report for blueprint 386a7ec3-7c2e-43cf-8f00-999e91e1d5e6:
 * 1 pending MGS update:
   * model2:serial2: Rot(PendingMgsUpdateRotDetails { expected_active_slot: ExpectedActiveRotSlot { slot: B, version: ArtifactVersion("1.1.0") }, expected_inactive_version: Version(ArtifactVersion("0.0.2")), expected_persistent_boot_preference: B, expected_pending_persistent_boot_preference: None, expected_transient_boot_preference: Some(B) })
 * zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+
 
 
 > blueprint-diff latest
@@ -2671,6 +2725,7 @@ INFO MGS-driven update completed (will remove it and re-evaluate board), artifac
 INFO configuring MGS-driven update, artifact_version: 1.0.0, artifact_hash: 68465b8e3f808f475510b525cfd62086d37ddd57688bd854184fdafb2b2198a4, expected_inactive_version: NoValidVersion, expected_active_version: 0.0.1, component: sp, sp_slot: 2, sp_type: Sled, serial_number: serial2, part_number: model2
 INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint e54a0836-53e1-4948-a3af-0b77165289b5 based on parent blueprint 386a7ec3-7c2e-43cf-8f00-999e91e1d5e6
+blueprint source: planner with report:
 planning report for blueprint e54a0836-53e1-4948-a3af-0b77165289b5:
 * skipping noop zone image source check on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: all 9 zones are already from artifacts
 * skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 8 zones are already from artifacts
@@ -2678,6 +2733,7 @@ planning report for blueprint e54a0836-53e1-4948-a3af-0b77165289b5:
 * 1 pending MGS update:
   * model2:serial2: Sp(PendingMgsUpdateSpDetails { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: NoValidVersion })
 * zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+
 
 
 > blueprint-diff latest
@@ -2736,16 +2792,18 @@ INFO performed noop zone image source checks on sled, sled_id: d81c6a84-79b8-495
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
 INFO MGS-driven update completed (will remove it and re-evaluate board), artifact_version: 1.0.0, artifact_hash: 68465b8e3f808f475510b525cfd62086d37ddd57688bd854184fdafb2b2198a4, expected_inactive_version: NoValidVersion, expected_active_version: 0.0.1, component: sp, sp_slot: 2, sp_type: Sled, serial_number: serial2, part_number: model2
-INFO configuring MGS-driven update, artifact_version: 1.0.0, artifact_hash: 2053f8594971bbf0a7326c833e2ffc12b065b9d823b9c0b967d275fa595e4e89, sled_agent_address: [fd00:1122:3344:103::1]:12345, expected_inactive_phase_2_hash: f3dd0c7a1bd4500ea0d8bcf67581f576d47752b2f1998a4cb0f0c3155c483008, expected_inactive_phase_1_hash: 0202020202020202020202020202020202020202020202020202020202020202, expected_active_phase_2_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a, expected_active_phase_1_hash: 0101010101010101010101010101010101010101010101010101010101010101, expected_boot_disk: A, expected_active_phase_1_slot: A, component: host_phase_1, sp_slot: 2, sp_type: Sled, serial_number: serial2, part_number: model2
+INFO configuring MGS-driven update, artifact_version: 1.0.0, artifact_hash: b99d5273ba1418bebb19d74b701d716896409566d41de76ada71bded4c9b166b, sled_agent_address: [fd00:1122:3344:103::1]:12345, expected_inactive_phase_2_hash: d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47, expected_inactive_phase_1_hash: 0202020202020202020202020202020202020202020202020202020202020202, expected_active_phase_2_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a, expected_active_phase_1_hash: 0101010101010101010101010101010101010101010101010101010101010101, expected_boot_disk: A, expected_active_phase_1_slot: A, component: host_phase_1, sp_slot: 2, sp_type: Sled, serial_number: serial2, part_number: model2
 INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint 459a45a5-616e-421f-873b-2fb08c36205c based on parent blueprint e54a0836-53e1-4948-a3af-0b77165289b5
+blueprint source: planner with report:
 planning report for blueprint 459a45a5-616e-421f-873b-2fb08c36205c:
 * skipping noop zone image source check on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: all 9 zones are already from artifacts
 * skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 8 zones are already from artifacts
 * skipping noop zone image source check on sled d81c6a84-79b8-4958-ae41-ea46c9b19763: all 8 zones are already from artifacts
 * 1 pending MGS update:
-  * model2:serial2: HostPhase1(PendingMgsUpdateHostPhase1Details { expected_active_phase_1_slot: A, expected_boot_disk: A, expected_active_phase_1_hash: ArtifactHash("0101010101010101010101010101010101010101010101010101010101010101"), expected_active_phase_2_hash: ArtifactHash("0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a"), expected_inactive_phase_1_hash: ArtifactHash("0202020202020202020202020202020202020202020202020202020202020202"), expected_inactive_phase_2_hash: ArtifactHash("f3dd0c7a1bd4500ea0d8bcf67581f576d47752b2f1998a4cb0f0c3155c483008"), sled_agent_address: [fd00:1122:3344:103::1]:12345 })
+  * model2:serial2: HostPhase1(PendingMgsUpdateHostPhase1Details { expected_active_phase_1_slot: A, expected_boot_disk: A, expected_active_phase_1_hash: ArtifactHash("0101010101010101010101010101010101010101010101010101010101010101"), expected_active_phase_2_hash: ArtifactHash("0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a"), expected_inactive_phase_1_hash: ArtifactHash("0202020202020202020202020202020202020202020202020202020202020202"), expected_inactive_phase_2_hash: ArtifactHash("d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47"), sled_agent_address: [fd00:1122:3344:103::1]:12345 })
 * zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+
 
 
 > blueprint-diff latest
@@ -2834,7 +2892,7 @@ to:   blueprint 459a45a5-616e-421f-873b-2fb08c36205c
     sp_type   slot   part_number   serial_number   artifact_hash                                                        artifact_version   details                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          
     ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 *   sled      2      model2        serial2         - 68465b8e3f808f475510b525cfd62086d37ddd57688bd854184fdafb2b2198a4   1.0.0              - Sp(PendingMgsUpdateSpDetails { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: NoValidVersion })                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 
-     └─                                            + 2053f8594971bbf0a7326c833e2ffc12b065b9d823b9c0b967d275fa595e4e89                      + HostPhase1(PendingMgsUpdateHostPhase1Details { expected_active_phase_1_slot: A, expected_boot_disk: A, expected_active_phase_1_hash: ArtifactHash("0101010101010101010101010101010101010101010101010101010101010101"), expected_active_phase_2_hash: ArtifactHash("0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a"), expected_inactive_phase_1_hash: ArtifactHash("0202020202020202020202020202020202020202020202020202020202020202"), expected_inactive_phase_2_hash: ArtifactHash("f3dd0c7a1bd4500ea0d8bcf67581f576d47752b2f1998a4cb0f0c3155c483008"), sled_agent_address: [fd00:1122:3344:103::1]:12345 })
+     └─                                            + b99d5273ba1418bebb19d74b701d716896409566d41de76ada71bded4c9b166b                      + HostPhase1(PendingMgsUpdateHostPhase1Details { expected_active_phase_1_slot: A, expected_boot_disk: A, expected_active_phase_1_hash: ArtifactHash("0101010101010101010101010101010101010101010101010101010101010101"), expected_active_phase_2_hash: ArtifactHash("0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a"), expected_inactive_phase_1_hash: ArtifactHash("0202020202020202020202020202020202020202020202020202020202020202"), expected_inactive_phase_2_hash: ArtifactHash("d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47"), sled_agent_address: [fd00:1122:3344:103::1]:12345 })
 
 
 internal DNS:
@@ -2849,11 +2907,11 @@ external DNS:
 
 
 > # Finish updating the last sled's host OS.
-> sled-update-host-phase2 d81c6a84-79b8-4958-ae41-ea46c9b19763 --boot-disk B --slot-b f3dd0c7a1bd4500ea0d8bcf67581f576d47752b2f1998a4cb0f0c3155c483008
-set sled d81c6a84-79b8-4958-ae41-ea46c9b19763 host phase 2 details: boot_disk -> B, B -> f3dd0c7a1bd4500ea0d8bcf67581f576d47752b2f1998a4cb0f0c3155c483008
+> sled-update-host-phase2 d81c6a84-79b8-4958-ae41-ea46c9b19763 --boot-disk B --slot-b d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47 
+set sled d81c6a84-79b8-4958-ae41-ea46c9b19763 host phase 2 details: boot_disk -> B, B -> d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47
 
-> sled-update-host-phase1 d81c6a84-79b8-4958-ae41-ea46c9b19763 --active B --slot-b 2053f8594971bbf0a7326c833e2ffc12b065b9d823b9c0b967d275fa595e4e89
-set sled d81c6a84-79b8-4958-ae41-ea46c9b19763 host phase 1 details: active -> B, B -> 2053f8594971bbf0a7326c833e2ffc12b065b9d823b9c0b967d275fa595e4e89
+> sled-update-host-phase1 d81c6a84-79b8-4958-ae41-ea46c9b19763 --active B --slot-b b99d5273ba1418bebb19d74b701d716896409566d41de76ada71bded4c9b166b 
+set sled d81c6a84-79b8-4958-ae41-ea46c9b19763 host phase 1 details: active -> B, B -> b99d5273ba1418bebb19d74b701d716896409566d41de76ada71bded4c9b166b
 
 > inventory-generate
 generated inventory collection 8a02a1c6-9e86-4dc0-9293-cd17da34f319 from configured sleds
@@ -2867,12 +2925,13 @@ INFO performed noop zone image source checks on sled, sled_id: 98e6b7c2-2efa-41c
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO performed noop zone image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 8, num_already_artifact: 8, num_eligible: 0, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
-INFO MGS-driven update completed (will remove it and re-evaluate board), artifact_version: 1.0.0, artifact_hash: 2053f8594971bbf0a7326c833e2ffc12b065b9d823b9c0b967d275fa595e4e89, sled_agent_address: [fd00:1122:3344:103::1]:12345, expected_inactive_phase_2_hash: f3dd0c7a1bd4500ea0d8bcf67581f576d47752b2f1998a4cb0f0c3155c483008, expected_inactive_phase_1_hash: 0202020202020202020202020202020202020202020202020202020202020202, expected_active_phase_2_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a, expected_active_phase_1_hash: 0101010101010101010101010101010101010101010101010101010101010101, expected_boot_disk: A, expected_active_phase_1_slot: A, component: host_phase_1, sp_slot: 2, sp_type: Sled, serial_number: serial2, part_number: model2
+INFO MGS-driven update completed (will remove it and re-evaluate board), artifact_version: 1.0.0, artifact_hash: b99d5273ba1418bebb19d74b701d716896409566d41de76ada71bded4c9b166b, sled_agent_address: [fd00:1122:3344:103::1]:12345, expected_inactive_phase_2_hash: d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47, expected_inactive_phase_1_hash: 0202020202020202020202020202020202020202020202020202020202020202, expected_active_phase_2_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a, expected_active_phase_1_hash: 0101010101010101010101010101010101010101010101010101010101010101, expected_boot_disk: A, expected_active_phase_1_slot: A, component: host_phase_1, sp_slot: 2, sp_type: Sled, serial_number: serial2, part_number: model2
 INFO skipping board for MGS-driven update, serial_number: serial2, part_number: model2
 INFO skipping board for MGS-driven update, serial_number: serial0, part_number: model0
 INFO skipping board for MGS-driven update, serial_number: serial1, part_number: model1
 INFO ran out of boards for MGS-driven update
 generated blueprint b2295597-5788-482e-acf9-1731ec63fbd2 based on parent blueprint 459a45a5-616e-421f-873b-2fb08c36205c
+blueprint source: planner with report:
 planning report for blueprint b2295597-5788-482e-acf9-1731ec63fbd2:
 * skipping noop zone image source check on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: all 9 zones are already from artifacts
 * skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 8 zones are already from artifacts
@@ -2880,6 +2939,7 @@ planning report for blueprint b2295597-5788-482e-acf9-1731ec63fbd2:
 * 1 out-of-date zone updated in-place:
   * sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, zone 353b3b65-20f7-48c3-88f7-495bd5d31545 (clickhouse)
 * 25 remaining out-of-date zones
+
 
 
 > blueprint-diff latest
@@ -2970,7 +3030,7 @@ to:   blueprint b2295597-5788-482e-acf9-1731ec63fbd2
     --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
     sp_type   slot   part_number   serial_number   artifact_hash                                                      artifact_version   details                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        
     --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
--   sled      2      model2        serial2         2053f8594971bbf0a7326c833e2ffc12b065b9d823b9c0b967d275fa595e4e89   1.0.0              HostPhase1(PendingMgsUpdateHostPhase1Details { expected_active_phase_1_slot: A, expected_boot_disk: A, expected_active_phase_1_hash: ArtifactHash("0101010101010101010101010101010101010101010101010101010101010101"), expected_active_phase_2_hash: ArtifactHash("0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a"), expected_inactive_phase_1_hash: ArtifactHash("0202020202020202020202020202020202020202020202020202020202020202"), expected_inactive_phase_2_hash: ArtifactHash("f3dd0c7a1bd4500ea0d8bcf67581f576d47752b2f1998a4cb0f0c3155c483008"), sled_agent_address: [fd00:1122:3344:103::1]:12345 })
+-   sled      2      model2        serial2         b99d5273ba1418bebb19d74b701d716896409566d41de76ada71bded4c9b166b   1.0.0              HostPhase1(PendingMgsUpdateHostPhase1Details { expected_active_phase_1_slot: A, expected_boot_disk: A, expected_active_phase_1_hash: ArtifactHash("0101010101010101010101010101010101010101010101010101010101010101"), expected_active_phase_2_hash: ArtifactHash("0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a"), expected_inactive_phase_1_hash: ArtifactHash("0202020202020202020202020202020202020202020202020202020202020202"), expected_inactive_phase_2_hash: ArtifactHash("d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47"), sled_agent_address: [fd00:1122:3344:103::1]:12345 })
 
 
 internal DNS:
@@ -3004,6 +3064,7 @@ INFO skipping board for MGS-driven update, serial_number: serial1, part_number: 
 INFO skipping board for MGS-driven update, serial_number: serial2, part_number: model2
 INFO ran out of boards for MGS-driven update
 generated blueprint 6fad8fd4-e825-433f-b76d-495484e068ce based on parent blueprint b2295597-5788-482e-acf9-1731ec63fbd2
+blueprint source: planner with report:
 planning report for blueprint 6fad8fd4-e825-433f-b76d-495484e068ce:
 * skipping noop zone image source check on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: all 9 zones are already from artifacts
 * skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 8 zones are already from artifacts
@@ -3011,6 +3072,7 @@ planning report for blueprint 6fad8fd4-e825-433f-b76d-495484e068ce:
 * 1 out-of-date zone expunged:
   * sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, zone 62620961-fc4a-481e-968b-f5acbac0dc63 (internal_ntp)
 * 24 remaining out-of-date zones
+
 
 
 > blueprint-diff latest
@@ -3141,6 +3203,7 @@ INFO skipping board for MGS-driven update, serial_number: serial2, part_number: 
 INFO ran out of boards for MGS-driven update
 INFO some zones not yet up-to-date, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, zones_currently_updating: [ZoneCurrentlyUpdating { zone_id: ba87399e-e9b7-4ee4-8cb7-0032822630e9 (service), zone_kind: InternalNtp, reason: MissingInInventory { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("67593d686ed04a1709f93972b71f4ebc148a9362120f65d239943e814a9a7439") } } }]
 generated blueprint 24b6e243-100c-428d-8ea6-35b504226f55 based on parent blueprint 6fad8fd4-e825-433f-b76d-495484e068ce
+blueprint source: planner with report:
 planning report for blueprint 24b6e243-100c-428d-8ea6-35b504226f55:
 * skipping noop zone image source check on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: all 8 zones are already from artifacts
 * skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 8 zones are already from artifacts
@@ -3148,6 +3211,7 @@ planning report for blueprint 24b6e243-100c-428d-8ea6-35b504226f55:
 * waiting for NTP zones to appear in inventory on sleds: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
 * sleds getting NTP zones and which have other services already, making them eligible for discretionary zones: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
 * missing NTP zone on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
+
 
 
 > blueprint-diff latest
@@ -3272,6 +3336,7 @@ INFO skipping board for MGS-driven update, serial_number: serial1, part_number: 
 INFO skipping board for MGS-driven update, serial_number: serial2, part_number: model2
 INFO ran out of boards for MGS-driven update
 generated blueprint 79fff7a2-2495-4c75-8465-4dc01bab48ce based on parent blueprint 24b6e243-100c-428d-8ea6-35b504226f55
+blueprint source: planner with report:
 planning report for blueprint 79fff7a2-2495-4c75-8465-4dc01bab48ce:
 * skipping noop zone image source check on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: all 9 zones are already from artifacts
 * skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 8 zones are already from artifacts
@@ -3279,6 +3344,7 @@ planning report for blueprint 79fff7a2-2495-4c75-8465-4dc01bab48ce:
 * 1 out-of-date zone expunged:
   * sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, zone 6c3ae381-04f7-41ea-b0ac-74db387dbc3a (external_dns)
 * 23 remaining out-of-date zones
+
 
 
 > blueprint-diff latest
@@ -3419,6 +3485,7 @@ INFO skipping board for MGS-driven update, serial_number: serial1, part_number: 
 INFO skipping board for MGS-driven update, serial_number: serial2, part_number: model2
 INFO ran out of boards for MGS-driven update
 generated blueprint 3bcc37b2-0c0b-44d0-b4ed-3bcb605e4312 based on parent blueprint 79fff7a2-2495-4c75-8465-4dc01bab48ce
+blueprint source: planner with report:
 planning report for blueprint 3bcc37b2-0c0b-44d0-b4ed-3bcb605e4312:
 * skipping noop zone image source check on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: all 8 zones are already from artifacts
 * skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 8 zones are already from artifacts
@@ -3426,6 +3493,7 @@ planning report for blueprint 3bcc37b2-0c0b-44d0-b4ed-3bcb605e4312:
 * discretionary zones placed:
   * external_dns zone on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c from source artifact: version 1.0.0
 * zone updates waiting on discretionary zones
+
 
 
 > blueprint-diff latest
@@ -3567,6 +3635,7 @@ INFO skipping board for MGS-driven update, serial_number: serial1, part_number: 
 INFO skipping board for MGS-driven update, serial_number: serial2, part_number: model2
 INFO ran out of boards for MGS-driven update
 generated blueprint 4d2eb6f3-7eb1-443a-8e76-7ecf05da2f6d based on parent blueprint 3bcc37b2-0c0b-44d0-b4ed-3bcb605e4312
+blueprint source: planner with report:
 planning report for blueprint 4d2eb6f3-7eb1-443a-8e76-7ecf05da2f6d:
 * skipping noop zone image source check on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: all 9 zones are already from artifacts
 * skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 8 zones are already from artifacts
@@ -3574,6 +3643,7 @@ planning report for blueprint 4d2eb6f3-7eb1-443a-8e76-7ecf05da2f6d:
 * 1 out-of-date zone updated in-place:
   * sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, zone 86a22a56-0168-453d-9df1-cb2a7c64b5d3 (crucible)
 * 22 remaining out-of-date zones
+
 
 
 > blueprint-diff latest
@@ -3693,6 +3763,7 @@ INFO skipping board for MGS-driven update, serial_number: serial1, part_number: 
 INFO skipping board for MGS-driven update, serial_number: serial2, part_number: model2
 INFO ran out of boards for MGS-driven update
 generated blueprint e2125c83-b255-45c9-bc9b-802cff09a812 based on parent blueprint 4d2eb6f3-7eb1-443a-8e76-7ecf05da2f6d
+blueprint source: planner with report:
 planning report for blueprint e2125c83-b255-45c9-bc9b-802cff09a812:
 * skipping noop zone image source check on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: all 9 zones are already from artifacts
 * skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 8 zones are already from artifacts
@@ -3700,6 +3771,7 @@ planning report for blueprint e2125c83-b255-45c9-bc9b-802cff09a812:
 * 1 out-of-date zone expunged:
   * sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, zone 99e2f30b-3174-40bf-a78a-90da8abba8ca (internal_dns)
 * 21 remaining out-of-date zones
+
 
 
 > blueprint-diff latest
@@ -3843,6 +3915,7 @@ INFO skipping board for MGS-driven update, serial_number: serial1, part_number: 
 INFO skipping board for MGS-driven update, serial_number: serial2, part_number: model2
 INFO ran out of boards for MGS-driven update
 generated blueprint f4a6848e-d13c-46e1-8c6a-944f886d7ba3 based on parent blueprint e2125c83-b255-45c9-bc9b-802cff09a812
+blueprint source: planner with report:
 planning report for blueprint f4a6848e-d13c-46e1-8c6a-944f886d7ba3:
 * skipping noop zone image source check on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: all 8 zones are already from artifacts
 * skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 8 zones are already from artifacts
@@ -3850,6 +3923,7 @@ planning report for blueprint f4a6848e-d13c-46e1-8c6a-944f886d7ba3:
 * discretionary zones placed:
   * internal_dns zone on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c from source artifact: version 1.0.0
 * zone updates waiting on discretionary zones
+
 
 
 > blueprint-diff latest
@@ -3994,6 +4068,7 @@ INFO skipping board for MGS-driven update, serial_number: serial1, part_number: 
 INFO skipping board for MGS-driven update, serial_number: serial2, part_number: model2
 INFO ran out of boards for MGS-driven update
 generated blueprint 834e4dbe-3b71-443d-bd4c-20e8253abc0c based on parent blueprint f4a6848e-d13c-46e1-8c6a-944f886d7ba3
+blueprint source: planner with report:
 planning report for blueprint 834e4dbe-3b71-443d-bd4c-20e8253abc0c:
 * skipping noop zone image source check on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: all 9 zones are already from artifacts
 * skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 8 zones are already from artifacts
@@ -4001,6 +4076,7 @@ planning report for blueprint 834e4dbe-3b71-443d-bd4c-20e8253abc0c:
 * 1 out-of-date zone expunged:
   * sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, zone ad6a3a03-8d0f-4504-99a4-cbf73d69b973 (crucible_pantry)
 * 20 remaining out-of-date zones
+
 
 
 > blueprint-diff latest
@@ -4132,6 +4208,7 @@ INFO skipping board for MGS-driven update, serial_number: serial1, part_number: 
 INFO skipping board for MGS-driven update, serial_number: serial2, part_number: model2
 INFO ran out of boards for MGS-driven update
 generated blueprint d9c5c5e3-c532-4c45-9ef5-22cb00f6a2e1 based on parent blueprint 834e4dbe-3b71-443d-bd4c-20e8253abc0c
+blueprint source: planner with report:
 planning report for blueprint d9c5c5e3-c532-4c45-9ef5-22cb00f6a2e1:
 * skipping noop zone image source check on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: all 8 zones are already from artifacts
 * skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 8 zones are already from artifacts
@@ -4139,6 +4216,7 @@ planning report for blueprint d9c5c5e3-c532-4c45-9ef5-22cb00f6a2e1:
 * discretionary zones placed:
   * crucible_pantry zone on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c from source artifact: version 1.0.0
 * zone updates waiting on discretionary zones
+
 
 
 > blueprint-diff latest
@@ -4271,6 +4349,7 @@ INFO skipping board for MGS-driven update, serial_number: serial1, part_number: 
 INFO skipping board for MGS-driven update, serial_number: serial2, part_number: model2
 INFO ran out of boards for MGS-driven update
 generated blueprint e2deb7c0-2262-49fe-855f-4250c22afb36 based on parent blueprint d9c5c5e3-c532-4c45-9ef5-22cb00f6a2e1
+blueprint source: planner with report:
 planning report for blueprint e2deb7c0-2262-49fe-855f-4250c22afb36:
 * skipping noop zone image source check on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: all 9 zones are already from artifacts
 * skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 8 zones are already from artifacts
@@ -4278,6 +4357,7 @@ planning report for blueprint e2deb7c0-2262-49fe-855f-4250c22afb36:
 * 1 out-of-date zone updated in-place:
   * sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, zone bd354eef-d8a6-4165-9124-283fb5e46d77 (crucible)
 * 19 remaining out-of-date zones
+
 
 
 > blueprint-diff latest
@@ -4402,6 +4482,7 @@ INFO skipping board for MGS-driven update, serial_number: serial1, part_number: 
 INFO skipping board for MGS-driven update, serial_number: serial2, part_number: model2
 INFO ran out of boards for MGS-driven update
 generated blueprint 23ce505c-8991-44a5-8863-f2b906fba9cf based on parent blueprint e2deb7c0-2262-49fe-855f-4250c22afb36
+blueprint source: planner with report:
 planning report for blueprint 23ce505c-8991-44a5-8863-f2b906fba9cf:
 * skipping noop zone image source check on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: all 9 zones are already from artifacts
 * skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 8 zones are already from artifacts
@@ -4409,6 +4490,7 @@ planning report for blueprint 23ce505c-8991-44a5-8863-f2b906fba9cf:
 * 1 out-of-date zone updated in-place:
   * sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, zone e2fdefe7-95b2-4fd2-ae37-56929a06d58c (crucible)
 * 18 remaining out-of-date zones
+
 
 
 > blueprint-diff latest
@@ -4536,6 +4618,7 @@ INFO skipping board for MGS-driven update, serial_number: serial1, part_number: 
 INFO skipping board for MGS-driven update, serial_number: serial2, part_number: model2
 INFO ran out of boards for MGS-driven update
 generated blueprint c0d81ea6-909c-4efb-964e-beff67f6da0d based on parent blueprint 23ce505c-8991-44a5-8863-f2b906fba9cf
+blueprint source: planner with report:
 planning report for blueprint c0d81ea6-909c-4efb-964e-beff67f6da0d:
 * skipping noop zone image source check on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: all 9 zones are already from artifacts
 * skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 8 zones are already from artifacts
@@ -4543,6 +4626,7 @@ planning report for blueprint c0d81ea6-909c-4efb-964e-beff67f6da0d:
 * 1 out-of-date zone updated in-place:
   * sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, zone 058fd5f9-60a8-4e11-9302-15172782e17d (crucible)
 * 17 remaining out-of-date zones
+
 
 
 > blueprint-diff latest
@@ -4655,6 +4739,7 @@ INFO skipping board for MGS-driven update, serial_number: serial1, part_number: 
 INFO skipping board for MGS-driven update, serial_number: serial2, part_number: model2
 INFO ran out of boards for MGS-driven update
 generated blueprint 60b55d33-5fec-4277-9864-935197eaead7 based on parent blueprint c0d81ea6-909c-4efb-964e-beff67f6da0d
+blueprint source: planner with report:
 planning report for blueprint 60b55d33-5fec-4277-9864-935197eaead7:
 * skipping noop zone image source check on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: all 9 zones are already from artifacts
 * skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 8 zones are already from artifacts
@@ -4662,6 +4747,7 @@ planning report for blueprint 60b55d33-5fec-4277-9864-935197eaead7:
 * 1 out-of-date zone expunged:
   * sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, zone 427ec88f-f467-42fa-9bbb-66a91a36103c (internal_dns)
 * 16 remaining out-of-date zones
+
 
 
 > blueprint-diff latest
@@ -4794,6 +4880,7 @@ INFO skipping board for MGS-driven update, serial_number: serial1, part_number: 
 INFO skipping board for MGS-driven update, serial_number: serial2, part_number: model2
 INFO ran out of boards for MGS-driven update
 generated blueprint aa13f40f-41ff-4b68-bee1-df2e1f805544 based on parent blueprint 60b55d33-5fec-4277-9864-935197eaead7
+blueprint source: planner with report:
 planning report for blueprint aa13f40f-41ff-4b68-bee1-df2e1f805544:
 * skipping noop zone image source check on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: all 9 zones are already from artifacts
 * skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 7 zones are already from artifacts
@@ -4801,6 +4888,7 @@ planning report for blueprint aa13f40f-41ff-4b68-bee1-df2e1f805544:
 * discretionary zones placed:
   * internal_dns zone on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 from source artifact: version 1.0.0
 * zone updates waiting on discretionary zones
+
 
 
 > blueprint-diff latest
@@ -4934,6 +5022,7 @@ INFO skipping board for MGS-driven update, serial_number: serial1, part_number: 
 INFO skipping board for MGS-driven update, serial_number: serial2, part_number: model2
 INFO ran out of boards for MGS-driven update
 generated blueprint 316ccd9e-5c53-46c3-a2e9-20c3867b7111 based on parent blueprint aa13f40f-41ff-4b68-bee1-df2e1f805544
+blueprint source: planner with report:
 planning report for blueprint 316ccd9e-5c53-46c3-a2e9-20c3867b7111:
 * skipping noop zone image source check on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: all 9 zones are already from artifacts
 * skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 8 zones are already from artifacts
@@ -4941,6 +5030,7 @@ planning report for blueprint 316ccd9e-5c53-46c3-a2e9-20c3867b7111:
 * 1 out-of-date zone updated in-place:
   * sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, zone 5199c033-4cf9-4ab6-8ae7-566bd7606363 (crucible)
 * 15 remaining out-of-date zones
+
 
 
 > blueprint-diff latest
@@ -5055,6 +5145,7 @@ INFO skipping board for MGS-driven update, serial_number: serial1, part_number: 
 INFO skipping board for MGS-driven update, serial_number: serial2, part_number: model2
 INFO ran out of boards for MGS-driven update
 generated blueprint 02078c95-3d58-4b7b-a03f-9b160361c50a based on parent blueprint 316ccd9e-5c53-46c3-a2e9-20c3867b7111
+blueprint source: planner with report:
 planning report for blueprint 02078c95-3d58-4b7b-a03f-9b160361c50a:
 * skipping noop zone image source check on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: all 9 zones are already from artifacts
 * skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 8 zones are already from artifacts
@@ -5062,6 +5153,7 @@ planning report for blueprint 02078c95-3d58-4b7b-a03f-9b160361c50a:
 * 1 out-of-date zone expunged:
   * sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, zone 6444f8a5-6465-4f0b-a549-1993c113569c (internal_ntp)
 * 14 remaining out-of-date zones
+
 
 
 > blueprint-diff latest
@@ -5186,6 +5278,7 @@ INFO skipping board for MGS-driven update, serial_number: serial2, part_number: 
 INFO ran out of boards for MGS-driven update
 INFO some zones not yet up-to-date, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, zones_currently_updating: [ZoneCurrentlyUpdating { zone_id: e14f91b0-0c41-48a0-919d-e5078d2b89b0 (service), zone_kind: InternalNtp, reason: MissingInInventory { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("67593d686ed04a1709f93972b71f4ebc148a9362120f65d239943e814a9a7439") } } }]
 generated blueprint e7a01ffc-6b0e-408b-917b-b1efe18b3110 based on parent blueprint 02078c95-3d58-4b7b-a03f-9b160361c50a
+blueprint source: planner with report:
 planning report for blueprint e7a01ffc-6b0e-408b-917b-b1efe18b3110:
 * skipping noop zone image source check on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: all 9 zones are already from artifacts
 * skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 7 zones are already from artifacts
@@ -5193,6 +5286,7 @@ planning report for blueprint e7a01ffc-6b0e-408b-917b-b1efe18b3110:
 * waiting for NTP zones to appear in inventory on sleds: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
 * sleds getting NTP zones and which have other services already, making them eligible for discretionary zones: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
 * missing NTP zone on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
+
 
 
 > blueprint-diff latest
@@ -5317,6 +5411,7 @@ INFO skipping board for MGS-driven update, serial_number: serial1, part_number: 
 INFO skipping board for MGS-driven update, serial_number: serial2, part_number: model2
 INFO ran out of boards for MGS-driven update
 generated blueprint 880e2ffc-8187-4275-a2f3-1b36aa2f4482 based on parent blueprint e7a01ffc-6b0e-408b-917b-b1efe18b3110
+blueprint source: planner with report:
 planning report for blueprint 880e2ffc-8187-4275-a2f3-1b36aa2f4482:
 * skipping noop zone image source check on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: all 9 zones are already from artifacts
 * skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 8 zones are already from artifacts
@@ -5324,6 +5419,7 @@ planning report for blueprint 880e2ffc-8187-4275-a2f3-1b36aa2f4482:
 * 1 out-of-date zone expunged:
   * sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, zone 803bfb63-c246-41db-b0da-d3b87ddfc63d (external_dns)
 * 13 remaining out-of-date zones
+
 
 
 > blueprint-diff latest
@@ -5461,6 +5557,7 @@ INFO skipping board for MGS-driven update, serial_number: serial1, part_number: 
 INFO skipping board for MGS-driven update, serial_number: serial2, part_number: model2
 INFO ran out of boards for MGS-driven update
 generated blueprint c4a20bcb-1a71-4e88-97b4-36d16f55daec based on parent blueprint 880e2ffc-8187-4275-a2f3-1b36aa2f4482
+blueprint source: planner with report:
 planning report for blueprint c4a20bcb-1a71-4e88-97b4-36d16f55daec:
 * skipping noop zone image source check on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: all 9 zones are already from artifacts
 * skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 7 zones are already from artifacts
@@ -5468,6 +5565,7 @@ planning report for blueprint c4a20bcb-1a71-4e88-97b4-36d16f55daec:
 * discretionary zones placed:
   * external_dns zone on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 from source artifact: version 1.0.0
 * zone updates waiting on discretionary zones
+
 
 
 > blueprint-diff latest
@@ -5606,6 +5704,7 @@ INFO skipping board for MGS-driven update, serial_number: serial1, part_number: 
 INFO skipping board for MGS-driven update, serial_number: serial2, part_number: model2
 INFO ran out of boards for MGS-driven update
 generated blueprint a2c6496d-98fc-444d-aa36-99508aa72367 based on parent blueprint c4a20bcb-1a71-4e88-97b4-36d16f55daec
+blueprint source: planner with report:
 planning report for blueprint a2c6496d-98fc-444d-aa36-99508aa72367:
 * skipping noop zone image source check on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: all 9 zones are already from artifacts
 * skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 8 zones are already from artifacts
@@ -5613,6 +5712,7 @@ planning report for blueprint a2c6496d-98fc-444d-aa36-99508aa72367:
 * 1 out-of-date zone expunged:
   * sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, zone ba4994a8-23f9-4b1a-a84f-a08d74591389 (crucible_pantry)
 * 12 remaining out-of-date zones
+
 
 
 > blueprint-diff latest
@@ -5741,6 +5841,7 @@ INFO skipping board for MGS-driven update, serial_number: serial1, part_number: 
 INFO skipping board for MGS-driven update, serial_number: serial2, part_number: model2
 INFO ran out of boards for MGS-driven update
 generated blueprint 6ed56354-5941-40d1-a06c-b0e940701d52 based on parent blueprint a2c6496d-98fc-444d-aa36-99508aa72367
+blueprint source: planner with report:
 planning report for blueprint 6ed56354-5941-40d1-a06c-b0e940701d52:
 * skipping noop zone image source check on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: all 9 zones are already from artifacts
 * skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 7 zones are already from artifacts
@@ -5748,6 +5849,7 @@ planning report for blueprint 6ed56354-5941-40d1-a06c-b0e940701d52:
 * discretionary zones placed:
   * crucible_pantry zone on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 from source artifact: version 1.0.0
 * zone updates waiting on discretionary zones
+
 
 
 > blueprint-diff latest
@@ -5877,6 +5979,7 @@ INFO skipping board for MGS-driven update, serial_number: serial1, part_number: 
 INFO skipping board for MGS-driven update, serial_number: serial2, part_number: model2
 INFO ran out of boards for MGS-driven update
 generated blueprint 9078c4ba-3a73-4b3f-ac2c-acb501f89cb2 based on parent blueprint 6ed56354-5941-40d1-a06c-b0e940701d52
+blueprint source: planner with report:
 planning report for blueprint 9078c4ba-3a73-4b3f-ac2c-acb501f89cb2:
 * skipping noop zone image source check on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: all 9 zones are already from artifacts
 * skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 8 zones are already from artifacts
@@ -5884,6 +5987,7 @@ planning report for blueprint 9078c4ba-3a73-4b3f-ac2c-acb501f89cb2:
 * 1 out-of-date zone updated in-place:
   * sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, zone dfac80b4-a887-430a-ae87-a4e065dba787 (crucible)
 * 11 remaining out-of-date zones
+
 
 
 > blueprint-diff latest
@@ -6008,6 +6112,7 @@ INFO skipping board for MGS-driven update, serial_number: serial1, part_number: 
 INFO skipping board for MGS-driven update, serial_number: serial2, part_number: model2
 INFO ran out of boards for MGS-driven update
 generated blueprint 8763abc1-8a42-4932-b5a7-33109e0e0152 based on parent blueprint 9078c4ba-3a73-4b3f-ac2c-acb501f89cb2
+blueprint source: planner with report:
 planning report for blueprint 8763abc1-8a42-4932-b5a7-33109e0e0152:
 * skipping noop zone image source check on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: all 9 zones are already from artifacts
 * skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 8 zones are already from artifacts
@@ -6015,6 +6120,7 @@ planning report for blueprint 8763abc1-8a42-4932-b5a7-33109e0e0152:
 * 1 out-of-date zone updated in-place:
   * sled d81c6a84-79b8-4958-ae41-ea46c9b19763, zone 694bd14f-cb24-4be4-bb19-876e79cda2c8 (crucible)
 * 10 remaining out-of-date zones
+
 
 
 > blueprint-diff latest
@@ -6127,6 +6233,7 @@ INFO skipping board for MGS-driven update, serial_number: serial1, part_number: 
 INFO skipping board for MGS-driven update, serial_number: serial2, part_number: model2
 INFO ran out of boards for MGS-driven update
 generated blueprint 2b89e0d7-f15b-4474-8ac4-85959ed1bc88 based on parent blueprint 8763abc1-8a42-4932-b5a7-33109e0e0152
+blueprint source: planner with report:
 planning report for blueprint 2b89e0d7-f15b-4474-8ac4-85959ed1bc88:
 * skipping noop zone image source check on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: all 9 zones are already from artifacts
 * skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 8 zones are already from artifacts
@@ -6134,6 +6241,7 @@ planning report for blueprint 2b89e0d7-f15b-4474-8ac4-85959ed1bc88:
 * 1 out-of-date zone expunged:
   * sled d81c6a84-79b8-4958-ae41-ea46c9b19763, zone 75b220ba-a0f4-4872-8202-dc7c87f062d0 (crucible_pantry)
 * 9 remaining out-of-date zones
+
 
 
 > blueprint-diff latest
@@ -6254,6 +6362,7 @@ INFO skipping board for MGS-driven update, serial_number: serial1, part_number: 
 INFO skipping board for MGS-driven update, serial_number: serial2, part_number: model2
 INFO ran out of boards for MGS-driven update
 generated blueprint 7f6b7297-c2bc-4f67-b3c0-c8e555ebbdc4 based on parent blueprint 2b89e0d7-f15b-4474-8ac4-85959ed1bc88
+blueprint source: planner with report:
 planning report for blueprint 7f6b7297-c2bc-4f67-b3c0-c8e555ebbdc4:
 * skipping noop zone image source check on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: all 9 zones are already from artifacts
 * skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 8 zones are already from artifacts
@@ -6261,6 +6370,7 @@ planning report for blueprint 7f6b7297-c2bc-4f67-b3c0-c8e555ebbdc4:
 * discretionary zones placed:
   * crucible_pantry zone on sled d81c6a84-79b8-4958-ae41-ea46c9b19763 from source artifact: version 1.0.0
 * zone updates waiting on discretionary zones
+
 
 
 > blueprint-diff latest
@@ -6382,6 +6492,7 @@ INFO skipping board for MGS-driven update, serial_number: serial1, part_number: 
 INFO skipping board for MGS-driven update, serial_number: serial2, part_number: model2
 INFO ran out of boards for MGS-driven update
 generated blueprint 59630e63-c953-4807-9e84-9e750a79f68e based on parent blueprint 7f6b7297-c2bc-4f67-b3c0-c8e555ebbdc4
+blueprint source: planner with report:
 planning report for blueprint 59630e63-c953-4807-9e84-9e750a79f68e:
 * skipping noop zone image source check on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: all 9 zones are already from artifacts
 * skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 8 zones are already from artifacts
@@ -6389,6 +6500,7 @@ planning report for blueprint 59630e63-c953-4807-9e84-9e750a79f68e:
 * 1 out-of-date zone updated in-place:
   * sled d81c6a84-79b8-4958-ae41-ea46c9b19763, zone 7c252b64-c5af-4ec1-989e-9a03f3b0f111 (crucible)
 * 8 remaining out-of-date zones
+
 
 
 > blueprint-diff latest
@@ -6502,6 +6614,7 @@ INFO skipping board for MGS-driven update, serial_number: serial1, part_number: 
 INFO skipping board for MGS-driven update, serial_number: serial2, part_number: model2
 INFO ran out of boards for MGS-driven update
 generated blueprint e93650dc-b5ba-4ec7-8550-9171c1ada194 based on parent blueprint 59630e63-c953-4807-9e84-9e750a79f68e
+blueprint source: planner with report:
 planning report for blueprint e93650dc-b5ba-4ec7-8550-9171c1ada194:
 * skipping noop zone image source check on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: all 9 zones are already from artifacts
 * skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 8 zones are already from artifacts
@@ -6509,6 +6622,7 @@ planning report for blueprint e93650dc-b5ba-4ec7-8550-9171c1ada194:
 * 1 out-of-date zone expunged:
   * sled d81c6a84-79b8-4958-ae41-ea46c9b19763, zone ea5b4030-b52f-44b2-8d70-45f15f987d01 (internal_dns)
 * 7 remaining out-of-date zones
+
 
 
 > blueprint-diff latest
@@ -6640,6 +6754,7 @@ INFO skipping board for MGS-driven update, serial_number: serial1, part_number: 
 INFO skipping board for MGS-driven update, serial_number: serial2, part_number: model2
 INFO ran out of boards for MGS-driven update
 generated blueprint 90650737-8142-47a6-9a48-a10efc487e57 based on parent blueprint e93650dc-b5ba-4ec7-8550-9171c1ada194
+blueprint source: planner with report:
 planning report for blueprint 90650737-8142-47a6-9a48-a10efc487e57:
 * skipping noop zone image source check on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: all 9 zones are already from artifacts
 * skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 8 zones are already from artifacts
@@ -6647,6 +6762,7 @@ planning report for blueprint 90650737-8142-47a6-9a48-a10efc487e57:
 * discretionary zones placed:
   * internal_dns zone on sled d81c6a84-79b8-4958-ae41-ea46c9b19763 from source artifact: version 1.0.0
 * zone updates waiting on discretionary zones
+
 
 
 > blueprint-diff latest
@@ -6779,6 +6895,7 @@ INFO skipping board for MGS-driven update, serial_number: serial1, part_number: 
 INFO skipping board for MGS-driven update, serial_number: serial2, part_number: model2
 INFO ran out of boards for MGS-driven update
 generated blueprint 2182613d-dc9f-41eb-9c6a-d33801849caa based on parent blueprint 90650737-8142-47a6-9a48-a10efc487e57
+blueprint source: planner with report:
 planning report for blueprint 2182613d-dc9f-41eb-9c6a-d33801849caa:
 * skipping noop zone image source check on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: all 9 zones are already from artifacts
 * skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 8 zones are already from artifacts
@@ -6786,6 +6903,7 @@ planning report for blueprint 2182613d-dc9f-41eb-9c6a-d33801849caa:
 * 1 out-of-date zone expunged:
   * sled d81c6a84-79b8-4958-ae41-ea46c9b19763, zone f10a4fb9-759f-4a65-b25e-5794ad2d07d8 (internal_ntp)
 * 6 remaining out-of-date zones
+
 
 
 > blueprint-diff latest
@@ -6912,6 +7030,7 @@ INFO skipping board for MGS-driven update, serial_number: serial2, part_number: 
 INFO ran out of boards for MGS-driven update
 INFO some zones not yet up-to-date, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, zones_currently_updating: [ZoneCurrentlyUpdating { zone_id: 9e2e0774-3cf6-4f75-9a12-92db05c77b81 (service), zone_kind: InternalNtp, reason: MissingInInventory { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("67593d686ed04a1709f93972b71f4ebc148a9362120f65d239943e814a9a7439") } } }]
 generated blueprint e8b088a8-7da0-480b-a2dc-75ffef068ece based on parent blueprint 2182613d-dc9f-41eb-9c6a-d33801849caa
+blueprint source: planner with report:
 planning report for blueprint e8b088a8-7da0-480b-a2dc-75ffef068ece:
 * skipping noop zone image source check on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: all 9 zones are already from artifacts
 * skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 8 zones are already from artifacts
@@ -6919,6 +7038,7 @@ planning report for blueprint e8b088a8-7da0-480b-a2dc-75ffef068ece:
 * waiting for NTP zones to appear in inventory on sleds: d81c6a84-79b8-4958-ae41-ea46c9b19763
 * sleds getting NTP zones and which have other services already, making them eligible for discretionary zones: d81c6a84-79b8-4958-ae41-ea46c9b19763
 * missing NTP zone on sled d81c6a84-79b8-4958-ae41-ea46c9b19763
+
 
 
 > blueprint-diff latest
@@ -7045,6 +7165,7 @@ INFO skipping board for MGS-driven update, serial_number: serial1, part_number: 
 INFO skipping board for MGS-driven update, serial_number: serial2, part_number: model2
 INFO ran out of boards for MGS-driven update
 generated blueprint 810ea95a-4730-43dd-867e-1984aeb9d873 based on parent blueprint e8b088a8-7da0-480b-a2dc-75ffef068ece
+blueprint source: planner with report:
 planning report for blueprint 810ea95a-4730-43dd-867e-1984aeb9d873:
 * skipping noop zone image source check on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: all 9 zones are already from artifacts
 * skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 8 zones are already from artifacts
@@ -7052,6 +7173,7 @@ planning report for blueprint 810ea95a-4730-43dd-867e-1984aeb9d873:
 * 1 out-of-date zone updated in-place:
   * sled d81c6a84-79b8-4958-ae41-ea46c9b19763, zone f55647d4-5500-4ad3-893a-df45bd50d622 (crucible)
 * 5 remaining out-of-date zones
+
 
 
 > blueprint-diff latest
@@ -7170,6 +7292,7 @@ INFO skipping board for MGS-driven update, serial_number: serial1, part_number: 
 INFO skipping board for MGS-driven update, serial_number: serial2, part_number: model2
 INFO ran out of boards for MGS-driven update
 generated blueprint 67c074ef-c52e-4ff1-851a-598c04dc2c8d based on parent blueprint 810ea95a-4730-43dd-867e-1984aeb9d873
+blueprint source: planner with report:
 planning report for blueprint 67c074ef-c52e-4ff1-851a-598c04dc2c8d:
 * skipping noop zone image source check on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: all 9 zones are already from artifacts
 * skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 8 zones are already from artifacts
@@ -7177,6 +7300,7 @@ planning report for blueprint 67c074ef-c52e-4ff1-851a-598c04dc2c8d:
 * 1 out-of-date zone expunged:
   * sled d81c6a84-79b8-4958-ae41-ea46c9b19763, zone f6ec9c67-946a-4da3-98d5-581f72ce8bf0 (external_dns)
 * 4 remaining out-of-date zones
+
 
 
 > blueprint-diff latest
@@ -7313,6 +7437,7 @@ INFO skipping board for MGS-driven update, serial_number: serial1, part_number: 
 INFO skipping board for MGS-driven update, serial_number: serial2, part_number: model2
 INFO ran out of boards for MGS-driven update
 generated blueprint 0a8d2f87-1d3e-4296-ba07-108940a7a57e based on parent blueprint 67c074ef-c52e-4ff1-851a-598c04dc2c8d
+blueprint source: planner with report:
 planning report for blueprint 0a8d2f87-1d3e-4296-ba07-108940a7a57e:
 * skipping noop zone image source check on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: all 9 zones are already from artifacts
 * skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 8 zones are already from artifacts
@@ -7320,6 +7445,7 @@ planning report for blueprint 0a8d2f87-1d3e-4296-ba07-108940a7a57e:
 * discretionary zones placed:
   * external_dns zone on sled d81c6a84-79b8-4958-ae41-ea46c9b19763 from source artifact: version 1.0.0
 * zone updates waiting on discretionary zones
+
 
 
 > blueprint-diff latest
@@ -7674,6 +7800,7 @@ parent:    67c074ef-c52e-4ff1-851a-598c04dc2c8d
 
  PENDING MGS-MANAGED UPDATES: 0
 
+blueprint source: planner with report:
 planning report for blueprint 0a8d2f87-1d3e-4296-ba07-108940a7a57e:
 * skipping noop zone image source check on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: all 9 zones are already from artifacts
 * skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 8 zones are already from artifacts
@@ -7681,6 +7808,7 @@ planning report for blueprint 0a8d2f87-1d3e-4296-ba07-108940a7a57e:
 * discretionary zones placed:
   * external_dns zone on sled d81c6a84-79b8-4958-ae41-ea46c9b19763 from source artifact: version 1.0.0
 * zone updates waiting on discretionary zones
+
 
 
 

@@ -140,6 +140,8 @@ use nexus_config::DnsTasksConfig;
 use nexus_db_model::DnsGroup;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
+use nexus_types::deployment::Blueprint;
+use nexus_types::deployment::BlueprintTarget;
 use nexus_types::deployment::PendingMgsUpdates;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use oximeter::types::ProducerRegistry;
@@ -426,8 +428,10 @@ impl BackgroundTasksInitializer {
         // Background task: blueprint loader
         //
         // Registration is below so that it can watch the planner.
-        let blueprint_loader =
-            blueprint_load::TargetBlueprintLoader::new(datastore.clone());
+        let blueprint_loader = blueprint_load::TargetBlueprintLoader::new(
+            datastore.clone(),
+            args.blueprint_load_tx,
+        );
         let rx_blueprint = blueprint_loader.watcher();
 
         // Background task: blueprint executor
@@ -1023,6 +1027,9 @@ pub struct BackgroundTasksData {
     pub saga_recovery: saga_recovery::SagaRecoveryHelpers<Arc<Nexus>>,
     /// Channel for TUF repository artifacts to be replicated out to sleds
     pub tuf_artifact_replication_rx: mpsc::Receiver<ArtifactsWithPlan>,
+    /// Channel for exposing the latest loaded blueprint
+    pub blueprint_load_tx:
+        watch::Sender<Option<Arc<(BlueprintTarget, Blueprint)>>>,
     /// `reqwest::Client` for webhook delivery requests.
     ///
     /// This is shared with the external API as it's also used when sending

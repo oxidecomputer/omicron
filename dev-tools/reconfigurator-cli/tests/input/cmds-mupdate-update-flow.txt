@@ -147,22 +147,22 @@ sled-update-rot-bootloader serial0 --stage0 2.0.0
 # Finish the MGS-based updates on sled 0.
 sled-update-rot serial0 --slot-a 2.0.0
 sled-update-sp serial0 --active 2.0.0
-sled-update-host-phase2 serial0 --boot-disk B --slot-b 0c0362b640cece5b9a5e86d8fa683bd2eb84c3e7f90731f597197d604ffa76e3
-sled-update-host-phase1 serial0 --active B --slot-b 44714733af7600b30a50bfd2cbaf707ff7ee9724073ff70a6732e55a88864cf6
+sled-update-host-phase2 serial0 --boot-disk B --slot-b 9ff631b5b7229604ab7c5aae2ee4a34a64772736b332540d38077b3aea6952df
+sled-update-host-phase1 serial0 --active B --slot-b 1eba0d79ea9d34558fb3f923a06614bd740649eeb0ca6e5086529dc60cd6f729
 
 # All the MGS-based updates on sled 1.
 sled-update-rot-bootloader serial1 --stage0 2.0.0
 sled-update-rot serial1 --slot-a 2.0.0
 sled-update-sp serial1 --active 2.0.0
-sled-update-host-phase2 serial1 --boot-disk B --slot-b 0c0362b640cece5b9a5e86d8fa683bd2eb84c3e7f90731f597197d604ffa76e3
-sled-update-host-phase1 serial1 --active B --slot-b 44714733af7600b30a50bfd2cbaf707ff7ee9724073ff70a6732e55a88864cf6
+sled-update-host-phase2 serial1 --boot-disk B --slot-b 9ff631b5b7229604ab7c5aae2ee4a34a64772736b332540d38077b3aea6952df
+sled-update-host-phase1 serial1 --active B --slot-b 1eba0d79ea9d34558fb3f923a06614bd740649eeb0ca6e5086529dc60cd6f729
 
 # All the MGS-based updates on sled 2.
 sled-update-rot-bootloader serial2 --stage0 2.0.0
 sled-update-rot serial2 --slot-a 2.0.0
 sled-update-sp serial2 --active 2.0.0
-sled-update-host-phase2 serial2 --boot-disk B --slot-b 0c0362b640cece5b9a5e86d8fa683bd2eb84c3e7f90731f597197d604ffa76e3
-sled-update-host-phase1 serial2 --active B --slot-b 44714733af7600b30a50bfd2cbaf707ff7ee9724073ff70a6732e55a88864cf6
+sled-update-host-phase2 serial2 --boot-disk B --slot-b 9ff631b5b7229604ab7c5aae2ee4a34a64772736b332540d38077b3aea6952df
+sled-update-host-phase1 serial2 --active B --slot-b 1eba0d79ea9d34558fb3f923a06614bd740649eeb0ca6e5086529dc60cd6f729
 
 # All MGS-based updates complete.
 inventory-generate

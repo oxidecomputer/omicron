@@ -31,6 +31,7 @@ pub use configuration::Configuration;
 pub use coordinator_state::{
     CoordinatorOperation, CoordinatorState, CoordinatorStateDiff,
 };
+pub use rack_secret_loader::{LoadRackSecretError, RackSecretLoaderDiff};
 pub use validators::ValidatedReconfigureMsgDiff;
 mod alarm;
 

@@ -326,6 +326,7 @@ parent:    516e80a3-b362-4fac-bd3c-4559717120dd
 
  PENDING MGS-MANAGED UPDATES: 0
 
+blueprint source: planner with report:
 planning report for blueprint 1ac2d88f-27dd-4506-8585-6b2be832528e:
 planner config:
     add zones with mupdate override:   true
@@ -342,4 +343,5 @@ planner config:
   * clickhouse zone on sled fefcf4cf-f7e7-46b3-b629-058526ce440e from source install dataset
   * internal_dns zone on sled fefcf4cf-f7e7-46b3-b629-058526ce440e from source install dataset
 * zone updates waiting on discretionary zones
+
 

@@ -29,8 +29,8 @@ sled-update-install-dataset serial2 --to-target-release
 inventory-generate
 blueprint-plan latest latest
 blueprint-diff latest
-# The above run would have triggered an SP update, which we should delete (we want to start
-# from a fresh state).
+# The above blueprint includes a pending MGS update, which we should delete
+# (we want to start from a fresh state).
 blueprint-edit latest delete-sp-update serial0
 # Also set the Omicron config for all sleds to reflect the
 # corresponding image sources.
@@ -108,7 +108,7 @@ blueprint-diff latest
 
 # Update only the simulated host phase 2; this is a prerequisite for updating
 # the phase 1, and must be done first.
-sled-update-host-phase2 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 --slot-b f3dd0c7a1bd4500ea0d8bcf67581f576d47752b2f1998a4cb0f0c3155c483008
+sled-update-host-phase2 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 --slot-b d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47 
 inventory-generate
 
 # Planning after only phase 2 has changed should make no changes. We're still
@@ -117,7 +117,7 @@ blueprint-plan latest latest
 blueprint-diff latest
 
 # Now update the simulated SP to reflect that the phase 1 update is done.
-sled-update-host-phase1 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 --active B --slot-b 2053f8594971bbf0a7326c833e2ffc12b065b9d823b9c0b967d275fa595e4e89
+sled-update-host-phase1 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 --active B --slot-b b99d5273ba1418bebb19d74b701d716896409566d41de76ada71bded4c9b166b 
 inventory-generate
 
 # Planning _still_ shouldn't make any new changes; the OS update as a whole
@@ -194,8 +194,8 @@ blueprint-plan latest latest
 blueprint-diff latest
 
 # Now simulate the update completing successfully.
-sled-update-host-phase2 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c --boot-disk B --slot-b f3dd0c7a1bd4500ea0d8bcf67581f576d47752b2f1998a4cb0f0c3155c483008
-sled-update-host-phase1 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c --active B --slot-b 2053f8594971bbf0a7326c833e2ffc12b065b9d823b9c0b967d275fa595e4e89
+sled-update-host-phase2 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c --boot-disk B --slot-b d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47 
+sled-update-host-phase1 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c --active B --slot-b b99d5273ba1418bebb19d74b701d716896409566d41de76ada71bded4c9b166b 
 inventory-generate
 
 # Another planning step should try to update the last sled, starting with the
@@ -254,8 +254,8 @@ blueprint-plan latest latest
 blueprint-diff latest
 
 # Finish updating the last sled's host OS.
-sled-update-host-phase2 d81c6a84-79b8-4958-ae41-ea46c9b19763 --boot-disk B --slot-b f3dd0c7a1bd4500ea0d8bcf67581f576d47752b2f1998a4cb0f0c3155c483008
-sled-update-host-phase1 d81c6a84-79b8-4958-ae41-ea46c9b19763 --active B --slot-b 2053f8594971bbf0a7326c833e2ffc12b065b9d823b9c0b967d275fa595e4e89
+sled-update-host-phase2 d81c6a84-79b8-4958-ae41-ea46c9b19763 --boot-disk B --slot-b d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47 
+sled-update-host-phase1 d81c6a84-79b8-4958-ae41-ea46c9b19763 --active B --slot-b b99d5273ba1418bebb19d74b701d716896409566d41de76ada71bded4c9b166b 
 inventory-generate
 
 # Do another planning run. This should start updating zones (one at a time).

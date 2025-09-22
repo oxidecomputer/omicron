@@ -357,16 +357,24 @@ impl super::Nexus {
         let (.., authz_project, authz_instance) =
             instance_lookup.lookup_for(authz::Action::Modify).await?;
 
-        check_instance_cpu_memory_sizes(params.ncpus, params.memory)?;
+        let params::InstanceUpdate {
+            ncpus,
+            memory,
+            auto_restart_policy,
+            boot_disk,
+            cpu_platform,
+        } = params;
 
-        let boot_disk_id = match params.boot_disk.clone() {
+        check_instance_cpu_memory_sizes(*ncpus, *memory)?;
+
+        let boot_disk_id = match boot_disk.as_ref() {
             Some(disk) => {
                 let selector = params::DiskSelector {
                     project: match &disk {
                         NameOrId::Name(_) => Some(authz_project.id().into()),
                         NameOrId::Id(_) => None,
                     },
-                    disk,
+                    disk: disk.clone(),
                 };
                 let (.., authz_disk) = self
                     .disk_lookup(opctx, selector)?
@@ -378,12 +386,18 @@ impl super::Nexus {
             None => None,
         };
 
-        let auto_restart_policy = params.auto_restart_policy.map(Into::into);
-        let ncpus = params.ncpus.into();
-        let memory = params.memory.into();
+        let auto_restart_policy = auto_restart_policy.map(Into::into);
+        let ncpus = (*ncpus).into();
+        let memory = (*memory).into();
+        let cpu_platform = cpu_platform.map(Into::into);
 
-        let update =
-            InstanceUpdate { boot_disk_id, auto_restart_policy, ncpus, memory };
+        let update = InstanceUpdate {
+            boot_disk_id,
+            auto_restart_policy,
+            ncpus,
+            memory,
+            cpu_platform,
+        };
         self.datastore()
             .instance_reconfigure(opctx, &authz_instance, update)
             .await
@@ -1254,6 +1268,7 @@ impl super::Nexus {
             .generate_vmm_spec(
                 &operation,
                 db_instance,
+                initial_vmm,
                 &disks,
                 &nics,
                 &ssh_keys,
@@ -2332,7 +2347,7 @@ mod tests {
     use futures::{SinkExt, StreamExt};
     use nexus_db_model::{
         Instance as DbInstance, InstanceState as DbInstanceState,
-        VmmState as DbVmmState,
+        VmmCpuPlatform, VmmState as DbVmmState,
     };
     use omicron_common::api::external::{
         Hostname, IdentityMetadataCreateParams, InstanceCpuCount, Name,
@@ -2454,6 +2469,7 @@ mod tests {
             external_ips: vec![],
             disks: vec![],
             boot_disk: None,
+            cpu_platform: None,
             ssh_public_keys: None,
             start: false,
             auto_restart_policy: Default::default(),
@@ -2473,6 +2489,7 @@ mod tests {
             ipnetwork::IpNetwork::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), 0)
                 .unwrap(),
             0,
+            VmmCpuPlatform::SledDefault,
         );
 
         (instance, vmm)

@@ -4,7 +4,7 @@
 
 //! developer REPL for driving blueprint planning
 
-use anyhow::{Context, anyhow, bail};
+use anyhow::{Context, anyhow, bail, ensure};
 use camino::Utf8PathBuf;
 use chrono::{DateTime, Utc};
 use clap::{ArgAction, ValueEnum};
@@ -31,7 +31,6 @@ use nexus_reconfigurator_simulation::{BlueprintId, CollectionId, SimState};
 use nexus_reconfigurator_simulation::{SimStateBuilder, SimTufRepoSource};
 use nexus_reconfigurator_simulation::{SimTufRepoDescription, Simulator};
 use nexus_sled_agent_shared::inventory::ZoneKind;
-use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::execution;
 use nexus_types::deployment::execution::blueprint_external_dns_config;
 use nexus_types::deployment::execution::blueprint_internal_dns_config;
@@ -40,6 +39,7 @@ use nexus_types::deployment::{BlueprintArtifactVersion, PendingMgsUpdate};
 use nexus_types::deployment::{
     BlueprintHostPhase2DesiredContents, PlannerConfig,
 };
+use nexus_types::deployment::{BlueprintSource, SledFilter};
 use nexus_types::deployment::{BlueprintZoneDisposition, ExpectedVersion};
 use nexus_types::deployment::{
     BlueprintZoneImageSource, PendingMgsUpdateDetails,
@@ -65,6 +65,7 @@ use omicron_uuid_kinds::VnicUuid;
 use omicron_uuid_kinds::{BlueprintUuid, MupdateOverrideUuid};
 use omicron_uuid_kinds::{CollectionUuid, MupdateUuid};
 use std::borrow::Cow;
+use std::collections::BTreeSet;
 use std::convert::Infallible;
 use std::fmt::{self, Write};
 use std::io::IsTerminal;
@@ -149,6 +150,9 @@ impl ReconfiguratorSim {
         builder.set_internal_dns_version(parent_blueprint.internal_dns_version);
         builder.set_external_dns_version(parent_blueprint.external_dns_version);
 
+        let mut active_nexus_zones = BTreeSet::new();
+        let mut not_yet_nexus_zones = BTreeSet::new();
+
         for (_, zone) in parent_blueprint
             .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
         {
@@ -170,7 +174,26 @@ impl ReconfiguratorSim {
                     .add_omicron_zone_nic(zone.id, nic)
                     .context("adding omicron zone NIC")?;
             }
+
+            match &zone.zone_type {
+                nexus_types::deployment::BlueprintZoneType::Nexus(nexus) => {
+                    if nexus.nexus_generation
+                        == parent_blueprint.nexus_generation
+                    {
+                        active_nexus_zones.insert(zone.id);
+                    } else if nexus.nexus_generation
+                        > parent_blueprint.nexus_generation
+                    {
+                        not_yet_nexus_zones.insert(zone.id);
+                    }
+                }
+                _ => (),
+            }
         }
+
+        builder.set_active_nexus_zones(active_nexus_zones);
+        builder.set_not_yet_nexus_zones(not_yet_nexus_zones);
+
         Ok(builder.build())
     }
 }
@@ -686,6 +709,10 @@ enum BlueprintEditCommands {
     AddNexus {
         /// sled on which to deploy the new instance
         sled_id: SledOpt,
+
+        /// generation of the new Nexus instance
+        nexus_generation: Generation,
+
         /// image source for the new zone
         ///
         /// The image source is required if the planning input of the system
@@ -742,7 +769,7 @@ enum BlueprintEditCommands {
         generation: Generation,
     },
     /// expunge a zone
-    ExpungeZone { zone_id: OmicronZoneUuid },
+    ExpungeZones { zone_ids: Vec<OmicronZoneUuid> },
     /// mark an expunged zone ready for cleanup
     MarkForCleanup { zone_id: OmicronZoneUuid },
     /// configure an SP update
@@ -771,6 +798,11 @@ enum BlueprintEditCommands {
         #[command(subcommand)]
         command: BlueprintEditDebugCommands,
     },
+    /// bumps the blueprint's Nexus generation
+    ///
+    /// This initiates a handoff from the current generation of Nexus zones to
+    /// the next generation of Nexus zones.
+    BumpNexusGeneration,
 }
 
 #[derive(Debug, Subcommand)]
@@ -1259,10 +1291,6 @@ struct LoadExampleArgs {
     /// The number of disks per sled in the example system.
     #[clap(short = 'd', long, default_value_t = SledBuilder::DEFAULT_NPOOLS)]
     ndisks_per_sled: u8,
-
-    /// Do not create zones in the example system.
-    #[clap(short = 'Z', long)]
-    no_zones: bool,
 
     /// Do not create entries for disks in the blueprint.
     #[clap(long)]
@@ -2072,8 +2100,9 @@ fn cmd_blueprint_plan(
 
     let blueprint = planner.plan().context("generating blueprint")?;
     let rv = format!(
-        "generated blueprint {} based on parent blueprint {}\n{}",
-        blueprint.id, parent_blueprint.id, blueprint.report,
+        "generated blueprint {} based on parent blueprint {}\n\
+         blueprint source: {}",
+        blueprint.id, parent_blueprint.id, blueprint.source,
     );
     system.add_blueprint(blueprint)?;
 
@@ -2120,7 +2149,11 @@ fn cmd_blueprint_edit(
     }
 
     let label = match args.edit_command {
-        BlueprintEditCommands::AddNexus { sled_id, image_source } => {
+        BlueprintEditCommands::AddNexus {
+            sled_id,
+            image_source,
+            nexus_generation,
+        } => {
             let sled_id = sled_id.to_sled_id(system.description())?;
             let image_source = image_source_unwrap_or(
                 image_source,
@@ -2128,7 +2161,7 @@ fn cmd_blueprint_edit(
                 ZoneKind::Nexus,
             )?;
             builder
-                .sled_add_zone_nexus(sled_id, image_source)
+                .sled_add_zone_nexus(sled_id, image_source, nexus_generation)
                 .context("failed to add Nexus zone")?;
             format!("added Nexus zone to sled {}", sled_id)
         }
@@ -2143,6 +2176,29 @@ fn cmd_blueprint_edit(
                 .sled_add_zone_cockroachdb(sled_id, image_source)
                 .context("failed to add CockroachDB zone")?;
             format!("added CockroachDB zone to sled {}", sled_id)
+        }
+        BlueprintEditCommands::BumpNexusGeneration => {
+            let current_generation = builder.nexus_generation();
+            let current_max = blueprint
+                .all_nexus_zones(BlueprintZoneDisposition::is_in_service)
+                .fold(
+                    current_generation,
+                    |current_max, (_sled_id, _zone_config, nexus_config)| {
+                        std::cmp::max(
+                            nexus_config.nexus_generation,
+                            current_max,
+                        )
+                    },
+                );
+            ensure!(
+                current_max > current_generation,
+                "cannot bump blueprint generation (currently \
+                 {current_generation}) past highest deployed Nexus \
+                 generation (currently {current_max})",
+            );
+            let next = current_generation.next();
+            builder.set_nexus_generation(next);
+            format!("nexus generation: {current_generation} -> {next}")
         }
         BlueprintEditCommands::SetRemoveMupdateOverride { sled_id, value } => {
             let sled_id = sled_id.to_sled_id(system.description())?;
@@ -2199,12 +2255,16 @@ fn cmd_blueprint_edit(
                 .context("failed to set host phase 2 source")?;
             rv
         }
-        BlueprintEditCommands::ExpungeZone { zone_id } => {
-            let sled_id = sled_with_zone(&builder, &zone_id)?;
-            builder
-                .sled_expunge_zone(sled_id, zone_id)
-                .context("failed to expunge zone")?;
-            format!("expunged zone {zone_id} from sled {sled_id}")
+        BlueprintEditCommands::ExpungeZones { zone_ids } => {
+            let mut rv = String::new();
+            for zone_id in zone_ids {
+                let sled_id = sled_with_zone(&builder, &zone_id)?;
+                builder.sled_expunge_zone(sled_id, zone_id).with_context(
+                    || format!("failed to expunge zone {zone_id}"),
+                )?;
+                swriteln!(rv, "expunged zone {zone_id} from sled {sled_id}");
+            }
+            rv
         }
         BlueprintEditCommands::MarkForCleanup { zone_id } => {
             let sled_id = sled_with_zone(&builder, &zone_id)?;
@@ -2284,7 +2344,8 @@ fn cmd_blueprint_edit(
         }
     };
 
-    let mut new_blueprint = builder.build();
+    let mut new_blueprint =
+        builder.build(BlueprintSource::ReconfiguratorCliEdit);
 
     // Normally `builder.build()` would construct the cockroach fingerprint
     // based on what we read from CRDB and put into the planning input, but
@@ -2920,7 +2981,6 @@ fn cmd_load_example(
         )
         .external_dns_count(3)
         .context("invalid external DNS zone count")?
-        .create_zones(!args.no_zones)
         .create_disks_in_blueprint(!args.no_disks_in_blueprint);
     for sled_policy in args.sled_policy {
         builder = builder
