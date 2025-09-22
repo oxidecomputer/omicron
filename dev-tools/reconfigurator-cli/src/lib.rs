@@ -5,7 +5,7 @@
 //! developer REPL for driving blueprint planning
 
 use anyhow::{Context, anyhow, bail, ensure};
-use camino::{Utf8Path, Utf8PathBuf};
+use camino::Utf8PathBuf;
 use chrono::{DateTime, Utc};
 use clap::{ArgAction, ValueEnum};
 use clap::{Args, Parser, Subcommand};
@@ -20,7 +20,9 @@ use nexus_inventory::CollectionBuilder;
 use nexus_reconfigurator_blippy::Blippy;
 use nexus_reconfigurator_blippy::BlippyReportSortKey;
 use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
-use nexus_reconfigurator_planning::example::ExampleSystemBuilder;
+use nexus_reconfigurator_planning::example::{
+    ExampleSystemBuilder, extract_tuf_repo_description, tuf_assemble,
+};
 use nexus_reconfigurator_planning::planner::Planner;
 use nexus_reconfigurator_planning::system::{
     RotStateOverrides, SledBuilder, SledInventoryVisibility, SystemDescription,
@@ -48,8 +50,8 @@ use nexus_types::external_api::views::SledPolicy;
 use nexus_types::external_api::views::SledProvisionPolicy;
 use nexus_types::inventory::CollectionDisplayCliFilter;
 use omicron_common::address::REPO_DEPOT_PORT;
+use omicron_common::api::external::Generation;
 use omicron_common::api::external::Name;
-use omicron_common::api::external::{Generation, TufRepoDescription};
 use omicron_common::disk::M2Slot;
 use omicron_common::policy::NEXUS_REDUNDANCY;
 use omicron_common::update::OmicronZoneManifestSource;
@@ -75,19 +77,8 @@ use tufaceous_artifact::ArtifactHash;
 use tufaceous_artifact::ArtifactVersion;
 use tufaceous_artifact::ArtifactVersionError;
 use tufaceous_lib::assemble::ArtifactManifest;
-use update_common::artifacts::{
-    ArtifactsWithPlan, ControlPlaneZonesMode, VerificationMode,
-};
 
 mod log_capture;
-
-/// The default key for TUF repository generation.
-///
-/// This was randomly generated through a tufaceous invocation.
-pub static DEFAULT_TUFACEOUS_KEY: &str = "ed25519:\
-MFECAQEwBQYDK2VwBCIEIJ9CnAhwk8PPt1x8icu\
-z9c12PdfCRHJpoUkuqJmIZ8GbgSEAbNGMpsHK5_w32\
-qwYdZH_BeVssmKzQlFsnPuaiHx2hy0=";
 
 /// REPL state
 #[derive(Debug)]
@@ -2842,32 +2833,6 @@ fn mupdate_source_to_description(
     }
 }
 
-fn extract_tuf_repo_description(
-    log: &slog::Logger,
-    filename: &Utf8Path,
-) -> anyhow::Result<TufRepoDescription> {
-    let file = std::fs::File::open(filename)
-        .with_context(|| format!("open {:?}", filename))?;
-    let buf = std::io::BufReader::new(file);
-    let rt =
-        tokio::runtime::Runtime::new().context("creating tokio runtime")?;
-    let repo_hash = ArtifactHash([0; 32]);
-    let artifacts_with_plan = rt.block_on(async {
-        ArtifactsWithPlan::from_zip(
-            buf,
-            None,
-            repo_hash,
-            ControlPlaneZonesMode::Split,
-            VerificationMode::BlindlyTrustAnything,
-            log,
-        )
-        .await
-        .with_context(|| format!("unpacking {:?}", filename))
-    })?;
-    let description = artifacts_with_plan.description().clone();
-    Ok(description)
-}
-
 fn cmd_tuf_assemble(
     sim: &ReconfiguratorSim,
     args: TufAssembleArgs,
@@ -2898,30 +2863,12 @@ fn cmd_tuf_assemble(
         Utf8PathBuf::from(format!("repo-{}.zip", manifest.system_version))
     };
 
-    if output_path.exists() {
-        bail!("output path `{output_path}` already exists");
-    }
-
-    // Just use a fixed key for now.
-    //
-    // In the future we may want to test changing the TUF key.
-    let mut tufaceous_args = vec![
-        "tufaceous",
-        "--key",
-        DEFAULT_TUFACEOUS_KEY,
-        "assemble",
-        manifest_path.as_str(),
-        output_path.as_str(),
-    ];
-    if args.allow_non_semver {
-        tufaceous_args.push("--allow-non-semver");
-    }
-    let args = tufaceous::Args::try_parse_from(tufaceous_args)
-        .expect("args are valid so this shouldn't fail");
-    let rt =
-        tokio::runtime::Runtime::new().context("creating tokio runtime")?;
-    rt.block_on(async move { args.exec(&sim.log).await })
-        .context("error executing tufaceous assemble")?;
+    tuf_assemble(
+        &sim.log,
+        &manifest_path,
+        &output_path,
+        args.allow_non_semver,
+    )?;
 
     let rv = format!(
         "created {} for system version {}",

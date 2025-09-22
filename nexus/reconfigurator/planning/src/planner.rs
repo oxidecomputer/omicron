@@ -5934,6 +5934,8 @@ pub(crate) mod test {
             &logctx.log,
             rng.next_system_rng(),
         )
+        .with_target_release_0_0_1()
+        .expect("set target release to 0.0.1")
         .build();
         verify_blueprint(&blueprint);
 
@@ -5977,13 +5979,18 @@ pub(crate) mod test {
             TEST_NAME,
         );
 
-        // All zones should be sourced from the install dataset by default.
+        // All zones should be sourced from the initial 0.0.1 target release by
+        // default.
+        eprintln!("{}", blueprint.display());
         assert!(
             blueprint
                 .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
                 .all(|(_, z)| matches!(
-                    z.image_source,
-                    BlueprintZoneImageSource::InstallDataset
+                    &z.image_source,
+                    BlueprintZoneImageSource::Artifact { version, hash: _ }
+                        if version == &BlueprintArtifactVersion::Available {
+                            version: ArtifactVersion::new_const("0.0.1")
+                        }
                 ))
         );
 
@@ -6046,8 +6053,11 @@ pub(crate) mod test {
         let is_old_cockroach = |zone: &BlueprintZoneConfig| -> bool {
             zone.zone_type.is_cockroach()
                 && matches!(
-                    zone.image_source,
-                    BlueprintZoneImageSource::InstallDataset
+                    &zone.image_source,
+                    BlueprintZoneImageSource::Artifact { version, hash: _ }
+                        if version == &BlueprintArtifactVersion::Available {
+                            version: ArtifactVersion::new_const("0.0.1")
+                        }
                 )
         };
         let is_up_to_date_cockroach = |zone: &BlueprintZoneConfig| -> bool {
