@@ -72,6 +72,7 @@ mod test {
     use nexus_types::deployment::Blueprint;
     use nexus_types::deployment::BlueprintHostPhase2DesiredSlots;
     use nexus_types::deployment::BlueprintSledConfig;
+    use nexus_types::deployment::BlueprintSource;
     use nexus_types::deployment::BlueprintTarget;
     use nexus_types::deployment::BlueprintZoneConfig;
     use nexus_types::deployment::BlueprintZoneDisposition;
@@ -80,7 +81,6 @@ mod test {
     use nexus_types::deployment::CockroachDbPreserveDowngrade;
     use nexus_types::deployment::OximeterReadMode;
     use nexus_types::deployment::PendingMgsUpdates;
-    use nexus_types::deployment::PlanningReport;
     use nexus_types::deployment::blueprint_zone_type;
     use nexus_types::external_api::views::SledState;
     use nexus_types::inventory::NetworkInterface;
@@ -179,7 +179,7 @@ mod test {
             time_created: now_db_precision(),
             creator: "test suite".to_string(),
             comment: "test blueprint".to_string(),
-            report: PlanningReport::new(blueprint_id),
+            source: BlueprintSource::Test,
         }
     }
 

@@ -26,6 +26,7 @@ use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintArtifactVersion;
 use nexus_types::deployment::BlueprintHostPhase2DesiredContents;
 use nexus_types::deployment::BlueprintHostPhase2DesiredSlots;
+use nexus_types::deployment::BlueprintSource;
 use nexus_types::deployment::ExpectedVersion;
 use nexus_types::deployment::OmicronZoneNic;
 use nexus_types::deployment::PlanningInput;
@@ -693,7 +694,7 @@ impl ExampleSystemBuilder {
             };
         }
 
-        let blueprint = builder.build();
+        let blueprint = builder.build(BlueprintSource::Test);
         for sled_cfg in blueprint.sleds.values() {
             for zone in sled_cfg.zones.iter() {
                 let service_id = zone.id;
