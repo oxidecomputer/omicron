@@ -910,8 +910,10 @@ mod test {
         .await;
 
         // Activate the background task again. Now, only instance 2 should be
-        // restarted.
+        // restarted.  Possible test flake here and this adds a bit more debug
+        // if we see this assertion fail.
         let status = assert_activation_ok!(task.activate(&opctx).await);
+        eprintln!("status: {:?}", status);
         assert_eq!(status.total_instances_found(), 1);
         assert_eq!(
             status.instances_reincarnated,
