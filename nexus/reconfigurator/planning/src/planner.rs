@@ -1896,7 +1896,7 @@ impl<'a> Planner<'a> {
         source_repo.zone_image_source(zone_kind)
     }
 
-    /// Return `true` if a zone of the given kind is ready to be updated;
+    /// Return `true` iff a zone of the given kind is ready to be updated;
     /// i.e., its dependencies have been updated.
     fn is_zone_ready_for_update(
         &self,
@@ -7376,7 +7376,8 @@ pub(crate) mod test {
 
     #[test]
     fn test_all_zones_sourced_from_initial_target_release_by_default() {
-        static TEST_NAME: &str = "all_zones_sourced_from_initial_target_release_by_default";
+        static TEST_NAME: &str =
+            "all_zones_sourced_from_initial_target_release_by_default";
         let logctx = test_setup_log(TEST_NAME);
         let log = logctx.log.clone();
 
