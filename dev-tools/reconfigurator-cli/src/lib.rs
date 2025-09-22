@@ -2439,11 +2439,13 @@ fn cmd_blueprint_diff(
     let internal_dns_config1 = blueprint_internal_dns_config(
         &blueprint1,
         &sleds_by_id,
+        blueprint1.nexus_generation,
         &Default::default(),
     )?;
     let internal_dns_config2 = blueprint_internal_dns_config(
         &blueprint2,
         &sleds_by_id,
+        blueprint1.nexus_generation,
         &Default::default(),
     )?;
     let dns_diff = DnsDiff::new(&internal_dns_config1, &internal_dns_config2)
@@ -2455,11 +2457,13 @@ fn cmd_blueprint_diff(
         &blueprint1,
         state.config().silo_names(),
         external_dns_zone_name.to_owned(),
+        blueprint1.nexus_generation,
     );
     let external_dns_config2 = blueprint_external_dns_config(
         &blueprint2,
         state.config().silo_names(),
         external_dns_zone_name.to_owned(),
+        blueprint2.nexus_generation,
     );
     let dns_diff = DnsDiff::new(&external_dns_config1, &external_dns_config2)
         .context("failed to assemble external DNS diff")?;
@@ -2523,6 +2527,7 @@ fn cmd_blueprint_diff_dns(
             blueprint_internal_dns_config(
                 blueprint,
                 &sleds_by_id,
+                blueprint.nexus_generation,
                 &Default::default(),
             )?
         }
@@ -2530,6 +2535,7 @@ fn cmd_blueprint_diff_dns(
             blueprint,
             state.config().silo_names(),
             state.config().external_dns_zone_name().to_owned(),
+            blueprint.nexus_generation,
         ),
     };
 
@@ -2995,6 +3001,7 @@ fn cmd_load_example(
     let internal_dns = blueprint_internal_dns_config(
         &blueprint,
         &sleds_by_id,
+        blueprint.nexus_generation,
         &Default::default(),
     )?;
     let external_dns_zone_name =
@@ -3003,6 +3010,7 @@ fn cmd_load_example(
         &blueprint,
         state.config_mut().silo_names(),
         external_dns_zone_name,
+        blueprint.nexus_generation,
     );
 
     let blueprint_id = blueprint.id;

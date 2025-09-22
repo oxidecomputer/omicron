@@ -93,6 +93,7 @@ pub use network_resources::OmicronZoneExternalSnatIp;
 pub use network_resources::OmicronZoneNetworkResources;
 pub use network_resources::OmicronZoneNic;
 pub use network_resources::OmicronZoneNicEntry;
+use omicron_common::api::external::Error;
 pub use planning_input::ClickhouseMode;
 pub use planning_input::ClickhousePolicy;
 pub use planning_input::CockroachDbClusterVersion;
@@ -424,6 +425,28 @@ impl Blueprint {
         };
 
         Ok(zone_config.nexus_generation < self.nexus_generation)
+    }
+
+    /// Returns the Nexus generation number for Nexus `nexus_id`, which is
+    /// assumed to refer to the currently-running Nexus instance (the current
+    /// process)
+    pub fn find_generation_for_self(
+        &self,
+        nexus_id: OmicronZoneUuid,
+    ) -> Result<Generation, Error> {
+        for (_sled_id, zone_config, nexus_config) in
+            self.all_nexus_zones(BlueprintZoneDisposition::is_in_service)
+        {
+            if zone_config.id == nexus_id {
+                return Ok(nexus_config.nexus_generation);
+            }
+        }
+
+        Err(Error::internal_error(&format!(
+            "failed to determine generation of currently-running Nexus: \
+             did not find Nexus {} in blueprint {}",
+            nexus_id, self.id,
+        )))
     }
 }
 
