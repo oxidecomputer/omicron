@@ -247,6 +247,21 @@ impl TestDatabase {
         }
     }
 
+    /// Returns a new independent datastore atop a new pool atop the same
+    /// database
+    ///
+    /// This is normally not necessary.  You can clone the `Arc<DataStore>`
+    /// returned by `datastore()`.  However, this is important for tests that
+    /// need separate datastores to test their separate quiesce behaviors.
+    pub async fn extra_datastore(&self, log: &Logger) -> Arc<DataStore> {
+        let pool = new_pool(log, &self.db);
+        Arc::new(
+            DataStore::new(&log, pool, None, IdentityCheckPolicy::DontCare)
+                .await
+                .unwrap(),
+        )
+    }
+
     pub fn opctx(&self) -> &OpContext {
         match &self.kind {
             TestKind::NoPool

@@ -244,10 +244,10 @@ mod test {
     };
     use nexus_types::deployment::{
         Blueprint, BlueprintHostPhase2DesiredSlots, BlueprintSledConfig,
-        BlueprintTarget, BlueprintZoneConfig, BlueprintZoneDisposition,
-        BlueprintZoneImageSource, BlueprintZoneType,
+        BlueprintSource, BlueprintTarget, BlueprintZoneConfig,
+        BlueprintZoneDisposition, BlueprintZoneImageSource, BlueprintZoneType,
         CockroachDbPreserveDowngrade, OximeterReadMode, PendingMgsUpdates,
-        PlanningReport, blueprint_zone_type,
+        blueprint_zone_type,
     };
     use nexus_types::external_api::views::SledState;
     use omicron_common::api::external;
@@ -328,7 +328,7 @@ mod test {
             time_created: chrono::Utc::now(),
             creator: "test".to_string(),
             comment: "test blueprint".to_string(),
-            report: PlanningReport::new(id),
+            source: BlueprintSource::Test,
         };
 
         datastore
@@ -428,11 +428,16 @@ mod test {
         let mut task = BlueprintExecutor::new(
             datastore.clone(),
             resolver.clone(),
-            blueprint_rx,
+            blueprint_rx.clone(),
             OmicronZoneUuid::new_v4(),
             Activator::new(),
             dummy_tx,
-            NexusQuiesceHandle::new(&opctx.log, datastore.clone()),
+            NexusQuiesceHandle::new(
+                datastore.clone(),
+                OmicronZoneUuid::new_v4(),
+                blueprint_rx,
+                opctx.child(BTreeMap::new()),
+            ),
         );
 
         // Now we're ready.

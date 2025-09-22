@@ -26,6 +26,7 @@ use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintArtifactVersion;
 use nexus_types::deployment::BlueprintHostPhase2DesiredContents;
 use nexus_types::deployment::BlueprintHostPhase2DesiredSlots;
+use nexus_types::deployment::BlueprintSource;
 use nexus_types::deployment::ExpectedVersion;
 use nexus_types::deployment::OmicronZoneNic;
 use nexus_types::deployment::PlanningInput;
@@ -175,8 +176,7 @@ pub struct ExampleSystem {
     pub system: SystemDescription,
     pub input: PlanningInput,
     pub collection: Collection,
-    /// The initial blueprint that was used to describe the system. This
-    /// blueprint has sleds but no zones.
+    /// The initial blueprint that was used to describe the system.
     pub initial_blueprint: Blueprint,
 }
 
@@ -539,7 +539,7 @@ impl ExampleSystemBuilder {
                 )))
                 .expect(
                     "this shouldn't error because provided external IPs \
-                     are all unique",
+                 are all unique",
                 );
         }
 
@@ -580,6 +580,7 @@ impl ExampleSystemBuilder {
                                 self.target_release
                                     .zone_image_source(ZoneKind::Nexus)
                                     .expect("obtained Nexus image source"),
+                                initial_blueprint.nexus_generation,
                             )
                             .unwrap();
                     }
@@ -693,7 +694,7 @@ impl ExampleSystemBuilder {
             };
         }
 
-        let blueprint = builder.build();
+        let blueprint = builder.build(BlueprintSource::Test);
         for sled_cfg in blueprint.sleds.values() {
             for zone in sled_cfg.zones.iter() {
                 let service_id = zone.id;
@@ -762,7 +763,7 @@ impl ExampleSystemBuilder {
                 .version
                 .clone();
             let host_phase_1_hash = artifacts_by_kind
-                .get(&ArtifactKind::HOST_PHASE_1)
+                .get(&ArtifactKind::GIMLET_HOST_PHASE_1)
                 .unwrap()
                 .hash;
             let host_phase_2_hash = artifacts_by_kind

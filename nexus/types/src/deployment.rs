@@ -270,8 +270,8 @@ pub struct Blueprint {
     /// (for debugging)
     pub comment: String,
 
-    /// Report on the planning session that resulted in this blueprint
-    pub report: PlanningReport,
+    /// Source of this blueprint (can include planning report)
+    pub source: BlueprintSource,
 }
 
 impl Blueprint {
@@ -292,6 +292,7 @@ impl Blueprint {
             time_created: self.time_created,
             creator: self.creator.clone(),
             comment: self.comment.clone(),
+            source: self.source.clone(),
         }
     }
 
@@ -308,6 +309,25 @@ impl Blueprint {
             self.sleds.iter().map(|(sled_id, config)| (*sled_id, config)),
             filter,
         )
+    }
+
+    /// Iterate over all Nexus zones that match the provided filter.
+    pub fn all_nexus_zones<F>(
+        &self,
+        filter: F,
+    ) -> impl Iterator<
+        Item = (SledUuid, &BlueprintZoneConfig, &blueprint_zone_type::Nexus),
+    >
+    where
+        F: FnMut(BlueprintZoneDisposition) -> bool,
+    {
+        self.all_omicron_zones(filter).filter_map(|(sled_id, zone)| {
+            if let BlueprintZoneType::Nexus(nexus_config) = &zone.zone_type {
+                Some((sled_id, zone, nexus_config))
+            } else {
+                None
+            }
+        })
     }
 
     /// Iterate over the [`BlueprintZoneConfig`] instances that match the
@@ -404,6 +424,45 @@ impl Blueprint {
         };
 
         Ok(zone_config.nexus_generation < self.nexus_generation)
+    }
+}
+
+/// Description of the source of a blueprint.
+#[derive(
+    Clone, Debug, Eq, PartialEq, JsonSchema, Deserialize, Serialize, Diffable,
+)]
+#[serde(tag = "source", rename_all = "snake_case")]
+pub enum BlueprintSource {
+    /// The initial blueprint created by the rack setup service.
+    Rss,
+    /// A blueprint created by the planner, and we still have the associated
+    /// planning report.
+    Planner(Arc<PlanningReport>),
+    /// A blueprint created by the planner but loaded from the database, so we
+    /// no longer have the associated planning report.
+    PlannerLoadedFromDatabase,
+    /// This blueprint was created by one of `reconfigurator-cli`'s blueprint
+    /// editing subcommands.
+    ReconfiguratorCliEdit,
+    /// This blueprint was constructed by hand by an automated test.
+    Test,
+}
+
+impl fmt::Display for BlueprintSource {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Rss => writeln!(f, "rack setup"),
+            Self::Planner(report) => {
+                writeln!(f, "planner with report:\n{report}")
+            }
+            Self::PlannerLoadedFromDatabase => {
+                writeln!(f, "planner (no report available)")
+            }
+            Self::ReconfiguratorCliEdit => {
+                writeln!(f, "edited directly with reconfigurator-cli")
+            }
+            Self::Test => writeln!(f, "constructed by an automated test"),
+        }
     }
 }
 
@@ -688,7 +747,7 @@ impl fmt::Display for BlueprintDisplay<'_> {
             time_created: _,
             creator: _,
             comment: _,
-            report,
+            source,
         } = self.blueprint;
 
         writeln!(f, "blueprint  {}", id)?;
@@ -801,7 +860,8 @@ impl fmt::Display for BlueprintDisplay<'_> {
             )?;
         }
 
-        writeln!(f, "\n{report}")?;
+        writeln!(f)?;
+        writeln!(f, "blueprint source: {source}")?;
 
         Ok(())
     }
@@ -2124,6 +2184,8 @@ pub struct BlueprintMetadata {
     /// human-readable string describing why this blueprint was created
     /// (for debugging)
     pub comment: String,
+    /// source of the blueprint (for debugging)
+    pub source: BlueprintSource,
 }
 
 /// Describes what blueprint, if any, the system is currently working toward

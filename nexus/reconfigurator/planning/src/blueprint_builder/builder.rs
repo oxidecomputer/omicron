@@ -40,6 +40,7 @@ use nexus_types::deployment::BlueprintHostPhase2DesiredSlots;
 use nexus_types::deployment::BlueprintPhysicalDiskConfig;
 use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
 use nexus_types::deployment::BlueprintSledConfig;
+use nexus_types::deployment::BlueprintSource;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneImageSource;
@@ -54,7 +55,6 @@ use nexus_types::deployment::OximeterReadMode;
 use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdates;
 use nexus_types::deployment::PlanningInput;
-use nexus_types::deployment::PlanningReport;
 use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::SledResources;
 use nexus_types::deployment::TufRepoContentsError;
@@ -527,7 +527,6 @@ pub struct BlueprintBuilder<'a> {
     cockroachdb_setting_preserve_downgrade: CockroachDbPreserveDowngrade,
     target_release_minimum_generation: Generation,
     nexus_generation: Generation,
-    report: Option<PlanningReport>,
 
     creator: String,
     operations: Vec<Operation>,
@@ -585,7 +584,6 @@ impl<'a> BlueprintBuilder<'a> {
         let num_sleds = sleds.len();
 
         let id = rng.next_blueprint();
-        let report = PlanningReport::new(id);
         Blueprint {
             id,
             sleds,
@@ -604,7 +602,10 @@ impl<'a> BlueprintBuilder<'a> {
             time_created: now_db_precision(),
             creator: creator.to_owned(),
             comment: format!("starting blueprint with {num_sleds} empty sleds"),
-            report,
+            // The only reason to create empty blueprints is tests. If that
+            // changes (e.g., if RSS starts using this builder to generate its
+            // blueprints), we could take a `source` argument instead.
+            source: BlueprintSource::Test,
         }
     }
 
@@ -677,7 +678,6 @@ impl<'a> BlueprintBuilder<'a> {
             target_release_minimum_generation: parent_blueprint
                 .target_release_minimum_generation,
             nexus_generation: parent_blueprint.nexus_generation,
-            report: None,
             creator: creator.to_owned(),
             operations: Vec::new(),
             comments: Vec::new(),
@@ -767,7 +767,7 @@ impl<'a> BlueprintBuilder<'a> {
     }
 
     /// Assemble a final [`Blueprint`] based on the contents of the builder
-    pub fn build(mut self) -> Blueprint {
+    pub fn build(mut self, source: BlueprintSource) -> Blueprint {
         let blueprint_id = self.new_blueprint_id();
 
         // Collect the Omicron zones config for all sleds, including sleds that
@@ -891,9 +891,7 @@ impl<'a> BlueprintBuilder<'a> {
                 .chain(self.operations.iter().map(|op| op.to_string()))
                 .collect::<Vec<String>>()
                 .join(", "),
-            report: self
-                .report
-                .unwrap_or_else(|| PlanningReport::new(blueprint_id)),
+            source,
         }
     }
 
@@ -922,12 +920,6 @@ impl<'a> BlueprintBuilder<'a> {
         editor
             .decommission()
             .map_err(|err| Error::SledEditError { sled_id, err })
-    }
-
-    /// Set the planning report for this blueprint.
-    pub fn set_report(&mut self, report: PlanningReport) -> &mut Self {
-        self.report = Some(report);
-        self
     }
 
     /// This is a short human-readable string summarizing the changes reflected
@@ -1549,6 +1541,7 @@ impl<'a> BlueprintBuilder<'a> {
         &mut self,
         sled_id: SledUuid,
         image_source: BlueprintZoneImageSource,
+        nexus_generation: Generation,
     ) -> Result<(), Error> {
         // Whether Nexus should use TLS and what the external DNS servers it
         // should use are currently provided at rack-setup time, and should be
@@ -1577,6 +1570,7 @@ impl<'a> BlueprintBuilder<'a> {
             external_tls,
             external_dns_servers,
             image_source,
+            nexus_generation,
         )
     }
 
@@ -1586,6 +1580,7 @@ impl<'a> BlueprintBuilder<'a> {
         external_tls: bool,
         external_dns_servers: Vec<IpAddr>,
         image_source: BlueprintZoneImageSource,
+        nexus_generation: Generation,
     ) -> Result<(), Error> {
         let nexus_id = self.rng.sled_rng(sled_id).next_zone();
         let ExternalNetworkingChoice {
@@ -1623,7 +1618,7 @@ impl<'a> BlueprintBuilder<'a> {
             nic,
             external_tls,
             external_dns_servers: external_dns_servers.clone(),
-            nexus_generation: Generation::new(),
+            nexus_generation,
         });
         let filesystem_pool =
             self.sled_select_zpool(sled_id, zone_type.kind())?;
@@ -2823,7 +2818,7 @@ pub mod test {
             }
         }
 
-        let blueprint2 = builder.build();
+        let blueprint2 = builder.build(BlueprintSource::Test);
         verify_blueprint(&blueprint2);
         let summary = blueprint2.diff_since_blueprint(&blueprint1);
         println!(
@@ -2872,7 +2867,7 @@ pub mod test {
         }
         builder.sled_ensure_zone_datasets(new_sled_id).unwrap();
 
-        let blueprint3 = builder.build();
+        let blueprint3 = builder.build(BlueprintSource::Test);
         verify_blueprint(&blueprint3);
         let summary = blueprint3.diff_since_blueprint(&blueprint2);
         println!(
@@ -3019,7 +3014,7 @@ pub mod test {
             rng.next_planner_rng(),
         )
         .expect("created builder")
-        .build();
+        .build(BlueprintSource::Test);
         verify_blueprint(&blueprint2);
 
         // We carried forward the desired state.
@@ -3057,7 +3052,7 @@ pub mod test {
             rng.next_planner_rng(),
         )
         .expect("created builder")
-        .build();
+        .build(BlueprintSource::Test);
         verify_blueprint(&blueprint3);
         assert_eq!(
             blueprint3.sleds.get(&decommision_sled_id).map(|c| c.state),
@@ -3238,7 +3233,7 @@ pub mod test {
         let r = builder.sled_ensure_zone_datasets(sled_id).unwrap();
         assert_eq!(r, EnsureMultiple::NotNeeded);
 
-        let blueprint = builder.build();
+        let blueprint = builder.build(BlueprintSource::Test);
         verify_blueprint(&blueprint);
 
         let mut builder = BlueprintBuilder::new_based_on(
@@ -3256,7 +3251,7 @@ pub mod test {
         let r = builder.sled_ensure_zone_datasets(sled_id).unwrap();
         assert_eq!(r, EnsureMultiple::NotNeeded);
 
-        let blueprint = builder.build();
+        let blueprint = builder.build(BlueprintSource::Test);
         verify_blueprint(&blueprint);
 
         // Find the datasets we've expunged in the blueprint
@@ -3342,6 +3337,7 @@ pub mod test {
                     .map(|sa| sa.sled_id)
                     .expect("no sleds present"),
                 BlueprintZoneImageSource::InstallDataset,
+                Generation::new(),
             )
             .unwrap_err();
 
@@ -3444,6 +3440,7 @@ pub mod test {
                 .sled_add_zone_nexus(
                     sled_id,
                     BlueprintZoneImageSource::InstallDataset,
+                    parent.nexus_generation,
                 )
                 .expect("added nexus zone");
         }
@@ -3466,6 +3463,7 @@ pub mod test {
                     .sled_add_zone_nexus(
                         sled_id,
                         BlueprintZoneImageSource::InstallDataset,
+                        parent.nexus_generation,
                     )
                     .expect("added nexus zone");
             }
@@ -3505,6 +3503,7 @@ pub mod test {
                 .sled_add_zone_nexus(
                     sled_id,
                     BlueprintZoneImageSource::InstallDataset,
+                    parent.nexus_generation,
                 )
                 .unwrap_err();
 
@@ -3588,7 +3587,7 @@ pub mod test {
         }
         builder.sled_ensure_zone_datasets(target_sled_id).unwrap();
 
-        let blueprint = builder.build();
+        let blueprint = builder.build(BlueprintSource::Test);
         verify_blueprint(&blueprint);
         assert_eq!(
             blueprint
@@ -3704,7 +3703,7 @@ pub mod test {
                 .expect("set zone image source successfully");
         }
 
-        let blueprint2 = blueprint_builder.build();
+        let blueprint2 = blueprint_builder.build(BlueprintSource::Test);
         let diff = blueprint2.diff_since_blueprint(&blueprint1);
         let display = diff.display();
         assert_contents(

@@ -28,6 +28,7 @@ use nexus_sled_agent_shared::inventory::OmicronZoneType;
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
+use nexus_types::deployment::BlueprintSource;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneImageSource;
@@ -65,6 +66,7 @@ use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::str::FromStr;
+use std::sync::Arc;
 
 pub(crate) use self::image_source::NoopConvertGlobalIneligibleReason;
 pub(crate) use self::image_source::NoopConvertInfo;
@@ -152,8 +154,7 @@ impl<'a> Planner<'a> {
     pub fn plan(mut self) -> Result<Blueprint, Error> {
         let checked = self.check_input_validity()?;
         let report = self.do_plan(checked)?;
-        self.blueprint.set_report(report);
-        Ok(self.blueprint.build())
+        Ok(self.blueprint.build(BlueprintSource::Planner(Arc::new(report))))
     }
 
     fn check_input_validity(&self) -> Result<InputChecked, Error> {
@@ -1172,7 +1173,17 @@ impl<'a> Planner<'a> {
                     self.blueprint.sled_add_zone_external_dns(sled_id, image)?
                 }
                 DiscretionaryOmicronZone::Nexus => {
-                    self.blueprint.sled_add_zone_nexus(sled_id, image)?
+                    // TODO: omicron#8936 will fix this to determine the
+                    // appropriate generation to use here.  For now, we use the
+                    // current generation.  That does mean that in the middle of
+                    // a handoff, we'll deploy the *new* version, but that's a
+                    // very unlikely case to get here and will be fixed by
+                    // omicron#8936.
+                    self.blueprint.sled_add_zone_nexus(
+                        sled_id,
+                        image,
+                        self.blueprint.nexus_generation(),
+                    )?
                 }
                 DiscretionaryOmicronZone::Oximeter => {
                     self.blueprint.sled_add_zone_oximeter(sled_id, image)?
@@ -2918,7 +2929,7 @@ pub(crate) mod test {
             )
             .expect("added external DNS zone");
 
-        let blueprint1a = blueprint_builder.build();
+        let blueprint1a = blueprint_builder.build(BlueprintSource::Test);
         assert_eq!(
             blueprint1a
                 .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
@@ -6608,7 +6619,7 @@ pub(crate) mod test {
                 "diff between blueprints (should be expunging boundary NTP using install dataset):\n{}",
                 summary.display()
             );
-            eprintln!("{}", new_blueprint.report);
+            eprintln!("{}", new_blueprint.source);
 
             assert_eq!(summary.total_zones_added(), 0);
             assert_eq!(summary.total_zones_removed(), 0);
@@ -6657,7 +6668,7 @@ pub(crate) mod test {
                 "diff between blueprints (should be adding one internal NTP and promoting another to boundary):\n{}",
                 summary.display()
             );
-            eprintln!("{}", new_blueprint.report);
+            eprintln!("{}", new_blueprint.source);
 
             assert_eq!(summary.total_zones_added(), 2);
             assert_eq!(summary.total_zones_removed(), 0);
@@ -6697,7 +6708,7 @@ pub(crate) mod test {
                 "diff between blueprints (should be expunging another boundary NTP):\n{}",
                 summary.display()
             );
-            eprintln!("{}", new_blueprint.report);
+            eprintln!("{}", new_blueprint.source);
 
             assert_eq!(summary.total_zones_added(), 0);
             assert_eq!(summary.total_zones_removed(), 0);
@@ -6738,7 +6749,7 @@ pub(crate) mod test {
                 "diff between blueprints (should be adding promoting internal -> boundary NTP):\n{}",
                 summary.display()
             );
-            eprintln!("{}", new_blueprint.report);
+            eprintln!("{}", new_blueprint.source);
 
             assert_eq!(summary.total_zones_added(), 2);
             assert_eq!(summary.total_zones_removed(), 0);
@@ -6775,7 +6786,7 @@ pub(crate) mod test {
                 "diff between blueprints (should be adding wrapping up internal NTP expungement):\n{}",
                 summary.display()
             );
-            eprintln!("{}", new_blueprint.report);
+            eprintln!("{}", new_blueprint.source);
 
             assert_eq!(summary.total_zones_added(), 0);
             assert_eq!(summary.total_zones_removed(), 0);
@@ -7165,8 +7176,11 @@ pub(crate) mod test {
             .plan()
             .unwrap_or_else(|_| panic!("can't re-plan after {i} iterations"));
 
-            assert_eq!(blueprint.report.blueprint_id, blueprint.id);
-            eprintln!("{}\n", blueprint.report);
+            let BlueprintSource::Planner(report) = &blueprint.source else {
+                panic!("unexpected source: {:?}", blueprint.source);
+            };
+            assert_eq!(report.blueprint_id, blueprint.id);
+            eprintln!("{report}\n");
             // TODO: more report testing
 
             {

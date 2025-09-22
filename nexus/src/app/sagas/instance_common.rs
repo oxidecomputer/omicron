@@ -10,7 +10,7 @@ use crate::Nexus;
 use nexus_db_lookup::LookupPath;
 use nexus_db_model::{
     ByteCount, ExternalIp, InstanceState, IpAttachState, NatEntry,
-    SledReservationConstraints, SledResourceVmm, VmmState,
+    SledReservationConstraints, SledResourceVmm, VmmCpuPlatform, VmmState,
 };
 use nexus_db_queries::authz;
 use nexus_db_queries::{authn, context::OpContext, db, db::DataStore};
@@ -94,6 +94,7 @@ pub async fn create_and_insert_vmm_record(
     propolis_id: PropolisUuid,
     sled_id: SledUuid,
     propolis_ip: Ipv6Addr,
+    cpu_platform: VmmCpuPlatform,
 ) -> Result<db::model::Vmm, ActionError> {
     let vmm = db::model::Vmm::new(
         propolis_id,
@@ -101,6 +102,7 @@ pub async fn create_and_insert_vmm_record(
         sled_id,
         IpAddr::V6(propolis_ip).into(),
         DEFAULT_PROPOLIS_PORT,
+        cpu_platform,
     );
 
     let vmm = datastore
