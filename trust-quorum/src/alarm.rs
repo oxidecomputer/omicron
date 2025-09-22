@@ -7,7 +7,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    Configuration, Epoch, PlatformId,
+    Configuration, Epoch,
     crypto::{DecryptionError, RackSecretReconstructError},
 };
 
@@ -27,7 +27,8 @@ pub enum Alarm {
     MismatchedConfigurations {
         config1: Configuration,
         config2: Configuration,
-        from: PlatformId,
+        // Either a stringified `PlatformId` or "Nexus"
+        from: String,
     },
 
     /// The `keyShareComputer` could not compute this node's share

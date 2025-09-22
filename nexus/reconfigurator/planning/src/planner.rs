@@ -2168,7 +2168,6 @@ pub(crate) mod test {
     use nexus_types::deployment::OmicronZoneExternalSnatIp;
     use nexus_types::deployment::SledDisk;
     use nexus_types::deployment::TargetReleaseDescription;
-    use nexus_types::deployment::TufRepoPolicy;
     use nexus_types::deployment::blueprint_zone_type;
     use nexus_types::deployment::blueprint_zone_type::InternalDns;
     use nexus_types::external_api::views::PhysicalDiskState;
@@ -5655,7 +5654,7 @@ pub(crate) mod test {
                 id: ArtifactId {
                     name: "host-os-phase-1".to_string(),
                     version: version.clone(),
-                    kind: ArtifactKind::HOST_PHASE_1,
+                    kind: ArtifactKind::GIMLET_HOST_PHASE_1,
                 },
                 hash: ArtifactHash([1; 32]),
                 size: 0,
@@ -5746,13 +5745,7 @@ pub(crate) mod test {
                 ))
         );
 
-        // This generation is successively incremented for each TUF repo. We use
-        // generation 2 to represent the first generation with a TUF repo
-        // attached.
-        let target_release_generation = Generation::from_u32(2);
-
         // Manually specify a TUF repo with fake zone images.
-        let mut input_builder = example.input.clone().into_builder();
         let version = ArtifactVersion::new_static("1.0.0-freeform")
             .expect("can't parse artifact version");
         let fake_hash = ArtifactHash([0; 32]);
@@ -5763,22 +5756,23 @@ pub(crate) mod test {
             hash: fake_hash,
         };
         let artifacts = create_zone_artifacts_at_version(&version);
-        let target_release_generation = target_release_generation.next();
-        input_builder.policy_mut().tuf_repo = TufRepoPolicy {
-            target_release_generation,
-            description: TargetReleaseDescription::TufRepo(
-                TufRepoDescription {
-                    repo: TufRepoMeta {
-                        hash: fake_hash,
-                        targets_role_version: 0,
-                        valid_until: Utc::now(),
-                        system_version: Version::new(1, 0, 0),
-                        file_name: String::from(""),
-                    },
-                    artifacts,
+        let description =
+            TargetReleaseDescription::TufRepo(TufRepoDescription {
+                repo: TufRepoMeta {
+                    hash: fake_hash,
+                    targets_role_version: 0,
+                    valid_until: Utc::now(),
+                    system_version: Version::new(1, 0, 0),
+                    file_name: String::from(""),
                 },
-            ),
-        };
+                artifacts,
+            });
+        example.system.set_target_release_and_old_repo(description);
+
+        let mut input_builder = example
+            .system
+            .to_planning_input_builder()
+            .expect("created PlanningInputBuilder");
 
         // Some helper predicates for the assertions below.
         let is_old_nexus = |zone: &BlueprintZoneConfig| -> bool {
@@ -6015,6 +6009,8 @@ pub(crate) mod test {
             &logctx.log,
             rng.next_system_rng(),
         )
+        .with_target_release_0_0_1()
+        .expect("set target release to 0.0.1")
         .build();
         verify_blueprint(&blueprint);
 
@@ -6058,13 +6054,18 @@ pub(crate) mod test {
             TEST_NAME,
         );
 
-        // All zones should be sourced from the install dataset by default.
+        // All zones should be sourced from the initial 0.0.1 target release by
+        // default.
+        eprintln!("{}", blueprint.display());
         assert!(
             blueprint
                 .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
                 .all(|(_, z)| matches!(
-                    z.image_source,
-                    BlueprintZoneImageSource::InstallDataset
+                    &z.image_source,
+                    BlueprintZoneImageSource::Artifact { version, hash: _ }
+                        if version == &BlueprintArtifactVersion::Available {
+                            version: ArtifactVersion::new_const("0.0.1")
+                        }
                 ))
         );
 
@@ -6075,7 +6076,6 @@ pub(crate) mod test {
         // The planner should avoid doing this update until it has confirmation
         // from inventory that the cluster is healthy.
 
-        let mut input_builder = example.input.clone().into_builder();
         let version = ArtifactVersion::new_static("1.0.0-freeform")
             .expect("can't parse artifact version");
         let fake_hash = ArtifactHash([0; 32]);
@@ -6086,27 +6086,27 @@ pub(crate) mod test {
             hash: fake_hash,
         };
         let artifacts = create_zone_artifacts_at_version(&version);
-        let target_release_generation = Generation::from_u32(2);
-        input_builder.policy_mut().tuf_repo = TufRepoPolicy {
-            target_release_generation,
-            description: TargetReleaseDescription::TufRepo(
-                TufRepoDescription {
-                    repo: TufRepoMeta {
-                        hash: fake_hash,
-                        targets_role_version: 0,
-                        valid_until: Utc::now(),
-                        system_version: Version::new(1, 0, 0),
-                        file_name: String::from(""),
-                    },
-                    artifacts,
+        let description =
+            TargetReleaseDescription::TufRepo(TufRepoDescription {
+                repo: TufRepoMeta {
+                    hash: fake_hash,
+                    targets_role_version: 0,
+                    valid_until: Utc::now(),
+                    system_version: Version::new(1, 0, 0),
+                    file_name: String::from(""),
                 },
-            ),
-        };
-        example.input = input_builder.build();
+                artifacts,
+            });
+        example.system.set_target_release_and_old_repo(description);
+
+        example.input = example
+            .system
+            .to_planning_input_builder()
+            .expect("created PlanningInputBuilder")
+            .build();
 
         // Manually update all zones except Cockroach
         //
-        // We just specified a new TUF repo, everything is going to shift from
         // the install dataset to this new repo.
         for mut zone in blueprint
             .sleds
@@ -6127,8 +6127,11 @@ pub(crate) mod test {
         let is_old_cockroach = |zone: &BlueprintZoneConfig| -> bool {
             zone.zone_type.is_cockroach()
                 && matches!(
-                    zone.image_source,
-                    BlueprintZoneImageSource::InstallDataset
+                    &zone.image_source,
+                    BlueprintZoneImageSource::Artifact { version, hash: _ }
+                        if version == &BlueprintArtifactVersion::Available {
+                            version: ArtifactVersion::new_const("0.0.1")
+                        }
                 )
         };
         let is_up_to_date_cockroach = |zone: &BlueprintZoneConfig| -> bool {
@@ -6434,10 +6437,12 @@ pub(crate) mod test {
         );
 
         // Use that boundary NTP zone to promote others.
-        let mut input_builder = example.input.clone().into_builder();
-        input_builder.policy_mut().target_boundary_ntp_zone_count =
-            BOUNDARY_NTP_REDUNDANCY;
-        example.input = input_builder.build();
+        example.system.target_boundary_ntp_zone_count(BOUNDARY_NTP_REDUNDANCY);
+        example.input = example
+            .system
+            .to_planning_input_builder()
+            .expect("created PlanningInputBuilder")
+            .build();
         let blueprint_name = "blueprint_with_boundary_ntp";
         let new_blueprint = Planner::new_based_on(
             log.clone(),
@@ -6528,7 +6533,6 @@ pub(crate) mod test {
         // The planner should avoid doing this update until it has confirmation
         // from inventory that the cluster is healthy.
 
-        let mut input_builder = example.input.clone().into_builder();
         let version = ArtifactVersion::new_static("1.0.0-freeform")
             .expect("can't parse artifact version");
         let fake_hash = ArtifactHash([0; 32]);
@@ -6539,23 +6543,24 @@ pub(crate) mod test {
             hash: fake_hash,
         };
         let artifacts = create_zone_artifacts_at_version(&version);
-        let target_release_generation = Generation::from_u32(2);
-        input_builder.policy_mut().tuf_repo = TufRepoPolicy {
-            target_release_generation,
-            description: TargetReleaseDescription::TufRepo(
-                TufRepoDescription {
-                    repo: TufRepoMeta {
-                        hash: fake_hash,
-                        targets_role_version: 0,
-                        valid_until: Utc::now(),
-                        system_version: Version::new(1, 0, 0),
-                        file_name: String::from(""),
-                    },
-                    artifacts,
+        let description =
+            TargetReleaseDescription::TufRepo(TufRepoDescription {
+                repo: TufRepoMeta {
+                    hash: fake_hash,
+                    targets_role_version: 0,
+                    valid_until: Utc::now(),
+                    system_version: Version::new(1, 0, 0),
+                    file_name: String::from(""),
                 },
-            ),
-        };
-        example.input = input_builder.build();
+                artifacts,
+            });
+        example.system.set_target_release_and_old_repo(description);
+
+        example.input = example
+            .system
+            .to_planning_input_builder()
+            .expect("created PlanningInputBuilder")
+            .build();
 
         // Manually update all zones except boundary NTP
         //
@@ -6988,7 +6993,6 @@ pub(crate) mod test {
         // The planner should avoid doing this update until it has confirmation
         // from inventory that the Internal DNS servers are ready.
 
-        let mut input_builder = example.input.clone().into_builder();
         let version = ArtifactVersion::new_static("1.0.0-freeform")
             .expect("can't parse artifact version");
         let fake_hash = ArtifactHash([0; 32]);
@@ -6999,23 +7003,24 @@ pub(crate) mod test {
             hash: fake_hash,
         };
         let artifacts = create_zone_artifacts_at_version(&version);
-        let target_release_generation = Generation::from_u32(2);
-        input_builder.policy_mut().tuf_repo = TufRepoPolicy {
-            target_release_generation,
-            description: TargetReleaseDescription::TufRepo(
-                TufRepoDescription {
-                    repo: TufRepoMeta {
-                        hash: fake_hash,
-                        targets_role_version: 0,
-                        valid_until: Utc::now(),
-                        system_version: Version::new(1, 0, 0),
-                        file_name: String::from(""),
-                    },
-                    artifacts,
+        let description =
+            TargetReleaseDescription::TufRepo(TufRepoDescription {
+                repo: TufRepoMeta {
+                    hash: fake_hash,
+                    targets_role_version: 0,
+                    valid_until: Utc::now(),
+                    system_version: Version::new(1, 0, 0),
+                    file_name: String::from(""),
                 },
-            ),
-        };
-        example.input = input_builder.build();
+                artifacts,
+            });
+        example.system.set_target_release_and_old_repo(description);
+
+        example.input = example
+            .system
+            .to_planning_input_builder()
+            .expect("created PlanningInputBuilder")
+            .build();
 
         // Manually update all zones except Internal DNS
         //
@@ -7286,7 +7291,6 @@ pub(crate) mod test {
 
         // Manually specify a TUF repo with fake images for all zones.
         // Only the name and kind of the artifacts matter.
-        let mut input_builder = example.input.clone().into_builder();
         let version = ArtifactVersion::new_static("2.0.0-freeform")
             .expect("can't parse artifact version");
         let fake_hash = ArtifactHash([0; 32]);
@@ -7298,23 +7302,23 @@ pub(crate) mod test {
         };
         // We use generation 2 to represent the first generation with a TUF repo
         // attached.
-        let target_release_generation = Generation::new().next();
-        let tuf_repo = TufRepoPolicy {
-            target_release_generation,
-            description: TargetReleaseDescription::TufRepo(
-                TufRepoDescription {
-                    repo: TufRepoMeta {
-                        hash: fake_hash,
-                        targets_role_version: 0,
-                        valid_until: Utc::now(),
-                        system_version: Version::new(1, 0, 0),
-                        file_name: String::from(""),
-                    },
-                    artifacts: create_zone_artifacts_at_version(&version),
+        let description =
+            TargetReleaseDescription::TufRepo(TufRepoDescription {
+                repo: TufRepoMeta {
+                    hash: fake_hash,
+                    targets_role_version: 0,
+                    valid_until: Utc::now(),
+                    system_version: Version::new(1, 0, 0),
+                    file_name: String::from(""),
                 },
-            ),
-        };
-        input_builder.policy_mut().tuf_repo = tuf_repo;
+                artifacts: create_zone_artifacts_at_version(&version),
+            });
+        example.system.set_target_release_and_old_repo(description);
+
+        let input_builder = example
+            .system
+            .to_planning_input_builder()
+            .expect("created PlanningInputBuilder");
         let input = input_builder.build();
 
         /// Expected number of planner iterations required to converge.

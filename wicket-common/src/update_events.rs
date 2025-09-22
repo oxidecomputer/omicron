@@ -51,6 +51,8 @@ pub enum UpdateStepId {
     ClearingInstallinatorImageId,
     SettingHostStartupOptions,
     WaitingForTrampolinePhase2Upload,
+    FetchHostType,
+    CheckHostType,
     DownloadingInstallinator,
     RunningInstallinator,
 }
@@ -219,6 +221,15 @@ pub enum UpdateTerminalError {
         #[source]
         error: anyhow::Error,
     },
+    #[error("Can't update Cosmo")]
+    CosmoHost,
+    #[error("getting SP state failed")]
+    SpGetFailed {
+        #[source]
+        error: gateway_client::Error<gateway_client::types::Error>,
+    },
+    #[error("Unknown host type {0}")]
+    UnknownHost(String),
 }
 
 impl update_engine::AsError for UpdateTerminalError {

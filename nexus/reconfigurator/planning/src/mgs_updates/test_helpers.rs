@@ -315,8 +315,15 @@ impl TestBoards {
                 None,
             ),
             make_artifact(
-                "host-os-phase-1",
-                ArtifactKind::HOST_PHASE_1,
+                "gimlet-host-os-phase-1",
+                ArtifactKind::GIMLET_HOST_PHASE_1,
+                ARTIFACT_HASH_HOST_PHASE_1,
+                None,
+                None,
+            ),
+            make_artifact(
+                "cosmo-host-os-phase-1",
+                ArtifactKind::COSMO_HOST_PHASE_1,
                 ARTIFACT_HASH_HOST_PHASE_1,
                 None,
                 None,

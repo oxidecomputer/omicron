@@ -19,6 +19,7 @@
 
 use crate::Omdb;
 use crate::check_allow_destructive::DestructiveOperationToken;
+use crate::db::blueprints::cmd_db_blueprints;
 use crate::db::ereport::cmd_db_ereport;
 use crate::helpers::CONNECTION_OPTIONS_HEADING;
 use crate::helpers::DATABASE_OPTIONS_HEADING;
@@ -42,6 +43,9 @@ use clap::ValueEnum;
 use clap::builder::PossibleValue;
 use clap::builder::PossibleValuesParser;
 use clap::builder::TypedValueParser;
+use db_metadata::DbMetadataArgs;
+use db_metadata::DbMetadataCommands;
+use db_metadata::cmd_db_metadata_list_nexus;
 use diesel::BoolExpressionMethods;
 use diesel::ExpressionMethods;
 use diesel::JoinOnDsl;
@@ -170,6 +174,8 @@ use tabled::Tabled;
 use uuid::Uuid;
 
 mod alert;
+mod blueprints;
+mod db_metadata;
 mod ereport;
 mod saga;
 mod user_data_export;
@@ -338,6 +344,12 @@ pub struct DbFetchOptions {
 /// Subcommands that query or update the database
 #[derive(Debug, Subcommand, Clone)]
 enum DbCommands {
+    /// Print information about blueprints
+    ///
+    /// Most blueprint information is available via `omdb nexus`, not `omdb db`.
+    Blueprints(blueprints::BlueprintsArgs),
+    /// Commands for database metadata
+    DbMetadata(DbMetadataArgs),
     /// Commands relevant to Crucible datasets
     CrucibleDataset(CrucibleDatasetArgs),
     /// Print any Crucible resources that are located on expunged physical disks
@@ -1128,6 +1140,14 @@ impl DbArgs {
         self.db_url_opts.with_datastore(omdb, log, |opctx, datastore| {
             async move {
                 match &self.command {
+                    DbCommands::Blueprints(args) => {
+                        cmd_db_blueprints(&opctx, &datastore, &fetch_opts, &args).await
+                    }
+                    DbCommands::DbMetadata(DbMetadataArgs {
+                        command: DbMetadataCommands::ListNexus,
+                    }) => {
+                        cmd_db_metadata_list_nexus(&opctx, &datastore).await
+                    }
                     DbCommands::CrucibleDataset(CrucibleDatasetArgs {
                         command: CrucibleDatasetCommands::List,
                     }) => {
@@ -4774,6 +4794,7 @@ async fn cmd_db_instance_info(
                     propolis_ip: _,
                     propolis_port: _,
                     instance_id: _,
+                    cpu_platform: _,
                     time_created,
                     time_deleted,
                     runtime:
@@ -7376,6 +7397,7 @@ fn prettyprint_vmm(
     const INSTANCE_ID: &'static str = "instance ID";
     const SLED_ID: &'static str = "sled ID";
     const SLED_SERIAL: &'static str = "sled serial";
+    const CPU_PLATFORM: &'static str = "CPU platform";
     const ADDRESS: &'static str = "propolis address";
     const STATE: &'static str = "state";
     const WIDTH: usize = const_max_len(&[
@@ -7386,6 +7408,7 @@ fn prettyprint_vmm(
         INSTANCE_ID,
         SLED_ID,
         SLED_SERIAL,
+        CPU_PLATFORM,
         STATE,
         ADDRESS,
     ]);
@@ -7399,6 +7422,7 @@ fn prettyprint_vmm(
         sled_id,
         propolis_ip,
         propolis_port,
+        cpu_platform,
         runtime: db::model::VmmRuntimeState { state, r#gen, time_state_updated },
     } = vmm;
 
@@ -7425,6 +7449,7 @@ fn prettyprint_vmm(
     if let Some(serial) = sled_serial {
         println!("{indent}{SLED_SERIAL:>width$}: {serial}");
     }
+    println!("{indent}{CPU_PLATFORM:>width$}: {cpu_platform}");
 }
 
 async fn cmd_db_vmm_list(
@@ -7500,6 +7525,7 @@ async fn cmd_db_vmm_list(
                 sled_id,
                 propolis_ip: _,
                 propolis_port: _,
+                cpu_platform: _,
                 runtime:
                     db::model::VmmRuntimeState {
                         state,
