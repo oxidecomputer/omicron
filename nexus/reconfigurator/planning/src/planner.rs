@@ -1039,6 +1039,10 @@ impl<'a> Planner<'a> {
                     let nexus_in_charge_image =
                         self.lookup_current_nexus_image()?;
 
+                    // Verify that all zones other than Nexus are updated and
+                    // using the new image. Note that this is considering both
+                    // zones from the parent blueprint, as well as zones
+                    // that we might be adding in this current planning pass.
                     let all_non_nexus_zones_updated =
                         report.discretionary_zones_placed.is_empty()
                             && self.all_non_nexus_zones_using_new_image()?;
@@ -1161,9 +1165,9 @@ impl<'a> Planner<'a> {
                 .current_sled_zones(sled_id, disposition_filter)
                 .filter(|z| {
                     let matches_kind = z.zone_type.kind() == zone_kind;
-                    let matches_image = z.image_source == *image_source;
                     match discretionary_zone_kind {
                         DiscretionaryOmicronZone::Nexus => {
+                            let matches_image = z.image_source == *image_source;
                             matches_kind && matches_image
                         }
                         _ => matches_kind,
@@ -2270,7 +2274,8 @@ impl<'a> Planner<'a> {
     // If the zone should not be updated yet, updates the planner report to
     // identify why it is not ready for update.
     //
-    // Precondition: zone must be a Nexus zone
+    // Precondition: zone must be a Nexus zone and be running an out-of-date
+    // image
     fn should_nexus_zone_be_expunged(
         &self,
         zone: &BlueprintZoneConfig,
@@ -2288,8 +2293,6 @@ impl<'a> Planner<'a> {
             _ => panic!("Not a Nexus zone"),
         };
 
-        use ZoneWaitingToExpunge::*;
-
         // Get the generation of the currently-executing Nexus zones.
         //
         // This presumably includes the currently-executing Nexus where
@@ -2299,7 +2302,7 @@ impl<'a> Planner<'a> {
             // generation, we can't perform the handoff safety check.
             report.waiting_zone(
                 zone,
-                Nexus {
+                ZoneWaitingToExpunge::Nexus {
                     zone_generation: zone_nexus_generation,
                     current_nexus_generation_known: false,
                 },
@@ -2317,7 +2320,7 @@ impl<'a> Planner<'a> {
         if current_gen == zone_nexus_generation {
             report.waiting_zone(
                 zone,
-                Nexus {
+                ZoneWaitingToExpunge::Nexus {
                     zone_generation: zone_nexus_generation,
                     current_nexus_generation_known: true,
                 },
