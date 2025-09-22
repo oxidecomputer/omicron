@@ -2,16 +2,16 @@
 # This is completely non-functional and is only useful for testing archive
 # extraction in other parts of the repository.
 
-system_version = "1.0.0"
+system_version = "0.0.1"
 
 [[artifact.gimlet_sp]]
 name = "fake-gimlet-sp"
-version = "1.0.0"
+version = "0.0.1"
 source = { kind = "fake", size = "1MiB" }
 
 [[artifact.gimlet_rot]]
 name = "fake-rot"
-version = "1.0.0"
+version = "0.0.1"
 [artifact.gimlet_rot.source]
 kind = "composite-rot"
 archive_a = { kind = "fake", size = "512KiB" }
@@ -19,16 +19,17 @@ archive_b = { kind = "fake", size = "512KiB" }
 
 [[artifact.host]]
 name = "fake-host"
-version = "1.0.0"
+version = "0.0.1"
 [artifact.host.source]
 kind = "composite-host"
 gimlet_phase_1 = { kind = "fake", size = "512KiB" }
 cosmo_phase_1 = { kind = "fake", size = "512KiB" }
+
 phase_2 = { kind = "fake", size = "1MiB" }
 
 [[artifact.trampoline]]
 name = "fake-trampoline"
-version = "1.0.0"
+version = "0.0.1"
 [artifact.trampoline.source]
 kind = "composite-host"
 gimlet_phase_1 = { kind = "fake", size = "512KiB" }
@@ -37,31 +38,31 @@ phase_2 = { kind = "fake", size = "1MiB" }
 
 [[artifact.control_plane]]
 name = "fake-control-plane"
-version = "1.0.0"
+version = "0.0.1"
 [artifact.control_plane.source]
 kind = "composite-control-plane"
 zones = [
-    { kind = "fake", artifact_name = "clickhouse",           file_name = "clickhouse.tar.gz",        size = "128KiB" },
-    { kind = "fake", artifact_name = "clickhouse_keeper",    file_name = "clickhouse_keeper.tar.gz", size = "128KiB" },
-    { kind = "fake", artifact_name = "clickhouse_server",    file_name = "clickhouse_server.tar.gz", size = "128KiB" },
-    { kind = "fake", artifact_name = "cockroachdb",          file_name = "cockroachdb.tar.gz",       size = "128KiB" },
-    { kind = "fake", artifact_name = "crucible-zone",        file_name = "crucible.tar.gz",          size = "128KiB" },
-    { kind = "fake", artifact_name = "crucible-pantry-zone", file_name = "crucible_pantry.tar.gz",   size = "128KiB" },
-    { kind = "fake", artifact_name = "external-dns",         file_name = "external_dns.tar.gz",      size = "128KiB" },
-    { kind = "fake", artifact_name = "internal-dns",         file_name = "internal_dns.tar.gz",      size = "128KiB" },
-    { kind = "fake", artifact_name = "ntp",                  file_name = "ntp.tar.gz",               size = "128KiB" },
-    { kind = "fake", artifact_name = "nexus",                file_name = "nexus.tar.gz",             size = "128KiB" },
-    { kind = "fake", artifact_name = "oximeter",             file_name = "oximeter.tar.gz",          size = "128KiB" },
+    { kind = "fake", artifact_name = "clickhouse", file_name = "clickhouse.tar.gz", size = "128KiB" },
+    { kind = "fake", artifact_name = "clickhouse_keeper", file_name = "clickhouse_keeper.tar.gz", size = "128KiB" },
+    { kind = "fake", artifact_name = "clickhouse_server", file_name = "clickhouse_server.tar.gz", size = "128KiB" },
+    { kind = "fake", artifact_name = "cockroachdb", file_name = "cockroachdb.tar.gz", size = "128KiB" },
+    { kind = "fake", artifact_name = "crucible-zone", file_name = "crucible.tar.gz", size = "128KiB" },
+    { kind = "fake", artifact_name = "crucible-pantry-zone", file_name = "crucible_pantry.tar.gz", size = "128KiB" },
+    { kind = "fake", artifact_name = "external-dns", file_name = "external_dns.tar.gz", size = "128KiB" },
+    { kind = "fake", artifact_name = "internal-dns", file_name = "internal_dns.tar.gz", size = "128KiB" },
+    { kind = "fake", artifact_name = "ntp", file_name = "ntp.tar.gz", size = "128KiB" },
+    { kind = "fake", artifact_name = "nexus", file_name = "nexus.tar.gz", size = "128KiB" },
+    { kind = "fake", artifact_name = "oximeter", file_name = "oximeter.tar.gz", size = "128KiB" },
 ]
 
 [[artifact.psc_sp]]
 name = "fake-psc-sp"
-version = "1.0.0"
+version = "0.0.1"
 source = { kind = "fake", size = "1MiB" }
 
 [[artifact.psc_rot]]
 name = "fake-psc-rot"
-version = "1.0.0"
+version = "0.0.1"
 [artifact.psc_rot.source]
 kind = "composite-rot"
 archive_a = { kind = "fake", size = "512KiB" }
@@ -69,12 +70,12 @@ archive_b = { kind = "fake", size = "512KiB" }
 
 [[artifact.switch_sp]]
 name = "fake-switch-sp"
-version = "1.0.0"
+version = "0.0.1"
 source = { kind = "fake", size = "1MiB" }
 
 [[artifact.switch_rot]]
 name = "fake-switch-rot"
-version = "1.0.0"
+version = "0.0.1"
 [artifact.switch_rot.source]
 kind = "composite-rot"
 archive_a = { kind = "fake", size = "512KiB" }
@@ -82,17 +83,15 @@ archive_b = { kind = "fake", size = "512KiB" }
 
 [[artifact.gimlet_rot_bootloader]]
 name = "fake-rot-bootloader"
-version = "1.0.0"
+version = "0.0.1"
 source = { kind = "fake", size = "1MiB" }
 
 [[artifact.psc_rot_bootloader]]
 name = "fake-psc-rot-bootloader"
-version = "1.0.0"
+version = "0.0.1"
 source = { kind = "fake", size = "1MiB" }
 
 [[artifact.switch_rot_bootloader]]
 name = "fake-switch-rot-bootloader"
-version = "1.0.0"
+version = "0.0.1"
 source = { kind = "fake", size = "1MiB" }
-
-

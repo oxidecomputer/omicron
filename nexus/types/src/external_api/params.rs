@@ -1293,18 +1293,27 @@ pub struct InstanceCreate {
 /// Parameters of an `Instance` that can be reconfigured after creation.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct InstanceUpdate {
-    /// The number of CPUs to assign to this instance.
+    /// The number of vCPUs to be allocated to the instance
     pub ncpus: InstanceCpuCount,
 
-    /// The amount of memory to assign to this instance.
+    /// The amount of RAM (in bytes) to be allocated to the instance
     pub memory: ByteCount,
 
-    /// Name or ID of the disk the instance should be instructed to boot from.
+    /// The disk the instance is configured to boot from.
     ///
-    /// A null value unsets the boot disk.
+    /// Setting a boot disk is optional but recommended to ensure predictable
+    /// boot behavior. The boot disk can be set during instance creation or
+    /// later if the instance is stopped. The boot disk counts against the disk
+    /// attachment limit.
+    ///
+    /// An instance that does not have a boot disk set will use the boot
+    /// options specified in its UEFI settings, which are controlled by both the
+    /// instance's UEFI firmware and the guest operating system. Boot options
+    /// can change as disks are attached and detached, which may result in an
+    /// instance that only boots to the EFI shell until a boot disk is set.
     pub boot_disk: Nullable<NameOrId>,
 
-    /// Sets the auto-restart policy for this instance.
+    /// The auto-restart policy for this instance.
     ///
     /// This policy determines whether the instance should be automatically
     /// restarted by the control plane on failure. If this is `null`, any
@@ -1321,7 +1330,9 @@ pub struct InstanceUpdate {
     pub auto_restart_policy: Nullable<InstanceAutoRestartPolicy>,
 
     /// The CPU platform to be used for this instance. If this is `null`, the
-    /// instance requires no particular CPU platform.
+    /// instance requires no particular CPU platform; when it is started the
+    /// instance will have the most general CPU platform supported by the sled
+    /// it is initially placed on.
     pub cpu_platform: Nullable<InstanceCpuPlatform>,
 }
 
@@ -2432,6 +2443,9 @@ pub struct ProbeListSelector {
 pub struct TimeseriesQuery {
     /// A timeseries query string, written in the Oximeter query language.
     pub query: String,
+    /// Whether to include ClickHouse query summaries in the response.
+    #[serde(default)]
+    pub include_summaries: bool,
 }
 
 // Allowed source IPs

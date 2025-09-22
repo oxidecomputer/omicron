@@ -740,7 +740,7 @@ dependencies = [
  "bitflags 2.9.1",
  "cexpr",
  "clang-sys",
- "itertools 0.13.0",
+ "itertools 0.12.1",
  "log",
  "prettyplease",
  "proc-macro2",
@@ -783,9 +783,23 @@ checksum = "5e764a1d40d510daf35e07be9eb06e75770908c27d411ee6c92109c9840eaaf7"
 
 [[package]]
 name = "bitfield"
-version = "0.14.0"
+version = "0.19.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2d7e60934ceec538daadb9d8432424ed043a904d8e0243f3c6446bce549a46ac"
+checksum = "62a3a774b2fcac1b726922b921ebba5e9fe36ad37659c822cf8ff2c1e0819892"
+dependencies = [
+ "bitfield-macros",
+]
+
+[[package]]
+name = "bitfield-macros"
+version = "0.19.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "52511b09931f7d5fe3a14f23adefbc23e5725b184013e96c8419febb61f14734"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.106",
+]
 
 [[package]]
 name = "bitfield-struct"
@@ -2612,7 +2626,7 @@ dependencies = [
  "attest-data",
  "const-oid",
  "ed25519-dalek",
- "env_logger 0.11.5",
+ "env_logger",
  "log",
  "p384",
  "pem-rfc7468",
@@ -3181,21 +3195,12 @@ dependencies = [
 
 [[package]]
 name = "env_logger"
-version = "0.10.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4cd405aab171cb85d6735e5c8d9db038c17d3ca007a4d2c25f337935c3d90580"
-dependencies = [
- "is-terminal",
- "log",
- "termcolor",
-]
-
-[[package]]
-name = "env_logger"
 version = "0.11.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e13fa619b91fb2381732789fc5de83b45675e882f66623b7d8cb4f643017018d"
 dependencies = [
+ "anstream",
+ "anstyle",
  "env_filter",
  "log",
 ]
@@ -5911,7 +5916,7 @@ dependencies = [
 [[package]]
 name = "lpc55_areas"
 version = "0.2.5"
-source = "git+https://github.com/oxidecomputer/lpc55_support#17d04af60b3a4fd82c77b1a33ca5370943cd25d9"
+source = "git+https://github.com/oxidecomputer/lpc55_support#b507bc6d5dbebabc1d4c9b1ea3c8f24afd68fcae"
 dependencies = [
  "bitfield",
  "clap",
@@ -5922,13 +5927,13 @@ dependencies = [
 [[package]]
 name = "lpc55_sign"
 version = "0.3.4"
-source = "git+https://github.com/oxidecomputer/lpc55_support#17d04af60b3a4fd82c77b1a33ca5370943cd25d9"
+source = "git+https://github.com/oxidecomputer/lpc55_support#b507bc6d5dbebabc1d4c9b1ea3c8f24afd68fcae"
 dependencies = [
  "byteorder",
  "const-oid",
  "crc-any",
  "der",
- "env_logger 0.10.2",
+ "env_logger",
  "hex",
  "log",
  "lpc55_areas",
@@ -5939,9 +5944,9 @@ dependencies = [
  "serde",
  "serde-hex",
  "sha2",
- "thiserror 1.0.69",
+ "thiserror 2.0.16",
  "x509-cert",
- "zerocopy 0.6.6",
+ "zerocopy 0.8.26",
 ]
 
 [[package]]
@@ -6895,7 +6900,10 @@ name = "nexus-reconfigurator-planning"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "camino",
+ "camino-tempfile",
  "chrono",
+ "clap",
  "clickhouse-admin-types",
  "cockroach-admin-types",
  "daft",
@@ -6935,8 +6943,12 @@ dependencies = [
  "swrite",
  "test-strategy",
  "thiserror 2.0.16",
+ "tokio",
+ "tufaceous",
  "tufaceous-artifact",
+ "tufaceous-lib",
  "typed-rng",
+ "update-common",
  "uuid",
 ]
 
@@ -7180,6 +7192,7 @@ dependencies = [
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "openssl",
+ "oximeter-db",
  "oxnet",
  "oxql-types",
  "parse-display",
@@ -8581,6 +8594,7 @@ dependencies = [
  "ed25519-dalek",
  "either",
  "elliptic-curve",
+ "env_logger",
  "ff",
  "flate2",
  "form_urlencoded",
@@ -8610,7 +8624,6 @@ dependencies = [
  "ipnetwork",
  "itertools 0.10.5",
  "itertools 0.12.1",
- "itertools 0.13.0",
  "lalrpop-util",
  "lazy_static",
  "libc",
@@ -8685,7 +8698,6 @@ dependencies = [
  "toml_edit 0.19.15",
  "toml_edit 0.22.27",
  "tracing",
- "unicode-xid",
  "url",
  "usdt",
  "usdt-impl",
@@ -9443,6 +9455,8 @@ dependencies = [
  "oximeter-types 0.1.0",
  "schemars",
  "serde",
+ "serde_json",
+ "uuid",
 ]
 
 [[package]]
@@ -14459,7 +14473,7 @@ dependencies = [
 [[package]]
 name = "tufaceous"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#57832718056c6585b4cddb4f3ebc04b9a07c7bd7"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#db072743d0cfde918dcf981a064f225b0003b98d"
 dependencies = [
  "anyhow",
  "camino",
@@ -14480,7 +14494,7 @@ dependencies = [
 [[package]]
 name = "tufaceous-artifact"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#57832718056c6585b4cddb4f3ebc04b9a07c7bd7"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#db072743d0cfde918dcf981a064f225b0003b98d"
 dependencies = [
  "daft",
  "hex",
@@ -14497,7 +14511,7 @@ dependencies = [
 [[package]]
 name = "tufaceous-brand-metadata"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#57832718056c6585b4cddb4f3ebc04b9a07c7bd7"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#db072743d0cfde918dcf981a064f225b0003b98d"
 dependencies = [
  "semver 1.0.26",
  "serde",
@@ -14509,7 +14523,7 @@ dependencies = [
 [[package]]
 name = "tufaceous-lib"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#57832718056c6585b4cddb4f3ebc04b9a07c7bd7"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#db072743d0cfde918dcf981a064f225b0003b98d"
 dependencies = [
  "anyhow",
  "async-trait",

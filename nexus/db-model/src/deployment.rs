@@ -28,7 +28,6 @@ use nexus_db_schema::schema::{
     debug_log_blueprint_planning,
 };
 use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
-use nexus_types::deployment::BlueprintPhysicalDiskConfig;
 use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
 use nexus_types::deployment::BlueprintTarget;
 use nexus_types::deployment::BlueprintZoneConfig;
@@ -52,6 +51,7 @@ use nexus_types::deployment::{
 use nexus_types::deployment::{
     BlueprintHostPhase2DesiredSlots, PlanningReport,
 };
+use nexus_types::deployment::{BlueprintPhysicalDiskConfig, BlueprintSource};
 use nexus_types::deployment::{BlueprintZoneImageSource, blueprint_zone_type};
 use nexus_types::deployment::{
     OmicronZoneExternalFloatingAddr, OmicronZoneExternalFloatingIp,
@@ -85,6 +85,7 @@ pub struct Blueprint {
     pub comment: String,
     pub target_release_minimum_generation: Generation,
     pub nexus_generation: Generation,
+    pub source: DbBpSource,
 }
 
 impl From<&'_ nexus_types::deployment::Blueprint> for Blueprint {
@@ -105,6 +106,7 @@ impl From<&'_ nexus_types::deployment::Blueprint> for Blueprint {
                 bp.target_release_minimum_generation,
             ),
             nexus_generation: Generation(bp.nexus_generation),
+            source: DbBpSource::from(&bp.source),
         }
     }
 }
@@ -128,6 +130,47 @@ impl From<Blueprint> for nexus_types::deployment::BlueprintMetadata {
             time_created: value.time_created,
             creator: value.creator,
             comment: value.comment,
+            source: value.source.into(),
+        }
+    }
+}
+
+impl_enum_type!(
+    BpSourceEnum:
+
+    #[derive(Clone, Copy, Debug, AsExpression, FromSqlRow, PartialEq)]
+    pub enum DbBpSource;
+
+    // Enum values
+    Rss => b"rss"
+    Planner => b"planner"
+    ReconfiguratorCliEdit => b"reconfigurator_cli_edit"
+    Test => b"test"
+);
+
+impl From<&'_ BlueprintSource> for DbBpSource {
+    fn from(value: &'_ BlueprintSource) -> Self {
+        match value {
+            BlueprintSource::Rss => Self::Rss,
+            // We don't store planning reports, so both of these variants squish
+            // to `Planner`.
+            BlueprintSource::Planner(_)
+            | BlueprintSource::PlannerLoadedFromDatabase => Self::Planner,
+            BlueprintSource::ReconfiguratorCliEdit => {
+                Self::ReconfiguratorCliEdit
+            }
+            BlueprintSource::Test => Self::Test,
+        }
+    }
+}
+
+impl From<DbBpSource> for BlueprintSource {
+    fn from(value: DbBpSource) -> Self {
+        match value {
+            DbBpSource::Rss => Self::Rss,
+            DbBpSource::Planner => Self::PlannerLoadedFromDatabase,
+            DbBpSource::ReconfiguratorCliEdit => Self::ReconfiguratorCliEdit,
+            DbBpSource::Test => Self::Test,
         }
     }
 }
@@ -1538,10 +1581,10 @@ pub struct DebugLogBlueprintPlanning {
     pub debug_blob: serde_json::Value,
 }
 
-impl TryFrom<PlanningReport> for DebugLogBlueprintPlanning {
+impl TryFrom<Arc<PlanningReport>> for DebugLogBlueprintPlanning {
     type Error = serde_json::Error;
 
-    fn try_from(report: PlanningReport) -> Result<Self, Self::Error> {
+    fn try_from(report: Arc<PlanningReport>) -> Result<Self, Self::Error> {
         let blueprint_id = report.blueprint_id.into();
         let report = serde_json::to_value(report)?;
 
