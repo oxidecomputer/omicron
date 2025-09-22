@@ -7443,5 +7443,7 @@ pub(crate) mod test {
                         }
                 ))
         );
+
+        logctx.cleanup_successful();
     }
 }
