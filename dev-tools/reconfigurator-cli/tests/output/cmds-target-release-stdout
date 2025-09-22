@@ -480,7 +480,7 @@ INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba based on parent blueprint df06bb57-ad42-4431-9206-abff322896c7
 planning report for blueprint 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba:
 * 1 pending MGS update:
-  * model0:serial0: HostPhase1(PendingMgsUpdateHostPhase1Details { expected_active_phase_1_slot: A, expected_boot_disk: A, expected_active_phase_1_hash: ArtifactHash("0101010101010101010101010101010101010101010101010101010101010101"), expected_active_phase_2_hash: ArtifactHash("0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a"), expected_inactive_phase_1_hash: ArtifactHash("0202020202020202020202020202020202020202020202020202020202020202"), expected_inactive_phase_2_hash: ArtifactHash("f3dd0c7a1bd4500ea0d8bcf67581f576d47752b2f1998a4cb0f0c3155c483008"), sled_agent_address: [fd00:1122:3344:101::1]:12345 })
+  * model0:serial0: HostPhase1(PendingMgsUpdateHostPhase1Details { expected_active_phase_1_slot: A, expected_boot_disk: A, expected_active_phase_1_hash: ArtifactHash("0101010101010101010101010101010101010101010101010101010101010101"), expected_active_phase_2_hash: ArtifactHash("0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a"), expected_inactive_phase_1_hash: ArtifactHash("0202020202020202020202020202020202020202020202020202020202020202"), expected_inactive_phase_2_hash: ArtifactHash("d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47"), sled_agent_address: [fd00:1122:3344:101::1]:12345 })
 * zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
 
 
@@ -599,7 +599,7 @@ INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint 9034c710-3e57-45f3-99e5-4316145e87ac based on parent blueprint 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba
 planning report for blueprint 9034c710-3e57-45f3-99e5-4316145e87ac:
 * 1 pending MGS update:
-  * model0:serial0: HostPhase1(PendingMgsUpdateHostPhase1Details { expected_active_phase_1_slot: A, expected_boot_disk: A, expected_active_phase_1_hash: ArtifactHash("0101010101010101010101010101010101010101010101010101010101010101"), expected_active_phase_2_hash: ArtifactHash("0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a"), expected_inactive_phase_1_hash: ArtifactHash("0202020202020202020202020202020202020202020202020202020202020202"), expected_inactive_phase_2_hash: ArtifactHash("f3dd0c7a1bd4500ea0d8bcf67581f576d47752b2f1998a4cb0f0c3155c483008"), sled_agent_address: [fd00:1122:3344:101::1]:12345 })
+  * model0:serial0: HostPhase1(PendingMgsUpdateHostPhase1Details { expected_active_phase_1_slot: A, expected_boot_disk: A, expected_active_phase_1_hash: ArtifactHash("0101010101010101010101010101010101010101010101010101010101010101"), expected_active_phase_2_hash: ArtifactHash("0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a"), expected_inactive_phase_1_hash: ArtifactHash("0202020202020202020202020202020202020202020202020202020202020202"), expected_inactive_phase_2_hash: ArtifactHash("d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47"), sled_agent_address: [fd00:1122:3344:101::1]:12345 })
 * zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
 
 
@@ -658,7 +658,7 @@ INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint d60afc57-f15d-476c-bd0f-b1071e2bb976 based on parent blueprint 9034c710-3e57-45f3-99e5-4316145e87ac
 planning report for blueprint d60afc57-f15d-476c-bd0f-b1071e2bb976:
 * 1 pending MGS update:
-  * model0:serial0: HostPhase1(PendingMgsUpdateHostPhase1Details { expected_active_phase_1_slot: A, expected_boot_disk: A, expected_active_phase_1_hash: ArtifactHash("0101010101010101010101010101010101010101010101010101010101010101"), expected_active_phase_2_hash: ArtifactHash("0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a"), expected_inactive_phase_1_hash: ArtifactHash("0202020202020202020202020202020202020202020202020202020202020202"), expected_inactive_phase_2_hash: ArtifactHash("f3dd0c7a1bd4500ea0d8bcf67581f576d47752b2f1998a4cb0f0c3155c483008"), sled_agent_address: [fd00:1122:3344:101::1]:12345 })
+  * model0:serial0: HostPhase1(PendingMgsUpdateHostPhase1Details { expected_active_phase_1_slot: A, expected_boot_disk: A, expected_active_phase_1_hash: ArtifactHash("0101010101010101010101010101010101010101010101010101010101010101"), expected_active_phase_2_hash: ArtifactHash("0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a"), expected_inactive_phase_1_hash: ArtifactHash("0202020202020202020202020202020202020202020202020202020202020202"), expected_inactive_phase_2_hash: ArtifactHash("d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47"), sled_agent_address: [fd00:1122:3344:101::1]:12345 })
 * zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
 
 
@@ -716,7 +716,7 @@ INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint a5a8f242-ffa5-473c-8efd-2acf2dc0b736 based on parent blueprint d60afc57-f15d-476c-bd0f-b1071e2bb976
 planning report for blueprint a5a8f242-ffa5-473c-8efd-2acf2dc0b736:
 * 1 pending MGS update:
-  * model0:serial0: HostPhase1(PendingMgsUpdateHostPhase1Details { expected_active_phase_1_slot: A, expected_boot_disk: A, expected_active_phase_1_hash: ArtifactHash("0101010101010101010101010101010101010101010101010101010101010101"), expected_active_phase_2_hash: ArtifactHash("0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a"), expected_inactive_phase_1_hash: ArtifactHash("0202020202020202020202020202020202020202020202020202020202020202"), expected_inactive_phase_2_hash: ArtifactHash("f3dd0c7a1bd4500ea0d8bcf67581f576d47752b2f1998a4cb0f0c3155c483008"), sled_agent_address: [fd00:1122:3344:101::1]:12345 })
+  * model0:serial0: HostPhase1(PendingMgsUpdateHostPhase1Details { expected_active_phase_1_slot: A, expected_boot_disk: A, expected_active_phase_1_hash: ArtifactHash("0101010101010101010101010101010101010101010101010101010101010101"), expected_active_phase_2_hash: ArtifactHash("0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a"), expected_inactive_phase_1_hash: ArtifactHash("0202020202020202020202020202020202020202020202020202020202020202"), expected_inactive_phase_2_hash: ArtifactHash("d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47"), sled_agent_address: [fd00:1122:3344:101::1]:12345 })
 * zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
 
 
@@ -1185,7 +1185,7 @@ INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint 61a93ea3-c872-48e0-aace-e86b0c52b839 based on parent blueprint 12d602a6-5ab4-487a-b94e-eb30cdf30300
 planning report for blueprint 61a93ea3-c872-48e0-aace-e86b0c52b839:
 * 1 pending MGS update:
-  * model1:serial1: HostPhase1(PendingMgsUpdateHostPhase1Details { expected_active_phase_1_slot: A, expected_boot_disk: A, expected_active_phase_1_hash: ArtifactHash("0101010101010101010101010101010101010101010101010101010101010101"), expected_active_phase_2_hash: ArtifactHash("0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a"), expected_inactive_phase_1_hash: ArtifactHash("0202020202020202020202020202020202020202020202020202020202020202"), expected_inactive_phase_2_hash: ArtifactHash("f3dd0c7a1bd4500ea0d8bcf67581f576d47752b2f1998a4cb0f0c3155c483008"), sled_agent_address: [fd00:1122:3344:102::1]:12345 })
+  * model1:serial1: HostPhase1(PendingMgsUpdateHostPhase1Details { expected_active_phase_1_slot: A, expected_boot_disk: A, expected_active_phase_1_hash: ArtifactHash("0101010101010101010101010101010101010101010101010101010101010101"), expected_active_phase_2_hash: ArtifactHash("0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a"), expected_inactive_phase_1_hash: ArtifactHash("0202020202020202020202020202020202020202020202020202020202020202"), expected_inactive_phase_2_hash: ArtifactHash("d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47"), sled_agent_address: [fd00:1122:3344:102::1]:12345 })
 * zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
 
 
@@ -1319,7 +1319,7 @@ INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint 27e755bc-dc10-4647-853c-f89bb3a15a2c based on parent blueprint 61a93ea3-c872-48e0-aace-e86b0c52b839
 planning report for blueprint 27e755bc-dc10-4647-853c-f89bb3a15a2c:
 * 1 pending MGS update:
-  * model1:serial1: HostPhase1(PendingMgsUpdateHostPhase1Details { expected_active_phase_1_slot: A, expected_boot_disk: A, expected_active_phase_1_hash: ArtifactHash("0101010101010101010101010101010101010101010101010101010101010101"), expected_active_phase_2_hash: ArtifactHash("0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a"), expected_inactive_phase_1_hash: ArtifactHash("ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"), expected_inactive_phase_2_hash: ArtifactHash("f3dd0c7a1bd4500ea0d8bcf67581f576d47752b2f1998a4cb0f0c3155c483008"), sled_agent_address: [fd00:1122:3344:102::1]:12345 })
+  * model1:serial1: HostPhase1(PendingMgsUpdateHostPhase1Details { expected_active_phase_1_slot: A, expected_boot_disk: A, expected_active_phase_1_hash: ArtifactHash("0101010101010101010101010101010101010101010101010101010101010101"), expected_active_phase_2_hash: ArtifactHash("0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a"), expected_inactive_phase_1_hash: ArtifactHash("ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"), expected_inactive_phase_2_hash: ArtifactHash("d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47"), sled_agent_address: [fd00:1122:3344:102::1]:12345 })
 * zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
 
 
@@ -1795,7 +1795,7 @@ INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint 386a7ec3-7c2e-43cf-8f00-999e91e1d5e6 based on parent blueprint 778e3f3a-58b1-4a5e-acff-d23c5d7124c2
 planning report for blueprint 386a7ec3-7c2e-43cf-8f00-999e91e1d5e6:
 * 1 pending MGS update:
-  * model2:serial2: HostPhase1(PendingMgsUpdateHostPhase1Details { expected_active_phase_1_slot: A, expected_boot_disk: A, expected_active_phase_1_hash: ArtifactHash("0101010101010101010101010101010101010101010101010101010101010101"), expected_active_phase_2_hash: ArtifactHash("0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a"), expected_inactive_phase_1_hash: ArtifactHash("0202020202020202020202020202020202020202020202020202020202020202"), expected_inactive_phase_2_hash: ArtifactHash("f3dd0c7a1bd4500ea0d8bcf67581f576d47752b2f1998a4cb0f0c3155c483008"), sled_agent_address: [fd00:1122:3344:103::1]:12345 })
+  * model2:serial2: HostPhase1(PendingMgsUpdateHostPhase1Details { expected_active_phase_1_slot: A, expected_boot_disk: A, expected_active_phase_1_hash: ArtifactHash("0101010101010101010101010101010101010101010101010101010101010101"), expected_active_phase_2_hash: ArtifactHash("0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a"), expected_inactive_phase_1_hash: ArtifactHash("0202020202020202020202020202020202020202020202020202020202020202"), expected_inactive_phase_2_hash: ArtifactHash("d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47"), sled_agent_address: [fd00:1122:3344:103::1]:12345 })
 * zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
 
 
