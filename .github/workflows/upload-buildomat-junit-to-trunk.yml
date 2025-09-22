@@ -1,0 +1,32 @@
+name: Upload JUnit from Buildomat to Trunk
+
+on:
+  workflow_dispatch:
+    inputs:
+      check_run_id:
+        description: Buildomat's gong.run.github_id
+        type: string
+        required: true
+  check_run:
+    types: [completed]
+
+permissions:
+  contents: read
+  checks: read
+  pull-requests: read
+
+jobs:
+  upload:
+    name: Upload
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout the source code
+        uses: actions/checkout@v5
+
+      - name: Upload JUnit XML to Trunk
+        run: tools/upload_buildomat_junit_to_trunk.sh $CHECK_RUN_ID
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TRUNK_TOKEN: ${{ secrets.TRUNK_IO_TOKEN }}
+          TRUNK_ORG_SLUG: oxide
+          CHECK_RUN_ID: ${{ github.event_name == 'check_run' && github.event.check_run.id || github.event.inputs.check_run_id }}
