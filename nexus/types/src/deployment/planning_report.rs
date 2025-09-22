@@ -899,6 +899,12 @@ impl PlanningZoneUpdatesStepReport {
             .entry(sled_id)
             .and_modify(|zones| zones.push(zone_config.to_owned()))
             .or_insert_with(|| vec![zone_config.to_owned()]);
+
+        // We check for out-of-date zones before expunging zones. If we just
+        // expunged this zone, it's no longer out of date.
+        if let Some(out_of_date) = self.out_of_date_zones.get_mut(&sled_id) {
+            out_of_date.retain(|z| z.zone_config.id != zone_config.id);
+        }
     }
 
     pub fn updated_zone(
@@ -910,6 +916,12 @@ impl PlanningZoneUpdatesStepReport {
             .entry(sled_id)
             .and_modify(|zones| zones.push(zone_config.to_owned()))
             .or_insert_with(|| vec![zone_config.to_owned()]);
+
+        // We check for out-of-date zones before updating zones. If we just
+        // updated this zone, it's no longer out of date.
+        if let Some(out_of_date) = self.out_of_date_zones.get_mut(&sled_id) {
+            out_of_date.retain(|z| z.zone_config.id != zone_config.id);
+        }
     }
 
     pub fn unsafe_zone(

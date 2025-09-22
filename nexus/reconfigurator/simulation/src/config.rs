@@ -5,7 +5,7 @@
 use std::fmt;
 
 use indexmap::IndexSet;
-use omicron_common::api::external::Name;
+use omicron_common::api::external::{Generation, Name};
 
 use crate::{
     LoadSerializedResultBuilder,
@@ -37,6 +37,10 @@ pub struct SimConfig {
     /// We can likely make this better after addressing
     /// <https://github.com/oxidecomputer/omicron/issues/6803>.
     num_nexus: Option<u16>,
+
+    /// The Nexus generation to treat as the active set for the purposes of
+    /// simulating handoff between updates.
+    active_nexus_zone_generation: Generation,
 }
 
 impl SimConfig {
@@ -48,6 +52,7 @@ impl SimConfig {
                 .collect(),
             external_dns_zone_name: String::from("oxide.example"),
             num_nexus: None,
+            active_nexus_zone_generation: Generation::new(),
         }
     }
 
@@ -64,6 +69,11 @@ impl SimConfig {
     #[inline]
     pub fn num_nexus(&self) -> Option<u16> {
         self.num_nexus
+    }
+
+    #[inline]
+    pub fn active_nexus_zone_generation(&self) -> Generation {
+        self.active_nexus_zone_generation
     }
 
     pub(crate) fn to_mut(&self) -> SimConfigBuilder {
@@ -141,6 +151,14 @@ impl SimConfigBuilder {
         self.log.push(SimConfigLogEntry::SetNumNexus(num_nexus));
     }
 
+    pub fn set_active_nexus_zone_generation(
+        &mut self,
+        gen: Generation,
+    ) {
+        self.inner.set_active_nexus_zone_generation(gen);
+        self.log.push(SimConfigLogEntry::SetActiveNexusZoneGeneration(gen));
+    }
+
     pub fn wipe(&mut self) {
         self.inner.wipe_inner();
         self.log.push(SimConfigLogEntry::Wipe);
@@ -159,6 +177,7 @@ pub enum SimConfigLogEntry {
     SetSiloNames(IndexSet<Name>),
     SetExternalDnsZoneName(String),
     SetNumNexus(u16),
+    SetActiveNexusZoneGeneration(Generation),
     Wipe,
 }
 
@@ -255,6 +274,10 @@ impl SimConfigBuilderInner {
 
     fn set_num_nexus_inner(&mut self, num_nexus: u16) {
         self.config.num_nexus = Some(num_nexus);
+    }
+
+    fn set_active_nexus_zone_generation(&mut self, gen: Generation) {
+        self.config.active_nexus_zone_generation = gen;
     }
 
     fn wipe_inner(&mut self) {
