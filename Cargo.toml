@@ -35,13 +35,12 @@ members = [
     "dev-tools/crdb-seed",
     "dev-tools/db-dev",
     "dev-tools/downloader",
+    "dev-tools/dropshot-apis",
     "dev-tools/ls-apis",
     "dev-tools/mgs-dev",
     "dev-tools/omdb",
     "dev-tools/omicron-dev",
     "dev-tools/omicron-dev-lib",
-    "dev-tools/openapi-manager",
-    "dev-tools/openapi-manager/types",
     "dev-tools/oxlog",
     "dev-tools/pins",
     "dev-tools/reconfigurator-cli",
@@ -193,13 +192,12 @@ default-members = [
     "dev-tools/crdb-seed",
     "dev-tools/db-dev",
     "dev-tools/downloader",
+    "dev-tools/dropshot-apis",
     "dev-tools/ls-apis",
     "dev-tools/mgs-dev",
     "dev-tools/omdb",
     "dev-tools/omicron-dev",
     "dev-tools/omicron-dev-lib",
-    "dev-tools/openapi-manager",
-    "dev-tools/openapi-manager/types",
     "dev-tools/oxlog",
     "dev-tools/pins",
     "dev-tools/reconfigurator-cli",
@@ -434,6 +432,8 @@ dns-server-api = { path = "dns-server-api" }
 dns-service-client = { path = "clients/dns-service-client" }
 dpd-client = { git = "https://github.com/oxidecomputer/dendrite", rev = "738c80d18d5e94eda367440ade7743e9d9f124de" }
 dropshot = { version = "0.16.3", features = [ "usdt-probes" ] }
+dropshot-api-manager = "0.1.0"
+dropshot-api-manager-types = "0.1.0"
 dyn-clone = "1.0.20"
 either = "1.15.0"
 ereport-types = { path = "ereport/types" }
@@ -591,7 +591,6 @@ oxlog = { path = "dev-tools/oxlog" }
 oxnet = "0.1.3"
 once_cell = "1.21.3"
 openapi-lint = { git = "https://github.com/oxidecomputer/openapi-lint", branch = "main" }
-openapi-manager-types = { path = "dev-tools/openapi-manager/types" }
 openapiv3 = "2.2.0"
 # must match samael's crate!
 openssl = "0.10"
@@ -954,10 +953,12 @@ opt-level = 3
 # It's common during development to use a local copy of various complex
 # dependencies.  If you want to use those, uncomment one of these blocks.
 #
-# [patch.crates-io]
+[patch.crates-io]
 # diesel = { path = "../../diesel/diesel" }
-# dropshot = { path = "../dropshot/dropshot" }
-# dropshot_endpoint = { path = "../dropshot/dropshot_endpoint" }
+dropshot = { path = "../dropshot/dropshot" }
+dropshot-api-manager = { path = "../dropshot/dropshot-api-manager" }
+dropshot-api-manager-types = { path = "../dropshot/dropshot-api-manager-types" }
+dropshot_endpoint = { path = "../dropshot/dropshot_endpoint" }
 # progenitor = { path = "../progenitor/progenitor" }
 # progenitor-client = { path = "../progenitor/progenitor-client" }
 # steno = { path = "../steno" }

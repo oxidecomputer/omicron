@@ -1,50 +1,31 @@
 [package]
-name = "openapi-manager"
+name = "omicron-dropshot-apis"
 version = "0.1.0"
 edition = "2021"
-license = "MPL-2.0"
-
-[lints]
-workspace = true
 
 [dependencies]
 anyhow.workspace = true
-atomicwrites.workspace = true
 bootstrap-agent-api.workspace = true
 camino.workspace = true
 clap.workspace = true
 clickhouse-admin-api.workspace = true
 cockroach-admin-api.workspace = true
-debug-ignore.workspace = true
 dns-server-api.workspace = true
-dropshot.workspace = true
-hex.workspace = true
-fs-err.workspace = true
+dropshot-api-manager-types.workspace = true
+dropshot-api-manager.workspace = true
 gateway-api.workspace = true
-indent_write.workspace = true
 installinator-api.workspace = true
-itertools.workspace = true
 nexus-external-api.workspace = true
 nexus-internal-api.workspace = true
-newtype_derive.workspace = true
 ntp-admin-api.workspace = true
 omicron-workspace-hack.workspace = true
 openapi-lint.workspace = true
-openapi-manager-types.workspace = true
 openapiv3.workspace = true
-owo-colors.workspace = true
 oximeter-api.workspace = true
 repo-depot-api.workspace = true
 semver.workspace = true
-serde_json.workspace = true
-sha2.workspace = true
-similar.workspace = true
 sled-agent-api.workspace = true
-slog-error-chain.workspace = true
-textwrap.workspace = true
-thiserror.workspace = true
-supports-color.workspace = true
 wicketd-api.workspace = true
 
-[dev-dependencies]
-assert_matches.workspace = true
+[lints]
+workspace = true

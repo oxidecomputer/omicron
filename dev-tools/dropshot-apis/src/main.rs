@@ -2,29 +2,51 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use bootstrap_agent_api::bootstrap_agent_api_mod;
-use clickhouse_admin_api::{
-    clickhouse_admin_keeper_api_mod, clickhouse_admin_server_api_mod,
-    clickhouse_admin_single_api_mod,
-};
-use cockroach_admin_api::cockroach_admin_api_mod;
-use dns_server_api::dns_server_api_mod;
-use gateway_api::gateway_api_mod;
-use installinator_api::installinator_api_mod;
-use nexus_external_api::nexus_external_api_mod;
-use nexus_internal_api::nexus_internal_api_mod;
-use ntp_admin_api::ntp_admin_api_mod;
-use oximeter_api::oximeter_api_mod;
-use repo_depot_api::repo_depot_api_mod;
-use sled_agent_api::sled_agent_api_mod;
-use wicketd_api::wicketd_api_mod;
+use std::process::ExitCode;
 
-use crate::apis::{ApiBoundary, ManagedApiConfig, Versions};
+use anyhow::{Context, anyhow};
+use bootstrap_agent_api::*;
+use camino::Utf8PathBuf;
+use clap::Parser;
+use clickhouse_admin_api::*;
+use cockroach_admin_api::*;
+use dns_server_api::*;
+use dropshot_api_manager::{Environment, ManagedApiConfig, ManagedApis};
+use dropshot_api_manager_types::{ApiBoundary, ValidationContext, Versions};
+use gateway_api::*;
+use installinator_api::*;
+use nexus_external_api::*;
+use nexus_internal_api::*;
+use ntp_admin_api::*;
+use openapiv3::OpenAPI;
+use oximeter_api::*;
+use repo_depot_api::*;
+use sled_agent_api::*;
+use wicketd_api::*;
 
-/// All APIs managed by openapi-manager.
+fn environment() -> anyhow::Result<Environment> {
+    // The workspace root is two levels up from this crate's directory.
+    let workspace_root = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .to_path_buf();
+    let env = Environment::new(
+        // This is the command used to run the OpenAPI manager.
+        "cargo xtask openapi".to_owned(),
+        workspace_root,
+        // This is the location within the workspace root where the OpenAPI
+        // documents are stored.
+        "openapi".into(),
+    )?;
+    Ok(env)
+}
+
+/// All APIs managed by the OpenAPI manager.
 // TODO The metadata here overlaps with metadata in api-manifest.toml.
-pub fn all_apis() -> Vec<ManagedApiConfig> {
-    vec![
+fn all_apis() -> anyhow::Result<ManagedApis> {
+    let apis = vec![
         ManagedApiConfig {
             title: "Bootstrap Agent API",
             versions: Versions::new_lockstep(semver::Version::new(0, 0, 1)),
@@ -187,26 +209,44 @@ pub fn all_apis() -> Vec<ManagedApiConfig> {
             ident: "wicketd",
             extra_validation: None,
         },
-    ]
+    ];
+
+    let apis = ManagedApis::new(apis)
+        .context("error creating ManagedApis")?
+        .with_validation(validate);
+    Ok(apis)
+}
+
+fn validate(doc: &OpenAPI, mut cx: ValidationContext<'_>) {
+    let errors = match cx.boundary() {
+        ApiBoundary::Internal => openapi_lint::validate(doc),
+        ApiBoundary::External => openapi_lint::validate_external(doc),
+    };
+    for error in errors {
+        cx.report_error(anyhow!(error));
+    }
+}
+
+fn main() -> anyhow::Result<ExitCode> {
+    let app = dropshot_api_manager::App::parse();
+    let env = environment()?;
+    let apis = all_apis()?;
+
+    Ok(app.exec(&env, &apis))
 }
 
 #[cfg(test)]
 mod tests {
-    use super::all_apis;
+    use dropshot_api_manager::test_util::check_apis_up_to_date;
+
+    use super::*;
 
     #[test]
-    fn all_apis_is_sorted() {
-        let unordered = all_apis()
-            .windows(2)
-            .filter_map(|window| {
-                (window[0].ident > window[1].ident).then_some(format!(
-                    "{} is incorrectly listed before {}",
-                    window[0].ident, window[1].ident
-                ))
-            })
-            .collect::<Vec<_>>();
-        if !unordered.is_empty() {
-            panic!("all_apis() is not sorted by filename: {unordered:?}")
-        }
+    fn test_apis_up_to_date() -> anyhow::Result<ExitCode> {
+        let env = environment()?;
+        let apis = all_apis()?;
+
+        let result = check_apis_up_to_date(&env, &apis)?;
+        Ok(result.to_exit_code())
     }
 }
