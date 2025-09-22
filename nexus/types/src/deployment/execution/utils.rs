@@ -6,7 +6,10 @@ use std::net::{IpAddr, SocketAddrV6};
 
 use iddqd::{IdOrdItem, id_upcast};
 use nexus_sled_agent_shared::inventory::SledRole;
-use omicron_common::{address::{Ipv6Subnet, SLED_PREFIX}, api::external::Generation};
+use omicron_common::{
+    address::{Ipv6Subnet, SLED_PREFIX},
+    api::external::Generation,
+};
 use omicron_uuid_kinds::SledUuid;
 
 use crate::{
