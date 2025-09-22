@@ -2256,14 +2256,13 @@ impl<'a> Planner<'a> {
         }
     }
 
-    fn lookup_current_nexus_generation(
-        &self,
-    ) -> Result<Option<Generation>, Error> {
+    fn lookup_current_nexus_generation(&self) -> Result<Generation, Error> {
         // Look up the active Nexus zone in the blueprint to get its generation
         self.blueprint
             .parent_blueprint()
             .find_generation_for_nexus(self.input.active_nexus_zones())
-            .map_err(|_| Error::NoActiveNexusZonesInParentBlueprint)
+            .map_err(|_| Error::NoActiveNexusZonesInParentBlueprint)?
+            .ok_or(Error::NoActiveNexusZonesInParentBlueprint)
     }
 
     // Returns whether the out-of-date Nexus zone is ready to be updated.
@@ -2297,18 +2296,7 @@ impl<'a> Planner<'a> {
         //
         // This presumably includes the currently-executing Nexus where
         // this logic is being considered.
-        let Some(current_gen) = self.lookup_current_nexus_generation()? else {
-            // If we don't know the current Nexus zone ID, or its
-            // generation, we can't perform the handoff safety check.
-            report.waiting_zone(
-                zone,
-                ZoneWaitingToExpunge::Nexus {
-                    zone_generation: zone_nexus_generation,
-                    current_nexus_generation_known: false,
-                },
-            );
-            return Ok(false);
-        };
+        let current_gen = self.lookup_current_nexus_generation()?;
 
         // We need to prevent old Nexus zones from shutting themselves
         // down. In other words: it's only safe to shut down if handoff
@@ -2322,7 +2310,6 @@ impl<'a> Planner<'a> {
                 zone,
                 ZoneWaitingToExpunge::Nexus {
                     zone_generation: zone_nexus_generation,
-                    current_nexus_generation_known: true,
                 },
             );
             return Ok(false);
@@ -8413,7 +8400,6 @@ pub(crate) mod test {
                 why,
                 &ZoneWaitingToExpunge::Nexus {
                     zone_generation: old_generation,
-                    current_nexus_generation_known: true,
                 },
                 "Unexpected waiting zones report: {:#?}",
                 waiting_zones,
