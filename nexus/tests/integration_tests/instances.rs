@@ -68,6 +68,7 @@ use omicron_common::api::external::InstanceNetworkInterface;
 use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::NameOrId;
+use omicron_common::api::external::Nullable;
 use omicron_common::api::external::Vni;
 use omicron_common::api::internal::shared::ResolvedVpcRoute;
 use omicron_common::api::internal::shared::RouterId;
@@ -4920,9 +4921,9 @@ async fn test_cannot_detach_boot_disk(cptestctx: &ControlPlaneTestContext) {
         &client,
         &instance.identity.id,
         params::InstanceUpdate {
-            boot_disk: None,
-            auto_restart_policy: None,
-            cpu_platform: None,
+            boot_disk: Nullable(None),
+            auto_restart_policy: Nullable(None),
+            cpu_platform: Nullable(None),
             ncpus: InstanceCpuCount::try_from(2).unwrap(),
             memory: ByteCount::from_gibibytes_u32(4),
         },
@@ -5025,9 +5026,9 @@ async fn test_updating_running_instance_boot_disk_is_conflict(
         &client,
         &instance_id.into_untyped_uuid(),
         params::InstanceUpdate {
-            boot_disk: Some(alsodata.clone().into()),
-            auto_restart_policy: None,
-            cpu_platform: None,
+            boot_disk: Nullable(Some(alsodata.clone().into())),
+            auto_restart_policy: Nullable(None),
+            cpu_platform: Nullable(None),
             ncpus: InstanceCpuCount::try_from(2).unwrap(),
             memory: ByteCount::from_gibibytes_u32(4),
         },
@@ -5044,9 +5045,11 @@ async fn test_updating_running_instance_boot_disk_is_conflict(
         params::InstanceUpdate {
             // Leave the boot disk the same as the one with which the instance
             // was created.
-            boot_disk: Some(probablydata.clone().into()),
-            auto_restart_policy: Some(InstanceAutoRestartPolicy::BestEffort),
-            cpu_platform: None,
+            boot_disk: Nullable(Some(probablydata.clone().into())),
+            auto_restart_policy: Nullable(Some(
+                InstanceAutoRestartPolicy::BestEffort,
+            )),
+            cpu_platform: Nullable(None),
             ncpus: InstanceCpuCount::try_from(2).unwrap(),
             memory: ByteCount::from_gibibytes_u32(4),
         },
@@ -5067,9 +5070,9 @@ async fn test_updating_missing_instance_is_not_found(
         &client,
         &UUID_THAT_DOESNT_EXIST,
         params::InstanceUpdate {
-            boot_disk: None,
-            auto_restart_policy: None,
-            cpu_platform: None,
+            boot_disk: Nullable(None),
+            auto_restart_policy: Nullable(None),
+            cpu_platform: Nullable(None),
             ncpus: InstanceCpuCount::try_from(0).unwrap(),
             memory: ByteCount::from_gibibytes_u32(0),
         },
@@ -5185,16 +5188,22 @@ async fn test_size_can_be_changed(cptestctx: &ControlPlaneTestContext) {
     let new_ncpus = InstanceCpuCount::try_from(4).unwrap();
     let new_memory = ByteCount::from_gibibytes_u32(8);
 
+    let base_update = params::InstanceUpdate {
+        auto_restart_policy: Nullable(auto_restart_policy),
+        boot_disk: Nullable(boot_disk_nameorid.clone()),
+        cpu_platform: Nullable(None),
+        ncpus: initial_ncpus,
+        memory: initial_memory,
+    };
+
     // Resizing the instance immediately will error; the instance is running.
     let err = expect_instance_reconfigure_err(
         client,
         &instance.identity.id,
         params::InstanceUpdate {
-            auto_restart_policy,
-            boot_disk: boot_disk_nameorid.clone(),
-            cpu_platform: None,
             ncpus: new_ncpus,
             memory: new_memory,
+            ..base_update.clone()
         },
         StatusCode::CONFLICT,
     )
@@ -5213,11 +5222,9 @@ async fn test_size_can_be_changed(cptestctx: &ControlPlaneTestContext) {
         client,
         &instance.identity.id,
         params::InstanceUpdate {
-            auto_restart_policy,
-            boot_disk: boot_disk_nameorid.clone(),
-            cpu_platform: None,
             ncpus: new_ncpus,
             memory: new_memory,
+            ..base_update.clone()
         },
     )
     .await;
@@ -5229,11 +5236,9 @@ async fn test_size_can_be_changed(cptestctx: &ControlPlaneTestContext) {
         client,
         &instance.identity.id,
         params::InstanceUpdate {
-            auto_restart_policy,
-            boot_disk: boot_disk_nameorid.clone(),
-            cpu_platform: None,
             ncpus: initial_ncpus,
             memory: new_memory,
+            ..base_update.clone()
         },
     )
     .await;
@@ -5244,11 +5249,9 @@ async fn test_size_can_be_changed(cptestctx: &ControlPlaneTestContext) {
         client,
         &instance.identity.id,
         params::InstanceUpdate {
-            auto_restart_policy,
-            boot_disk: boot_disk_nameorid.clone(),
-            cpu_platform: None,
             ncpus: initial_ncpus,
             memory: initial_memory,
+            ..base_update.clone()
         },
     )
     .await;
@@ -5263,11 +5266,9 @@ async fn test_size_can_be_changed(cptestctx: &ControlPlaneTestContext) {
         client,
         &instance.identity.id,
         params::InstanceUpdate {
-            auto_restart_policy,
-            boot_disk: boot_disk_nameorid.clone(),
-            cpu_platform: None,
             ncpus: InstanceCpuCount(MAX_VCPU_PER_INSTANCE + 1),
             memory: instance.memory,
+            ..base_update.clone()
         },
         StatusCode::BAD_REQUEST,
     )
@@ -5285,11 +5286,9 @@ async fn test_size_can_be_changed(cptestctx: &ControlPlaneTestContext) {
         client,
         &instance.identity.id,
         params::InstanceUpdate {
-            auto_restart_policy,
-            boot_disk: boot_disk_nameorid.clone(),
-            cpu_platform: None,
             ncpus: instance.ncpus,
             memory: ByteCount::from_mebibytes_u32(0),
+            ..base_update.clone()
         },
         StatusCode::BAD_REQUEST,
     )
@@ -5301,12 +5300,10 @@ async fn test_size_can_be_changed(cptestctx: &ControlPlaneTestContext) {
         client,
         &instance.identity.id,
         params::InstanceUpdate {
-            auto_restart_policy,
-            boot_disk: boot_disk_nameorid.clone(),
-            cpu_platform: None,
             ncpus: instance.ncpus,
             memory: ByteCount::try_from(MAX_MEMORY_BYTES_PER_INSTANCE - 1)
                 .unwrap(),
+            ..base_update.clone()
         },
         StatusCode::BAD_REQUEST,
     )
@@ -5319,13 +5316,11 @@ async fn test_size_can_be_changed(cptestctx: &ControlPlaneTestContext) {
         client,
         &instance.identity.id,
         params::InstanceUpdate {
-            auto_restart_policy,
-            boot_disk: boot_disk_nameorid.clone(),
-            cpu_platform: None,
             ncpus: instance.ncpus,
             memory: ByteCount::from_mebibytes_u32(
                 (max_mib + 1024).try_into().unwrap(),
             ),
+            ..base_update.clone()
         },
         StatusCode::BAD_REQUEST,
     )
@@ -5342,11 +5337,9 @@ async fn test_size_can_be_changed(cptestctx: &ControlPlaneTestContext) {
         client,
         &instance.identity.id,
         params::InstanceUpdate {
-            auto_restart_policy,
-            boot_disk: boot_disk_nameorid.clone(),
-            cpu_platform: None,
             ncpus: new_ncpus,
             memory: new_memory,
+            ..base_update.clone()
         },
         StatusCode::NOT_FOUND,
     )
@@ -5404,9 +5397,9 @@ async fn test_auto_restart_policy_can_be_changed(
             client,
             &instance.identity.id,
             dbg!(params::InstanceUpdate {
-                auto_restart_policy,
-                boot_disk: None,
-                cpu_platform: None,
+                auto_restart_policy: Nullable(auto_restart_policy),
+                boot_disk: Nullable(None),
+                cpu_platform: Nullable(None),
                 ncpus: InstanceCpuCount::try_from(2).unwrap(),
                 memory: ByteCount::from_gibibytes_u32(4),
             }),
@@ -5477,9 +5470,9 @@ async fn test_cpu_platform_can_be_changed(cptestctx: &ControlPlaneTestContext) {
             client,
             &instance.identity.id,
             dbg!(params::InstanceUpdate {
-                auto_restart_policy: None,
-                boot_disk: None,
-                cpu_platform,
+                auto_restart_policy: Nullable(None),
+                boot_disk: Nullable(None),
+                cpu_platform: Nullable(cpu_platform),
                 ncpus: InstanceCpuCount::try_from(2).unwrap(),
                 memory: ByteCount::from_gibibytes_u32(4),
             }),
@@ -5572,9 +5565,9 @@ async fn test_boot_disk_can_be_changed(cptestctx: &ControlPlaneTestContext) {
         &client,
         &instance.identity.id,
         params::InstanceUpdate {
-            boot_disk: Some(disks[1].identity.id.into()),
-            auto_restart_policy: None,
-            cpu_platform: None,
+            boot_disk: Nullable(Some(disks[1].identity.id.into())),
+            auto_restart_policy: Nullable(None),
+            cpu_platform: Nullable(None),
             ncpus: InstanceCpuCount::try_from(2).unwrap(),
             memory: ByteCount::from_gibibytes_u32(4),
         },
@@ -5641,9 +5634,9 @@ async fn test_boot_disk_must_be_attached(cptestctx: &ControlPlaneTestContext) {
         &client,
         &instance.identity.id,
         params::InstanceUpdate {
-            boot_disk: Some(disks[0].identity.id.into()),
-            auto_restart_policy: None,
-            cpu_platform: None,
+            boot_disk: Nullable(Some(disks[0].identity.id.into())),
+            auto_restart_policy: Nullable(None),
+            cpu_platform: Nullable(None),
             ncpus: InstanceCpuCount::try_from(2).unwrap(),
             memory: ByteCount::from_gibibytes_u32(4),
         },
@@ -5675,9 +5668,9 @@ async fn test_boot_disk_must_be_attached(cptestctx: &ControlPlaneTestContext) {
         &client,
         &instance.identity.id,
         params::InstanceUpdate {
-            boot_disk: Some(disks[0].identity.id.into()),
-            auto_restart_policy: None,
-            cpu_platform: None,
+            boot_disk: Nullable(Some(disks[0].identity.id.into())),
+            auto_restart_policy: Nullable(None),
+            cpu_platform: Nullable(None),
             ncpus: InstanceCpuCount::try_from(2).unwrap(),
             memory: ByteCount::from_gibibytes_u32(4),
         },
@@ -6654,9 +6647,9 @@ async fn test_can_start_instance_with_cpu_platform(
         &client,
         &instance.identity.id,
         params::InstanceUpdate {
-            boot_disk: None,
-            auto_restart_policy: None,
-            cpu_platform: Some(InstanceCpuPlatform::AmdTurin),
+            boot_disk: Nullable(None),
+            auto_restart_policy: Nullable(None),
+            cpu_platform: Nullable(Some(InstanceCpuPlatform::AmdTurin)),
             ncpus: InstanceCpuCount::try_from(1).unwrap(),
             memory: ByteCount::from_gibibytes_u32(4),
         },

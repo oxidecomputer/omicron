@@ -4506,6 +4506,13 @@ CREATE TYPE IF NOT EXISTS omicron.public.bp_physical_disk_disposition AS ENUM (
     'expunged'
 );
 
+CREATE TYPE IF NOT EXISTS omicron.public.bp_source AS ENUM (
+    'rss',
+    'planner',
+    'reconfigurator_cli_edit',
+    'test'
+);
+
 -- list of all blueprints
 CREATE TABLE IF NOT EXISTS omicron.public.blueprint (
     id UUID PRIMARY KEY,
@@ -4559,7 +4566,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.blueprint (
     target_release_minimum_generation INT8 NOT NULL,
 
     -- The generation of the active group of Nexus instances
-    nexus_generation INT8 NOT NULL
+    nexus_generation INT8 NOT NULL,
+
+    -- The source of this blueprint
+    source omicron.public.bp_source NOT NULL
 );
 
 -- table describing both the current and historical target blueprints of the
@@ -4986,6 +4996,23 @@ CREATE TABLE IF NOT EXISTS omicron.public.cockroachdb_zone_id_to_node_id (
     -- a given node ID, and we need a unique requirement on the pair (via this
     -- primary key) to support `ON CONFLICT DO NOTHING` idempotent inserts.
     PRIMARY KEY (omicron_zone_id, crdb_node_id)
+);
+
+-- Debug logging of blueprint planner reports
+--
+-- When the blueprint planner inside Nexus runs, it generates a report
+-- describing what it did and why. Once the blueprint is generated, this report
+-- is only intended for humans for debugging.  Because no shipping software ever
+-- never needs to read this and because we want to prioritize ease of evolving
+-- these structures, we we punt on a SQL representation entirely. This table
+-- stores a JSON blob containing the planning reports for blueprints, but we _do
+-- not_ provide any way to parse this data in Nexus or other shipping software.
+-- (JSON in the database has all the normal problems of versioning, etc., and we
+-- punt on that entirely by saying "do not parse this".) omdb and other dev
+-- tooling is free to (attempt to) parse and interpret these JSON blobs.
+CREATE TABLE IF NOT EXISTS omicron.public.debug_log_blueprint_planning (
+    blueprint_id UUID NOT NULL PRIMARY KEY,
+    debug_blob JSONB NOT NULL
 );
 
 /*
@@ -6641,7 +6668,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '190.0.0', NULL)
+    (TRUE, NOW(), NOW(), '192.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

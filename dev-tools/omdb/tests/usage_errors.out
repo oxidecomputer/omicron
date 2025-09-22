@@ -115,6 +115,8 @@ Query the control plane database (CockroachDB)
 Usage: omdb db [OPTIONS] <COMMAND>
 
 Commands:
+  blueprints                   Print information about blueprints
+  db-metadata                  Commands for database metadata
   crucible-dataset             Commands relevant to Crucible datasets
   replacements-to-do           Print any Crucible resources that are located on expunged physical
                                disks
@@ -174,6 +176,8 @@ Query the control plane database (CockroachDB)
 Usage: omdb db [OPTIONS] <COMMAND>
 
 Commands:
+  blueprints                   Print information about blueprints
+  db-metadata                  Commands for database metadata
   crucible-dataset             Commands relevant to Crucible datasets
   replacements-to-do           Print any Crucible resources that are located on expunged physical
                                disks
