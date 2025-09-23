@@ -1021,6 +1021,9 @@ pub enum ZoneUpdatesWaitingOn {
     /// Waiting on discretionary zone placement.
     DiscretionaryZones,
 
+    /// Waiting on zones to propagate to inventory,
+    InventoryPropagation,
+
     /// Waiting on updates to RoT / SP / Host OS / etc.
     PendingMgsUpdates,
 
@@ -1032,6 +1035,7 @@ impl ZoneUpdatesWaitingOn {
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::DiscretionaryZones => "discretionary zones",
+            Self::InventoryPropagation => "zone propagation to inventory",
             Self::PendingMgsUpdates => {
                 "pending MGS updates (RoT / SP / Host OS / etc.)"
             }

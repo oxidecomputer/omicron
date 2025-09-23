@@ -2266,6 +2266,7 @@ planning report for blueprint b2295597-5788-482e-acf9-1731ec63fbd2:
 * waiting for NTP zones to appear in inventory on sleds: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
 * sleds getting NTP zones and which have other services already, making them eligible for discretionary zones: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
 * missing NTP zone on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
+* zone updates waiting on zone propagation to inventory
 * waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
@@ -4311,6 +4312,7 @@ planning report for blueprint 316ccd9e-5c53-46c3-a2e9-20c3867b7111:
 * waiting for NTP zones to appear in inventory on sleds: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
 * sleds getting NTP zones and which have other services already, making them eligible for discretionary zones: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
 * missing NTP zone on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
+* zone updates waiting on zone propagation to inventory
 * waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
@@ -6037,6 +6039,7 @@ planning report for blueprint 90650737-8142-47a6-9a48-a10efc487e57:
 * waiting for NTP zones to appear in inventory on sleds: d81c6a84-79b8-4958-ae41-ea46c9b19763
 * sleds getting NTP zones and which have other services already, making them eligible for discretionary zones: d81c6a84-79b8-4958-ae41-ea46c9b19763
 * missing NTP zone on sled d81c6a84-79b8-4958-ae41-ea46c9b19763
+* zone updates waiting on zone propagation to inventory
 * waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
