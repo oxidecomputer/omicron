@@ -14391,6 +14391,7 @@ dependencies = [
 name = "trust-quorum-test-utils"
 version = "0.1.0"
 dependencies = [
+ "bootstore",
  "camino",
  "daft",
  "dropshot",
@@ -14398,8 +14399,10 @@ dependencies = [
  "iddqd",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
+ "secrecy 0.10.3",
  "serde",
  "serde_json",
+ "sled-hardware-types",
  "slog",
  "trust-quorum",
 ]
