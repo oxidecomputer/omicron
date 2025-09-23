@@ -6671,6 +6671,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "nexus-lockstep-api"
+version = "0.1.0"
+dependencies = [
+ "dropshot",
+ "nexus-types",
+ "omicron-workspace-hack",
+]
+
+[[package]]
+name = "nexus-lockstep-client"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "futures",
+ "omicron-workspace-hack",
+ "progenitor 0.10.0",
+ "regress",
+ "reqwest",
+ "schemars",
+ "serde",
+ "slog",
+ "uuid",
+]
+
+[[package]]
 name = "nexus-macros-common"
 version = "0.1.0"
 dependencies = [
@@ -7956,6 +7981,7 @@ dependencies = [
  "nexus-external-api",
  "nexus-internal-api",
  "nexus-inventory",
+ "nexus-lockstep-api",
  "nexus-metrics-producer-gc",
  "nexus-mgs-updates",
  "nexus-networking",
@@ -8779,6 +8805,7 @@ dependencies = [
  "newtype_derive",
  "nexus-external-api",
  "nexus-internal-api",
+ "nexus-lockstep-api",
  "ntp-admin-api",
  "omicron-workspace-hack",
  "openapi-lint",
@@ -12427,8 +12454,11 @@ name = "sled-agent-api"
 version = "0.1.0"
 dependencies = [
  "camino",
+ "chrono",
  "dropshot",
  "http",
+ "id-map",
+ "iddqd",
  "nexus-sled-agent-shared",
  "omicron-common",
  "omicron-uuid-kinds",

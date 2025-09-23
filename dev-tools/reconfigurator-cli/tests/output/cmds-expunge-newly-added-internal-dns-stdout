@@ -494,7 +494,7 @@ internal DNS:
 +       AAAA fd00:1122:3344:3::1
 -   name: ns3                                                (records: 1)
 -       AAAA fd00:1122:3344:3::1
-    unchanged names: 87 (records: 97)
+    unchanged names: 88 (records: 100)
 
 external DNS:
   DNS zone: "oxide.example" (unchanged)
@@ -636,7 +636,7 @@ to:   blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4
 
 internal DNS:
   DNS zone: "control-plane.oxide.internal" (unchanged)
-    unchanged names: 91 (records: 103)
+    unchanged names: 92 (records: 106)
 
 external DNS:
   DNS zone: "oxide.example" (unchanged)
@@ -826,7 +826,7 @@ internal DNS:
 +       AAAA fd00:1122:3344:2::1
 +   name: ns3                                                (records: 1)
 +       AAAA fd00:1122:3344:3::1
-    unchanged names: 87 (records: 97)
+    unchanged names: 88 (records: 100)
 
 external DNS:
   DNS zone: "oxide.example" (unchanged)

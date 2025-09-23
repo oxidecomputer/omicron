@@ -54,6 +54,9 @@ use sled_diagnostics::SledDiagnosticsQueryOutput;
 use tufaceous_artifact::ArtifactHash;
 use uuid::Uuid;
 
+/// Copies of data types that changed between v3 and v4.
+mod v3;
+
 api_versions!([
     // WHEN CHANGING THE API (part 1 of 2):
     //
@@ -66,6 +69,7 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
+    (4, ADD_NEXUS_LOCKSTEP_PORT_TO_INVENTORY),
     (3, ADD_SWITCH_ZONE_OPERATOR_POLICY),
     (2, REMOVE_DESTROY_ORPHANED_DATASETS_CHICKEN_SWITCH),
     (1, INITIAL),
@@ -323,11 +327,25 @@ pub trait SledAgentApi {
     #[endpoint {
         method = PUT,
         path = "/omicron-config",
+        versions = VERSION_ADD_NEXUS_LOCKSTEP_PORT_TO_INVENTORY..,
     }]
     async fn omicron_config_put(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<OmicronSledConfig>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    #[endpoint {
+        operation_id = "omicron_config_put",
+        method = PUT,
+        path = "/omicron-config",
+        versions = ..VERSION_ADD_NEXUS_LOCKSTEP_PORT_TO_INVENTORY,
+    }]
+    async fn v3_omicron_config_put(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<v3::OmicronSledConfig>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        Self::omicron_config_put(rqctx, body.map(Into::into)).await
+    }
 
     #[endpoint {
         method = GET,
@@ -551,10 +569,25 @@ pub trait SledAgentApi {
     #[endpoint {
         method = GET,
         path = "/inventory",
+        versions = VERSION_ADD_NEXUS_LOCKSTEP_PORT_TO_INVENTORY..,
     }]
     async fn inventory(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<Inventory>, HttpError>;
+
+    /// Fetch basic information about this sled
+    #[endpoint {
+        operation_id = "inventory",
+        method = GET,
+        path = "/inventory",
+        versions = ..VERSION_ADD_NEXUS_LOCKSTEP_PORT_TO_INVENTORY,
+    }]
+    async fn v3_inventory(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<v3::Inventory>, HttpError> {
+        let HttpResponseOk(inventory) = Self::inventory(rqctx).await?;
+        Ok(HttpResponseOk(inventory.into()))
+    }
 
     /// Fetch sled identifiers
     #[endpoint {
