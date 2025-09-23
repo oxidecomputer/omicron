@@ -18,6 +18,7 @@ use daft::Diffable;
 use iddqd::IdOrdItem;
 use iddqd::id_upcast;
 use indent_write::fmt::IndentWriter;
+use omicron_common::disk::M2Slot;
 use omicron_common::policy::COCKROACHDB_REDUNDANCY;
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::MupdateOverrideUuid;
@@ -494,11 +495,11 @@ impl PlanningMupdateOverrideStepReport {
 #[serde(tag = "type", content = "value")]
 pub enum FailedMgsUpdateReason {
     /// The active host phase 1 slot does not match the boot disk
-    #[error("active phase 1 slot does not match boot disk")]
-    ActiveHostPhase1SlotBootDiskMismatch,
+    #[error("active phase 1 slot {0:?} does not match boot disk")]
+    ActiveHostPhase1SlotBootDiskMismatch(M2Slot),
     /// The active host phase 1 hash was not found in inventory
-    #[error("active host phase 1 hash is not in inventory")]
-    ActiveHostPhase1HashNotInInventory,
+    #[error("active host phase 1 hash for slot {0:?} is not in inventory")]
+    ActiveHostPhase1HashNotInInventory(M2Slot),
     /// The active host phase 1 slot was not found in inventory
     #[error("active host phase 1 slot is not in inventory")]
     ActiveHostPhase1SlotNotInInventory,
@@ -509,11 +510,11 @@ pub enum FailedMgsUpdateReason {
     #[error("caboose for {0:?} is not in inventory")]
     CabooseNotInInventory(CabooseWhich),
     /// The version in the caboose or artifact was not able to be parsed
-    #[error("version could not be parsed")]
-    FailedVersionParse,
+    #[error("version from caboose {caboose:?} could not be parsed: {err}")]
+    FailedVersionParse { caboose: CabooseWhich, err: String },
     /// The inactive host phase 1 hash was not found in inventory
-    #[error("inactive host phase 1 hash is not in inventory")]
-    InactiveHostPhase1HashNotInInventory,
+    #[error("inactive host phase 1 hash for slot {0:?} is not in inventory")]
+    InactiveHostPhase1HashNotInInventory(M2Slot),
     /// Last reconciliation details were not found in inventory
     #[error("sled agent last reconciliation is not in inventory")]
     LastReconciliationNotInInventory,

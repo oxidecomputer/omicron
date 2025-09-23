@@ -62,39 +62,25 @@ pub fn try_make_update_sp(
     current_artifacts: &TufRepoDescription,
 ) -> Result<Option<PendingMgsUpdate>, FailedMgsUpdateReason> {
     let Some(sp_info) = inventory.sps.get(baseboard_id) else {
-        warn!(
-            log,
-            "cannot configure SP update for board \
-             (missing SP info from inventory)";
-            baseboard_id
-        );
         return Err(FailedMgsUpdateReason::SpNotInInventory);
     };
 
     let Some(active_caboose) =
         inventory.caboose_for(CabooseWhich::SpSlot0, baseboard_id)
     else {
-        warn!(
-            log,
-            "cannot configure SP update for board \
-             (missing active caboose from inventory)";
-            baseboard_id,
-        );
         return Err(FailedMgsUpdateReason::CabooseNotInInventory(
             CabooseWhich::SpSlot0,
         ));
     };
 
-    let Ok(expected_active_version) = active_caboose.caboose.version.parse()
-    else {
-        warn!(
-            log,
-            "cannot configure SP update for board \
-             (cannot parse current active version as an ArtifactVersion)";
-            baseboard_id,
-            "found_version" => &active_caboose.caboose.version,
-        );
-        return Err(FailedMgsUpdateReason::FailedVersionParse);
+    let expected_active_version = match active_caboose.caboose.version.parse() {
+        Ok(v) => v,
+        Err(e) => {
+            return Err(FailedMgsUpdateReason::FailedVersionParse {
+                caboose: CabooseWhich::SpSlot0,
+                err: format!("{}", e),
+            });
+        }
     };
 
     let board = &active_caboose.caboose.board;
@@ -135,11 +121,6 @@ pub fn try_make_update_sp(
         })
         .collect();
     if matching_artifacts.is_empty() {
-        warn!(
-            log,
-            "cannot configure SP update for board (no matching artifact)";
-            baseboard_id,
-        );
         return Err(FailedMgsUpdateReason::NoMatchingArtifactFound);
     }
 
@@ -167,14 +148,11 @@ pub fn try_make_update_sp(
     {
         Ok(None) => ExpectedVersion::NoValidVersion,
         Ok(Some(v)) => ExpectedVersion::Version(v),
-        Err(_) => {
-            warn!(
-                log,
-                "cannot configure SP update for board \
-                 (found inactive slot contents but version was not valid)";
-                baseboard_id
-            );
-            return Err(FailedMgsUpdateReason::FailedVersionParse);
+        Err(e) => {
+            return Err(FailedMgsUpdateReason::FailedVersionParse {
+                caboose: CabooseWhich::SpSlot1,
+                err: format!("{}", e),
+            });
         }
     };
 

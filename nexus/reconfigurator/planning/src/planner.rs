@@ -7375,9 +7375,9 @@ pub(crate) mod test {
     }
 
     #[test]
-    fn test_all_zones_sourced_from_initial_target_release_by_default() {
+    fn test_zones_sourced_from_initial_target_release_by_default() {
         static TEST_NAME: &str =
-            "all_zones_sourced_from_initial_target_release_by_default";
+            "zones_sourced_from_initial_target_release_by_default";
         let logctx = test_setup_log(TEST_NAME);
         let log = logctx.log.clone();
 

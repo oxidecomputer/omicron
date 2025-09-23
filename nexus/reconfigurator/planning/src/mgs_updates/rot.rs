@@ -108,22 +108,10 @@ pub fn try_make_update_rot(
     current_artifacts: &TufRepoDescription,
 ) -> Result<Option<PendingMgsUpdate>, FailedMgsUpdateReason> {
     let Some(sp_info) = inventory.sps.get(baseboard_id) else {
-        warn!(
-            log,
-            "cannot configure RoT update for board \
-             (missing SP info from inventory)";
-            baseboard_id
-        );
         return Err(FailedMgsUpdateReason::SpNotInInventory);
     };
 
     let Some(rot_state) = inventory.rots.get(baseboard_id) else {
-        warn!(
-            log,
-            "cannot configure RoT update for board \
-             (missing RoT state from inventory)";
-            baseboard_id
-        );
         return Err(FailedMgsUpdateReason::RotStateNotInInventory);
     };
 
@@ -133,37 +121,23 @@ pub fn try_make_update_rot(
     let Some(active_caboose) =
         inventory.caboose_for(active_caboose_which, baseboard_id)
     else {
-        warn!(
-            log,
-            "cannot configure RoT update for board \
-             (missing active slot {active_slot} caboose from inventory)";
-            baseboard_id,
-        );
         return Err(FailedMgsUpdateReason::CabooseNotInInventory(
             active_caboose_which,
         ));
     };
 
-    let Ok(expected_active_version) = active_caboose.caboose.version.parse()
-    else {
-        warn!(
-            log,
-            "cannot configure RoT update for board \
-             (cannot parse current active version as an ArtifactVersion)";
-            baseboard_id,
-            "found_version" => &active_caboose.caboose.version,
-        );
-        return Err(FailedMgsUpdateReason::FailedVersionParse);
+    let expected_active_version = match active_caboose.caboose.version.parse() {
+        Ok(v) => v,
+        Err(e) => {
+            return Err(FailedMgsUpdateReason::FailedVersionParse {
+                caboose: active_caboose_which,
+                err: format!("{}", e),
+            });
+        }
     };
 
     let board = &active_caboose.caboose.board;
     let Some(rkth) = &active_caboose.caboose.sign else {
-        warn!(
-            log,
-            "cannot configure RoT update for board \
-             (missing sign in caboose from inventory)";
-            baseboard_id
-        );
         return Err(FailedMgsUpdateReason::CabooseMissingSign(
             active_caboose_which,
         ));
@@ -225,11 +199,6 @@ pub fn try_make_update_rot(
         })
         .collect();
     if matching_artifacts.is_empty() {
-        warn!(
-            log,
-            "cannot configure RoT update for board (no matching artifact)";
-            baseboard_id,
-        );
         return Err(FailedMgsUpdateReason::NoMatchingArtifactFound);
     }
 
@@ -256,24 +225,20 @@ pub fn try_make_update_rot(
     };
 
     // Begin configuring an update.
+    let inactive_caboose_which =
+        CabooseWhich::from_rot_slot(active_slot.toggled());
     let expected_inactive_version = match inventory
-        .caboose_for(
-            CabooseWhich::from_rot_slot(active_slot.toggled()),
-            baseboard_id,
-        )
+        .caboose_for(inactive_caboose_which, baseboard_id)
         .map(|c| c.caboose.version.parse::<ArtifactVersion>())
         .transpose()
     {
         Ok(None) => ExpectedVersion::NoValidVersion,
         Ok(Some(v)) => ExpectedVersion::Version(v),
-        Err(_) => {
-            warn!(
-                log,
-                "cannot configure RoT update for board \
-                 (found inactive slot contents but version was not valid)";
-                baseboard_id
-            );
-            return Err(FailedMgsUpdateReason::FailedVersionParse);
+        Err(e) => {
+            return Err(FailedMgsUpdateReason::FailedVersionParse {
+                caboose: inactive_caboose_which,
+                err: format!("{}", e),
+            });
         }
     };
 

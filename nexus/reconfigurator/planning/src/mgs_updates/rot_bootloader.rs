@@ -63,49 +63,29 @@ pub fn try_make_update_rot_bootloader(
     current_artifacts: &TufRepoDescription,
 ) -> Result<Option<PendingMgsUpdate>, FailedMgsUpdateReason> {
     let Some(sp_info) = inventory.sps.get(baseboard_id) else {
-        warn!(
-            log,
-            "cannot configure RoT bootloader update for board \
-             (missing SP info from inventory)";
-            baseboard_id
-        );
         return Err(FailedMgsUpdateReason::SpNotInInventory);
     };
 
     let Some(stage0_caboose) =
         inventory.caboose_for(CabooseWhich::Stage0, baseboard_id)
     else {
-        warn!(
-            log,
-            "cannot configure RoT bootloader update for board \
-             (missing stage0 caboose from inventory)";
-            baseboard_id,
-        );
         return Err(FailedMgsUpdateReason::CabooseNotInInventory(
             CabooseWhich::Stage0,
         ));
     };
 
-    let Ok(expected_stage0_version) = stage0_caboose.caboose.version.parse()
-    else {
-        warn!(
-            log,
-            "cannot configure RoT bootloader update for board \
-             (cannot parse current stage0 version as an ArtifactVersion)";
-            baseboard_id,
-            "found_version" => &stage0_caboose.caboose.version,
-        );
-        return Err(FailedMgsUpdateReason::FailedVersionParse);
+    let expected_stage0_version = match stage0_caboose.caboose.version.parse() {
+        Ok(v) => v,
+        Err(e) => {
+            return Err(FailedMgsUpdateReason::FailedVersionParse {
+                caboose: CabooseWhich::Stage0,
+                err: format!("{}", e),
+            });
+        }
     };
 
     let board = &stage0_caboose.caboose.board;
     let Some(rkth) = &stage0_caboose.caboose.sign else {
-        warn!(
-            log,
-            "cannot configure RoT bootloader update for board \
-             (missing sign in stage0 caboose from inventory)";
-            baseboard_id
-        );
         return Err(FailedMgsUpdateReason::CabooseMissingSign(
             CabooseWhich::Stage0,
         ));
@@ -160,11 +140,6 @@ pub fn try_make_update_rot_bootloader(
         })
         .collect();
     if matching_artifacts.is_empty() {
-        warn!(
-            log,
-            "cannot configure RoT bootloader update for board (no matching artifact)";
-            baseboard_id,
-        );
         return Err(FailedMgsUpdateReason::NoMatchingArtifactFound);
     }
 
@@ -196,14 +171,11 @@ pub fn try_make_update_rot_bootloader(
     {
         Ok(None) => ExpectedVersion::NoValidVersion,
         Ok(Some(v)) => ExpectedVersion::Version(v),
-        Err(_) => {
-            warn!(
-                log,
-                "cannot configure RoT bootloader update for board \
-                 (found stage0 next contents but version was not valid)";
-                baseboard_id
-            );
-            return Err(FailedMgsUpdateReason::FailedVersionParse);
+        Err(e) => {
+            return Err(FailedMgsUpdateReason::FailedVersionParse {
+                caboose: CabooseWhich::Stage0Next,
+                err: format!("{}", e),
+            });
         }
     };
 

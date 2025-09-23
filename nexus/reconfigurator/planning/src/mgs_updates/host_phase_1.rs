@@ -276,12 +276,6 @@ pub(super) fn try_make_update(
     FailedMgsUpdateReason,
 > {
     let Some(sp_info) = inventory.sps.get(baseboard_id) else {
-        warn!(
-            log,
-            "cannot configure host OS update for board \
-             (missing SP info from inventory)";
-            baseboard_id,
-        );
         return Err(FailedMgsUpdateReason::SpNotInInventory);
     };
 
@@ -298,36 +292,15 @@ pub(super) fn try_make_update(
     let Some(sled_agent) = inventory.sled_agents.iter().find(|sled_agent| {
         sled_agent.baseboard_id.as_ref() == Some(baseboard_id)
     }) else {
-        warn!(
-            log,
-            "cannot configure host OS update for board \
-             (missing sled-agent info from inventory)";
-            baseboard_id,
-        );
         return Err(FailedMgsUpdateReason::SledAgentInfoNotInInventory);
     };
     let Some(last_reconciliation) = sled_agent.last_reconciliation.as_ref()
     else {
-        warn!(
-            log,
-            "cannot configure host OS update for board \
-             (missing last reconciliation details from inventory)";
-            baseboard_id,
-        );
         return Err(FailedMgsUpdateReason::LastReconciliationNotInInventory);
     };
     let boot_disk = match &last_reconciliation.boot_partitions.boot_disk {
         Ok(boot_disk) => *boot_disk,
         Err(err) => {
-            // This error is a `String`; we can't use `InlineErrorChain`.
-            let err: &str = &err;
-            warn!(
-                log,
-                "cannot configure host OS update for board \
-                 (sled-agent reported an error determining boot disk)";
-                baseboard_id,
-                "err" => err,
-            );
             return Err(FailedMgsUpdateReason::UnableToDetermineBootDisk(
                 err.to_string(),
             ));
@@ -337,16 +310,6 @@ pub(super) fn try_make_update(
         match &last_reconciliation.boot_partitions.slot_details(boot_disk) {
             Ok(details) => details.artifact_hash,
             Err(err) => {
-                // This error is a `String`; we can't use `InlineErrorChain`.
-                let err: &str = &err;
-                warn!(
-                    log,
-                    "cannot configure host OS update for board \
-                     (sled-agent reported an error boot disk phase 2 image)";
-                    baseboard_id,
-                    "boot_disk" => ?boot_disk,
-                    "err" => err,
-                );
                 return Err(
                     FailedMgsUpdateReason::UnableToRetrieveBootDiskPhase2Image(
                         err.to_string(),
@@ -358,12 +321,6 @@ pub(super) fn try_make_update(
     let Some(active_phase_1_slot) =
         inventory.host_phase_1_active_slot_for(baseboard_id).map(|s| s.slot)
     else {
-        warn!(
-            log,
-            "cannot configure host OS update for board \
-             (inventory missing current active host phase 1 slot)";
-            baseboard_id,
-        );
         return Err(FailedMgsUpdateReason::ActiveHostPhase1SlotNotInInventory);
     };
 
@@ -379,16 +336,10 @@ pub(super) fn try_make_update(
     // 1 slot and the boot disk, they'll induce a support case to recover, given
     // this current implementation. As far as we know they shouldn't happen.
     if active_phase_1_slot != boot_disk {
-        warn!(
-            log,
-            "cannot configure host OS update for board (active phase 1 slot \
-             doesn't match boot disk; is the sled already being updated?)";
-            baseboard_id,
-            "active_phase_1_slot" => ?active_phase_1_slot,
-            "boot_disk" => ?boot_disk,
-        );
         return Err(
-            FailedMgsUpdateReason::ActiveHostPhase1SlotBootDiskMismatch,
+            FailedMgsUpdateReason::ActiveHostPhase1SlotBootDiskMismatch(
+                active_phase_1_slot,
+            ),
         );
     }
 
@@ -396,14 +347,9 @@ pub(super) fn try_make_update(
         .host_phase_1_flash_hash_for(active_phase_1_slot, baseboard_id)
         .map(|h| h.hash)
     else {
-        warn!(
-            log,
-            "cannot configure host OS update for board \
-             (missing active phase 1 hash from inventory)";
-            baseboard_id,
-            "slot" => ?active_phase_1_slot,
-        );
-        return Err(FailedMgsUpdateReason::ActiveHostPhase1HashNotInInventory);
+        return Err(FailedMgsUpdateReason::ActiveHostPhase1HashNotInInventory(
+            active_phase_1_slot,
+        ));
     };
 
     let Some(inactive_phase_1_hash) = inventory
@@ -421,7 +367,9 @@ pub(super) fn try_make_update(
             "slot" => ?active_phase_1_slot.toggled(),
         );
         return Err(
-            FailedMgsUpdateReason::InactiveHostPhase1HashNotInInventory,
+            FailedMgsUpdateReason::InactiveHostPhase1HashNotInInventory(
+                active_phase_1_slot.toggled(),
+            ),
         );
     };
 
@@ -442,21 +390,9 @@ pub(super) fn try_make_update(
             ([p1], [p2]) => (p1, p2),
             // "TUF is broken" cases: missing one or the other.
             ([], _) => {
-                warn!(
-                    log,
-                    "cannot configure host OS update for board \
-                     (no phase 1 artifact)";
-                    baseboard_id,
-                );
                 return Err(FailedMgsUpdateReason::NoMatchingArtifactFound);
             }
             (_, []) => {
-                warn!(
-                    log,
-                    "cannot configure host OS update for board \
-                     (no phase 2 artifact)";
-                    baseboard_id,
-                );
                 return Err(FailedMgsUpdateReason::NoMatchingArtifactFound);
             }
             // "TUF is broken" cases: have multiple of one or the other. This
@@ -464,14 +400,6 @@ pub(super) fn try_make_update(
             // host OS images. We can't proceed, because we don't know how to
             // pair up which phase 1 matches which phase 2.
             (_, _) => {
-                warn!(
-                    log,
-                    "cannot configure host OS update for board \
-                     (multiple OS images in TUF repo)";
-                    baseboard_id,
-                    "num-phase-1-images" => phase_1_artifacts.len(),
-                    "num-phase-2-images" => phase_2_artifacts.len(),
-                );
                 return Err(FailedMgsUpdateReason::TooManyMatchingArtifacts);
             }
         };
