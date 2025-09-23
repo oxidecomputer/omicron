@@ -15,7 +15,7 @@ use omicron_common::backoff::BackoffError;
 use omicron_common::backoff::retry_notify;
 use omicron_common::backoff::retry_policy_local;
 use sled_agent_config_reconciler::InternalDisksReceiver;
-use sled_agent_types::rack_init::RackInitializeRequest;
+use sled_agent_types::rack_init::RackInitializeRequestParams;
 use sled_agent_types::rack_ops::RssStep;
 use sled_agent_types::sled::StartSledAgentRequest;
 use slog::Logger;
@@ -48,7 +48,7 @@ impl RssHandle {
     pub(super) async fn run_rss(
         log: &Logger,
         sprockets: SprocketsConfig,
-        config: RackInitializeRequest,
+        config: RackInitializeRequestParams,
         our_bootstrap_address: Ipv6Addr,
         internal_disks_rx: InternalDisksReceiver,
         bootstore: bootstore::NodeHandle,

@@ -14,6 +14,8 @@ use nexus_db_queries::db::DataStore;
 use nexus_reconfigurator_planning::planner::Planner;
 use nexus_reconfigurator_planning::planner::PlannerRng;
 use nexus_reconfigurator_preparation::PlanningInputFromDb;
+use nexus_types::deployment::BlueprintSource;
+use nexus_types::deployment::PlanningReport;
 use nexus_types::deployment::{Blueprint, BlueprintTarget};
 use nexus_types::internal_api::background::BlueprintPlannerStatus;
 use omicron_common::api::external::LookupType;
@@ -257,7 +259,25 @@ impl BlueprintPlanner {
         }
 
         // We have a new target!
-        let report = blueprint.report.clone();
+
+        // We just ran the planner, so we should always get its report. This
+        // output is for debugging only, though, so just make an empty one in
+        // the unreachable arms.
+        let report = match &blueprint.source {
+            BlueprintSource::Planner(report) => Arc::clone(report),
+            BlueprintSource::Rss
+            | BlueprintSource::PlannerLoadedFromDatabase
+            | BlueprintSource::ReconfiguratorCliEdit
+            | BlueprintSource::Test => {
+                warn!(
+                    &opctx.log,
+                    "ran planner, but got unexpected blueprint source; \
+                     generating an empty planning report";
+                    "source" => ?&blueprint.source,
+                );
+                Arc::new(PlanningReport::new(blueprint.id))
+            }
+        };
         self.tx_blueprint.send_replace(Some(Arc::new((target, blueprint))));
         BlueprintPlannerStatus::Targeted {
             parent_blueprint_id,
@@ -290,6 +310,7 @@ mod test {
         ReconfiguratorConfigView,
     };
     use omicron_uuid_kinds::OmicronZoneUuid;
+    use std::collections::BTreeMap;
 
     type ControlPlaneTestContext =
         nexus_test_utils::ControlPlaneTestContext<crate::Server>;
@@ -305,7 +326,9 @@ mod test {
         );
 
         // Spin up the blueprint loader background task.
-        let mut loader = TargetBlueprintLoader::new(datastore.clone());
+        let (tx_loader, _) = watch::channel(None);
+        let mut loader =
+            TargetBlueprintLoader::new(datastore.clone(), tx_loader);
         let mut rx_loader = loader.watcher();
         loader.activate(&opctx).await;
         let (_initial_target, initial_blueprint) = &*rx_loader
@@ -427,7 +450,12 @@ mod test {
             OmicronZoneUuid::new_v4(),
             Activator::new(),
             dummy_tx,
-            NexusQuiesceHandle::new(&opctx.log, datastore.clone()),
+            NexusQuiesceHandle::new(
+                datastore.clone(),
+                OmicronZoneUuid::new_v4(),
+                rx_loader.clone(),
+                opctx.child(BTreeMap::new()),
+            ),
         );
         let value = executor.activate(&opctx).await;
         let value = value.as_object().expect("response is not a JSON object");

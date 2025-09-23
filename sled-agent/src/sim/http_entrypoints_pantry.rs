@@ -399,8 +399,18 @@ mod tests {
         let raw_url = format!(
             "https://raw.githubusercontent.com/oxidecomputer/crucible/{part}/openapi/crucible-pantry.json",
         );
-        let raw_json =
-            reqwest::blocking::get(&raw_url).unwrap().text().unwrap();
+
+        // The default timeout of 30 seconds was sometimes not enough
+        // heavy load.
+        let raw_json = reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_secs(120))
+            .build()
+            .unwrap()
+            .get(&raw_url)
+            .send()
+            .unwrap()
+            .text()
+            .unwrap();
         serde_json::from_str(&raw_json).unwrap()
     }
 

@@ -313,6 +313,7 @@ mod test {
     use internal_dns_types::names::BOUNDARY_NTP_DNS_NAME;
     use internal_dns_types::names::DNS_ZONE;
     use internal_dns_types::names::ServiceName;
+    use nexus_db_model::DbMetadataNexusState;
     use nexus_db_model::DnsGroup;
     use nexus_db_model::Silo;
     use nexus_db_queries::authn;
@@ -336,6 +337,7 @@ mod test {
     use nexus_types::deployment::Blueprint;
     use nexus_types::deployment::BlueprintHostPhase2DesiredSlots;
     use nexus_types::deployment::BlueprintSledConfig;
+    use nexus_types::deployment::BlueprintSource;
     use nexus_types::deployment::BlueprintTarget;
     use nexus_types::deployment::BlueprintZoneConfig;
     use nexus_types::deployment::BlueprintZoneDisposition;
@@ -351,7 +353,6 @@ mod test {
     use nexus_types::deployment::OximeterReadPolicy;
     use nexus_types::deployment::PendingMgsUpdates;
     use nexus_types::deployment::PlannerConfig;
-    use nexus_types::deployment::PlanningReport;
     use nexus_types::deployment::SledFilter;
     use nexus_types::deployment::TufRepoPolicy;
     use nexus_types::deployment::blueprint_zone_type;
@@ -729,7 +730,7 @@ mod test {
             time_created: now_db_precision(),
             creator: "test-suite".to_string(),
             comment: "test blueprint".to_string(),
-            report: PlanningReport::new(blueprint_id),
+            source: BlueprintSource::Test,
         };
 
         // To make things slightly more interesting, let's add a zone that's
@@ -1502,6 +1503,17 @@ mod test {
             datastore.zpool_list_all_external_batched(&opctx).await.unwrap();
         let ip_pool_range_rows =
             fetch_all_service_ip_pool_ranges(&datastore, &opctx).await;
+        let active_nexus_zones = datastore
+            .get_db_metadata_nexus_in_state(
+                &opctx,
+                vec![DbMetadataNexusState::Active],
+            )
+            .await
+            .internal_context("fetching active nexuses")
+            .unwrap()
+            .into_iter()
+            .map(|z| z.nexus_id())
+            .collect();
         let planning_input = {
             let mut builder = PlanningInputFromDb {
                 sled_rows: &sled_rows,
@@ -1527,6 +1539,8 @@ mod test {
                 tuf_repo: TufRepoPolicy::initial(),
                 old_repo: TufRepoPolicy::initial(),
                 planner_config: PlannerConfig::default(),
+                active_nexus_zones,
+                not_yet_nexus_zones: BTreeSet::new(),
                 log,
             }
             .build()
@@ -1560,7 +1574,7 @@ mod test {
                 blueprint.nexus_generation,
             )
             .unwrap();
-        let blueprint2 = builder.build();
+        let blueprint2 = builder.build(BlueprintSource::Test);
         eprintln!("blueprint2: {}", blueprint2.display());
         // Figure out the id of the new zone.
         let zones_before = blueprint

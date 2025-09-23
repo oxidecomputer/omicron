@@ -67,6 +67,7 @@ use omicron_common::policy::CRUCIBLE_PANTRY_REDUNDANCY;
 use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
 use omicron_common::policy::NEXUS_REDUNDANCY;
 use omicron_uuid_kinds::MupdateOverrideUuid;
+use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use std::collections::BTreeMap;
@@ -125,6 +126,8 @@ pub struct SystemDescription {
     old_repo: TufRepoPolicy,
     planner_config: PlannerConfig,
     ignore_impossible_mgs_updates_since: DateTime<Utc>,
+    active_nexus_zones: BTreeSet<OmicronZoneUuid>,
+    not_yet_nexus_zones: BTreeSet<OmicronZoneUuid>,
 }
 
 impl SystemDescription {
@@ -208,6 +211,8 @@ impl SystemDescription {
             old_repo: TufRepoPolicy::initial(),
             planner_config: PlannerConfig::default(),
             ignore_impossible_mgs_updates_since: Utc::now(),
+            active_nexus_zones: BTreeSet::new(),
+            not_yet_nexus_zones: BTreeSet::new(),
         }
     }
 
@@ -247,6 +252,18 @@ impl SystemDescription {
 
     pub fn get_target_nexus_zone_count(&self) -> usize {
         self.target_nexus_zone_count
+    }
+
+    pub fn target_boundary_ntp_zone_count(
+        &mut self,
+        count: usize,
+    ) -> &mut Self {
+        self.target_boundary_ntp_zone_count = count;
+        self
+    }
+
+    pub fn get_target_boundary_ntp_zone_count(&self) -> usize {
+        self.target_boundary_ntp_zone_count
     }
 
     pub fn target_crucible_pantry_zone_count(
@@ -786,7 +803,7 @@ impl SystemDescription {
             description,
         };
 
-        self.tuf_repo = new_repo;
+        let _old_repo = self.set_tuf_repo_inner(new_repo);
 
         // It's tempting to consider setting old_repo to the current tuf_repo,
         // but that requires the invariant that old_repo is always the current
@@ -794,9 +811,32 @@ impl SystemDescription {
         // https://github.com/oxidecomputer/omicron/issues/8056 for some
         // discussion.
         //
-        // We may want a more explicit operation to set the old repo, though.
+        // We provide a method to set the old repo explicitly with these
+        // assumptions in mind: `set_target_release_and_old_repo`.
 
         self
+    }
+
+    pub fn set_target_release_and_old_repo(
+        &mut self,
+        description: TargetReleaseDescription,
+    ) -> &mut Self {
+        let new_repo = TufRepoPolicy {
+            target_release_generation: self
+                .tuf_repo
+                .target_release_generation
+                .next(),
+            description,
+        };
+
+        let old_repo = self.set_tuf_repo_inner(new_repo);
+        self.old_repo = old_repo;
+
+        self
+    }
+
+    fn set_tuf_repo_inner(&mut self, new_repo: TufRepoPolicy) -> TufRepoPolicy {
+        mem::replace(&mut self.tuf_repo, new_repo)
     }
 
     pub fn set_ignore_impossible_mgs_updates_since(
@@ -804,6 +844,22 @@ impl SystemDescription {
         since: DateTime<Utc>,
     ) -> &mut Self {
         self.ignore_impossible_mgs_updates_since = since;
+        self
+    }
+
+    pub fn set_active_nexus_zones(
+        &mut self,
+        active_nexus_zones: BTreeSet<OmicronZoneUuid>,
+    ) -> &mut Self {
+        self.active_nexus_zones = active_nexus_zones;
+        self
+    }
+
+    pub fn set_not_yet_nexus_zones(
+        &mut self,
+        not_yet_nexus_zones: BTreeSet<OmicronZoneUuid>,
+    ) -> &mut Self {
+        self.not_yet_nexus_zones = not_yet_nexus_zones;
         self
     }
 
@@ -1029,6 +1085,8 @@ impl SystemDescription {
             self.external_dns_version,
             CockroachDbSettings::empty(),
         );
+        builder.set_active_nexus_zones(self.active_nexus_zones.clone());
+        builder.set_not_yet_nexus_zones(self.not_yet_nexus_zones.clone());
         builder.set_ignore_impossible_mgs_updates_since(
             self.ignore_impossible_mgs_updates_since,
         );
