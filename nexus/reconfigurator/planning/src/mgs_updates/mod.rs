@@ -621,7 +621,10 @@ fn try_make_update(
                         component,
                         reason: e,
                     });
-                    None
+                    let pending_actions = PlannedMgsUpdates::new()
+                        .set_skipped_updates(skipped_updates.clone())
+                        .build();
+                    Some(pending_actions)
                 }
             }
         })
@@ -682,6 +685,7 @@ mod test {
     use dropshot::ConfigLogging;
     use dropshot::ConfigLoggingLevel;
     use gateway_client::types::SpType;
+    use iddqd::IdOrdMap;
     use nexus_types::deployment::ExpectedVersion;
     use nexus_types::deployment::MgsUpdateComponent;
     use nexus_types::deployment::PendingMgsUpdateDetails;
@@ -692,6 +696,7 @@ mod test {
     use nexus_types::deployment::planning_report::SkippedMgsUpdate;
     use nexus_types::deployment::planning_report::SkippedMgsUpdates;
     use nexus_types::inventory::BaseboardId;
+    use nexus_types::inventory::CabooseWhich;
     use omicron_test_utils::dev::LogContext;
     use std::collections::BTreeSet;
     use std::sync::Arc;
@@ -749,29 +754,147 @@ mod test {
             impossible_update_policy,
         );
 
-        // The planner should gather each of the failed updates, and report no
-        // pending updates
+        // The planner should only gather the first failed update (RoT
+        // bootloader), and report no pending updates. There will only be a
+        // single entry as there is only a single fake board.
         let mut expected_skipped_updates = SkippedMgsUpdates::new();
         expected_skipped_updates.push(SkippedMgsUpdate {
             baseboard_id: fake_board.clone(),
             component: MgsUpdateComponent::RotBootloader,
             reason: FailedMgsUpdateReason::SpNotInInventory,
         });
-        expected_skipped_updates.push(SkippedMgsUpdate {
-            baseboard_id: fake_board.clone(),
-            component: MgsUpdateComponent::Rot,
-            reason: FailedMgsUpdateReason::SpNotInInventory,
-        });
-        expected_skipped_updates.push(SkippedMgsUpdate {
-            baseboard_id: fake_board.clone(),
-            component: MgsUpdateComponent::Sp,
-            reason: FailedMgsUpdateReason::SpNotInInventory,
-        });
-        expected_skipped_updates.push(SkippedMgsUpdate {
-            baseboard_id: fake_board,
-            component: MgsUpdateComponent::HostOs,
-            reason: FailedMgsUpdateReason::SpNotInInventory,
-        });
+        assert_eq!(skipped_mgs_updates, expected_skipped_updates);
+        assert!(updates.is_empty());
+
+        // Now we build a the collection so it only reports updates necessary
+        // for the RoT, SP and Host OS.
+        let mut collection = test_boards
+            .collection_builder()
+            .rot_active_version_exception(SpType::Sled, 0, ARTIFACT_VERSION_1)
+            .sp_active_version_exception(SpType::Sled, 0, ARTIFACT_VERSION_1)
+            .host_active_exception(
+                0,
+                ARTIFACT_HASH_HOST_PHASE_1_V1,
+                ARTIFACT_HASH_HOST_PHASE_2_V1,
+            )
+            .build();
+
+        // Let's remove all RoT information to force a failed update
+        for baseboard_id in &collection.baseboards {
+            collection.rots.remove(baseboard_id);
+        }
+
+        let PlannedMgsUpdates {
+            pending_updates: updates,
+            skipped_mgs_updates,
+            ..
+        } = plan_mgs_updates(
+            log,
+            &collection,
+            &collection.baseboards,
+            &current_updates,
+            &TargetReleaseDescription::TufRepo(repo.clone()),
+            nmax_updates,
+            impossible_update_policy,
+        );
+
+        // The planner should only gather the first RoT failed update of
+        // each of the boards, and report no pending updates
+        let mut expected_skipped_updates = SkippedMgsUpdates::new();
+        for baseboard_id in &collection.baseboards {
+            expected_skipped_updates.push(SkippedMgsUpdate {
+                baseboard_id: baseboard_id.clone(),
+                component: MgsUpdateComponent::Rot,
+                reason: FailedMgsUpdateReason::RotStateNotInInventory,
+            });
+        }
+        assert_eq!(skipped_mgs_updates, expected_skipped_updates);
+        assert!(updates.is_empty());
+
+        // Like before we build a collection that only reports updates necessary
+        // for the SP and Host OS.
+        let mut collection = test_boards
+            .collection_builder()
+            .sp_active_version_exception(SpType::Sled, 0, ARTIFACT_VERSION_1)
+            .host_active_exception(
+                0,
+                ARTIFACT_HASH_HOST_PHASE_1_V1,
+                ARTIFACT_HASH_HOST_PHASE_2_V1,
+            )
+            .build();
+
+        // Let's remove SP slot 0 caboose information to force a failed update
+        collection.cabooses_found.remove(&CabooseWhich::SpSlot0);
+
+        let PlannedMgsUpdates {
+            pending_updates: updates,
+            skipped_mgs_updates,
+            ..
+        } = plan_mgs_updates(
+            log,
+            &collection,
+            &collection.baseboards,
+            &current_updates,
+            &TargetReleaseDescription::TufRepo(repo.clone()),
+            nmax_updates,
+            impossible_update_policy,
+        );
+
+        // The planner should only gather the first SP failed update of
+        // each of the boards, and report no pending updates
+        let mut expected_skipped_updates = SkippedMgsUpdates::new();
+        for baseboard_id in &collection.baseboards {
+            expected_skipped_updates.push(SkippedMgsUpdate {
+                baseboard_id: baseboard_id.clone(),
+                component: MgsUpdateComponent::Sp,
+                reason: FailedMgsUpdateReason::CabooseNotInInventory(
+                    CabooseWhich::SpSlot0,
+                ),
+            });
+        }
+        assert_eq!(skipped_mgs_updates, expected_skipped_updates);
+        assert!(updates.is_empty());
+
+        // Now we create one more collection where only the Host OS needs an
+        // update
+        let mut collection = test_boards
+            .collection_builder()
+            .host_active_exception(
+                0,
+                ARTIFACT_HASH_HOST_PHASE_1_V1,
+                ARTIFACT_HASH_HOST_PHASE_2_V1,
+            )
+            .build();
+
+        // Remove sled agent info to force a failed update
+        collection.sled_agents = IdOrdMap::new();
+
+        let PlannedMgsUpdates {
+            pending_updates: updates,
+            skipped_mgs_updates,
+            ..
+        } = plan_mgs_updates(
+            log,
+            &collection,
+            &collection.baseboards,
+            &current_updates,
+            &TargetReleaseDescription::TufRepo(repo.clone()),
+            nmax_updates,
+            impossible_update_policy,
+        );
+
+        // The planner should only gather the first Host OS failed update of
+        // each of the sled boards, and report no pending updates
+        let mut expected_skipped_updates = SkippedMgsUpdates::new();
+        for baseboard_id in &collection.baseboards {
+            if baseboard_id.part_number == "dummy_sled" {
+                expected_skipped_updates.push(SkippedMgsUpdate {
+                    baseboard_id: baseboard_id.clone(),
+                    component: MgsUpdateComponent::HostOs,
+                    reason: FailedMgsUpdateReason::SledAgentInfoNotInInventory,
+                });
+            }
+        }
         assert_eq!(skipped_mgs_updates, expected_skipped_updates);
         assert!(updates.is_empty());
     }
