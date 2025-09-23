@@ -5815,9 +5815,21 @@ pub(crate) mod test {
         }
 
         // Request 3 Nexus zones. The blueprint will show changes in each sled
-        // for BlueprintHostPhase2DesiredSlotsDiff even if we are not performing
-        // an update for the Host OS. We need each sled to look identical in the
-        // blueprint, so we add a nexus zone to each sled.
+        // for BlueprintHostPhase2DesiredSlotsDiff in a simulated system even if
+        // we are not performing an update for the Host OS because it's going
+        // from `CurrentContents` to:
+        // `Artifact {
+        //      version: Available {
+        //          version: ArtifactVersion(
+        //              "1.0.0-freeform",
+        //          ),
+        //      },
+        //      hash: ArtifactHash(
+        //          "0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+        //      )
+        //  } `
+        // We need each sled to look identical in the blueprint, so we add a
+        // nexus zone to each sled.
         input_builder.policy_mut().target_nexus_zone_count =
             input_builder.policy_mut().target_nexus_zone_count + 3;
         let input = input_builder.build();
@@ -6141,9 +6153,20 @@ pub(crate) mod test {
             result
         };
 
-        // First we update the blueprint once for each sled, as the diff in the
-        // simulated system will always report there are changes with the host
-        // phase 2 even when no update is needed
+        // First we update the blueprint once for each sled. The blueprint will
+        // show changes in each sled for BlueprintHostPhase2DesiredSlotsDiff in
+        // a simulated system even if we are not performing an update for the
+        // Host OS because it's going from `CurrentContents` to:
+        // `Artifact {
+        //      version: Available {
+        //          version: ArtifactVersion(
+        //              "1.0.0-freeform",
+        //          ),
+        //      },
+        //      hash: ArtifactHash(
+        //          "0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+        //      )
+        //  } `
         let mut parent = blueprint;
         for i in 2..=4 {
             update_collection_from_blueprint(&mut example, &parent);
@@ -6624,9 +6647,20 @@ pub(crate) mod test {
             collection.ntp_timesync = ntp_timesync;
         };
 
-        // First we update the blueprint once for each sled, as the diff in the
-        // simulated system will always report there are changes with the host
-        // phase 2 even when no update is needed
+        // First we update the blueprint once for each sled. The blueprint will
+        // show changes in each sled for BlueprintHostPhase2DesiredSlotsDiff in
+        // a simulated system even if we are not performing an update for the
+        // Host OS because it's going from `CurrentContents` to:
+        // `Artifact {
+        //      version: Available {
+        //          version: ArtifactVersion(
+        //              "1.0.0-freeform",
+        //          ),
+        //      },
+        //      hash: ArtifactHash(
+        //          "0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+        //      )
+        //  } `
         let mut parent = blueprint;
         for i in 2..=4 {
             update_collection_from_blueprint(&mut example, &parent);
@@ -7060,9 +7094,20 @@ pub(crate) mod test {
             result
         };
 
-        // First we update the blueprint once for each sled, as the diff in the
-        // simulated system will always report there are changes with the host
-        // phase 2 even when no update is needed
+        // First we update the blueprint once for each sled. The blueprint will
+        // show changes in each sled for BlueprintHostPhase2DesiredSlotsDiff in
+        // a simulated system even if we are not performing an update for the
+        // Host OS because it's going from `CurrentContents` to:
+        // `Artifact {
+        //      version: Available {
+        //          version: ArtifactVersion(
+        //              "1.0.0-freeform",
+        //          ),
+        //      },
+        //      hash: ArtifactHash(
+        //          "0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+        //      )
+        //  } `
         let mut parent = blueprint;
         for i in 2..=4 {
             update_collection_from_blueprint(&mut example, &parent);

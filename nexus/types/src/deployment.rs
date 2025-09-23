@@ -1565,9 +1565,9 @@ pub enum PendingMgsUpdateDetails {
     HostPhase1(PendingMgsUpdateHostPhase1Details),
 }
 
-impl Into<MgsUpdateComponent> for PendingMgsUpdateDetails {
-    fn into(self) -> MgsUpdateComponent {
-        match self {
+impl From<&PendingMgsUpdateDetails> for MgsUpdateComponent {
+    fn from(details: &PendingMgsUpdateDetails) -> Self {
+        match &details {
             PendingMgsUpdateDetails::Rot { .. } => MgsUpdateComponent::Rot,
             PendingMgsUpdateDetails::RotBootloader { .. } => {
                 MgsUpdateComponent::RotBootloader
