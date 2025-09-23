@@ -61,6 +61,7 @@ nexus-background-task-interface.workspace = true
 nexus-config.workspace = true
 nexus-external-api.workspace = true
 nexus-internal-api.workspace = true
+nexus-lockstep-api.workspace = true
 nexus-mgs-updates.workspace = true
 nexus-networking.workspace = true
 nexus-saga-recovery.workspace = true
