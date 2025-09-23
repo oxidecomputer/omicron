@@ -1534,17 +1534,21 @@ pub(crate) mod test {
         request: &RegionSnapshotReplacement,
     ) {
         let opctx = test_opctx(cptestctx);
+
         let db_request = datastore
             .get_region_snapshot_replacement_request_by_id(&opctx, request.id)
             .await
             .unwrap();
 
         assert_eq!(db_request.new_region_id, None);
-        assert_eq!(
-            db_request.replacement_state,
-            RegionSnapshotReplacementState::Requested
-        );
         assert_eq!(db_request.operating_saga_id, None);
+
+        match db_request.replacement_state {
+            RegionSnapshotReplacementState::Requested => {}
+            x => {
+                panic!("replacement state {:?} != Requested", x);
+            }
+        }
     }
 
     async fn assert_volume_untouched(

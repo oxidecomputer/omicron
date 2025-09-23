@@ -504,13 +504,19 @@ INFO skipped noop image source check on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0
 INFO skipped noop image source check on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, reason: remove_mupdate_override is set in the blueprint (203fa72c-85c1-466a-8ed3-338ee029530d)
 generated blueprint a5a8f242-ffa5-473c-8efd-2acf2dc0b736 based on parent blueprint d60afc57-f15d-476c-bd0f-b1071e2bb976
 blueprint source: planner with report:
-planning report for blueprint a5a8f242-ffa5-473c-8efd-2acf2dc0b736:
+planning report:
 * zone adds waiting on blockers
 * zone adds and updates are blocked:
   - current target release generation (2) is lower than minimum required by blueprint (3)
   - sleds have remove mupdate override set in blueprint: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, d81c6a84-79b8-4958-ae41-ea46c9b19763
   - sleds have mupdate override errors: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
+  - sleds have deployment units with image sources not set to Artifact:
+    - sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: 7 zones
+    - sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: 6 zones
+    - sled d81c6a84-79b8-4958-ae41-ea46c9b19763: 6 zones
+
 * zone updates waiting on zone add blockers
+* waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
 
@@ -780,12 +786,18 @@ INFO skipped noop image source check on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0
 INFO skipped noop image source check on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, reason: remove_mupdate_override is set in the blueprint (203fa72c-85c1-466a-8ed3-338ee029530d)
 generated blueprint 626487fa-7139-45ec-8416-902271fc730b based on parent blueprint a5a8f242-ffa5-473c-8efd-2acf2dc0b736
 blueprint source: planner with report:
-planning report for blueprint 626487fa-7139-45ec-8416-902271fc730b:
+planning report:
 * zone adds waiting on blockers
 * zone adds and updates are blocked:
   - sleds have remove mupdate override set in blueprint: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, d81c6a84-79b8-4958-ae41-ea46c9b19763
   - sleds have mupdate override errors: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
+  - sleds have deployment units with image sources not set to Artifact:
+    - sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: 7 zones
+    - sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: 6 zones
+    - sled d81c6a84-79b8-4958-ae41-ea46c9b19763: 6 zones
+
 * zone updates waiting on zone add blockers
+* waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
 
@@ -906,14 +918,19 @@ INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noo
 INFO skipped noop image source check on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, reason: remove_mupdate_override is set in the blueprint (1c0ce176-6dc8-4a90-adea-d4a8000751da)
 generated blueprint c1a0d242-9160-40f4-96ae-61f8f40a0b1b based on parent blueprint 626487fa-7139-45ec-8416-902271fc730b
 blueprint source: planner with report:
-planning report for blueprint c1a0d242-9160-40f4-96ae-61f8f40a0b1b:
+planning report:
 * noop converting 6/6 install-dataset zones to artifact store on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
 * zone adds waiting on blockers
 * zone adds and updates are blocked:
   - current target release generation (3) is lower than minimum required by blueprint (4)
   - sleds have remove mupdate override set in blueprint: d81c6a84-79b8-4958-ae41-ea46c9b19763
   - sleds have mupdate override errors: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
+  - sleds have deployment units with image sources not set to Artifact:
+    - sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: 7 zones
+    - sled d81c6a84-79b8-4958-ae41-ea46c9b19763: 6 zones
+
 * zone updates waiting on zone add blockers
+* waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
 
@@ -1066,9 +1083,6 @@ set sled d81c6a84-79b8-4958-ae41-ea46c9b19763 mupdate override: 1c0ce176-6dc8-4a
 > # Run the planner again. This will cause sled 2's blueprint
 > # remove_mupdate_override to be unset. But no further planning steps will
 > # happen because the target release generation is not new enough.
-> #
-> # TODO: we want to block further planning steps until the target release is
-> # uploaded and all install-dataset zones have been converted to artifact ones.
 > inventory-generate
 generated inventory collection a71f7a73-35a6-45e8-acbe-f1c5925eed69 from configured sleds
 
@@ -1094,13 +1108,18 @@ INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noo
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
 generated blueprint afb09faf-a586-4483-9289-04d4f1d8ba23 based on parent blueprint c1a0d242-9160-40f4-96ae-61f8f40a0b1b
 blueprint source: planner with report:
-planning report for blueprint afb09faf-a586-4483-9289-04d4f1d8ba23:
+planning report:
 * skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 6 zones are already from artifacts
 * zone adds waiting on blockers
 * zone adds and updates are blocked:
   - current target release generation (3) is lower than minimum required by blueprint (4)
   - sleds have mupdate override errors: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
+  - sleds have deployment units with image sources not set to Artifact:
+    - sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: 7 zones
+    - sled d81c6a84-79b8-4958-ae41-ea46c9b19763: 6 zones
+
 * zone updates waiting on zone add blockers
+* waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
 
@@ -1271,13 +1290,18 @@ parent:    c1a0d242-9160-40f4-96ae-61f8f40a0b1b
  PENDING MGS-MANAGED UPDATES: 0
 
 blueprint source: planner with report:
-planning report for blueprint afb09faf-a586-4483-9289-04d4f1d8ba23:
+planning report:
 * skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 6 zones are already from artifacts
 * zone adds waiting on blockers
 * zone adds and updates are blocked:
   - current target release generation (3) is lower than minimum required by blueprint (4)
   - sleds have mupdate override errors: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
+  - sleds have deployment units with image sources not set to Artifact:
+    - sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: 7 zones
+    - sled d81c6a84-79b8-4958-ae41-ea46c9b19763: 6 zones
+
 * zone updates waiting on zone add blockers
+* waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
 
@@ -1413,13 +1437,17 @@ INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noo
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
 generated blueprint ce365dff-2cdb-4f35-a186-b15e20e1e700 based on parent blueprint afb09faf-a586-4483-9289-04d4f1d8ba23
 blueprint source: planner with report:
-planning report for blueprint ce365dff-2cdb-4f35-a186-b15e20e1e700:
+planning report:
 * skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 6 zones are already from artifacts
 * noop converting 6/6 install-dataset zones to artifact store on sled d81c6a84-79b8-4958-ae41-ea46c9b19763
 * zone adds waiting on blockers
 * zone adds and updates are blocked:
   - sleds have mupdate override errors: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
+  - sleds have deployment units with image sources not set to Artifact:
+    - sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: 7 zones
+
 * zone updates waiting on zone add blockers
+* waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
 
@@ -1590,13 +1618,17 @@ parent:    afb09faf-a586-4483-9289-04d4f1d8ba23
  PENDING MGS-MANAGED UPDATES: 0
 
 blueprint source: planner with report:
-planning report for blueprint ce365dff-2cdb-4f35-a186-b15e20e1e700:
+planning report:
 * skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 6 zones are already from artifacts
 * noop converting 6/6 install-dataset zones to artifact store on sled d81c6a84-79b8-4958-ae41-ea46c9b19763
 * zone adds waiting on blockers
 * zone adds and updates are blocked:
   - sleds have mupdate override errors: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
+  - sleds have deployment units with image sources not set to Artifact:
+    - sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: 7 zones
+
 * zone updates waiting on zone add blockers
+* waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
 
@@ -1685,16 +1717,14 @@ external DNS:
 
 
 
-> # Now clear the mupdate override error. At this point, the rest of the
-> # planner starts working.
+> # Now clear the mupdate override error. At this point, we're *still* blocked
+> # on serial1's install dataset not being known (so cannot be noop converted).
 > sled-set serial1 mupdate-override unset
 set sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c mupdate override: error -> unset
 
 > inventory-generate
 generated inventory collection 0b5efbb3-0b1b-4bbf-b7d8-a2d6fca074c6 from configured sleds
 
-
-> # This will attempt to update the RoT bootloader on the first sled.
 > blueprint-plan latest latest
 INFO performed noop zone image source checks on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, num_total: 7, num_already_artifact: 0, num_eligible: 0, num_ineligible: 7
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
@@ -1705,24 +1735,94 @@ INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noo
 INFO performed noop zone image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 6, num_already_artifact: 6, num_eligible: 0, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
-INFO configuring MGS-driven update, artifact_version: 2.0.0, artifact_hash: 8f89bf8bc5f3271650ad72a26fc0d116c910161ca143731473a2b20fb82653cc, expected_stage0_next_version: NoValidVersion, expected_stage0_version: 0.0.1, component: rot_bootloader, sp_slot: 0, sp_type: Sled, serial_number: serial0, part_number: model0
-INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint 8f2d1f39-7c88-4701-aa43-56bf281b28c1 based on parent blueprint ce365dff-2cdb-4f35-a186-b15e20e1e700
 blueprint source: planner with report:
-planning report for blueprint 8f2d1f39-7c88-4701-aa43-56bf281b28c1:
+planning report:
 * skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 6 zones are already from artifacts
 * skipping noop zone image source check on sled d81c6a84-79b8-4958-ae41-ea46c9b19763: all 6 zones are already from artifacts
+* zone adds waiting on blockers
+* zone adds and updates are blocked:
+  - sleds have deployment units with image sources not set to Artifact:
+    - sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: 7 zones
+
+* zone updates waiting on zone add blockers
+* waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
+
+
+
+> blueprint-diff latest
+from: blueprint ce365dff-2cdb-4f35-a186-b15e20e1e700
+to:   blueprint 8f2d1f39-7c88-4701-aa43-56bf281b28c1
+
+ COCKROACHDB SETTINGS:
+    state fingerprint:::::::::::::::::   (none) (unchanged)
+    cluster.preserve_downgrade_option:   (do not modify) (unchanged)
+
+ METADATA:
+    internal DNS version:::   1 (unchanged)
+    external DNS version:::   1 (unchanged)
+    target release min gen:   4 (unchanged)
+    nexus gen::::::::::::::   1 (unchanged)
+
+ OXIMETER SETTINGS:
+    generation:   1 (unchanged)
+    read from::   SingleNode (unchanged)
+
+
+internal DNS:
+  DNS zone: "control-plane.oxide.internal" (unchanged)
+    unchanged names: 40 (records: 56)
+
+external DNS:
+  DNS zone: "oxide.example" (unchanged)
+    unchanged names: 5 (records: 9)
+
+
+
+
+> # Update serial1's install dataset. Finally the planner is unblocked. (Note that
+> # we do noop conversions of serial1 to Artifact and the unblocking of further
+> # steps within the same blueprint. In other words, the code that considers
+> # whether add/update are blocked takes into account noop conversions.)
+> sled-update-install-dataset serial1 --to-target-release
+sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: install dataset updated: to target release (system version 2.0.0)
+
+> inventory-generate
+generated inventory collection 78f72e8d-46a9-40a9-8618-602f54454d80 from configured sleds
+
+
+> # This will attempt to update the RoT bootloader on the first sled.
+> blueprint-plan latest latest
+INFO performed noop zone image source checks on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, num_total: 7, num_already_artifact: 0, num_eligible: 7, num_ineligible: 0
+INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
+INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
+INFO performed noop zone image source checks on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, num_total: 6, num_already_artifact: 6, num_eligible: 0, num_ineligible: 0
+INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
+INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
+INFO performed noop zone image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 6, num_already_artifact: 6, num_eligible: 0, num_ineligible: 0
+INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
+INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
+INFO configuring MGS-driven update, artifact_version: 2.0.0, artifact_hash: 8f89bf8bc5f3271650ad72a26fc0d116c910161ca143731473a2b20fb82653cc, expected_stage0_next_version: NoValidVersion, expected_stage0_version: 0.0.1, component: rot_bootloader, sp_slot: 0, sp_type: Sled, serial_number: serial0, part_number: model0
+INFO reached maximum number of pending MGS-driven updates, max: 1
+generated blueprint 12d602a6-5ab4-487a-b94e-eb30cdf30300 based on parent blueprint 8f2d1f39-7c88-4701-aa43-56bf281b28c1
+blueprint source: planner with report:
+planning report:
+* skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 6 zones are already from artifacts
+* skipping noop zone image source check on sled d81c6a84-79b8-4958-ae41-ea46c9b19763: all 6 zones are already from artifacts
+* noop converting 7/7 install-dataset zones to artifact store on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
 * 1 pending MGS update:
   * model0:serial0: RotBootloader(PendingMgsUpdateRotBootloaderDetails { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: NoValidVersion })
+* only placed 0/1 desired nexus zones
 * zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+* waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
 
 > blueprint-show latest
-blueprint  8f2d1f39-7c88-4701-aa43-56bf281b28c1
-parent:    ce365dff-2cdb-4f35-a186-b15e20e1e700
+blueprint  12d602a6-5ab4-487a-b94e-eb30cdf30300
+parent:    8f2d1f39-7c88-4701-aa43-56bf281b28c1
 
-  sled: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c (active, config generation 5)
+  sled: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c (active, config generation 6)
 
     host phase 2 contents:
     ------------------------
@@ -1759,16 +1859,16 @@ parent:    ce365dff-2cdb-4f35-a186-b15e20e1e700
 
 
     omicron zones:
-    ---------------------------------------------------------------------------------------------------------------
-    zone type         zone id                                image source      disposition   underlay IP           
-    ---------------------------------------------------------------------------------------------------------------
-    clickhouse        353b3b65-20f7-48c3-88f7-495bd5d31545   install dataset   in service    fd00:1122:3344:102::23
-    crucible          bd354eef-d8a6-4165-9124-283fb5e46d77   install dataset   in service    fd00:1122:3344:102::26
-    crucible_pantry   ad6a3a03-8d0f-4504-99a4-cbf73d69b973   install dataset   in service    fd00:1122:3344:102::25
-    external_dns      6c3ae381-04f7-41ea-b0ac-74db387dbc3a   install dataset   in service    fd00:1122:3344:102::24
-    internal_dns      99e2f30b-3174-40bf-a78a-90da8abba8ca   install dataset   in service    fd00:1122:3344:1::1   
-    internal_ntp      62620961-fc4a-481e-968b-f5acbac0dc63   install dataset   in service    fd00:1122:3344:102::21
-    nexus             466a9f29-62bf-4e63-924a-b9efdb86afec   install dataset   in service    fd00:1122:3344:102::22
+    -----------------------------------------------------------------------------------------------------------------------
+    zone type         zone id                                image source              disposition   underlay IP           
+    -----------------------------------------------------------------------------------------------------------------------
+    clickhouse        353b3b65-20f7-48c3-88f7-495bd5d31545   artifact: version 2.0.0   in service    fd00:1122:3344:102::23
+    crucible          bd354eef-d8a6-4165-9124-283fb5e46d77   artifact: version 2.0.0   in service    fd00:1122:3344:102::26
+    crucible_pantry   ad6a3a03-8d0f-4504-99a4-cbf73d69b973   artifact: version 2.0.0   in service    fd00:1122:3344:102::25
+    external_dns      6c3ae381-04f7-41ea-b0ac-74db387dbc3a   artifact: version 2.0.0   in service    fd00:1122:3344:102::24
+    internal_dns      99e2f30b-3174-40bf-a78a-90da8abba8ca   artifact: version 2.0.0   in service    fd00:1122:3344:1::1   
+    internal_ntp      62620961-fc4a-481e-968b-f5acbac0dc63   artifact: version 2.0.0   in service    fd00:1122:3344:102::21
+    nexus             466a9f29-62bf-4e63-924a-b9efdb86afec   artifact: version 2.0.0   in service    fd00:1122:3344:102::22
 
 
 
@@ -1876,7 +1976,7 @@ parent:    ce365dff-2cdb-4f35-a186-b15e20e1e700
  METADATA:
     created by:::::::::::::   reconfigurator-sim
     created at:::::::::::::   <REDACTED_TIMESTAMP>
-    comment::::::::::::::::   update Sled 0 (serial0) RoT bootloader to 2.0.0
+    comment::::::::::::::::   update Sled 0 (serial0) RoT bootloader to 2.0.0, sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: performed 7 noop zone image source updates
     internal DNS version:::   1
     external DNS version:::   1
     target release min gen:   4
@@ -1891,19 +1991,80 @@ parent:    ce365dff-2cdb-4f35-a186-b15e20e1e700
 
 
 blueprint source: planner with report:
-planning report for blueprint 8f2d1f39-7c88-4701-aa43-56bf281b28c1:
+planning report:
 * skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 6 zones are already from artifacts
 * skipping noop zone image source check on sled d81c6a84-79b8-4958-ae41-ea46c9b19763: all 6 zones are already from artifacts
+* noop converting 7/7 install-dataset zones to artifact store on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
 * 1 pending MGS update:
   * model0:serial0: RotBootloader(PendingMgsUpdateRotBootloaderDetails { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: NoValidVersion })
+* only placed 0/1 desired nexus zones
 * zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+* waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
 
 
 > blueprint-diff latest
-from: blueprint ce365dff-2cdb-4f35-a186-b15e20e1e700
-to:   blueprint 8f2d1f39-7c88-4701-aa43-56bf281b28c1
+from: blueprint 8f2d1f39-7c88-4701-aa43-56bf281b28c1
+to:   blueprint 12d602a6-5ab4-487a-b94e-eb30cdf30300
+
+ MODIFIED SLEDS:
+
+  sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c (active, config generation 5 -> 6):
+
+    host phase 2 contents:
+    ------------------------
+    slot   boot image source
+    ------------------------
+    A      current contents 
+    B      current contents 
+
+
+    physical disks:
+    ------------------------------------------------------------------------------------
+    vendor        model        serial                                        disposition
+    ------------------------------------------------------------------------------------
+    fake-vendor   fake-model   serial-72c59873-31ff-4e36-8d76-ff834009349a   in service 
+
+
+    datasets:
+    -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+    dataset name                                                                                                   dataset id                             disposition   quota     reservation   compression
+    -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+    oxp_72c59873-31ff-4e36-8d76-ff834009349a/crucible                                                              8c4fa711-1d5d-4e93-85f0-d17bff47b063   in service    none      none          off        
+    oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/clickhouse                                                      3b66453b-7148-4c1b-84a9-499e43290ab4   in service    none      none          off        
+    oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/external_dns                                                    841d5648-05f0-47b0-b446-92f6b60fe9a6   in service    none      none          off        
+    oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/internal_dns                                                    3560dd69-3b23-4c69-807d-d673104cfc68   in service    none      none          off        
+    oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/zone                                                            4829f422-aa31-41a8-ab73-95684ff1ef48   in service    none      none          off        
+    oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/zone/oxz_clickhouse_353b3b65-20f7-48c3-88f7-495bd5d31545        318fae85-abcb-4259-b1b6-ac96d193f7b7   in service    none      none          off        
+    oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/zone/oxz_crucible_bd354eef-d8a6-4165-9124-283fb5e46d77          2ad1875a-92ac-472f-8c26-593309f0e4da   in service    none      none          off        
+    oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/zone/oxz_crucible_pantry_ad6a3a03-8d0f-4504-99a4-cbf73d69b973   c31623de-c19b-4615-9f1d-5e1daa5d3bda   in service    none      none          off        
+    oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/zone/oxz_external_dns_6c3ae381-04f7-41ea-b0ac-74db387dbc3a      b46de15d-33e7-4cd0-aa7c-e7be2a61e71b   in service    none      none          off        
+    oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/zone/oxz_internal_dns_99e2f30b-3174-40bf-a78a-90da8abba8ca      09b9cc9b-3426-470b-a7bc-538f82dede03   in service    none      none          off        
+    oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/zone/oxz_nexus_466a9f29-62bf-4e63-924a-b9efdb86afec             775f9207-c42d-4af2-9186-27ffef67735e   in service    none      none          off        
+    oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/zone/oxz_ntp_62620961-fc4a-481e-968b-f5acbac0dc63               2db6b7c1-0f46-4ced-a3ad-48872793360e   in service    none      none          off        
+    oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/debug                                                           93957ca0-9ed1-4e7b-8c34-2ce07a69541c   in service    100 GiB   none          gzip-9     
+
+
+    omicron zones:
+    -------------------------------------------------------------------------------------------------------------------------
+    zone type         zone id                                image source                disposition   underlay IP           
+    -------------------------------------------------------------------------------------------------------------------------
+*   clickhouse        353b3b65-20f7-48c3-88f7-495bd5d31545   - install dataset           in service    fd00:1122:3344:102::23
+     └─                                                      + artifact: version 2.0.0                                       
+*   crucible          bd354eef-d8a6-4165-9124-283fb5e46d77   - install dataset           in service    fd00:1122:3344:102::26
+     └─                                                      + artifact: version 2.0.0                                       
+*   crucible_pantry   ad6a3a03-8d0f-4504-99a4-cbf73d69b973   - install dataset           in service    fd00:1122:3344:102::25
+     └─                                                      + artifact: version 2.0.0                                       
+*   external_dns      6c3ae381-04f7-41ea-b0ac-74db387dbc3a   - install dataset           in service    fd00:1122:3344:102::24
+     └─                                                      + artifact: version 2.0.0                                       
+*   internal_dns      99e2f30b-3174-40bf-a78a-90da8abba8ca   - install dataset           in service    fd00:1122:3344:1::1   
+     └─                                                      + artifact: version 2.0.0                                       
+*   internal_ntp      62620961-fc4a-481e-968b-f5acbac0dc63   - install dataset           in service    fd00:1122:3344:102::21
+     └─                                                      + artifact: version 2.0.0                                       
+*   nexus             466a9f29-62bf-4e63-924a-b9efdb86afec   - install dataset           in service    fd00:1122:3344:102::22
+     └─                                                      + artifact: version 2.0.0                                       
+
 
  COCKROACHDB SETTINGS:
     state fingerprint:::::::::::::::::   (none) (unchanged)
@@ -2000,10 +2161,10 @@ set sled d81c6a84-79b8-4958-ae41-ea46c9b19763 host phase 1 details: active -> B,
 
 > # All MGS-based updates complete.
 > inventory-generate
-generated inventory collection 78f72e8d-46a9-40a9-8618-602f54454d80 from configured sleds
+generated inventory collection 39363465-89ae-4ac2-9be1-099068da9d45 from configured sleds
 
 > blueprint-plan latest latest
-INFO performed noop zone image source checks on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, num_total: 7, num_already_artifact: 0, num_eligible: 0, num_ineligible: 7
+INFO performed noop zone image source checks on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, num_total: 7, num_already_artifact: 7, num_eligible: 0, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO performed noop zone image source checks on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, num_total: 6, num_already_artifact: 6, num_eligible: 0, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
@@ -2014,25 +2175,28 @@ INFO skipping board for MGS-driven update, serial_number: serial0, part_number: 
 INFO skipping board for MGS-driven update, serial_number: serial1, part_number: model1
 INFO skipping board for MGS-driven update, serial_number: serial2, part_number: model2
 INFO ran out of boards for MGS-driven update
-INFO some zones not yet up-to-date, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, zones_currently_updating: [ZoneCurrentlyUpdating { zone_id: 0c71b3b2-6ceb-4e8f-b020-b08675e83038 (service), zone_kind: Nexus, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("0e32b4a3e5d3668bb1d6a16fb06b74dc60b973fa479dcee0aae3adbb52bf1388") }, inv_image_source: InstallDataset } }, ZoneCurrentlyUpdating { zone_id: 427ec88f-f467-42fa-9bbb-66a91a36103c (service), zone_kind: InternalDns, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("ffbf1373f7ee08dddd74c53ed2a94e7c4c572a982d3a9bc94000c6956b700c6a") }, inv_image_source: InstallDataset } }, ZoneCurrentlyUpdating { zone_id: 5199c033-4cf9-4ab6-8ae7-566bd7606363 (service), zone_kind: Crucible, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("6f17cf65fb5a5bec5542dd07c03cd0acc01e59130f02c532c8d848ecae810047") }, inv_image_source: InstallDataset } }, ZoneCurrentlyUpdating { zone_id: 6444f8a5-6465-4f0b-a549-1993c113569c (service), zone_kind: InternalNtp, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("67593d686ed04a1709f93972b71f4ebc148a9362120f65d239943e814a9a7439") }, inv_image_source: InstallDataset } }, ZoneCurrentlyUpdating { zone_id: 803bfb63-c246-41db-b0da-d3b87ddfc63d (service), zone_kind: ExternalDns, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("ccca13ed19b8731f9adaf0d6203b02ea3b9ede4fa426b9fac0a07ce95440046d") }, inv_image_source: InstallDataset } }, ZoneCurrentlyUpdating { zone_id: ba4994a8-23f9-4b1a-a84f-a08d74591389 (service), zone_kind: CruciblePantry, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("21f0ada306859c23917361f2e0b9235806c32607ec689c7e8cf16bb898bc5a02") }, inv_image_source: InstallDataset } }]
-generated blueprint 12d602a6-5ab4-487a-b94e-eb30cdf30300 based on parent blueprint 8f2d1f39-7c88-4701-aa43-56bf281b28c1
+INFO some zones not yet up-to-date, zones_currently_updating: [ZonePropagationIncomplete { zone_id: 353b3b65-20f7-48c3-88f7-495bd5d31545 (service), zone_kind: Clickhouse, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("2.0.0") }, hash: ArtifactHash("bb2d1ff02d11f72bc9049ae57f27536207519a1859d29f8d7a90ab3b44d56b08") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: 466a9f29-62bf-4e63-924a-b9efdb86afec (service), zone_kind: Nexus, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("2.0.0") }, hash: ArtifactHash("e9b7035f41848a987a798c15ac424cc91dd662b1af0920d58d8aa1ebad7467b6") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: 62620961-fc4a-481e-968b-f5acbac0dc63 (service), zone_kind: InternalNtp, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("2.0.0") }, hash: ArtifactHash("d76e26198daed69cdae04490d7477f8c842e0dbe37d463eac0d0a8d3fb803095") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: 6c3ae381-04f7-41ea-b0ac-74db387dbc3a (service), zone_kind: ExternalDns, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("2.0.0") }, hash: ArtifactHash("f282c45771429f7bebf71f0cc668521066db57c6bb07fcfccdfb44825d3d930f") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: 99e2f30b-3174-40bf-a78a-90da8abba8ca (service), zone_kind: InternalDns, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("2.0.0") }, hash: ArtifactHash("de30657a72b066b8ef1f56351a0a5d4d7000da0a62c4be9b2e949a107ca8a389") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: ad6a3a03-8d0f-4504-99a4-cbf73d69b973 (service), zone_kind: CruciblePantry, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("2.0.0") }, hash: ArtifactHash("3ff26dad96faa8f67251f5de40458b4f809d536bfe8572134da0e42c2fa12674") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: bd354eef-d8a6-4165-9124-283fb5e46d77 (service), zone_kind: Crucible, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("2.0.0") }, hash: ArtifactHash("866f6a7c2e51c056fb722b5113e80181cc9cd8b712a0d3dbf1edc4ce29e5229e") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: 0c71b3b2-6ceb-4e8f-b020-b08675e83038 (service), zone_kind: Nexus, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("0e32b4a3e5d3668bb1d6a16fb06b74dc60b973fa479dcee0aae3adbb52bf1388") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: 427ec88f-f467-42fa-9bbb-66a91a36103c (service), zone_kind: InternalDns, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("ffbf1373f7ee08dddd74c53ed2a94e7c4c572a982d3a9bc94000c6956b700c6a") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: 5199c033-4cf9-4ab6-8ae7-566bd7606363 (service), zone_kind: Crucible, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("6f17cf65fb5a5bec5542dd07c03cd0acc01e59130f02c532c8d848ecae810047") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: 6444f8a5-6465-4f0b-a549-1993c113569c (service), zone_kind: InternalNtp, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("67593d686ed04a1709f93972b71f4ebc148a9362120f65d239943e814a9a7439") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: 803bfb63-c246-41db-b0da-d3b87ddfc63d (service), zone_kind: ExternalDns, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("ccca13ed19b8731f9adaf0d6203b02ea3b9ede4fa426b9fac0a07ce95440046d") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: ba4994a8-23f9-4b1a-a84f-a08d74591389 (service), zone_kind: CruciblePantry, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("21f0ada306859c23917361f2e0b9235806c32607ec689c7e8cf16bb898bc5a02") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: 3eeb8d49-eb1a-43f8-bb64-c2338421c2c6 (service), zone_kind: Nexus, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("2.0.0") }, hash: ArtifactHash("e9b7035f41848a987a798c15ac424cc91dd662b1af0920d58d8aa1ebad7467b6") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: 75b220ba-a0f4-4872-8202-dc7c87f062d0 (service), zone_kind: CruciblePantry, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("2.0.0") }, hash: ArtifactHash("3ff26dad96faa8f67251f5de40458b4f809d536bfe8572134da0e42c2fa12674") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: ea5b4030-b52f-44b2-8d70-45f15f987d01 (service), zone_kind: InternalDns, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("2.0.0") }, hash: ArtifactHash("de30657a72b066b8ef1f56351a0a5d4d7000da0a62c4be9b2e949a107ca8a389") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: f10a4fb9-759f-4a65-b25e-5794ad2d07d8 (service), zone_kind: InternalNtp, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("2.0.0") }, hash: ArtifactHash("d76e26198daed69cdae04490d7477f8c842e0dbe37d463eac0d0a8d3fb803095") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: f55647d4-5500-4ad3-893a-df45bd50d622 (service), zone_kind: Crucible, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("2.0.0") }, hash: ArtifactHash("866f6a7c2e51c056fb722b5113e80181cc9cd8b712a0d3dbf1edc4ce29e5229e") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: f6ec9c67-946a-4da3-98d5-581f72ce8bf0 (service), zone_kind: ExternalDns, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("2.0.0") }, hash: ArtifactHash("f282c45771429f7bebf71f0cc668521066db57c6bb07fcfccdfb44825d3d930f") }, inv_image_source: InstallDataset } }]
+generated blueprint 61a93ea3-c872-48e0-aace-e86b0c52b839 based on parent blueprint 12d602a6-5ab4-487a-b94e-eb30cdf30300
 blueprint source: planner with report:
-planning report for blueprint 12d602a6-5ab4-487a-b94e-eb30cdf30300:
+planning report:
+* skipping noop zone image source check on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: all 7 zones are already from artifacts
 * skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 6 zones are already from artifacts
 * skipping noop zone image source check on sled d81c6a84-79b8-4958-ae41-ea46c9b19763: all 6 zones are already from artifacts
 * noop converting host phase 2 slot B to Artifact on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
 * noop converting host phase 2 slot B to Artifact on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
 * noop converting host phase 2 slot B to Artifact on sled d81c6a84-79b8-4958-ae41-ea46c9b19763
+* only placed 0/1 desired nexus zones
+* waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
 
 > blueprint-diff latest
-from: blueprint 8f2d1f39-7c88-4701-aa43-56bf281b28c1
-to:   blueprint 12d602a6-5ab4-487a-b94e-eb30cdf30300
+from: blueprint 12d602a6-5ab4-487a-b94e-eb30cdf30300
+to:   blueprint 61a93ea3-c872-48e0-aace-e86b0c52b839
 
  MODIFIED SLEDS:
 
-  sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c (active, config generation 5 -> 6):
+  sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c (active, config generation 6 -> 7):
 
     host phase 2 contents:
     --------------------------------
@@ -2070,16 +2234,16 @@ to:   blueprint 12d602a6-5ab4-487a-b94e-eb30cdf30300
 
 
     omicron zones:
-    ---------------------------------------------------------------------------------------------------------------
-    zone type         zone id                                image source      disposition   underlay IP           
-    ---------------------------------------------------------------------------------------------------------------
-    clickhouse        353b3b65-20f7-48c3-88f7-495bd5d31545   install dataset   in service    fd00:1122:3344:102::23
-    crucible          bd354eef-d8a6-4165-9124-283fb5e46d77   install dataset   in service    fd00:1122:3344:102::26
-    crucible_pantry   ad6a3a03-8d0f-4504-99a4-cbf73d69b973   install dataset   in service    fd00:1122:3344:102::25
-    external_dns      6c3ae381-04f7-41ea-b0ac-74db387dbc3a   install dataset   in service    fd00:1122:3344:102::24
-    internal_dns      99e2f30b-3174-40bf-a78a-90da8abba8ca   install dataset   in service    fd00:1122:3344:1::1   
-    internal_ntp      62620961-fc4a-481e-968b-f5acbac0dc63   install dataset   in service    fd00:1122:3344:102::21
-    nexus             466a9f29-62bf-4e63-924a-b9efdb86afec   install dataset   in service    fd00:1122:3344:102::22
+    -----------------------------------------------------------------------------------------------------------------------
+    zone type         zone id                                image source              disposition   underlay IP           
+    -----------------------------------------------------------------------------------------------------------------------
+    clickhouse        353b3b65-20f7-48c3-88f7-495bd5d31545   artifact: version 2.0.0   in service    fd00:1122:3344:102::23
+    crucible          bd354eef-d8a6-4165-9124-283fb5e46d77   artifact: version 2.0.0   in service    fd00:1122:3344:102::26
+    crucible_pantry   ad6a3a03-8d0f-4504-99a4-cbf73d69b973   artifact: version 2.0.0   in service    fd00:1122:3344:102::25
+    external_dns      6c3ae381-04f7-41ea-b0ac-74db387dbc3a   artifact: version 2.0.0   in service    fd00:1122:3344:102::24
+    internal_dns      99e2f30b-3174-40bf-a78a-90da8abba8ca   artifact: version 2.0.0   in service    fd00:1122:3344:1::1   
+    internal_ntp      62620961-fc4a-481e-968b-f5acbac0dc63   artifact: version 2.0.0   in service    fd00:1122:3344:102::21
+    nexus             466a9f29-62bf-4e63-924a-b9efdb86afec   artifact: version 2.0.0   in service    fd00:1122:3344:102::22
 
 
   sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 (active, config generation 7 -> 8):
@@ -2225,7 +2389,7 @@ set sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 mupdate override: unset -> c8fba91
 added sled c3bc4c6d-fdde-4fc4-8493-89d2a1e5ee6b (serial: serial3)
 
 > inventory-generate
-generated inventory collection 39363465-89ae-4ac2-9be1-099068da9d45 from configured sleds
+generated inventory collection 04bc9001-0836-4fec-b9cb-9d4760caf8b4 from configured sleds
 
 
 > # This will *not* generate the datasets and internal NTP zone on the new
@@ -2244,7 +2408,7 @@ INFO blueprint mupdate override updated to match inventory, phase: do_plan_mupda
 
 INFO no previous MGS update found as part of updating blueprint mupdate override to match inventory, phase: do_plan_mupdate_override, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
 INFO updating target release minimum generation based on new set-override actions, phase: do_plan_mupdate_override, current_generation: 4, new_generation: 5
-INFO performed noop zone image source checks on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, num_total: 7, num_already_artifact: 0, num_eligible: 0, num_ineligible: 7
+INFO performed noop zone image source checks on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, num_total: 7, num_already_artifact: 7, num_eligible: 0, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO skipped noop image source check on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, reason: remove_mupdate_override is set in the blueprint (c8fba912-63ae-473a-9115-0495d10fb3bc)
 INFO performed noop zone image source checks on sled, sled_id: c3bc4c6d-fdde-4fc4-8493-89d2a1e5ee6b, num_total: 0, num_already_artifact: 0, num_eligible: 0, num_ineligible: 0
@@ -2252,22 +2416,27 @@ INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noo
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: c3bc4c6d-fdde-4fc4-8493-89d2a1e5ee6b, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
 INFO performed noop zone image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 6, num_already_artifact: 6, num_eligible: 0, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
-generated blueprint 61a93ea3-c872-48e0-aace-e86b0c52b839 based on parent blueprint 12d602a6-5ab4-487a-b94e-eb30cdf30300
+generated blueprint 27e755bc-dc10-4647-853c-f89bb3a15a2c based on parent blueprint 61a93ea3-c872-48e0-aace-e86b0c52b839
 blueprint source: planner with report:
-planning report for blueprint 61a93ea3-c872-48e0-aace-e86b0c52b839:
+planning report:
+* skipping noop zone image source check on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: all 7 zones are already from artifacts
 * skipping noop zone image source check on sled c3bc4c6d-fdde-4fc4-8493-89d2a1e5ee6b: all 0 zones are already from artifacts
 * skipping noop zone image source check on sled d81c6a84-79b8-4958-ae41-ea46c9b19763: all 6 zones are already from artifacts
 * zone adds waiting on blockers
 * zone adds and updates are blocked:
   - current target release generation (4) is lower than minimum required by blueprint (5)
   - sleds have remove mupdate override set in blueprint: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
+  - sleds have deployment units with image sources not set to Artifact:
+    - sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: 6 zones
+
 * zone updates waiting on zone add blockers
+* waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
 
 > blueprint-diff latest
-from: blueprint 12d602a6-5ab4-487a-b94e-eb30cdf30300
-to:   blueprint 61a93ea3-c872-48e0-aace-e86b0c52b839
+from: blueprint 61a93ea3-c872-48e0-aace-e86b0c52b839
+to:   blueprint 27e755bc-dc10-4647-853c-f89bb3a15a2c
 
  MODIFIED SLEDS:
 
@@ -2370,7 +2539,7 @@ planner config updated:
 
 
 > blueprint-plan latest latest
-INFO performed noop zone image source checks on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, num_total: 7, num_already_artifact: 0, num_eligible: 0, num_ineligible: 7
+INFO performed noop zone image source checks on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, num_total: 7, num_already_artifact: 7, num_eligible: 0, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO skipped noop image source check on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, reason: remove_mupdate_override is set in the blueprint (c8fba912-63ae-473a-9115-0495d10fb3bc)
 INFO performed noop zone image source checks on sled, sled_id: c3bc4c6d-fdde-4fc4-8493-89d2a1e5ee6b, num_total: 0, num_already_artifact: 0, num_eligible: 0, num_ineligible: 0
@@ -2379,27 +2548,33 @@ INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noo
 INFO performed noop zone image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 6, num_already_artifact: 6, num_eligible: 0, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO altered physical disks, sled_id: c3bc4c6d-fdde-4fc4-8493-89d2a1e5ee6b, sled_edits: SledEditCounts { disks: EditCounts { added: 10, updated: 0, expunged: 0, removed: 0 }, datasets: EditCounts { added: 20, updated: 0, expunged: 0, removed: 0 }, zones: EditCounts { added: 0, updated: 0, expunged: 0, removed: 0 } }
-generated blueprint 27e755bc-dc10-4647-853c-f89bb3a15a2c based on parent blueprint 61a93ea3-c872-48e0-aace-e86b0c52b839
+generated blueprint 9f89efdf-a23e-4137-b7cc-79f4a91cbe1f based on parent blueprint 27e755bc-dc10-4647-853c-f89bb3a15a2c
 blueprint source: planner with report:
-planning report for blueprint 27e755bc-dc10-4647-853c-f89bb3a15a2c:
+planning report:
 planner config:
     add zones with mupdate override:   true
 
+* skipping noop zone image source check on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: all 7 zones are already from artifacts
 * skipping noop zone image source check on sled c3bc4c6d-fdde-4fc4-8493-89d2a1e5ee6b: all 0 zones are already from artifacts
 * skipping noop zone image source check on sled d81c6a84-79b8-4958-ae41-ea46c9b19763: all 6 zones are already from artifacts
 * zone adds and updates are blocked:
   - current target release generation (4) is lower than minimum required by blueprint (5)
   - sleds have remove mupdate override set in blueprint: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
+  - sleds have deployment units with image sources not set to Artifact:
+    - sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: 6 zones
+
 * adding zones despite being blocked, as specified by the `add_zones_with_mupdate_override` planner config option
 * discretionary zone placement waiting for NTP zones on sleds: c3bc4c6d-fdde-4fc4-8493-89d2a1e5ee6b
 * missing NTP zone on sled c3bc4c6d-fdde-4fc4-8493-89d2a1e5ee6b
+* only placed 0/1 desired nexus zones
 * zone updates waiting on zone add blockers
+* waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
 
 > blueprint-diff latest
-from: blueprint 61a93ea3-c872-48e0-aace-e86b0c52b839
-to:   blueprint 27e755bc-dc10-4647-853c-f89bb3a15a2c
+from: blueprint 27e755bc-dc10-4647-853c-f89bb3a15a2c
+to:   blueprint 9f89efdf-a23e-4137-b7cc-79f4a91cbe1f
 
  MODIFIED SLEDS:
 
@@ -2433,34 +2608,34 @@ to:   blueprint 27e755bc-dc10-4647-853c-f89bb3a15a2c
     -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
     dataset name                                                                                       dataset id                             disposition   quota     reservation   compression
     -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-+   oxp_1a2d5932-ca5b-44b8-a0a4-31215d934293/crypt/zone                                                1e98b76f-11ed-4b79-8759-cbecd2f7f0d9   in service    none      none          off        
-+   oxp_2454c824-3b2b-4350-a5c7-ce9b1ff5a903/crypt/zone                                                e20c48ae-597e-4341-bf40-eeeb76c3762c   in service    none      none          off        
-+   oxp_5369d002-dd19-48f2-8c08-ba063cb1e010/crypt/zone                                                2bc7995d-9c70-4641-80a7-857c48fd1950   in service    none      none          off        
-+   oxp_5e25e3a5-d115-4df0-a54b-81f29fbb9d61/crypt/zone                                                ada18d30-b0c4-46c8-9179-18b0538e9aaa   in service    none      none          off        
-+   oxp_6082ad32-e210-4786-9656-4b6bfcec5d05/crypt/zone                                                3a517a41-e948-4dd3-8792-cc44766db624   in service    none      none          off        
-+   oxp_88659529-1c87-4107-8227-c9276a330bf5/crypt/zone                                                31120549-ea59-4c77-ba4d-bb7c7533ed07   in service    none      none          off        
-+   oxp_9cde7847-ff58-41af-95bf-aecebc3f1344/crypt/zone                                                300a9158-6179-4a27-b602-b5b508ffe753   in service    none      none          off        
-+   oxp_9e9ca75a-6a79-4706-bcce-35714d79913c/crypt/zone                                                3e9ff584-4500-4ec7-ba7e-4c072ab1a930   in service    none      none          off        
-+   oxp_d8c90412-fbdb-480d-8a07-c3de73b441bc/crypt/zone                                                3692a85a-ed9a-432a-a83b-ae0be332b5f4   in service    none      none          off        
-+   oxp_f3052185-bebb-4e75-842b-d8125b70bb8a/crypt/zone                                                a30fa102-f04d-40d9-89bb-1b99531e3352   in service    none      none          off        
-+   oxp_1a2d5932-ca5b-44b8-a0a4-31215d934293/crypt/zone/oxz_ntp_6af1f5f5-6a16-40f0-a830-651e738967aa   1bcd66fb-3ab2-43e9-8f1f-7109e699b00f   in service    none      none          off        
-+   oxp_1a2d5932-ca5b-44b8-a0a4-31215d934293/crypt/debug                                               fd79ae88-b57c-4119-8d75-e2a08d1f0754   in service    100 GiB   none          gzip-9     
-+   oxp_2454c824-3b2b-4350-a5c7-ce9b1ff5a903/crypt/debug                                               7fe7a330-9e24-4257-b342-52c91a95b727   in service    100 GiB   none          gzip-9     
-+   oxp_5369d002-dd19-48f2-8c08-ba063cb1e010/crypt/debug                                               8e31b075-0e5c-4908-be7e-2d8be8292b72   in service    100 GiB   none          gzip-9     
-+   oxp_5e25e3a5-d115-4df0-a54b-81f29fbb9d61/crypt/debug                                               5b97259a-9114-4c66-987c-bcb0bf1b63ac   in service    100 GiB   none          gzip-9     
-+   oxp_6082ad32-e210-4786-9656-4b6bfcec5d05/crypt/debug                                               c96c0f0a-1e9c-44c0-a774-b86c0e699474   in service    100 GiB   none          gzip-9     
-+   oxp_88659529-1c87-4107-8227-c9276a330bf5/crypt/debug                                               abf8aedc-712e-43f0-a142-ec36543f987a   in service    100 GiB   none          gzip-9     
-+   oxp_9cde7847-ff58-41af-95bf-aecebc3f1344/crypt/debug                                               3efd9ba9-0319-44d0-a13a-9abc9aa3ce7b   in service    100 GiB   none          gzip-9     
-+   oxp_9e9ca75a-6a79-4706-bcce-35714d79913c/crypt/debug                                               12dc8471-bafb-46ae-bb19-4cc791dff15b   in service    100 GiB   none          gzip-9     
-+   oxp_d8c90412-fbdb-480d-8a07-c3de73b441bc/crypt/debug                                               cdfb4f8b-a90f-4ba2-a620-f228a405f231   in service    100 GiB   none          gzip-9     
-+   oxp_f3052185-bebb-4e75-842b-d8125b70bb8a/crypt/debug                                               aa61d941-f193-4a8a-8918-e682b96968d9   in service    100 GiB   none          gzip-9     
++   oxp_1a2d5932-ca5b-44b8-a0a4-31215d934293/crypt/zone                                                902e330d-4d6e-4b2c-8e75-83abd725278e   in service    none      none          off        
++   oxp_2454c824-3b2b-4350-a5c7-ce9b1ff5a903/crypt/zone                                                b1852e8a-77a5-4069-950f-f414eb89b489   in service    none      none          off        
++   oxp_5369d002-dd19-48f2-8c08-ba063cb1e010/crypt/zone                                                76435db9-395e-4207-a1eb-80fd31462763   in service    none      none          off        
++   oxp_5e25e3a5-d115-4df0-a54b-81f29fbb9d61/crypt/zone                                                fd3b32f6-840a-4831-b27f-b65052d8c00b   in service    none      none          off        
++   oxp_6082ad32-e210-4786-9656-4b6bfcec5d05/crypt/zone                                                5cc4f3dc-459c-42fe-b7b5-493b6d72d90c   in service    none      none          off        
++   oxp_88659529-1c87-4107-8227-c9276a330bf5/crypt/zone                                                be939f45-3895-4ac2-8140-8345ba808ef0   in service    none      none          off        
++   oxp_9cde7847-ff58-41af-95bf-aecebc3f1344/crypt/zone                                                36c2157d-00f9-4934-b465-17c6dff5aa5b   in service    none      none          off        
++   oxp_9e9ca75a-6a79-4706-bcce-35714d79913c/crypt/zone                                                a777b70b-2d04-4cc1-8afc-85e46460ec1f   in service    none      none          off        
++   oxp_d8c90412-fbdb-480d-8a07-c3de73b441bc/crypt/zone                                                3f037273-07b9-4852-b364-bd885d16aee5   in service    none      none          off        
++   oxp_f3052185-bebb-4e75-842b-d8125b70bb8a/crypt/zone                                                7647e033-19a3-400c-9bcc-d19d569715c5   in service    none      none          off        
++   oxp_1a2d5932-ca5b-44b8-a0a4-31215d934293/crypt/zone/oxz_ntp_3c3c2ba0-1c7d-4005-b02c-98366435a2c1   58255ab2-30ff-448b-a049-a9ef6b0fd0c5   in service    none      none          off        
++   oxp_1a2d5932-ca5b-44b8-a0a4-31215d934293/crypt/debug                                               8d52d9dc-7e33-4a6f-9548-8a43048fb34e   in service    100 GiB   none          gzip-9     
++   oxp_2454c824-3b2b-4350-a5c7-ce9b1ff5a903/crypt/debug                                               e1a49e92-5d7a-46a4-a1ff-b53fcb7190af   in service    100 GiB   none          gzip-9     
++   oxp_5369d002-dd19-48f2-8c08-ba063cb1e010/crypt/debug                                               97723fdc-18bb-43c5-b81a-6cda8b6b5a1f   in service    100 GiB   none          gzip-9     
++   oxp_5e25e3a5-d115-4df0-a54b-81f29fbb9d61/crypt/debug                                               b6dc1ce7-759e-4c13-a05b-116007ac3be0   in service    100 GiB   none          gzip-9     
++   oxp_6082ad32-e210-4786-9656-4b6bfcec5d05/crypt/debug                                               cf9455fe-cfe0-4ae9-ac8a-31a7caf58c03   in service    100 GiB   none          gzip-9     
++   oxp_88659529-1c87-4107-8227-c9276a330bf5/crypt/debug                                               776bda33-4677-47c9-b2d7-ac4eeb0d81d3   in service    100 GiB   none          gzip-9     
++   oxp_9cde7847-ff58-41af-95bf-aecebc3f1344/crypt/debug                                               7bde4b36-0f64-4e03-9767-f0316ab60409   in service    100 GiB   none          gzip-9     
++   oxp_9e9ca75a-6a79-4706-bcce-35714d79913c/crypt/debug                                               e716eab0-d1ba-43b4-8111-94d4565e1aa9   in service    100 GiB   none          gzip-9     
++   oxp_d8c90412-fbdb-480d-8a07-c3de73b441bc/crypt/debug                                               3b33c570-ecdb-4fb4-b856-3b108bf90920   in service    100 GiB   none          gzip-9     
++   oxp_f3052185-bebb-4e75-842b-d8125b70bb8a/crypt/debug                                               e38d5c18-c24a-4b05-84e8-1726f2015746   in service    100 GiB   none          gzip-9     
 
 
     omicron zones:
     --------------------------------------------------------------------------------------------------------------------
     zone type      zone id                                image source              disposition   underlay IP           
     --------------------------------------------------------------------------------------------------------------------
-+   internal_ntp   6af1f5f5-6a16-40f0-a830-651e738967aa   artifact: version 2.0.0   in service    fd00:1122:3344:104::21
++   internal_ntp   3c3c2ba0-1c7d-4005-b02c-98366435a2c1   artifact: version 2.0.0   in service    fd00:1122:3344:104::21
 
 
  COCKROACHDB SETTINGS:
@@ -2480,15 +2655,15 @@ to:   blueprint 27e755bc-dc10-4647-853c-f89bb3a15a2c
 
 internal DNS:
 * DNS zone: "control-plane.oxide.internal": 
-+   name: 6af1f5f5-6a16-40f0-a830-651e738967aa.host          (records: 1)
++   name: 3c3c2ba0-1c7d-4005-b02c-98366435a2c1.host          (records: 1)
 +       AAAA fd00:1122:3344:104::21
 *   name: _internal-ntp._tcp                                 (records: 3 -> 4)
 -       SRV  port   123 62620961-fc4a-481e-968b-f5acbac0dc63.host.control-plane.oxide.internal
 -       SRV  port   123 6444f8a5-6465-4f0b-a549-1993c113569c.host.control-plane.oxide.internal
 -       SRV  port   123 f10a4fb9-759f-4a65-b25e-5794ad2d07d8.host.control-plane.oxide.internal
++       SRV  port   123 3c3c2ba0-1c7d-4005-b02c-98366435a2c1.host.control-plane.oxide.internal
 +       SRV  port   123 62620961-fc4a-481e-968b-f5acbac0dc63.host.control-plane.oxide.internal
 +       SRV  port   123 6444f8a5-6465-4f0b-a549-1993c113569c.host.control-plane.oxide.internal
-+       SRV  port   123 6af1f5f5-6a16-40f0-a830-651e738967aa.host.control-plane.oxide.internal
 +       SRV  port   123 f10a4fb9-759f-4a65-b25e-5794ad2d07d8.host.control-plane.oxide.internal
     unchanged names: 40 (records: 55)
 
@@ -2503,23 +2678,23 @@ external DNS:
 > # test that the planner bails if it attempts a rollback of the target release
 > # minimum generation.
 > blueprint-edit latest set-target-release-min-gen 1000
-blueprint 9f89efdf-a23e-4137-b7cc-79f4a91cbe1f created from latest blueprint (27e755bc-dc10-4647-853c-f89bb3a15a2c): set target release minimum generation to 1000
+blueprint 9a9e6c32-5a84-4020-a159-33dceff18d35 created from latest blueprint (9f89efdf-a23e-4137-b7cc-79f4a91cbe1f): set target release minimum generation to 1000
 
 > sled-set serial1 mupdate-override cc724abe-80c1-47e6-9771-19e6540531a9
 set sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c mupdate override: unset -> cc724abe-80c1-47e6-9771-19e6540531a9
 
 > inventory-generate
-generated inventory collection 04bc9001-0836-4fec-b9cb-9d4760caf8b4 from configured sleds
+generated inventory collection 08abe624-4b5f-491c-90cb-d74a84e4ba3e from configured sleds
 
 > blueprint-plan latest latest
 INFO blueprint mupdate override updated to match inventory, phase: do_plan_mupdate_override, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, new_bp_override: cc724abe-80c1-47e6-9771-19e6540531a9, prev_bp_override: None, zones: 
-  - zone 353b3b65-20f7-48c3-88f7-495bd5d31545 (Clickhouse) left unchanged, image source: install dataset
-  - zone 466a9f29-62bf-4e63-924a-b9efdb86afec (Nexus) left unchanged, image source: install dataset
-  - zone 62620961-fc4a-481e-968b-f5acbac0dc63 (InternalNtp) left unchanged, image source: install dataset
-  - zone 6c3ae381-04f7-41ea-b0ac-74db387dbc3a (ExternalDns) left unchanged, image source: install dataset
-  - zone 99e2f30b-3174-40bf-a78a-90da8abba8ca (InternalDns) left unchanged, image source: install dataset
-  - zone ad6a3a03-8d0f-4504-99a4-cbf73d69b973 (CruciblePantry) left unchanged, image source: install dataset
-  - zone bd354eef-d8a6-4165-9124-283fb5e46d77 (Crucible) left unchanged, image source: install dataset
+  - zone 353b3b65-20f7-48c3-88f7-495bd5d31545 (Clickhouse) updated from artifact: version 2.0.0 to install dataset
+  - zone 466a9f29-62bf-4e63-924a-b9efdb86afec (Nexus) updated from artifact: version 2.0.0 to install dataset
+  - zone 62620961-fc4a-481e-968b-f5acbac0dc63 (InternalNtp) updated from artifact: version 2.0.0 to install dataset
+  - zone 6c3ae381-04f7-41ea-b0ac-74db387dbc3a (ExternalDns) updated from artifact: version 2.0.0 to install dataset
+  - zone 99e2f30b-3174-40bf-a78a-90da8abba8ca (InternalDns) updated from artifact: version 2.0.0 to install dataset
+  - zone ad6a3a03-8d0f-4504-99a4-cbf73d69b973 (CruciblePantry) updated from artifact: version 2.0.0 to install dataset
+  - zone bd354eef-d8a6-4165-9124-283fb5e46d77 (Crucible) updated from artifact: version 2.0.0 to install dataset
 , host_phase_2: 
   - host phase 2 slot A: current contents (unchanged)
   - host phase 2 slot B: updated from artifact (version version 2.0.0, hash 9ff631b5b7229604ab7c5aae2ee4a34a64772736b332540d38077b3aea6952df) to preserving current contents
