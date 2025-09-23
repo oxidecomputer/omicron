@@ -1032,6 +1032,7 @@ result:
   config:
     configured external DNS zone name: oxide.example
     configured silo names: example-silo
+    active Nexus generation: 1
 
 
 > # This should show the target release.

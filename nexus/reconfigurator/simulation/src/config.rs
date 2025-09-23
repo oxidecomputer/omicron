@@ -2,10 +2,12 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::fmt;
+use std::{collections::BTreeSet, fmt};
 
 use indexmap::IndexSet;
+use nexus_types::deployment::{Blueprint, BlueprintTarget};
 use omicron_common::api::external::{Generation, Name};
+use omicron_uuid_kinds::OmicronZoneUuid;
 
 use crate::{
     LoadSerializedResultBuilder,
@@ -120,11 +122,17 @@ impl SimConfigBuilder {
         &mut self,
         external_dns_zone_names: Vec<String>,
         silo_names: Vec<Name>,
+        active_nexus_zones: &BTreeSet<OmicronZoneUuid>,
+        target_blueprint: Option<&BlueprintTarget>,
+        all_blueprints: &[Blueprint],
         res: &mut LoadSerializedResultBuilder,
     ) -> LoadSerializedConfigResult {
         self.inner.load_serialized_inner(
             external_dns_zone_names,
             silo_names,
+            active_nexus_zones,
+            target_blueprint,
+            all_blueprints,
             res,
         )
     }
@@ -187,6 +195,9 @@ pub struct LoadSerializedConfigResult {
 
     /// The silo names loaded.
     pub silo_names: Vec<Name>,
+
+    /// The generation of active Nexus zones loaded.
+    pub active_nexus_generation: Generation,
 }
 
 impl fmt::Display for LoadSerializedConfigResult {
@@ -201,6 +212,12 @@ impl fmt::Display for LoadSerializedConfigResult {
             f,
             "configured silo names: {}",
             join_comma_or_none(&self.silo_names)
+        )?;
+
+        writeln!(
+            f,
+            "active Nexus generation: {}",
+            self.active_nexus_generation,
         )?;
 
         Ok(())
@@ -221,6 +238,9 @@ impl SimConfigBuilderInner {
         &mut self,
         external_dns_zone_names: Vec<String>,
         silo_names: Vec<Name>,
+        active_nexus_zones: &BTreeSet<OmicronZoneUuid>,
+        target_blueprint: Option<&BlueprintTarget>,
+        all_blueprints: &[Blueprint],
         res: &mut LoadSerializedResultBuilder,
     ) -> LoadSerializedConfigResult {
         let nnames = external_dns_zone_names.len();
@@ -242,7 +262,30 @@ impl SimConfigBuilderInner {
 
         self.set_silo_names_inner(silo_names.clone());
 
-        LoadSerializedConfigResult { external_dns_zone_name, silo_names }
+        // Determine the active Nexus generation by comparing the current set of
+        // active Nexus zones to the current target blueprint.
+        let active_nexus_generation = match determine_active_nexus_generation(
+            active_nexus_zones,
+            target_blueprint,
+            all_blueprints,
+        ) {
+            Ok(generation) => generation,
+            Err(message) => {
+                res.warnings.push(format!(
+                    "could not determine active Nexus \
+                     generation from serialized state: \
+                     {message} (using default of 1)"
+                ));
+                Generation::new()
+            }
+        };
+        self.set_active_nexus_zone_generation(active_nexus_generation);
+
+        LoadSerializedConfigResult {
+            external_dns_zone_name,
+            silo_names,
+            active_nexus_generation,
+        }
     }
 
     // Not public: the only caller of this is load_serialized.
@@ -280,4 +323,38 @@ impl SimConfigBuilderInner {
     fn wipe_inner(&mut self) {
         self.config = SimConfig::new();
     }
+}
+
+fn determine_active_nexus_generation(
+    active_nexus_zones: &BTreeSet<OmicronZoneUuid>,
+    target_blueprint: Option<&BlueprintTarget>,
+    all_blueprints: &[Blueprint],
+) -> Result<Generation, String> {
+    let Some(target_blueprint) = target_blueprint else {
+        return Err("no target blueprint set".to_string());
+    };
+
+    let Some(blueprint) =
+        all_blueprints.iter().find(|bp| bp.id == target_blueprint.target_id)
+    else {
+        return Err(format!(
+            "target blueprint {} not found",
+            target_blueprint.target_id
+        ));
+    };
+
+    let maybe_gen = blueprint
+        .find_generation_for_nexus(active_nexus_zones)
+        .map_err(|err| format!("{err:#}"))?;
+
+    maybe_gen.ok_or_else(|| {
+        format!(
+            "could not find Nexus zones in current target blueprint: {:?}",
+            active_nexus_zones
+                .iter()
+                .map(|z| z.to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    })
 }
