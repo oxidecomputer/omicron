@@ -1535,25 +1535,14 @@ pub struct AlertProbeResult {
 
 // UPDATE
 
-/// Source of a system software target release.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, JsonSchema, Serialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum TargetReleaseSource {
-    /// Unspecified or unknown source (probably MUPdate).
-    Unspecified,
-
-    /// The specified release of the rack's system software.
-    SystemVersion { version: Version },
-}
-
-/// View of a system software target release.
+/// View of a system software target release
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 pub struct TargetRelease {
-    /// The time it was set as the target release.
+    /// Time this was set as the target release
     pub time_requested: DateTime<Utc>,
 
-    /// The source of the target release.
-    pub release_source: TargetReleaseSource,
+    /// The specified release of the rack's system software
+    pub version: Version,
 }
 
 /// Trusted root role used by the update system to verify update repositories.
@@ -1570,8 +1559,16 @@ pub struct UpdatesTrustRoot {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 pub struct UpdateStatus {
-    /// Current target release config
-    pub target_release: TargetRelease,
+    /// Current target release of the rack's system software
+    ///
+    /// This may not correspond to the actual software running on the rack
+    /// at the time of request; it is instead the release that the rack
+    /// reconfigurator should be moving towards as a goal state. After some
+    /// number of planning and execution phases, the software running on the
+    /// rack should eventually correspond to the release described here.
+    ///
+    /// Will only be null if a target release has never been set.
+    pub target_release: Option<TargetRelease>,
 
     /// Count of components running each release version
     pub components_by_release_version: BTreeMap<String, usize>,

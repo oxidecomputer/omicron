@@ -642,10 +642,7 @@ async fn test_update_status() -> Result<()> {
     // initial status
     let status: views::UpdateStatus =
         object_get(client, "/v1/system/update/status").await;
-    assert_eq!(
-        status.target_release.release_source,
-        views::TargetReleaseSource::Unspecified
-    );
+    assert_eq!(status.target_release, None);
     let counts = status.components_by_release_version;
     assert_eq!(counts.get("install dataset").unwrap(), &7);
     assert_eq!(counts.get("unknown").unwrap(), &15);
@@ -667,10 +664,7 @@ async fn test_update_status() -> Result<()> {
 
     let status: views::UpdateStatus =
         object_get(client, "/v1/system/update/status").await;
-    assert_eq!(
-        status.target_release.release_source,
-        views::TargetReleaseSource::SystemVersion { version: v1 }
-    );
+    assert_eq!(status.target_release.unwrap().version, v1);
 
     // blueprint time doesn't change
     assert_eq!(time_last_progress, status.time_last_progress);
@@ -701,10 +695,7 @@ async fn test_update_status() -> Result<()> {
     let status: views::UpdateStatus =
         object_get(client, "/v1/system/update/status").await;
 
-    assert_eq!(
-        status.target_release.release_source,
-        views::TargetReleaseSource::SystemVersion { version: v2 }
-    );
+    assert_eq!(status.target_release.unwrap().version, v2);
 
     // blueprint time doesn't change
     assert_eq!(time_last_progress, status.time_last_progress);

@@ -298,13 +298,12 @@ API operations found with tag "system/update"
 OPERATION ID                             METHOD   URL PATH
 system_update_get_repository             GET      /v1/system/update/repository/{system_version}
 system_update_put_repository             PUT      /v1/system/update/repository
+system_update_status                     GET      /v1/system/update/status
 system_update_trust_root_create          POST     /v1/system/update/trust-roots
 system_update_trust_root_delete          DELETE   /v1/system/update/trust-roots/{trust_root_id}
 system_update_trust_root_list            GET      /v1/system/update/trust-roots
 system_update_trust_root_view            GET      /v1/system/update/trust-roots/{trust_root_id}
 target_release_update                    PUT      /v1/system/update/target-release
-target_release_view                      GET      /v1/system/update/target-release
-update_status                            GET      /v1/system/update/status
 
 API operations found with tag "tokens"
 OPERATION ID                             METHOD   URL PATH

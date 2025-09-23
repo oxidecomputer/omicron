@@ -6796,34 +6796,10 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
-    async fn target_release_view(
-        rqctx: RequestContext<ApiContext>,
-    ) -> Result<HttpResponseOk<views::TargetRelease>, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let nexus = &apictx.context.nexus;
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-            let target_release =
-                nexus.datastore().target_release_get_current(&opctx).await?;
-            Ok(HttpResponseOk(
-                nexus
-                    .datastore()
-                    .target_release_view(&opctx, &target_release)
-                    .await?,
-            ))
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
-    }
-
     async fn target_release_update(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<params::SetTargetReleaseParams>,
-    ) -> Result<HttpResponseCreated<views::TargetRelease>, HttpError> {
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
@@ -6844,21 +6820,17 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 nexus.datastore().target_release_get_current(&opctx).await?;
 
             // Disallow downgrades.
-            if let views::TargetReleaseSource::SystemVersion { version } = nexus
-                .datastore()
-                .target_release_view(&opctx, &current_target_release)
-                .await?
-                .release_source
-            {
+            if let Some(tuf_repo_id) = current_target_release.tuf_repo_id {
+                let version = nexus
+                    .datastore()
+                    .tuf_repo_get_version(&opctx, &tuf_repo_id)
+                    .await?;
                 if version > system_version {
-                    return Err(HttpError::for_bad_request(
-                        None,
-                        format!(
-                            "The requested target system release ({system_version}) \
-                             is older than the current target system release ({version}). \
-                             This is not supported."
-                        ),
-                    ));
+                    return Err(Error::invalid_request(format!(
+                        "The requested target release ({system_version}) must \
+                         be newer than the current target release ({version})."
+                    ))
+                    .into());
                 }
             }
 
@@ -6874,17 +6846,11 @@ impl NexusExternalApi for NexusExternalApiImpl {
                     &current_target_release,
                     tuf_repo_id,
                 );
-            let target_release = nexus
+            nexus
                 .datastore()
                 .target_release_insert(&opctx, next_target_release)
                 .await?;
-
-            Ok(HttpResponseCreated(
-                nexus
-                    .datastore()
-                    .target_release_view(&opctx, &target_release)
-                    .await?,
-            ))
+            Ok(HttpResponseUpdatedNoContent())
         };
         apictx
             .context
@@ -6893,7 +6859,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
-    async fn update_status(
+    async fn system_update_status(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<views::UpdateStatus>, HttpError> {
         let apictx = rqctx.context();

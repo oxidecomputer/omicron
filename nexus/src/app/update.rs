@@ -166,10 +166,19 @@ impl super::Nexus {
         // it can still have an Unspecified release_source
         let db_target_release =
             self.datastore().target_release_get_current(opctx).await?;
-        let target_release = self
-            .datastore()
-            .target_release_view(opctx, &db_target_release)
-            .await?;
+        let target_release = match db_target_release.tuf_repo_id {
+            Some(tuf_repo_id) => {
+                let version = self
+                    .datastore()
+                    .tuf_repo_get_version(opctx, &tuf_repo_id)
+                    .await?;
+                Some(views::TargetRelease {
+                    time_requested: db_target_release.time_requested,
+                    version,
+                })
+            }
+            None => None,
+        };
 
         let components_by_release_version =
             self.component_version_counts(opctx, &db_target_release).await?;

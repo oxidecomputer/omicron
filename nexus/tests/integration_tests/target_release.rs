@@ -11,9 +11,10 @@ use http::StatusCode;
 use http::method::Method;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::{NexusRequest, RequestBuilder};
+use nexus_test_utils::resource_helpers::object_get;
 use nexus_test_utils::test_setup;
 use nexus_types::external_api::params::SetTargetReleaseParams;
-use nexus_types::external_api::views::{TargetRelease, TargetReleaseSource};
+use nexus_types::external_api::views;
 use omicron_common::api::external::TufRepoInsertResponse;
 use semver::Version;
 use tufaceous_artifact::{ArtifactVersion, KnownArtifactKind};
@@ -28,17 +29,10 @@ async fn get_set_target_release() -> Result<()> {
     let client = &ctx.external_client;
     let logctx = &ctx.logctx;
 
-    // There should always be a target release.
-    let target_release: TargetRelease =
-        NexusRequest::object_get(client, "/v1/system/update/target-release")
-            .authn_as(AuthnMode::PrivilegedUser)
-            .execute()
-            .await
-            .unwrap()
-            .parsed_body()
-            .unwrap();
-    assert!(target_release.time_requested < Utc::now());
-    assert_eq!(target_release.release_source, TargetReleaseSource::Unspecified);
+    // There is no target release before one has ever been specified
+    let status: views::UpdateStatus =
+        object_get(client, "/v1/system/update/status").await;
+    assert_eq!(status.target_release, None);
 
     // Attempting to set an invalid system version should fail.
     let system_version = Version::new(0, 0, 0);
@@ -69,15 +63,16 @@ async fn get_set_target_release() -> Result<()> {
             .parsed_body()?;
         assert_eq!(system_version, response.recorded.repo.system_version);
 
-        let target_release =
-            set_target_release(client, &system_version).await?;
+        set_target_release(client, &system_version).await?;
+
+        let status: views::UpdateStatus =
+            object_get(client, "/v1/system/update/status").await;
+
+        let target_release = status.target_release.unwrap();
         let after = Utc::now();
         assert!(target_release.time_requested >= before);
         assert!(target_release.time_requested <= after);
-        assert_eq!(
-            target_release.release_source,
-            TargetReleaseSource::SystemVersion { version: system_version },
-        );
+        assert_eq!(target_release.version, system_version);
     }
 
     // Adding a repo with non-semver artifact versions should be ok, too.
@@ -100,15 +95,16 @@ async fn get_set_target_release() -> Result<()> {
             .parsed_body()?;
         assert_eq!(system_version, response.recorded.repo.system_version);
 
-        let target_release =
-            set_target_release(client, &system_version).await?;
+        set_target_release(client, &system_version).await?;
+
+        let status: views::UpdateStatus =
+            object_get(client, "/v1/system/update/status").await;
+
+        let target_release = status.target_release.unwrap();
         let after = Utc::now();
         assert!(target_release.time_requested >= before);
         assert!(target_release.time_requested <= after);
-        assert_eq!(
-            target_release.release_source,
-            TargetReleaseSource::SystemVersion { version: system_version },
-        );
+        assert_eq!(target_release.version, system_version);
     }
 
     // Attempting to downgrade to an earlier system version (2.0.0 → 1.0.0)
@@ -124,7 +120,7 @@ async fn get_set_target_release() -> Result<()> {
 pub async fn set_target_release(
     client: &ClientTestContext,
     system_version: &Version,
-) -> Result<TargetRelease> {
+) -> Result<(), anyhow::Error> {
     NexusRequest::new(
         RequestBuilder::new(
             client,
@@ -134,10 +130,10 @@ pub async fn set_target_release(
         .body(Some(&SetTargetReleaseParams {
             system_version: system_version.clone(),
         }))
-        .expect_status(Some(StatusCode::CREATED)),
+        .expect_status(Some(StatusCode::NO_CONTENT)),
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
     .await
-    .map(|response| response.parsed_body().unwrap())
+    .map(|_| ())
 }
