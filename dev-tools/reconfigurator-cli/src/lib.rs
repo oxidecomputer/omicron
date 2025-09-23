@@ -2445,7 +2445,7 @@ fn cmd_blueprint_diff(
     let internal_dns_config2 = blueprint_internal_dns_config(
         &blueprint2,
         &sleds_by_id,
-        blueprint1.nexus_generation,
+        blueprint2.nexus_generation,
         &Default::default(),
     )?;
     let dns_diff = DnsDiff::new(&internal_dns_config1, &internal_dns_config2)
