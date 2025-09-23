@@ -225,11 +225,11 @@ impl<'a> Planner<'a> {
             PlanningZoneUpdatesStepReport::waiting_on(
                 ZoneUpdatesWaitingOn::PendingMgsUpdates,
             )
-        } else if !mgs_updates.skipped_mgs_updates.is_empty() {
-            // ... or if there are skipped updates for the RoT / SP / Host OS /
+        } else if !mgs_updates.blocked_mgs_updates.is_empty() {
+            // ... or if there are blocked updates for the RoT / SP / Host OS /
             // RoT bootloader.
             PlanningZoneUpdatesStepReport::waiting_on(
-                ZoneUpdatesWaitingOn::SkippedMgsUpdates,
+                ZoneUpdatesWaitingOn::BlockedMgsUpdates,
             )
         } else if !add.add_update_blocked_reasons.is_empty() {
             // ... or if there are pending zone add blockers.
@@ -1258,7 +1258,7 @@ impl<'a> Planner<'a> {
         let PlannedMgsUpdates {
             pending_updates,
             pending_host_phase_2_changes,
-            skipped_mgs_updates,
+            blocked_mgs_updates,
         } = plan_mgs_updates(
             &self.log,
             &self.inventory,
@@ -1283,7 +1283,7 @@ impl<'a> Planner<'a> {
         self.blueprint.pending_mgs_updates_replace_all(pending_updates.clone());
         Ok(PlanningMgsUpdatesStepReport::new(
             pending_updates,
-            skipped_mgs_updates,
+            blocked_mgs_updates,
         ))
     }
 

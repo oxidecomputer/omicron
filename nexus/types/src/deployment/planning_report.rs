@@ -546,7 +546,7 @@ pub enum FailedMgsUpdateReason {
 #[derive(
     Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Diffable, JsonSchema,
 )]
-pub struct SkippedMgsUpdate {
+pub struct BlockedMgsUpdate {
     /// id of the baseboard that we attempted to update
     pub baseboard_id: Arc<BaseboardId>,
     /// type of SP component that we attempted to update
@@ -555,7 +555,7 @@ pub struct SkippedMgsUpdate {
     pub reason: FailedMgsUpdateReason,
 }
 
-impl IdOrdItem for SkippedMgsUpdate {
+impl IdOrdItem for BlockedMgsUpdate {
     type Key<'a> = &'a BaseboardId;
     fn key(&self) -> Self::Key<'_> {
         &*self.baseboard_id
@@ -568,26 +568,26 @@ impl IdOrdItem for SkippedMgsUpdate {
 )]
 pub struct PlanningMgsUpdatesStepReport {
     pub pending_mgs_updates: PendingMgsUpdates,
-    pub skipped_mgs_updates: Vec<SkippedMgsUpdate>,
+    pub blocked_mgs_updates: Vec<BlockedMgsUpdate>,
 }
 
 impl PlanningMgsUpdatesStepReport {
     pub fn new(
         pending_mgs_updates: PendingMgsUpdates,
-        skipped_mgs_updates: Vec<SkippedMgsUpdate>,
+        blocked_mgs_updates: Vec<BlockedMgsUpdate>,
     ) -> Self {
-        Self { pending_mgs_updates, skipped_mgs_updates }
+        Self { pending_mgs_updates, blocked_mgs_updates }
     }
 
     pub fn is_empty(&self) -> bool {
         self.pending_mgs_updates.is_empty()
-            && self.skipped_mgs_updates.is_empty()
+            && self.blocked_mgs_updates.is_empty()
     }
 }
 
 impl fmt::Display for PlanningMgsUpdatesStepReport {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let Self { pending_mgs_updates, skipped_mgs_updates } = self;
+        let Self { pending_mgs_updates, blocked_mgs_updates } = self;
         if !pending_mgs_updates.is_empty() {
             let n = pending_mgs_updates.len();
             let s = plural(n);
@@ -600,11 +600,11 @@ impl fmt::Display for PlanningMgsUpdatesStepReport {
                 )?;
             }
         }
-        if !skipped_mgs_updates.is_empty() {
-            let n = skipped_mgs_updates.len();
+        if !blocked_mgs_updates.is_empty() {
+            let n = blocked_mgs_updates.len();
             let s = plural(n);
-            writeln!(f, "* {n} skipped MGS update{s}:")?;
-            for update in skipped_mgs_updates {
+            writeln!(f, "* {n} blocked MGS update{s}:")?;
+            for update in blocked_mgs_updates {
                 writeln!(
                     f,
                     "  * {} {}: {}",
@@ -1103,8 +1103,8 @@ pub enum ZoneUpdatesWaitingOn {
     /// Waiting on updates to RoT bootloader / RoT / SP / Host OS.
     PendingMgsUpdates,
 
-    /// Waiting on skipped updates to RoT bootloader / RoT / SP / Host OS.
-    SkippedMgsUpdates,
+    /// Waiting on blocked updates to RoT bootloader / RoT / SP / Host OS.
+    BlockedMgsUpdates,
 
     /// Waiting on the same set of blockers zone adds are waiting on.
     ZoneAddBlockers,
@@ -1117,8 +1117,8 @@ impl ZoneUpdatesWaitingOn {
             Self::PendingMgsUpdates => {
                 "pending MGS updates (RoT bootloader / RoT / SP / Host OS)"
             }
-            Self::SkippedMgsUpdates => {
-                "skipped MGS updates (RoT bootloader / RoT / SP / Host OS)"
+            Self::BlockedMgsUpdates => {
+                "blocked MGS updates (RoT bootloader / RoT / SP / Host OS)"
             }
             Self::ZoneAddBlockers => "zone add blockers",
         }

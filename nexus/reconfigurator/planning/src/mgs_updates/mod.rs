@@ -28,8 +28,8 @@ use nexus_types::deployment::PendingMgsUpdateRotDetails;
 use nexus_types::deployment::PendingMgsUpdateSpDetails;
 use nexus_types::deployment::PendingMgsUpdates;
 use nexus_types::deployment::TargetReleaseDescription;
+use nexus_types::deployment::planning_report::BlockedMgsUpdate;
 use nexus_types::deployment::planning_report::FailedMgsUpdateReason;
-use nexus_types::deployment::planning_report::SkippedMgsUpdate;
 use nexus_types::inventory::BaseboardId;
 use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::Collection;
@@ -68,8 +68,8 @@ pub(crate) struct PlannedMgsUpdates {
     /// result in a change to the respective sled's `BlueprintSledConfig`.
     pub(crate) pending_host_phase_2_changes: PendingHostPhase2Changes,
 
-    // Updates to components that failed for some reason and have been skipped.
-    pub(crate) skipped_mgs_updates: Vec<SkippedMgsUpdate>,
+    // Updates to components that failed for some reason and have been blocked.
+    pub(crate) blocked_mgs_updates: Vec<BlockedMgsUpdate>,
 }
 
 impl PlannedMgsUpdates {
@@ -77,7 +77,7 @@ impl PlannedMgsUpdates {
         Self {
             pending_updates: PendingMgsUpdates::new(),
             pending_host_phase_2_changes: PendingHostPhase2Changes::empty(),
-            skipped_mgs_updates: Vec::new(),
+            blocked_mgs_updates: Vec::new(),
         }
     }
 
@@ -97,11 +97,11 @@ impl PlannedMgsUpdates {
         self
     }
 
-    fn set_skipped_updates(
+    fn set_blocked_updates(
         &mut self,
-        skipped_updates: Vec<SkippedMgsUpdate>,
+        blocked_updates: Vec<BlockedMgsUpdate>,
     ) -> &mut Self {
-        self.skipped_mgs_updates = skipped_updates;
+        self.blocked_mgs_updates = blocked_updates;
         self
     }
 
@@ -111,7 +111,7 @@ impl PlannedMgsUpdates {
             pending_host_phase_2_changes: self
                 .pending_host_phase_2_changes
                 .clone(),
-            skipped_mgs_updates: self.skipped_mgs_updates.clone(),
+            blocked_mgs_updates: self.blocked_mgs_updates.clone(),
         }
     }
 }
@@ -143,7 +143,7 @@ pub(crate) fn plan_mgs_updates(
     let mut pending_updates = PendingMgsUpdates::new();
     let mut pending_host_phase_2_changes = PendingHostPhase2Changes::empty();
     let mut boards_preferred = BTreeSet::new();
-    let mut skipped_mgs_updates = Vec::new();
+    let mut blocked_mgs_updates = Vec::new();
 
     // Determine the status of all currently pending updates by comparing what
     // they were trying to do (and their preconditions) against the current
@@ -221,7 +221,7 @@ pub(crate) fn plan_mgs_updates(
             return PlannedMgsUpdates {
                 pending_updates,
                 pending_host_phase_2_changes,
-                skipped_mgs_updates,
+                blocked_mgs_updates,
             };
         }
         TargetReleaseDescription::TufRepo(description) => description,
@@ -247,23 +247,24 @@ pub(crate) fn plan_mgs_updates(
             return PlannedMgsUpdates {
                 pending_updates,
                 pending_host_phase_2_changes,
-                skipped_mgs_updates,
+                blocked_mgs_updates,
             };
         }
 
-        // TODO-K: Make it clearer whether it's a single update or system-wide
-        // report
+        // `try_make_update` will always return at most a single update at a
+        // time. This means that this instance of `PlannedMgsUpdates` describes
+        // a single device update
         let PlannedMgsUpdates {
             pending_updates: updates,
             pending_host_phase_2_changes: mut host_phase_2,
-            skipped_mgs_updates: mut skipped_updates,
+            blocked_mgs_updates: mut blocked_updates,
         } = try_make_update(log, board, inventory, current_artifacts);
 
         if let Some(update) = updates.into_iter().next() {
             info!(log, "configuring MGS-driven update"; update);
             pending_updates.insert(update.clone());
         } else {
-            if skipped_mgs_updates.is_empty() && host_phase_2.is_empty() {
+            if blocked_mgs_updates.is_empty() && host_phase_2.is_empty() {
                 info!(log, "skipping board for MGS-driven update (no update necessary)"; board);
             } else {
                 info!(log, "skipping board for MGS-driven update (found issues)"; board);
@@ -271,14 +272,14 @@ pub(crate) fn plan_mgs_updates(
         }
 
         pending_host_phase_2_changes.append(&mut host_phase_2);
-        skipped_mgs_updates.append(&mut skipped_updates);
+        blocked_mgs_updates.append(&mut blocked_updates);
     }
 
     info!(log, "ran out of boards for MGS-driven update");
     PlannedMgsUpdates {
         pending_updates,
         pending_host_phase_2_changes,
-        skipped_mgs_updates,
+        blocked_mgs_updates,
     }
 }
 
@@ -565,7 +566,7 @@ fn try_make_update(
     inventory: &Collection,
     current_artifacts: &TufRepoDescription,
 ) -> PlannedMgsUpdates {
-    let mut skipped_updates = Vec::new();
+    let mut blocked_updates = Vec::new();
 
     // We try MGS-driven update components in a hardcoded priority order until
     // any of them returns `Some`.  The order is described in RFD 565 section
@@ -606,7 +607,7 @@ fn try_make_update(
                     // phase 2 changes necessary.
                     let pending_actions = PlannedMgsUpdates::new()
                         .add_pending_update(update)
-                        .set_skipped_updates(skipped_updates.clone())
+                        .set_blocked_updates(blocked_updates.clone())
                         .build();
                     Some(pending_actions)
                 }
@@ -615,13 +616,13 @@ fn try_make_update(
                 Ok(None) => None,
                 // There was a failure, skip the update and record it
                 Err(e) => {
-                    skipped_updates.push(SkippedMgsUpdate {
+                    blocked_updates.push(BlockedMgsUpdate {
                         baseboard_id: baseboard_id.clone(),
                         component,
                         reason: e,
                     });
                     let pending_actions = PlannedMgsUpdates::new()
-                        .set_skipped_updates(skipped_updates.clone())
+                        .set_blocked_updates(blocked_updates.clone())
                         .build();
                     Some(pending_actions)
                 }
@@ -643,22 +644,22 @@ fn try_make_update(
                 .set_pending_host_os_phase2_changes(
                     pending_host_os_phase2_changes,
                 )
-                .set_skipped_updates(skipped_updates)
+                .set_blocked_updates(blocked_updates)
                 .build()
         }
         // The Host OS is already at the desired version, we only need to pass
         // along any previous skipped updates
         Ok(None) => PlannedMgsUpdates::new()
-            .set_skipped_updates(skipped_updates)
+            .set_blocked_updates(blocked_updates)
             .build(),
         Err(e) => {
-            skipped_updates.push(SkippedMgsUpdate {
+            blocked_updates.push(BlockedMgsUpdate {
                 baseboard_id: baseboard_id.clone(),
                 component: MgsUpdateComponent::HostOs,
                 reason: e,
             });
             PlannedMgsUpdates::new()
-                .set_skipped_updates(skipped_updates)
+                .set_blocked_updates(blocked_updates)
                 .build()
         }
     }
@@ -691,8 +692,8 @@ mod test {
     use nexus_types::deployment::PendingMgsUpdateSpDetails;
     use nexus_types::deployment::PendingMgsUpdates;
     use nexus_types::deployment::TargetReleaseDescription;
+    use nexus_types::deployment::planning_report::BlockedMgsUpdate;
     use nexus_types::deployment::planning_report::FailedMgsUpdateReason;
-    use nexus_types::deployment::planning_report::SkippedMgsUpdate;
     use nexus_types::inventory::BaseboardId;
     use nexus_types::inventory::CabooseWhich;
     use omicron_test_utils::dev::LogContext;
@@ -702,8 +703,8 @@ mod test {
 
     // Confirm our behaviour for skipped updates
     #[test]
-    fn test_skipped_updates() {
-        let test_name = "planning_mgs_updates_skipped_updates";
+    fn test_blocked_updates() {
+        let test_name = "planning_mgs_updates_blocked_updates";
         let logctx = LogContext::new(
             test_name,
             &ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Debug },
@@ -740,7 +741,7 @@ mod test {
 
         let PlannedMgsUpdates {
             pending_updates: updates,
-            skipped_mgs_updates,
+            blocked_mgs_updates,
             ..
         } = plan_mgs_updates(
             log,
@@ -755,12 +756,12 @@ mod test {
         // The planner should only gather the first failed update (RoT
         // bootloader), and report no pending updates. There will only be a
         // single entry as there is only a single fake board.
-        let expected_skipped_updates = vec![SkippedMgsUpdate {
+        let expected_blocked_updates = vec![BlockedMgsUpdate {
             baseboard_id: fake_board.clone(),
             component: MgsUpdateComponent::RotBootloader,
             reason: FailedMgsUpdateReason::SpNotInInventory,
         }];
-        assert_eq!(skipped_mgs_updates, expected_skipped_updates);
+        assert_eq!(blocked_mgs_updates, expected_blocked_updates);
         assert!(updates.is_empty());
 
         // Now we build a the collection so it only reports updates necessary
@@ -783,7 +784,7 @@ mod test {
 
         let PlannedMgsUpdates {
             pending_updates: updates,
-            skipped_mgs_updates,
+            blocked_mgs_updates,
             ..
         } = plan_mgs_updates(
             log,
@@ -797,15 +798,15 @@ mod test {
 
         // The planner should only gather the first RoT failed update of
         // each of the boards, and report no pending updates
-        let mut expected_skipped_updates = Vec::new();
+        let mut expected_blocked_updates = Vec::new();
         for baseboard_id in &collection.baseboards {
-            expected_skipped_updates.push(SkippedMgsUpdate {
+            expected_blocked_updates.push(BlockedMgsUpdate {
                 baseboard_id: baseboard_id.clone(),
                 component: MgsUpdateComponent::Rot,
                 reason: FailedMgsUpdateReason::RotStateNotInInventory,
             });
         }
-        assert_eq!(skipped_mgs_updates, expected_skipped_updates);
+        assert_eq!(blocked_mgs_updates, expected_blocked_updates);
         assert!(updates.is_empty());
 
         // Like before we build a collection that only reports updates necessary
@@ -825,7 +826,7 @@ mod test {
 
         let PlannedMgsUpdates {
             pending_updates: updates,
-            skipped_mgs_updates,
+            blocked_mgs_updates,
             ..
         } = plan_mgs_updates(
             log,
@@ -839,9 +840,9 @@ mod test {
 
         // The planner should only gather the first SP failed update of
         // each of the boards, and report no pending updates
-        let mut expected_skipped_updates = Vec::new();
+        let mut expected_blocked_updates = Vec::new();
         for baseboard_id in &collection.baseboards {
-            expected_skipped_updates.push(SkippedMgsUpdate {
+            expected_blocked_updates.push(BlockedMgsUpdate {
                 baseboard_id: baseboard_id.clone(),
                 component: MgsUpdateComponent::Sp,
                 reason: FailedMgsUpdateReason::CabooseNotInInventory(
@@ -849,7 +850,7 @@ mod test {
                 ),
             });
         }
-        assert_eq!(skipped_mgs_updates, expected_skipped_updates);
+        assert_eq!(blocked_mgs_updates, expected_blocked_updates);
         assert!(updates.is_empty());
 
         // Now we create one more collection where only the Host OS needs an
@@ -868,7 +869,7 @@ mod test {
 
         let PlannedMgsUpdates {
             pending_updates: updates,
-            skipped_mgs_updates,
+            blocked_mgs_updates,
             ..
         } = plan_mgs_updates(
             log,
@@ -882,17 +883,17 @@ mod test {
 
         // The planner should only gather the first Host OS failed update of
         // each of the sled boards, and report no pending updates
-        let mut expected_skipped_updates = Vec::new();
+        let mut expected_blocked_updates = Vec::new();
         for baseboard_id in &collection.baseboards {
             if baseboard_id.part_number == "dummy_sled" {
-                expected_skipped_updates.push(SkippedMgsUpdate {
+                expected_blocked_updates.push(BlockedMgsUpdate {
                     baseboard_id: baseboard_id.clone(),
                     component: MgsUpdateComponent::HostOs,
                     reason: FailedMgsUpdateReason::SledAgentInfoNotInInventory,
                 });
             }
         }
-        assert_eq!(skipped_mgs_updates, expected_skipped_updates);
+        assert_eq!(blocked_mgs_updates, expected_blocked_updates);
         assert!(updates.is_empty());
     }
 

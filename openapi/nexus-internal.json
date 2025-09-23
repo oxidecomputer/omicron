@@ -2511,6 +2511,40 @@
           "port"
         ]
       },
+      "BlockedMgsUpdate": {
+        "type": "object",
+        "properties": {
+          "baseboard_id": {
+            "description": "id of the baseboard that we attempted to update",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BaseboardId"
+              }
+            ]
+          },
+          "component": {
+            "description": "type of SP component that we attempted to update",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MgsUpdateComponent"
+              }
+            ]
+          },
+          "reason": {
+            "description": "reason why the update failed",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/FailedMgsUpdateReason"
+              }
+            ]
+          }
+        },
+        "required": [
+          "baseboard_id",
+          "component",
+          "reason"
+        ]
+      },
       "Blueprint": {
         "description": "Describes a complete set of software and configuration for the system",
         "type": "object",
@@ -7270,16 +7304,19 @@
       "PlanningMgsUpdatesStepReport": {
         "type": "object",
         "properties": {
+          "blocked_mgs_updates": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BlockedMgsUpdate"
+            }
+          },
           "pending_mgs_updates": {
             "$ref": "#/components/schemas/PendingMgsUpdates"
-          },
-          "skipped_mgs_updates": {
-            "$ref": "#/components/schemas/SkippedMgsUpdates"
           }
         },
         "required": [
-          "pending_mgs_updates",
-          "skipped_mgs_updates"
+          "blocked_mgs_updates",
+          "pending_mgs_updates"
         ]
       },
       "PlanningNoopImageSourceConverted": {
@@ -8936,54 +8973,6 @@
         "format": "uint64",
         "minimum": 0
       },
-      "SkippedMgsUpdate": {
-        "type": "object",
-        "properties": {
-          "baseboard_id": {
-            "description": "id of the baseboard that we attempted to update",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/BaseboardId"
-              }
-            ]
-          },
-          "component": {
-            "description": "type of SP component that we attempted to update",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/MgsUpdateComponent"
-              }
-            ]
-          },
-          "reason": {
-            "description": "reason why the update failed",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/FailedMgsUpdateReason"
-              }
-            ]
-          }
-        },
-        "required": [
-          "baseboard_id",
-          "component",
-          "reason"
-        ]
-      },
-      "SkippedMgsUpdates": {
-        "type": "object",
-        "properties": {
-          "updates": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/SkippedMgsUpdate"
-            }
-          }
-        },
-        "required": [
-          "updates"
-        ]
-      },
       "SledAgentInfo": {
         "description": "Sent by a sled agent to Nexus to inform about resources",
         "type": "object",
@@ -10104,13 +10093,13 @@
             ]
           },
           {
-            "description": "Waiting on skipped updates to RoT bootloader / RoT / SP / Host OS.",
+            "description": "Waiting on blocked updates to RoT bootloader / RoT / SP / Host OS.",
             "type": "object",
             "properties": {
               "type": {
                 "type": "string",
                 "enum": [
-                  "skipped_mgs_updates"
+                  "blocked_mgs_updates"
                 ]
               }
             },
