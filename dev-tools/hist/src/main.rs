@@ -134,10 +134,11 @@ impl Platform {
     }
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
-    sigpipe::reset();
+fn main() -> Result<()> {
+    oxide_tokio_rt::run(main_impl())
+}
 
+async fn main_impl() -> Result<()> {
     let args = HistArgs::parse();
     run_cmd_async(args).await
 }

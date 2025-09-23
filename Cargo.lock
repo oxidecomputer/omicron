@@ -7838,6 +7838,7 @@ dependencies = [
  "crossterm 0.29.0",
  "futures",
  "omicron-workspace-hack",
+ "oxide-tokio-rt",
  "quick-xml",
  "ratatui",
  "reqwest",
