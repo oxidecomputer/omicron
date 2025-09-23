@@ -53,6 +53,9 @@ planning report:
 
 
 
+notes for customer operator:
+  * 1 sled with no available disks to host NTP service
+
 > blueprint-show 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
 blueprint  8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
 parent:    dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21

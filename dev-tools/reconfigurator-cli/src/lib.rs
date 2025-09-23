@@ -2106,9 +2106,34 @@ fn cmd_blueprint_plan(
     .context("creating planner")?;
 
     let blueprint = planner.plan().context("generating blueprint")?;
+    let operator_notes = match &blueprint.source {
+        BlueprintSource::Planner(report) => {
+            let mut notes = report
+                .operator_notes()
+                .into_notes()
+                .into_iter()
+                .map(|note| format!("\n  * {note}"))
+                .peekable();
+            if notes.peek().is_some() {
+                format!(
+                    "\n\nnotes for customer operator:{}",
+                    notes.collect::<String>()
+                )
+            } else {
+                String::new()
+            }
+        }
+        BlueprintSource::Rss
+        | BlueprintSource::PlannerLoadedFromDatabase
+        | BlueprintSource::ReconfiguratorCliEdit
+        | BlueprintSource::Test => unreachable!(
+            "unexpected blueprint source {} (just ran planner!)",
+            blueprint.source
+        ),
+    };
     let rv = format!(
         "generated blueprint {} based on parent blueprint {}\n\
-         blueprint source: {}",
+         blueprint source: {}{operator_notes}",
         blueprint.id, parent_blueprint.id, blueprint.source,
     );
     system.add_blueprint(blueprint)?;

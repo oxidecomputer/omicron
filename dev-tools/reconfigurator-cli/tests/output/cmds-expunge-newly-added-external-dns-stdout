@@ -868,6 +868,9 @@ planner config:
 
 
 
+notes for customer operator:
+  * support override configured: internal services can be placed even if some versions are unknown due to sled recovery operations
+
 > blueprint-diff 366b0b68-d80e-4bc1-abd3-dc69837847e0 9c998c1d-1a7b-440a-ae0c-40f781dea6e2
 from: blueprint 366b0b68-d80e-4bc1-abd3-dc69837847e0
 to:   blueprint 9c998c1d-1a7b-440a-ae0c-40f781dea6e2

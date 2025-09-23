@@ -37,6 +37,10 @@ use std::fmt::Write;
 use std::sync::Arc;
 use thiserror::Error;
 
+mod operator_notes;
+
+pub use operator_notes::PlanningOperatorNotes;
+
 /// A full blueprint planning report. Other than the blueprint ID, each
 /// field corresponds to a step in the update planner, i.e., a subroutine
 /// of `omicron_nexus::reconfigurator::planning::Planner::do_plan`.
@@ -89,14 +93,33 @@ impl PlanningReport {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.expunge.is_empty()
-            && self.decommission.is_empty()
-            && self.noop_image_source.is_empty()
-            && self.mgs_updates.is_empty()
-            && self.add.is_empty()
-            && self.zone_updates.is_empty()
-            && self.nexus_generation_bump.is_empty()
-            && self.cockroachdb_settings.is_empty()
+        let Self {
+            expunge,
+            decommission,
+            noop_image_source,
+            mgs_updates,
+            add,
+            zone_updates,
+            nexus_generation_bump,
+            cockroachdb_settings,
+            // the config is not relevant to whether we have content
+            planner_config: _,
+        } = self;
+
+        expunge.is_empty()
+            && decommission.is_empty()
+            && noop_image_source.is_empty()
+            && mgs_updates.is_empty()
+            && add.is_empty()
+            && zone_updates.is_empty()
+            && nexus_generation_bump.is_empty()
+            && cockroachdb_settings.is_empty()
+    }
+
+    /// Returns a set of notes condensed from this report that are suitable for
+    /// display to a rack operator (i.e., not internal debugging).
+    pub fn operator_notes(&self) -> PlanningOperatorNotes {
+        PlanningOperatorNotes::new(self)
     }
 }
 
@@ -139,7 +162,7 @@ impl fmt::Display for PlanningReport {
 #[cfg_attr(test, derive(test_strategy::Arbitrary))]
 pub struct PlanningExpungeStepReport {
     /// Expunged disks not present in the parent blueprint.
-    pub orphan_disks: BTreeMap<SledUuid, PhysicalDiskUuid>,
+    pub orphan_disks: BTreeMap<SledUuid, Vec<PhysicalDiskUuid>>,
 }
 
 impl PlanningExpungeStepReport {
@@ -161,8 +184,11 @@ impl fmt::Display for PlanningExpungeStepReport {
                 "* planning input contained expunged disks \
                    not present in parent blueprint:",
             )?;
-            for (sled, disk) in orphan_disks.iter() {
-                writeln!(f, "  * sled {sled}, disk {disk}",)?;
+            for (sled, disks) in orphan_disks.iter() {
+                writeln!(f, "  * sled {sled}:")?;
+                for disk in disks {
+                    writeln!(f, "    * disk {disk}")?;
+                }
             }
         }
         Ok(())
@@ -675,13 +701,13 @@ pub struct DiscretionaryZonePlacement {
 pub enum ZoneAddWaitingOn {
     /// Waiting on one or more blockers (typically MUPdate-related reasons) to
     /// clear.
-    Blockers,
+    MupdateBlockers,
 }
 
 impl ZoneAddWaitingOn {
     pub fn as_str(&self) -> &'static str {
         match self {
-            Self::Blockers => "blockers",
+            Self::MupdateBlockers => "mupdate blockers",
         }
     }
 }

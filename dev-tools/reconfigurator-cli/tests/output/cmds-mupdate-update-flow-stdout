@@ -505,7 +505,7 @@ INFO skipped noop image source check on sled, sled_id: d81c6a84-79b8-4958-ae41-e
 generated blueprint a5a8f242-ffa5-473c-8efd-2acf2dc0b736 based on parent blueprint d60afc57-f15d-476c-bd0f-b1071e2bb976
 blueprint source: planner with report:
 planning report:
-* zone adds waiting on blockers
+* zone adds waiting on mupdate blockers
 * zone adds and updates are blocked:
   - current target release generation (2) is lower than minimum required by blueprint (3)
   - sleds have remove mupdate override set in blueprint: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, d81c6a84-79b8-4958-ae41-ea46c9b19763
@@ -519,6 +519,9 @@ planning report:
 * waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
+
+notes for customer operator:
+  * service updates are waiting for system to recover from support-driven update (mupdate)
 
 
 > # Diff the blueprints. This diff should show:
@@ -787,7 +790,7 @@ INFO skipped noop image source check on sled, sled_id: d81c6a84-79b8-4958-ae41-e
 generated blueprint 626487fa-7139-45ec-8416-902271fc730b based on parent blueprint a5a8f242-ffa5-473c-8efd-2acf2dc0b736
 blueprint source: planner with report:
 planning report:
-* zone adds waiting on blockers
+* zone adds waiting on mupdate blockers
 * zone adds and updates are blocked:
   - sleds have remove mupdate override set in blueprint: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, d81c6a84-79b8-4958-ae41-ea46c9b19763
   - sleds have mupdate override errors: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
@@ -800,6 +803,9 @@ planning report:
 * waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
+
+notes for customer operator:
+  * service updates are waiting for system to recover from support-driven update (mupdate)
 
 > blueprint-diff latest
 from: blueprint a5a8f242-ffa5-473c-8efd-2acf2dc0b736
@@ -920,7 +926,7 @@ generated blueprint c1a0d242-9160-40f4-96ae-61f8f40a0b1b based on parent bluepri
 blueprint source: planner with report:
 planning report:
 * noop converting 6/6 install-dataset zones to artifact store on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
-* zone adds waiting on blockers
+* zone adds waiting on mupdate blockers
 * zone adds and updates are blocked:
   - current target release generation (3) is lower than minimum required by blueprint (4)
   - sleds have remove mupdate override set in blueprint: d81c6a84-79b8-4958-ae41-ea46c9b19763
@@ -933,6 +939,10 @@ planning report:
 * waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
+
+notes for customer operator:
+  * across 1 sled, converted 6/6 service zones to known versions
+  * service updates are waiting for system to recover from support-driven update (mupdate)
 
 
 > # Diff the blueprints. This diff should show:
@@ -1110,7 +1120,7 @@ generated blueprint afb09faf-a586-4483-9289-04d4f1d8ba23 based on parent bluepri
 blueprint source: planner with report:
 planning report:
 * skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 6 zones are already from artifacts
-* zone adds waiting on blockers
+* zone adds waiting on mupdate blockers
 * zone adds and updates are blocked:
   - current target release generation (3) is lower than minimum required by blueprint (4)
   - sleds have mupdate override errors: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
@@ -1122,6 +1132,9 @@ planning report:
 * waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
+
+notes for customer operator:
+  * service updates are waiting for system to recover from support-driven update (mupdate)
 
 > blueprint-show latest
 blueprint  afb09faf-a586-4483-9289-04d4f1d8ba23
@@ -1292,7 +1305,7 @@ parent:    c1a0d242-9160-40f4-96ae-61f8f40a0b1b
 blueprint source: planner with report:
 planning report:
 * skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 6 zones are already from artifacts
-* zone adds waiting on blockers
+* zone adds waiting on mupdate blockers
 * zone adds and updates are blocked:
   - current target release generation (3) is lower than minimum required by blueprint (4)
   - sleds have mupdate override errors: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
@@ -1440,7 +1453,7 @@ blueprint source: planner with report:
 planning report:
 * skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 6 zones are already from artifacts
 * noop converting 6/6 install-dataset zones to artifact store on sled d81c6a84-79b8-4958-ae41-ea46c9b19763
-* zone adds waiting on blockers
+* zone adds waiting on mupdate blockers
 * zone adds and updates are blocked:
   - sleds have mupdate override errors: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
   - sleds have deployment units with image sources not set to Artifact:
@@ -1450,6 +1463,10 @@ planning report:
 * waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
+
+notes for customer operator:
+  * across 1 sled, converted 6/6 service zones to known versions
+  * service updates are waiting for system to recover from support-driven update (mupdate)
 
 > blueprint-show latest
 blueprint  ce365dff-2cdb-4f35-a186-b15e20e1e700
@@ -1621,7 +1638,7 @@ blueprint source: planner with report:
 planning report:
 * skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 6 zones are already from artifacts
 * noop converting 6/6 install-dataset zones to artifact store on sled d81c6a84-79b8-4958-ae41-ea46c9b19763
-* zone adds waiting on blockers
+* zone adds waiting on mupdate blockers
 * zone adds and updates are blocked:
   - sleds have mupdate override errors: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
   - sleds have deployment units with image sources not set to Artifact:
@@ -1740,7 +1757,7 @@ blueprint source: planner with report:
 planning report:
 * skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 6 zones are already from artifacts
 * skipping noop zone image source check on sled d81c6a84-79b8-4958-ae41-ea46c9b19763: all 6 zones are already from artifacts
-* zone adds waiting on blockers
+* zone adds waiting on mupdate blockers
 * zone adds and updates are blocked:
   - sleds have deployment units with image sources not set to Artifact:
     - sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: 7 zones
@@ -1749,6 +1766,9 @@ planning report:
 * waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
+
+notes for customer operator:
+  * service updates are waiting for system to recover from support-driven update (mupdate)
 
 > blueprint-diff latest
 from: blueprint ce365dff-2cdb-4f35-a186-b15e20e1e700
@@ -1817,6 +1837,10 @@ planning report:
 * waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
+
+notes for customer operator:
+  * across 1 sled, converted 7/7 service zones to known versions
+  * out of eligible sleds: only placed 0 services out of 1 desired
 
 > blueprint-show latest
 blueprint  12d602a6-5ab4-487a-b94e-eb30cdf30300
@@ -2191,6 +2215,10 @@ planning report:
 
 
 
+notes for customer operator:
+  * across 3 sleds, converted 3 OS images to known versions
+  * out of eligible sleds: only placed 0 services out of 1 desired
+
 > blueprint-diff latest
 from: blueprint 12d602a6-5ab4-487a-b94e-eb30cdf30300
 to:   blueprint 61a93ea3-c872-48e0-aace-e86b0c52b839
@@ -2423,7 +2451,7 @@ planning report:
 * skipping noop zone image source check on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: all 7 zones are already from artifacts
 * skipping noop zone image source check on sled c3bc4c6d-fdde-4fc4-8493-89d2a1e5ee6b: all 0 zones are already from artifacts
 * skipping noop zone image source check on sled d81c6a84-79b8-4958-ae41-ea46c9b19763: all 6 zones are already from artifacts
-* zone adds waiting on blockers
+* zone adds waiting on mupdate blockers
 * zone adds and updates are blocked:
   - current target release generation (4) is lower than minimum required by blueprint (5)
   - sleds have remove mupdate override set in blueprint: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
@@ -2434,6 +2462,9 @@ planning report:
 * waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
+
+notes for customer operator:
+  * service updates are waiting for system to recover from support-driven update (mupdate)
 
 > blueprint-diff latest
 from: blueprint 61a93ea3-c872-48e0-aace-e86b0c52b839
@@ -2572,6 +2603,10 @@ planner config:
 * waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
+
+notes for customer operator:
+  * support override configured: internal services can be placed even if some versions are unknown due to sled recovery operations
+  * out of eligible sleds: only placed 0 services out of 1 desired
 
 > blueprint-diff latest
 from: blueprint 27e755bc-dc10-4647-853c-f89bb3a15a2c
