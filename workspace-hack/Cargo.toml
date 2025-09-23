@@ -81,7 +81,6 @@ managed = { version = "0.8.0", default-features = false, features = ["alloc", "m
 memchr = { version = "2.7.4" }
 newtype-uuid = { version = "1.2.4" }
 nix = { version = "0.29.0", features = ["feature", "net", "uio"] }
-nom = { version = "7.1.3" }
 num-bigint-dig = { version = "0.8.4", default-features = false, features = ["i128", "prime", "serde", "u64_digit", "zeroize"] }
 num-integer = { version = "0.1.46", features = ["i128"] }
 num-iter = { version = "0.1.45", default-features = false, features = ["i128"] }
@@ -140,7 +139,6 @@ toml = { version = "0.7.8" }
 toml_datetime = { version = "0.6.11", default-features = false, features = ["serde"] }
 toml_edit-3c51e837cfc5589a = { package = "toml_edit", version = "0.22.27", features = ["serde"] }
 tracing = { version = "0.1.40", features = ["log"] }
-unicode-xid = { version = "0.2.6" }
 url = { version = "2.5.4", features = ["serde"] }
 usdt = { version = "0.5.0" }
 usdt-impl = { version = "0.5.0", default-features = false, features = ["asm", "des"] }
@@ -218,7 +216,6 @@ managed = { version = "0.8.0", default-features = false, features = ["alloc", "m
 memchr = { version = "2.7.4" }
 newtype-uuid = { version = "1.2.4" }
 nix = { version = "0.29.0", features = ["feature", "net", "uio"] }
-nom = { version = "7.1.3" }
 num-bigint-dig = { version = "0.8.4", default-features = false, features = ["i128", "prime", "serde", "u64_digit", "zeroize"] }
 num-integer = { version = "0.1.46", features = ["i128"] }
 num-iter = { version = "0.1.45", default-features = false, features = ["i128"] }
@@ -279,7 +276,6 @@ toml = { version = "0.7.8" }
 toml_datetime = { version = "0.6.11", default-features = false, features = ["serde"] }
 toml_edit-3c51e837cfc5589a = { package = "toml_edit", version = "0.22.27", features = ["serde"] }
 tracing = { version = "0.1.40", features = ["log"] }
-unicode-xid = { version = "0.2.6" }
 url = { version = "2.5.4", features = ["serde"] }
 usdt = { version = "0.5.0" }
 usdt-impl = { version = "0.5.0", default-features = false, features = ["asm", "des"] }
@@ -365,6 +361,7 @@ hyper-rustls = { version = "0.27.7", features = ["http2", "ring", "webpki-tokio"
 hyper-util = { version = "0.1.16", features = ["full"] }
 itertools-93f6ce9d446188ac = { package = "itertools", version = "0.10.5" }
 mio = { version = "1.0.2", features = ["net", "os-ext"] }
+nom = { version = "7.1.3" }
 rustix-d585fab2519d2d1 = { package = "rustix", version = "0.38.37", features = ["event", "fs", "net", "pipe", "process", "stdio", "system", "termios", "time"] }
 rustix-dff4ba8e3ae991db = { package = "rustix", version = "1.0.7", features = ["fs", "stdio", "termios"] }
 toml_edit-cdcf2f9584511fe6 = { package = "toml_edit", version = "0.19.15", features = ["serde"] }
@@ -380,6 +377,7 @@ hyper-rustls = { version = "0.27.7", features = ["http2", "ring", "webpki-tokio"
 hyper-util = { version = "0.1.16", features = ["full"] }
 itertools-93f6ce9d446188ac = { package = "itertools", version = "0.10.5" }
 mio = { version = "1.0.2", features = ["net", "os-ext"] }
+nom = { version = "7.1.3" }
 rustix-d585fab2519d2d1 = { package = "rustix", version = "0.38.37", features = ["event", "fs", "net", "pipe", "process", "stdio", "system", "termios", "time"] }
 rustix-dff4ba8e3ae991db = { package = "rustix", version = "1.0.7", features = ["fs", "stdio", "termios"] }
 toml_edit-cdcf2f9584511fe6 = { package = "toml_edit", version = "0.19.15", features = ["serde"] }

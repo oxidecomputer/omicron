@@ -3087,14 +3087,6 @@
               "add": {
                 "$ref": "#/components/schemas/PlanningAddStepReport"
               },
-              "blueprint_id": {
-                "description": "The blueprint produced by the planning run this report describes.",
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/TypedUuidForBlueprintKind"
-                  }
-                ]
-              },
               "cockroachdb_settings": {
                 "$ref": "#/components/schemas/PlanningCockroachdbSettingsStepReport"
               },
@@ -3106,6 +3098,9 @@
               },
               "mgs_updates": {
                 "$ref": "#/components/schemas/PlanningMgsUpdatesStepReport"
+              },
+              "nexus_generation_bump": {
+                "$ref": "#/components/schemas/PlanningNexusGenerationBumpReport"
               },
               "noop_image_source": {
                 "$ref": "#/components/schemas/PlanningNoopImageSourceStepReport"
@@ -3130,11 +3125,11 @@
             },
             "required": [
               "add",
-              "blueprint_id",
               "cockroachdb_settings",
               "decommission",
               "expunge",
               "mgs_updates",
+              "nexus_generation_bump",
               "noop_image_source",
               "planner_config",
               "source",
@@ -6030,6 +6025,70 @@
         "description": "Password hashes must be in PHC (Password Hashing Competition) string format.  Passwords must be hashed with Argon2id.  Password hashes may be rejected if the parameters appear not to be secure enough.",
         "type": "string"
       },
+      "NexusGenerationBumpWaitingOn": {
+        "oneOf": [
+          {
+            "description": "Waiting for the planner to finish updating all non-Nexus zones",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "found_old_non_nexus_zones"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "Waiting for the planner to deploy new-generation Nexus zones",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "missing_new_nexus_in_blueprint"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "Waiting for `db_metadata_nexus` records to be deployed for new-generation Nexus zones",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "missing_nexus_database_access_records"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "Waiting for newly deployed Nexus zones to appear to inventory",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "missing_new_nexus_in_inventory"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          }
+        ]
+      },
       "NodeName": {
         "description": "Unique name for a saga [`Node`]\n\nEach node requires a string name that's unique within its DAG.  The name is used to identify its output.  Nodes that depend on a given node (either directly or indirectly) can access the node's output using its name.",
         "type": "string"
@@ -7118,6 +7177,63 @@
           "pending_mgs_updates"
         ]
       },
+      "PlanningNexusGenerationBumpReport": {
+        "oneOf": [
+          {
+            "description": "We have no reason to bump the Nexus generation number.",
+            "type": "object",
+            "properties": {
+              "component": {
+                "type": "string",
+                "enum": [
+                  "nothing_to_report"
+                ]
+              }
+            },
+            "required": [
+              "component"
+            ]
+          },
+          {
+            "description": "We are waiting on some condition before we can bump the Nexus generation.",
+            "type": "object",
+            "properties": {
+              "component": {
+                "type": "string",
+                "enum": [
+                  "waiting_on"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/NexusGenerationBumpWaitingOn"
+              }
+            },
+            "required": [
+              "component",
+              "value"
+            ]
+          },
+          {
+            "description": "We are bumping the Nexus generation number to this value.",
+            "type": "object",
+            "properties": {
+              "component": {
+                "type": "string",
+                "enum": [
+                  "bumping_generation"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/Generation"
+              }
+            },
+            "required": [
+              "component",
+              "value"
+            ]
+          }
+        ]
+      },
       "PlanningNoopImageSourceConverted": {
         "description": "How many of the total install-dataset zones and/or host phase 2 slots were noop-converted to use the artifact store on a particular sled.",
         "type": "object",
@@ -7430,13 +7546,20 @@
                 "$ref": "#/components/schemas/ZoneUpdatesWaitingOn"
               }
             ]
+          },
+          "waiting_zones": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ZoneWaitingToExpunge"
+            }
           }
         },
         "required": [
           "expunged_zones",
           "out_of_date_zones",
           "unsafe_zones",
-          "updated_zones"
+          "updated_zones",
+          "waiting_zones"
         ]
       },
       "PortConfigV2": {
@@ -9732,6 +9855,7 @@
         ]
       },
       "ZoneUnsafeToShutdown": {
+        "description": "Zones which should not be shut down, because their lack of availability could be problematic for the successful functioning of the deployed system.",
         "oneOf": [
           {
             "type": "object",
@@ -9850,6 +9974,29 @@
             },
             "required": [
               "type"
+            ]
+          }
+        ]
+      },
+      "ZoneWaitingToExpunge": {
+        "description": "Out-of-date zones which are not yet ready to be expunged.\n\nFor example, out-of-date Nexus zones should not be expunged until handoff has completed.",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "nexus"
+                ]
+              },
+              "zone_generation": {
+                "$ref": "#/components/schemas/Generation"
+              }
+            },
+            "required": [
+              "type",
+              "zone_generation"
             ]
           }
         ]

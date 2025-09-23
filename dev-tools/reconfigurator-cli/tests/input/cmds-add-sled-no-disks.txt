@@ -12,6 +12,10 @@ sled-add --ndisks 0
 # Generate a new inventory collection that includes that sled.
 inventory-generate
 
+# Set the add_zones_with_mupdate_override planner config to ensure that zone
+# adds happen despite zone image sources not being Artifact.
+set planner-config --add-zones-with-mupdate-override true
+
 # Try to plan a new blueprint; this should be okay even though the sled
 # we added has no disks.
 blueprint-plan dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21 eb0796d5-ab8a-4f7b-a884-b4aeacb8ab51

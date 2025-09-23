@@ -7,6 +7,42 @@ show
 # Create a TUF repository from a fake manifest. (The output TUF repo is
 # written to a temporary directory that this invocation of `reconfigurator-cli`
 # is running out of as its working directory.)
+#
+# This is used to simulate the initial version of the system.
+tuf-assemble ../../update-common/manifests/fake-0.0.1.toml
+
+# Load the target release from the assembled TUF repository.
+set target-release repo-0.0.1.zip
+
+# Print the default target release.
+show
+
+# Update the install dataset on all sleds to the target release.
+# This will cause zones to be noop converted over to Artifact,
+# unblocking upgrades.
+sled-update-install-dataset serial0 --to-target-release
+sled-update-install-dataset serial1 --to-target-release
+sled-update-install-dataset serial2 --to-target-release
+
+# Generate inventory, then do a planning run to ensure that all zones
+# are set to Artifact.
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+# The above blueprint includes a pending MGS update, which we should delete
+# (we want to start from a fresh state).
+blueprint-edit latest delete-sp-update serial0
+# Also set the Omicron config for all sleds to reflect the
+# corresponding image sources.
+sled-set serial0 omicron-config latest
+sled-set serial1 omicron-config latest
+sled-set serial2 omicron-config latest
+# Generate inventory once more to reflect the omicron config changes.
+inventory-generate
+inventory-show latest
+
+# Setup is now done -- create another TUF repository which will act as the
+# target release being updated to.
 tuf-assemble ../../update-common/manifests/fake.toml
 
 # Load the target release from the assembled TUF repository.
@@ -17,13 +53,12 @@ show
 
 # Test that this state survives a save/load operation.
 save saved.out
-wipe all
+wipe system
 # This should NOT show the target release.
 show
-load saved.out
+load saved.out 61f451b3-2121-4ed6-91c7-a550054f6c21
 # This should show the target release.
 show
-
 
 # Great.  Now, let's run through an upgrade!
 # First, print out what we've got.
@@ -408,10 +443,53 @@ inventory-generate
 blueprint-plan latest latest
 blueprint-diff latest
 
-# The previous step updated the last non-Nexus zone on the final sled. We should
-# now see a blueprint where every in-service zone (other than Nexus) has an
-# image source set to an artifact from our TUF repo.
-blueprint-show latest
+sled-set d81c6a84-79b8-4958-ae41-ea46c9b19763 omicron-config latest
+inventory-generate
 
-# We ought to update the inventory for the final sled and then step through
-# the Nexus handoff process, but that work is still in progress.
+# Start the Nexus handoff process: A planning step here should place three new
+# Nexus zones, each running from the new TUF repo artifact.
+blueprint-plan latest latest
+blueprint-diff latest
+
+# Update inventory to reflect the three Nexus zones starting.
+sled-set 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c omicron-config latest
+sled-set 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 omicron-config latest
+sled-set d81c6a84-79b8-4958-ae41-ea46c9b19763 omicron-config latest
+inventory-generate
+
+# Planning now should bump the top-level `nexus_generation` to 2, indicating
+# that we want handoff to begin.
+blueprint-plan latest latest
+blueprint-diff latest
+
+# Planning again should make no changes: we haven't yet performed a handoff,
+# so the old Nexus zones are still in charge.
+blueprint-plan latest latest
+blueprint-diff latest
+
+# Bump the set of active Nexus zones; this simulates Nexus handoff.
+set active-nexus-gen 2
+
+# Planning should now expunge one of the old Nexus zones.
+blueprint-plan latest latest
+blueprint-diff latest
+
+# Two more planning iterations should expunge the remaining two old install
+# dataset Nexus zones.
+blueprint-plan latest latest
+blueprint-diff latest
+blueprint-plan latest latest
+blueprint-diff latest
+
+# Update sled configs and inventory to reflect the expunged Nexus zones.
+sled-set 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c omicron-config latest
+sled-set 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 omicron-config latest
+sled-set d81c6a84-79b8-4958-ae41-ea46c9b19763 omicron-config latest
+inventory-generate
+
+# Planning now should note that the old zones are gone, but do nothing else:
+# the update is complete. All in-service zones have image sources from the new
+# TUF repo, and all zones using old images are expunged.
+blueprint-plan latest latest
+blueprint-diff latest
+blueprint-show latest

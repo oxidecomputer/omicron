@@ -150,6 +150,7 @@ impl ReconfiguratorSim {
         builder.set_internal_dns_version(parent_blueprint.internal_dns_version);
         builder.set_external_dns_version(parent_blueprint.external_dns_version);
 
+        let active_nexus_gen = state.config().active_nexus_zone_generation();
         let mut active_nexus_zones = BTreeSet::new();
         let mut not_yet_nexus_zones = BTreeSet::new();
 
@@ -177,18 +178,21 @@ impl ReconfiguratorSim {
 
             match &zone.zone_type {
                 nexus_types::deployment::BlueprintZoneType::Nexus(nexus) => {
-                    if nexus.nexus_generation
-                        == parent_blueprint.nexus_generation
-                    {
+                    if nexus.nexus_generation == active_nexus_gen {
                         active_nexus_zones.insert(zone.id);
-                    } else if nexus.nexus_generation
-                        > parent_blueprint.nexus_generation
-                    {
+                    } else if nexus.nexus_generation > active_nexus_gen {
                         not_yet_nexus_zones.insert(zone.id);
                     }
                 }
                 _ => (),
             }
+        }
+
+        if active_nexus_zones.is_empty() {
+            bail!(
+                "no Nexus zones found at current active generation \
+                 ({active_nexus_gen})"
+            );
         }
 
         builder.set_active_nexus_zones(active_nexus_zones);
@@ -1185,6 +1189,9 @@ enum SetArgs {
     Seed { seed: String },
     /// target number of Nexus instances (for planning)
     NumNexus { num_nexus: u16 },
+    /// specify the generation of Nexus zones that are considered active when
+    /// running the blueprint planner
+    ActiveNexusGen { gen: Generation },
     /// system's external DNS zone name (suffix)
     ExternalDnsZoneName { zone_name: String },
     /// system target release
@@ -2740,6 +2747,12 @@ fn cmd_set(
                 .system_mut()
                 .description_mut()
                 .target_nexus_zone_count(usize::from(num_nexus));
+            rv
+        }
+        SetArgs::ActiveNexusGen { gen } => {
+            let rv =
+                format!("will use active Nexus zones from generation {gen}");
+            state.config_mut().set_active_nexus_zone_generation(gen);
             rv
         }
         SetArgs::ExternalDnsZoneName { zone_name } => {

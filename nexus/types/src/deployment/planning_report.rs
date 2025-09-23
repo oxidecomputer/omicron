@@ -13,8 +13,8 @@ use super::PlannerConfig;
 
 use daft::Diffable;
 use indent_write::fmt::IndentWriter;
+use omicron_common::api::external::Generation;
 use omicron_common::policy::COCKROACHDB_REDUNDANCY;
-use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::MupdateOverrideUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
@@ -50,9 +50,6 @@ use std::fmt::Write;
 )]
 #[must_use = "an unread report is not actionable"]
 pub struct PlanningReport {
-    /// The blueprint produced by the planning run this report describes.
-    pub blueprint_id: BlueprintUuid,
-
     /// The configuration in effect for this planning run.
     pub planner_config: PlannerConfig,
 
@@ -63,13 +60,13 @@ pub struct PlanningReport {
     pub mgs_updates: PlanningMgsUpdatesStepReport,
     pub add: PlanningAddStepReport,
     pub zone_updates: PlanningZoneUpdatesStepReport,
+    pub nexus_generation_bump: PlanningNexusGenerationBumpReport,
     pub cockroachdb_settings: PlanningCockroachdbSettingsStepReport,
 }
 
 impl PlanningReport {
-    pub fn new(blueprint_id: BlueprintUuid) -> Self {
+    pub fn new() -> Self {
         Self {
-            blueprint_id,
             planner_config: PlannerConfig::default(),
             expunge: PlanningExpungeStepReport::new(),
             decommission: PlanningDecommissionStepReport::new(),
@@ -79,6 +76,7 @@ impl PlanningReport {
             ),
             add: PlanningAddStepReport::new(),
             zone_updates: PlanningZoneUpdatesStepReport::new(),
+            nexus_generation_bump: PlanningNexusGenerationBumpReport::new(),
             cockroachdb_settings: PlanningCockroachdbSettingsStepReport::new(),
         }
     }
@@ -90,6 +88,7 @@ impl PlanningReport {
             && self.mgs_updates.is_empty()
             && self.add.is_empty()
             && self.zone_updates.is_empty()
+            && self.nexus_generation_bump.is_empty()
             && self.cockroachdb_settings.is_empty()
     }
 }
@@ -97,14 +96,9 @@ impl PlanningReport {
 impl fmt::Display for PlanningReport {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         if self.is_empty() {
-            writeln!(
-                f,
-                "empty planning report for blueprint {}.",
-                self.blueprint_id,
-            )?;
+            writeln!(f, "empty planning report")?;
         } else {
             let Self {
-                blueprint_id,
                 planner_config,
                 expunge,
                 decommission,
@@ -112,9 +106,10 @@ impl fmt::Display for PlanningReport {
                 mgs_updates,
                 add,
                 zone_updates,
+                nexus_generation_bump,
                 cockroachdb_settings,
             } = self;
-            writeln!(f, "planning report for blueprint {blueprint_id}:")?;
+            writeln!(f, "planning report:")?;
             if *planner_config != PlannerConfig::default() {
                 writeln!(f, "planner config:\n{}", planner_config.display())?;
             }
@@ -124,6 +119,7 @@ impl fmt::Display for PlanningReport {
             mgs_updates.fmt(f)?;
             add.fmt(f)?;
             zone_updates.fmt(f)?;
+            nexus_generation_bump.fmt(f)?;
             cockroachdb_settings.fmt(f)?;
         }
         Ok(())
@@ -838,6 +834,7 @@ pub struct PlanningZoneUpdatesStepReport {
     pub expunged_zones: BTreeMap<SledUuid, Vec<BlueprintZoneConfig>>,
     pub updated_zones: BTreeMap<SledUuid, Vec<BlueprintZoneConfig>>,
     pub unsafe_zones: BTreeMap<BlueprintZoneConfig, ZoneUnsafeToShutdown>,
+    pub waiting_zones: BTreeMap<BlueprintZoneConfig, ZoneWaitingToExpunge>,
 }
 
 impl PlanningZoneUpdatesStepReport {
@@ -848,6 +845,7 @@ impl PlanningZoneUpdatesStepReport {
             expunged_zones: BTreeMap::new(),
             updated_zones: BTreeMap::new(),
             unsafe_zones: BTreeMap::new(),
+            waiting_zones: BTreeMap::new(),
         }
     }
 
@@ -863,6 +861,7 @@ impl PlanningZoneUpdatesStepReport {
             && self.expunged_zones.is_empty()
             && self.updated_zones.is_empty()
             && self.unsafe_zones.is_empty()
+            && self.waiting_zones.is_empty()
     }
 
     pub fn out_of_date_zone(
@@ -890,6 +889,12 @@ impl PlanningZoneUpdatesStepReport {
             .entry(sled_id)
             .and_modify(|zones| zones.push(zone_config.to_owned()))
             .or_insert_with(|| vec![zone_config.to_owned()]);
+
+        // We check for out-of-date zones before expunging zones. If we just
+        // expunged this zone, it's no longer out of date.
+        if let Some(out_of_date) = self.out_of_date_zones.get_mut(&sled_id) {
+            out_of_date.retain(|z| z.zone_config.id != zone_config.id);
+        }
     }
 
     pub fn updated_zone(
@@ -901,6 +906,12 @@ impl PlanningZoneUpdatesStepReport {
             .entry(sled_id)
             .and_modify(|zones| zones.push(zone_config.to_owned()))
             .or_insert_with(|| vec![zone_config.to_owned()]);
+
+        // We check for out-of-date zones before updating zones. If we just
+        // updated this zone, it's no longer out of date.
+        if let Some(out_of_date) = self.out_of_date_zones.get_mut(&sled_id) {
+            out_of_date.retain(|z| z.zone_config.id != zone_config.id);
+        }
     }
 
     pub fn unsafe_zone(
@@ -909,6 +920,14 @@ impl PlanningZoneUpdatesStepReport {
         reason: ZoneUnsafeToShutdown,
     ) {
         self.unsafe_zones.insert(zone.clone(), reason);
+    }
+
+    pub fn waiting_zone(
+        &mut self,
+        zone: &BlueprintZoneConfig,
+        reason: ZoneWaitingToExpunge,
+    ) {
+        self.waiting_zones.insert(zone.clone(), reason);
     }
 }
 
@@ -920,6 +939,7 @@ impl fmt::Display for PlanningZoneUpdatesStepReport {
             expunged_zones,
             updated_zones,
             unsafe_zones,
+            waiting_zones,
         } = self;
 
         if let Some(waiting_on) = waiting_on {
@@ -977,6 +997,20 @@ impl fmt::Display for PlanningZoneUpdatesStepReport {
             }
         }
 
+        if !waiting_zones.is_empty() {
+            let (n, s) = plural_map(waiting_zones);
+            writeln!(f, "* {n} zone{s} waiting to be expunged:")?;
+            for (zone, reason) in waiting_zones.iter() {
+                writeln!(
+                    f,
+                    "  * zone {} ({}): {}",
+                    zone.id,
+                    zone.zone_type.kind().report_str(),
+                    reason,
+                )?;
+            }
+        }
+
         Ok(())
     }
 }
@@ -1008,6 +1042,8 @@ impl ZoneUpdatesWaitingOn {
     }
 }
 
+/// Zones which should not be shut down, because their lack of availability
+/// could be problematic for the successful functioning of the deployed system.
 #[derive(
     Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Diffable, JsonSchema,
 )]
@@ -1030,6 +1066,124 @@ impl fmt::Display for ZoneUnsafeToShutdown {
                 total_internal_dns_zones: t,
                 synchronized_count: s,
             } => write!(f, "only {s}/{t} internal DNS zones are synchronized"),
+        }
+    }
+}
+
+/// Out-of-date zones which are not yet ready to be expunged.
+///
+/// For example, out-of-date Nexus zones should not be expunged until
+/// handoff has completed.
+#[derive(
+    Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Diffable, JsonSchema,
+)]
+#[serde(rename_all = "snake_case", tag = "type")]
+pub enum ZoneWaitingToExpunge {
+    Nexus { zone_generation: Generation },
+}
+
+impl fmt::Display for ZoneWaitingToExpunge {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::Nexus { zone_generation } => {
+                write!(
+                    f,
+                    "image out-of-date, but zone's nexus_generation \
+                     {zone_generation} is still active"
+                )
+            }
+        }
+    }
+}
+
+#[derive(
+    Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Diffable, JsonSchema,
+)]
+#[serde(tag = "component", rename_all = "snake_case", content = "value")]
+pub enum PlanningNexusGenerationBumpReport {
+    /// We have no reason to bump the Nexus generation number.
+    NothingToReport,
+
+    /// We are waiting on some condition before we can bump the
+    /// Nexus generation.
+    WaitingOn(NexusGenerationBumpWaitingOn),
+
+    /// We are bumping the Nexus generation number to this value.
+    BumpingGeneration(Generation),
+}
+
+impl PlanningNexusGenerationBumpReport {
+    pub fn new() -> Self {
+        Self::NothingToReport
+    }
+
+    pub fn is_empty(&self) -> bool {
+        matches!(self, Self::NothingToReport)
+    }
+
+    pub fn set_waiting_on(&mut self, why: NexusGenerationBumpWaitingOn) {
+        *self = Self::WaitingOn(why);
+    }
+
+    pub fn set_next_generation(&mut self, next_generation: Generation) {
+        *self = Self::BumpingGeneration(next_generation);
+    }
+}
+
+impl fmt::Display for PlanningNexusGenerationBumpReport {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::WaitingOn(why) => {
+                writeln!(
+                    f,
+                    "* waiting to update top-level nexus_generation: {}",
+                    why.as_str()
+                )?;
+            }
+            Self::BumpingGeneration(gen) => {
+                writeln!(f, "* updating top-level nexus_generation to: {gen}")?;
+            }
+            // Nothing to report
+            Self::NothingToReport => (),
+        }
+        Ok(())
+    }
+}
+
+#[derive(
+    Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Diffable, JsonSchema,
+)]
+#[serde(rename_all = "snake_case", tag = "type")]
+pub enum NexusGenerationBumpWaitingOn {
+    /// Waiting for the planner to finish updating all non-Nexus zones
+    FoundOldNonNexusZones,
+
+    /// Waiting for the planner to deploy new-generation Nexus zones
+    MissingNewNexusInBlueprint,
+
+    /// Waiting for `db_metadata_nexus` records to be deployed for
+    /// new-generation Nexus zones
+    MissingNexusDatabaseAccessRecords,
+
+    /// Waiting for newly deployed Nexus zones to appear to inventory
+    MissingNewNexusInInventory,
+}
+
+impl NexusGenerationBumpWaitingOn {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::FoundOldNonNexusZones => {
+                "some non-Nexus zone are not yet updated"
+            }
+            Self::MissingNewNexusInBlueprint => {
+                "new Nexus zones have not been planned yet"
+            }
+            Self::MissingNexusDatabaseAccessRecords => {
+                "new Nexus zones do not have database records yet"
+            }
+            Self::MissingNewNexusInInventory => {
+                "new Nexus zones are not in inventory yet"
+            }
         }
     }
 }
