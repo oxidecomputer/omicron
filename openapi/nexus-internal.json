@@ -3087,14 +3087,6 @@
               "add": {
                 "$ref": "#/components/schemas/PlanningAddStepReport"
               },
-              "blueprint_id": {
-                "description": "The blueprint produced by the planning run this report describes.",
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/TypedUuidForBlueprintKind"
-                  }
-                ]
-              },
               "cockroachdb_settings": {
                 "$ref": "#/components/schemas/PlanningCockroachdbSettingsStepReport"
               },
@@ -3133,7 +3125,6 @@
             },
             "required": [
               "add",
-              "blueprint_id",
               "cockroachdb_settings",
               "decommission",
               "expunge",

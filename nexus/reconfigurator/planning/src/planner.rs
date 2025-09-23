@@ -283,7 +283,6 @@ impl<'a> Planner<'a> {
         let cockroachdb_settings = self.do_plan_cockroachdb_settings();
 
         Ok(PlanningReport {
-            blueprint_id: self.blueprint.new_blueprint_id(),
             planner_config: *self.input.planner_config(),
             expunge,
             decommission,
@@ -8054,7 +8053,6 @@ pub(crate) mod test {
             let BlueprintSource::Planner(report) = &blueprint.source else {
                 panic!("unexpected source: {:?}", blueprint.source);
             };
-            assert_eq!(report.blueprint_id, blueprint.id);
             eprintln!("{report}\n");
             // TODO: more report testing
 

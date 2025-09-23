@@ -601,7 +601,7 @@ T ENA ID                                   PARENT                               
 INFO skipping noop image source check for all sleds, reason: no target release is currently set
 generated blueprint 86db3308-f817-4626-8838-4085949a6a41 based on parent blueprint ade5749d-bdf3-4fab-a8ae-00bea01b3a5a
 blueprint source: planner with report:
-planning report for blueprint 86db3308-f817-4626-8838-4085949a6a41:
+planning report:
 * zone adds waiting on blockers
 * zone adds and updates are blocked:
   - sleds have deployment units with image sources not set to Artifact:
@@ -1846,7 +1846,7 @@ INTERNAL DNS STATUS
 INFO skipping noop image source check for all sleds, reason: no target release is currently set
 generated blueprint 86db3308-f817-4626-8838-4085949a6a41 based on parent blueprint ade5749d-bdf3-4fab-a8ae-00bea01b3a5a
 blueprint source: planner with report:
-planning report for blueprint 86db3308-f817-4626-8838-4085949a6a41:
+planning report:
 * zone adds waiting on blockers
 * zone adds and updates are blocked:
   - sleds have deployment units with image sources not set to Artifact:
