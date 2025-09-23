@@ -8,7 +8,6 @@
 
 use super::server::ProfileInfo;
 use super::server::Progress;
-use crate::QuerySummary;
 use crate::native::block::Block;
 use std::borrow::Cow;
 use std::collections::BTreeMap;
@@ -132,6 +131,8 @@ impl Query {
 pub struct QueryResult {
     /// The ID of the query.
     pub id: Uuid,
+    /// The raw SQL query.
+    pub query: String,
     /// The accumulated query progress for the whole query.
     pub progress: Progress,
     /// Any data returned by the query.
@@ -147,9 +148,10 @@ pub struct QueryResult {
 
 impl QueryResult {
     /// Return a query summary from the full query result.
-    pub fn query_summary(&self) -> QuerySummary {
-        QuerySummary {
+    pub fn query_summary(&self) -> oxql_types::QuerySummary {
+        oxql_types::QuerySummary {
             id: self.id,
+            query: self.query.clone(),
             elapsed: self.progress.query_time,
             io_summary: self.progress.into(),
         }

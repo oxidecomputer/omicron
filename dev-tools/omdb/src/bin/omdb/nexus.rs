@@ -41,6 +41,7 @@ use nexus_client::types::SagaState;
 use nexus_client::types::SledSelector;
 use nexus_client::types::UninitializedSledId;
 use nexus_db_lookup::LookupPath;
+use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_inventory::now_db_precision;
 use nexus_saga_recovery::LastPass;
@@ -229,7 +230,7 @@ enum BlueprintsCommands {
 }
 
 #[derive(Debug, Clone, Copy)]
-enum BlueprintIdOrCurrentTarget {
+pub(crate) enum BlueprintIdOrCurrentTarget {
     CurrentTarget,
     BlueprintId(BlueprintUuid),
 }
@@ -248,7 +249,24 @@ impl FromStr for BlueprintIdOrCurrentTarget {
 }
 
 impl BlueprintIdOrCurrentTarget {
-    async fn resolve_to_id(
+    pub(crate) async fn resolve_to_id_via_db(
+        &self,
+        opctx: &OpContext,
+        datastore: &DataStore,
+    ) -> anyhow::Result<BlueprintUuid> {
+        match self {
+            BlueprintIdOrCurrentTarget::CurrentTarget => {
+                let target = datastore
+                    .blueprint_target_get_current(opctx)
+                    .await
+                    .context("failed to get current target")?;
+                Ok(target.target_id)
+            }
+            BlueprintIdOrCurrentTarget::BlueprintId(id) => Ok(*id),
+        }
+    }
+
+    async fn resolve_to_id_via_nexus(
         &self,
         client: &nexus_client::Client,
     ) -> anyhow::Result<BlueprintUuid> {
@@ -268,7 +286,7 @@ impl BlueprintIdOrCurrentTarget {
         &self,
         client: &nexus_client::Client,
     ) -> anyhow::Result<Blueprint> {
-        let id = self.resolve_to_id(client).await?;
+        let id = self.resolve_to_id_via_nexus(client).await?;
         let response = client
             .blueprint_view(id.as_untyped_uuid())
             .await
@@ -3334,7 +3352,8 @@ async fn cmd_nexus_blueprints_delete(
     args: &BlueprintIdArgs,
     _destruction_token: DestructiveOperationToken,
 ) -> Result<(), anyhow::Error> {
-    let blueprint_id = args.blueprint_id.resolve_to_id(client).await?;
+    let blueprint_id =
+        args.blueprint_id.resolve_to_id_via_nexus(client).await?;
     let _ = client
         .blueprint_delete(blueprint_id.as_untyped_uuid())
         .await
@@ -3431,7 +3450,8 @@ async fn cmd_nexus_blueprints_target_set_enabled(
     enabled: bool,
     _destruction_token: DestructiveOperationToken,
 ) -> Result<(), anyhow::Error> {
-    let blueprint_id = args.blueprint_id.resolve_to_id(client).await?;
+    let blueprint_id =
+        args.blueprint_id.resolve_to_id_via_nexus(client).await?;
     let description = if enabled { "enabled" } else { "disabled" };
     client
         .blueprint_target_set_enabled(

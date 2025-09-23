@@ -2981,6 +2981,7 @@ mod tests {
     use nexus_reconfigurator_planning::system::SledBuilder;
     use nexus_reconfigurator_planning::system::SystemDescription;
     use nexus_types::deployment::Blueprint;
+    use nexus_types::deployment::BlueprintSource;
     use nexus_types::deployment::BlueprintTarget;
     use nexus_types::deployment::BlueprintZoneConfig;
     use nexus_types::deployment::BlueprintZoneDisposition;
@@ -3348,7 +3349,7 @@ mod tests {
                     bp0.nexus_generation,
                 )
                 .expect("added nexus to third sled");
-            builder.build()
+            builder.build(BlueprintSource::Test)
         };
         bp_insert_and_make_target(&opctx, &datastore, &bp1).await;
 
@@ -3425,7 +3426,7 @@ mod tests {
                     )
                     .expect("added nexus to third sled");
             }
-            builder.build()
+            builder.build(BlueprintSource::Test)
         };
 
         // Insert the service NIC records for all the Nexuses.
@@ -3990,6 +3991,7 @@ mod tests {
                         external_ips: vec![],
                         disks: vec![],
                         boot_disk: None,
+                        cpu_platform: None,
                         ssh_public_keys: None,
                         start: false,
                         auto_restart_policy: Default::default(),

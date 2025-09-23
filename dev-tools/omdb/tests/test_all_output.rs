@@ -182,8 +182,8 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
         // as the one in the target blueprint - it shouldn't be trying to
         // quiesce yet).
         //
-        // We tests a version of this command which sets this record to
-        // quiesced anyway as the final invocation.
+        // We test a version of this command which sets this record to quiesced
+        // anyway as the final invocation.
         &[
             "--destructive",
             "db",

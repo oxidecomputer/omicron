@@ -5,7 +5,7 @@ stdout:
 Target Blueprint ......<REDACTED_BLUEPRINT_ID>....... @ nexus_generation: 1
 ID                                   |LAST_DRAINED_BLUEPRINT |STATE  |TRANSITIONING_TO 
 -------------------------------------+-----------------------+-------+-----------------
-..........<REDACTED_UUID>........... |n/a                    |active |                 
+..........<REDACTED_UUID>........... |                       |active |                 
 ---------------------------------------------
 stderr:
 note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
@@ -1537,7 +1537,7 @@ parent:    <none>
 
  PENDING MGS-MANAGED UPDATES: 0
 
-empty planning report for blueprint ......<REDACTED_BLUEPRINT_ID>........
+blueprint source: constructed by an automated test
 
 
 ---------------------------------------------
@@ -1661,7 +1661,7 @@ parent:    <none>
 
  PENDING MGS-MANAGED UPDATES: 0
 
-empty planning report for blueprint ......<REDACTED_BLUEPRINT_ID>........
+blueprint source: constructed by an automated test
 
 
 ---------------------------------------------

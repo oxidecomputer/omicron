@@ -19,6 +19,7 @@
 
 use crate::Omdb;
 use crate::check_allow_destructive::DestructiveOperationToken;
+use crate::db::blueprints::cmd_db_blueprints;
 use crate::db::ereport::cmd_db_ereport;
 use crate::helpers::CONNECTION_OPTIONS_HEADING;
 use crate::helpers::DATABASE_OPTIONS_HEADING;
@@ -42,6 +43,10 @@ use clap::ValueEnum;
 use clap::builder::PossibleValue;
 use clap::builder::PossibleValuesParser;
 use clap::builder::TypedValueParser;
+use db_metadata::DbMetadataArgs;
+use db_metadata::DbMetadataCommands;
+use db_metadata::cmd_db_metadata_force_nexus_quiesce;
+use db_metadata::cmd_db_metadata_list_nexus;
 use diesel::BoolExpressionMethods;
 use diesel::ExpressionMethods;
 use diesel::JoinOnDsl;
@@ -61,7 +66,6 @@ use nexus_db_errors::OptionalError;
 use nexus_db_lookup::DataStoreConnection;
 use nexus_db_lookup::LookupPath;
 use nexus_db_model::CrucibleDataset;
-use nexus_db_model::DbMetadataNexusState;
 use nexus_db_model::Disk;
 use nexus_db_model::DnsGroup;
 use nexus_db_model::DnsName;
@@ -145,13 +149,11 @@ use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::MacAddr;
-use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::DownstairsRegionUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
-use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::ParseError;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::PropolisUuid;
@@ -173,6 +175,8 @@ use tabled::Tabled;
 use uuid::Uuid;
 
 mod alert;
+mod blueprints;
+mod db_metadata;
 mod ereport;
 mod saga;
 mod user_data_export;
@@ -341,6 +345,10 @@ pub struct DbFetchOptions {
 /// Subcommands that query or update the database
 #[derive(Debug, Subcommand, Clone)]
 enum DbCommands {
+    /// Print information about blueprints
+    ///
+    /// Most blueprint information is available via `omdb nexus`, not `omdb db`.
+    Blueprints(blueprints::BlueprintsArgs),
     /// Commands for database metadata
     DbMetadata(DbMetadataArgs),
     /// Commands relevant to Crucible datasets
@@ -399,47 +407,6 @@ enum DbCommands {
     Zpool(ZpoolArgs),
     /// Commands for querying and interacting with user data export objects
     UserDataExport(user_data_export::UserDataExportArgs),
-}
-
-#[derive(Debug, Args, Clone)]
-struct DbMetadataArgs {
-    #[command(subcommand)]
-    command: DbMetadataCommands,
-}
-
-#[derive(Debug, Subcommand, Clone)]
-enum DbMetadataCommands {
-    /// Lists the `db_metadata_nexus` records for all Nexuses.
-    #[clap(alias = "ls-nexus")]
-    ListNexus,
-
-    /// !!! DANGEROUS !!! Updates a `db_metadata_nexus` record to 'Quiesced'
-    ///
-    /// THIS OPERATION IS DANGEROUS. It is the responsibility of the caller
-    /// to ensure that the specified Nexus zone is not running.
-    ///
-    /// If the Nexus being updated is actually running, this operation
-    /// may cause arbitrary data corruption, as it can allow multiple Nexuses
-    /// at distinct database verions to inadvertently be running concurrently.
-    ///
-    /// This operation is intended to assist in the explicit case where a Nexus
-    /// is unable to finish marking itself quiesced during the handoff process,
-    /// and cannot be expunged.
-    ForceNexusQuiesce(ForceNexusQuiesceArgs),
-}
-
-#[derive(Debug, Args, Clone)]
-struct ForceNexusQuiesceArgs {
-    /// The UUID of the Nexus zone to be marked quiesced
-    id: OmicronZoneUuid,
-
-    /// If "true": don't bother parsing the target blueprint to identify the
-    /// validity of the [`id`] argument.
-    ///
-    /// Forcing Nexus to quiesce is already an unsafe operation; this makes
-    /// it even less safe. Use with caution.
-    #[arg(long, action=ArgAction::SetTrue)]
-    ignore_target_blueprint: bool,
 }
 
 #[derive(Debug, Args, Clone)]
@@ -1174,6 +1141,9 @@ impl DbArgs {
         self.db_url_opts.with_datastore(omdb, log, |opctx, datastore| {
             async move {
                 match &self.command {
+                    DbCommands::Blueprints(args) => {
+                        cmd_db_blueprints(&opctx, &datastore, &fetch_opts, &args).await
+                    }
                     DbCommands::DbMetadata(DbMetadataArgs {
                         command: DbMetadataCommands::ListNexus,
                     }) => {
@@ -1690,167 +1660,6 @@ async fn lookup_project(
         .await
         .optional()
         .with_context(|| format!("loading project {project_id}"))
-}
-
-// DB Metadata
-
-#[derive(Tabled)]
-#[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
-struct DbMetadataNexusRow {
-    id: OmicronZoneUuid,
-    #[tabled(display_with = "option_impl_display")]
-    last_drained_blueprint: Option<BlueprintUuid>,
-
-    // Identifies the state we observe in the database
-    state: String,
-
-    // Identifies the state this Nexus is trying to achieve, based on the target
-    // blueprint, if it's different from the current state
-    #[tabled(display_with = "display_option_blank")]
-    transitioning_to: Option<String>,
-}
-
-fn get_intended_nexus_state(
-    bp_nexus_generation: Generation,
-    bp_nexus_generation_by_zone: &BTreeMap<OmicronZoneUuid, Generation>,
-    id: OmicronZoneUuid,
-) -> Option<DbMetadataNexusState> {
-    let Some(gen) = bp_nexus_generation_by_zone.get(&id) else {
-        return None;
-    };
-
-    Some(if *gen < bp_nexus_generation {
-        // This Nexus is either quiescing, or has already quiesced
-        DbMetadataNexusState::Quiesced
-    } else if *gen == bp_nexus_generation {
-        // This Nexus is either active, or will become active once
-        // the prior generation has quiesced
-        DbMetadataNexusState::Active
-    } else {
-        // This Nexus is not ready to be run yet
-        DbMetadataNexusState::NotYet
-    })
-}
-
-fn get_nexus_state_transition(
-    observed: DbMetadataNexusState,
-    intended: Option<DbMetadataNexusState>,
-) -> Option<String> {
-    match (observed, intended) {
-        (observed, Some(intended)) if observed == intended => None,
-        (_, Some(intended)) => Some(intended.to_string()),
-        (_, None) => Some("Unknown".to_string()),
-    }
-}
-
-async fn get_db_metadata_nexus_rows(
-    opctx: &OpContext,
-    datastore: &DataStore,
-    blueprint: &Blueprint,
-) -> Result<Vec<DbMetadataNexusRow>, anyhow::Error> {
-    let states = [
-        DbMetadataNexusState::Active,
-        DbMetadataNexusState::NotYet,
-        DbMetadataNexusState::Quiesced,
-    ];
-
-    let nexus_generation_by_zone = blueprint
-        .all_nexus_zones(BlueprintZoneDisposition::is_in_service)
-        .map(|(_, zone, nexus_zone)| (zone.id, nexus_zone.nexus_generation))
-        .collect::<BTreeMap<_, _>>();
-
-    Ok(datastore
-        .get_db_metadata_nexus_in_state(opctx, &states)
-        .await?
-        .into_iter()
-        .map(|db_metadata_nexus| {
-            let id = db_metadata_nexus.nexus_id();
-            let last_drained_blueprint =
-                db_metadata_nexus.last_drained_blueprint_id();
-            let state = db_metadata_nexus.state().to_string();
-            let intended_state = get_intended_nexus_state(
-                blueprint.nexus_generation,
-                &nexus_generation_by_zone,
-                id,
-            );
-
-            let transitioning_to = get_nexus_state_transition(
-                db_metadata_nexus.state(),
-                intended_state,
-            );
-
-            DbMetadataNexusRow {
-                id,
-                last_drained_blueprint,
-                state,
-                transitioning_to,
-            }
-        })
-        .collect())
-}
-
-async fn cmd_db_metadata_list_nexus(
-    opctx: &OpContext,
-    datastore: &DataStore,
-) -> Result<(), anyhow::Error> {
-    let (_, current_target_blueprint) = datastore
-        .blueprint_target_get_current_full(opctx)
-        .await
-        .context("loading current target blueprint")?;
-    println!(
-        "Target Blueprint {} @ nexus_generation: {}",
-        current_target_blueprint.id, current_target_blueprint.nexus_generation
-    );
-
-    let rows: Vec<_> =
-        get_db_metadata_nexus_rows(opctx, datastore, &current_target_blueprint)
-            .await?;
-    let table = tabled::Table::new(rows)
-        .with(tabled::settings::Style::psql())
-        .with(tabled::settings::Padding::new(0, 1, 0, 0))
-        .to_string();
-    println!("{}", table);
-
-    Ok(())
-}
-
-async fn cmd_db_metadata_force_nexus_quiesce(
-    opctx: &OpContext,
-    datastore: &DataStore,
-    args: &ForceNexusQuiesceArgs,
-    _destruction_token: DestructiveOperationToken,
-) -> Result<(), anyhow::Error> {
-    if !args.ignore_target_blueprint {
-        let (_, current_target_blueprint) = datastore
-            .blueprint_target_get_current_full(opctx)
-            .await
-            .context("loading current target blueprint")?;
-        let nexus_generation = current_target_blueprint
-            .all_nexus_zones(BlueprintZoneDisposition::is_in_service)
-            .find_map(|(_, zone, nexus_zone)| {
-                if zone.id == args.id {
-                    Some(nexus_zone.nexus_generation)
-                } else {
-                    None
-                }
-            });
-
-        let Some(gen) = nexus_generation else {
-            bail!("Nexus {} not found in blueprint", args.id);
-        };
-        let bp_gen = current_target_blueprint.nexus_generation;
-        if bp_gen <= gen {
-            bail!(
-                "Nexus {} not ready to quiesce (nexus generation {gen} >= blueprint gen {bp_gen})",
-                args.id
-            );
-        }
-    }
-
-    datastore.database_nexus_access_quiesce(opctx, args.id).await?;
-    println!("Quiesced {}", args.id);
-
-    Ok(())
 }
 
 // Crucible datasets
@@ -4992,6 +4801,7 @@ async fn cmd_db_instance_info(
                     propolis_ip: _,
                     propolis_port: _,
                     instance_id: _,
+                    cpu_platform: _,
                     time_created,
                     time_deleted,
                     runtime:
@@ -7594,6 +7404,7 @@ fn prettyprint_vmm(
     const INSTANCE_ID: &'static str = "instance ID";
     const SLED_ID: &'static str = "sled ID";
     const SLED_SERIAL: &'static str = "sled serial";
+    const CPU_PLATFORM: &'static str = "CPU platform";
     const ADDRESS: &'static str = "propolis address";
     const STATE: &'static str = "state";
     const WIDTH: usize = const_max_len(&[
@@ -7604,6 +7415,7 @@ fn prettyprint_vmm(
         INSTANCE_ID,
         SLED_ID,
         SLED_SERIAL,
+        CPU_PLATFORM,
         STATE,
         ADDRESS,
     ]);
@@ -7617,6 +7429,7 @@ fn prettyprint_vmm(
         sled_id,
         propolis_ip,
         propolis_port,
+        cpu_platform,
         runtime: db::model::VmmRuntimeState { state, r#gen, time_state_updated },
     } = vmm;
 
@@ -7643,6 +7456,7 @@ fn prettyprint_vmm(
     if let Some(serial) = sled_serial {
         println!("{indent}{SLED_SERIAL:>width$}: {serial}");
     }
+    println!("{indent}{CPU_PLATFORM:>width$}: {cpu_platform}");
 }
 
 async fn cmd_db_vmm_list(
@@ -7718,6 +7532,7 @@ async fn cmd_db_vmm_list(
                 sled_id,
                 propolis_ip: _,
                 propolis_port: _,
+                cpu_platform: _,
                 runtime:
                     db::model::VmmRuntimeState {
                         state,

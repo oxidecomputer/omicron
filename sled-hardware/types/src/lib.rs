@@ -4,8 +4,76 @@
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use std::ops::RangeInclusive;
 
 pub mod underlay;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum OxideSled {
+    Gimlet,
+    Cosmo,
+}
+
+impl OxideSled {
+    pub fn try_from_root_node_name(root_node_name: &str) -> Option<Self> {
+        const GIMLET_ROOT_NODE_NAME: &str = "Oxide,Gimlet";
+        const COSMO_ROOT_NODE_NAME: &str = "Oxide,Cosmo";
+        match root_node_name {
+            GIMLET_ROOT_NODE_NAME => Some(Self::Gimlet),
+            COSMO_ROOT_NODE_NAME => Some(Self::Cosmo),
+            _ => None,
+        }
+    }
+
+    pub fn try_from_model(model: &str) -> Option<Self> {
+        match model {
+            "913-0000023" => Some(Self::Cosmo),
+            "913-0000019" | "913-0000006" => Some(Self::Gimlet),
+            _ => None,
+        }
+    }
+
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::Gimlet => "gimlet",
+            Self::Cosmo => "cosmo",
+        }
+    }
+
+    pub fn m2_disk_slots(&self) -> RangeInclusive<i64> {
+        match self {
+            Self::Gimlet | Self::Cosmo => 0x11..=0x12,
+        }
+    }
+
+    pub fn u2_disk_slots(&self) -> RangeInclusive<i64> {
+        match self {
+            Self::Gimlet => 0x00..=0x09,
+            Self::Cosmo => 0x20..=0x29,
+        }
+    }
+
+    pub fn bootdisk_slots(&self) -> [i64; 2] {
+        match self {
+            Self::Gimlet | Self::Cosmo => [0x11, 0x12],
+        }
+    }
+}
+
+// Note that, as part of a larger effort to generalize Omicron
+// for sled types other than gimlets, we would like to change
+// the Baseboard type to refer to an `OxideSled` variant instead
+// of Gimlets, specifically.  Similarly, the doc comment on the
+// type should be changed to read:
+//
+// Describes properties that should uniquely identify a system.
+//
+// However, this requires introducing a new revision into the
+// sled-agent API, and the Baseboard type has leaked into surprising
+// places, so that work has been deferred to a change subsequent
+// to the one that interprets the "model" string to differentiate
+// between Gimlet and Cosmo.  (This comment should be removed once
+// that work is completed).
 
 /// Describes properties that should uniquely identify a Gimlet.
 #[derive(
@@ -23,19 +91,34 @@ pub mod underlay;
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Baseboard {
     Gimlet { identifier: String, model: String, revision: u32 },
-
     Unknown,
 
     Pc { identifier: String, model: String },
 }
 
 impl Baseboard {
+    pub fn new_oxide_sled(
+        kind: OxideSled,
+        identifier: String,
+        model: String,
+        revision: u32,
+    ) -> Self {
+        match kind {
+            OxideSled::Gimlet => Self::new_gimlet(identifier, model, revision),
+            OxideSled::Cosmo => Self::new_cosmo(identifier, model, revision),
+        }
+    }
+
     #[allow(dead_code)]
     pub fn new_gimlet(
         identifier: String,
         model: String,
         revision: u32,
     ) -> Self {
+        Self::Gimlet { identifier, model, revision }
+    }
+
+    pub fn new_cosmo(identifier: String, model: String, revision: u32) -> Self {
         Self::Gimlet { identifier, model, revision }
     }
 
@@ -51,7 +134,9 @@ impl Baseboard {
 
     pub fn type_string(&self) -> &str {
         match &self {
-            Self::Gimlet { .. } => "gimlet",
+            Self::Gimlet { .. } => OxideSled::try_from_model(self.model())
+                .map(|sled| sled.name())
+                .unwrap_or("oxide"),
             Self::Pc { .. } => "pc",
             Self::Unknown => "unknown",
         }
@@ -86,7 +171,8 @@ impl std::fmt::Display for Baseboard {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Baseboard::Gimlet { identifier, model, revision } => {
-                write!(f, "gimlet-{identifier}-{model}-{revision}")
+                let oxide_sled_type = self.type_string();
+                write!(f, "{oxide_sled_type}-{identifier}-{model}-{revision}")
             }
             Baseboard::Unknown => write!(f, "unknown"),
             Baseboard::Pc { identifier, model } => {

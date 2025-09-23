@@ -43,10 +43,12 @@ INFO added artifact, name: fake-gimlet-sp, kind: gimlet_sp, version: 1.0.0, hash
 INFO added artifact, name: fake-rot, kind: gimlet_rot_image_a, version: 1.0.0, hash: d11e65f934bf0de51df2e5b484f61ee72072417b43ac87f33e958008428e7b02, length: 783
 INFO added artifact, name: fake-rot, kind: gimlet_rot_image_b, version: 1.0.0, hash: d11e65f934bf0de51df2e5b484f61ee72072417b43ac87f33e958008428e7b02, length: 783
 INFO added artifact, name: fake-rot-bootloader, kind: gimlet_rot_bootloader, version: 1.0.0, hash: 5b0f601b1fbb8674db9c751a02f8b14f8e6d4e8470f4f7b686fecb2c49ec11f9, length: 797
-INFO added artifact, name: fake-host, kind: host_phase_1, version: 1.0.0, hash: 2053f8594971bbf0a7326c833e2ffc12b065b9d823b9c0b967d275fa595e4e89, length: 524288
-INFO added artifact, name: fake-host, kind: host_phase_2, version: 1.0.0, hash: f3dd0c7a1bd4500ea0d8bcf67581f576d47752b2f1998a4cb0f0c3155c483008, length: 1048576
-INFO added artifact, name: fake-trampoline, kind: trampoline_phase_1, version: 1.0.0, hash: 9b7575cad720f017e936fe5994fc4e21fe040acaaf83c2edd86132aa3d667c7b, length: 524288
-INFO added artifact, name: fake-trampoline, kind: trampoline_phase_2, version: 1.0.0, hash: f355fb8429a7e0f0716dad035f9a06c799168d6c0ffcde85b1a96fef21d4b53e, length: 1048576
+INFO added artifact, name: fake-host, kind: gimlet_host_phase_1, version: 1.0.0, hash: b99d5273ba1418bebb19d74b701d716896409566d41de76ada71bded4c9b166b, length: 524288
+INFO added artifact, name: fake-host, kind: cosmo_host_phase_1, version: 1.0.0, hash: 9525f567106549a3fc32df870a74803d77e51dcc44190b218e227a2c5d444f58, length: 524288
+INFO added artifact, name: fake-host, kind: host_phase_2, version: 1.0.0, hash: d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47, length: 1048576
+INFO added artifact, name: fake-trampoline, kind: gimlet_trampoline_phase_1, version: 1.0.0, hash: bcb27520ee5a56e19f6df9662c66d69ac681fbd873a97547be5f6a5ae3d250c4, length: 524288
+INFO added artifact, name: fake-trampoline, kind: cosmo_trampoline_phase_1, version: 1.0.0, hash: e235b8afb58ee69d966853bd5efe7c7e904da84b9035a332b3e691dc1d5cdbd0, length: 524288
+INFO added artifact, name: fake-trampoline, kind: trampoline_phase_2, version: 1.0.0, hash: a5dfcc4bc69b791f1c509df499e9e72cce844cb2b53a56d8bb357b264bdf13b6, length: 1048576
 INFO added artifact, name: clickhouse, kind: zone, version: 1.0.0, hash: 52b1eb4daff6f9140491d547b11248392920230db3db0eef5f5fa5333fe9e659, length: 1686
 INFO added artifact, name: clickhouse_keeper, kind: zone, version: 1.0.0, hash: cda702919449d86663be97295043aeca0ead69ae5db3bbdb20053972254a27a3, length: 1690
 INFO added artifact, name: clickhouse_server, kind: zone, version: 1.0.0, hash: 5f9ae6a9821bbe8ff0bf60feddf8b167902fe5f3e2c98bd21edd1ec9d969a001, length: 1690
@@ -66,7 +68,7 @@ INFO added artifact, name: fake-switch-sp, kind: switch_sp, version: 1.0.0, hash
 INFO added artifact, name: fake-switch-rot, kind: switch_rot_image_a, version: 1.0.0, hash: 32307d6d75c9707e8499ba4a4d379f99c0358237b6e190ff6a8024b470f62342, length: 774
 INFO added artifact, name: fake-switch-rot, kind: switch_rot_image_b, version: 1.0.0, hash: 32307d6d75c9707e8499ba4a4d379f99c0358237b6e190ff6a8024b470f62342, length: 774
 INFO added artifact, name: fake-switch-rot-bootloader, kind: switch_rot_bootloader, version: 1.0.0, hash: 70836d170abd5621f95bb4225987b27b3d3dd6168e73cd60e44309bdfeb94e98, length: 804
-INFO added artifact, name: installinator_document, kind: installinator_document, version: 1.0.0, hash: c6ae866031d1183094c92cde9d9d1fd5f18356abc81a842ce31471b473fd5582, length: 367
+INFO added artifact, name: installinator_document, kind: installinator_document, version: 1.0.0, hash: a6a636b5d57813578766b3f1c2559abf9af5d8c86187538167937c476beeefa3, length: 367
 set target release based on repo-1.0.0.zip
 
 
@@ -108,10 +110,12 @@ INFO added artifact, name: fake-gimlet-sp, kind: gimlet_sp, version: 2.0.0, hash
 INFO added artifact, name: fake-gimlet-rot, kind: gimlet_rot_image_a, version: 2.0.0, hash: 3ab29e804bcbf382370f9f071b2f0ed71e5bb6af8b01474fcc2a414caccfc9be, length: 782
 INFO added artifact, name: fake-gimlet-rot, kind: gimlet_rot_image_b, version: 2.0.0, hash: 3ab29e804bcbf382370f9f071b2f0ed71e5bb6af8b01474fcc2a414caccfc9be, length: 782
 INFO added artifact, name: fake-gimlet-rot-bootloader, kind: gimlet_rot_bootloader, version: 2.0.0, hash: 8f89bf8bc5f3271650ad72a26fc0d116c910161ca143731473a2b20fb82653cc, length: 800
-INFO added artifact, name: fake-host, kind: host_phase_1, version: 2.0.0, hash: 44714733af7600b30a50bfd2cbaf707ff7ee9724073ff70a6732e55a88864cf6, length: 524288
-INFO added artifact, name: fake-host, kind: host_phase_2, version: 2.0.0, hash: 0c0362b640cece5b9a5e86d8fa683bd2eb84c3e7f90731f597197d604ffa76e3, length: 1048576
-INFO added artifact, name: fake-trampoline, kind: trampoline_phase_1, version: non-semver, hash: 24f8ca0d52da5238644b11964c6feda854c7530820713efefa7ac91683b3fc76, length: 524288
-INFO added artifact, name: fake-trampoline, kind: trampoline_phase_2, version: non-semver, hash: 5fceee33d358aacb8a34ca93a30e28354bd8f341f6e3e895a2cafe83904f3d80, length: 1048576
+INFO added artifact, name: fake-host, kind: gimlet_host_phase_1, version: 2.0.0, hash: 1eba0d79ea9d34558fb3f923a06614bd740649eeb0ca6e5086529dc60cd6f729, length: 524288
+INFO added artifact, name: fake-host, kind: cosmo_host_phase_1, version: 2.0.0, hash: acde77f1a4ee5cf719841b21bb04fd652ddf61387bdbc95a67cc1006009ad611, length: 524288
+INFO added artifact, name: fake-host, kind: host_phase_2, version: 2.0.0, hash: 9ff631b5b7229604ab7c5aae2ee4a34a64772736b332540d38077b3aea6952df, length: 1048576
+INFO added artifact, name: fake-trampoline, kind: gimlet_trampoline_phase_1, version: non-semver, hash: 4c854917481a7bcb7b7c1e63833296b3ac1f8687aae5b950ece75a08cf27f35f, length: 524288
+INFO added artifact, name: fake-trampoline, kind: cosmo_trampoline_phase_1, version: non-semver, hash: 6b4ace7210d67fa3a63b14e007d99fbcad1b4e27e78025c8e467c2341f67c2ba, length: 524288
+INFO added artifact, name: fake-trampoline, kind: trampoline_phase_2, version: non-semver, hash: d7cdc8e1bfd15a830cfdc67868a7c05828090aefc42c8af44aa1104900d09fe5, length: 1048576
 INFO added artifact, name: clickhouse, kind: zone, version: 2.0.0, hash: bb2d1ff02d11f72bc9049ae57f27536207519a1859d29f8d7a90ab3b44d56b08, length: 1687
 INFO added artifact, name: clickhouse_keeper, kind: zone, version: 2.0.0, hash: 1eb9f24be68f13c274aa0ac9b863cec520dbfe762620c328431728d75bfd2198, length: 1691
 INFO added artifact, name: clickhouse_server, kind: zone, version: 2.0.0, hash: 50fe271948672a9af1ba5f96c9d87ff2736fa72d78dfef598a79fa0cc8a00474, length: 1691
@@ -131,7 +135,7 @@ INFO added artifact, name: fake-switch-sp, kind: switch_sp, version: 2.0.0, hash
 INFO added artifact, name: fake-switch-rot, kind: switch_rot_image_a, version: 2.0.0, hash: ad32d98232043a39d076b5b90b506fad406767e0ce1298507e1733bc4e576740, length: 791
 INFO added artifact, name: fake-switch-rot, kind: switch_rot_image_b, version: 2.0.0, hash: ad32d98232043a39d076b5b90b506fad406767e0ce1298507e1733bc4e576740, length: 791
 INFO added artifact, name: fake-switch-rot-bootloader, kind: switch_rot_bootloader, version: non-semver-2, hash: ceae102fa428d81aa6c5d9e1c742fb9ca1091ce5b2797ed0bb14615cf678d342, length: 811
-INFO added artifact, name: installinator_document, kind: installinator_document, version: 2.0.0, hash: 065b2b7cde09474c9a1bcf98a8f9c93129f617e074404c6aa76164f440a5627f, length: 367
+INFO added artifact, name: installinator_document, kind: installinator_document, version: 2.0.0, hash: 13bb3382a02d1f908137cfa356f1434995de15539341a6d8f52a8f2614c52d6c, length: 367
 sled b82ede02-399c-48c6-a1de-411df4fa49a7: install dataset updated: from repo at repo-2.0.0.zip (system version 2.0.0)
 
 
@@ -177,13 +181,23 @@ INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noo
 INFO skipped noop image source check on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, reason: remove_mupdate_override is set in the blueprint (ffffffff-ffff-ffff-ffff-ffffffffffff)
 INFO skipped noop image source check on sled, sled_id: e96e226f-4ed9-4c01-91b9-69a9cd076c9e, reason: sled not found in inventory
 generated blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4 based on parent blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
+blueprint source: planner with report:
 planning report for blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4:
 * noop converting 6/6 install-dataset zones to artifact store on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
 * noop converting 5/6 install-dataset zones to artifact store on sled aff6c093-197d-42c5-ad80-9f10ba051a34
 * zone adds waiting on blockers
 * zone adds and updates are blocked:
   - sleds have remove mupdate override set in blueprint: d81c6a84-79b8-4958-ae41-ea46c9b19763
+  - sleds have deployment units with image sources not set to Artifact:
+    - sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: 7 zones
+    - sled aff6c093-197d-42c5-ad80-9f10ba051a34: 1 zone
+    - sled b82ede02-399c-48c6-a1de-411df4fa49a7: 2 zones
+    - sled d81c6a84-79b8-4958-ae41-ea46c9b19763: 2 zones
+    - sled e96e226f-4ed9-4c01-91b9-69a9cd076c9e: 2 zones
+
 * zone updates waiting on zone add blockers
+* waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
+
 
 
 
@@ -415,13 +429,22 @@ INFO performed noop zone image source checks on sled, sled_id: e96e226f-4ed9-4c0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: e96e226f-4ed9-4c01-91b9-69a9cd076c9e, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: e96e226f-4ed9-4c01-91b9-69a9cd076c9e, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
 generated blueprint af934083-59b5-4bf6-8966-6fb5292c29e1 based on parent blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4
+blueprint source: planner with report:
 planning report for blueprint af934083-59b5-4bf6-8966-6fb5292c29e1:
 * skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 6 zones are already from artifacts
 * noop converting 2/2 install-dataset zones to artifact store on sled e96e226f-4ed9-4c01-91b9-69a9cd076c9e
 * zone adds waiting on blockers
 * zone adds and updates are blocked:
   - sleds have remove mupdate override set in blueprint: d81c6a84-79b8-4958-ae41-ea46c9b19763
+  - sleds have deployment units with image sources not set to Artifact:
+    - sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: 7 zones
+    - sled aff6c093-197d-42c5-ad80-9f10ba051a34: 1 zone
+    - sled b82ede02-399c-48c6-a1de-411df4fa49a7: 2 zones
+    - sled d81c6a84-79b8-4958-ae41-ea46c9b19763: 2 zones
+
 * zone updates waiting on zone add blockers
+* waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
+
 
 
 

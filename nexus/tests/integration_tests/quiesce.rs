@@ -10,6 +10,7 @@ use nexus_reconfigurator_planning::planner::PlannerRng;
 use nexus_reconfigurator_preparation::PlanningInputFromDb;
 use nexus_test_interface::NexusServer;
 use nexus_test_utils_macros::nexus_test;
+use nexus_types::deployment::BlueprintSource;
 use nexus_types::deployment::BlueprintTargetSet;
 use nexus_types::deployment::PlannerConfig;
 use omicron_common::api::external::Error;
@@ -83,7 +84,7 @@ async fn test_quiesce(cptestctx: &ControlPlaneTestContext) {
     )
     .expect("creating BlueprintBuilder");
     builder.set_nexus_generation(blueprint1.nexus_generation.next());
-    let blueprint2 = builder.build();
+    let blueprint2 = builder.build(BlueprintSource::Test);
     nexus
         .blueprint_import(&opctx, blueprint2.clone())
         .await
