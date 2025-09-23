@@ -15,7 +15,6 @@ use daft::Diffable;
 use indent_write::fmt::IndentWriter;
 use omicron_common::api::external::Generation;
 use omicron_common::policy::COCKROACHDB_REDUNDANCY;
-use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::MupdateOverrideUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
@@ -51,9 +50,6 @@ use std::fmt::Write;
 )]
 #[must_use = "an unread report is not actionable"]
 pub struct PlanningReport {
-    /// The blueprint produced by the planning run this report describes.
-    pub blueprint_id: BlueprintUuid,
-
     /// The configuration in effect for this planning run.
     pub planner_config: PlannerConfig,
 
@@ -69,9 +65,8 @@ pub struct PlanningReport {
 }
 
 impl PlanningReport {
-    pub fn new(blueprint_id: BlueprintUuid) -> Self {
+    pub fn new() -> Self {
         Self {
-            blueprint_id,
             planner_config: PlannerConfig::default(),
             expunge: PlanningExpungeStepReport::new(),
             decommission: PlanningDecommissionStepReport::new(),
@@ -101,14 +96,9 @@ impl PlanningReport {
 impl fmt::Display for PlanningReport {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         if self.is_empty() {
-            writeln!(
-                f,
-                "empty planning report for blueprint {}.",
-                self.blueprint_id,
-            )?;
+            writeln!(f, "empty planning report")?;
         } else {
             let Self {
-                blueprint_id,
                 planner_config,
                 expunge,
                 decommission,
@@ -119,7 +109,7 @@ impl fmt::Display for PlanningReport {
                 nexus_generation_bump,
                 cockroachdb_settings,
             } = self;
-            writeln!(f, "planning report for blueprint {blueprint_id}:")?;
+            writeln!(f, "planning report:")?;
             if *planner_config != PlannerConfig::default() {
                 writeln!(f, "planner config:\n{}", planner_config.display())?;
             }
