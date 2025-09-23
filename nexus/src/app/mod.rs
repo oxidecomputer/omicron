@@ -1267,10 +1267,10 @@ async fn switch_zone_address_mappings(
 /// along with the well known port numbers to target a specific switch + service
 /// combination.
 ///
-/// We return whatever we're able to successfully resolve. In the event of a
+/// We return whatever we're able to successfully resolve. In the event of
 /// a communication timeout or other failure with MGS, the SwitchLocation -> Ipv6Addr
 /// mapping will be missing from the returned HashMap. Callers will need to inspect
-/// the contents to be ensure what they expect to be there is actually there.
+/// the contents to ensure what they expect to be there is actually there.
 async fn map_switch_zone_addrs(
     log: &Logger,
     switch_zone_addresses: Vec<Ipv6Addr>,

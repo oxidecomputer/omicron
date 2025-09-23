@@ -794,6 +794,8 @@ async fn sis_ensure_running(
 
 #[cfg(test)]
 mod test {
+    use std::net::SocketAddrV6;
+
     use crate::app::{saga::create_saga_dag, sagas::test_helpers};
     use crate::external_api::params;
     use dropshot::test_util::ClientTestContext;
@@ -808,6 +810,7 @@ mod test {
         InstanceCpuCount, Name,
     };
     use omicron_common::api::internal::shared::SwitchLocation;
+    use tokio::time::sleep;
     use uuid::Uuid;
 
     use super::*;
@@ -1014,12 +1017,9 @@ mod test {
             .expect("there should be at least one dendrite running");
 
         switch0_dpd
-            .child
-            .as_mut()
-            .expect("child process should be present")
-            .kill()
+            .cleanup()
             .await
-            .expect("child process should be killed");
+            .expect("switch0 process should get cleaned up");
 
         let log = &opctx.log;
 
@@ -1079,10 +1079,10 @@ mod test {
 
         let dpd_client = dpd_client::Client::new(
             &format!("http://[{addr}]:{port}"),
-            client_state,
+            client_state.clone(),
         );
 
-        // Check to ensure that the nat entry for the address has made it onto the switch
+        // Check to ensure that the nat entry for the address has made it onto switch1 dendrite
         let nat_entries = dpd_client
             .nat_ipv4_list(&std::net::Ipv4Addr::new(10, 0, 0, 0), None, None)
             .await
@@ -1091,6 +1091,59 @@ mod test {
             .clone();
 
         assert_eq!(nat_entries.len(), 1);
+
+        let port = cptestctx
+            .dendrite
+            .get(&SwitchLocation::Switch0)
+            .expect("two dendrites should be present in test context")
+            .port;
+
+        let nexus_address = cptestctx.internal_client.bind_address;
+        let mgs = cptestctx.gateway.get(&SwitchLocation::Switch0).unwrap();
+        let mgs_address =
+            SocketAddrV6::new(Ipv6Addr::LOCALHOST, mgs.port, 0, 0).into();
+
+        // Test fault recovery for nat propogation
+        // Start a new dendrite instance
+        let new_switch0 =
+            omicron_test_utils::dev::dendrite::DendriteInstance::start(
+                port,
+                Some(nexus_address),
+                Some(mgs_address),
+            )
+            .await
+            .unwrap();
+
+        cptestctx.dendrite.insert(SwitchLocation::Switch0, new_switch0);
+
+        let dpd_client = dpd_client::Client::new(
+            &format!("http://[{addr}]:{port}"),
+            client_state,
+        );
+
+        // Ensure that the nat entry for the address has made it onto the new switch0 dendrite.
+        // This might take a few seconds while the new dendrite comes online.
+        let mut nat_entries = vec![];
+        for _ in 0..5 {
+            nat_entries = dpd_client
+                .nat_ipv4_list(
+                    &std::net::Ipv4Addr::new(10, 0, 0, 0),
+                    None,
+                    None,
+                )
+                .await
+                .unwrap()
+                .items
+                .clone();
+
+            if !nat_entries.is_empty() {
+                break;
+            }
+            sleep(tokio::time::Duration::from_secs(1)).await;
+        }
+
+        assert_eq!(nat_entries.len(), 1);
+
         cptestctx.teardown().await;
     }
 

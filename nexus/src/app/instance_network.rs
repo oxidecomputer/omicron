@@ -411,7 +411,8 @@ pub(crate) async fn instance_ensure_dpd_config(
     // We should not bail out if there is an error while notifying dendrite.
     // If there is an error communicating with one dendrite instance but the
     // other is operational and we bail here, it will prevent users from starting
-    // an instance.
+    // an instance. Dendrite should still catch back up via a RPW if we fail to
+    // notify it here.
     if let Err(e) = notify_dendrite_nat_state(
         datastore,
         log,
