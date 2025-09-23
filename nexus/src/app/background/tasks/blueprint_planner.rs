@@ -359,7 +359,14 @@ mod test {
                 version: 1,
                 config: ReconfiguratorConfig {
                     planner_enabled: true,
-                    planner_config: PlannerConfig::default(),
+                    planner_config: PlannerConfig {
+                        // Set this config to true because we'd like to test
+                        // adding zones even if no target release is set. In the
+                        // future, we'll allow adding zones if no target release
+                        // has ever been set, in which case we can go back to
+                        // setting this field to false.
+                        add_zones_with_mupdate_override: true,
+                    },
                 },
                 time_modified: now_db_precision(),
             }),
