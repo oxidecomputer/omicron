@@ -563,6 +563,10 @@ pub struct PlanningAddStepReport {
     /// MUPdate-related reasons.)
     pub add_zones_with_mupdate_override: bool,
 
+    /// Set to true if the target release generation and minimum release
+    /// generation are both 1, which would allow zones to be added.
+    pub target_release_generations_are_one: bool,
+
     pub sleds_without_ntp_zones_in_inventory: BTreeSet<SledUuid>,
     pub sleds_without_zpools_for_ntp_zones: BTreeSet<SledUuid>,
     pub sleds_waiting_for_ntp_zone: BTreeSet<SledUuid>,
@@ -590,6 +594,7 @@ impl PlanningAddStepReport {
             waiting_on: None,
             add_update_blocked_reasons: Vec::new(),
             add_zones_with_mupdate_override: false,
+            target_release_generations_are_one: false,
             sleds_without_ntp_zones_in_inventory: BTreeSet::new(),
             sleds_without_zpools_for_ntp_zones: BTreeSet::new(),
             sleds_waiting_for_ntp_zone: BTreeSet::new(),
@@ -689,6 +694,7 @@ impl fmt::Display for PlanningAddStepReport {
             waiting_on,
             add_update_blocked_reasons,
             add_zones_with_mupdate_override,
+            target_release_generations_are_one,
             sleds_without_ntp_zones_in_inventory,
             sleds_without_zpools_for_ntp_zones,
             sleds_waiting_for_ntp_zone,
@@ -718,12 +724,21 @@ impl fmt::Display for PlanningAddStepReport {
             }
         }
 
+        let mut add_zones_despite_being_blocked_reasons = Vec::new();
         if *add_zones_with_mupdate_override {
+            add_zones_despite_being_blocked_reasons.push(
+                "planner config `add_zones_with_mupdate_override` is true",
+            );
+        }
+        if *target_release_generations_are_one {
+            add_zones_despite_being_blocked_reasons
+                .push("target release generation is 1");
+        }
+        if !add_zones_despite_being_blocked_reasons.is_empty() {
             writeln!(
                 f,
-                "* adding zones despite being blocked, \
-                   as specified by the `add_zones_with_mupdate_override` \
-                   planner config option"
+                "* adding zones despite being blocked, because: {}",
+                add_zones_despite_being_blocked_reasons.join(", "),
             )?;
         }
 
