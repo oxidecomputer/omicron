@@ -8677,6 +8677,8 @@ dependencies = [
  "usdt",
  "usdt-impl",
  "uuid",
+ "vergen",
+ "vergen-lib",
  "winnow 0.6.26",
  "winnow 0.7.10",
  "x509-cert",
