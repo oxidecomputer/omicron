@@ -232,8 +232,7 @@ When running `cargo xtask virtual-hardware create`, consider using the
 the virtual U2/M2 devices:
 
 ```bash
-cargo xtask virtual-hardware create \
-   --vdev-dir /scratch \
+cargo xtask virtual-hardware --vdev-dir /scratch create \
    --gateway-ip 192.168.1.199 \
    --pxa-start 192.168.1.20 \
    --pxa-end 192.168.1.40
