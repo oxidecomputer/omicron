@@ -515,7 +515,7 @@ parent:    4d4e6c38-cd95-4c4e-8f45-6af4d686964b
  PENDING MGS-MANAGED UPDATES: 0
 
 blueprint source: planner with report:
-planning report for blueprint 9f71f5d3-a272-4382-9154-6ea2e171a6c6:
+planning report:
 planner config:
     add zones with mupdate override:   true
 
