@@ -55,6 +55,7 @@ pub fn mgs_update_status_sp(
 }
 
 /// Determine if the given baseboard needs an SP update and, if so, returns it.
+/// An error means an update is still necessary but cannot be completed.
 pub fn try_make_update_sp(
     log: &slog::Logger,
     baseboard_id: &Arc<BaseboardId>,

@@ -101,6 +101,7 @@ pub fn mgs_update_status_rot(
 }
 
 /// Determine if the given baseboard needs an RoT update and, if so, returns it.
+/// An error means an update is still necessary but cannot be completed.
 pub fn try_make_update_rot(
     log: &slog::Logger,
     baseboard_id: &Arc<BaseboardId>,

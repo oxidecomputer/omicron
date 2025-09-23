@@ -4846,10 +4846,14 @@
                 "enum": [
                   "active_host_phase1_slot_boot_disk_mismatch"
                 ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/M2Slot"
               }
             },
             "required": [
-              "type"
+              "type",
+              "value"
             ]
           },
           {
@@ -4861,10 +4865,14 @@
                 "enum": [
                   "active_host_phase1_hash_not_in_inventory"
                 ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/M2Slot"
               }
             },
             "required": [
-              "type"
+              "type",
+              "value"
             ]
           },
           {
@@ -4929,10 +4937,26 @@
                 "enum": [
                   "failed_version_parse"
                 ]
+              },
+              "value": {
+                "type": "object",
+                "properties": {
+                  "caboose": {
+                    "$ref": "#/components/schemas/CabooseWhich"
+                  },
+                  "err": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "caboose",
+                  "err"
+                ]
               }
             },
             "required": [
-              "type"
+              "type",
+              "value"
             ]
           },
           {
@@ -4944,10 +4968,14 @@
                 "enum": [
                   "inactive_host_phase1_hash_not_in_inventory"
                 ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/M2Slot"
               }
             },
             "required": [
-              "type"
+              "type",
+              "value"
             ]
           },
           {

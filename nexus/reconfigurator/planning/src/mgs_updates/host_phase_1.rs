@@ -72,6 +72,10 @@ impl PendingHostPhase2Changes {
         );
     }
 
+    pub(super) fn is_empty(&self) -> bool {
+        self.by_sled.is_empty()
+    }
+
     pub(crate) fn into_iter(
         self,
     ) -> impl Iterator<Item = (SledUuid, M2Slot, BlueprintHostPhase2DesiredContents)>
@@ -98,11 +102,6 @@ impl PendingHostPhase2Changes {
         sled_id: &SledUuid,
     ) -> Option<(M2Slot, BlueprintHostPhase2DesiredContents)> {
         self.by_sled.remove(sled_id)
-    }
-
-    #[cfg(test)]
-    pub(super) fn is_empty(&self) -> bool {
-        self.by_sled.is_empty()
     }
 
     #[cfg(test)]
@@ -266,6 +265,9 @@ pub(super) fn update_status(
     }
 }
 
+/// Determine if the given baseboard needs a Host OS update and, if so,
+/// returns it. An error means an update is still necessary but cannot be
+/// completed.
 pub(super) fn try_make_update(
     log: &slog::Logger,
     baseboard_id: &Arc<BaseboardId>,

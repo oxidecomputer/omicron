@@ -55,7 +55,8 @@ pub fn mgs_update_status_rot_bootloader(
 }
 
 /// Determine if the given baseboard needs an RoT bootloader update and, if so,
-/// returns it.
+/// returns it. An error means an update is still necessary but cannot be
+/// completed.
 pub fn try_make_update_rot_bootloader(
     log: &slog::Logger,
     baseboard_id: &Arc<BaseboardId>,

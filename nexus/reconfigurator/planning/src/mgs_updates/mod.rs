@@ -82,7 +82,7 @@ impl PlannedMgsUpdates {
         }
     }
 
-    fn set_pending_update(
+    fn add_pending_update(
         &mut self,
         pending_update: PendingMgsUpdate,
     ) -> &mut Self {
@@ -252,20 +252,23 @@ pub(crate) fn plan_mgs_updates(
             };
         }
 
+        // TODO-K: Make it clearer whether it's a single update or system-wide
+        // report
         let PlannedMgsUpdates {
             pending_updates: updates,
             pending_host_phase_2_changes: mut host_phase_2,
             skipped_mgs_updates: mut skipped_updates,
         } = try_make_update(log, board, inventory, current_artifacts);
 
-        if !updates.is_empty() {
-            // We can safely unwrap because we just created the update with the
-            // baseboard_id in try_make_update above
-            let update = updates.get(&board).unwrap();
+        if let Some(update) = updates.into_iter().next() {
             info!(log, "configuring MGS-driven update"; update);
             pending_updates.insert(update.clone());
         } else {
-            info!(log, "skipping board for MGS-driven update"; board)
+            if skipped_mgs_updates.is_empty() && host_phase_2.is_empty() {
+                info!(log, "skipping board for MGS-driven update (no update necessary)"; board);
+            } else {
+                info!(log, "skipping board for MGS-driven update (found issues)"; board);
+            }
         }
 
         pending_host_phase_2_changes.append(&mut host_phase_2);
@@ -569,53 +572,41 @@ fn try_make_update(
     // any of them returns `Some`.  The order is described in RFD 565 section
     // "Update Sequence".
     type UpdateResult = Result<Option<PendingMgsUpdate>, FailedMgsUpdateReason>;
-    type UpdateFn<'a> = Box<dyn Fn() -> UpdateResult + 'a>;
-    let attempts: [(MgsUpdateComponent, UpdateFn); 3] = [
+    let attempts: [(MgsUpdateComponent, UpdateResult); 3] = [
         (
             MgsUpdateComponent::RotBootloader,
-            Box::new(|| {
-                try_make_update_rot_bootloader(
-                    log,
-                    baseboard_id,
-                    inventory,
-                    current_artifacts,
-                )
-            }),
+            try_make_update_rot_bootloader(
+                log,
+                baseboard_id,
+                inventory,
+                current_artifacts,
+            ),
         ),
         (
             MgsUpdateComponent::Rot,
-            Box::new(|| {
-                try_make_update_rot(
-                    log,
-                    baseboard_id,
-                    inventory,
-                    current_artifacts,
-                )
-            }),
+            try_make_update_rot(
+                log,
+                baseboard_id,
+                inventory,
+                current_artifacts,
+            ),
         ),
         (
             MgsUpdateComponent::Sp,
-            Box::new(|| {
-                try_make_update_sp(
-                    log,
-                    baseboard_id,
-                    inventory,
-                    current_artifacts,
-                )
-            }),
+            try_make_update_sp(log, baseboard_id, inventory, current_artifacts),
         ),
     ];
 
     if let Some(update_actions) =
         attempts.into_iter().find_map(|(component, attempt)| {
-            match attempt() {
+            match attempt {
                 // There is a pending update, record it along with any previous
                 // failed updates
                 Ok(Some(update)) => {
                     // We have a non-host update; there are no pending host
                     // phase 2 changes necessary.
                     let pending_actions = PlannedMgsUpdates::new()
-                        .set_pending_update(update)
+                        .add_pending_update(update)
                         .set_skipped_updates(skipped_updates.clone())
                         .build();
                     Some(pending_actions)
@@ -646,7 +637,7 @@ fn try_make_update(
     ) {
         Ok(Some((update, pending_host_os_phase2_changes))) => {
             PlannedMgsUpdates::new()
-                .set_pending_update(update)
+                .add_pending_update(update)
                 .set_pending_host_os_phase2_changes(
                     pending_host_os_phase2_changes,
                 )
