@@ -264,7 +264,7 @@ impl<'a> Planner<'a> {
         };
         add.add_update_blocked_reasons = add_update_blocked_reasons;
         add.add_zones_with_mupdate_override = add_zones_with_mupdate_override;
-        add.target_release_generations_are_one =
+        add.target_release_generation_is_one =
             target_release_generation_is_one;
 
         let zone_updates = if add.any_discretionary_zones_placed() {
