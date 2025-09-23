@@ -21,6 +21,7 @@ use crate::planner::image_source::NoopConvertHostPhase2Contents;
 use crate::planner::image_source::NoopConvertZoneStatus;
 use crate::planner::omicron_zone_placement::PlacementError;
 use gateway_client::types::SpType;
+use iddqd::IdOrdMap;
 use itertools::Itertools;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryResult;
 use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
@@ -70,6 +71,8 @@ use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::str::FromStr;
 use std::sync::Arc;
+use swrite::SWrite;
+use swrite::swriteln;
 
 pub(crate) use self::image_source::NoopConvertGlobalIneligibleReason;
 pub(crate) use self::image_source::NoopConvertInfo;
@@ -1880,12 +1883,10 @@ impl<'a> Planner<'a> {
         //    system is in a corrupt state. The planner will not take any
         //    actions until the error is resolved.
         //
-        // 4. (TODO: https://github.com/oxidecomputer/omicron/issues/8726)
-        //    If any sleds' deployment units aren't at known versions after
-        //    noop image source changes have been considered, then we shouldn't
-        //    proceed with adding or updating zones. Again, this is driven
-        //    primarily by the desire to minimize the number of versions of
-        //    system software running at any time.
+        // 4. If any sleds' deployment units aren't at known versions, then we
+        //    shouldn't proceed with adding zones or updating deployment units.
+        //    Again, this is driven primarily by the desire to minimize the
+        //    number of versions of system software running at any time.
         //
         // What does "any sleds" mean in this context? We don't need to care
         // about decommissioned or expunged sleds, so we consider in-service
@@ -1955,7 +1956,71 @@ impl<'a> Planner<'a> {
             }
         }
 
-        // TODO: implement condition 4 above.
+        // Condition 4 above.
+        {
+            let mut sleds_with_non_artifact = BTreeMap::new();
+            for sled_id in self.input.all_sled_ids(SledFilter::InService) {
+                let mut zones_with_non_artifact = IdOrdMap::new();
+                // Are all zone image sources set to Artifact?
+                for z in self.blueprint.current_sled_zones(
+                    sled_id,
+                    BlueprintZoneDisposition::is_in_service,
+                ) {
+                    match &z.image_source {
+                        BlueprintZoneImageSource::InstallDataset => {
+                            zones_with_non_artifact.insert_overwrite(z);
+                        }
+                        BlueprintZoneImageSource::Artifact { .. } => {}
+                    }
+                }
+
+                // TODO: (https://github.com/oxidecomputer/omicron/issues/8918)
+                // We should also check that the boot disk's host phase 2
+                // image is a known version.
+                //
+                // Currently, the blueprint doesn't currently cache information
+                // about which disk is the boot disk.
+                //
+                // * Inventory does have this information, but if a sled isn't
+                //   in inventory (due to, say, a transient network error), we
+                //   won't be able to make that determination.
+                //
+                // * So we skip this check under the assumption that if all zone
+                //   image sources are at known versions, the host phase 2 image
+                //   is also most likely at a known version.
+                //
+                // We really should explicitly check that the host phase 2 image
+                // is known, though!
+
+                if !zones_with_non_artifact.is_empty() {
+                    sleds_with_non_artifact
+                        .insert(sled_id, zones_with_non_artifact);
+                }
+            }
+
+            if !sleds_with_non_artifact.is_empty() {
+                let mut reason =
+                    "sleds have deployment units with image sources \
+                     not set to Artifact:\n"
+                        .to_owned();
+                for (sled_id, zones_with_non_artifact) in
+                    &sleds_with_non_artifact
+                {
+                    swriteln!(
+                        reason,
+                        "- sled {sled_id}: {} {}",
+                        zones_with_non_artifact.len(),
+                        if zones_with_non_artifact.len() == 1 {
+                            "zone"
+                        } else {
+                            "zones"
+                        }
+                    );
+                }
+
+                reasons.push(reason);
+            }
+        }
 
         Ok(reasons)
     }
@@ -2236,33 +2301,41 @@ impl<'a> Planner<'a> {
     fn lookup_current_nexus_image(
         &self,
     ) -> Result<BlueprintZoneImageSource, Error> {
-        // Look up the active Nexus zone in the blueprint to get its image
-        if let Some(image) = self
-            .blueprint
-            .parent_blueprint()
-            .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
-            .find_map(|(_, blueprint_zone)| {
-                if self.input.active_nexus_zones().contains(&blueprint_zone.id)
-                {
-                    Some(blueprint_zone.image_source.clone())
-                } else {
-                    None
+        // Look up the active Nexus zone in the blueprint to get its image.
+        //
+        // Use the *current* blueprint, not the *parent* blueprint, because zone
+        // image sources are mutable. In particular, mupdate overrides and noop
+        // conversions can change the image source.
+        let mut image_source = None;
+        for sled_id in self.input.all_sled_ids(SledFilter::InService) {
+            for zone in self.blueprint.current_sled_zones(
+                sled_id,
+                BlueprintZoneDisposition::is_in_service,
+            ) {
+                if self.input.active_nexus_zones().contains(&zone.id) {
+                    image_source = Some(zone.image_source.clone());
+                    break;
                 }
-            })
-        {
+            }
+        }
+
+        if let Some(image) = image_source {
             Ok(image)
         } else {
-            Err(Error::NoActiveNexusZonesInParentBlueprint)
+            Err(Error::NoActiveNexusZonesInBlueprint)
         }
     }
 
     fn lookup_current_nexus_generation(&self) -> Result<Generation, Error> {
-        // Look up the active Nexus zone in the blueprint to get its generation
+        // Look up the active Nexus zone in the blueprint to get its generation.
+        //
+        // The Nexus generation is immutable, so it's fine (and easier in this
+        // case) to look at the parent blueprint.
         self.blueprint
             .parent_blueprint()
             .find_generation_for_nexus(self.input.active_nexus_zones())
-            .map_err(|_| Error::NoActiveNexusZonesInParentBlueprint)?
-            .ok_or(Error::NoActiveNexusZonesInParentBlueprint)
+            .map_err(|_| Error::NoActiveNexusZonesInBlueprint)?
+            .ok_or(Error::NoActiveNexusZonesInBlueprint)
     }
 
     // Returns whether the out-of-date Nexus zone is ready to be updated.
@@ -2649,6 +2722,18 @@ pub(crate) mod test {
         .build();
         verify_blueprint(&blueprint1);
 
+        // Set this chicken switch so that zones are added even though image
+        // sources are currently InstallDataset.
+        let mut config = example.system.get_planner_config();
+        config.add_zones_with_mupdate_override = true;
+        example.system.set_planner_config(config);
+
+        let input = example
+            .system
+            .to_planning_input_builder()
+            .expect("created PlanningInputBuilder")
+            .build();
+
         println!("{}", blueprint1.display());
 
         // Now run the planner.  It should do nothing because our initial
@@ -2657,7 +2742,7 @@ pub(crate) mod test {
         let blueprint2 = Planner::new_based_on(
             logctx.log.clone(),
             &blueprint1,
-            &example.input,
+            &input,
             "no-op?",
             &example.collection,
             PlannerRng::from_seed((TEST_NAME, "bp2")),
@@ -2836,7 +2921,7 @@ pub(crate) mod test {
 
         // Use our example system with one sled and one Nexus instance as a
         // starting point.
-        let (example, blueprint1) =
+        let (mut example, blueprint1) =
             ExampleSystemBuilder::new(&logctx.log, TEST_NAME)
                 .nsleds(1)
                 .nexus_count(1)
@@ -2848,7 +2933,18 @@ pub(crate) mod test {
             .next()
             .map(|sa| sa.sled_id)
             .unwrap();
-        let input = example.input;
+
+        // Set this chicken switch so that zones are added even though image
+        // sources are currently InstallDataset.
+        let mut config = example.system.get_planner_config();
+        config.add_zones_with_mupdate_override = true;
+        example.system.set_planner_config(config);
+
+        let input = example
+            .system
+            .to_planning_input_builder()
+            .expect("created PlanningInputBuilder")
+            .build();
         let collection = example.collection;
 
         // This blueprint should only have 1 Nexus instance on the one sled we
@@ -2938,7 +3034,15 @@ pub(crate) mod test {
         let logctx = test_setup_log(TEST_NAME);
 
         // Use our example system as a starting point.
-        let (collection, input, blueprint1) = example(&logctx.log, TEST_NAME);
+        let (mut example, blueprint1) =
+            ExampleSystemBuilder::new(&logctx.log, TEST_NAME).build();
+        let collection = example.collection;
+
+        // Set this chicken switch so that zones are added even though image
+        // sources are currently InstallDataset.
+        let mut config = example.system.get_planner_config();
+        config.add_zones_with_mupdate_override = true;
+        example.system.set_planner_config(config);
 
         // This blueprint should only have 3 Nexus zones: one on each sled.
         assert_eq!(blueprint1.sleds.len(), 3);
@@ -2954,7 +3058,10 @@ pub(crate) mod test {
         }
 
         // Now run the planner with a high number of target Nexus zones.
-        let mut builder = input.into_builder();
+        let mut builder = example
+            .system
+            .to_planning_input_builder()
+            .expect("created PlanningInputBuilder");
         builder.policy_mut().target_nexus_zone_count = 14;
         let input = builder.build();
         let blueprint2 = Planner::new_based_on(
@@ -3024,8 +3131,20 @@ pub(crate) mod test {
         let logctx = test_setup_log(TEST_NAME);
 
         // Use our example system as a starting point.
-        let (collection, input, mut blueprint1) =
-            example(&logctx.log, TEST_NAME);
+        let (mut example, mut blueprint1) =
+            ExampleSystemBuilder::new(&logctx.log, TEST_NAME).build();
+        let collection = example.collection;
+
+        // Set this chicken switch so that zones are added even though image
+        // sources are currently InstallDataset.
+        let mut config = example.system.get_planner_config();
+        config.add_zones_with_mupdate_override = true;
+        example.system.set_planner_config(config);
+
+        example
+            .system
+            .to_planning_input_builder()
+            .expect("created PlanningInputBuilder");
 
         // This blueprint should have exactly 3 internal DNS zones: one on each
         // sled.
@@ -3043,27 +3162,33 @@ pub(crate) mod test {
 
         // Try to run the planner with a high number of internal DNS zones;
         // it will fail because the target is > MAX_DNS_REDUNDANCY.
-        let mut builder = input.clone().into_builder();
-        builder.policy_mut().target_internal_dns_zone_count = 14;
-        match Planner::new_based_on(
-            logctx.log.clone(),
-            &blueprint1,
-            &builder.build(),
-            "test_blueprint2",
-            &collection,
-            PlannerRng::from_entropy(),
-        )
-        .expect("created planner")
-        .plan()
         {
-            Ok(_) => panic!("unexpected success"),
-            Err(err) => {
-                let err = InlineErrorChain::new(&err).to_string();
-                assert!(
-                    err.contains("can only have ")
-                        && err.contains(" internal DNS servers"),
-                    "unexpected error: {err}"
-                );
+            let mut builder = example
+                .system
+                .to_planning_input_builder()
+                .expect("created PlanningInputBuilder");
+            builder.policy_mut().target_internal_dns_zone_count = 14;
+
+            match Planner::new_based_on(
+                logctx.log.clone(),
+                &blueprint1,
+                &builder.build(),
+                "test_blueprint2",
+                &collection,
+                PlannerRng::from_entropy(),
+            )
+            .expect("created planner")
+            .plan()
+            {
+                Ok(_) => panic!("unexpected success"),
+                Err(err) => {
+                    let err = InlineErrorChain::new(&err).to_string();
+                    assert!(
+                        err.contains("can only have ")
+                            && err.contains(" internal DNS servers"),
+                        "unexpected error: {err}"
+                    );
+                }
             }
         }
 
@@ -3085,6 +3210,12 @@ pub(crate) mod test {
                 }
             });
         }
+
+        let builder = example
+            .system
+            .to_planning_input_builder()
+            .expect("created PlanningInputBuilder");
+        let input = builder.build();
 
         let blueprint2 = Planner::new_based_on(
             logctx.log.clone(),
@@ -3154,12 +3285,23 @@ pub(crate) mod test {
         let logctx = test_setup_log(TEST_NAME);
 
         // Use our example system as a starting point.
-        let (collection, input, blueprint1) = example(&logctx.log, TEST_NAME);
+        let (mut example, blueprint1) =
+            ExampleSystemBuilder::new(&logctx.log, TEST_NAME).build();
+        let collection = example.collection;
+
+        // Set this chicken switch so that zones are added even though image
+        // sources are currently InstallDataset.
+        let mut config = example.system.get_planner_config();
+        config.add_zones_with_mupdate_override = true;
+        example.system.set_planner_config(config);
 
         // Expunge the first sled we see, which will result in a Nexus external
         // IP no longer being associated with a running zone, and a new Nexus
         // zone being added to one of the two remaining sleds.
-        let mut builder = input.into_builder();
+        let mut builder = example
+            .system
+            .to_planning_input_builder()
+            .expect("created PlanningInputBuilder");
         let (sled_id, _) =
             builder.sleds_mut().iter_mut().next().expect("no sleds");
         let sled_id = *sled_id;
@@ -3261,7 +3403,21 @@ pub(crate) mod test {
         let logctx = test_setup_log(TEST_NAME);
 
         // Use our example system as a starting point.
-        let (collection, input, blueprint1) = example(&logctx.log, TEST_NAME);
+        let (mut example, blueprint1) =
+            ExampleSystemBuilder::new(&logctx.log, TEST_NAME).build();
+        let collection = example.collection;
+
+        // Set this chicken switch so that zones are added even though image
+        // sources are currently InstallDataset.
+        let mut config = example.system.get_planner_config();
+        config.add_zones_with_mupdate_override = true;
+        example.system.set_planner_config(config);
+
+        let input = example
+            .system
+            .to_planning_input_builder()
+            .expect("created PlanningInputBuilder")
+            .build();
 
         // We should not be able to add any external DNS zones yet,
         // because we haven't give it any addresses (which currently
@@ -3445,12 +3601,19 @@ pub(crate) mod test {
         let logctx = test_setup_log(TEST_NAME);
 
         // Create an example system with a single sled
-        let (example, blueprint1) =
+        let (mut example, blueprint1) =
             ExampleSystemBuilder::new(&logctx.log, TEST_NAME).nsleds(1).build();
         let collection = example.collection;
-        let input = example.input;
+        // Set this chicken switch so that zones are added even though zones are
+        // currently InstallDataset.
+        let mut config = example.system.get_planner_config();
+        config.add_zones_with_mupdate_override = true;
+        example.system.set_planner_config(config);
 
-        let mut builder = input.into_builder();
+        let mut builder = example
+            .system
+            .to_planning_input_builder()
+            .expect("created PlanningInputBuilder");
 
         // Avoid churning on the quantity of Nexus and internal DNS zones -
         // we're okay staying at one each.
@@ -3546,12 +3709,20 @@ pub(crate) mod test {
         let logctx = test_setup_log(TEST_NAME);
 
         // Create an example system with a single sled
-        let (example, mut blueprint1) =
+        let (mut example, mut blueprint1) =
             ExampleSystemBuilder::new(&logctx.log, TEST_NAME).nsleds(1).build();
         let collection = example.collection;
-        let input = example.input;
 
-        let mut builder = input.into_builder();
+        // Set this chicken switch so that zones are added even though image
+        // sources are currently InstallDataset.
+        let mut config = example.system.get_planner_config();
+        config.add_zones_with_mupdate_override = true;
+        example.system.set_planner_config(config);
+
+        let mut builder = example
+            .system
+            .to_planning_input_builder()
+            .expect("created PlanningInputBuilder");
 
         // Avoid churning on the quantity of Nexus and internal DNS zones -
         // we're okay staying at one each.
@@ -3624,11 +3795,17 @@ pub(crate) mod test {
         static TEST_NAME: &str = "planner_disk_add_expunge_decommission";
         let logctx = test_setup_log(TEST_NAME);
 
-        // Create an example system with a single sled
-        let (example, blueprint1) =
-            ExampleSystemBuilder::new(&logctx.log, TEST_NAME).nsleds(1).build();
+        // Create an example system with two sleds. We're going to expunge one
+        // of these sleds.
+        let (mut example, blueprint1) =
+            ExampleSystemBuilder::new(&logctx.log, TEST_NAME).nsleds(2).build();
         let mut collection = example.collection;
-        let input = example.input;
+
+        // Set this chicken switch so that zones are added even though image
+        // sources are currently InstallDataset.
+        let mut config = example.system.get_planner_config();
+        config.add_zones_with_mupdate_override = true;
+        example.system.set_planner_config(config);
 
         // The initial blueprint configuration has generation 2
         let (sled_id, sled_config) =
@@ -3643,7 +3820,10 @@ pub(crate) mod test {
             );
         }
 
-        let mut builder = input.into_builder();
+        let mut builder = example
+            .system
+            .to_planning_input_builder()
+            .expect("created PlanningInputBuilder");
 
         // Let's expunge a disk. Its disposition should change to `Expunged`
         // but its state should remain active.
@@ -3987,15 +4167,23 @@ pub(crate) mod test {
         let logctx = test_setup_log(TEST_NAME);
 
         // Create an example system with a single sled
-        let (example, blueprint1) =
+        let (mut example, blueprint1) =
             ExampleSystemBuilder::new(&logctx.log, TEST_NAME)
                 .nsleds(1)
                 .nexus_count(2)
                 .build();
         let collection = example.collection;
-        let input = example.input;
 
-        let mut builder = input.into_builder();
+        // Set this chicken switch so that zones are added even though image
+        // sources are currently InstallDataset.
+        let mut config = example.system.get_planner_config();
+        config.add_zones_with_mupdate_override = true;
+        example.system.set_planner_config(config);
+
+        let mut builder = example
+            .system
+            .to_planning_input_builder()
+            .expect("created PlanningInputBuilder");
 
         // Aside: Avoid churning on the quantity of Nexus zones - we're okay
         // staying at two.
@@ -4130,10 +4318,15 @@ pub(crate) mod test {
         // and decommissioned sleds. (When we add more kinds of
         // non-provisionable states in the future, we'll have to add more
         // sleds.)
-        let (example, mut blueprint1) =
+        let (mut example, mut blueprint1) =
             ExampleSystemBuilder::new(&logctx.log, TEST_NAME).nsleds(5).build();
         let collection = example.collection;
-        let input = example.input;
+
+        // Set this chicken switch so that zones are added even though image
+        // sources are currently InstallDataset.
+        let mut config = example.system.get_planner_config();
+        config.add_zones_with_mupdate_override = true;
+        example.system.set_planner_config(config);
 
         // This blueprint should only have 5 Nexus zones: one on each sled.
         assert_eq!(blueprint1.sleds.len(), 5);
@@ -4150,7 +4343,10 @@ pub(crate) mod test {
 
         // Arbitrarily choose some of the sleds and mark them non-provisionable
         // in various ways.
-        let mut builder = input.into_builder();
+        let mut builder = example
+            .system
+            .to_planning_input_builder()
+            .expect("created PlanningInputBuilder");
         let mut sleds_iter = builder.sleds_mut().iter_mut();
 
         let nonprovisionable_sled_id = {
@@ -4457,13 +4653,25 @@ pub(crate) mod test {
         let logctx = test_setup_log(TEST_NAME);
 
         // Use our example system as a starting point.
-        let (collection, input, blueprint1) = example(&logctx.log, TEST_NAME);
+        let (mut example, blueprint1) =
+            ExampleSystemBuilder::new(&logctx.log, TEST_NAME).build();
+
+        // Set this chicken switch so that zones are added even though image
+        // sources are currently InstallDataset.
+        let mut config = example.system.get_planner_config();
+        config.add_zones_with_mupdate_override = true;
+        example.system.set_planner_config(config);
+
+        let collection = example.collection;
 
         // Expunge one of the sleds.
         //
         // We expunge a sled via planning input using the builder so that disks
         // are properly taken into account.
-        let mut builder = input.into_builder();
+        let mut builder = example
+            .system
+            .to_planning_input_builder()
+            .expect("created PlanningInputBuilder");
         let expunged_sled_id = {
             let mut iter = builder.sleds_mut().iter_mut();
             let (sled_id, _) = iter.next().expect("at least one sled");
@@ -4738,7 +4946,15 @@ pub(crate) mod test {
         let logctx = test_setup_log(TEST_NAME);
 
         // Use our example system as a starting point.
-        let (collection, input, blueprint1) = example(&logctx.log, TEST_NAME);
+        let (mut example, blueprint1) =
+            ExampleSystemBuilder::new(&logctx.log, TEST_NAME).build();
+        let collection = example.collection;
+
+        // Set this chicken switch so that zones are added even though image
+        // sources are currently InstallDataset.
+        let mut config = example.system.get_planner_config();
+        config.add_zones_with_mupdate_override = true;
+        example.system.set_planner_config(config);
 
         // We should start with CRUCIBLE_PANTRY_REDUNDANCY pantries spread out
         // to at most 1 per sled. Find one of the sleds running one.
@@ -4760,7 +4976,10 @@ pub(crate) mod test {
         // (non-expunged) sled.
         let expunged_sled_id = pantry_sleds[0];
 
-        let mut input_builder = input.into_builder();
+        let mut input_builder = example
+            .system
+            .to_planning_input_builder()
+            .expect("created PlanningInputBuilder");
         input_builder
             .sleds_mut()
             .get_mut(&expunged_sled_id)
@@ -4812,7 +5031,15 @@ pub(crate) mod test {
         let logctx = test_setup_log(TEST_NAME);
 
         // Use our example system as a starting point.
-        let (collection, input, blueprint1) = example(&logctx.log, TEST_NAME);
+        let (mut example, blueprint1) =
+            ExampleSystemBuilder::new(&logctx.log, TEST_NAME).build();
+        let collection = example.collection;
+
+        // Set this chicken switch so that zones are added even though image
+        // sources are currently InstallDataset.
+        let mut config = example.system.get_planner_config();
+        config.add_zones_with_mupdate_override = true;
+        example.system.set_planner_config(config);
 
         // We should start with one ClickHouse zone. Find out which sled it's on.
         let clickhouse_sleds = blueprint1
@@ -4830,7 +5057,10 @@ pub(crate) mod test {
 
         // Expunge the sled hosting ClickHouse and re-plan. The planner should
         // immediately replace the zone with one on another (non-expunged) sled.
-        let mut input_builder = input.into_builder();
+        let mut input_builder = example
+            .system
+            .to_planning_input_builder()
+            .expect("created PlanningInputBuilder");
         input_builder
             .sleds_mut()
             .get_mut(&clickhouse_sled)
@@ -4882,8 +5112,16 @@ pub(crate) mod test {
         let log = logctx.log.clone();
 
         // Use our example system.
-        let (mut collection, input, blueprint1) = example(&log, TEST_NAME);
+        let (mut example, blueprint1) =
+            ExampleSystemBuilder::new(&logctx.log, TEST_NAME).build();
+        let mut collection = example.collection;
         verify_blueprint(&blueprint1);
+
+        // Set this chicken switch so that zones are added even though image
+        // sources are currently InstallDataset.
+        let mut config = example.system.get_planner_config();
+        config.add_zones_with_mupdate_override = true;
+        example.system.set_planner_config(config);
 
         // We shouldn't have a clickhouse cluster config, as we don't have a
         // clickhouse policy set yet
@@ -4892,7 +5130,10 @@ pub(crate) mod test {
         let target_servers = 2;
 
         // Enable clickhouse clusters via policy
-        let mut input_builder = input.into_builder();
+        let mut input_builder = example
+            .system
+            .to_planning_input_builder()
+            .expect("created PlanningInputBuilder");
         input_builder.policy_mut().clickhouse_policy =
             Some(clickhouse_policy(ClickhouseMode::Both {
                 target_servers,
@@ -5229,13 +5470,25 @@ pub(crate) mod test {
         let log = logctx.log.clone();
 
         // Use our example system.
-        let (mut collection, input, blueprint1) = example(&log, TEST_NAME);
+        let (mut example, blueprint1) =
+            ExampleSystemBuilder::new(&log, TEST_NAME).build();
+        let mut collection = example.collection;
+
+        // Set this chicken switch so that zones are added even though image
+        // sources are currently InstallDataset.
+        let mut config = example.system.get_planner_config();
+        config.add_zones_with_mupdate_override = true;
+        example.system.set_planner_config(config);
+
+        let mut input_builder = example
+            .system
+            .to_planning_input_builder()
+            .expect("created PlanningInputBuilder");
 
         let target_keepers = 3;
         let target_servers = 2;
 
         // Enable clickhouse clusters via policy
-        let mut input_builder = input.into_builder();
         input_builder.policy_mut().clickhouse_policy =
             Some(clickhouse_policy(ClickhouseMode::Both {
                 target_servers,
@@ -5448,13 +5701,25 @@ pub(crate) mod test {
         let log = logctx.log.clone();
 
         // Use our example system.
-        let (collection, input, blueprint1) = example(&log, TEST_NAME);
+        let (mut example, blueprint1) =
+            ExampleSystemBuilder::new(&log, TEST_NAME).build();
+        let collection = example.collection;
+
+        // Set this chicken switch so that zones are added even though image
+        // sources are currently InstallDataset.
+        let mut config = example.system.get_planner_config();
+        config.add_zones_with_mupdate_override = true;
+        example.system.set_planner_config(config);
+
+        let mut input_builder = example
+            .system
+            .to_planning_input_builder()
+            .expect("created PlanningInputBuilder");
 
         let target_keepers = 3;
         let target_servers = 2;
 
         // Enable clickhouse clusters via policy
-        let mut input_builder = input.into_builder();
         input_builder.policy_mut().clickhouse_policy =
             Some(clickhouse_policy(ClickhouseMode::Both {
                 target_servers,
@@ -5832,7 +6097,15 @@ pub(crate) mod test {
         let log = logctx.log.clone();
 
         // Use our example system.
-        let (mut collection, input, blueprint1) = example(&log, TEST_NAME);
+        let (mut example, blueprint1) =
+            ExampleSystemBuilder::new(&log, TEST_NAME).build();
+        let mut collection = example.collection;
+
+        // Set this chicken switch so that zones are added even though image
+        // sources are currently InstallDataset.
+        let mut config = example.system.get_planner_config();
+        config.add_zones_with_mupdate_override = true;
+        example.system.set_planner_config(config);
 
         // Find a internal DNS zone we'll use for our test.
         let (sled_id, internal_dns_config) = blueprint1
@@ -5850,7 +6123,10 @@ pub(crate) mod test {
         // Expunge the disk used by the internal DNS zone.
         let input = {
             let internal_dns_zpool = &internal_dns_config.filesystem_pool;
-            let mut builder = input.into_builder();
+            let mut builder = example
+                .system
+                .to_planning_input_builder()
+                .expect("created PlanningInputBuilder");
             builder
                 .sleds_mut()
                 .get_mut(&sled_id)
@@ -6090,11 +6366,12 @@ pub(crate) mod test {
             &logctx.log,
             rng.next_system_rng(),
         )
+        .with_target_release_0_0_1()
+        .expect("set target release to 0.0.1")
         .build();
         verify_blueprint(&blueprint1);
 
-        // We should start with no specified TUF repo and nothing to do.
-        assert!(example.input.tuf_repo().description().tuf_repo().is_none());
+        // We should start with nothing to do.
         assert_planning_makes_no_changes(
             &logctx.log,
             &blueprint1,
@@ -6103,13 +6380,17 @@ pub(crate) mod test {
             TEST_NAME,
         );
 
-        // All zones should be sourced from the install dataset by default.
+        // All zones should be sourced from the initial 0.0.1 target release by
+        // default.
         assert!(
             blueprint1
                 .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
                 .all(|(_, z)| matches!(
-                    z.image_source,
-                    BlueprintZoneImageSource::InstallDataset
+                    &z.image_source,
+                    BlueprintZoneImageSource::Artifact { version, hash: _ }
+                        if version == &BlueprintArtifactVersion::Available {
+                            version: ArtifactVersion::new_const("0.0.1")
+                        }
                 ))
         );
 
@@ -6146,8 +6427,11 @@ pub(crate) mod test {
         let is_old_nexus = |zone: &BlueprintZoneConfig| -> bool {
             zone.zone_type.is_nexus()
                 && matches!(
-                    zone.image_source,
-                    BlueprintZoneImageSource::InstallDataset
+                    &zone.image_source,
+                    BlueprintZoneImageSource::Artifact { version, hash: _ }
+                        if version == &BlueprintArtifactVersion::Available {
+                            version: ArtifactVersion::new_const("0.0.1")
+                        }
                 )
         };
         let is_up_to_date_nexus = |zone: &BlueprintZoneConfig| -> bool {
@@ -6156,8 +6440,11 @@ pub(crate) mod test {
         let is_old_pantry = |zone: &BlueprintZoneConfig| -> bool {
             zone.zone_type.is_crucible_pantry()
                 && matches!(
-                    zone.image_source,
-                    BlueprintZoneImageSource::InstallDataset
+                    &zone.image_source,
+                    BlueprintZoneImageSource::Artifact { version, hash: _ }
+                        if version == &BlueprintArtifactVersion::Available {
+                            version: ArtifactVersion::new_const("0.0.1")
+                        }
                 )
         };
         let is_up_to_date_pantry = |zone: &BlueprintZoneConfig| -> bool {
@@ -6203,6 +6490,7 @@ pub(crate) mod test {
         {
             let blueprint_name = format!("expunging_crucible_pantry_{i}");
             i += 1;
+
             update_collection_from_blueprint(&mut example, &parent);
             let blueprint = Planner::new_based_on(
                 log.clone(),
@@ -6232,10 +6520,15 @@ pub(crate) mod test {
                         // If the zone was previously in-service, it gets
                         // expunged.
                         if modified_zone.disposition.before.is_in_service() {
-                            assert_eq!(
-                                *modified_zone.image_source.before,
-                                BlueprintZoneImageSource::InstallDataset
-                            );
+                            assert!(matches!(
+                                modified_zone.image_source.before,
+                                BlueprintZoneImageSource::Artifact {
+                                    version,
+                                    hash: _,
+                                } if version == &BlueprintArtifactVersion::Available {
+                                    version: ArtifactVersion::new_const("0.0.1")
+                                }
+                            ));
                             assert!(
                                 modified_zone.disposition.after.is_expunged(),
                             );
@@ -6411,10 +6704,15 @@ pub(crate) mod test {
                             *modified_zone.zone_type.before,
                             BlueprintZoneType::Nexus(_)
                         ));
-                        assert_eq!(
-                            *modified_zone.image_source.before,
-                            BlueprintZoneImageSource::InstallDataset
-                        );
+                        assert!(matches!(
+                            modified_zone.image_source.before,
+                            BlueprintZoneImageSource::Artifact {
+                                version,
+                                hash: _,
+                            } if version == &BlueprintArtifactVersion::Available {
+                                version: ArtifactVersion::new_const("0.0.1")
+                            }
+                        ));
 
                         // If the zone was previously in-service, it gets
                         // expunged.
@@ -6548,7 +6846,7 @@ pub(crate) mod test {
 
         // This test "starts" here -- we specify a new TUF repo with an updated
         // CockroachDB image. We create a new TUF repo where version of
-        // CockroachDB has been updated out of the install dataset.
+        // CockroachDB has been updated out of the 0.0.1 repo.
         //
         // The planner should avoid doing this update until it has confirmation
         // from inventory that the cluster is healthy.
@@ -6585,7 +6883,7 @@ pub(crate) mod test {
         // Manually update all zones except Cockroach
         //
         // We just specified a new TUF repo, everything is going to shift from
-        // the install dataset to this new repo.
+        // the initial 0.0.1 repo to this new repo.
         for mut zone in blueprint
             .sleds
             .values_mut()
@@ -6695,8 +6993,8 @@ pub(crate) mod test {
         // Once we have zero underreplicated ranges, we can start to update
         // Cockroach zones.
         //
-        // We'll update one zone at a time, from the install dataset to the
-        // new TUF repo artifact.
+        // We'll update one zone at a time, from the initial 0.0.1 artifact to
+        // the new TUF repo artifact.
         for i in 1..=COCKROACHDB_REDUNDANCY {
             // Keep setting this value in a loop;
             // "update_collection_from_blueprint" resets it.
@@ -6746,7 +7044,7 @@ pub(crate) mod test {
             TEST_NAME,
         );
 
-        // Validate that we do not flip back to the install dataset after
+        // Validate that we do not flip back to the 0.0.1 artifact after
         // performing the update.
         example.collection.cockroach_status = create_valid_looking_status();
         example
@@ -6780,6 +7078,8 @@ pub(crate) mod test {
             &logctx.log,
             rng.next_system_rng(),
         )
+        .with_target_release_0_0_1()
+        .expect("set target release to 0.0.1")
         .build();
         verify_blueprint(&blueprint);
 
@@ -6962,19 +7262,22 @@ pub(crate) mod test {
             TEST_NAME,
         );
 
-        // All zones should be sourced from the install dataset by default.
+        // All zones should be sourced from the 0.0.1 repo by default.
         assert!(
             blueprint
                 .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
                 .all(|(_, z)| matches!(
-                    z.image_source,
-                    BlueprintZoneImageSource::InstallDataset
+                    &z.image_source,
+                    BlueprintZoneImageSource::Artifact { version, hash: _ }
+                        if version == &BlueprintArtifactVersion::Available {
+                            version: ArtifactVersion::new_const("0.0.1")
+                        }
                 ))
         );
 
         // This test "starts" here -- we specify a new TUF repo with an updated
         // Boundary NTP image. We create a new TUF repo where version of
-        // Boundary NTP has been updated out of the install dataset.
+        // Boundary NTP has been updated out of the 0.0.1 repo.
         //
         // The planner should avoid doing this update until it has confirmation
         // from inventory that the cluster is healthy.
@@ -7011,7 +7314,7 @@ pub(crate) mod test {
         // Manually update all zones except boundary NTP
         //
         // We just specified a new TUF repo, everything is going to shift from
-        // the install dataset to this new repo.
+        // the 0.0.1 repo to this new repo.
         for mut zone in blueprint
             .sleds
             .values_mut()
@@ -7031,8 +7334,11 @@ pub(crate) mod test {
         let is_old_boundary_ntp = |zone: &BlueprintZoneConfig| -> bool {
             zone.zone_type.is_boundary_ntp()
                 && matches!(
-                    zone.image_source,
-                    BlueprintZoneImageSource::InstallDataset
+                    &zone.image_source,
+                    BlueprintZoneImageSource::Artifact { version, hash: _ }
+                        if version == &BlueprintArtifactVersion::Available {
+                            version: ArtifactVersion::new_const("0.0.1")
+                        }
                 )
         };
         let old_boundary_ntp_count = |blueprint: &Blueprint| -> usize {
@@ -7145,8 +7451,8 @@ pub(crate) mod test {
         // Once all nodes are timesync'd, we can start to update boundary NTP
         // zones.
         //
-        // We'll update one zone at a time, from the install dataset to the
-        // new TUF repo artifact.
+        // We'll update one zone at a time, from the 0.0.1 artifact to the new
+        // TUF repo artifact.
         set_valid_looking_timesync(&mut example.collection);
 
         //
@@ -7168,7 +7474,8 @@ pub(crate) mod test {
         {
             let summary = new_blueprint.diff_since_blueprint(&blueprint);
             eprintln!(
-                "diff between blueprints (should be expunging boundary NTP using install dataset):\n{}",
+                "diff between blueprints (should be expunging \
+                 boundary NTP using 0.0.1 artifact):\n{}",
                 summary.display()
             );
             eprintln!("{}", new_blueprint.source);
@@ -7281,7 +7588,8 @@ pub(crate) mod test {
         // + Start expunging an internal NTP
         //
         // Cleanup:
-        // * Finish expunging the boundary NTP on the install dataset
+        // * Finish expunging the boundary NTP running off of the 0.0.1
+        //   artifact
         //
 
         let new_blueprint = Planner::new_based_on(
@@ -7361,7 +7669,7 @@ pub(crate) mod test {
             TEST_NAME,
         );
 
-        // Validate that we do not flip back to the install dataset after
+        // Validate that we do not flip back to the 0.0.1 artifact after
         // performing the update, even if we lose timesync data.
         example.collection.ntp_timesync = IdOrdMap::new();
         assert_planning_makes_no_changes(
@@ -7387,22 +7695,27 @@ pub(crate) mod test {
             &logctx.log,
             rng.next_system_rng(),
         )
+        .with_target_release_0_0_1()
+        .expect("set target release to 0.0.1")
         .build();
         verify_blueprint(&blueprint);
 
-        // All zones should be sourced from the install dataset by default.
+        // All zones should be sourced from the initial TUF repo by default.
         assert!(
             blueprint
                 .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
                 .all(|(_, z)| matches!(
-                    z.image_source,
-                    BlueprintZoneImageSource::InstallDataset
+                    &z.image_source,
+                    BlueprintZoneImageSource::Artifact { version, hash: _ }
+                        if version == &BlueprintArtifactVersion::Available {
+                            version: ArtifactVersion::new_const("0.0.1")
+                        }
                 ))
         );
 
         // This test "starts" here -- we specify a new TUF repo with an updated
         // Internal DNS image. We create a new TUF repo where version of
-        // Internal DNS has been updated out of the install dataset.
+        // Internal DNS has been updated to "1.0.0-freeform".
         //
         // The planner should avoid doing this update until it has confirmation
         // from inventory that the Internal DNS servers are ready.
@@ -7440,7 +7753,7 @@ pub(crate) mod test {
         // Manually update all zones except Internal DNS
         //
         // We just specified a new TUF repo, everything is going to shift from
-        // the install dataset to this new repo.
+        // the 0.0.1 repo to this new repo.
         for mut zone in blueprint
             .sleds
             .values_mut()
@@ -7460,8 +7773,11 @@ pub(crate) mod test {
         let is_old_internal_dns = |zone: &BlueprintZoneConfig| -> bool {
             zone.zone_type.is_internal_dns()
                 && matches!(
-                    zone.image_source,
-                    BlueprintZoneImageSource::InstallDataset
+                    &zone.image_source,
+                    BlueprintZoneImageSource::Artifact { version, hash: _ }
+                        if version == &BlueprintArtifactVersion::Available {
+                            version: ArtifactVersion::new_const("0.0.1")
+                        }
                 )
         };
         let is_up_to_date_internal_dns = |zone: &BlueprintZoneConfig| -> bool {
@@ -7544,8 +7860,8 @@ pub(crate) mod test {
         // Once we have valid DNS statuses, we can start to update Internal DNS
         // zones.
         //
-        // We'll update one zone at a time, from the install dataset to the
-        // new TUF repo artifact.
+        // We'll update one zone at a time, from the 0.0.1 artifact to the new
+        // TUF repo artifact.
         for i in 1..=INTERNAL_DNS_REDUNDANCY {
             example.collection.internal_dns_generation_status =
                 create_valid_looking_status(&blueprint);
@@ -7630,7 +7946,7 @@ pub(crate) mod test {
             TEST_NAME,
         );
 
-        // Validate that we do not flip back to the install dataset after
+        // Validate that we do not flip back to the 0.0.1 artifact after
         // performing the update.
         example.collection.internal_dns_generation_status = IdOrdMap::new();
         assert_planning_makes_no_changes(
@@ -7657,16 +7973,21 @@ pub(crate) mod test {
             &logctx.log,
             rng.next_system_rng(),
         )
+        .with_target_release_0_0_1()
+        .expect("set target release to 0.0.1")
         .build();
         verify_blueprint(&blueprint1);
 
-        // All zones should be sourced from the install dataset by default.
+        // All zones should be sourced from the 0.0.1 repo by default.
         assert!(
             blueprint1
                 .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
                 .all(|(_, z)| matches!(
-                    z.image_source,
-                    BlueprintZoneImageSource::InstallDataset
+                    &z.image_source,
+                    BlueprintZoneImageSource::Artifact { version, hash: _ }
+                        if version == &BlueprintArtifactVersion::Available {
+                            version: ArtifactVersion::new_const("0.0.1")
+                        }
                 ))
         );
 
@@ -7910,6 +8231,30 @@ pub(crate) mod test {
             );
         }
 
+        // Asserts that a blueprint, if generated, is not trying to bump the
+        // Nexus generation number.
+        #[track_caller]
+        fn assert_child_bp_has_no_nexus_generation_bump(
+            &self,
+            child_blueprint: &Blueprint,
+        ) {
+            verify_blueprint(&child_blueprint);
+            let summary = child_blueprint.diff_since_blueprint(&self.blueprint);
+
+            let BlueprintSource::Planner(report) = &child_blueprint.source
+            else {
+                panic!("Child blueprint has no associated report");
+            };
+
+            assert!(
+                report.nexus_generation_bump.is_empty(),
+                "Blueprint Summary: {}\n\
+                 Nexus generation bump is not empty: {}",
+                summary.display(),
+                report,
+            );
+        }
+
         // Asserts that a new blueprint, if generated, will have no report.
         //
         // This function explicitly ignores the "noop_image_source" report.
@@ -7935,7 +8280,7 @@ pub(crate) mod test {
                     && report.zone_updates.is_empty()
                     && report.nexus_generation_bump.is_empty()
                     && report.cockroachdb_settings.is_empty(),
-                "Blueprint Summary: {}\n
+                "Blueprint Summary: {}\n\
                  Planning report is not empty: {}",
                 summary.display(),
                 report,
@@ -7978,7 +8323,7 @@ pub(crate) mod test {
         // repo.
         let new_bp = bp_generator.plan_new_blueprint("no-op");
         bp_generator.assert_child_bp_makes_no_changes(&new_bp);
-        bp_generator.assert_child_bp_has_no_report(&new_bp);
+        bp_generator.assert_child_bp_has_no_nexus_generation_bump(&new_bp);
 
         // Set up a TUF repo with new artifacts
         let artifact_version_1 =
@@ -8136,7 +8481,7 @@ pub(crate) mod test {
         // repo.
         let new_bp = bp_generator.plan_new_blueprint("no-op");
         bp_generator.assert_child_bp_makes_no_changes(&new_bp);
-        bp_generator.assert_child_bp_has_no_report(&new_bp);
+        bp_generator.assert_child_bp_has_no_nexus_generation_bump(&new_bp);
 
         // Initially, all zones should be sourced from the install dataset
         assert!(

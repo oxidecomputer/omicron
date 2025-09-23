@@ -1066,6 +1066,16 @@ impl IdMappable for BlueprintZoneConfig {
     }
 }
 
+impl IdOrdItem for BlueprintZoneConfig {
+    type Key<'a> = OmicronZoneUuid;
+
+    fn key(&self) -> Self::Key<'_> {
+        self.id
+    }
+
+    id_upcast!();
+}
+
 impl BlueprintZoneConfig {
     /// Returns the underlay IP address associated with this zone.
     ///

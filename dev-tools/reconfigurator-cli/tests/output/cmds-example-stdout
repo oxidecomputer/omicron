@@ -599,10 +599,15 @@ T ENA ID                                   PARENT                               
 
 > blueprint-plan ade5749d-bdf3-4fab-a8ae-00bea01b3a5a
 INFO skipping noop image source check for all sleds, reason: no target release is currently set
-WARN cannot issue more MGS-driven updates (no current artifacts)
 generated blueprint 86db3308-f817-4626-8838-4085949a6a41 based on parent blueprint ade5749d-bdf3-4fab-a8ae-00bea01b3a5a
 blueprint source: planner with report:
-empty planning report for blueprint 86db3308-f817-4626-8838-4085949a6a41.
+planning report for blueprint 86db3308-f817-4626-8838-4085949a6a41:
+* zone adds waiting on blockers
+* zone adds and updates are blocked:
+  - sleds have deployment units with image sources not set to Artifact:
+    - sled 89d02b1b-478c-401a-8e28-7a26f74fa41b: 18 zones
+
+* zone updates waiting on zone add blockers
 
 
 
@@ -1839,10 +1844,16 @@ INTERNAL DNS STATUS
 > # sled to be expunged.
 > blueprint-plan latest
 INFO skipping noop image source check for all sleds, reason: no target release is currently set
-WARN cannot issue more MGS-driven updates (no current artifacts)
 generated blueprint 86db3308-f817-4626-8838-4085949a6a41 based on parent blueprint ade5749d-bdf3-4fab-a8ae-00bea01b3a5a
 blueprint source: planner with report:
-empty planning report for blueprint 86db3308-f817-4626-8838-4085949a6a41.
+planning report for blueprint 86db3308-f817-4626-8838-4085949a6a41:
+* zone adds waiting on blockers
+* zone adds and updates are blocked:
+  - sleds have deployment units with image sources not set to Artifact:
+    - sled 2eb69596-f081-4e2d-9425-9994926e0832: 4 zones
+    - sled 89d02b1b-478c-401a-8e28-7a26f74fa41b: 17 zones
+
+* zone updates waiting on zone add blockers
 
 
 
