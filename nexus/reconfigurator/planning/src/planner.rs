@@ -41,7 +41,6 @@ use nexus_types::deployment::SledDetails;
 use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::TufRepoContentsError;
 use nexus_types::deployment::ZpoolFilter;
-use nexus_types::deployment::planning_report::SkippedMgsUpdates;
 use nexus_types::deployment::{
     CockroachdbUnsafeToShutdown, PlanningAddStepReport,
     PlanningCockroachdbSettingsStepReport, PlanningDecommissionStepReport,
@@ -197,7 +196,7 @@ impl<'a> Planner<'a> {
         } else {
             PlanningMgsUpdatesStepReport::new(
                 PendingMgsUpdates::new(),
-                SkippedMgsUpdates::new(),
+                Vec::new(),
             )
         };
 

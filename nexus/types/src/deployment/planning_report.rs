@@ -83,7 +83,7 @@ impl PlanningReport {
             noop_image_source: PlanningNoopImageSourceStepReport::new(),
             mgs_updates: PlanningMgsUpdatesStepReport::new(
                 PendingMgsUpdates::new(),
-                SkippedMgsUpdates::new(),
+                Vec::new(),
             ),
             add: PlanningAddStepReport::new(),
             zone_updates: PlanningZoneUpdatesStepReport::new(),
@@ -564,42 +564,17 @@ impl IdOrdItem for SkippedMgsUpdate {
 }
 
 #[derive(
-    Clone, Debug, Eq, PartialEq, Deserialize, Serialize, JsonSchema, Diffable,
-)]
-pub struct SkippedMgsUpdates {
-    pub updates: Vec<SkippedMgsUpdate>,
-}
-
-impl SkippedMgsUpdates {
-    pub fn new() -> Self {
-        Self { updates: Vec::new() }
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.updates.is_empty()
-    }
-
-    pub fn push(&mut self, update: SkippedMgsUpdate) {
-        self.updates.push(update)
-    }
-
-    pub fn append(&mut self, other: &mut Self) {
-        self.updates.append(&mut other.updates);
-    }
-}
-
-#[derive(
     Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Diffable, JsonSchema,
 )]
 pub struct PlanningMgsUpdatesStepReport {
     pub pending_mgs_updates: PendingMgsUpdates,
-    pub skipped_mgs_updates: SkippedMgsUpdates,
+    pub skipped_mgs_updates: Vec<SkippedMgsUpdate>,
 }
 
 impl PlanningMgsUpdatesStepReport {
     pub fn new(
         pending_mgs_updates: PendingMgsUpdates,
-        skipped_mgs_updates: SkippedMgsUpdates,
+        skipped_mgs_updates: Vec<SkippedMgsUpdate>,
     ) -> Self {
         Self { pending_mgs_updates, skipped_mgs_updates }
     }
@@ -626,10 +601,10 @@ impl fmt::Display for PlanningMgsUpdatesStepReport {
             }
         }
         if !skipped_mgs_updates.is_empty() {
-            let n = skipped_mgs_updates.updates.len();
+            let n = skipped_mgs_updates.len();
             let s = plural(n);
             writeln!(f, "* {n} skipped MGS update{s}:")?;
-            for update in &skipped_mgs_updates.updates {
+            for update in skipped_mgs_updates {
                 writeln!(
                     f,
                     "  * {} {}: {}",
