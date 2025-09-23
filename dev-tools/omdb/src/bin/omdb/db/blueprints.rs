@@ -232,5 +232,13 @@ async fn cmd_db_blueprint_planner_report_show(
     println!("planner report for blueprint {blueprint_id}:");
     println!("{report}");
 
+    let operator_notes = report.operator_notes().into_notes();
+    if !operator_notes.is_empty() {
+        println!("\nnotes for customer operator:");
+        for note in operator_notes {
+            println!("  * {note}");
+        }
+    }
+
     Ok(())
 }

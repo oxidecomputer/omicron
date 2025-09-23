@@ -152,6 +152,9 @@ planning report:
 
 
 
+notes for customer operator:
+  * across 3 sleds, converted 25/25 service zones to known versions
+
 > blueprint-diff latest
 from: blueprint dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21
 to:   blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
@@ -3242,6 +3245,9 @@ planning report:
 
 
 
+notes for customer operator:
+  * 1 sled waiting for NTP
+
 > blueprint-diff latest
 from: blueprint 6fad8fd4-e825-433f-b76d-495484e068ce
 to:   blueprint 24b6e243-100c-428d-8ea6-35b504226f55
@@ -5333,6 +5339,9 @@ planning report:
 
 
 
+notes for customer operator:
+  * 1 sled waiting for NTP
+
 > blueprint-diff latest
 from: blueprint 02078c95-3d58-4b7b-a03f-9b160361c50a
 to:   blueprint e7a01ffc-6b0e-408b-917b-b1efe18b3110
@@ -7099,6 +7108,9 @@ planning report:
 
 
 
+notes for customer operator:
+  * 1 sled waiting for NTP
+
 > blueprint-diff latest
 from: blueprint 2182613d-dc9f-41eb-9c6a-d33801849caa
 to:   blueprint e8b088a8-7da0-480b-a2dc-75ffef068ece
@@ -7951,6 +7963,10 @@ planning report:
 
 
 
+notes for customer operator:
+  * waiting for handoff from old version to new version
+  * initiating handoff from old version to new
+
 > blueprint-diff latest
 from: blueprint d69e1109-06be-4469-8876-4292dc7885d7
 to:   blueprint 12f19448-6a10-4b4b-ae19-a8c94a566097
@@ -8040,6 +8056,9 @@ planning report:
   * zone 466a9f29-62bf-4e63-924a-b9efdb86afec: nexus image out-of-date, but nexus_generation 1 is still active
 
 
+
+notes for customer operator:
+  * waiting for handoff from old version to new version
 
 > blueprint-diff latest
 from: blueprint 12f19448-6a10-4b4b-ae19-a8c94a566097

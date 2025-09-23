@@ -131,6 +131,7 @@ pub use planning_report::PlanningNoopImageSourceSkipSledHostPhase2Reason;
 pub use planning_report::PlanningNoopImageSourceSkipSledZonesReason;
 pub use planning_report::PlanningNoopImageSourceSkipZoneReason;
 pub use planning_report::PlanningNoopImageSourceStepReport;
+pub use planning_report::PlanningOperatorNotes;
 pub use planning_report::PlanningReport;
 pub use planning_report::PlanningZoneUpdatesStepReport;
 pub use planning_report::ZoneAddWaitingOn;
