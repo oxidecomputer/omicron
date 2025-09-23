@@ -1189,7 +1189,8 @@ enum SetArgs {
     Seed { seed: String },
     /// target number of Nexus instances (for planning)
     NumNexus { num_nexus: u16 },
-    /// generation of the active Nexus zones (controlling handoff)
+    /// specify the generation of Nexus zones that are considered active when
+    /// running the blueprint planner
     ActiveNexusGen { gen: Generation },
     /// system's external DNS zone name (suffix)
     ExternalDnsZoneName { zone_name: String },
