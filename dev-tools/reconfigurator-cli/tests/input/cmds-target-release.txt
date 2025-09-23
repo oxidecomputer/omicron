@@ -470,7 +470,7 @@ blueprint-diff latest
 # Bump the set of active Nexus zones; this simulates Nexus handoff.
 set active-nexus-gen 2
 
-# Planning should now expunge one of the old install dataset Nexus zones.
+# Planning should now expunge one of the old Nexus zones.
 blueprint-plan latest latest
 blueprint-diff latest
 
@@ -487,9 +487,9 @@ sled-set 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 omicron-config latest
 sled-set d81c6a84-79b8-4958-ae41-ea46c9b19763 omicron-config latest
 inventory-generate
 
-# Planning now should do note that the old zones are gone, but do nothing else:
-# the update is complete. All in-service zones are running from TUF repo
-# artifacts, and all install dataset zones are expunged.
+# Planning now should note that the old zones are gone, but do nothing else:
+# the update is complete. All in-service zones have image sources from the new
+# TUF repo, and all zones using old images are expunged.
 blueprint-plan latest latest
 blueprint-diff latest
 blueprint-show latest

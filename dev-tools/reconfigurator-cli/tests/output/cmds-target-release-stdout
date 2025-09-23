@@ -8062,7 +8062,7 @@ external DNS:
 will use active Nexus zones from generation 2
 
 
-> # Planning should now expunge one of the old install dataset Nexus zones.
+> # Planning should now expunge one of the old Nexus zones.
 > blueprint-plan latest latest
 INFO performed noop zone image source checks on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, num_total: 10, num_already_artifact: 10, num_eligible: 0, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
@@ -8528,9 +8528,9 @@ set sled d81c6a84-79b8-4958-ae41-ea46c9b19763 omicron config from latest bluepri
 generated inventory collection 5ffc4b23-0e6e-40e9-bacd-f83ca33f9792 from configured sleds
 
 
-> # Planning now should do note that the old zones are gone, but do nothing else:
-> # the update is complete. All in-service zones are running from TUF repo
-> # artifacts, and all install dataset zones are expunged.
+> # Planning now should note that the old zones are gone, but do nothing else:
+> # the update is complete. All in-service zones have image sources from the new
+> # TUF repo, and all zones using old images are expunged.
 > blueprint-plan latest latest
 INFO performed noop zone image source checks on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, num_total: 9, num_already_artifact: 9, num_eligible: 0, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
