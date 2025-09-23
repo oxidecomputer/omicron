@@ -196,6 +196,7 @@ planning report for blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4:
     - sled e96e226f-4ed9-4c01-91b9-69a9cd076c9e: 2 zones
 
 * zone updates waiting on zone add blockers
+* waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
 
@@ -442,6 +443,7 @@ planning report for blueprint af934083-59b5-4bf6-8966-6fb5292c29e1:
     - sled d81c6a84-79b8-4958-ae41-ea46c9b19763: 2 zones
 
 * zone updates waiting on zone add blockers
+* waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
 
