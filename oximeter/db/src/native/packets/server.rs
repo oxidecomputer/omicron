@@ -6,8 +6,6 @@
 
 //! Packets sent from the server.
 
-use crate::client::query_summary::IoCount;
-use crate::client::query_summary::IoSummary;
 use crate::native::block::Block;
 use crate::native::block::DataType;
 use std::fmt;
@@ -190,11 +188,14 @@ pub struct Progress {
     pub query_time: Duration,
 }
 
-impl From<Progress> for IoSummary {
+impl From<Progress> for oxql_types::IoSummary {
     fn from(value: Progress) -> Self {
-        IoSummary {
-            read: IoCount { bytes: value.bytes_read, rows: value.rows_read },
-            written: IoCount {
+        oxql_types::IoSummary {
+            read: oxql_types::IoCount {
+                bytes: value.bytes_read,
+                rows: value.rows_read,
+            },
+            written: oxql_types::IoCount {
                 bytes: value.bytes_written,
                 rows: value.rows_written,
             },

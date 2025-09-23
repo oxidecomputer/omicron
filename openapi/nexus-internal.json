@@ -9993,9 +9993,6 @@
           {
             "type": "object",
             "properties": {
-              "current_nexus_generation_known": {
-                "type": "boolean"
-              },
               "type": {
                 "type": "string",
                 "enum": [
@@ -10007,7 +10004,6 @@
               }
             },
             "required": [
-              "current_nexus_generation_known",
               "type",
               "zone_generation"
             ]

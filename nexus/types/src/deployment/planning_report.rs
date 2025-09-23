@@ -1089,26 +1089,18 @@ impl fmt::Display for ZoneUnsafeToShutdown {
 )]
 #[serde(rename_all = "snake_case", tag = "type")]
 pub enum ZoneWaitingToExpunge {
-    Nexus { zone_generation: Generation, current_nexus_generation_known: bool },
+    Nexus { zone_generation: Generation },
 }
 
 impl fmt::Display for ZoneWaitingToExpunge {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Self::Nexus { zone_generation, current_nexus_generation_known } => {
-                if *current_nexus_generation_known {
-                    write!(
-                        f,
-                        "image out-of-date, but zone's nexus_generation \
-                         {zone_generation} is still active"
-                    )
-                } else {
-                    write!(
-                        f,
-                        "zone's nexus_generation is {zone_generation}, but \
-                         the currently-running Nexus generation is unknown"
-                    )
-                }
+            Self::Nexus { zone_generation } => {
+                write!(
+                    f,
+                    "image out-of-date, but zone's nexus_generation \
+                     {zone_generation} is still active"
+                )
             }
         }
     }

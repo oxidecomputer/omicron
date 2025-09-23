@@ -115,8 +115,8 @@ pub enum Error {
     NoAvailableZpool { sled_id: SledUuid, kind: ZoneKind },
     #[error("no Nexus zones exist in parent blueprint")]
     NoNexusZonesInParentBlueprint,
-    #[error("no active Nexus zones exist in parent blueprint")]
-    NoActiveNexusZonesInParentBlueprint,
+    #[error("no active Nexus zones exist in blueprint currently being built")]
+    NoActiveNexusZonesInBlueprint,
     #[error("conflicting values for active Nexus zones in parent blueprint")]
     ActiveNexusZoneGenerationConflictInParentBlueprint,
     #[error("no Boundary NTP zones exist in parent blueprint")]
