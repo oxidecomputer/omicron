@@ -176,6 +176,7 @@ pub enum Problem<'a> {
     )]
     BlessedVersionBroken {
         compatibility_issues: DisplayableVec<OpenApiCompatibilityError>,
+        generated: &'a GeneratedApiSpecFile,
     },
 
     #[error(
@@ -268,6 +269,15 @@ impl<'a> Problem<'a> {
         self.fix().is_some()
     }
 
+    pub fn debug(&'a self) -> Option<DebugState<'a>> {
+        match self {
+            Problem::BlessedVersionBroken { generated, .. } => {
+                Some(DebugState::SaveGenerated { generated })
+            }
+            _ => None,
+        }
+    }
+
     pub fn fix(&'a self) -> Option<Fix<'a>> {
         match self {
             Problem::LocalSpecFileOrphaned { spec_file_name } => {
@@ -310,6 +320,44 @@ impl<'a> Problem<'a> {
             Problem::LatestLinkStale { api_ident, link, .. }
             | Problem::LatestLinkMissing { api_ident, link } => {
                 Some(Fix::FixSymlink { api_ident, link })
+            }
+        }
+    }
+}
+
+pub enum DebugState<'a> {
+    SaveGenerated { generated: &'a GeneratedApiSpecFile },
+}
+
+impl Display for DebugState<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DebugState::SaveGenerated { generated } => {
+                writeln!(
+                    f,
+                    "Saving debug state {}",
+                    generated.spec_file_name()
+                )?;
+            }
+        }
+        Ok(())
+    }
+}
+
+impl DebugState<'_> {
+    pub fn execute(&self, env: &Environment) -> anyhow::Result<Vec<String>> {
+        let root = env.openapi_dir();
+        match self {
+            DebugState::SaveGenerated { generated } => {
+                let path = root.join(format!(
+                    "{}-DEBUG",
+                    generated.spec_file_name().path()
+                ));
+                Ok(vec![format!(
+                    "updated {}: {:?}",
+                    &path,
+                    overwrite_file(&path, generated.contents())?
+                )])
             }
         }
     }
@@ -767,6 +815,7 @@ fn resolve_api_version_blessed<'a>(
     if !issues.is_empty() {
         problems.push(Problem::BlessedVersionBroken {
             compatibility_issues: DisplayableVec(issues),
+            generated,
         });
     }
 

@@ -68,6 +68,16 @@ pub(crate) fn generate_impl(
     );
 
     if resolved.has_unfixable_problems() {
+        for api in apis.iter_apis() {
+            let ident = api.ident();
+            for version in api.iter_versions_semver() {
+                let resolution =
+                    resolved.resolution_for_api_version(ident, version).unwrap();
+                let problems: Vec<_> = resolution.problems().collect();
+                debug_problems(env, problems, &styles);
+            }
+        }
+
         return match display_resolution(env, &apis, &resolved, &styles)? {
             CheckResult::Failures => Ok(GenerateResult::Failures),
             unexpected => {
@@ -250,6 +260,38 @@ fn print_final_status(
         num_unchanged.style(styles.bold),
         num_errors.style(styles.bold),
     );
+}
+
+fn debug_problems<'a, T>(env: &Environment, problems: T, styles: &Styles)
+where
+    T: IntoIterator<Item = &'a Problem<'a>>,
+{
+    for p in problems {
+        println!("check {}", p);
+        // We should have already bailed out if there were any unfixable
+        // problems.
+        if let Some(fix) = p.debug() {
+            match fix.execute(env) {
+                Ok(steps) => {
+                    for s in steps {
+                        eprintln!(
+                            "{:>HEADER_WIDTH$} {}",
+                            "DEBUG".style(styles.success_header),
+                            s,
+                        );
+                    }
+                }
+                Err(error) => {
+                    eprintln!(
+                        "{:>HEADER_WIDTH$} fix {:?}: {:#}",
+                        "DEBUG FAILED".style(styles.failure_header),
+                        fix.to_string(),
+                        error
+                    );
+                }
+            }
+        }
+    }
 }
 
 fn fix_problems<'a, T>(
