@@ -61,8 +61,8 @@ pub fn try_make_update_sp(
     baseboard_id: &Arc<BaseboardId>,
     inventory: &Collection,
     current_artifacts: &TufRepoDescription,
-// TODO-K: Like the Host OS, use an enum here as the return type as suggested in
-// https://github.com/oxidecomputer/omicron/pull/9001#discussion_r2372837627
+    // TODO-K: Like the Host OS, use an enum here as the return type as suggested in
+    // https://github.com/oxidecomputer/omicron/pull/9001#discussion_r2372837627
 ) -> Result<Option<PendingMgsUpdate>, FailedMgsUpdateReason> {
     let Some(sp_info) = inventory.sps.get(baseboard_id) else {
         return Err(FailedMgsUpdateReason::SpNotInInventory);
