@@ -89,7 +89,9 @@ impl From<model::SiloUser> for SiloUser {
                 silo_id: record.silo_id,
                 // SAFETY: there is a database constraint that prevents a user
                 // with provision type 'api_only' from having a null external id
-                external_id: record.external_id.unwrap(),
+                external_id: record
+                    .external_id
+                    .expect("database constraint exists"),
             }),
 
             UserProvisionType::Jit => SiloUser::Jit(SiloUserJit {
@@ -100,7 +102,9 @@ impl From<model::SiloUser> for SiloUser {
                 silo_id: record.silo_id,
                 // SAFETY: there is a database constraint that prevents a user
                 // with provision type 'jit' from having a null external id
-                external_id: record.external_id.unwrap(),
+                external_id: record
+                    .external_id
+                    .expect("database constraint exists"),
             }),
         }
     }

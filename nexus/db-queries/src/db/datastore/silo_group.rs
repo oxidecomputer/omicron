@@ -85,7 +85,9 @@ impl From<model::SiloGroup> for SiloGroup {
                     silo_id: record.silo_id,
                     // SAFETY: there is a database constraint that prevents a group
                     // with provision type 'api_only' from having a null external id
-                    external_id: record.external_id.unwrap(),
+                    external_id: record
+                        .external_id
+                        .expect("database constraint exists"),
                 })
             }
 
@@ -97,7 +99,9 @@ impl From<model::SiloGroup> for SiloGroup {
                 silo_id: record.silo_id,
                 // SAFETY: there is a database constraint that prevents a group
                 // with provision type 'jit' from having a null external id
-                external_id: record.external_id.unwrap(),
+                external_id: record
+                    .external_id
+                    .expect("database constraint exists"),
             }),
         }
     }
