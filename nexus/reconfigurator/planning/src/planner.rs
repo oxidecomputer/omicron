@@ -6996,48 +6996,6 @@ pub(crate) mod test {
             result
         };
 
-        // First we update the blueprint once for each sled. The blueprint will
-        // show changes in each sled for BlueprintHostPhase2DesiredSlotsDiff in
-        // a simulated system even if we are not performing an update for the
-        // Host OS because it's going from `CurrentContents` to:
-        // `Artifact {
-        //      version: Available {
-        //          version: ArtifactVersion(
-        //              "1.0.0-freeform",
-        //          ),
-        //      },
-        //      hash: ArtifactHash(
-        //          "0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
-        //      )
-        //  } `
-        let mut parent = blueprint;
-        for i in 2..=4 {
-            update_collection_from_blueprint(&mut example, &parent);
-
-            let blueprint_name = format!("blueprint{i}");
-            let blueprint = Planner::new_based_on(
-                log.clone(),
-                &parent,
-                &example.input,
-                &blueprint_name,
-                &example.collection,
-                PlannerRng::from_seed((TEST_NAME, &blueprint_name)),
-            )
-            .expect("can't create planner")
-            .plan()
-            .unwrap_or_else(|_| panic!("can't re-plan after {i} iterations"));
-
-            {
-                let summary = blueprint.diff_since_blueprint(&parent);
-                for sled in summary.diff.sleds.modified_values_diff() {
-                    assert!(sled.zones.added.is_empty());
-                    assert!(sled.zones.removed.is_empty());
-                }
-            }
-
-            parent = blueprint;
-        }
-        let mut blueprint = parent;
 
         // If we have missing info in our inventory, the
         // planner will not update any Cockroach zones.
@@ -7498,55 +7456,12 @@ pub(crate) mod test {
             collection.ntp_timesync = ntp_timesync;
         };
 
-        // First we update the blueprint once for each sled. The blueprint will
-        // show changes in each sled for BlueprintHostPhase2DesiredSlotsDiff in
-        // a simulated system even if we are not performing an update for the
-        // Host OS because it's going from `CurrentContents` to:
-        // `Artifact {
-        //      version: Available {
-        //          version: ArtifactVersion(
-        //              "1.0.0-freeform",
-        //          ),
-        //      },
-        //      hash: ArtifactHash(
-        //          "0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
-        //      )
-        //  } `
-        let mut parent = blueprint;
-        for i in 2..=4 {
-            update_collection_from_blueprint(&mut example, &parent);
-
-            let blueprint_name = format!("blueprint{i}");
-            let blueprint = Planner::new_based_on(
-                log.clone(),
-                &parent,
-                &example.input,
-                &blueprint_name,
-                &example.collection,
-                PlannerRng::from_seed((TEST_NAME, &blueprint_name)),
-            )
-            .expect("can't create planner")
-            .plan()
-            .unwrap_or_else(|_| panic!("can't re-plan after {i} iterations"));
-
-            {
-                let summary = blueprint.diff_since_blueprint(&parent);
-                for sled in summary.diff.sleds.modified_values_diff() {
-                    assert!(sled.zones.added.is_empty());
-                    assert!(sled.zones.removed.is_empty());
-                }
-            }
-
-            parent = blueprint;
-        }
-        let blueprint4 = parent;
-
         // If we have missing info in our inventory, the
         // planner will not update any boundary NTP zones.
         example.collection.ntp_timesync = IdOrdMap::new();
         assert_planning_makes_no_changes(
             &log,
-            &blueprint4,
+            &blueprint,
             &example.input,
             &example.collection,
             TEST_NAME,
@@ -7569,7 +7484,7 @@ pub(crate) mod test {
         example.collection.ntp_timesync.remove(&boundary_ntp_zone);
         assert_planning_makes_no_changes(
             &log,
-            &blueprint4,
+            &blueprint,
             &example.input,
             &example.collection,
             TEST_NAME,
@@ -7597,7 +7512,7 @@ pub(crate) mod test {
             .synced = false;
         assert_planning_makes_no_changes(
             &log,
-            &blueprint4,
+            &blueprint,
             &example.input,
             &example.collection,
             TEST_NAME,
@@ -7617,7 +7532,7 @@ pub(crate) mod test {
         //
         let new_blueprint = Planner::new_based_on(
             log.clone(),
-            &blueprint4,
+            &blueprint,
             &example.input,
             "test_blueprint_expunge_old_boundary_ntp",
             &example.collection,
@@ -7627,7 +7542,7 @@ pub(crate) mod test {
         .plan()
         .expect("plan for trivial TUF repo");
         {
-            let summary = new_blueprint.diff_since_blueprint(&blueprint4);
+            let summary = new_blueprint.diff_since_blueprint(&blueprint);
             eprintln!(
                 "diff between blueprints (should be expunging \
                  boundary NTP using 0.0.1 artifact):\n{}",
@@ -7954,51 +7869,6 @@ pub(crate) mod test {
             }
             result
         };
-
-        // First we update the blueprint once for each sled. The blueprint will
-        // show changes in each sled for BlueprintHostPhase2DesiredSlotsDiff in
-        // a simulated system even if we are not performing an update for the
-        // Host OS because it's going from `CurrentContents` to:
-        // `Artifact {
-        //      version: Available {
-        //          version: ArtifactVersion(
-        //              "1.0.0-freeform",
-        //          ),
-        //      },
-        //      hash: ArtifactHash(
-        //          "0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
-        //      )
-        //  } `
-        let mut parent = blueprint;
-        for i in 2..=4 {
-            update_collection_from_blueprint(&mut example, &parent);
-
-            let blueprint_name = format!("blueprint{i}");
-            // We make sure we don't update any internal DNS zones yet
-            example.collection.internal_dns_generation_status = IdOrdMap::new();
-            let blueprint = Planner::new_based_on(
-                log.clone(),
-                &parent,
-                &example.input,
-                &blueprint_name,
-                &example.collection,
-                PlannerRng::from_seed((TEST_NAME, &blueprint_name)),
-            )
-            .expect("can't create planner")
-            .plan()
-            .unwrap_or_else(|_| panic!("can't re-plan after {i} iterations"));
-
-            {
-                let summary = blueprint.diff_since_blueprint(&parent);
-                for sled in summary.diff.sleds.modified_values_diff() {
-                    assert!(sled.zones.added.is_empty());
-                    assert!(sled.zones.removed.is_empty());
-                }
-            }
-
-            parent = blueprint;
-        }
-        let mut blueprint = parent;
 
         // If we have missing info in our inventory, the
         // planner will not update any Internal DNS zones.
