@@ -1813,7 +1813,7 @@ planning report:
 * 1 pending MGS update:
   * model0:serial0: RotBootloader(PendingMgsUpdateRotBootloaderDetails { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: NoValidVersion })
 * only placed 0/1 desired nexus zones
-* zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+* zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
 * waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
@@ -1997,9 +1997,8 @@ planning report:
 * noop converting 7/7 install-dataset zones to artifact store on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
 * 1 pending MGS update:
   * model0:serial0: RotBootloader(PendingMgsUpdateRotBootloaderDetails { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: NoValidVersion })
-* zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
 * only placed 0/1 desired nexus zones
-* zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+* zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
 * waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
