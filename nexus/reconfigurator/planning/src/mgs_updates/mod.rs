@@ -584,7 +584,7 @@ fn try_make_update(
                         // component is already at the expected version
                     }
                     Err(e) => {
-                         // There was a failure, skip the update and record it
+                        // There was a failure, skip the update and record it
                         pending_actions.add_blocked_update(BlockedMgsUpdate {
                             baseboard_id: baseboard_id.clone(),
                             component,

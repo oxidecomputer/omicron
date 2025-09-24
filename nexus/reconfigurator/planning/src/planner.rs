@@ -6378,7 +6378,9 @@ pub(crate) mod test {
                     version: version.clone(),
                     kind: ArtifactKind::HOST_PHASE_2,
                 },
-                hash: ArtifactHash([0x0a; 32]),
+                hash: ArtifactHash(hex_literal::hex!(
+                    "7cd830e1682d50620de0f5c24b8cca15937eb10d2a415ade6ad28c0d314408eb"
+                )),
                 size: 0,
                 board: None,
                 sign: None,
@@ -6397,7 +6399,7 @@ pub(crate) mod test {
             TufArtifactMeta {
                 id: ArtifactId {
                     name: sp_sim::SIM_ROT_BOARD.to_string(),
-                    version: ArtifactVersion::new("0.0.2").unwrap(),
+                    version: ArtifactVersion::new("0.0.1").unwrap(),
                     kind: ArtifactKind::GIMLET_ROT_IMAGE_B,
                 },
                 hash: ArtifactHash([0; 32]),
@@ -6536,24 +6538,8 @@ pub(crate) mod test {
             };
         }
 
-        // Request 3 Nexus zones. The blueprint will show changes in each sled
-        // for BlueprintHostPhase2DesiredSlotsDiff in a simulated system even if
-        // we are not performing an update for the Host OS because it's going
-        // from `CurrentContents` to:
-        // `Artifact {
-        //      version: Available {
-        //          version: ArtifactVersion(
-        //              "1.0.0-freeform",
-        //          ),
-        //      },
-        //      hash: ArtifactHash(
-        //          "0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
-        //      )
-        //  } `
-        // We need each sled to look identical in the blueprint, so we add a
-        // nexus zone to each sled.
         let expected_new_nexus_zones =
-            input_builder.policy_mut().target_nexus_zone_count + 3;
+            input_builder.policy_mut().target_nexus_zone_count;
         let expected_pantries =
             input_builder.policy_mut().target_crucible_pantry_zone_count;
         example.input = input_builder.build();
@@ -6827,26 +6813,26 @@ pub(crate) mod test {
         }
 
         // Everything's up-to-date in Kansas City!
-        let blueprint20 = parent;
+        let blueprint12 = parent;
         assert_eq!(
-            blueprint20
+            blueprint12
                 .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
                 .filter(|(_, z)| is_up_to_date_nexus(z))
                 .count(),
-            NEXUS_REDUNDANCY + 3,
+            NEXUS_REDUNDANCY,
         );
         assert_eq!(
-            blueprint20
+            blueprint12
                 .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
                 .filter(|(_, z)| is_old_nexus(z))
                 .count(),
             0,
         );
 
-        update_collection_from_blueprint(&mut example, &blueprint20);
+        update_collection_from_blueprint(&mut example, &blueprint12);
         assert_planning_makes_no_changes(
             &logctx.log,
-            &blueprint20,
+            &blueprint12,
             &example.input,
             &example.collection,
             TEST_NAME,
@@ -6867,6 +6853,8 @@ pub(crate) mod test {
             &logctx.log,
             rng.next_system_rng(),
         )
+        .with_target_release_0_0_1()
+        .expect("set target release to 0.0.1")
         .build();
         verify_blueprint(&blueprint);
 
@@ -6910,12 +6898,18 @@ pub(crate) mod test {
             TEST_NAME,
         );
 
+        // All zones should be sourced from the initial 0.0.1 target release by
+        // default.
+        eprintln!("{}", blueprint.display());
         assert!(
             blueprint
                 .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
                 .all(|(_, z)| matches!(
                     &z.image_source,
-                    BlueprintZoneImageSource::InstallDataset
+                    BlueprintZoneImageSource::Artifact { version, hash: _ }
+                        if version == &BlueprintArtifactVersion::Available {
+                            version: ArtifactVersion::new_const("0.0.1")
+                        }
                 ))
         );
 
@@ -6979,7 +6973,10 @@ pub(crate) mod test {
             zone.zone_type.is_cockroach()
                 && matches!(
                     &zone.image_source,
-                    BlueprintZoneImageSource::InstallDataset
+                    BlueprintZoneImageSource::Artifact { version, hash: _ }
+                        if version == &BlueprintArtifactVersion::Available {
+                            version: ArtifactVersion::new_const("0.0.1")
+                        }
                 )
         };
         let is_up_to_date_cockroach = |zone: &BlueprintZoneConfig| -> bool {
@@ -8669,6 +8666,8 @@ pub(crate) mod test {
             rng.next_system_rng(),
         )
         .nexus_count(3)
+        .with_target_release_0_0_1()
+        .expect("set target release to 0.0.1")
         .build();
         verify_blueprint(&blueprint);
 
@@ -8691,8 +8690,11 @@ pub(crate) mod test {
                 .blueprint
                 .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
                 .all(|(_, z)| matches!(
-                    z.image_source,
-                    BlueprintZoneImageSource::InstallDataset
+                    &z.image_source,
+                    BlueprintZoneImageSource::Artifact { version, hash: _ }
+                        if version == &BlueprintArtifactVersion::Available {
+                            version: ArtifactVersion::new_const("0.0.1")
+                        }
                 ))
         );
 

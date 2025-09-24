@@ -6912,6 +6912,7 @@ dependencies = [
  "expectorate",
  "gateway-client",
  "gateway-types",
+ "hex-literal",
  "id-map",
  "iddqd",
  "illumos-utils",
