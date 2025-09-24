@@ -8,16 +8,20 @@ use crate::nexus::{
     NexusConfig, NexusOp, NexusReply, NexusState, NexusStateDiff,
 };
 use crate::{Event, member_universe};
+use bootstore::schemes::v0::SharePkgCommon;
 use daft::{BTreeMapDiff, BTreeSetDiff, Diffable, Leaf};
 use iddqd::IdOrdMap;
+use omicron_uuid_kinds::GenericUuid;
+use secrecy::ExposeSecretMut;
+use sled_hardware_types::Baseboard;
 use slog::{Logger, info};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Display;
 use trust_quorum::{
-    Configuration, CoordinatorOperation, CoordinatorStateDiff, Envelope, Epoch,
-    LoadRackSecretError, Node, NodeCallerCtx, NodeCommonCtx, NodeCtx,
-    NodeCtxDiff, NodeDiff, PeerMsgKind, PlatformId,
-    ValidatedReconfigureMsgDiff,
+    Configuration, CoordinatingMsg, CoordinatorOperation, CoordinatorStateDiff,
+    Envelope, Epoch, LoadRackSecretError, Node, NodeCallerCtx, NodeCommonCtx,
+    NodeCtx, NodeCtxDiff, NodeDiff, PeerMsgKind, PersistentState, PlatformId,
+    ValidatedLrtqUpgradeMsgDiff, ValidatedReconfigureMsgDiff,
 };
 
 // The state of our entire system including the system under test and
@@ -86,8 +90,6 @@ impl TqState {
     }
 
     /// Send the latest `ReconfigureMsg` from `Nexus` to the coordinator node
-    ///
-    /// If the node is not available, then abort the configuration at nexus
     pub fn send_reconfigure_msg(&mut self) {
         let (coordinator, msg) = self.nexus.reconfigure_msg_for_latest_config();
         let epoch_to_config = msg.epoch;
@@ -114,6 +116,22 @@ impl TqState {
                     .insert_unique(latest_persisted_config.clone())
                     .expect("unique");
             }
+        }
+    }
+
+    /// Send the latest `LrtqUpgradeMsg` from nexus to the coordinator node
+    pub fn send_lrtq_upgrade_msg(&mut self) {
+        let (coordinator, msg) =
+            self.nexus.lrtq_upgrade_msg_for_latest_config();
+        if !self.crashed_nodes.contains(coordinator) {
+            let (node, ctx) = self
+                .sut
+                .nodes
+                .get_mut(coordinator)
+                .expect("coordinator exists");
+
+            node.coordinate_upgrade_from_lrtq(ctx, msg)
+                .expect("valid configuration");
         }
     }
 
@@ -199,6 +217,12 @@ impl TqState {
                     crashed_nodes,
                 );
             }
+            Event::InitialSetupLrtq { member_universe_size, config } => {
+                self.apply_event_initial_config_lrtq(
+                    member_universe_size,
+                    config,
+                );
+            }
             Event::AbortConfiguration(epoch) => {
                 self.apply_event_abort_configuration(epoch)
             }
@@ -222,6 +246,9 @@ impl TqState {
             }
             Event::Reconfigure(nexus_config) => {
                 self.apply_event_reconfigure(nexus_config)
+            }
+            Event::LrtqUpgrade(nexus_config) => {
+                self.apply_event_lrtq_upgrade(nexus_config)
             }
             Event::CrashNode(id) => {
                 self.apply_event_crash_node(id);
@@ -274,6 +301,60 @@ impl TqState {
 
         // Put the coordinator's outgoing messages on the wire if there are any
         self.send_envelopes_from_coordinator();
+    }
+
+    fn apply_event_initial_config_lrtq(
+        &mut self,
+        member_universe_size: usize,
+        config: NexusConfig,
+    ) {
+        // Generate the member universe
+        self.member_universe = member_universe(member_universe_size);
+
+        // Translate `PlatformId`s to `Baseboards`s for LRTQ membership
+        let baseboards: BTreeSet<_> = config
+            .members
+            .iter()
+            .cloned()
+            .map(|id| {
+                Baseboard::new_pc(
+                    id.serial_number().to_string(),
+                    id.part_number().to_string(),
+                )
+            })
+            .collect();
+
+        // Create the LRTQ key share packages and take only the common data,
+        // which is what we use for trust quorum upgrade.
+        let share_pkgs = config
+            .members
+            .iter()
+            .cloned()
+            .zip(
+                bootstore::schemes::v0::create_pkgs(
+                    self.nexus.rack_id.into_untyped_uuid(),
+                    baseboards.clone(),
+                )
+                .unwrap()
+                .expose_secret_mut()
+                .iter()
+                .map(|pkg| pkg.common.clone()),
+            )
+            .collect();
+
+        // Create the SUT nodes
+        self.sut =
+            Sut::new_lrtq(&self.log, self.member_universe.clone(), share_pkgs);
+
+        // Inform nexus about the initial configuration
+        self.nexus.configs.insert_unique(config).expect("new config");
+
+        // Establish bootstrap network connections between all nodes
+        for (from, (node, ctx)) in self.sut.nodes.iter_mut() {
+            for to in self.member_universe.iter().filter(|id| from != *id) {
+                node.on_connect(ctx, to.clone());
+            }
+        }
     }
 
     fn apply_event_commit(&mut self, id: PlatformId) {
@@ -354,7 +435,9 @@ impl TqState {
                 );
             }
             Err(LoadRackSecretError::NoCommittedConfigurations) => {
-                assert!(ctx.persistent_state().is_uninitialized());
+                assert!(
+                    ctx.persistent_state().latest_committed_epoch().is_none()
+                );
             }
             Err(LoadRackSecretError::NotCommitted(epoch)) => {
                 assert!(!ctx.persistent_state().commits.contains(&epoch));
@@ -543,6 +626,12 @@ impl TqState {
         self.send_envelopes_from_coordinator();
     }
 
+    fn apply_event_lrtq_upgrade(&mut self, nexus_config: NexusConfig) {
+        self.nexus.configs.insert_unique(nexus_config).expect("new config");
+        self.send_lrtq_upgrade_msg();
+        self.send_envelopes_from_coordinator();
+    }
+
     // Commit at nexus when preparing
     fn nexus_commit(&mut self) {
         let mut latest_config = self.nexus.latest_config_mut();
@@ -619,6 +708,29 @@ impl Sut {
             .into_iter()
             .map(|id| {
                 let mut ctx = NodeCtx::new(id.clone());
+                let node = Node::new(log, &mut ctx);
+                (id, (node, ctx))
+            })
+            .collect();
+        Sut { nodes }
+    }
+
+    pub fn new_lrtq(
+        log: &Logger,
+        universe: Vec<PlatformId>,
+        mut share_pkgs: BTreeMap<PlatformId, SharePkgCommon>,
+    ) -> Sut {
+        // Populate the persistent state of each member in the LRTQ cluster
+        // with a share pkg
+        let nodes = universe
+            .into_iter()
+            .map(|id| {
+                let mut ctx = if let Some(pkg) = share_pkgs.remove(&id) {
+                    let ps = PersistentState::new_lrtq_only(pkg);
+                    NodeCtx::new_with_persistent_state(id.clone(), ps)
+                } else {
+                    NodeCtx::new(id.clone())
+                };
                 let node = Node::new(log, &mut ctx);
                 (id, (node, ctx))
             })
@@ -871,23 +983,13 @@ fn display_node_diff(
             writeln!(
                 f,
                 "    started coordinating at epoch {}",
-                node_diff
-                    .coordinator_state()
-                    .after
-                    .unwrap()
-                    .reconfigure_msg()
-                    .epoch()
+                node_diff.coordinator_state().after.unwrap().msg().epoch()
             )?;
         } else if node_diff.coordinator_state().after.is_none() {
             writeln!(
                 f,
                 "    stopped coordinating at epoch {}",
-                node_diff
-                    .coordinator_state()
-                    .before
-                    .unwrap()
-                    .reconfigure_msg()
-                    .epoch()
+                node_diff.coordinator_state().before.unwrap().msg().epoch()
             )?;
         } else {
             let before = node_diff.coordinator_state().before.unwrap();
@@ -945,7 +1047,25 @@ pub fn display_coordinator_state_diff(
     diff: CoordinatorStateDiff<'_>,
     f: &mut std::fmt::Formatter<'_>,
 ) -> std::fmt::Result {
-    display_validated_reconfigure_msg_diff(diff.reconfigure_msg(), f)?;
+    match (diff.msg().before, diff.msg().after) {
+        (CoordinatingMsg::Reconfig(a), CoordinatingMsg::Reconfig(b)) => {
+            display_validated_reconfigure_msg_diff(a.diff(b), f)?;
+        }
+        (CoordinatingMsg::Upgrade(a), CoordinatingMsg::Upgrade(b)) => {
+            display_validated_lrtq_upgrade_msg_diff(a.diff(b), f)?;
+        }
+        (CoordinatingMsg::Reconfig(_), CoordinatingMsg::Upgrade(_)) => {
+            panic!("Cannot go from reconfiguring to LRTQ upgrade");
+        }
+        (CoordinatingMsg::Upgrade(a), CoordinatingMsg::Reconfig(b)) => {
+            writeln!(
+                f,
+                "    Went from LRTQ upgrade to Reconfig: epoch: {} -> {}",
+                a.epoch(),
+                b.epoch()
+            )?;
+        }
+    }
 
     // Configuration contains roughly the same information as a
     // `ValidatedReconfigureMsg`. Let's report the only relevant change.
@@ -959,7 +1079,7 @@ pub fn display_coordinator_state_diff(
 }
 
 pub fn display_validated_reconfigure_msg_diff(
-    diff: &ValidatedReconfigureMsgDiff<'_>,
+    diff: ValidatedReconfigureMsgDiff<'_>,
     f: &mut std::fmt::Formatter<'_>,
 ) -> std::fmt::Result {
     // diff.rack_id changes when tqdb `rewind` command is used, which makes it
@@ -978,6 +1098,51 @@ pub fn display_validated_reconfigure_msg_diff(
             "    last committed epoch: {:?} -> {:?}",
             diff.last_committed_epoch().before,
             diff.last_committed_epoch().after
+        )?;
+    }
+    if !diff.members().added.is_empty() {
+        writeln!(f, "    added members:")?;
+        for member in &diff.members().added {
+            writeln!(f, "        {member}")?;
+        }
+    }
+    if !diff.members().removed.is_empty() {
+        writeln!(f, "    removed members:")?;
+        for member in &diff.members().removed {
+            writeln!(f, "        {member}")?;
+        }
+    }
+    if diff.threshold().is_modified() {
+        writeln!(
+            f,
+            "    threshold: {} -> {}",
+            diff.threshold().before,
+            diff.threshold().after
+        )?;
+    }
+    // Always write out the coordinator id. It's useful for digging.
+    writeln!(
+        f,
+        "    coordinator: {} -> {}",
+        diff.coordinator_id().before,
+        diff.coordinator_id().after,
+    )?;
+
+    Ok(())
+}
+
+pub fn display_validated_lrtq_upgrade_msg_diff(
+    diff: ValidatedLrtqUpgradeMsgDiff,
+    f: &mut std::fmt::Formatter<'_>,
+) -> std::fmt::Result {
+    // diff.rack_id changes when tqdb `rewind` command is used, which makes it
+    // confusing. It never changes inside tests, so no need to diff it.
+    if diff.epoch().is_modified() {
+        writeln!(
+            f,
+            "    epoch: {} -> {}",
+            diff.epoch().before,
+            diff.epoch().after
         )?;
     }
     if !diff.members().added.is_empty() {
@@ -1050,8 +1215,14 @@ pub fn display_coordinator_operation_diff(
             }
         }
         (
-            CoordinatorOperation::CollectLrtqShares { shares: before, .. },
-            CoordinatorOperation::CollectLrtqShares { shares: after, .. },
+            CoordinatorOperation::CollectLrtqShares {
+                collected_lrtq_shares: before,
+                ..
+            },
+            CoordinatorOperation::CollectLrtqShares {
+                collected_lrtq_shares: after,
+                ..
+            },
         ) => {
             if before != after {
                 writeln!(f, "    collected lrtq shares differ")?;
