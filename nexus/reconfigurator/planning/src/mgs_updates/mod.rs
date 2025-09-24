@@ -567,74 +567,27 @@ fn try_make_update(
         MgsUpdateComponent::Sp,
         MgsUpdateComponent::HostOs,
     ] {
-        match component {
+        let update_attempt = match component {
             MgsUpdateComponent::RotBootloader => {
-                match try_make_update_rot_bootloader(
+                try_make_update_rot_bootloader(
                     log,
                     baseboard_id,
                     inventory,
                     current_artifacts,
-                ) {
-                    Ok(pending_update) => {
-                        if let Some(update) = pending_update {
-                            // There is a pending update, record it
-                            pending_actions.add_pending_update(update);
-                        }
-                        // Otherwise, we don't have any pending actions, the
-                        // component is already at the expected version
-                    }
-                    Err(e) => {
-                        // There was a failure, skip the update and record it
-                        pending_actions.add_blocked_update(BlockedMgsUpdate {
-                            baseboard_id: baseboard_id.clone(),
-                            component,
-                            reason: e,
-                        });
-                    }
-                };
+                )
             }
-            MgsUpdateComponent::Rot => {
-                match try_make_update_rot(
-                    log,
-                    baseboard_id,
-                    inventory,
-                    current_artifacts,
-                ) {
-                    Ok(pending_update) => {
-                        if let Some(update) = pending_update {
-                            pending_actions.add_pending_update(update);
-                        }
-                    }
-                    Err(e) => {
-                        pending_actions.add_blocked_update(BlockedMgsUpdate {
-                            baseboard_id: baseboard_id.clone(),
-                            component,
-                            reason: e,
-                        });
-                    }
-                };
-            }
-            MgsUpdateComponent::Sp => {
-                match try_make_update_sp(
-                    log,
-                    baseboard_id,
-                    inventory,
-                    current_artifacts,
-                ) {
-                    Ok(pending_update) => {
-                        if let Some(update) = pending_update {
-                            pending_actions.add_pending_update(update);
-                        }
-                    }
-                    Err(e) => {
-                        pending_actions.add_blocked_update(BlockedMgsUpdate {
-                            baseboard_id: baseboard_id.clone(),
-                            component,
-                            reason: e,
-                        });
-                    }
-                };
-            }
+            MgsUpdateComponent::Rot => try_make_update_rot(
+                log,
+                baseboard_id,
+                inventory,
+                current_artifacts,
+            ),
+            MgsUpdateComponent::Sp => try_make_update_sp(
+                log,
+                baseboard_id,
+                inventory,
+                current_artifacts,
+            ),
             MgsUpdateComponent::HostOs => {
                 match host_phase_1::try_make_update(
                     log,
@@ -643,32 +596,46 @@ fn try_make_update(
                     current_artifacts,
                 ) {
                     Ok(pending_update) => {
+                        // Host updates also return host OS phase 2 changes;
+                        // pull those out here and insert them into
+                        // `pending_actions`, then return the typical pending
+                        // update (which will itself be inserted into
+                        // `pending_actions` below).
                         if let Some((update, host_os_phase_2_changes)) =
                             pending_update
                         {
-                            pending_actions.add_pending_update(update);
                             pending_actions.set_pending_host_os_phase2_changes(
                                 host_os_phase_2_changes,
                             );
+                            Ok(Some(update))
+                        } else {
+                            Ok(None)
                         }
                     }
-                    Err(e) => {
-                        pending_actions.add_blocked_update(BlockedMgsUpdate {
-                            baseboard_id: baseboard_id.clone(),
-                            component,
-                            reason: e,
-                        });
-                    }
-                };
+                    Err(e) => Err(e),
+                }
             }
         };
 
-        // If there is a pending or blocked MGS driven update we return it
-        // immediately.
-        if !pending_actions.blocked_mgs_updates.is_empty()
-            || !pending_actions.pending_updates.is_empty()
-        {
-            return pending_actions;
+        match update_attempt {
+            Ok(None) => {
+                // No update needed; try the next component.
+                continue;
+            }
+            // If there is a pending or blocked MGS-driven update, we break so
+            // we can return it immediately.
+            Ok(Some(update)) => {
+                pending_actions.add_pending_update(update);
+                break;
+            }
+            Err(e) => {
+                pending_actions.add_blocked_update(BlockedMgsUpdate {
+                    baseboard_id: baseboard_id.clone(),
+                    component,
+                    reason: e,
+                });
+                break;
+            }
         }
     }
 
