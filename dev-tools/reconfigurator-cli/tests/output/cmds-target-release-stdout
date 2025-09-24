@@ -7944,9 +7944,9 @@ planning report:
 * skipping noop zone image source check on sled d81c6a84-79b8-4958-ae41-ea46c9b19763: all 9 zones are already from artifacts
 * 3 remaining out-of-date zones
 * 3 zones waiting to be expunged:
-  * zone 0c71b3b2-6ceb-4e8f-b020-b08675e83038 (nexus): image out-of-date, but zone's nexus_generation 1 is still active
-  * zone 3eeb8d49-eb1a-43f8-bb64-c2338421c2c6 (nexus): image out-of-date, but zone's nexus_generation 1 is still active
-  * zone 466a9f29-62bf-4e63-924a-b9efdb86afec (nexus): image out-of-date, but zone's nexus_generation 1 is still active
+  * zone 0c71b3b2-6ceb-4e8f-b020-b08675e83038: nexus image out-of-date, but nexus_generation 1 is still active
+  * zone 3eeb8d49-eb1a-43f8-bb64-c2338421c2c6: nexus image out-of-date, but nexus_generation 1 is still active
+  * zone 466a9f29-62bf-4e63-924a-b9efdb86afec: nexus image out-of-date, but nexus_generation 1 is still active
 * updating top-level nexus_generation to: 2
 
 
@@ -8035,9 +8035,9 @@ planning report:
 * skipping noop zone image source check on sled d81c6a84-79b8-4958-ae41-ea46c9b19763: all 9 zones are already from artifacts
 * 3 remaining out-of-date zones
 * 3 zones waiting to be expunged:
-  * zone 0c71b3b2-6ceb-4e8f-b020-b08675e83038 (nexus): image out-of-date, but zone's nexus_generation 1 is still active
-  * zone 3eeb8d49-eb1a-43f8-bb64-c2338421c2c6 (nexus): image out-of-date, but zone's nexus_generation 1 is still active
-  * zone 466a9f29-62bf-4e63-924a-b9efdb86afec (nexus): image out-of-date, but zone's nexus_generation 1 is still active
+  * zone 0c71b3b2-6ceb-4e8f-b020-b08675e83038: nexus image out-of-date, but nexus_generation 1 is still active
+  * zone 3eeb8d49-eb1a-43f8-bb64-c2338421c2c6: nexus image out-of-date, but nexus_generation 1 is still active
+  * zone 466a9f29-62bf-4e63-924a-b9efdb86afec: nexus image out-of-date, but nexus_generation 1 is still active
 
 
 
