@@ -258,14 +258,14 @@ async fn test_instance_watcher_metrics(
                               filter timestamp > @2000-01-01";
 
     let client = &cptestctx.external_client;
-    let internal_client = &cptestctx.internal_client;
+    let lockstep_client = &cptestctx.lockstep_client;
     let nexus = &cptestctx.server.server_context().nexus;
     let oximeter = &cptestctx.oximeter;
 
     let activate_instance_watcher = || async {
         use nexus_test_utils::background::activate_background_task;
 
-        let _ = activate_background_task(&internal_client, "instance_watcher")
+        let _ = activate_background_task(&lockstep_client, "instance_watcher")
             .await;
     };
 
@@ -479,11 +479,11 @@ async fn test_project_timeseries_query(
     let i2p1 = create_instance(&client, "project1", "instance2").await;
     let _i3p2 = create_instance(&client, "project2", "instance3").await;
 
-    let internal_client = &cptestctx.internal_client;
+    let lockstep_client = &cptestctx.lockstep_client;
 
     // get the instance metrics to show up
     let _ =
-        activate_background_task(&internal_client, "instance_watcher").await;
+        activate_background_task(&lockstep_client, "instance_watcher").await;
 
     // Query with no project specified
     let q1 = "get virtual_machine:check";

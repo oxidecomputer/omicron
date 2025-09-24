@@ -10,11 +10,11 @@ use common::LiveTestContext;
 use common::reconfigurator::blueprint_edit_current_target;
 use futures::TryStreamExt;
 use live_tests_macros::live_test;
-use nexus_client::types::BlueprintTargetSet;
-use nexus_client::types::QuiesceState;
-use nexus_client::types::Saga;
-use nexus_client::types::SagaState;
 use nexus_inventory::CollectionBuilder;
+use nexus_lockstep_client::types::BlueprintTargetSet;
+use nexus_lockstep_client::types::QuiesceState;
+use nexus_lockstep_client::types::Saga;
+use nexus_lockstep_client::types::SagaState;
 use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
 use nexus_reconfigurator_planning::planner::Planner;
 use nexus_reconfigurator_planning::planner::PlannerRng;
@@ -210,7 +210,7 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
     wait_for_condition(
         || async {
             match new_zone_client.saga_list(None, None, None).await {
-                Err(nexus_client::Error::CommunicationError(error)) => {
+                Err(nexus_lockstep_client::Error::CommunicationError(error)) => {
                     info!(log, "expunged Nexus no longer reachable";
                         "error" => slog_error_chain::InlineErrorChain::new(&error),
                     );
@@ -374,7 +374,7 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
 }
 
 async fn list_sagas(
-    client: &nexus_client::Client,
+    client: &nexus_lockstep_client::Client,
 ) -> Result<Vec<Saga>, anyhow::Error> {
     client
         .saga_list_stream(None, None)
