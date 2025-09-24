@@ -5,7 +5,7 @@
 
 use internal_dns_resolver::Resolver;
 use internal_dns_types::names::ServiceName;
-use nexus_client::Client as NexusClient;
+use nexus_lockstep_client::Client as NexusClient;
 use omicron_test_utils::dev::poll::{CondCheckError, wait_for_condition};
 use omicron_test_utils::dev::test_setup_log;
 use omicron_uuid_kinds::GenericUuid;
@@ -95,7 +95,10 @@ enum MakeNexusError {
     #[error("looking up Nexus IP in internal DNS")]
     Resolve(#[from] internal_dns_resolver::ResolveError),
     #[error("making request to Nexus")]
-    Request(#[from] nexus_client::Error<nexus_client::types::Error>),
+    Request(
+        #[from]
+        nexus_lockstep_client::Error<nexus_lockstep_client::types::Error>,
+    ),
 }
 
 /// Make one attempt to look up the IP of Nexus in internal DNS and make an HTTP
@@ -109,7 +112,8 @@ async fn make_nexus_client(
     log: &slog::Logger,
 ) -> Result<NexusClient, MakeNexusError> {
     debug!(log, "doing DNS lookup for Nexus");
-    let nexus_ip = resolver.lookup_socket_v6(ServiceName::Nexus).await?;
+    let nexus_ip =
+        resolver.lookup_socket_v6(ServiceName::NexusLockstep).await?;
     let url = format!("http://{}", nexus_ip);
     debug!(log, "found Nexus IP"; "nexus_ip" => %nexus_ip, "url" => &url);
 
