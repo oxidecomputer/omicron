@@ -2709,3 +2709,55 @@ pub struct AuditLog {
     /// Exclusive
     pub end_time: Option<DateTime<Utc>>,
 }
+
+// SCIM
+
+#[derive(Deserialize, JsonSchema)]
+pub struct ScimV2GetTokenPathParam {
+    pub token_id: Uuid,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct ScimV2DeleteTokenPathParam {
+    pub token_id: Uuid,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct ScimV2GetUserPathParam {
+    pub user_id: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct ScimV2PutUserPathParam {
+    pub user_id: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct ScimV2PatchUserPathParam {
+    pub user_id: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct ScimV2DeleteUserPathParam {
+    pub user_id: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct ScimV2GetGroupPathParam {
+    pub group_id: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct ScimV2PutGroupPathParam {
+    pub group_id: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct ScimV2PatchGroupPathParam {
+    pub group_id: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct ScimV2DeleteGroupPathParam {
+    pub group_id: String,
+}

@@ -393,6 +393,7 @@ impl DataStore {
             &authn::USER_INTERNAL_READ,
             &authn::USER_EXTERNAL_AUTHN,
             &authn::USER_SAGA_RECOVERY,
+            &authn::USER_EXTERNAL_SCIM,
         ]
         .iter()
         .map(|u| {
@@ -409,6 +410,7 @@ impl DataStore {
         .collect::<Vec<UserBuiltin>>();
 
         debug!(opctx.log, "attempting to create built-in users");
+
         let count = diesel::insert_into(dsl::user_builtin)
             .values(builtin_users)
             .on_conflict(dsl::id)
@@ -416,6 +418,7 @@ impl DataStore {
             .execute_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
         info!(opctx.log, "created {} built-in users", count);
 
         Ok(())

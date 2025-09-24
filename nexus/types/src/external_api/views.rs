@@ -1585,6 +1585,25 @@ fn expected_one_of<T: strum::VariantArray + fmt::Display>() -> String {
     msg
 }
 
+// SCIM
+
+/// The POST response is the only time the generated bearer token is returned to
+/// the client.
+#[derive(Serialize, JsonSchema)]
+pub struct ScimClientBearerTokenCreateResponse {
+    pub id: Uuid,
+    pub time_created: DateTime<Utc>,
+    pub time_expires: Option<DateTime<Utc>>,
+    pub bearer_token: String,
+}
+
+#[derive(Serialize, JsonSchema)]
+pub struct ScimClientBearerToken {
+    pub id: Uuid,
+    pub time_created: DateTime<Utc>,
+    pub time_expires: Option<DateTime<Utc>>,
+}
+
 #[cfg(test)]
 mod test {
     use super::*;

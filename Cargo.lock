@@ -6603,6 +6603,7 @@ dependencies = [
  "openapiv3",
  "oximeter-types 0.1.0",
  "oxql-types",
+ "scim2-rs",
 ]
 
 [[package]]
@@ -8051,6 +8052,7 @@ dependencies = [
  "rustls-pemfile 2.2.0",
  "samael",
  "schemars",
+ "scim2-rs",
  "semver 1.0.26",
  "serde",
  "serde_json",
@@ -11900,6 +11902,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "scim2-rs"
+version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/scim2-rs#dbe1cb7e42f7322f5cd532015e7ab430d04113b7"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "chrono",
+ "dropshot",
+ "http",
+ "iddqd",
+ "schemars",
+ "serde",
+ "serde_json",
+ "slog",
+ "unicase",
+ "uuid",
+]
+
+[[package]]
 name = "scoped-tls"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -14815,12 +14836,9 @@ checksum = "eaea85b334db583fe3274d12b4cd1880032beab409c0d774be044d4480ab9a94"
 
 [[package]]
 name = "unicase"
-version = "2.7.0"
+version = "2.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f7d2d4dafb69621809a81864c9c1b864479e1235c0dd4e199924b9742439ed89"
-dependencies = [
- "version_check",
-]
+checksum = "75b844d17643ee918803943289730bec8aac480150456169e647ed0b576ba539"
 
 [[package]]
 name = "unicode-bidi"
