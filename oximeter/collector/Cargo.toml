@@ -27,6 +27,7 @@ oximeter-client.workspace = true
 oximeter-db.workspace = true
 qorb.workspace = true
 rand.workspace = true
+regex.workspace = true
 reqwest = { workspace = true, features = [ "json" ] }
 schemars.workspace = true
 semver.workspace = true
@@ -44,6 +45,9 @@ usdt.workspace = true
 uuid.workspace = true
 omicron-workspace-hack.workspace = true
 nexus-client.workspace = true
+opentelemetry.workspace = true
+opentelemetry_sdk.workspace = true
+opentelemetry-otlp.workspace = true
 
 [dev-dependencies]
 expectorate.workspace = true

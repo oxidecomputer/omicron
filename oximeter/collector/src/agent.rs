@@ -23,6 +23,12 @@ use nexus_client::Client as NexusClient;
 use nexus_client::types::IdSortMode;
 use omicron_common::backoff;
 use omicron_common::backoff::BackoffError;
+use opentelemetry::KeyValue;
+use opentelemetry::metrics::MeterProvider;
+use opentelemetry_otlp::MetricExporter;
+use opentelemetry_sdk::metrics::SdkMeterProvider;
+use oximeter::Field;
+use oximeter::types::ProducerResultsItem;
 use oximeter_api::ProducerDetails;
 use oximeter_db::Client;
 use oximeter_db::DbWrite;
@@ -30,6 +36,7 @@ use qorb::claim::Handle;
 use qorb::policy::Policy;
 use qorb::pool::Pool;
 use qorb::resolver::BoxedResolver;
+use regex::Regex;
 use slog::Logger;
 use slog::debug;
 use slog::error;
@@ -39,6 +46,7 @@ use slog::trace;
 use slog::warn;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
+use std::collections::HashMap;
 use std::collections::btree_map::Entry;
 use std::net::SocketAddrV6;
 use std::ops::Bound;
@@ -498,7 +506,7 @@ impl CollectionTaskSenderWrapper {
     ) -> anyhow::Result<()> {
         let (result_single, result_cluster) = futures::future::join(
             self.single_tx.send(msg.clone()),
-            self.cluster_tx.send(msg),
+            self.cluster_tx.send(msg.clone()),
         )
         .await;
 
@@ -514,6 +522,171 @@ impl CollectionTaskSenderWrapper {
                 "failed to send value from the collection task to channel for cluster: {e:?}"
             );
         };
+
+        let _ = CollectionTaskSenderWrapper::update_meters(msg).await;
+
+        Ok(())
+    }
+
+    // Publish collected metrics to otlp via otel. Our approach here is to
+    // construct a new otel exporter on each update, register the relevant
+    // meters, and shut down the exporter, causing it to flush metrics to the
+    // otlp sink. This avoids the headache of maintaining a long-lived
+    // exporter, expunging stale meters, etc.
+    async fn update_meters(msg: CollectionTaskOutput) -> anyhow::Result<()> {
+        // TODO: Make OTLP endpoint configurable by customer. (this won't work)
+        let exporter = MetricExporter::builder().with_http().build()?;
+        let provider = SdkMeterProvider::builder()
+            .with_periodic_exporter(exporter)
+            .build();
+        let meter = provider.meter("oximeter");
+
+        #[derive(Debug)]
+        struct TimestampedDatum {
+            datum: oximeter::Datum,
+            timeseries_name: String,
+            timestamp: DateTime<Utc>,
+        }
+
+        // We only want to record the most recent value for each series, so
+        // loop over all samples and track the latest values.
+        let mut latest: HashMap<Vec<Field>, TimestampedDatum> = HashMap::new();
+        for result in &msg.results {
+            match result {
+                ProducerResultsItem::Ok(samples) => {
+                    for sample in samples {
+                        let key = sample.fields();
+                        let tsd = TimestampedDatum {
+                            datum: sample.measurement.datum().clone(),
+                            timeseries_name: sample.timeseries_name.to_string(),
+                            timestamp: sample.measurement.timestamp(),
+                        };
+                        if let Some(existing) = latest.get(&key) {
+                            if tsd.timestamp > existing.timestamp {
+                                latest.insert(key, tsd);
+                            }
+                        } else {
+                            latest.insert(key, tsd);
+                        }
+                    }
+                }
+                ProducerResultsItem::Err(e) => {
+                    println!("{}", e);
+                }
+            }
+        }
+
+        // Cache meters so that we don't have to recreate them for each set of labels.
+        let mut meters_i64_gauge = HashMap::new();
+        let mut meters_f64_gauge = HashMap::new();
+        let mut meters_u64_counter = HashMap::new();
+        let mut meters_u64_histogram = HashMap::new();
+        let mut meters_f64_histogram = HashMap::new();
+
+        let allowed_pattern = Regex::new(r"[^a-zA-Z0-9_]+").unwrap();
+
+        for (fields, tsd) in &latest {
+            let datum = &tsd.datum;
+            let timeseries_clean = allowed_pattern
+                .replace_all(&tsd.timeseries_name, "_")
+                .into_owned();
+            let mut kvs = Vec::new();
+            for field in fields {
+                kvs.push(KeyValue::new(
+                    field.name.clone(),
+                    field.value.clone().to_string(),
+                ));
+            }
+
+            // TODO: Handle all datum types, and express more concisely if
+            // possible.
+            // TODO: Check that we're mapping oximeter types to otel types
+            // correctly. Is a Datum::I8 always a gauge, a Datum::CumulativeU64
+            // always a counter, etc.?
+            match datum {
+                oximeter::Datum::I8(value) => {
+                    meters_i64_gauge
+                        .entry(timeseries_clean.clone())
+                        .or_insert_with(|| {
+                            meter.i64_gauge(timeseries_clean).build()
+                        })
+                        .record(i64::from(*value), &kvs);
+                }
+                oximeter::Datum::I64(value) => {
+                    meters_i64_gauge
+                        .entry(timeseries_clean.clone())
+                        .or_insert_with(|| {
+                            meter.i64_gauge(timeseries_clean).build()
+                        })
+                        .record(*value, &kvs);
+                }
+                oximeter::Datum::F32(value) => {
+                    meters_f64_gauge
+                        .entry(timeseries_clean.clone())
+                        .or_insert_with(|| {
+                            meter.f64_gauge(timeseries_clean).build()
+                        })
+                        .record(f64::from(*value), &kvs);
+                }
+                oximeter::Datum::F64(value) => {
+                    meters_f64_gauge
+                        .entry(timeseries_clean.clone())
+                        .or_insert_with(|| {
+                            meter.f64_gauge(timeseries_clean).build()
+                        })
+                        .record(*value, &kvs);
+                }
+                oximeter::Datum::CumulativeU64(value) => {
+                    meters_u64_counter
+                        .entry(timeseries_clean.clone())
+                        .or_insert_with(|| {
+                            meter.u64_counter(timeseries_clean).build()
+                        })
+                        .add(value.value(), &kvs);
+                }
+                oximeter::Datum::HistogramU64(value) => {
+                    let (bins, counts) = value.bins_and_counts();
+                    let cast_bins: Vec<f64> =
+                        bins.clone().into_iter().map(|x| x as f64).collect();
+                    let metric = meters_u64_histogram
+                        .entry(timeseries_clean.clone())
+                        .or_insert_with(|| {
+                            meter
+                                .u64_histogram(timeseries_clean)
+                                .with_boundaries(cast_bins.clone())
+                                .build()
+                        });
+                    for (bin, count) in bins.iter().zip(counts.iter()) {
+                        for _ in 0..*count {
+                            metric.record(*bin, &kvs);
+                        }
+                    }
+                }
+                oximeter::Datum::HistogramF64(value) => {
+                    let (bins, counts) = value.bins_and_counts();
+                    let metric = meters_f64_histogram
+                        .entry(timeseries_clean.clone())
+                        .or_insert_with(|| {
+                            meter
+                                .f64_histogram(timeseries_clean)
+                                .with_boundaries(bins.clone())
+                                .build()
+                        });
+                    for (bin, count) in bins.iter().zip(counts.iter()) {
+                        for _ in 0..*count {
+                            metric.record(*bin, &kvs);
+                        }
+                    }
+                }
+                _ => {
+                    println!("Unhandled metric {:?}", tsd);
+                }
+            }
+        }
+
+        // Flush metrics to exporter.
+        provider.shutdown()?;
+
         Ok(())
     }
 }

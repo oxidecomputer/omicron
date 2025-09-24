@@ -360,6 +360,9 @@ cast_lossless = "warn"
 [workspace.dependencies]
 anyhow = "1.0"
 anstyle = "1.0.11"
+opentelemetry = { version = "0.30", features = ["metrics"] }
+opentelemetry_sdk = { version = "0.30", features = ["metrics"] }
+opentelemetry-otlp = { version = "0.30", features = ["metrics"] }
 api_identity = { path = "api_identity" }
 approx = "0.5.1"
 assert_matches = "1.5.0"
