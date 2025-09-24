@@ -29,7 +29,6 @@ use nexus_types::deployment::PendingMgsUpdateSpDetails;
 use nexus_types::deployment::PendingMgsUpdates;
 use nexus_types::deployment::TargetReleaseDescription;
 use nexus_types::deployment::planning_report::BlockedMgsUpdate;
-use nexus_types::deployment::planning_report::FailedMgsUpdateReason;
 use nexus_types::inventory::BaseboardId;
 use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::Collection;
@@ -68,7 +67,8 @@ pub(crate) struct PlannedMgsUpdates {
     /// result in a change to the respective sled's `BlueprintSledConfig`.
     pub(crate) pending_host_phase_2_changes: PendingHostPhase2Changes,
 
-    // Updates to components that failed for some reason and have been blocked.
+    /// Updates to components that cannot be planned due to a failure in a
+    /// previous attempt.
     pub(crate) blocked_mgs_updates: Vec<BlockedMgsUpdate>,
 }
 
@@ -89,30 +89,20 @@ impl PlannedMgsUpdates {
         self
     }
 
+    fn add_blocked_update(
+        &mut self,
+        blocked_update: BlockedMgsUpdate,
+    ) -> &mut Self {
+        self.blocked_mgs_updates.push(blocked_update);
+        self
+    }
+
     fn set_pending_host_os_phase2_changes(
         &mut self,
         pending_host_os_phase2_changes: PendingHostPhase2Changes,
     ) -> &mut Self {
         self.pending_host_phase_2_changes = pending_host_os_phase2_changes;
         self
-    }
-
-    fn set_blocked_updates(
-        &mut self,
-        blocked_updates: Vec<BlockedMgsUpdate>,
-    ) -> &mut Self {
-        self.blocked_mgs_updates = blocked_updates;
-        self
-    }
-
-    fn build(&self) -> Self {
-        Self {
-            pending_updates: self.pending_updates.clone(),
-            pending_host_phase_2_changes: self
-                .pending_host_phase_2_changes
-                .clone(),
-            blocked_mgs_updates: self.blocked_mgs_updates.clone(),
-        }
     }
 }
 
@@ -566,103 +556,123 @@ fn try_make_update(
     inventory: &Collection,
     current_artifacts: &TufRepoDescription,
 ) -> PlannedMgsUpdates {
-    let mut blocked_updates = Vec::new();
+    let mut pending_actions = PlannedMgsUpdates::new();
 
     // We try MGS-driven update components in a hardcoded priority order until
     // any of them returns `Some`.  The order is described in RFD 565 section
     // "Update Sequence".
-    type UpdateResult = Result<Option<PendingMgsUpdate>, FailedMgsUpdateReason>;
-    let attempts: [(MgsUpdateComponent, UpdateResult); 3] = [
-        (
-            MgsUpdateComponent::RotBootloader,
-            try_make_update_rot_bootloader(
-                log,
-                baseboard_id,
-                inventory,
-                current_artifacts,
-            ),
-        ),
-        (
-            MgsUpdateComponent::Rot,
-            try_make_update_rot(
-                log,
-                baseboard_id,
-                inventory,
-                current_artifacts,
-            ),
-        ),
-        (
-            MgsUpdateComponent::Sp,
-            try_make_update_sp(log, baseboard_id, inventory, current_artifacts),
-        ),
-    ];
-
-    if let Some(update_actions) =
-        attempts.into_iter().find_map(|(component, attempt)| {
-            match attempt {
-                // There is a pending update, record it along with any previous
-                // failed updates
-                Ok(Some(update)) => {
-                    // We have a non-host update; there are no pending host
-                    // phase 2 changes necessary.
-                    let pending_actions = PlannedMgsUpdates::new()
-                        .add_pending_update(update)
-                        .set_blocked_updates(blocked_updates.clone())
-                        .build();
-                    Some(pending_actions)
-                }
-                // We don't have any pending actions, the component is already
-                // at the expected version
-                Ok(None) => None,
-                // There was a failure, skip the update and record it
-                Err(e) => {
-                    blocked_updates.push(BlockedMgsUpdate {
-                        baseboard_id: baseboard_id.clone(),
-                        component,
-                        reason: e,
-                    });
-                    let pending_actions = PlannedMgsUpdates::new()
-                        .set_blocked_updates(blocked_updates.clone())
-                        .build();
-                    Some(pending_actions)
-                }
+    for component in [
+        MgsUpdateComponent::RotBootloader,
+        MgsUpdateComponent::Rot,
+        MgsUpdateComponent::Sp,
+        MgsUpdateComponent::HostOs,
+    ] {
+        match component {
+            MgsUpdateComponent::RotBootloader => {
+                match try_make_update_rot_bootloader(
+                    log,
+                    baseboard_id,
+                    inventory,
+                    current_artifacts,
+                ) {
+                    Ok(pending_update) => {
+                        if let Some(update) = pending_update {
+                            // There is a pending update, record it
+                            pending_actions.add_pending_update(update);
+                        }
+                        // Otherwise, we don't have any pending actions, the
+                        // component is already at the expected version
+                    }
+                    Err(e) => {
+                         // There was a failure, skip the update and record it
+                        pending_actions.add_blocked_update(BlockedMgsUpdate {
+                            baseboard_id: baseboard_id.clone(),
+                            component,
+                            reason: e,
+                        });
+                    }
+                };
             }
-        })
-    {
-        return update_actions;
+            MgsUpdateComponent::Rot => {
+                match try_make_update_rot(
+                    log,
+                    baseboard_id,
+                    inventory,
+                    current_artifacts,
+                ) {
+                    Ok(pending_update) => {
+                        if let Some(update) = pending_update {
+                            pending_actions.add_pending_update(update);
+                        }
+                    }
+                    Err(e) => {
+                        pending_actions.add_blocked_update(BlockedMgsUpdate {
+                            baseboard_id: baseboard_id.clone(),
+                            component,
+                            reason: e,
+                        });
+                    }
+                };
+            }
+            MgsUpdateComponent::Sp => {
+                match try_make_update_sp(
+                    log,
+                    baseboard_id,
+                    inventory,
+                    current_artifacts,
+                ) {
+                    Ok(pending_update) => {
+                        if let Some(update) = pending_update {
+                            pending_actions.add_pending_update(update);
+                        }
+                    }
+                    Err(e) => {
+                        pending_actions.add_blocked_update(BlockedMgsUpdate {
+                            baseboard_id: baseboard_id.clone(),
+                            component,
+                            reason: e,
+                        });
+                    }
+                };
+            }
+            MgsUpdateComponent::HostOs => {
+                match host_phase_1::try_make_update(
+                    log,
+                    baseboard_id,
+                    inventory,
+                    current_artifacts,
+                ) {
+                    Ok(pending_update) => {
+                        if let Some((update, host_os_phase_2_changes)) =
+                            pending_update
+                        {
+                            pending_actions.add_pending_update(update);
+                            pending_actions.set_pending_host_os_phase2_changes(
+                                host_os_phase_2_changes,
+                            );
+                        }
+                    }
+                    Err(e) => {
+                        pending_actions.add_blocked_update(BlockedMgsUpdate {
+                            baseboard_id: baseboard_id.clone(),
+                            component,
+                            reason: e,
+                        });
+                    }
+                };
+            }
+        };
+
+        // If there is a pending or blocked MGS driven update we return it
+        // immediately.
+        if !pending_actions.blocked_mgs_updates.is_empty()
+            || !pending_actions.pending_updates.is_empty()
+        {
+            return pending_actions;
+        }
     }
 
-    match host_phase_1::try_make_update(
-        log,
-        baseboard_id,
-        inventory,
-        current_artifacts,
-    ) {
-        Ok(Some((update, pending_host_os_phase2_changes))) => {
-            PlannedMgsUpdates::new()
-                .add_pending_update(update)
-                .set_pending_host_os_phase2_changes(
-                    pending_host_os_phase2_changes,
-                )
-                .set_blocked_updates(blocked_updates)
-                .build()
-        }
-        // The Host OS is already at the desired version, we only need to pass
-        // along any previous skipped updates
-        Ok(None) => PlannedMgsUpdates::new()
-            .set_blocked_updates(blocked_updates)
-            .build(),
-        Err(e) => {
-            blocked_updates.push(BlockedMgsUpdate {
-                baseboard_id: baseboard_id.clone(),
-                component: MgsUpdateComponent::HostOs,
-                reason: e,
-            });
-            PlannedMgsUpdates::new()
-                .set_blocked_updates(blocked_updates)
-                .build()
-        }
-    }
+    pending_actions
 }
 
 #[cfg(test)]

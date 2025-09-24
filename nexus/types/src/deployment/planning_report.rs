@@ -81,10 +81,7 @@ impl PlanningReport {
             expunge: PlanningExpungeStepReport::new(),
             decommission: PlanningDecommissionStepReport::new(),
             noop_image_source: PlanningNoopImageSourceStepReport::new(),
-            mgs_updates: PlanningMgsUpdatesStepReport::new(
-                PendingMgsUpdates::new(),
-                Vec::new(),
-            ),
+            mgs_updates: PlanningMgsUpdatesStepReport::empty(),
             add: PlanningAddStepReport::new(),
             zone_updates: PlanningZoneUpdatesStepReport::new(),
             cockroachdb_settings: PlanningCockroachdbSettingsStepReport::new(),
@@ -577,6 +574,13 @@ impl PlanningMgsUpdatesStepReport {
         blocked_mgs_updates: Vec<BlockedMgsUpdate>,
     ) -> Self {
         Self { pending_mgs_updates, blocked_mgs_updates }
+    }
+
+    pub fn empty() -> Self {
+        Self {
+            pending_mgs_updates: PendingMgsUpdates::new(),
+            blocked_mgs_updates: Vec::new(),
+        }
     }
 
     pub fn is_empty(&self) -> bool {
