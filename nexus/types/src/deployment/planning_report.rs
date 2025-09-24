@@ -1166,7 +1166,6 @@ pub enum ZoneUpdatesWaitingOn {
     /// Waiting on updates to RoT bootloader / RoT / SP / Host OS.
     PendingMgsUpdates,
 
-
     /// Waiting on the same set of blockers zone adds are waiting on.
     ZoneAddBlockers,
 }
