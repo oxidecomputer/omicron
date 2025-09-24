@@ -99,13 +99,20 @@ pub fn blueprint_internal_dns_config(
             BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
                 internal_address,
                 nexus_generation,
+                lockstep_port,
                 ..
             }) => {
-                if *nexus_generation != active_nexus_generation {
-                    continue 'all_zones;
+                if *nexus_generation == active_nexus_generation {
+                    // Add both the `nexus` service as well as the
+                    // `nexus-lockstep` service.  Continue so we don't fall
+                    // through and call `host_zone_with_one_backend`.
+                    dns_builder.host_zone_nexus(
+                        zone.id,
+                        *internal_address,
+                        *lockstep_port,
+                    )?;
                 }
-
-                (ServiceName::Nexus, internal_address)
+                continue 'all_zones;
             }
             BlueprintZoneType::Crucible(blueprint_zone_type::Crucible {
                 address,

@@ -392,7 +392,7 @@ internal DNS:
 +       SRV  port   123 e8fe709c-725f-4bb2-b714-ffcda13a9e54.host.control-plane.oxide.internal
 -   name: db288a1e-c33c-44ca-8c79-9a8978afa34d.host          (records: 1)
 -       AAAA fd00:1122:3344:106::21
-    unchanged names: 50 (records: 65)
+    unchanged names: 51 (records: 68)
 
 external DNS:
   DNS zone: "oxide.example" (unchanged)
@@ -510,7 +510,7 @@ to:   blueprint af934083-59b5-4bf6-8966-6fb5292c29e1
 
 internal DNS:
   DNS zone: "control-plane.oxide.internal" (unchanged)
-    unchanged names: 52 (records: 73)
+    unchanged names: 53 (records: 76)
 
 external DNS:
   DNS zone: "oxide.example" (unchanged)

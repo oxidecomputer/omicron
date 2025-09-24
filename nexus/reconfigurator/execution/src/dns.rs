@@ -590,6 +590,7 @@ mod test {
                 )
             }
             OmicronZoneType::Nexus {
+                lockstep_port,
                 external_dns_servers,
                 external_ip,
                 external_tls,
@@ -601,6 +602,7 @@ mod test {
                 )?;
                 BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
                     internal_address,
+                    lockstep_port,
                     external_ip: OmicronZoneExternalFloatingIp {
                         id: external_ip_id,
                         ip: external_ip,
@@ -1002,6 +1004,7 @@ mod test {
             ServiceName::InternalDns,
             ServiceName::ExternalDns,
             ServiceName::Nexus,
+            ServiceName::NexusLockstep,
             ServiceName::Oximeter,
             ServiceName::Dendrite,
             ServiceName::CruciblePantry,
@@ -1657,17 +1660,20 @@ mod test {
         // Nothing was removed.
         assert!(diff.names_removed().next().is_none());
 
-        // The SRV record for Nexus itself ought to have changed, growing one
-        // more record -- for the new AAAA record above.
+        // The SRV records for both nexus (internal) and nexus-lockstep ought
+        // to have changed, growing one more record -- for the new AAAA record
+        // above.
         let changed: Vec<_> = diff.names_changed().collect();
-        assert_eq!(changed.len(), 1);
-        let (name, old_records, new_records) = changed[0];
-        assert_eq!(name, ServiceName::Nexus.dns_name());
-        let new_srv = subset_plus_one(old_records, new_records);
-        let DnsRecord::Srv(new_srv) = new_srv else {
-            panic!("expected SRV record, found {:?}", new_srv);
-        };
-        assert_eq!(new_srv.target, new_zone_host.fqdn());
+        assert_eq!(changed.len(), 2);
+        assert_eq!(changed[0].0, ServiceName::NexusLockstep.dns_name());
+        assert_eq!(changed[1].0, ServiceName::Nexus.dns_name());
+        for (_, old_records, new_records) in changed {
+            let new_srv = subset_plus_one(old_records, new_records);
+            let DnsRecord::Srv(new_srv) = new_srv else {
+                panic!("expected SRV record, found {:?}", new_srv);
+            };
+            assert_eq!(new_srv.target, new_zone_host.fqdn());
+        }
 
         // As for external DNS: all existing names ought to have been changed,
         // gaining a new A record for the new host.

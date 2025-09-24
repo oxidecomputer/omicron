@@ -159,7 +159,7 @@ to:   blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
 
 internal DNS:
   DNS zone: "control-plane.oxide.internal" (unchanged)
-    unchanged names: 49 (records: 59)
+    unchanged names: 50 (records: 62)
 
 external DNS:
   DNS zone: "oxide.example" (unchanged)
@@ -320,7 +320,7 @@ to:   blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4
 
 internal DNS:
   DNS zone: "control-plane.oxide.internal" (unchanged)
-    unchanged names: 49 (records: 59)
+    unchanged names: 50 (records: 62)
 
 external DNS:
   DNS zone: "oxide.example" (unchanged)
@@ -632,7 +632,7 @@ to:   blueprint af934083-59b5-4bf6-8966-6fb5292c29e1
 
 internal DNS:
   DNS zone: "control-plane.oxide.internal" (unchanged)
-    unchanged names: 49 (records: 59)
+    unchanged names: 50 (records: 62)
 
 external DNS:
   DNS zone: "oxide.example" (unchanged)
@@ -793,7 +793,7 @@ to:   blueprint df06bb57-ad42-4431-9206-abff322896c7
 
 internal DNS:
   DNS zone: "control-plane.oxide.internal" (unchanged)
-    unchanged names: 49 (records: 59)
+    unchanged names: 50 (records: 62)
 
 external DNS:
   DNS zone: "oxide.example" (unchanged)
