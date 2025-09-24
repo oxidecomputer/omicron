@@ -436,16 +436,13 @@ impl DataStore {
         recovery_user_password_hash: omicron_passwords::PasswordHashString,
         dns_update: DnsVersionUpdateBuilder,
     ) -> Result<(), RackInitError> {
-        match &recovery_silo.identity_mode {
-            shared::SiloIdentityMode::LocalOnly => {
-                // Ok
-            }
-
-            shared::SiloIdentityMode::SamlJit => {
-                return Err(RackInitError::Silo(Error::invalid_request(
-                    "recovery silo should only use identity mode LocalOnly",
-                )));
-            }
+        if !matches!(
+            &recovery_silo.identity_mode,
+            shared::SiloIdentityMode::LocalOnly
+        ) {
+            return Err(RackInitError::Silo(Error::invalid_request(
+                "recovery silo should only use identity mode LocalOnly",
+            )));
         }
 
         let db_silo = self
