@@ -833,8 +833,8 @@ pub struct PlanningZoneUpdatesStepReport {
     pub out_of_date_zones: BTreeMap<SledUuid, Vec<PlanningOutOfDateZone>>,
     pub expunged_zones: BTreeMap<SledUuid, Vec<BlueprintZoneConfig>>,
     pub updated_zones: BTreeMap<SledUuid, Vec<BlueprintZoneConfig>>,
-    pub unsafe_zones: BTreeMap<BlueprintZoneConfig, ZoneUnsafeToShutdown>,
-    pub waiting_zones: BTreeMap<BlueprintZoneConfig, ZoneWaitingToExpunge>,
+    pub unsafe_zones: BTreeMap<OmicronZoneUuid, ZoneUnsafeToShutdown>,
+    pub waiting_zones: BTreeMap<OmicronZoneUuid, ZoneWaitingToExpunge>,
 }
 
 impl PlanningZoneUpdatesStepReport {
@@ -919,7 +919,7 @@ impl PlanningZoneUpdatesStepReport {
         zone: &BlueprintZoneConfig,
         reason: ZoneUnsafeToShutdown,
     ) {
-        self.unsafe_zones.insert(zone.clone(), reason);
+        self.unsafe_zones.insert(zone.id, reason);
     }
 
     pub fn waiting_zone(
@@ -927,7 +927,7 @@ impl PlanningZoneUpdatesStepReport {
         zone: &BlueprintZoneConfig,
         reason: ZoneWaitingToExpunge,
     ) {
-        self.waiting_zones.insert(zone.clone(), reason);
+        self.waiting_zones.insert(zone.id, reason);
     }
 }
 
@@ -986,28 +986,16 @@ impl fmt::Display for PlanningZoneUpdatesStepReport {
         if !unsafe_zones.is_empty() {
             let (n, s) = plural_map(unsafe_zones);
             writeln!(f, "* {n} zone{s} not ready to shut down safely:")?;
-            for (zone, reason) in unsafe_zones.iter() {
-                writeln!(
-                    f,
-                    "  * zone {} ({}): {}",
-                    zone.id,
-                    zone.zone_type.kind().report_str(),
-                    reason,
-                )?;
+            for (zone_id, reason) in unsafe_zones.iter() {
+                writeln!(f, "  * zone {zone_id}: {reason}")?;
             }
         }
 
         if !waiting_zones.is_empty() {
             let (n, s) = plural_map(waiting_zones);
             writeln!(f, "* {n} zone{s} waiting to be expunged:")?;
-            for (zone, reason) in waiting_zones.iter() {
-                writeln!(
-                    f,
-                    "  * zone {} ({}): {}",
-                    zone.id,
-                    zone.zone_type.kind().report_str(),
-                    reason,
-                )?;
+            for (zone_id, reason) in waiting_zones.iter() {
+                writeln!(f, "  * zone {zone_id}: {reason}")?;
             }
         }
 
@@ -1061,7 +1049,9 @@ pub enum ZoneUnsafeToShutdown {
 impl fmt::Display for ZoneUnsafeToShutdown {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Self::Cockroachdb { reason } => write!(f, "{reason}"),
+            Self::Cockroachdb { reason } => {
+                write!(f, "cockroach unsafe to shut down: {reason}")
+            }
             Self::BoundaryNtp {
                 total_boundary_ntp_zones: t,
                 synchronized_count: s,
@@ -1092,7 +1082,7 @@ impl fmt::Display for ZoneWaitingToExpunge {
             Self::Nexus { zone_generation } => {
                 write!(
                     f,
-                    "image out-of-date, but zone's nexus_generation \
+                    "nexus image out-of-date, but nexus_generation \
                      {zone_generation} is still active"
                 )
             }
