@@ -7088,6 +7088,21 @@
             ]
           },
           {
+            "description": "Waiting on zones to propagate to inventory.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "inventory_propagation"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
             "description": "Waiting on updates to RoT / SP / Host OS / etc.",
             "type": "object",
             "properties": {
