@@ -1545,8 +1545,6 @@ impl<'a> Planner<'a> {
         &mut self,
         mgs_updates: &PlanningMgsUpdatesStepReport,
     ) -> Result<PlanningZoneUpdatesStepReport, Error> {
-        let mut report = PlanningZoneUpdatesStepReport::new();
-
         let zones_currently_updating =
             self.get_zones_not_yet_propagated_to_inventory();
         if !zones_currently_updating.is_empty() {
@@ -1554,8 +1552,12 @@ impl<'a> Planner<'a> {
                 self.log, "some zones not yet up-to-date";
                 "zones_currently_updating" => ?zones_currently_updating,
             );
-            return Ok(report);
+            return Ok(PlanningZoneUpdatesStepReport::waiting_on(
+                ZoneUpdatesWaitingOn::InventoryPropagation,
+            ));
         }
+
+        let mut report = PlanningZoneUpdatesStepReport::new();
 
         // Find the zones with out-of-date images
         let out_of_date_zones = self.get_out_of_date_zones();
