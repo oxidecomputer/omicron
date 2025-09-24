@@ -6996,7 +6996,6 @@ pub(crate) mod test {
             result
         };
 
-
         // If we have missing info in our inventory, the
         // planner will not update any Cockroach zones.
         example.collection.cockroach_status = BTreeMap::new();
