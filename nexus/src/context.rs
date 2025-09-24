@@ -271,17 +271,24 @@ impl ServerContext {
                     log, "Setting up qorb database pool from a single host";
                     "url" => #?url,
                 );
-                db::Pool::new_single_host(
+                db::PoolBuilder::new(
                     &log,
-                    &db::Config { url: url.clone() },
+                    db::ConnectWith::SingleHost(&db::Config {
+                        url: url.clone(),
+                    }),
                 )
+                .build()
             }
             nexus_config::Database::FromDns => {
                 info!(
                     log, "Setting up qorb database pool from DNS";
                     "dns_addrs" => ?qorb_resolver.bootstrap_dns_ips(),
                 );
-                db::Pool::new(&log, &qorb_resolver)
+                db::PoolBuilder::new(
+                    &log,
+                    db::ConnectWith::Resolver(&qorb_resolver),
+                )
+                .build()
             }
         };
 

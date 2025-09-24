@@ -28,6 +28,8 @@ use tokio::sync::watch;
 /// Wrapper around a database connection pool.
 ///
 /// Expected to be used as the primary interface to the database.
+///
+/// Can be constructed with a [`PoolBuilder`].
 pub struct Pool {
     // IDs are assigned to each connection, acting as keys within the Quiesce
     // state.  These are used to track the set of in-use connections and
@@ -37,6 +39,7 @@ pub struct Pool {
     log: Logger,
     terminated: std::sync::atomic::AtomicBool,
     quiesce: watch::Sender<Quiesce>,
+    collect_backtraces: bool,
 }
 
 // Provides an alternative to the DNS resolver for cases where we want to
@@ -85,100 +88,77 @@ fn make_postgres_connector(
     ))
 }
 
+pub enum ConnectWith<'a> {
+    /// Uses a resolver to connect to the database.
+    Resolver(&'a QorbResolver),
+
+    /// Connects to a single hard-coded database node.
+    SingleHost(&'a DbConfig),
+}
+
+/// Utility for building [`Pool`]s.
+pub struct PoolBuilder<'a> {
+    log: &'a Logger,
+    connect_with: ConnectWith<'a>,
+    policy: Option<Policy>,
+    collect_backtraces: Option<bool>,
+}
+
+impl<'a> PoolBuilder<'a> {
+    pub fn new(log: &'a Logger, connect_with: ConnectWith<'a>) -> Self {
+        Self { log, connect_with, policy: None, collect_backtraces: None }
+    }
+
+    pub fn policy(mut self, policy: Policy) -> Self {
+        self.policy = Some(policy);
+        self
+    }
+
+    pub fn collect_backtraces(mut self, collect_backtraces: bool) -> Self {
+        self.collect_backtraces = Some(collect_backtraces);
+        self
+    }
+
+    pub fn build(self) -> Pool {
+        let Self { log, connect_with, policy, collect_backtraces } = self;
+
+        let (resolver, name) = match connect_with {
+            ConnectWith::Resolver(resolver) => {
+                (resolver.for_service(ServiceName::Cockroach), "crdb")
+            }
+            ConnectWith::SingleHost(config) => {
+                (make_single_host_resolver(config), "crdb-single-host")
+            }
+        };
+        let connector = make_postgres_connector(log);
+
+        let policy = policy.unwrap_or_else(|| Policy::default());
+        let collect_backtraces = collect_backtraces.unwrap_or(true);
+
+        let inner = match qorb::pool::Pool::new(
+            name.to_string(),
+            resolver,
+            connector,
+            policy,
+        ) {
+            Ok(pool) => {
+                debug!(log, "registered USDT probes");
+                pool
+            }
+            Err(err) => {
+                error!(log, "failed to register USDT probes");
+                err.into_inner()
+            }
+        };
+        Pool::new(inner, log.clone(), collect_backtraces)
+    }
+}
+
 impl Pool {
-    /// Creates a new qorb-backed connection pool to the database.
-    ///
-    /// Creating this pool does not necessarily wait for connections to become
-    /// available, as backends may shift over time.
-    pub fn new(log: &Logger, resolver: &QorbResolver) -> Self {
-        let resolver = resolver.for_service(ServiceName::Cockroach);
-        let connector = make_postgres_connector(log);
-        let policy = Policy::default();
-        let inner = match qorb::pool::Pool::new(
-            "crdb".to_string(),
-            resolver,
-            connector,
-            policy,
-        ) {
-            Ok(pool) => {
-                debug!(log, "registered USDT probes");
-                pool
-            }
-            Err(err) => {
-                error!(log, "failed to register USDT probes");
-                err.into_inner()
-            }
-        };
-        Self::new_common(inner, log.clone())
-    }
-
-    /// Creates a new qorb-backed connection pool to a single instance of the
-    /// database.
-    ///
-    /// This is intended for tests that want to skip DNS resolution, relying
-    /// on a single instance of the database.
-    ///
-    /// In production, [Self::new] should be preferred.
-    pub fn new_single_host(log: &Logger, db_config: &DbConfig) -> Self {
-        let resolver = make_single_host_resolver(db_config);
-        let connector = make_postgres_connector(log);
-        let policy = Policy::default();
-        let inner = match qorb::pool::Pool::new(
-            "crdb-single-host".to_string(),
-            resolver,
-            connector,
-            policy,
-        ) {
-            Ok(pool) => {
-                debug!(log, "registered USDT probes");
-                pool
-            }
-            Err(err) => {
-                error!(log, "failed to register USDT probes");
-                err.into_inner()
-            }
-        };
-        Self::new_common(inner, log.clone())
-    }
-
-    /// Creates a new qorb-backed connection pool which returns an error
-    /// if claims are not available within one millisecond.
-    ///
-    /// This is intended for test-only usage, in particular for tests where
-    /// claim requests should rapidly return errors when a backend has been
-    /// intentionally disabled.
-    #[cfg(any(test, feature = "testing"))]
-    pub fn new_single_host_failfast(
-        log: &Logger,
-        db_config: &DbConfig,
-    ) -> Self {
-        let resolver = make_single_host_resolver(db_config);
-        let connector = make_postgres_connector(log);
-        let policy = Policy {
-            claim_timeout: tokio::time::Duration::from_millis(1),
-            ..Default::default()
-        };
-        let inner = match qorb::pool::Pool::new(
-            "crdb-single-host-failfast".to_string(),
-            resolver,
-            connector,
-            policy,
-        ) {
-            Ok(pool) => {
-                debug!(log, "registered USDT probes");
-                pool
-            }
-            Err(err) => {
-                error!(log, "failed to register USDT probes");
-                err.into_inner()
-            }
-        };
-        Self::new_common(inner, log.clone())
-    }
-
-    fn new_common(
+    fn new(
         inner: qorb::pool::Pool<AsyncConnection>,
         log: Logger,
+        collect_backtraces: bool,
     ) -> Self {
         let (quiesce, _) = watch::channel(Quiesce {
             new_claims_allowed: ClaimsAllowed::Allowed,
@@ -190,6 +170,7 @@ impl Pool {
             log,
             terminated: std::sync::atomic::AtomicBool::new(false),
             quiesce,
+            collect_backtraces,
         }
     }
 
@@ -197,7 +178,11 @@ impl Pool {
     pub async fn claim(&self) -> Result<DataStoreConnection, Error> {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let held_since = Utc::now();
-        let debug = Backtrace::force_capture().to_string();
+        let debug = if self.collect_backtraces {
+            Backtrace::force_capture().to_string()
+        } else {
+            "<backtraces disabled>".to_string()
+        };
         let allowed = self.quiesce.send_if_modified(|q| {
             if let ClaimsAllowed::Disallowed = q.new_claims_allowed {
                 false
@@ -366,7 +351,9 @@ mod test {
         let mut db = crdb::test_setup_database(log).await;
         let cfg = crate::db::Config { url: db.pg_config().clone() };
         {
-            let pool = Pool::new_single_host(&log, &cfg);
+            let pool = PoolBuilder::new(&log, ConnectWith::SingleHost(&cfg))
+                .collect_backtraces(false)
+                .build();
             pool.terminate().await;
         }
         db.cleanup().await.unwrap();
@@ -383,7 +370,9 @@ mod test {
         let mut db = crdb::test_setup_database(log).await;
         let cfg = crate::db::Config { url: db.pg_config().clone() };
         {
-            let pool = Pool::new_single_host(&log, &cfg);
+            let pool = PoolBuilder::new(&log, ConnectWith::SingleHost(&cfg))
+                .collect_backtraces(false)
+                .build();
             drop(pool);
         }
         db.cleanup().await.unwrap();
