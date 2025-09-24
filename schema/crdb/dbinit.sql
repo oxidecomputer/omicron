@@ -4329,12 +4329,22 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_sled_config_zone (
     image_source omicron.public.inv_zone_image_source NOT NULL,
     image_artifact_sha256 STRING(64),
 
+    -- Nexus lockstep service port, used only by Nexus zones
+    nexus_lockstep_port INT4
+        CHECK (nexus_lockstep_port IS NULL OR nexus_lockstep_port BETWEEN 0 AND 65535),
+
     CONSTRAINT zone_image_source_artifact_hash_present CHECK (
         (image_source = 'artifact'
             AND image_artifact_sha256 IS NOT NULL)
         OR
         (image_source != 'artifact'
             AND image_artifact_sha256 IS NULL)
+    ),
+
+    CONSTRAINT nexus_lockstep_port_for_nexus_zones CHECK (
+        (zone_type = 'nexus' AND nexus_lockstep_port IS NOT NULL)
+        OR
+        (zone_type != 'nexus' AND nexus_lockstep_port IS NULL)
     ),
 
     PRIMARY KEY (inv_collection_id, sled_config_id, id)
@@ -4782,6 +4792,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_omicron_zone (
     -- Generation for Nexus zones
     nexus_generation INT8,
 
+    -- Nexus lockstep service port, used only by Nexus zones
+    nexus_lockstep_port INT4
+        CHECK (nexus_lockstep_port IS NULL OR nexus_lockstep_port BETWEEN 0 AND 65535),
+
     PRIMARY KEY (blueprint_id, id),
 
     CONSTRAINT expunged_disposition_properties CHECK (
@@ -4805,6 +4819,12 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_omicron_zone (
         (zone_type = 'nexus' AND nexus_generation IS NOT NULL)
         OR
         (zone_type != 'nexus' AND nexus_generation IS NULL)
+    ),
+
+    CONSTRAINT nexus_lockstep_port_for_nexus_zones CHECK (
+        (zone_type = 'nexus' AND nexus_lockstep_port IS NOT NULL)
+        OR
+        (zone_type != 'nexus' AND nexus_lockstep_port IS NULL)
     )
 );
 
@@ -6668,7 +6688,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '192.0.0', NULL)
+    (TRUE, NOW(), NOW(), '193.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

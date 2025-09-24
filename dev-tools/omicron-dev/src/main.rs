@@ -109,6 +109,10 @@ impl RunAllArgs {
             cptestctx.server.get_http_server_internal_address().await,
         );
         println!(
+            "omicron-dev: nexus lockstep API:     {:?}",
+            cptestctx.server.get_http_server_lockstep_address().await,
+        );
+        println!(
             "omicron-dev: cockroachdb pid:        {}",
             cptestctx.database.pid(),
         );

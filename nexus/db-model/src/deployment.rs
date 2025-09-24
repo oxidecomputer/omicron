@@ -574,6 +574,7 @@ pub struct BpOmicronZone {
     pub image_source: DbBpZoneImageSource,
     pub image_artifact_sha256: Option<ArtifactHash>,
     pub nexus_generation: Option<Generation>,
+    pub nexus_lockstep_port: Option<SqlU16>,
 }
 
 impl BpOmicronZone {
@@ -636,6 +637,7 @@ impl BpOmicronZone {
             snat_first_port: None,
             snat_last_port: None,
             nexus_generation: None,
+            nexus_lockstep_port: None,
         };
 
         match &blueprint_zone.zone_type {
@@ -763,6 +765,7 @@ impl BpOmicronZone {
             }
             BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
                 internal_address,
+                lockstep_port,
                 external_ip,
                 nic,
                 external_tls,
@@ -777,6 +780,8 @@ impl BpOmicronZone {
                 bp_omicron_zone.bp_nic_id = Some(nic.id);
                 bp_omicron_zone.second_service_ip =
                     Some(IpNetwork::from(external_ip.ip));
+                bp_omicron_zone.nexus_lockstep_port =
+                    Some(SqlU16::from(*lockstep_port));
                 bp_omicron_zone.nexus_external_tls = Some(*external_tls);
                 bp_omicron_zone.nexus_external_dns_servers = Some(
                     external_dns_servers
@@ -971,6 +976,9 @@ impl BpOmicronZone {
             ZoneType::Nexus => {
                 BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
                     internal_address: primary_address,
+                    lockstep_port: *self.nexus_lockstep_port.ok_or_else(
+                        || anyhow!("expected 'nexus_lockstep_port'"),
+                    )?,
                     external_ip: OmicronZoneExternalFloatingIp {
                         id: external_ip_id?,
                         ip: self
@@ -1573,11 +1581,11 @@ pub struct DebugLogBlueprintPlanning {
     pub debug_blob: serde_json::Value,
 }
 
-impl TryFrom<Arc<PlanningReport>> for DebugLogBlueprintPlanning {
-    type Error = serde_json::Error;
-
-    fn try_from(report: Arc<PlanningReport>) -> Result<Self, Self::Error> {
-        let blueprint_id = report.blueprint_id.into();
+impl DebugLogBlueprintPlanning {
+    pub fn new(
+        blueprint_id: BlueprintUuid,
+        report: Arc<PlanningReport>,
+    ) -> Result<Self, serde_json::Error> {
         let report = serde_json::to_value(report)?;
 
         // We explicitly _don't_ define a struct describing the format of
@@ -1595,6 +1603,6 @@ impl TryFrom<Arc<PlanningReport>> for DebugLogBlueprintPlanning {
             "report": report,
         });
 
-        Ok(Self { blueprint_id, debug_blob })
+        Ok(Self { blueprint_id: blueprint_id.into(), debug_blob })
     }
 }

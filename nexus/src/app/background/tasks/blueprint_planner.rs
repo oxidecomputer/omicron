@@ -22,6 +22,7 @@ use omicron_common::api::external::LookupType;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::GenericUuid as _;
 use serde_json::json;
+use slog_error_chain::InlineErrorChain;
 use std::sync::Arc;
 use tokio::sync::watch::{self, Receiver, Sender};
 
@@ -275,7 +276,7 @@ impl BlueprintPlanner {
                      generating an empty planning report";
                     "source" => ?&blueprint.source,
                 );
-                Arc::new(PlanningReport::new(blueprint.id))
+                Arc::new(PlanningReport::new())
             }
         };
         self.tx_blueprint.send_replace(Some(Arc::new((target, blueprint))));
@@ -292,7 +293,16 @@ impl BackgroundTask for BlueprintPlanner {
         &'a mut self,
         opctx: &'a OpContext,
     ) -> BoxFuture<'a, serde_json::Value> {
-        Box::pin(async move { json!(self.plan(opctx).await) })
+        Box::pin(async move {
+            let status = self.plan(opctx).await;
+            match serde_json::to_value(status) {
+                Ok(val) => val,
+                Err(err) => json!({
+                    "error": format!("could not serialize task status: {}",
+                                     InlineErrorChain::new(&err)),
+                }),
+            }
+        })
     }
 }
 
@@ -384,10 +394,9 @@ mod test {
             BlueprintPlannerStatus::Targeted {
                 parent_blueprint_id,
                 blueprint_id,
-                report,
+                report: _,
             } if parent_blueprint_id == initial_blueprint.id
-                && blueprint_id != initial_blueprint.id
-                && blueprint_id == report.blueprint_id =>
+                && blueprint_id != initial_blueprint.id =>
             {
                 blueprint_id
             }

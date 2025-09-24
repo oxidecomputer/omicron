@@ -17,6 +17,7 @@ gateway-api.workspace = true
 installinator-api.workspace = true
 nexus-external-api.workspace = true
 nexus-internal-api.workspace = true
+nexus-lockstep-api.workspace = true
 ntp-admin-api.workspace = true
 omicron-workspace-hack.workspace = true
 openapi-lint.workspace = true
@@ -24,6 +25,8 @@ openapiv3.workspace = true
 oximeter-api.workspace = true
 repo-depot-api.workspace = true
 semver.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 sled-agent-api.workspace = true
 wicketd-api.workspace = true
 

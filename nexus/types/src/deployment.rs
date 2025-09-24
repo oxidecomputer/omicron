@@ -56,6 +56,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use slog::Key;
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::fmt;
 use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
@@ -93,6 +94,7 @@ pub use network_resources::OmicronZoneExternalSnatIp;
 pub use network_resources::OmicronZoneNetworkResources;
 pub use network_resources::OmicronZoneNic;
 pub use network_resources::OmicronZoneNicEntry;
+use omicron_common::api::external::Error;
 pub use planning_input::ClickhouseMode;
 pub use planning_input::ClickhousePolicy;
 pub use planning_input::CockroachDbClusterVersion;
@@ -116,12 +118,14 @@ pub use planning_input::TufRepoContentsError;
 pub use planning_input::TufRepoPolicy;
 pub use planning_input::ZpoolFilter;
 pub use planning_report::CockroachdbUnsafeToShutdown;
+pub use planning_report::NexusGenerationBumpWaitingOn;
 pub use planning_report::PlanningAddStepReport;
 pub use planning_report::PlanningCockroachdbSettingsStepReport;
 pub use planning_report::PlanningDecommissionStepReport;
 pub use planning_report::PlanningExpungeStepReport;
 pub use planning_report::PlanningMgsUpdatesStepReport;
 pub use planning_report::PlanningMupdateOverrideStepReport;
+pub use planning_report::PlanningNexusGenerationBumpReport;
 pub use planning_report::PlanningNoopImageSourceSkipSledHostPhase2Reason;
 pub use planning_report::PlanningNoopImageSourceSkipSledZonesReason;
 pub use planning_report::PlanningNoopImageSourceSkipZoneReason;
@@ -131,6 +135,7 @@ pub use planning_report::PlanningZoneUpdatesStepReport;
 pub use planning_report::ZoneAddWaitingOn;
 pub use planning_report::ZoneUnsafeToShutdown;
 pub use planning_report::ZoneUpdatesWaitingOn;
+pub use planning_report::ZoneWaitingToExpunge;
 pub use reconfigurator_config::PlannerConfig;
 pub use reconfigurator_config::PlannerConfigDiff;
 pub use reconfigurator_config::PlannerConfigDisplay;
@@ -424,6 +429,57 @@ impl Blueprint {
         };
 
         Ok(zone_config.nexus_generation < self.nexus_generation)
+    }
+
+    /// Given a set of Nexus zone UUIDs, returns the "nexus generation"
+    /// of these zones in the blueprint.
+    ///
+    /// Returns [`Option::None`] if none of these zones are found.
+    ///
+    /// Returns an error if there are multiple distinct generations for these
+    /// zones.
+    pub fn find_generation_for_nexus(
+        &self,
+        nexus_zones: &BTreeSet<OmicronZoneUuid>,
+    ) -> Result<Option<Generation>, anyhow::Error> {
+        let mut gen = None;
+        for (_, zone, nexus_zone) in
+            self.all_nexus_zones(BlueprintZoneDisposition::is_in_service)
+        {
+            if nexus_zones.contains(&zone.id) {
+                let found_gen = nexus_zone.nexus_generation;
+                if let Some(gen) = gen {
+                    if found_gen != gen {
+                        bail!("Multiple generations found for these zones");
+                    }
+                }
+                gen = Some(found_gen);
+            }
+        }
+
+        Ok(gen)
+    }
+
+    /// Returns the Nexus generation number for Nexus `nexus_id`, which is
+    /// assumed to refer to the currently-running Nexus instance (the current
+    /// process)
+    pub fn find_generation_for_self(
+        &self,
+        nexus_id: OmicronZoneUuid,
+    ) -> Result<Generation, Error> {
+        for (_sled_id, zone_config, nexus_config) in
+            self.all_nexus_zones(BlueprintZoneDisposition::is_in_service)
+        {
+            if zone_config.id == nexus_id {
+                return Ok(nexus_config.nexus_generation);
+            }
+        }
+
+        Err(Error::internal_error(&format!(
+            "failed to determine generation of currently-running Nexus: \
+             did not find Nexus {} in blueprint {}",
+            nexus_id, self.id,
+        )))
     }
 }
 
@@ -1031,6 +1087,16 @@ impl IdMappable for BlueprintZoneConfig {
     fn id(&self) -> Self::Id {
         self.id
     }
+}
+
+impl IdOrdItem for BlueprintZoneConfig {
+    type Key<'a> = OmicronZoneUuid;
+
+    fn key(&self) -> Self::Key<'_> {
+        self.id
+    }
+
+    id_upcast!();
 }
 
 impl BlueprintZoneConfig {

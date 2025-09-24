@@ -15,7 +15,6 @@ use crate::blueprint_editor::NoAvailableDnsSubnets;
 use crate::blueprint_editor::SledEditError;
 use crate::blueprint_editor::SledEditor;
 use crate::mgs_updates::PendingHostPhase2Changes;
-use crate::planner::NoopConvertGlobalIneligibleReason;
 use crate::planner::NoopConvertInfo;
 use crate::planner::NoopConvertSledIneligibleReason;
 use crate::planner::ZoneExpungeReason;
@@ -115,6 +114,10 @@ pub enum Error {
     NoAvailableZpool { sled_id: SledUuid, kind: ZoneKind },
     #[error("no Nexus zones exist in parent blueprint")]
     NoNexusZonesInParentBlueprint,
+    #[error("no active Nexus zones exist in blueprint currently being built")]
+    NoActiveNexusZonesInBlueprint,
+    #[error("conflicting values for active Nexus zones in parent blueprint")]
+    ActiveNexusZoneGenerationConflictInParentBlueprint,
     #[error("no Boundary NTP zones exist in parent blueprint")]
     NoBoundaryNtpZonesInParentBlueprint,
     #[error(
@@ -726,6 +729,10 @@ impl<'a> BlueprintBuilder<'a> {
         self.sled_editors.keys().copied()
     }
 
+    /// Iterates over all zones on a sled.
+    ///
+    /// This will include both zones from the parent blueprint, as well
+    /// as the changes made within this builder.
     pub fn current_sled_zones<F>(
         &self,
         sled_id: SledUuid,
@@ -738,6 +745,25 @@ impl<'a> BlueprintBuilder<'a> {
             return Either::Left(iter::empty());
         };
         Either::Right(editor.zones(filter))
+    }
+
+    /// Iterates over all zones on all sleds.
+    ///
+    /// Acts like a combination of [`Self::sled_ids_with_zones`] and
+    /// [`Self::current_sled_zones`].
+    ///
+    /// This will include both zones from the parent blueprint, as well
+    /// as the changes made within this builder.
+    pub fn current_zones<F>(
+        &'a self,
+        filter: F,
+    ) -> impl Iterator<Item = &'a BlueprintZoneConfig>
+    where
+        F: FnMut(BlueprintZoneDisposition) -> bool + Clone,
+    {
+        self.sled_ids_with_zones().flat_map(move |sled_id| {
+            self.current_sled_zones(sled_id, filter.clone())
+        })
     }
 
     pub fn current_sled_disks<F>(
@@ -1537,6 +1563,7 @@ impl<'a> BlueprintBuilder<'a> {
         Ok(Ensure::Added)
     }
 
+    /// Adds a nexus zone on this sled.
     pub fn sled_add_zone_nexus(
         &mut self,
         sled_id: SledUuid,
@@ -1565,6 +1592,7 @@ impl<'a> BlueprintBuilder<'a> {
                 _ => None,
             })
             .ok_or(Error::NoNexusZonesInParentBlueprint)?;
+
         self.sled_add_zone_nexus_with_config(
             sled_id,
             external_tls,
@@ -1614,6 +1642,7 @@ impl<'a> BlueprintBuilder<'a> {
         let internal_address = SocketAddrV6::new(ip, port, 0, 0);
         let zone_type = BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
             internal_address,
+            lockstep_port: omicron_common::address::NEXUS_LOCKSTEP_PORT,
             external_ip,
             nic,
             external_tls,
@@ -2709,9 +2738,6 @@ impl IdOrdItem for EnsureMupdateOverrideUpdatedZone {
 /// though inventory no longer has the sled.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum BpMupdateOverrideNotClearedReason {
-    /// There is a global reason noop conversions are not possible.
-    NoopGlobalIneligible(NoopConvertGlobalIneligibleReason),
-
     /// There is a sled-specific reason noop conversions are not possible.
     NoopSledIneligible(NoopConvertSledIneligibleReason),
 }
@@ -2719,12 +2745,6 @@ pub(crate) enum BpMupdateOverrideNotClearedReason {
 impl fmt::Display for BpMupdateOverrideNotClearedReason {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            BpMupdateOverrideNotClearedReason::NoopGlobalIneligible(reason) => {
-                write!(
-                    f,
-                    "no sleds can be noop-converted to Artifact: {reason}",
-                )
-            }
             BpMupdateOverrideNotClearedReason::NoopSledIneligible(reason) => {
                 write!(
                     f,
@@ -3337,7 +3357,7 @@ pub mod test {
                     .map(|sa| sa.sled_id)
                     .expect("no sleds present"),
                 BlueprintZoneImageSource::InstallDataset,
-                Generation::new(),
+                parent.nexus_generation,
             )
             .unwrap_err();
 

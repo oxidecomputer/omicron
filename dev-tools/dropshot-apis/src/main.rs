@@ -12,15 +12,19 @@ use clickhouse_admin_api::*;
 use cockroach_admin_api::*;
 use dns_server_api::*;
 use dropshot_api_manager::{Environment, ManagedApiConfig, ManagedApis};
-use dropshot_api_manager_types::{ApiBoundary, ValidationContext, Versions};
+use dropshot_api_manager_types::{
+    ManagedApiMetadata, ValidationContext, Versions,
+};
 use gateway_api::*;
 use installinator_api::*;
 use nexus_external_api::*;
 use nexus_internal_api::*;
+use nexus_lockstep_api::*;
 use ntp_admin_api::*;
 use openapiv3::OpenAPI;
 use oximeter_api::*;
 use repo_depot_api::*;
+use serde::{Deserialize, Serialize};
 use sled_agent_api::*;
 use wicketd_api::*;
 
@@ -50,8 +54,12 @@ fn all_apis() -> anyhow::Result<ManagedApis> {
         ManagedApiConfig {
             title: "Bootstrap Agent API",
             versions: Versions::new_lockstep(semver::Version::new(0, 0, 1)),
-            description: "Per-sled API for setup and teardown",
-            boundary: ApiBoundary::Internal,
+            metadata: ManagedApiMetadata {
+                description: Some("Per-sled API for setup and teardown"),
+                contact_url: Some("https://oxide.computer"),
+                contact_email: Some("api@oxide.computer"),
+                extra: to_value(ApiBoundary::Internal),
+            },
             api_description: bootstrap_agent_api_mod::stub_api_description,
             ident: "bootstrap-agent",
             extra_validation: None,
@@ -61,9 +69,15 @@ fn all_apis() -> anyhow::Result<ManagedApis> {
             versions: Versions::new_versioned(
                 clickhouse_admin_api::supported_versions(),
             ),
-            description: "API for interacting with the Oxide \
-                control plane's ClickHouse cluster keepers",
-            boundary: ApiBoundary::Internal,
+            metadata: ManagedApiMetadata {
+                description: Some(
+                    "API for interacting with the Oxide \
+                     control plane's ClickHouse cluster keepers",
+                ),
+                contact_url: Some("https://oxide.computer"),
+                contact_email: Some("api@oxide.computer"),
+                extra: to_value(ApiBoundary::Internal),
+            },
             api_description:
                 clickhouse_admin_keeper_api_mod::stub_api_description,
             ident: "clickhouse-admin-keeper",
@@ -74,9 +88,15 @@ fn all_apis() -> anyhow::Result<ManagedApis> {
             versions: Versions::new_versioned(
                 clickhouse_admin_api::supported_versions(),
             ),
-            description: "API for interacting with the Oxide \
-                control plane's ClickHouse cluster replica servers",
-            boundary: ApiBoundary::Internal,
+            metadata: ManagedApiMetadata {
+                description: Some(
+                    "API for interacting with the Oxide \
+                    control plane's ClickHouse cluster replica servers",
+                ),
+                contact_url: Some("https://oxide.computer"),
+                contact_email: Some("api@oxide.computer"),
+                extra: to_value(ApiBoundary::Internal),
+            },
             api_description:
                 clickhouse_admin_server_api_mod::stub_api_description,
             ident: "clickhouse-admin-server",
@@ -87,9 +107,15 @@ fn all_apis() -> anyhow::Result<ManagedApis> {
             versions: Versions::new_versioned(
                 clickhouse_admin_api::supported_versions(),
             ),
-            description: "API for interacting with the Oxide \
-                control plane's single-node ClickHouse database",
-            boundary: ApiBoundary::Internal,
+            metadata: ManagedApiMetadata {
+                description: Some(
+                    "API for interacting with the Oxide \
+                    control plane's single-node ClickHouse database",
+                ),
+                contact_url: Some("https://oxide.computer"),
+                contact_email: Some("api@oxide.computer"),
+                extra: to_value(ApiBoundary::Internal),
+            },
             api_description:
                 clickhouse_admin_single_api_mod::stub_api_description,
             ident: "clickhouse-admin-single",
@@ -100,9 +126,15 @@ fn all_apis() -> anyhow::Result<ManagedApis> {
             versions: Versions::new_versioned(
                 cockroach_admin_api::supported_versions(),
             ),
-            description: "API for interacting with the Oxide \
-                control plane's CockroachDB cluster",
-            boundary: ApiBoundary::Internal,
+            metadata: ManagedApiMetadata {
+                description: Some(
+                    "API for interacting with the Oxide \
+                    control plane's CockroachDB cluster",
+                ),
+                contact_url: Some("https://oxide.computer"),
+                contact_email: Some("api@oxide.computer"),
+                extra: to_value(ApiBoundary::Internal),
+            },
             api_description: cockroach_admin_api_mod::stub_api_description,
             ident: "cockroach-admin",
             extra_validation: None,
@@ -112,8 +144,12 @@ fn all_apis() -> anyhow::Result<ManagedApis> {
             versions: Versions::new_versioned(
                 dns_server_api::supported_versions(),
             ),
-            description: "API for the internal DNS server",
-            boundary: ApiBoundary::Internal,
+            metadata: ManagedApiMetadata {
+                description: Some("API for the internal DNS server"),
+                contact_url: Some("https://oxide.computer"),
+                contact_email: Some("api@oxide.computer"),
+                extra: to_value(ApiBoundary::Internal),
+            },
             api_description: dns_server_api_mod::stub_api_description,
             ident: "dns-server",
             extra_validation: None,
@@ -121,9 +157,15 @@ fn all_apis() -> anyhow::Result<ManagedApis> {
         ManagedApiConfig {
             title: "Oxide Management Gateway Service API",
             versions: Versions::new_versioned(gateway_api::supported_versions()),
-            description: "API for interacting with the Oxide \
-                control plane's gateway service",
-            boundary: ApiBoundary::Internal,
+            metadata: ManagedApiMetadata {
+                description: Some(
+                    "API for interacting with the Oxide \
+                    control plane's gateway service",
+                ),
+                contact_url: Some("https://oxide.computer"),
+                contact_email: Some("api@oxide.computer"),
+                extra: to_value(ApiBoundary::Internal),
+            },
             api_description: gateway_api_mod::stub_api_description,
             ident: "gateway",
             extra_validation: None,
@@ -131,9 +173,15 @@ fn all_apis() -> anyhow::Result<ManagedApis> {
         ManagedApiConfig {
             title: "Installinator API",
             versions: Versions::new_lockstep(semver::Version::new(0, 0, 1)),
-            description: "API for installinator to fetch artifacts \
-                and report progress",
-            boundary: ApiBoundary::Internal,
+            metadata: ManagedApiMetadata {
+                description: Some(
+                    "API for installinator to fetch artifacts \
+                     and report progress",
+                ),
+                contact_url: Some("https://oxide.computer"),
+                contact_email: Some("api@oxide.computer"),
+                extra: to_value(ApiBoundary::Internal),
+            },
             api_description: installinator_api_mod::stub_api_description,
             ident: "installinator",
             extra_validation: None,
@@ -141,10 +189,16 @@ fn all_apis() -> anyhow::Result<ManagedApis> {
         ManagedApiConfig {
             title: "Oxide Region API",
             versions: Versions::new_lockstep(semver::Version::new(
-                20250730, 0, 0,
+                20251008, 0, 0,
             )),
-            description: "API for interacting with the Oxide control plane",
-            boundary: ApiBoundary::External,
+            metadata: ManagedApiMetadata {
+                description: Some(
+                    "API for interacting with the Oxide control plane",
+                ),
+                contact_url: Some("https://oxide.computer"),
+                contact_email: Some("api@oxide.computer"),
+                extra: to_value(ApiBoundary::External),
+            },
             api_description: nexus_external_api_mod::stub_api_description,
             ident: "nexus",
             extra_validation: Some(nexus_external_api::validate_api),
@@ -152,10 +206,27 @@ fn all_apis() -> anyhow::Result<ManagedApis> {
         ManagedApiConfig {
             title: "Nexus internal API",
             versions: Versions::new_lockstep(semver::Version::new(0, 0, 1)),
-            description: "Nexus internal API",
-            boundary: ApiBoundary::Internal,
+            metadata: ManagedApiMetadata {
+                description: Some("Nexus internal API"),
+                contact_url: Some("https://oxide.computer"),
+                contact_email: Some("api@oxide.computer"),
+                extra: to_value(ApiBoundary::Internal),
+            },
             api_description: nexus_internal_api_mod::stub_api_description,
             ident: "nexus-internal",
+            extra_validation: None,
+        },
+        ManagedApiConfig {
+            title: "Nexus lockstep API",
+            versions: Versions::new_lockstep(semver::Version::new(0, 0, 1)),
+            metadata: ManagedApiMetadata {
+                description: Some("Nexus lockstep internal API"),
+                contact_url: Some("https://oxide.computer"),
+                contact_email: Some("api@oxide.computer"),
+                extra: to_value(ApiBoundary::Internal),
+            },
+            api_description: nexus_lockstep_api_mod::stub_api_description,
+            ident: "nexus-lockstep",
             extra_validation: None,
         },
         ManagedApiConfig {
@@ -163,8 +234,12 @@ fn all_apis() -> anyhow::Result<ManagedApis> {
             versions: Versions::new_versioned(
                 ntp_admin_api::supported_versions(),
             ),
-            description: "API for interacting with NTP",
-            boundary: ApiBoundary::Internal,
+            metadata: ManagedApiMetadata {
+                description: Some("API for interacting with NTP"),
+                contact_url: Some("https://oxide.computer"),
+                contact_email: Some("api@oxide.computer"),
+                extra: to_value(ApiBoundary::Internal),
+            },
             api_description: ntp_admin_api_mod::stub_api_description,
             ident: "ntp-admin",
             extra_validation: None,
@@ -174,8 +249,12 @@ fn all_apis() -> anyhow::Result<ManagedApis> {
             versions: Versions::new_versioned(
                 oximeter_api::supported_versions(),
             ),
-            description: "API for interacting with oximeter",
-            boundary: ApiBoundary::Internal,
+            metadata: ManagedApiMetadata {
+                description: Some("API for interacting with oximeter"),
+                contact_url: Some("https://oxide.computer"),
+                contact_email: Some("api@oxide.computer"),
+                extra: to_value(ApiBoundary::Internal),
+            },
             api_description: oximeter_api_mod::stub_api_description,
             ident: "oximeter",
             extra_validation: None,
@@ -183,8 +262,12 @@ fn all_apis() -> anyhow::Result<ManagedApis> {
         ManagedApiConfig {
             title: "Oxide TUF Repo Depot API",
             versions: Versions::new_lockstep(semver::Version::new(0, 0, 1)),
-            description: "API for fetching update artifacts",
-            boundary: ApiBoundary::Internal,
+            metadata: ManagedApiMetadata {
+                description: Some("API for fetching update artifacts"),
+                contact_url: Some("https://oxide.computer"),
+                contact_email: Some("api@oxide.computer"),
+                extra: to_value(ApiBoundary::Internal),
+            },
             api_description: repo_depot_api_mod::stub_api_description,
             ident: "repo-depot",
             extra_validation: None,
@@ -194,8 +277,12 @@ fn all_apis() -> anyhow::Result<ManagedApis> {
             versions: Versions::new_versioned(
                 sled_agent_api::supported_versions(),
             ),
-            description: "API for interacting with individual sleds",
-            boundary: ApiBoundary::Internal,
+            metadata: ManagedApiMetadata {
+                description: Some("API for interacting with individual sleds"),
+                contact_url: Some("https://oxide.computer"),
+                contact_email: Some("api@oxide.computer"),
+                extra: to_value(ApiBoundary::Internal),
+            },
             api_description: sled_agent_api_mod::stub_api_description,
             ident: "sled-agent",
             extra_validation: None,
@@ -203,8 +290,14 @@ fn all_apis() -> anyhow::Result<ManagedApis> {
         ManagedApiConfig {
             title: "Oxide Technician Port Control Service",
             versions: Versions::new_lockstep(semver::Version::new(0, 0, 1)),
-            description: "API for use by the technician port TUI: wicket",
-            boundary: ApiBoundary::Internal,
+            metadata: ManagedApiMetadata {
+                description: Some(
+                    "API for use by the technician port TUI: wicket",
+                ),
+                contact_url: Some("https://oxide.computer"),
+                contact_email: Some("api@oxide.computer"),
+                extra: to_value(ApiBoundary::Internal),
+            },
             api_description: wicketd_api_mod::stub_api_description,
             ident: "wicketd",
             extra_validation: None,
@@ -217,8 +310,29 @@ fn all_apis() -> anyhow::Result<ManagedApis> {
     Ok(apis)
 }
 
+/// A bit of extra metadata that can be supplied to each API.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+struct ApiExtra {
+    boundary: ApiBoundary,
+}
+
+fn to_value(boundary: ApiBoundary) -> serde_json::Value {
+    serde_json::to_value(ApiExtra { boundary }).unwrap()
+}
+
+/// This is some example data that is used in the `validate` function below.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum ApiBoundary {
+    Internal,
+    External,
+}
+
 fn validate(doc: &OpenAPI, mut cx: ValidationContext<'_>) {
-    let errors = match cx.boundary() {
+    let extra = serde_json::from_value::<ApiExtra>(cx.metadata().extra.clone())
+        .unwrap();
+
+    let errors = match extra.boundary {
         ApiBoundary::Internal => openapi_lint::validate(doc),
         ApiBoundary::External => openapi_lint::validate_external(doc),
     };

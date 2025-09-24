@@ -1869,6 +1869,8 @@ table! {
 
         image_source -> crate::enums::InvZoneImageSourceEnum,
         image_artifact_sha256 -> Nullable<Text>,
+
+        nexus_lockstep_port -> Nullable<Int4>,
     }
 }
 
@@ -2086,6 +2088,7 @@ table! {
         image_source -> crate::enums::BpZoneImageSourceEnum,
         image_artifact_sha256 -> Nullable<Text>,
         nexus_generation -> Nullable<Int8>,
+        nexus_lockstep_port -> Nullable<Int4>,
     }
 }
 

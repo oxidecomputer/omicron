@@ -182,13 +182,21 @@ INFO skipped noop image source check on sled, sled_id: d81c6a84-79b8-4958-ae41-e
 INFO skipped noop image source check on sled, sled_id: e96e226f-4ed9-4c01-91b9-69a9cd076c9e, reason: sled not found in inventory
 generated blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4 based on parent blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
 blueprint source: planner with report:
-planning report for blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4:
+planning report:
 * noop converting 6/6 install-dataset zones to artifact store on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
 * noop converting 5/6 install-dataset zones to artifact store on sled aff6c093-197d-42c5-ad80-9f10ba051a34
 * zone adds waiting on blockers
 * zone adds and updates are blocked:
   - sleds have remove mupdate override set in blueprint: d81c6a84-79b8-4958-ae41-ea46c9b19763
+  - sleds have deployment units with image sources not set to Artifact:
+    - sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: 7 zones
+    - sled aff6c093-197d-42c5-ad80-9f10ba051a34: 1 zone
+    - sled b82ede02-399c-48c6-a1de-411df4fa49a7: 2 zones
+    - sled d81c6a84-79b8-4958-ae41-ea46c9b19763: 2 zones
+    - sled e96e226f-4ed9-4c01-91b9-69a9cd076c9e: 2 zones
+
 * zone updates waiting on zone add blockers
+* waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
 
@@ -384,7 +392,7 @@ internal DNS:
 +       SRV  port   123 e8fe709c-725f-4bb2-b714-ffcda13a9e54.host.control-plane.oxide.internal
 -   name: db288a1e-c33c-44ca-8c79-9a8978afa34d.host          (records: 1)
 -       AAAA fd00:1122:3344:106::21
-    unchanged names: 50 (records: 65)
+    unchanged names: 51 (records: 68)
 
 external DNS:
   DNS zone: "oxide.example" (unchanged)
@@ -422,13 +430,20 @@ INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noo
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: e96e226f-4ed9-4c01-91b9-69a9cd076c9e, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
 generated blueprint af934083-59b5-4bf6-8966-6fb5292c29e1 based on parent blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4
 blueprint source: planner with report:
-planning report for blueprint af934083-59b5-4bf6-8966-6fb5292c29e1:
+planning report:
 * skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 6 zones are already from artifacts
 * noop converting 2/2 install-dataset zones to artifact store on sled e96e226f-4ed9-4c01-91b9-69a9cd076c9e
 * zone adds waiting on blockers
 * zone adds and updates are blocked:
   - sleds have remove mupdate override set in blueprint: d81c6a84-79b8-4958-ae41-ea46c9b19763
+  - sleds have deployment units with image sources not set to Artifact:
+    - sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: 7 zones
+    - sled aff6c093-197d-42c5-ad80-9f10ba051a34: 1 zone
+    - sled b82ede02-399c-48c6-a1de-411df4fa49a7: 2 zones
+    - sled d81c6a84-79b8-4958-ae41-ea46c9b19763: 2 zones
+
 * zone updates waiting on zone add blockers
+* waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
 
@@ -495,7 +510,7 @@ to:   blueprint af934083-59b5-4bf6-8966-6fb5292c29e1
 
 internal DNS:
   DNS zone: "control-plane.oxide.internal" (unchanged)
-    unchanged names: 52 (records: 73)
+    unchanged names: 53 (records: 76)
 
 external DNS:
   DNS zone: "oxide.example" (unchanged)

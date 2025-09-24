@@ -30,7 +30,7 @@ use omicron_common::api::external::{
 };
 use openapiv3::OpenAPI;
 
-pub const API_VERSION: &str = "20250730.0.0";
+pub const API_VERSION: &str = "20251008.0.0";
 
 const MIB: usize = 1024 * 1024;
 const GIB: usize = 1024 * MIB;

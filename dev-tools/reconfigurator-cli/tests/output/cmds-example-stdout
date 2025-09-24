@@ -599,10 +599,15 @@ T ENA ID                                   PARENT                               
 
 > blueprint-plan ade5749d-bdf3-4fab-a8ae-00bea01b3a5a
 INFO skipping noop image source check for all sleds, reason: no target release is currently set
-WARN cannot issue more MGS-driven updates (no current artifacts)
 generated blueprint 86db3308-f817-4626-8838-4085949a6a41 based on parent blueprint ade5749d-bdf3-4fab-a8ae-00bea01b3a5a
 blueprint source: planner with report:
-empty planning report for blueprint 86db3308-f817-4626-8838-4085949a6a41.
+planning report:
+* zone adds and updates are blocked:
+  - sleds have deployment units with image sources not set to Artifact:
+    - sled 89d02b1b-478c-401a-8e28-7a26f74fa41b: 18 zones
+
+* adding zones despite being blocked, because: target release generation is 1
+* zone updates waiting on zone add blockers
 
 
 
@@ -639,7 +644,7 @@ to:   blueprint 86db3308-f817-4626-8838-4085949a6a41
 
 internal DNS:
   DNS zone: "control-plane.oxide.internal" (unchanged)
-    unchanged names: 37 (records: 47)
+    unchanged names: 38 (records: 50)
 
 external DNS:
   DNS zone: "oxide.example" (unchanged)
@@ -808,6 +813,10 @@ internal DNS:
 +       SRV  port  5353 2521ef1e-ef52-46f0-9f27-93a3b6683d92.host.control-plane.oxide.internal
 +       SRV  port  5353 7f4e4ff4-b1eb-4c47-b079-9d7fcfcf35f6.host.control-plane.oxide.internal
 +       SRV  port  5353 e50dff5f-8d7c-440b-b86a-5ca7e9117dfa.host.control-plane.oxide.internal
++   name: _nexus-lockstep._tcp                               (records: 3)
++       SRV  port 12232 a2f67884-b0e7-498a-a005-f6686f599ca6.host.control-plane.oxide.internal
++       SRV  port 12232 e34091ec-ac63-4976-b2b8-85b9223c136f.host.control-plane.oxide.internal
++       SRV  port 12232 fb88d7af-16bd-4638-a9f4-ef04d0045f20.host.control-plane.oxide.internal
 +   name: _nexus._tcp                                        (records: 3)
 +       SRV  port 12221 a2f67884-b0e7-498a-a005-f6686f599ca6.host.control-plane.oxide.internal
 +       SRV  port 12221 e34091ec-ac63-4976-b2b8-85b9223c136f.host.control-plane.oxide.internal
@@ -1020,6 +1029,10 @@ internal DNS:
 -       SRV  port  5353 2521ef1e-ef52-46f0-9f27-93a3b6683d92.host.control-plane.oxide.internal
 -       SRV  port  5353 7f4e4ff4-b1eb-4c47-b079-9d7fcfcf35f6.host.control-plane.oxide.internal
 -       SRV  port  5353 e50dff5f-8d7c-440b-b86a-5ca7e9117dfa.host.control-plane.oxide.internal
+-   name: _nexus-lockstep._tcp                               (records: 3)
+-       SRV  port 12232 a2f67884-b0e7-498a-a005-f6686f599ca6.host.control-plane.oxide.internal
+-       SRV  port 12232 e34091ec-ac63-4976-b2b8-85b9223c136f.host.control-plane.oxide.internal
+-       SRV  port 12232 fb88d7af-16bd-4638-a9f4-ef04d0045f20.host.control-plane.oxide.internal
 -   name: _nexus._tcp                                        (records: 3)
 -       SRV  port 12221 a2f67884-b0e7-498a-a005-f6686f599ca6.host.control-plane.oxide.internal
 -       SRV  port 12221 e34091ec-ac63-4976-b2b8-85b9223c136f.host.control-plane.oxide.internal
@@ -1839,10 +1852,16 @@ INTERNAL DNS STATUS
 > # sled to be expunged.
 > blueprint-plan latest
 INFO skipping noop image source check for all sleds, reason: no target release is currently set
-WARN cannot issue more MGS-driven updates (no current artifacts)
 generated blueprint 86db3308-f817-4626-8838-4085949a6a41 based on parent blueprint ade5749d-bdf3-4fab-a8ae-00bea01b3a5a
 blueprint source: planner with report:
-empty planning report for blueprint 86db3308-f817-4626-8838-4085949a6a41.
+planning report:
+* zone adds and updates are blocked:
+  - sleds have deployment units with image sources not set to Artifact:
+    - sled 2eb69596-f081-4e2d-9425-9994926e0832: 4 zones
+    - sled 89d02b1b-478c-401a-8e28-7a26f74fa41b: 17 zones
+
+* adding zones despite being blocked, because: target release generation is 1
+* zone updates waiting on zone add blockers
 
 
 
@@ -1957,7 +1976,7 @@ internal DNS:
 +       SRV  port   123 ac5bb28e-91d5-42f3-a57a-d84e1c414c17.host.control-plane.oxide.internal
 -   name: e668d83e-a28c-42dc-b574-467e57403cc1.host          (records: 1)
 -       AAAA fd00:1122:3344:103::24
-    unchanged names: 43 (records: 55)
+    unchanged names: 44 (records: 58)
 
 external DNS:
   DNS zone: "oxide.example" (unchanged)

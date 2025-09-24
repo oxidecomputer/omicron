@@ -494,7 +494,7 @@ internal DNS:
 +       AAAA fd00:1122:3344:3::1
 -   name: ns3                                                (records: 1)
 -       AAAA fd00:1122:3344:3::1
-    unchanged names: 87 (records: 97)
+    unchanged names: 88 (records: 100)
 
 external DNS:
   DNS zone: "oxide.example" (unchanged)
@@ -636,7 +636,7 @@ to:   blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4
 
 internal DNS:
   DNS zone: "control-plane.oxide.internal" (unchanged)
-    unchanged names: 91 (records: 103)
+    unchanged names: 92 (records: 106)
 
 external DNS:
   DNS zone: "oxide.example" (unchanged)
@@ -648,10 +648,16 @@ external DNS:
 > # Planning a new blueprint will now replace the expunged zone, with new records for its replacement.
 > blueprint-plan 58d5e830-0884-47d8-a7cd-b2b3751adeb4
 INFO skipping noop image source check for all sleds, reason: no target release is currently set
-WARN cannot issue more MGS-driven updates (no current artifacts)
 generated blueprint af934083-59b5-4bf6-8966-6fb5292c29e1 based on parent blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4
 blueprint source: planner with report:
-planning report for blueprint af934083-59b5-4bf6-8966-6fb5292c29e1:
+planning report:
+* zone adds and updates are blocked:
+  - sleds have deployment units with image sources not set to Artifact:
+    - sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: 15 zones
+    - sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: 15 zones
+    - sled d81c6a84-79b8-4958-ae41-ea46c9b19763: 15 zones
+
+* adding zones despite being blocked, because: target release generation is 1
 * discretionary zones placed:
   * internal_dns zone on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c from source install dataset
 * zone updates waiting on discretionary zones
@@ -809,7 +815,7 @@ internal DNS:
 +       AAAA fd00:1122:3344:2::1
 +   name: ns3                                                (records: 1)
 +       AAAA fd00:1122:3344:3::1
-    unchanged names: 87 (records: 97)
+    unchanged names: 88 (records: 100)
 
 external DNS:
   DNS zone: "oxide.example" (unchanged)
