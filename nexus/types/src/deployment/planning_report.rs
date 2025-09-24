@@ -682,6 +682,10 @@ pub struct PlanningAddStepReport {
     /// MUPdate-related reasons.)
     pub add_zones_with_mupdate_override: bool,
 
+    /// Set to true if the target release generation is 1, which would allow
+    /// zones to be added.
+    pub target_release_generation_is_one: bool,
+
     pub sleds_without_ntp_zones_in_inventory: BTreeSet<SledUuid>,
     pub sleds_without_zpools_for_ntp_zones: BTreeSet<SledUuid>,
     pub sleds_waiting_for_ntp_zone: BTreeSet<SledUuid>,
@@ -709,6 +713,7 @@ impl PlanningAddStepReport {
             waiting_on: None,
             add_update_blocked_reasons: Vec::new(),
             add_zones_with_mupdate_override: false,
+            target_release_generation_is_one: false,
             sleds_without_ntp_zones_in_inventory: BTreeSet::new(),
             sleds_without_zpools_for_ntp_zones: BTreeSet::new(),
             sleds_waiting_for_ntp_zone: BTreeSet::new(),
@@ -808,6 +813,7 @@ impl fmt::Display for PlanningAddStepReport {
             waiting_on,
             add_update_blocked_reasons,
             add_zones_with_mupdate_override,
+            target_release_generation_is_one,
             sleds_without_ntp_zones_in_inventory,
             sleds_without_zpools_for_ntp_zones,
             sleds_waiting_for_ntp_zone,
@@ -837,12 +843,21 @@ impl fmt::Display for PlanningAddStepReport {
             }
         }
 
+        let mut add_zones_despite_being_blocked_reasons = Vec::new();
         if *add_zones_with_mupdate_override {
+            add_zones_despite_being_blocked_reasons.push(
+                "planner config `add_zones_with_mupdate_override` is true",
+            );
+        }
+        if *target_release_generation_is_one {
+            add_zones_despite_being_blocked_reasons
+                .push("target release generation is 1");
+        }
+        if !add_zones_despite_being_blocked_reasons.is_empty() {
             writeln!(
                 f,
-                "* adding zones despite being blocked, \
-                   as specified by the `add_zones_with_mupdate_override` \
-                   planner config option"
+                "* adding zones despite being blocked, because: {}",
+                add_zones_despite_being_blocked_reasons.join(", "),
             )?;
         }
 
@@ -1008,6 +1023,12 @@ impl PlanningZoneUpdatesStepReport {
             .entry(sled_id)
             .and_modify(|zones| zones.push(zone_config.to_owned()))
             .or_insert_with(|| vec![zone_config.to_owned()]);
+
+        // We check for out-of-date zones before expunging zones. If we just
+        // expunged this zone, it's no longer out of date.
+        if let Some(out_of_date) = self.out_of_date_zones.get_mut(&sled_id) {
+            out_of_date.retain(|z| z.zone_config.id != zone_config.id);
+        }
     }
 
     pub fn updated_zone(
@@ -1019,6 +1040,12 @@ impl PlanningZoneUpdatesStepReport {
             .entry(sled_id)
             .and_modify(|zones| zones.push(zone_config.to_owned()))
             .or_insert_with(|| vec![zone_config.to_owned()]);
+
+        // We check for out-of-date zones before updating zones. If we just
+        // updated this zone, it's no longer out of date.
+        if let Some(out_of_date) = self.out_of_date_zones.get_mut(&sled_id) {
+            out_of_date.retain(|z| z.zone_config.id != zone_config.id);
+        }
     }
 
     pub fn unsafe_zone(
@@ -1130,6 +1157,9 @@ pub enum ZoneUpdatesWaitingOn {
     /// Waiting on discretionary zone placement.
     DiscretionaryZones,
 
+    /// Waiting on zones to propagate to inventory.
+    InventoryPropagation,
+
     /// Waiting on updates to RoT bootloader / RoT / SP / Host OS.
     PendingMgsUpdates,
 
@@ -1144,6 +1174,7 @@ impl ZoneUpdatesWaitingOn {
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::DiscretionaryZones => "discretionary zones",
+            Self::InventoryPropagation => "zone propagation to inventory",
             Self::PendingMgsUpdates => {
                 "pending MGS updates (RoT bootloader / RoT / SP / Host OS)"
             }

@@ -328,15 +328,12 @@ parent:    516e80a3-b362-4fac-bd3c-4559717120dd
 
 blueprint source: planner with report:
 planning report:
-planner config:
-    add zones with mupdate override:   true
-
 * zone adds and updates are blocked:
   - sleds have deployment units with image sources not set to Artifact:
     - sled d67ce8f0-a691-4010-b414-420d82e80527: 14 zones
     - sled fefcf4cf-f7e7-46b3-b629-058526ce440e: 14 zones
 
-* adding zones despite being blocked, as specified by the `add_zones_with_mupdate_override` planner config option
+* adding zones despite being blocked, because: target release generation is 1
 * discretionary zones placed:
   * crucible_pantry zone on sled d67ce8f0-a691-4010-b414-420d82e80527 from source install dataset
   * nexus zone on sled d67ce8f0-a691-4010-b414-420d82e80527 from source install dataset

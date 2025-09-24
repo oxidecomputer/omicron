@@ -15,6 +15,7 @@ omicron-workspace-hack.workspace = true
 [dev-dependencies]
 anyhow.workspace = true
 assert_matches.workspace = true
+dns-service-client.workspace = true
 dropshot.workspace = true
 futures.workspace = true
 internal-dns-resolver.workspace = true
