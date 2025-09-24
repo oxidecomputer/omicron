@@ -2429,7 +2429,7 @@ impl<'a> Planner<'a> {
         Ok(true)
     }
 
-    /// Return `true` if we believe a zone can safely be shut down; e.g., any
+    /// Return `true` iff we believe a zone can safely be shut down; e.g., any
     /// data it's responsible for is sufficiently persisted or replicated.
     ///
     /// "shut down" includes both "discretionary expunge" (e.g., if we're
