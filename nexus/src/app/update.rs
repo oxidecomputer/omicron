@@ -307,7 +307,7 @@ impl super::Nexus {
                         M2Slot::A => slot_a_version.clone(),
                         M2Slot::B => slot_b_version.clone(),
                     }),
-                    _ => None,
+                    internal_views::HostPhase1Status::NotASled => None,
                 };
 
                 std::iter::once(sp_version)
