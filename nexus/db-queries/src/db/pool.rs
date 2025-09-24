@@ -232,6 +232,18 @@ impl Pool {
             })
     }
 
+    /// Returns a connection from the pool, bypassing the quiesce check
+    ///
+    /// This is only intended for use *during* quiesce to update our final
+    /// database record.
+    pub async fn claim_quiesced(
+        &self,
+    ) -> Result<qorb::claim::Handle<AsyncConnection>, Error> {
+        self.inner.claim().await.map_err(|err| {
+            Error::unavail(&format!("Failed to access DB connection: {err}"))
+        })
+    }
+
     /// Disables creation of all new database claims
     ///
     /// This is currently a one-way trip.  The pool cannot be un-quiesced.

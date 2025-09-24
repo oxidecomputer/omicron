@@ -115,7 +115,7 @@ mod test {
             format!("s-{i})"),
             "m".into(),
             PhysicalDiskKind::U2,
-            sled_id.into_untyped_uuid(),
+            sled_id,
         );
         datastore
             .physical_disk_insert(&opctx, physical_disk.clone())
@@ -134,8 +134,8 @@ mod test {
             .zpool_insert(
                 opctx,
                 Zpool::new(
-                    Uuid::new_v4(),
-                    sled_id.into_untyped_uuid(),
+                    ZpoolUuid::new_v4(),
+                    sled_id,
                     id,
                     ByteCount::from(0).into(),
                 ),

@@ -13,12 +13,11 @@ use omicron_common::api::external::{
     AddressLotKind, AffinityPolicy, AllowedSourceIps, BfdMode, BgpPeer,
     ByteCount, FailureDomain, Hostname, IdentityMetadataCreateParams,
     IdentityMetadataUpdateParams, InstanceAutoRestartPolicy, InstanceCpuCount,
-    IpVersion, LinkFec, LinkSpeed, Name, NameOrId, Nullable, PaginationOrder,
-    RouteDestination, RouteTarget, UserId,
+    InstanceCpuPlatform, IpVersion, LinkFec, LinkSpeed, Name, NameOrId,
+    Nullable, PaginationOrder, RouteDestination, RouteTarget, UserId,
 };
 use omicron_common::disk::DiskVariant;
-use omicron_uuid_kinds::SiloGroupUuid;
-use omicron_uuid_kinds::SiloUserUuid;
+use omicron_uuid_kinds::*;
 use oxnet::{IpNet, Ipv4Net, Ipv6Net};
 use parse_display::Display;
 use schemars::JsonSchema;
@@ -110,7 +109,7 @@ id_path_param!(TufTrustRootPath, trust_root_id, "trust root");
 // TODO: The hardware resources should be represented by its UUID or a hardware
 // ID that can be used to deterministically generate the UUID.
 id_path_param!(RackPath, rack_id, "rack");
-id_path_param!(SledPath, sled_id, "sled");
+id_path_param!(SledPath, sled_id, "sled", SledUuid);
 id_path_param!(SwitchPath, switch_id, "switch");
 id_path_param!(PhysicalDiskPath, disk_id, "physical disk");
 
@@ -120,7 +119,8 @@ id_path_param!(BlueprintPath, blueprint_id, "blueprint");
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct SledSelector {
     /// ID of the sled
-    pub sled: Uuid,
+    #[schemars(with = "Uuid")]
+    pub sled: SledUuid,
 }
 
 /// Parameters for `sled_set_provision_policy`.
@@ -1281,23 +1281,39 @@ pub struct InstanceCreate {
     /// Anti-Affinity groups which this instance should be added.
     #[serde(default)]
     pub anti_affinity_groups: Vec<NameOrId>,
+
+    /// The CPU platform to be used for this instance. If this is `null`, the
+    /// instance requires no particular CPU platform; when it is started the
+    /// instance will have the most general CPU platform supported by the sled
+    /// it is initially placed on.
+    #[serde(default)]
+    pub cpu_platform: Option<InstanceCpuPlatform>,
 }
 
 /// Parameters of an `Instance` that can be reconfigured after creation.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct InstanceUpdate {
-    /// The number of CPUs to assign to this instance.
+    /// The number of vCPUs to be allocated to the instance
     pub ncpus: InstanceCpuCount,
 
-    /// The amount of memory to assign to this instance.
+    /// The amount of RAM (in bytes) to be allocated to the instance
     pub memory: ByteCount,
 
-    /// Name or ID of the disk the instance should be instructed to boot from.
+    /// The disk the instance is configured to boot from.
     ///
-    /// If not provided, unset the instance's boot disk.
-    pub boot_disk: Option<NameOrId>,
+    /// Setting a boot disk is optional but recommended to ensure predictable
+    /// boot behavior. The boot disk can be set during instance creation or
+    /// later if the instance is stopped. The boot disk counts against the disk
+    /// attachment limit.
+    ///
+    /// An instance that does not have a boot disk set will use the boot
+    /// options specified in its UEFI settings, which are controlled by both the
+    /// instance's UEFI firmware and the guest operating system. Boot options
+    /// can change as disks are attached and detached, which may result in an
+    /// instance that only boots to the EFI shell until a boot disk is set.
+    pub boot_disk: Nullable<NameOrId>,
 
-    /// Sets the auto-restart policy for this instance.
+    /// The auto-restart policy for this instance.
     ///
     /// This policy determines whether the instance should be automatically
     /// restarted by the control plane on failure. If this is `null`, any
@@ -1311,7 +1327,13 @@ pub struct InstanceUpdate {
     /// configurable through other mechanisms, such as on a per-project basis.
     /// In that case, any configured default policy will be used if this is
     /// `null`.
-    pub auto_restart_policy: Option<InstanceAutoRestartPolicy>,
+    pub auto_restart_policy: Nullable<InstanceAutoRestartPolicy>,
+
+    /// The CPU platform to be used for this instance. If this is `null`, the
+    /// instance requires no particular CPU platform; when it is started the
+    /// instance will have the most general CPU platform supported by the sled
+    /// it is initially placed on.
+    pub cpu_platform: Nullable<InstanceCpuPlatform>,
 }
 
 #[inline]
@@ -2404,7 +2426,8 @@ pub struct SetTargetReleaseParams {
 pub struct ProbeCreate {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
-    pub sled: Uuid,
+    #[schemars(with = "Uuid")]
+    pub sled: SledUuid,
     pub ip_pool: Option<NameOrId>,
 }
 
@@ -2420,6 +2443,9 @@ pub struct ProbeListSelector {
 pub struct TimeseriesQuery {
     /// A timeseries query string, written in the Oximeter query language.
     pub query: String,
+    /// Whether to include ClickHouse query summaries in the response.
+    #[serde(default)]
+    pub include_summaries: bool,
 }
 
 // Allowed source IPs

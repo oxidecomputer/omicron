@@ -133,6 +133,14 @@ impl NodeCtx {
             alarms: BTreeSet::new(),
         }
     }
+
+    #[cfg(any(test, feature = "testing"))]
+    pub fn clear_mutable_state(&mut self) {
+        self.persistent_state_changed = false;
+        self.outgoing.clear();
+        self.connected.clear();
+        self.alarms.clear();
+    }
 }
 
 impl NodeCommonCtx for NodeCtx {

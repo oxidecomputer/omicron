@@ -33,18 +33,35 @@ added sled 00320471-945d-413c-85e7-03e091a70b3c (serial: serial3)
 generated inventory collection eb0796d5-ab8a-4f7b-a884-b4aeacb8ab51 from configured sleds
 
 
+> # Set the add_zones_with_mupdate_override planner config to ensure that zone
+> # adds happen despite zone image sources not being Artifact.
+> set planner-config --add-zones-with-mupdate-override true
+planner config updated:
+*   add zones with mupdate override:   false -> true
+
+
+
 > # Try to plan a new blueprint; this should be okay even though the sled
 > # we added has no disks.
 > blueprint-plan dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21 eb0796d5-ab8a-4f7b-a884-b4aeacb8ab51
 INFO skipping noop image source check for all sleds, reason: no target release is currently set
-WARN cannot issue more MGS-driven updates (no current artifacts)
 generated blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1 based on parent blueprint dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21
-planning report for blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1:
-chicken switches:
-    add zones with mupdate override:   false
+blueprint source: planner with report:
+planning report:
+planner config:
+    add zones with mupdate override:   true
 
+* zone adds and updates are blocked:
+  - sleds have deployment units with image sources not set to Artifact:
+    - sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: 9 zones
+    - sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: 8 zones
+    - sled d81c6a84-79b8-4958-ae41-ea46c9b19763: 8 zones
+
+* adding zones despite being blocked, as specified by the `add_zones_with_mupdate_override` planner config option
 * no zpools in service for NTP zones on sleds: 00320471-945d-413c-85e7-03e091a70b3c
 * discretionary zone placement waiting for NTP zones on sleds: 00320471-945d-413c-85e7-03e091a70b3c
+* zone updates waiting on zone add blockers
+
 
 
 > blueprint-show 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
@@ -278,12 +295,22 @@ parent:    dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21
 
  PENDING MGS-MANAGED UPDATES: 0
 
-planning report for blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1:
-chicken switches:
-    add zones with mupdate override:   false
+blueprint source: planner with report:
+planning report:
+planner config:
+    add zones with mupdate override:   true
 
+* zone adds and updates are blocked:
+  - sleds have deployment units with image sources not set to Artifact:
+    - sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: 9 zones
+    - sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: 8 zones
+    - sled d81c6a84-79b8-4958-ae41-ea46c9b19763: 8 zones
+
+* adding zones despite being blocked, as specified by the `add_zones_with_mupdate_override` planner config option
 * no zpools in service for NTP zones on sleds: 00320471-945d-413c-85e7-03e091a70b3c
 * discretionary zone placement waiting for NTP zones on sleds: 00320471-945d-413c-85e7-03e091a70b3c
+* zone updates waiting on zone add blockers
+
 
 
 

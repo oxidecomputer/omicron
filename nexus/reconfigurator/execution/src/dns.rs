@@ -313,6 +313,7 @@ mod test {
     use internal_dns_types::names::BOUNDARY_NTP_DNS_NAME;
     use internal_dns_types::names::DNS_ZONE;
     use internal_dns_types::names::ServiceName;
+    use nexus_db_model::DbMetadataNexusState;
     use nexus_db_model::DnsGroup;
     use nexus_db_model::Silo;
     use nexus_db_queries::authn;
@@ -336,6 +337,7 @@ mod test {
     use nexus_types::deployment::Blueprint;
     use nexus_types::deployment::BlueprintHostPhase2DesiredSlots;
     use nexus_types::deployment::BlueprintSledConfig;
+    use nexus_types::deployment::BlueprintSource;
     use nexus_types::deployment::BlueprintTarget;
     use nexus_types::deployment::BlueprintZoneConfig;
     use nexus_types::deployment::BlueprintZoneDisposition;
@@ -350,8 +352,7 @@ mod test {
     use nexus_types::deployment::OximeterReadMode;
     use nexus_types::deployment::OximeterReadPolicy;
     use nexus_types::deployment::PendingMgsUpdates;
-    use nexus_types::deployment::PlannerChickenSwitches;
-    use nexus_types::deployment::PlanningReport;
+    use nexus_types::deployment::PlannerConfig;
     use nexus_types::deployment::SledFilter;
     use nexus_types::deployment::TufRepoPolicy;
     use nexus_types::deployment::blueprint_zone_type;
@@ -579,6 +580,7 @@ mod test {
                 )
             }
             OmicronZoneType::Nexus {
+                lockstep_port,
                 external_dns_servers,
                 external_ip,
                 external_tls,
@@ -590,6 +592,7 @@ mod test {
                 )?;
                 BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
                     internal_address,
+                    lockstep_port,
                     external_ip: OmicronZoneExternalFloatingIp {
                         id: external_ip_id,
                         ip: external_ip,
@@ -729,7 +732,7 @@ mod test {
             time_created: now_db_precision(),
             creator: "test-suite".to_string(),
             comment: "test blueprint".to_string(),
-            report: PlanningReport::new(blueprint_id),
+            source: BlueprintSource::Test,
         };
 
         // To make things slightly more interesting, let's add a zone that's
@@ -989,6 +992,7 @@ mod test {
             ServiceName::InternalDns,
             ServiceName::ExternalDns,
             ServiceName::Nexus,
+            ServiceName::NexusLockstep,
             ServiceName::Oximeter,
             ServiceName::Dendrite,
             ServiceName::CruciblePantry,
@@ -1502,6 +1506,17 @@ mod test {
             datastore.zpool_list_all_external_batched(&opctx).await.unwrap();
         let ip_pool_range_rows =
             fetch_all_service_ip_pool_ranges(&datastore, &opctx).await;
+        let active_nexus_zones = datastore
+            .get_db_metadata_nexus_in_state(
+                &opctx,
+                vec![DbMetadataNexusState::Active],
+            )
+            .await
+            .internal_context("fetching active nexuses")
+            .unwrap()
+            .into_iter()
+            .map(|z| z.nexus_id())
+            .collect();
         let planning_input = {
             let mut builder = PlanningInputFromDb {
                 sled_rows: &sled_rows,
@@ -1526,7 +1541,9 @@ mod test {
                 oximeter_read_policy: OximeterReadPolicy::new(1),
                 tuf_repo: TufRepoPolicy::initial(),
                 old_repo: TufRepoPolicy::initial(),
-                chicken_switches: PlannerChickenSwitches::default(),
+                planner_config: PlannerConfig::default(),
+                active_nexus_zones,
+                not_yet_nexus_zones: BTreeSet::new(),
                 log,
             }
             .build()
@@ -1557,9 +1574,10 @@ mod test {
             .sled_add_zone_nexus(
                 sled_id,
                 BlueprintZoneImageSource::InstallDataset,
+                blueprint.nexus_generation,
             )
             .unwrap();
-        let blueprint2 = builder.build();
+        let blueprint2 = builder.build(BlueprintSource::Test);
         eprintln!("blueprint2: {}", blueprint2.display());
         // Figure out the id of the new zone.
         let zones_before = blueprint
@@ -1627,17 +1645,20 @@ mod test {
         // Nothing was removed.
         assert!(diff.names_removed().next().is_none());
 
-        // The SRV record for Nexus itself ought to have changed, growing one
-        // more record -- for the new AAAA record above.
+        // The SRV records for both nexus (internal) and nexus-lockstep ought
+        // to have changed, growing one more record -- for the new AAAA record
+        // above.
         let changed: Vec<_> = diff.names_changed().collect();
-        assert_eq!(changed.len(), 1);
-        let (name, old_records, new_records) = changed[0];
-        assert_eq!(name, ServiceName::Nexus.dns_name());
-        let new_srv = subset_plus_one(old_records, new_records);
-        let DnsRecord::Srv(new_srv) = new_srv else {
-            panic!("expected SRV record, found {:?}", new_srv);
-        };
-        assert_eq!(new_srv.target, new_zone_host.fqdn());
+        assert_eq!(changed.len(), 2);
+        assert_eq!(changed[0].0, ServiceName::NexusLockstep.dns_name());
+        assert_eq!(changed[1].0, ServiceName::Nexus.dns_name());
+        for (_, old_records, new_records) in changed {
+            let new_srv = subset_plus_one(old_records, new_records);
+            let DnsRecord::Srv(new_srv) = new_srv else {
+                panic!("expected SRV record, found {:?}", new_srv);
+            };
+            assert_eq!(new_srv.target, new_zone_host.fqdn());
+        }
 
         // As for external DNS: all existing names ought to have been changed,
         // gaining a new A record for the new host.

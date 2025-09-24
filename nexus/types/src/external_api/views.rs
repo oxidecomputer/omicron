@@ -19,11 +19,7 @@ use omicron_common::api::external::{
     Digest, Error, FailureDomain, IdentityMetadata, InstanceState, Name,
     ObjectIdentity, SimpleIdentity, SimpleIdentityOrName,
 };
-use omicron_uuid_kinds::AlertReceiverUuid;
-use omicron_uuid_kinds::AlertUuid;
-use omicron_uuid_kinds::BuiltInUserUuid;
-use omicron_uuid_kinds::SiloGroupUuid;
-use omicron_uuid_kinds::SiloUserUuid;
+use omicron_uuid_kinds::*;
 use oxnet::{Ipv4Net, Ipv6Net};
 use schemars::JsonSchema;
 use semver::Version;
@@ -552,7 +548,8 @@ pub struct Rack {
 /// The unique ID of a sled.
 #[derive(Clone, Debug, Serialize, JsonSchema)]
 pub struct SledId {
-    pub id: Uuid,
+    #[schemars(with = "Uuid")]
+    pub id: SledUuid,
 }
 
 /// An operator's view of a Sled.
@@ -784,7 +781,8 @@ pub struct PhysicalDisk {
     pub state: PhysicalDiskState,
 
     /// The sled to which this disk is attached, if any.
-    pub sled_id: Option<Uuid>,
+    #[schemars(with = "Option<Uuid>")]
+    pub sled_id: Option<SledUuid>,
 
     pub vendor: String,
     pub serial: String,
@@ -1125,11 +1123,37 @@ impl From<oxql_types::Table> for OxqlTable {
     }
 }
 
+/// Basic metadata about the resource usage of a single ClickHouse SQL query.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+pub struct OxqlQuerySummary {
+    /// The database-assigned query ID.
+    pub id: Uuid,
+    /// The raw ClickHouse SQL query.
+    pub query: String,
+    /// The total duration of the ClickHouse query (network plus execution).
+    pub elapsed_ms: usize,
+    /// Summary of the data read and written.
+    pub io_summary: oxql_types::IoSummary,
+}
+
+impl From<oxql_types::QuerySummary> for OxqlQuerySummary {
+    fn from(query_summary: oxql_types::QuerySummary) -> Self {
+        OxqlQuerySummary {
+            id: query_summary.id,
+            query: query_summary.query,
+            elapsed_ms: query_summary.elapsed.as_millis() as usize,
+            io_summary: query_summary.io_summary,
+        }
+    }
+}
+
 /// The result of a successful OxQL query.
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
 pub struct OxqlQueryResult {
     /// Tables resulting from the query, each containing timeseries.
     pub tables: Vec<OxqlTable>,
+    /// Summaries of queries run against ClickHouse.
+    pub query_summaries: Option<Vec<OxqlQuerySummary>>,
 }
 
 // ALERTS

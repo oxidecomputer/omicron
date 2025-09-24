@@ -14,8 +14,8 @@ use camino::Utf8PathBuf;
 use futures::Stream;
 use futures::StreamExt;
 use futures::TryStreamExt;
-use nexus_client::types::SupportBundleInfo;
-use nexus_client::types::SupportBundleState;
+use nexus_lockstep_client::types::SupportBundleInfo;
+use nexus_lockstep_client::types::SupportBundleState;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
 use std::io;
@@ -31,7 +31,7 @@ use tokio::io::AsyncRead;
 use tokio::io::ReadBuf;
 
 pub struct StreamedFile<'a> {
-    client: &'a nexus_client::Client,
+    client: &'a nexus_lockstep_client::Client,
     id: SupportBundleUuid,
     path: Utf8PathBuf,
     stream: Option<Pin<Box<dyn Stream<Item = reqwest::Result<Bytes>> + Send>>>,
@@ -40,7 +40,7 @@ pub struct StreamedFile<'a> {
 
 impl<'a> StreamedFile<'a> {
     fn new(
-        client: &'a nexus_client::Client,
+        client: &'a nexus_lockstep_client::Client,
         id: SupportBundleUuid,
         path: Utf8PathBuf,
     ) -> Self {
@@ -111,13 +111,13 @@ impl AsyncRead for StreamedFile<'_> {
 
 /// Access to a support bundle from the internal API
 pub struct InternalApiAccess<'a> {
-    client: &'a nexus_client::Client,
+    client: &'a nexus_lockstep_client::Client,
     id: SupportBundleUuid,
 }
 
 impl<'a> InternalApiAccess<'a> {
     pub fn new(
-        client: &'a nexus_client::Client,
+        client: &'a nexus_lockstep_client::Client,
         id: SupportBundleUuid,
     ) -> Self {
         Self { client, id }
@@ -170,7 +170,7 @@ impl<'c> SupportBundleAccessor for InternalApiAccess<'c> {
 }
 
 async fn wait_for_bundle_to_be_collected(
-    client: &nexus_client::Client,
+    client: &nexus_lockstep_client::Client,
     id: SupportBundleUuid,
 ) -> Result<SupportBundleInfo, anyhow::Error> {
     let mut printed_wait_msg = false;
@@ -207,7 +207,7 @@ async fn wait_for_bundle_to_be_collected(
 ///
 /// If a bundle is being collected, waits for it.
 pub async fn access_bundle_from_id(
-    client: &nexus_client::Client,
+    client: &nexus_lockstep_client::Client,
     id: Option<SupportBundleUuid>,
 ) -> Result<InternalApiAccess<'_>, anyhow::Error> {
     let id = match id {

@@ -105,9 +105,7 @@ use omicron_common::api::external::http_pagination::marker_for_name;
 use omicron_common::api::external::http_pagination::marker_for_name_or_id;
 use omicron_common::api::external::http_pagination::name_or_id_pagination;
 use omicron_common::bail_unless;
-use omicron_uuid_kinds::GenericUuid;
-use omicron_uuid_kinds::SupportBundleUuid;
-use omicron_uuid_kinds::TufTrustRootUuid;
+use omicron_uuid_kinds::*;
 use propolis_client::support::WebSocketStream;
 use propolis_client::support::tungstenite::protocol::frame::coding::CloseCode;
 use propolis_client::support::tungstenite::protocol::{
@@ -6153,10 +6151,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
         let handler = async {
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
-            let id = nexus
-                .sled_add(&opctx, sled.into_inner())
-                .await?
-                .into_untyped_uuid();
+            let id = nexus.sled_add(&opctx, sled.into_inner()).await?;
             Ok(HttpResponseCreated(views::SledId { id }))
         };
         apictx
@@ -6567,13 +6562,26 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let nexus = &apictx.context.nexus;
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
-            let query = body.into_inner().query;
+            let body_params = body.into_inner();
+            let query = body_params.query;
+            let include_summaries = body_params.include_summaries;
             nexus
                 .timeseries_query(&opctx, &query)
                 .await
-                .map(|tables| {
+                .map(|result| {
                     HttpResponseOk(views::OxqlQueryResult {
-                        tables: tables.into_iter().map(Into::into).collect(),
+                        tables: result
+                            .tables
+                            .into_iter()
+                            .map(Into::into)
+                            .collect(),
+                        query_summaries: include_summaries.then_some(
+                            result
+                                .query_summaries
+                                .into_iter()
+                                .map(Into::into)
+                                .collect(),
+                        ),
                     })
                 })
                 .map_err(HttpError::from)
@@ -6596,15 +6604,28 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
             let project_selector = query_params.into_inner();
-            let query = body.into_inner().query;
+            let body_params = body.into_inner();
+            let query = body_params.query;
+            let include_summaries = body_params.include_summaries;
             let project_lookup =
                 nexus.project_lookup(&opctx, project_selector)?;
             nexus
                 .timeseries_query_project(&opctx, &project_lookup, &query)
                 .await
-                .map(|tables| {
+                .map(|result| {
                     HttpResponseOk(views::OxqlQueryResult {
-                        tables: tables.into_iter().map(Into::into).collect(),
+                        tables: result
+                            .tables
+                            .into_iter()
+                            .map(Into::into)
+                            .collect(),
+                        query_summaries: include_summaries.then_some(
+                            result
+                                .query_summaries
+                                .into_iter()
+                                .map(Into::into)
+                                .collect(),
+                        ),
                     })
                 })
                 .map_err(HttpError::from)

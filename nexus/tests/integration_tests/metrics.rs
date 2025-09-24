@@ -258,14 +258,14 @@ async fn test_instance_watcher_metrics(
                               filter timestamp > @2000-01-01";
 
     let client = &cptestctx.external_client;
-    let internal_client = &cptestctx.internal_client;
+    let lockstep_client = &cptestctx.lockstep_client;
     let nexus = &cptestctx.server.server_context().nexus;
     let oximeter = &cptestctx.oximeter;
 
     let activate_instance_watcher = || async {
         use nexus_test_utils::background::activate_background_task;
 
-        let _ = activate_background_task(&internal_client, "instance_watcher")
+        let _ = activate_background_task(&lockstep_client, "instance_watcher")
             .await;
     };
 
@@ -479,11 +479,11 @@ async fn test_project_timeseries_query(
     let i2p1 = create_instance(&client, "project1", "instance2").await;
     let _i3p2 = create_instance(&client, "project2", "instance3").await;
 
-    let internal_client = &cptestctx.internal_client;
+    let lockstep_client = &cptestctx.lockstep_client;
 
     // get the instance metrics to show up
     let _ =
-        activate_background_task(&internal_client, "instance_watcher").await;
+        activate_background_task(&lockstep_client, "instance_watcher").await;
 
     // Query with no project specified
     let q1 = "get virtual_machine:check";
@@ -582,6 +582,7 @@ async fn test_project_timeseries_query(
     let url = "/v1/timeseries/query?project=project1";
     let body = nexus_types::external_api::params::TimeseriesQuery {
         query: q6.to_string(),
+        include_summaries: false,
     };
     let result =
         object_create_error(client, url, &body, StatusCode::BAD_REQUEST).await;
@@ -602,6 +603,7 @@ async fn test_project_timeseries_query(
     let url = "/v1/timeseries/query?project=nonexistent";
     let body = nexus_types::external_api::params::TimeseriesQuery {
         query: q6.to_string(),
+        include_summaries: false,
     };
     let result =
         object_create_error(client, url, &body, StatusCode::NOT_FOUND).await;
@@ -611,6 +613,7 @@ async fn test_project_timeseries_query(
     let url = "/v1/timeseries/query?project=project1";
     let body = nexus_types::external_api::params::TimeseriesQuery {
         query: q1.to_string(),
+        include_summaries: false,
     };
 
     let request = RequestBuilder::new(client, Method::POST, url)
@@ -645,6 +648,24 @@ async fn test_project_timeseries_query(
         .await;
     assert_eq!(result.tables.len(), 1);
     assert_eq!(result.tables[0].timeseries.len(), 2); // two instances
+    assert!(result.query_summaries.is_none());
+
+    // Request metrics again, this time with query summaries.
+    let body = nexus_types::external_api::params::TimeseriesQuery {
+        query: q1.to_string(),
+        include_summaries: true,
+    };
+    let request = RequestBuilder::new(client, Method::POST, url)
+        .body(Some(&body))
+        .expect_status(Some(StatusCode::OK));
+    let result = NexusRequest::new(request)
+        .authn_as(AuthnMode::UnprivilegedUser)
+        .execute_and_parse_unwrap::<views::OxqlQueryResult>()
+        .await;
+    assert_eq!(result.tables.len(), 1);
+    assert_eq!(result.tables[0].timeseries.len(), 2); // two instances
+    assert!(result.query_summaries.is_some());
+    assert_eq!(result.query_summaries.unwrap().len(), 2);
 }
 
 #[nexus_test]

@@ -41,8 +41,10 @@ use omicron_common::api::external::NameOrId;
 use omicron_nexus::Nexus;
 use omicron_nexus::TestInterfaces as _;
 use omicron_nexus::app::{MAX_DISK_SIZE_BYTES, MIN_DISK_SIZE_BYTES};
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::VolumeUuid;
-use omicron_uuid_kinds::{GenericUuid, InstanceUuid};
+use omicron_uuid_kinds::ZpoolUuid;
 use sled_agent_client::TestInterfaces as _;
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -2137,9 +2139,9 @@ async fn test_single_region_allocate_for_replace(
     assert_eq!(allocated_regions.len(), one_more);
 
     // Each region should be on a different pool
-    let pools_used: HashSet<Uuid> = datasets_and_regions
+    let pools_used: HashSet<ZpoolUuid> = datasets_and_regions
         .iter()
-        .map(|(dataset, _)| dataset.pool_id)
+        .map(|(dataset, _)| dataset.pool_id())
         .collect();
 
     assert_eq!(pools_used.len(), REGION_REDUNDANCY_THRESHOLD + 1);
@@ -2291,7 +2293,7 @@ async fn test_no_halt_disk_delete_one_region_on_expunged_agent(
 
     // Expunge the physical disk
     let (_, db_zpool) = LookupPath::new(&opctx, datastore)
-        .zpool_id(zpool.id.into_untyped_uuid())
+        .zpool_id(zpool.id)
         .fetch()
         .await
         .unwrap();
@@ -2299,7 +2301,7 @@ async fn test_no_halt_disk_delete_one_region_on_expunged_agent(
     datastore
         .physical_disk_update_policy(
             &opctx,
-            db_zpool.physical_disk_id.into(),
+            db_zpool.physical_disk_id(),
             PhysicalDiskPolicy::Expunged,
         )
         .await
@@ -2346,8 +2348,8 @@ async fn test_disk_expunge(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(allocated_regions.len(), REGION_REDUNDANCY_THRESHOLD);
 
     // Expunge the sled
-    let int_client = &cptestctx.internal_client;
-    int_client
+    cptestctx
+        .lockstep_client
         .make_request(
             Method::POST,
             "/sleds/expunge",

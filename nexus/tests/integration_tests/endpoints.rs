@@ -658,6 +658,7 @@ pub static DEMO_INSTANCE_CREATE: LazyLock<params::InstanceCreate> =
         }],
         disks: vec![],
         boot_disk: None,
+        cpu_platform: None,
         start: true,
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
@@ -679,14 +680,16 @@ pub static DEMO_STOPPED_INSTANCE_CREATE: LazyLock<params::InstanceCreate> =
         }],
         disks: vec![],
         boot_disk: None,
+        cpu_platform: None,
         start: true,
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
     });
 pub static DEMO_INSTANCE_UPDATE: LazyLock<params::InstanceUpdate> =
     LazyLock::new(|| params::InstanceUpdate {
-        boot_disk: None,
-        auto_restart_policy: None,
+        boot_disk: Nullable(None),
+        cpu_platform: Nullable(None),
+        auto_restart_policy: Nullable(None),
         ncpus: InstanceCpuCount(1),
         memory: ByteCount::from_gibibytes_u32(16),
     });
@@ -1144,6 +1147,7 @@ pub static SYSTEM_TIMESERIES_QUERY_URL: LazyLock<String> =
 pub static DEMO_TIMESERIES_QUERY: LazyLock<params::TimeseriesQuery> =
     LazyLock::new(|| params::TimeseriesQuery {
         query: String::from("get http_service:request_latency_histogram"),
+        include_summaries: false,
     });
 
 // Users

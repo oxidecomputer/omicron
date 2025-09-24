@@ -145,6 +145,7 @@ async fn test_snapshot_basic(cptestctx: &ControlPlaneTestContext) {
             boot_disk: Some(params::InstanceDiskAttachment::Attach(
                 params::InstanceDiskAttach { name: base_disk_name.clone() },
             )),
+            cpu_platform: None,
             disks: Vec::new(),
             external_ips: vec![],
             start: true,
@@ -351,6 +352,7 @@ async fn test_snapshot_stopped_instance(cptestctx: &ControlPlaneTestContext) {
             boot_disk: Some(params::InstanceDiskAttachment::Attach(
                 params::InstanceDiskAttach { name: base_disk_name.clone() },
             )),
+            cpu_platform: None,
             disks: Vec::new(),
             external_ips: vec![],
             start: false,
@@ -1678,8 +1680,8 @@ async fn test_snapshot_expunge(cptestctx: &ControlPlaneTestContext) {
     .await;
 
     // Expunge the sled
-    let int_client = &cptestctx.internal_client;
-    int_client
+    cptestctx
+        .lockstep_client
         .make_request(
             Method::POST,
             "/sleds/expunge",

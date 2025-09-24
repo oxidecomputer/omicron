@@ -136,8 +136,8 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
     let cmd_path = path_to_executable(CMD_OMDB);
 
     let postgres_url = cptestctx.database.listen_url();
-    let nexus_internal_url =
-        format!("http://{}/", cptestctx.internal_client.bind_address);
+    let nexus_lockstep_url =
+        format!("http://{}/", cptestctx.lockstep_client.bind_address);
     let mgs_url = cptestctx
         .gateway
         .get(&SwitchLocation::Switch0)
@@ -156,7 +156,7 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
     // Get the CockroachDB metadata from the blueprint so we can redact it
     let initial_blueprint: Blueprint = dropshot::test_util::read_json(
         &mut cptestctx
-            .internal_client
+            .lockstep_client
             .make_request_no_body(
                 Method::GET,
                 &format!("/deployment/blueprints/all/{initial_blueprint_id}"),
@@ -177,6 +177,7 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
     let mut output = String::new();
 
     let invocations: &[&[&str]] = &[
+        &["db", "db-metadata", "ls-nexus"],
         &["db", "disks", "list"],
         &["db", "dns", "show"],
         &["db", "dns", "diff", "external", "2"],
@@ -246,12 +247,16 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
         ],
         // This one should fail because it has no parent.
         &["nexus", "blueprints", "diff", &initial_blueprint_id],
-        // chicken switches: show and set
-        &["nexus", "chicken-switches", "show", "current"],
+        // reconfigurator config: show and set
+        &["nexus", "reconfigurator-config", "show", "current"],
+        // NOTE: Enabling the planner here _may_ cause Nexus to start creating
+        // new blueprints; any commands whose output is only stable if the set
+        // of blueprints is stable must come before this command to avoid being
+        // racy.
         &[
             "-w",
             "nexus",
-            "chicken-switches",
+            "reconfigurator-config",
             "set",
             "--planner-enabled",
             "true",
@@ -259,14 +264,12 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
         &[
             "-w",
             "nexus",
-            "chicken-switches",
+            "reconfigurator-config",
             "set",
             "--add-zones-with-mupdate-override",
-            "false",
+            "true",
         ],
-        // After the set commands above, we should see chicken switches
-        // populated.
-        &["nexus", "chicken-switches", "show", "current"],
+        &["nexus", "reconfigurator-config", "show", "current"],
         &["reconfigurator", "export", tmppath.as_str()],
         // We can't easily test the sled agent output because that's only
         // provided by a real sled agent, which is not available in the
@@ -303,7 +306,7 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
     for args in invocations {
         println!("running commands with args: {:?}", args);
         let p = postgres_url.to_string();
-        let u = nexus_internal_url.clone();
+        let u = nexus_lockstep_url.clone();
         let g = mgs_url.clone();
         let ox = ox_url.clone();
         let ch = ch_url.clone();
@@ -393,8 +396,8 @@ async fn test_omdb_env_settings(cptestctx: &ControlPlaneTestContext) {
 
     let cmd_path = path_to_executable(CMD_OMDB);
     let postgres_url = cptestctx.database.listen_url().to_string();
-    let nexus_internal_url =
-        format!("http://{}", cptestctx.internal_client.bind_address);
+    let nexus_lockstep_url =
+        format!("http://{}", cptestctx.lockstep_client.bind_address);
     let ox_url = format!("http://{}/", cptestctx.oximeter.server_address());
     let ox_test_producer = cptestctx.producer.address().ip();
     let ch_url = format!("http://{}/", cptestctx.clickhouse.http_address());
@@ -422,7 +425,7 @@ async fn test_omdb_env_settings(cptestctx: &ControlPlaneTestContext) {
     let args = &[
         "nexus",
         "--nexus-internal-url",
-        &nexus_internal_url.clone(),
+        &nexus_lockstep_url.clone(),
         "background-tasks",
         "doc",
     ];
@@ -431,7 +434,7 @@ async fn test_omdb_env_settings(cptestctx: &ControlPlaneTestContext) {
     // Case 2: specified in multiple places (command-line argument wins)
     let args =
         &["nexus", "--nexus-internal-url", "junk", "background-tasks", "doc"];
-    let n = nexus_internal_url.clone();
+    let n = nexus_lockstep_url.clone();
     do_run(
         &mut output,
         move |exec| exec.env("OMDB_NEXUS_URL", &n),

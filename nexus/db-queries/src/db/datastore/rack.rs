@@ -72,6 +72,7 @@ use omicron_common::bail_unless;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SiloUserUuid;
 use omicron_uuid_kinds::SledUuid;
+use omicron_uuid_kinds::ZpoolUuid;
 use slog_error_chain::InlineErrorChain;
 use std::sync::{Arc, OnceLock};
 use uuid::Uuid;
@@ -82,6 +83,7 @@ pub struct RackInit {
     pub rack_id: Uuid,
     pub rack_subnet: IpNetwork,
     pub blueprint: Blueprint,
+    pub blueprint_execution_enabled: bool,
     pub physical_disks: Vec<PhysicalDisk>,
     pub zpools: Vec<Zpool>,
     pub datasets: Vec<CrucibleDataset>,
@@ -103,7 +105,8 @@ enum RackInitError {
     AddingNic(Error),
     BlueprintInsert(Error),
     BlueprintTargetSet(Error),
-    DatasetInsert { err: AsyncInsertError, zpool_id: Uuid },
+    NexusDatabaseAccessRecordsInsert(Error),
+    DatasetInsert { err: AsyncInsertError, zpool_id: ZpoolUuid },
     PhysicalDiskInsert(Error),
     ZpoolInsert(Error),
     RackUpdate { err: DieselError, rack_id: Uuid },
@@ -134,7 +137,7 @@ impl From<RackInitError> for Error {
             RackInitError::DatasetInsert { err, zpool_id } => match err {
                 AsyncInsertError::CollectionNotFound => Error::ObjectNotFound {
                     type_name: ResourceType::Zpool,
-                    lookup_type: LookupType::ById(zpool_id),
+                    lookup_type: LookupType::by_id(zpool_id),
                 },
                 AsyncInsertError::DatabaseError(e) => {
                     public_error_from_diesel(e, ErrorHandler::Server)
@@ -150,8 +153,12 @@ impl From<RackInitError> for Error {
                 err.internal_context("failed to insert Blueprint")
             }
             RackInitError::BlueprintTargetSet(err) => {
-                err.internal_context("failed to insert set target Blueprint")
+                err.internal_context("failed to set target Blueprint")
             }
+            RackInitError::NexusDatabaseAccessRecordsInsert(err) => err
+                .internal_context(
+                    "failed to insert nexus database access records",
+                ),
             RackInitError::RackUpdate { err, rack_id } => {
                 public_error_from_diesel(
                     err,
@@ -339,7 +346,7 @@ impl DataStore {
                 // plane via decommissioning, then added back again later, which
                 // requires allocating a new subnet.)
                 match LookupPath::new(opctx, self)
-                    .sled_id(allocation.sled_id.into_untyped_uuid())
+                    .sled_id(allocation.sled_id.into())
                     .optional_fetch_for(authz::Action::Read)
                     .await?
                     .map(|(_, sled)| sled.state())
@@ -714,6 +721,8 @@ impl DataStore {
                         rack_init.service_ip_pool_ranges;
                     let internal_dns = rack_init.internal_dns;
                     let external_dns = rack_init.external_dns;
+                    let blueprint_execution_enabled =
+                        rack_init.blueprint_execution_enabled;
 
                     // Early exit if the rack has already been initialized.
                     let rack = rack_dsl::rack
@@ -787,16 +796,13 @@ impl DataStore {
                         DieselError::RollbackTransaction
                     })?;
 
-                    // Mark the RSS-generated blueprint as the current target,
-                    // DISABLED. We may change this to enabled in the future
-                    // when more of Reconfigurator is automated, but for now we
-                    // require a support operation to enable it.
+                    // Make that initial blueprint the target.
                     Self::blueprint_target_set_current_on_connection(
                         &conn,
                         opctx,
                         BlueprintTarget {
                             target_id: blueprint.id,
-                            enabled: false,
+                            enabled: blueprint_execution_enabled,
                             time_made_target: Utc::now(),
                         },
                     )
@@ -824,7 +830,7 @@ impl DataStore {
                                 }
                             }).collect(),
                     ).await.map_err(|e| {
-                        err.set(RackInitError::BlueprintTargetSet(e)).unwrap();
+                        err.set(RackInitError::NexusDatabaseAccessRecordsInsert(e)).unwrap();
                         DieselError::RollbackTransaction
                     })?;
 
@@ -874,9 +880,9 @@ impl DataStore {
 
                     for dataset in datasets {
                         use nexus_db_schema::schema::crucible_dataset::dsl;
-                        let zpool_id = dataset.pool_id;
+                        let zpool_id = dataset.pool_id();
                         Zpool::insert_resource(
-                            zpool_id,
+                            zpool_id.into(),
                             diesel::insert_into(dsl::crucible_dataset)
                                 .values(dataset.clone())
                                 .on_conflict(dsl::id)
@@ -1060,6 +1066,7 @@ mod test {
     use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
     use nexus_types::deployment::BlueprintHostPhase2DesiredSlots;
     use nexus_types::deployment::BlueprintSledConfig;
+    use nexus_types::deployment::BlueprintSource;
     use nexus_types::deployment::CockroachDbPreserveDowngrade;
     use nexus_types::deployment::PendingMgsUpdates;
     use nexus_types::deployment::{
@@ -1068,7 +1075,7 @@ mod test {
     };
     use nexus_types::deployment::{
         BlueprintZoneDisposition, BlueprintZoneImageSource,
-        OmicronZoneExternalSnatIp, OximeterReadMode, PlanningReport,
+        OmicronZoneExternalSnatIp, OximeterReadMode,
     };
     use nexus_types::external_api::shared::SiloIdentityMode;
     use nexus_types::external_api::views::SledState;
@@ -1087,9 +1094,12 @@ mod test {
     use omicron_common::api::internal::shared::SourceNatConfig;
     use omicron_common::zpool_name::ZpoolName;
     use omicron_test_utils::dev;
-    use omicron_uuid_kinds::{BlueprintUuid, ExternalIpUuid, OmicronZoneUuid};
-    use omicron_uuid_kinds::{GenericUuid, ZpoolUuid};
-    use omicron_uuid_kinds::{SledUuid, TypedUuid};
+    use omicron_uuid_kinds::BlueprintUuid;
+    use omicron_uuid_kinds::ExternalIpUuid;
+    use omicron_uuid_kinds::GenericUuid;
+    use omicron_uuid_kinds::OmicronZoneUuid;
+    use omicron_uuid_kinds::SledUuid;
+    use omicron_uuid_kinds::ZpoolUuid;
     use oxnet::IpNet;
     use std::collections::{BTreeMap, HashMap};
     use std::net::Ipv6Addr;
@@ -1122,8 +1132,9 @@ mod test {
                     time_created: Utc::now(),
                     creator: "test suite".to_string(),
                     comment: "test suite".to_string(),
-                    report: PlanningReport::new(blueprint_id),
+                    source: BlueprintSource::Test,
                 },
+                blueprint_execution_enabled: false,
                 physical_disks: vec![],
                 zpools: vec![],
                 datasets: vec![],
@@ -1289,9 +1300,9 @@ mod test {
         logctx.cleanup_successful();
     }
 
-    async fn create_test_sled(db: &DataStore, sled_id: Uuid) -> Sled {
+    async fn create_test_sled(db: &DataStore, sled_id: SledUuid) -> Sled {
         let sled_update = SledUpdateBuilder::new()
-            .sled_id(SledUuid::from_untyped_uuid(sled_id))
+            .sled_id(sled_id)
             .rack_id(rack_id())
             .build();
         let (sled, _) = db
@@ -1384,9 +1395,9 @@ mod test {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
-        let sled1 = create_test_sled(&datastore, Uuid::new_v4()).await;
-        let sled2 = create_test_sled(&datastore, Uuid::new_v4()).await;
-        let sled3 = create_test_sled(&datastore, Uuid::new_v4()).await;
+        let sled1 = create_test_sled(&datastore, SledUuid::new_v4()).await;
+        let sled2 = create_test_sled(&datastore, SledUuid::new_v4()).await;
+        let sled3 = create_test_sled(&datastore, SledUuid::new_v4()).await;
 
         let service_ip_pool_ranges = vec![
             IpRange::try_from((
@@ -1399,17 +1410,11 @@ mod test {
         let mut system = SystemDescription::new();
         system
             .service_ip_pool_ranges(service_ip_pool_ranges.clone())
-            .sled(
-                SledBuilder::new().id(TypedUuid::from_untyped_uuid(sled1.id())),
-            )
+            .sled(SledBuilder::new().id(sled1.id()))
             .expect("failed to add sled1")
-            .sled(
-                SledBuilder::new().id(TypedUuid::from_untyped_uuid(sled2.id())),
-            )
+            .sled(SledBuilder::new().id(sled2.id()))
             .expect("failed to add sled2")
-            .sled(
-                SledBuilder::new().id(TypedUuid::from_untyped_uuid(sled3.id())),
-            )
+            .sled(SledBuilder::new().id(sled3.id()))
             .expect("failed to add sled3");
 
         let external_dns_ip = IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4));
@@ -1438,7 +1443,7 @@ mod test {
         let mut blueprint_zones = BTreeMap::new();
         let dataset = random_dataset();
         blueprint_zones.insert(
-            SledUuid::from_untyped_uuid(sled1.id()),
+            sled1.id(),
             [
                 BlueprintZoneConfig {
                     disposition: BlueprintZoneDisposition::InService,
@@ -1510,7 +1515,7 @@ mod test {
             .collect::<IdMap<_>>(),
         );
         blueprint_zones.insert(
-            SledUuid::from_untyped_uuid(sled2.id()),
+            sled2.id(),
             [
                 BlueprintZoneConfig {
                     disposition: BlueprintZoneDisposition::InService,
@@ -1519,6 +1524,8 @@ mod test {
                     zone_type: BlueprintZoneType::Nexus(
                         blueprint_zone_type::Nexus {
                             internal_address: "[::1]:80".parse().unwrap(),
+                            lockstep_port:
+                                omicron_common::address::NEXUS_LOCKSTEP_PORT,
                             external_ip: OmicronZoneExternalFloatingIp {
                                 id: ExternalIpUuid::new_v4(),
                                 ip: nexus_ip,
@@ -1584,7 +1591,7 @@ mod test {
             .collect(),
         );
         blueprint_zones.insert(
-            SledUuid::from_untyped_uuid(sled3.id()),
+            sled3.id(),
             [BlueprintZoneConfig {
                 disposition: BlueprintZoneDisposition::InService,
                 id: ntp3_id,
@@ -1618,7 +1625,7 @@ mod test {
             time_created: now_db_precision(),
             creator: "test suite".to_string(),
             comment: "test blueprint".to_string(),
-            report: PlanningReport::new(blueprint_id),
+            source: BlueprintSource::Test,
         };
 
         let rack = datastore
@@ -1740,7 +1747,7 @@ mod test {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
-        let sled = create_test_sled(&datastore, Uuid::new_v4()).await;
+        let sled = create_test_sled(&datastore, SledUuid::new_v4()).await;
 
         // Ask for two Nexus services, with different external IPs.
         let nexus_ip_start = Ipv4Addr::new(1, 2, 3, 4);
@@ -1753,9 +1760,7 @@ mod test {
         let mut system = SystemDescription::new();
         system
             .service_ip_pool_ranges(service_ip_pool_ranges.clone())
-            .sled(
-                SledBuilder::new().id(TypedUuid::from_untyped_uuid(sled.id())),
-            )
+            .sled(SledBuilder::new().id(sled.id()))
             .expect("failed to add sled");
 
         let nexus_id1 = OmicronZoneUuid::new_v4();
@@ -1770,7 +1775,7 @@ mod test {
 
         let mut blueprint_zones = BTreeMap::new();
         blueprint_zones.insert(
-            SledUuid::from_untyped_uuid(sled.id()),
+            sled.id(),
             [
                 BlueprintZoneConfig {
                     disposition: BlueprintZoneDisposition::InService,
@@ -1779,6 +1784,8 @@ mod test {
                     zone_type: BlueprintZoneType::Nexus(
                         blueprint_zone_type::Nexus {
                             internal_address: "[::1]:80".parse().unwrap(),
+                            lockstep_port:
+                                omicron_common::address::NEXUS_LOCKSTEP_PORT,
                             external_ip: OmicronZoneExternalFloatingIp {
                                 id: ExternalIpUuid::new_v4(),
                                 ip: nexus_ip_start.into(),
@@ -1811,6 +1818,8 @@ mod test {
                     zone_type: BlueprintZoneType::Nexus(
                         blueprint_zone_type::Nexus {
                             internal_address: "[::1]:80".parse().unwrap(),
+                            lockstep_port:
+                                omicron_common::address::NEXUS_LOCKSTEP_PORT,
                             external_ip: OmicronZoneExternalFloatingIp {
                                 id: ExternalIpUuid::new_v4(),
                                 ip: nexus_ip_end.into(),
@@ -1886,7 +1895,7 @@ mod test {
             time_created: now_db_precision(),
             creator: "test suite".to_string(),
             comment: "test blueprint".to_string(),
-            report: PlanningReport::new(blueprint_id),
+            source: BlueprintSource::Test,
         };
 
         let rack = datastore
@@ -2029,7 +2038,7 @@ mod test {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
-        let sled = create_test_sled(&datastore, Uuid::new_v4()).await;
+        let sled = create_test_sled(&datastore, SledUuid::new_v4()).await;
 
         // Ask for a Nexus service with an IPv6 address.
         let nexus_ip_start =
@@ -2044,9 +2053,7 @@ mod test {
         let mut system = SystemDescription::new();
         system
             .service_ip_pool_ranges(service_ip_pool_ranges.clone())
-            .sled(
-                SledBuilder::new().id(TypedUuid::from_untyped_uuid(sled.id())),
-            )
+            .sled(SledBuilder::new().id(sled.id()))
             .expect("failed to add sled");
 
         let nexus_id = OmicronZoneUuid::new_v4();
@@ -2057,7 +2064,7 @@ mod test {
 
         let mut blueprint_zones = BTreeMap::new();
         blueprint_zones.insert(
-            SledUuid::from_untyped_uuid(sled.id()),
+            sled.id(),
             [BlueprintZoneConfig {
                 disposition: BlueprintZoneDisposition::InService,
                 id: nexus_id,
@@ -2065,6 +2072,8 @@ mod test {
                 zone_type: BlueprintZoneType::Nexus(
                     blueprint_zone_type::Nexus {
                         internal_address: "[::1]:80".parse().unwrap(),
+                        lockstep_port:
+                            omicron_common::address::NEXUS_LOCKSTEP_PORT,
                         external_ip: OmicronZoneExternalFloatingIp {
                             id: ExternalIpUuid::new_v4(),
                             ip: nexus_ip_start.into(),
@@ -2136,7 +2145,7 @@ mod test {
             time_created: now_db_precision(),
             creator: "test suite".to_string(),
             comment: "test blueprint".to_string(),
-            report: PlanningReport::new(blueprint_id),
+            source: BlueprintSource::Test,
             nexus_generation: *Generation::new(),
         };
 
@@ -2266,13 +2275,11 @@ mod test {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
-        let sled = create_test_sled(&datastore, Uuid::new_v4()).await;
+        let sled = create_test_sled(&datastore, SledUuid::new_v4()).await;
 
         let mut system = SystemDescription::new();
         system
-            .sled(
-                SledBuilder::new().id(TypedUuid::from_untyped_uuid(sled.id())),
-            )
+            .sled(SledBuilder::new().id(sled.id()))
             .expect("failed to add sled");
 
         let nexus_ip = IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4));
@@ -2283,7 +2290,7 @@ mod test {
         let mut macs = MacAddr::iter_system();
         let mut blueprint_zones = BTreeMap::new();
         blueprint_zones.insert(
-            SledUuid::from_untyped_uuid(sled.id()),
+            sled.id(),
             [BlueprintZoneConfig {
                 disposition: BlueprintZoneDisposition::InService,
                 id: nexus_id,
@@ -2291,6 +2298,8 @@ mod test {
                 zone_type: BlueprintZoneType::Nexus(
                     blueprint_zone_type::Nexus {
                         internal_address: "[::1]:80".parse().unwrap(),
+                        lockstep_port:
+                            omicron_common::address::NEXUS_LOCKSTEP_PORT,
                         external_ip: OmicronZoneExternalFloatingIp {
                             id: ExternalIpUuid::new_v4(),
                             ip: nexus_ip,
@@ -2338,7 +2347,7 @@ mod test {
             time_created: now_db_precision(),
             creator: "test suite".to_string(),
             comment: "test blueprint".to_string(),
-            report: PlanningReport::new(blueprint_id),
+            source: BlueprintSource::Test,
         };
 
         let result = datastore
@@ -2367,7 +2376,7 @@ mod test {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
-        let sled = create_test_sled(&datastore, Uuid::new_v4()).await;
+        let sled = create_test_sled(&datastore, SledUuid::new_v4()).await;
 
         let ip = IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4));
         let service_ip_pool_ranges = vec![IpRange::from(ip)];
@@ -2375,9 +2384,7 @@ mod test {
         let mut system = SystemDescription::new();
         system
             .service_ip_pool_ranges(service_ip_pool_ranges.clone())
-            .sled(
-                SledBuilder::new().id(TypedUuid::from_untyped_uuid(sled.id())),
-            )
+            .sled(SledBuilder::new().id(sled.id()))
             .expect("failed to add sled");
 
         // Request two services which happen to be using the same IP address.
@@ -2394,7 +2401,7 @@ mod test {
         let mut blueprint_zones = BTreeMap::new();
         let dataset = random_dataset();
         blueprint_zones.insert(
-            SledUuid::from_untyped_uuid(sled.id()),
+            sled.id(),
             [
                 BlueprintZoneConfig {
                     disposition: BlueprintZoneDisposition::InService,
@@ -2433,6 +2440,8 @@ mod test {
                     zone_type: BlueprintZoneType::Nexus(
                         blueprint_zone_type::Nexus {
                             internal_address: "[::1]:80".parse().unwrap(),
+                            lockstep_port:
+                                omicron_common::address::NEXUS_LOCKSTEP_PORT,
                             external_ip: OmicronZoneExternalFloatingIp {
                                 id: ExternalIpUuid::new_v4(),
                                 ip,
@@ -2482,7 +2491,7 @@ mod test {
             time_created: now_db_precision(),
             creator: "test suite".to_string(),
             comment: "test blueprint".to_string(),
-            report: PlanningReport::new(blueprint_id),
+            source: BlueprintSource::Test,
         };
 
         let result = datastore
@@ -2675,11 +2684,7 @@ mod test {
         // Pick one of the hw_baseboard_ids and insert a sled record. We should
         // get back the `CommissionedSled` allocation result if we retry
         // allocation of that baseboard.
-        create_test_sled(
-            &datastore,
-            allocations[0].sled_id.into_untyped_uuid(),
-        )
-        .await;
+        create_test_sled(&datastore, allocations[0].sled_id.into()).await;
         match datastore
             .allocate_sled_underlay_subnet_octets(
                 &opctx,
@@ -2708,11 +2713,9 @@ mod test {
         let target_hw_baseboard_id = *hw_baseboard_ids.last().unwrap();
         for _ in 0..5 {
             // Commission the sled.
-            let sled = create_test_sled(
-                &datastore,
-                prior_allocation.sled_id.into_untyped_uuid(),
-            )
-            .await;
+            let sled =
+                create_test_sled(&datastore, prior_allocation.sled_id.into())
+                    .await;
 
             // If we attempt this same baseboard again, we get the existing
             // allocation back.
@@ -2766,7 +2769,7 @@ mod test {
 
             // We should get the next octet with a new sled ID.
             assert_eq!(allocation.subnet_octet, next_expected_octet);
-            assert_ne!(allocation.sled_id.into_untyped_uuid(), sled.id());
+            assert_ne!(allocation.sled_id, sled.id().into());
             prior_allocation = allocation;
 
             // Ensure if we attempt this same baseboard again, we get the

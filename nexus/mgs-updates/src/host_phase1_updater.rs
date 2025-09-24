@@ -266,7 +266,7 @@ impl ReconfiguratorHostPhase1Updater {
         // blueprint.)
         if current_active_slot_hash != *expected_active_phase_1_hash {
             return Err(PrecheckError::WrongActiveArtifact {
-                kind: ArtifactKind::HOST_PHASE_1,
+                kind: ArtifactKind::GIMLET_HOST_PHASE_1,
                 expected: *expected_active_phase_1_hash,
                 found: current_active_slot_hash,
             });
@@ -298,7 +298,7 @@ impl ReconfiguratorHostPhase1Updater {
             Ok(PrecheckStatus::ReadyForUpdate)
         } else {
             Err(PrecheckError::WrongInactiveArtifact {
-                kind: ArtifactKind::HOST_PHASE_1,
+                kind: ArtifactKind::GIMLET_HOST_PHASE_1,
                 expected: *expected_inactive_phase_1_hash,
                 found: found_inactive_artifact,
             })
@@ -334,7 +334,7 @@ impl ReconfiguratorHostPhase1Updater {
                 err @ (HostPhase1HashError::Timeout(_)
                 | HostPhase1HashError::ContentsModifiedWhileHashing),
             ) => Err(PrecheckError::DeterminingActiveArtifact {
-                kind: ArtifactKind::HOST_PHASE_1,
+                kind: ArtifactKind::GIMLET_HOST_PHASE_1,
                 err: InlineErrorChain::new(&err).to_string(),
             }),
         }

@@ -366,6 +366,7 @@ use omicron_common::api::internal::nexus::SledVmmState;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::PropolisUuid;
+use omicron_uuid_kinds::SledUuid;
 use serde::{Deserialize, Serialize};
 use steno::{ActionError, DagBuilder, Node};
 use uuid::Uuid;
@@ -494,7 +495,7 @@ struct UpdatesRequired {
 #[derive(Debug, Deserialize, Serialize)]
 enum NetworkConfigUpdate {
     Delete,
-    Update { active_propolis_id: PropolisUuid, new_sled_id: Uuid },
+    Update { active_propolis_id: PropolisUuid, new_sled_id: SledUuid },
 }
 
 /// Virtual provisioning counters to release when an instance no longer has a
@@ -746,7 +747,7 @@ impl NetworkConfigUpdate {
     fn to_vmm(vmm: &Vmm) -> Self {
         Self::Update {
             active_propolis_id: PropolisUuid::from_untyped_uuid(vmm.id),
-            new_sled_id: vmm.sled_id,
+            new_sled_id: vmm.sled_id(),
         }
     }
 }
@@ -1577,6 +1578,7 @@ mod test {
                 external_ips: vec![],
                 disks: vec![],
                 boot_disk: None,
+                cpu_platform: None,
                 start: true,
                 auto_restart_policy: Default::default(),
                 anti_affinity_groups: Vec::new(),
@@ -2467,15 +2469,13 @@ mod test {
 
             let vmm = state.vmm().as_ref().unwrap();
             let dst_sled_id = cptestctx
-                .find_sled_agent(vmm.sled_id)
+                .find_sled_agent(vmm.sled_id())
                 .expect("need at least one other sled");
             let params = instance_migrate::Params {
                 serialized_authn: authn::saga::Serialized::for_opctx(&opctx),
                 instance: state.instance().clone(),
                 src_vmm: vmm.clone(),
-                migrate_params: InstanceMigrateRequest {
-                    dst_sled_id: dst_sled_id.into_untyped_uuid(),
-                },
+                migrate_params: InstanceMigrateRequest { dst_sled_id },
             };
 
             nexus

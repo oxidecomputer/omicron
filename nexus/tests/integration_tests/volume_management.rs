@@ -69,7 +69,6 @@ use omicron_uuid_kinds::UpstairsRepairUuid;
 use omicron_uuid_kinds::UpstairsSessionUuid;
 use omicron_uuid_kinds::UpstairsUuid;
 use omicron_uuid_kinds::VolumeUuid;
-use omicron_uuid_kinds::ZpoolUuid;
 use rand::prelude::SliceRandom;
 use rand::{SeedableRng, rngs::StdRng};
 use sled_agent_client::{CrucibleOpts, VolumeConstructionRequest};
@@ -4063,7 +4062,7 @@ async fn test_read_only_region_reference_counting(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let internal_client = &cptestctx.internal_client;
+    let lockstep_client = &cptestctx.lockstep_client;
     let apictx = &cptestctx.server.server_context();
     let nexus = &apictx.nexus;
     let datastore = nexus.datastore();
@@ -4120,7 +4119,7 @@ async fn test_read_only_region_reference_counting(
         .await
         .unwrap();
 
-    wait_for_all_replacements(datastore, &internal_client).await;
+    wait_for_all_replacements(datastore, &lockstep_client).await;
 
     // The snapshot's allocated regions should have the one read-only region
 
@@ -4212,8 +4211,7 @@ async fn test_read_only_region_reference_counting(
     let mut region_still_state_crated = false;
 
     for sled_agent in cptestctx.all_sled_agents() {
-        let zpool_id =
-            ZpoolUuid::from_untyped_uuid(db_read_only_dataset.pool_id);
+        let zpool_id = db_read_only_dataset.pool_id();
         if !sled_agent.sled_agent.has_zpool(zpool_id) {
             continue;
         }
@@ -4296,8 +4294,7 @@ async fn test_read_only_region_reference_counting(
     let mut region_destroyed = false;
 
     for sled_agent in cptestctx.all_sled_agents() {
-        let zpool_id =
-            ZpoolUuid::from_untyped_uuid(db_read_only_dataset.pool_id);
+        let zpool_id = db_read_only_dataset.pool_id();
         if !sled_agent.sled_agent.has_zpool(zpool_id) {
             continue;
         }
@@ -4333,7 +4330,7 @@ async fn test_read_only_region_reference_counting_layers(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let internal_client = &cptestctx.internal_client;
+    let lockstep_client = &cptestctx.lockstep_client;
     let apictx = &cptestctx.server.server_context();
     let nexus = &apictx.nexus;
     let datastore = nexus.datastore();
@@ -4390,7 +4387,7 @@ async fn test_read_only_region_reference_counting_layers(
         .await
         .unwrap();
 
-    wait_for_all_replacements(datastore, &internal_client).await;
+    wait_for_all_replacements(datastore, &lockstep_client).await;
 
     // Grab the read-only region in the snapshot volume
 
@@ -5584,7 +5581,7 @@ async fn test_double_layer_with_read_only_region_delete(
     // 6) At the end, assert that all Crucible resources were cleaned up
 
     let client = &cptestctx.external_client;
-    let internal_client = &cptestctx.internal_client;
+    let lockstep_client = &cptestctx.lockstep_client;
     let apictx = &cptestctx.server.server_context();
     let nexus = &apictx.nexus;
     let datastore = nexus.datastore();
@@ -5649,7 +5646,7 @@ async fn test_double_layer_with_read_only_region_delete(
         .await
         .unwrap();
 
-    wait_for_all_replacements(datastore, &internal_client).await;
+    wait_for_all_replacements(datastore, &lockstep_client).await;
 
     assert!(!disk_test.crucible_resources_deleted().await);
 
@@ -5709,7 +5706,7 @@ async fn test_double_layer_snapshot_with_read_only_region_delete_2(
     // 6) At the end, assert that all Crucible resources were cleaned up
 
     let client = &cptestctx.external_client;
-    let internal_client = &cptestctx.internal_client;
+    let lockstep_client = &cptestctx.lockstep_client;
     let apictx = &cptestctx.server.server_context();
     let nexus = &apictx.nexus;
     let datastore = nexus.datastore();
@@ -5760,7 +5757,7 @@ async fn test_double_layer_snapshot_with_read_only_region_delete_2(
         .await
         .unwrap();
 
-    wait_for_all_replacements(datastore, &internal_client).await;
+    wait_for_all_replacements(datastore, &lockstep_client).await;
 
     wait_for_condition(
         || {
@@ -5806,7 +5803,7 @@ async fn test_double_layer_snapshot_with_read_only_region_delete_2(
         .await
         .unwrap();
 
-    wait_for_all_replacements(datastore, &internal_client).await;
+    wait_for_all_replacements(datastore, &lockstep_client).await;
 
     assert!(!disk_test.crucible_resources_deleted().await);
 
@@ -5835,7 +5832,7 @@ async fn test_double_layer_snapshot_with_read_only_region_delete_2(
         .await
         .unwrap();
 
-    wait_for_all_replacements(datastore, &internal_client).await;
+    wait_for_all_replacements(datastore, &lockstep_client).await;
 
     assert!(!disk_test.crucible_resources_deleted().await);
 
@@ -6446,7 +6443,7 @@ async fn test_proper_region_sled_redundancy(
                         .unwrap()
                 };
 
-                zpool.sled_id
+                zpool.sled_id()
             };
 
             assert!(
