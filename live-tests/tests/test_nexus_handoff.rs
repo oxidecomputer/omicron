@@ -467,7 +467,6 @@ async fn test_nexus_handoff(lc: &LiveTestContext) {
                 .await?;
             check_external_dns(log, &blueprint_handoff, next_generation)
                 .await?;
-            // XXX-dap TODO-cleanup
             Ok::<_, CondCheckError<anyhow::Error>>(())
         },
         &Duration::from_secs(1),
