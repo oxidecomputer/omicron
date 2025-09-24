@@ -3756,33 +3756,6 @@
         "minLength": 5,
         "maxLength": 17
       },
-      "MgsDrivenUpdateStatus": {
-        "type": "object",
-        "properties": {
-          "baseboard_description": {
-            "type": "string"
-          },
-          "host_os_phase_1": {
-            "$ref": "#/components/schemas/HostPhase1Status"
-          },
-          "rot": {
-            "$ref": "#/components/schemas/RotStatus"
-          },
-          "rot_bootloader": {
-            "$ref": "#/components/schemas/RotBootloaderStatus"
-          },
-          "sp": {
-            "$ref": "#/components/schemas/SpStatus"
-          }
-        },
-        "required": [
-          "baseboard_description",
-          "host_os_phase_1",
-          "rot",
-          "rot_bootloader",
-          "sp"
-        ]
-      },
       "MgsUpdateComponent": {
         "type": "string",
         "enum": [
@@ -3790,59 +3763,6 @@
           "rot",
           "rot_bootloader",
           "host_os"
-        ]
-      },
-      "MgsUpdateDriverStatus": {
-        "description": "Status of ongoing update attempts, recently completed attempts, and update requests that are waiting for retry.",
-        "type": "object",
-        "properties": {
-          "in_progress": {
-            "title": "IdOrdMap",
-            "x-rust-type": {
-              "crate": "iddqd",
-              "parameters": [
-                {
-                  "$ref": "#/components/schemas/InProgressUpdateStatus"
-                }
-              ],
-              "path": "iddqd::IdOrdMap",
-              "version": "*"
-            },
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/InProgressUpdateStatus"
-            },
-            "uniqueItems": true
-          },
-          "recent": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/CompletedAttempt"
-            }
-          },
-          "waiting": {
-            "title": "IdOrdMap",
-            "x-rust-type": {
-              "crate": "iddqd",
-              "parameters": [
-                {
-                  "$ref": "#/components/schemas/WaitingStatus"
-                }
-              ],
-              "path": "iddqd::IdOrdMap",
-              "version": "*"
-            },
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/WaitingStatus"
-            },
-            "uniqueItems": true
-          }
-        },
-        "required": [
-          "in_progress",
-          "recent",
-          "waiting"
         ]
       },
       "MigrationRuntimeState": {
