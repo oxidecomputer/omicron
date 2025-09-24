@@ -229,6 +229,9 @@ impl TqState {
             Event::RestartNode { id, connection_order } => {
                 self.apply_event_restart_node(id, connection_order);
             }
+            Event::PrepareAndCommit(id) => {
+                self.apply_event_prepare_and_commit(id);
+            }
         }
     }
 
@@ -286,6 +289,35 @@ impl TqState {
         });
     }
 
+    // We only do this at the end of the cluster test in `ensure_liveness`.
+    //
+    // This means that there must be at least one prepared config that we can
+    // use in the `PrepareAndCommit`. We don't pull the config out in test
+    // generation because of the lack of RNG seeding, which will result in
+    // differences in rack secrets during test execution and tqdb playback. We
+    // should fix this eventually, but it probably won't require changing this
+    // method.
+    fn apply_event_prepare_and_commit(&mut self, id: PlatformId) {
+        // Just grab the configuration from a prepared member here. In real code
+        // Nexus will poll the coordinator for a configuration when it polls for
+        // prepare acks.
+        let prepared = self
+            .nexus
+            .latest_config()
+            .prepared_members
+            .first()
+            .expect("at least one prepared member");
+        let (_, ctx) = self.sut.nodes.get(prepared).expect("node exists");
+        let config = ctx
+            .persistent_state()
+            .latest_config()
+            .expect("config exists")
+            .clone();
+        let (node, ctx) = self.sut.nodes.get_mut(&id).expect("node exists");
+        assert!(node.prepare_and_commit(ctx, config).is_ok());
+        send_envelopes(ctx, &mut self.bootstrap_network, &self.crashed_nodes);
+    }
+
     fn apply_event_load_rack_secret(&mut self, id: PlatformId, epoch: Epoch) {
         let (node, ctx) = self.sut.nodes.get_mut(&id).expect("node exists");
 
@@ -293,6 +325,12 @@ impl TqState {
         match node.load_rack_secret(ctx, epoch) {
             Ok(None) => {
                 assert!(node.is_collecting_shares_for_rack_secret(epoch));
+                // Send any messages output as a result of the load
+                send_envelopes(
+                    ctx,
+                    &mut self.bootstrap_network,
+                    &self.crashed_nodes,
+                );
             }
             Ok(Some(_)) => {
                 // We may be collecting for a later epoch, but haven't thrown
@@ -306,6 +344,13 @@ impl TqState {
                         .latest_committed_epoch()
                         .expect("at least one committed epoch")
                         >= epoch
+                );
+
+                // Send any messages output as a result of the load
+                send_envelopes(
+                    ctx,
+                    &mut self.bootstrap_network,
+                    &self.crashed_nodes,
                 );
             }
             Err(LoadRackSecretError::NoCommittedConfigurations) => {

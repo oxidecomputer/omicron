@@ -303,7 +303,7 @@ fn sled_mode_from_config(config: &Config) -> Result<SledMode, StartError> {
             }
             SledMode::Auto
         }
-        SledModeConfig::Gimlet => SledMode::Gimlet,
+        SledModeConfig::Sled => SledMode::Sled,
         SledModeConfig::Scrimlet => {
             let asic = if cfg!(feature = "switch-asic") {
                 DendriteAsic::TofinoAsic

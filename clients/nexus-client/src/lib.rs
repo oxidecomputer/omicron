@@ -5,10 +5,7 @@
 //! Interface for making API requests to the Oxide control plane at large
 //! from within the control plane
 
-use iddqd::IdOrdItem;
-use iddqd::id_upcast;
 use std::collections::HashMap;
-use uuid::Uuid;
 
 progenitor::generate_api!(
     spec = "../../openapi/nexus-internal.json",
@@ -38,8 +35,6 @@ progenitor::generate_api!(
         BlueprintPhysicalDiskDisposition = nexus_types::deployment::BlueprintPhysicalDiskDisposition,
         BlueprintZoneImageSource = nexus_types::deployment::BlueprintZoneImageSource,
         Certificate = omicron_common::api::internal::nexus::Certificate,
-        ClickhouseMode = nexus_types::deployment::ClickhouseMode,
-        ClickhousePolicy = nexus_types::deployment::ClickhousePolicy,
         DatasetKind = omicron_common::api::internal::shared::DatasetKind,
         DnsConfigParams = nexus_types::internal_api::params::DnsConfigParams,
         DnsConfigZone = nexus_types::internal_api::params::DnsConfigZone,
@@ -47,26 +42,17 @@ progenitor::generate_api!(
         Generation = omicron_common::api::external::Generation,
         ImportExportPolicy = omicron_common::api::external::ImportExportPolicy,
         MacAddr = omicron_common::api::external::MacAddr,
-        MgsUpdateDriverStatus = nexus_types::internal_api::views::MgsUpdateDriverStatus,
         Name = omicron_common::api::external::Name,
         NetworkInterface = omicron_common::api::internal::shared::NetworkInterface,
         NetworkInterfaceKind = omicron_common::api::internal::shared::NetworkInterfaceKind,
         NewPasswordHash = omicron_passwords::NewPasswordHash,
-        OmicronPhysicalDiskConfig = omicron_common::disk::OmicronPhysicalDiskConfig,
-        OmicronPhysicalDisksConfig = omicron_common::disk::OmicronPhysicalDisksConfig,
         OximeterReadMode = nexus_types::deployment::OximeterReadMode,
-        OximeterReadPolicy = nexus_types::deployment::OximeterReadPolicy,
         PendingMgsUpdate = nexus_types::deployment::PendingMgsUpdate,
         PlannerConfig = nexus_types::deployment::PlannerConfig,
-        ReconfiguratorConfig = nexus_types::deployment::ReconfiguratorConfig,
-        ReconfiguratorConfigParam = nexus_types::deployment::ReconfiguratorConfigParam,
-        ReconfiguratorConfigView = nexus_types::deployment::ReconfiguratorConfigView,
         RecoverySiloConfig = nexus_sled_agent_shared::recovery_silo::RecoverySiloConfig,
         Srv = nexus_types::internal_api::params::Srv,
         TypedUuidForBlueprintKind = omicron_uuid_kinds::BlueprintUuid,
-        TypedUuidForCollectionKind = omicron_uuid_kinds::CollectionUuid,
         TypedUuidForDatasetKind = omicron_uuid_kinds::TypedUuid<omicron_uuid_kinds::DatasetKind>,
-        TypedUuidForDemoSagaKind = omicron_uuid_kinds::DemoSagaUuid,
         TypedUuidForDownstairsKind = omicron_uuid_kinds::TypedUuid<omicron_uuid_kinds::DownstairsKind>,
         TypedUuidForPhysicalDiskKind = omicron_uuid_kinds::TypedUuid<omicron_uuid_kinds::PhysicalDiskKind>,
         TypedUuidForPropolisKind = omicron_uuid_kinds::TypedUuid<omicron_uuid_kinds::PropolisKind>,
@@ -76,9 +62,6 @@ progenitor::generate_api!(
         TypedUuidForUpstairsSessionKind = omicron_uuid_kinds::TypedUuid<omicron_uuid_kinds::UpstairsSessionKind>,
         TypedUuidForVolumeKind = omicron_uuid_kinds::TypedUuid<omicron_uuid_kinds::VolumeKind>,
         TypedUuidForZpoolKind = omicron_uuid_kinds::TypedUuid<omicron_uuid_kinds::ZpoolKind>,
-        UpdateStatus = nexus_types::internal_api::views::UpdateStatus,
-        ZoneStatus = nexus_types::internal_api::views::ZoneStatus,
-        ZoneStatusVersion = nexus_types::internal_api::views::ZoneStatusVersion,
         ZpoolName = omicron_common::zpool_name::ZpoolName,
     },
     patch = {
@@ -87,26 +70,6 @@ progenitor::generate_api!(
         Baseboard = { derives = [PartialEq, Eq] }
     }
 );
-
-impl IdOrdItem for types::PendingSagaInfo {
-    type Key<'a> = Uuid;
-
-    fn key(&self) -> Self::Key<'_> {
-        self.saga_id
-    }
-
-    id_upcast!();
-}
-
-impl IdOrdItem for types::HeldDbClaimInfo {
-    type Key<'a> = u64;
-
-    fn key(&self) -> Self::Key<'_> {
-        self.id
-    }
-
-    id_upcast!();
-}
 
 impl omicron_common::api::external::ClientError for types::Error {
     fn message(&self) -> String {

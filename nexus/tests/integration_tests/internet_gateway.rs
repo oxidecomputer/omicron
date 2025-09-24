@@ -387,6 +387,7 @@ async fn test_setup(c: &ClientTestContext) {
         }],
         true,
         None,
+        None,
     )
     .await;
 

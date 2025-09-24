@@ -305,7 +305,7 @@ impl DataStore {
     pub async fn get_db_metadata_nexus_in_state(
         &self,
         opctx: &OpContext,
-        states: &[DbMetadataNexusState],
+        states: Vec<DbMetadataNexusState>,
     ) -> Result<Vec<DbMetadataNexus>, Error> {
         use nexus_db_schema::schema::db_metadata_nexus::dsl;
 

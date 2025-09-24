@@ -1048,6 +1048,7 @@ mod test {
     use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
     use nexus_types::deployment::BlueprintHostPhase2DesiredSlots;
     use nexus_types::deployment::BlueprintSledConfig;
+    use nexus_types::deployment::BlueprintSource;
     use nexus_types::deployment::CockroachDbPreserveDowngrade;
     use nexus_types::deployment::PendingMgsUpdates;
     use nexus_types::deployment::{
@@ -1056,7 +1057,7 @@ mod test {
     };
     use nexus_types::deployment::{
         BlueprintZoneDisposition, BlueprintZoneImageSource,
-        OmicronZoneExternalSnatIp, OximeterReadMode, PlanningReport,
+        OmicronZoneExternalSnatIp, OximeterReadMode,
     };
     use nexus_types::external_api::shared::SiloIdentityMode;
     use nexus_types::external_api::views::SledState;
@@ -1113,7 +1114,7 @@ mod test {
                     time_created: Utc::now(),
                     creator: "test suite".to_string(),
                     comment: "test suite".to_string(),
-                    report: PlanningReport::new(blueprint_id),
+                    source: BlueprintSource::Test,
                 },
                 blueprint_execution_enabled: false,
                 physical_disks: vec![],
@@ -1505,6 +1506,8 @@ mod test {
                     zone_type: BlueprintZoneType::Nexus(
                         blueprint_zone_type::Nexus {
                             internal_address: "[::1]:80".parse().unwrap(),
+                            lockstep_port:
+                                omicron_common::address::NEXUS_LOCKSTEP_PORT,
                             external_ip: OmicronZoneExternalFloatingIp {
                                 id: ExternalIpUuid::new_v4(),
                                 ip: nexus_ip,
@@ -1604,7 +1607,7 @@ mod test {
             time_created: now_db_precision(),
             creator: "test suite".to_string(),
             comment: "test blueprint".to_string(),
-            report: PlanningReport::new(blueprint_id),
+            source: BlueprintSource::Test,
         };
 
         let rack = datastore
@@ -1763,6 +1766,8 @@ mod test {
                     zone_type: BlueprintZoneType::Nexus(
                         blueprint_zone_type::Nexus {
                             internal_address: "[::1]:80".parse().unwrap(),
+                            lockstep_port:
+                                omicron_common::address::NEXUS_LOCKSTEP_PORT,
                             external_ip: OmicronZoneExternalFloatingIp {
                                 id: ExternalIpUuid::new_v4(),
                                 ip: nexus_ip_start.into(),
@@ -1795,6 +1800,8 @@ mod test {
                     zone_type: BlueprintZoneType::Nexus(
                         blueprint_zone_type::Nexus {
                             internal_address: "[::1]:80".parse().unwrap(),
+                            lockstep_port:
+                                omicron_common::address::NEXUS_LOCKSTEP_PORT,
                             external_ip: OmicronZoneExternalFloatingIp {
                                 id: ExternalIpUuid::new_v4(),
                                 ip: nexus_ip_end.into(),
@@ -1870,7 +1877,7 @@ mod test {
             time_created: now_db_precision(),
             creator: "test suite".to_string(),
             comment: "test blueprint".to_string(),
-            report: PlanningReport::new(blueprint_id),
+            source: BlueprintSource::Test,
         };
 
         let rack = datastore
@@ -2047,6 +2054,8 @@ mod test {
                 zone_type: BlueprintZoneType::Nexus(
                     blueprint_zone_type::Nexus {
                         internal_address: "[::1]:80".parse().unwrap(),
+                        lockstep_port:
+                            omicron_common::address::NEXUS_LOCKSTEP_PORT,
                         external_ip: OmicronZoneExternalFloatingIp {
                             id: ExternalIpUuid::new_v4(),
                             ip: nexus_ip_start.into(),
@@ -2118,7 +2127,7 @@ mod test {
             time_created: now_db_precision(),
             creator: "test suite".to_string(),
             comment: "test blueprint".to_string(),
-            report: PlanningReport::new(blueprint_id),
+            source: BlueprintSource::Test,
             nexus_generation: *Generation::new(),
         };
 
@@ -2271,6 +2280,8 @@ mod test {
                 zone_type: BlueprintZoneType::Nexus(
                     blueprint_zone_type::Nexus {
                         internal_address: "[::1]:80".parse().unwrap(),
+                        lockstep_port:
+                            omicron_common::address::NEXUS_LOCKSTEP_PORT,
                         external_ip: OmicronZoneExternalFloatingIp {
                             id: ExternalIpUuid::new_v4(),
                             ip: nexus_ip,
@@ -2318,7 +2329,7 @@ mod test {
             time_created: now_db_precision(),
             creator: "test suite".to_string(),
             comment: "test blueprint".to_string(),
-            report: PlanningReport::new(blueprint_id),
+            source: BlueprintSource::Test,
         };
 
         let result = datastore
@@ -2411,6 +2422,8 @@ mod test {
                     zone_type: BlueprintZoneType::Nexus(
                         blueprint_zone_type::Nexus {
                             internal_address: "[::1]:80".parse().unwrap(),
+                            lockstep_port:
+                                omicron_common::address::NEXUS_LOCKSTEP_PORT,
                             external_ip: OmicronZoneExternalFloatingIp {
                                 id: ExternalIpUuid::new_v4(),
                                 ip,
@@ -2460,7 +2473,7 @@ mod test {
             time_created: now_db_precision(),
             creator: "test suite".to_string(),
             comment: "test blueprint".to_string(),
-            report: PlanningReport::new(blueprint_id),
+            source: BlueprintSource::Test,
         };
 
         let result = datastore

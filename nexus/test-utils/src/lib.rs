@@ -42,6 +42,7 @@ use nexus_sled_agent_shared::inventory::OmicronSledConfig;
 use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
 use nexus_sled_agent_shared::inventory::SledCpuFamily;
 use nexus_sled_agent_shared::recovery_silo::RecoverySiloConfig;
+use nexus_test_interface::InternalServer;
 use nexus_test_interface::NexusServer;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintDatasetConfig;
@@ -50,6 +51,7 @@ use nexus_types::deployment::BlueprintHostPhase2DesiredSlots;
 use nexus_types::deployment::BlueprintPhysicalDiskConfig;
 use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
 use nexus_types::deployment::BlueprintSledConfig;
+use nexus_types::deployment::BlueprintSource;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneImageSource;
@@ -60,7 +62,6 @@ use nexus_types::deployment::OmicronZoneExternalFloatingIp;
 use nexus_types::deployment::OmicronZoneExternalSnatIp;
 use nexus_types::deployment::OximeterReadMode;
 use nexus_types::deployment::PlannerConfig;
-use nexus_types::deployment::PlanningReport;
 use nexus_types::deployment::ReconfiguratorConfig;
 use nexus_types::deployment::blueprint_zone_type;
 use nexus_types::external_api::views::SledState;
@@ -176,6 +177,7 @@ pub struct ControlPlaneTestContext<N> {
     pub external_client: ClientTestContext,
     pub techport_client: ClientTestContext,
     pub internal_client: ClientTestContext,
+    pub lockstep_client: ClientTestContext,
     pub server: N,
     pub database: dev::db::CockroachInstance,
     pub database_admin: omicron_cockroach_admin::Server,
@@ -377,6 +379,19 @@ impl RackInitRequestBuilder {
             .expect("Failed to set up DNS for GZ service");
     }
 
+    // Special handling of Nexus, which has multiple SRV records for its single
+    // zone.
+    fn add_nexus_to_dns(
+        &mut self,
+        zone_id: OmicronZoneUuid,
+        address: SocketAddrV6,
+        lockstep_port: u16,
+    ) {
+        self.internal_dns_config
+            .host_zone_nexus(zone_id, address, lockstep_port)
+            .expect("Failed to set up Nexus DNS");
+    }
+
     // Special handling of ClickHouse, which has multiple SRV records for its
     // single zone.
     fn add_clickhouse_to_dns(
@@ -424,6 +439,7 @@ pub struct ControlPlaneTestContextBuilder<'a, N: NexusServer> {
     pub external_client: Option<ClientTestContext>,
     pub techport_client: Option<ClientTestContext>,
     pub internal_client: Option<ClientTestContext>,
+    pub lockstep_client: Option<ClientTestContext>,
 
     pub server: Option<N>,
     pub database: Option<dev::db::CockroachInstance>,
@@ -483,6 +499,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             external_client: None,
             techport_client: None,
             internal_client: None,
+            lockstep_client: None,
             server: None,
             database: None,
             database_admin: None,
@@ -828,25 +845,36 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                 .clone(),
         };
 
-        let (nexus_internal, nexus_internal_addr) =
-            N::start_internal(&self.config, &log).await?;
+        let nexus_internal = N::start_internal(&self.config, &log).await?;
+        let nexus_internal_addr =
+            nexus_internal.get_http_server_internal_address();
+        let internal_address = match nexus_internal_addr {
+            SocketAddr::V4(addr) => {
+                SocketAddrV6::new(addr.ip().to_ipv6_mapped(), addr.port(), 0, 0)
+            }
+            SocketAddr::V6(addr) => addr,
+        };
+        let lockstep_address = match nexus_internal
+            .get_http_server_lockstep_address()
+        {
+            SocketAddr::V4(addr) => {
+                SocketAddrV6::new(addr.ip().to_ipv6_mapped(), addr.port(), 0, 0)
+            }
+            SocketAddr::V6(addr) => addr,
+        };
+        assert_eq!(internal_address.ip(), lockstep_address.ip());
 
-        let address = SocketAddrV6::new(
-            match nexus_internal_addr.ip() {
-                IpAddr::V4(addr) => addr.to_ipv6_mapped(),
-                IpAddr::V6(addr) => addr,
-            },
-            nexus_internal_addr.port(),
-            0,
-            0,
-        );
-
-        self.rack_init_builder.add_service_to_dns(
+        self.rack_init_builder.add_nexus_to_dns(
             self.config.deployment.id,
-            address,
-            ServiceName::Nexus,
+            internal_address,
+            lockstep_address.port(),
         );
-        self.record_nexus_zone(self.config.clone(), address, 0);
+        self.record_nexus_zone(
+            self.config.clone(),
+            internal_address,
+            lockstep_address.port(),
+            0,
+        );
         self.nexus_internal = Some(nexus_internal);
         self.nexus_internal_addr = Some(nexus_internal_addr);
         Ok(())
@@ -890,13 +918,24 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                  nexus/examples/config-second.toml"
             );
         };
-        self.record_nexus_zone(second_nexus_config, second_internal_address, 1);
+        let second_lockstep_port = second_nexus_config
+            .deployment
+            .dropshot_lockstep
+            .bind_address
+            .port();
+        self.record_nexus_zone(
+            second_nexus_config,
+            second_internal_address,
+            second_lockstep_port,
+            1,
+        );
     }
 
     fn record_nexus_zone(
         &mut self,
         config: NexusConfig,
         internal_address: SocketAddrV6,
+        lockstep_port: u16,
         which: usize,
     ) {
         let id = config.deployment.id;
@@ -925,6 +964,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                 },
                 external_tls: config.deployment.dropshot_external.tls,
                 internal_address,
+                lockstep_port,
                 nic: NetworkInterface {
                     id: Uuid::new_v4(),
                     ip: NEXUS_OPTE_IPV4_SUBNET
@@ -1035,7 +1075,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             time_created: Utc::now(),
             creator: "nexus-test-utils".to_string(),
             comment: "initial test blueprint".to_string(),
-            report: PlanningReport::new(id),
+            source: BlueprintSource::Test,
         };
 
         self.initial_blueprint_id = Some(blueprint.id);
@@ -1080,6 +1120,8 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             server.get_http_server_techport_address().await;
         let internal_server_addr =
             server.get_http_server_internal_address().await;
+        let lockstep_server_addr =
+            server.get_http_server_lockstep_address().await;
         let testctx_external = ClientTestContext::new(
             external_server_addr,
             self.logctx
@@ -1098,11 +1140,18 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                 .log
                 .new(o!("component" => "internal client test context")),
         );
+        let testctx_lockstep = ClientTestContext::new(
+            lockstep_server_addr,
+            self.logctx
+                .log
+                .new(o!("component" => "lockstep client test context")),
+        );
 
         self.external_dns_zone_name = Some(external_dns_zone_name);
         self.external_client = Some(testctx_external);
         self.techport_client = Some(testctx_techport);
         self.internal_client = Some(testctx_internal);
+        self.lockstep_client = Some(testctx_lockstep);
         self.silo_name = Some(silo_name);
         self.user_name = Some(user_name);
         self.password = Some(TEST_SUITE_PASSWORD.to_string());
@@ -1463,6 +1512,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             external_client: self.external_client.unwrap(),
             techport_client: self.techport_client.unwrap(),
             internal_client: self.internal_client.unwrap(),
+            lockstep_client: self.lockstep_client.unwrap(),
             database: self.database.unwrap(),
             database_admin: self.database_admin.unwrap(),
             clickhouse: self.clickhouse.unwrap(),

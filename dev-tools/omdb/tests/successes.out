@@ -1,3 +1,16 @@
+EXECUTING COMMAND: omdb ["db", "db-metadata", "ls-nexus"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+Target Blueprint ......<REDACTED_BLUEPRINT_ID>....... @ nexus_generation: 1
+ID                                   |LAST_DRAINED_BLUEPRINT |STATE  |TRANSITIONING_TO 
+-------------------------------------+-----------------------+-------+-----------------
+..........<REDACTED_UUID>........... |                       |active |                 
+---------------------------------------------
+stderr:
+note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
+note: database schema version matches expected (<redacted database version>)
+=============================================
 EXECUTING COMMAND: omdb ["db", "disks", "list"]
 termination: Exited(0)
 ---------------------------------------------
@@ -1514,7 +1527,7 @@ parent:    <none>
 
  PENDING MGS-MANAGED UPDATES: 0
 
-empty planning report for blueprint ......<REDACTED_BLUEPRINT_ID>........
+blueprint source: constructed by an automated test
 
 
 ---------------------------------------------
@@ -1638,7 +1651,7 @@ parent:    <none>
 
  PENDING MGS-MANAGED UPDATES: 0
 
-empty planning report for blueprint ......<REDACTED_BLUEPRINT_ID>........
+blueprint source: constructed by an automated test
 
 
 ---------------------------------------------

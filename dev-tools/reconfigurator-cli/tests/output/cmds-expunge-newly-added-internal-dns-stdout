@@ -333,13 +333,14 @@ parent:    184f10b3-61cb-41ef-9b93-3489b2bac559
 
  PENDING MGS-MANAGED UPDATES: 0
 
-empty planning report for blueprint dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21.
+blueprint source: constructed by an automated test
 
 
 
 > # Expunge an internal DNS zone
-> blueprint-edit dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21 expunge-zone 99e2f30b-3174-40bf-a78a-90da8abba8ca
+> blueprint-edit dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21 expunge-zones 99e2f30b-3174-40bf-a78a-90da8abba8ca
 blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1 created from blueprint dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21: expunged zone 99e2f30b-3174-40bf-a78a-90da8abba8ca from sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
+
 
 > # Diff against the new blueprint; the zone has been expunged so its records should be removed.
 > blueprint-diff dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
@@ -493,7 +494,7 @@ internal DNS:
 +       AAAA fd00:1122:3344:3::1
 -   name: ns3                                                (records: 1)
 -       AAAA fd00:1122:3344:3::1
-    unchanged names: 87 (records: 97)
+    unchanged names: 88 (records: 100)
 
 external DNS:
   DNS zone: "oxide.example" (unchanged)
@@ -635,7 +636,7 @@ to:   blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4
 
 internal DNS:
   DNS zone: "control-plane.oxide.internal" (unchanged)
-    unchanged names: 91 (records: 103)
+    unchanged names: 92 (records: 106)
 
 external DNS:
   DNS zone: "oxide.example" (unchanged)
@@ -644,17 +645,34 @@ external DNS:
 
 
 
+> # Set the add_zones_with_mupdate_override planner config to ensure that zone
+> # adds happen despite zone image sources not being Artifact.
+> set planner-config --add-zones-with-mupdate-override true
+planner config updated:
+*   add zones with mupdate override:   false -> true
+
+
+
 > # Planning a new blueprint will now replace the expunged zone, with new records for its replacement.
 > blueprint-plan 58d5e830-0884-47d8-a7cd-b2b3751adeb4
 INFO skipping noop image source check for all sleds, reason: no target release is currently set
-INFO skipping board for MGS-driven update, serial_number: serial0, part_number: model0 due to unsafe zones: [InternalDns]
-INFO skipping board for MGS-driven update, serial_number: serial2, part_number: model2 due to unsafe zones: [InternalDns]
-WARN cannot issue more MGS-driven updates (no current artifacts)
 generated blueprint af934083-59b5-4bf6-8966-6fb5292c29e1 based on parent blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4
-planning report for blueprint af934083-59b5-4bf6-8966-6fb5292c29e1:
+blueprint source: planner with report:
+planning report:
+planner config:
+    add zones with mupdate override:   true
+
+* zone adds and updates are blocked:
+  - sleds have deployment units with image sources not set to Artifact:
+    - sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: 15 zones
+    - sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: 15 zones
+    - sled d81c6a84-79b8-4958-ae41-ea46c9b19763: 15 zones
+
+* adding zones despite being blocked, as specified by the `add_zones_with_mupdate_override` planner config option
 * discretionary zones placed:
   * internal_dns zone on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c from source install dataset
 * zone updates waiting on discretionary zones
+
 
 
 > blueprint-diff 58d5e830-0884-47d8-a7cd-b2b3751adeb4 af934083-59b5-4bf6-8966-6fb5292c29e1
@@ -808,7 +826,7 @@ internal DNS:
 +       AAAA fd00:1122:3344:2::1
 +   name: ns3                                                (records: 1)
 +       AAAA fd00:1122:3344:3::1
-    unchanged names: 87 (records: 97)
+    unchanged names: 88 (records: 100)
 
 external DNS:
   DNS zone: "oxide.example" (unchanged)

@@ -115,6 +115,8 @@ Query the control plane database (CockroachDB)
 Usage: omdb db [OPTIONS] <COMMAND>
 
 Commands:
+  blueprints                   Print information about blueprints
+  db-metadata                  Commands for database metadata
   crucible-dataset             Commands relevant to Crucible datasets
   replacements-to-do           Print any Crucible resources that are located on expunged physical
                                disks
@@ -174,6 +176,8 @@ Query the control plane database (CockroachDB)
 Usage: omdb db [OPTIONS] <COMMAND>
 
 Commands:
+  blueprints                   Print information about blueprints
+  db-metadata                  Commands for database metadata
   crucible-dataset             Commands relevant to Crucible datasets
   replacements-to-do           Print any Crucible resources that are located on expunged physical
                                disks
@@ -862,9 +866,10 @@ Options:
   -h, --help                   Print help
 
 Connection Options:
-      --nexus-internal-url <NEXUS_INTERNAL_URL>  URL of the Nexus internal API [env:
-                                                 OMDB_NEXUS_URL=]
-      --dns-server <DNS_SERVER>                  [env: OMDB_DNS_SERVER=]
+      --nexus-internal-url <NEXUS_INTERNAL_URL>
+          URL of the Nexus internal lockstep API [env: OMDB_NEXUS_URL=]
+      --dns-server <DNS_SERVER>
+          [env: OMDB_DNS_SERVER=]
 
 Safety Options:
   -w, --destructive  Allow potentially-destructive subcommands
@@ -893,9 +898,10 @@ Options:
   -h, --help                   Print help
 
 Connection Options:
-      --nexus-internal-url <NEXUS_INTERNAL_URL>  URL of the Nexus internal API [env:
-                                                 OMDB_NEXUS_URL=]
-      --dns-server <DNS_SERVER>                  [env: OMDB_DNS_SERVER=]
+      --nexus-internal-url <NEXUS_INTERNAL_URL>
+          URL of the Nexus internal lockstep API [env: OMDB_NEXUS_URL=]
+      --dns-server <DNS_SERVER>
+          [env: OMDB_DNS_SERVER=]
 
 Safety Options:
   -w, --destructive  Allow potentially-destructive subcommands
@@ -938,7 +944,7 @@ Options:
 
 Connection Options:
       --nexus-internal-url <NEXUS_INTERNAL_URL>
-          URL of the Nexus internal API
+          URL of the Nexus internal lockstep API
           
           [env: OMDB_NEXUS_URL=]
 
@@ -977,9 +983,10 @@ Options:
   -h, --help                   Print help
 
 Connection Options:
-      --nexus-internal-url <NEXUS_INTERNAL_URL>  URL of the Nexus internal API [env:
-                                                 OMDB_NEXUS_URL=]
-      --dns-server <DNS_SERVER>                  [env: OMDB_DNS_SERVER=]
+      --nexus-internal-url <NEXUS_INTERNAL_URL>
+          URL of the Nexus internal lockstep API [env: OMDB_NEXUS_URL=]
+      --dns-server <DNS_SERVER>
+          [env: OMDB_DNS_SERVER=]
 
 Safety Options:
   -w, --destructive  Allow potentially-destructive subcommands
@@ -1006,9 +1013,10 @@ Options:
   -h, --help                   Print help
 
 Connection Options:
-      --nexus-internal-url <NEXUS_INTERNAL_URL>  URL of the Nexus internal API [env:
-                                                 OMDB_NEXUS_URL=]
-      --dns-server <DNS_SERVER>                  [env: OMDB_DNS_SERVER=]
+      --nexus-internal-url <NEXUS_INTERNAL_URL>
+          URL of the Nexus internal lockstep API [env: OMDB_NEXUS_URL=]
+      --dns-server <DNS_SERVER>
+          [env: OMDB_DNS_SERVER=]
 
 Safety Options:
   -w, --destructive  Allow potentially-destructive subcommands
@@ -1045,9 +1053,10 @@ Options:
   -h, --help                   Print help
 
 Connection Options:
-      --nexus-internal-url <NEXUS_INTERNAL_URL>  URL of the Nexus internal API [env:
-                                                 OMDB_NEXUS_URL=]
-      --dns-server <DNS_SERVER>                  [env: OMDB_DNS_SERVER=]
+      --nexus-internal-url <NEXUS_INTERNAL_URL>
+          URL of the Nexus internal lockstep API [env: OMDB_NEXUS_URL=]
+      --dns-server <DNS_SERVER>
+          [env: OMDB_DNS_SERVER=]
 
 Safety Options:
   -w, --destructive  Allow potentially-destructive subcommands

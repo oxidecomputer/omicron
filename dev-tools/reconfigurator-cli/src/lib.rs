@@ -4,8 +4,8 @@
 
 //! developer REPL for driving blueprint planning
 
-use anyhow::{Context, anyhow, bail};
-use camino::{Utf8Path, Utf8PathBuf};
+use anyhow::{Context, anyhow, bail, ensure};
+use camino::Utf8PathBuf;
 use chrono::{DateTime, Utc};
 use clap::{ArgAction, ValueEnum};
 use clap::{Args, Parser, Subcommand};
@@ -20,7 +20,9 @@ use nexus_inventory::CollectionBuilder;
 use nexus_reconfigurator_blippy::Blippy;
 use nexus_reconfigurator_blippy::BlippyReportSortKey;
 use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
-use nexus_reconfigurator_planning::example::ExampleSystemBuilder;
+use nexus_reconfigurator_planning::example::{
+    ExampleSystemBuilder, extract_tuf_repo_description, tuf_assemble,
+};
 use nexus_reconfigurator_planning::planner::Planner;
 use nexus_reconfigurator_planning::system::{
     RotStateOverrides, SledBuilder, SledInventoryVisibility, SystemDescription,
@@ -29,7 +31,6 @@ use nexus_reconfigurator_simulation::{BlueprintId, CollectionId, SimState};
 use nexus_reconfigurator_simulation::{SimStateBuilder, SimTufRepoSource};
 use nexus_reconfigurator_simulation::{SimTufRepoDescription, Simulator};
 use nexus_sled_agent_shared::inventory::ZoneKind;
-use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::execution;
 use nexus_types::deployment::execution::blueprint_external_dns_config;
 use nexus_types::deployment::execution::blueprint_internal_dns_config;
@@ -38,6 +39,7 @@ use nexus_types::deployment::{BlueprintArtifactVersion, PendingMgsUpdate};
 use nexus_types::deployment::{
     BlueprintHostPhase2DesiredContents, PlannerConfig,
 };
+use nexus_types::deployment::{BlueprintSource, SledFilter};
 use nexus_types::deployment::{BlueprintZoneDisposition, ExpectedVersion};
 use nexus_types::deployment::{
     BlueprintZoneImageSource, PendingMgsUpdateDetails,
@@ -48,8 +50,8 @@ use nexus_types::external_api::views::SledPolicy;
 use nexus_types::external_api::views::SledProvisionPolicy;
 use nexus_types::inventory::CollectionDisplayCliFilter;
 use omicron_common::address::REPO_DEPOT_PORT;
+use omicron_common::api::external::Generation;
 use omicron_common::api::external::Name;
-use omicron_common::api::external::{Generation, TufRepoDescription};
 use omicron_common::disk::M2Slot;
 use omicron_common::policy::NEXUS_REDUNDANCY;
 use omicron_common::update::OmicronZoneManifestSource;
@@ -75,19 +77,8 @@ use tufaceous_artifact::ArtifactHash;
 use tufaceous_artifact::ArtifactVersion;
 use tufaceous_artifact::ArtifactVersionError;
 use tufaceous_lib::assemble::ArtifactManifest;
-use update_common::artifacts::{
-    ArtifactsWithPlan, ControlPlaneZonesMode, VerificationMode,
-};
 
 mod log_capture;
-
-/// The default key for TUF repository generation.
-///
-/// This was randomly generated through a tufaceous invocation.
-pub static DEFAULT_TUFACEOUS_KEY: &str = "ed25519:\
-MFECAQEwBQYDK2VwBCIEIJ9CnAhwk8PPt1x8icu\
-z9c12PdfCRHJpoUkuqJmIZ8GbgSEAbNGMpsHK5_w32\
-qwYdZH_BeVssmKzQlFsnPuaiHx2hy0=";
 
 /// REPL state
 #[derive(Debug)]
@@ -778,7 +769,7 @@ enum BlueprintEditCommands {
         generation: Generation,
     },
     /// expunge a zone
-    ExpungeZone { zone_id: OmicronZoneUuid },
+    ExpungeZones { zone_ids: Vec<OmicronZoneUuid> },
     /// mark an expunged zone ready for cleanup
     MarkForCleanup { zone_id: OmicronZoneUuid },
     /// configure an SP update
@@ -807,6 +798,11 @@ enum BlueprintEditCommands {
         #[command(subcommand)]
         command: BlueprintEditDebugCommands,
     },
+    /// bumps the blueprint's Nexus generation
+    ///
+    /// This initiates a handoff from the current generation of Nexus zones to
+    /// the next generation of Nexus zones.
+    BumpNexusGeneration,
 }
 
 #[derive(Debug, Subcommand)]
@@ -2104,8 +2100,9 @@ fn cmd_blueprint_plan(
 
     let blueprint = planner.plan().context("generating blueprint")?;
     let rv = format!(
-        "generated blueprint {} based on parent blueprint {}\n{}",
-        blueprint.id, parent_blueprint.id, blueprint.report,
+        "generated blueprint {} based on parent blueprint {}\n\
+         blueprint source: {}",
+        blueprint.id, parent_blueprint.id, blueprint.source,
     );
     system.add_blueprint(blueprint)?;
 
@@ -2180,6 +2177,29 @@ fn cmd_blueprint_edit(
                 .context("failed to add CockroachDB zone")?;
             format!("added CockroachDB zone to sled {}", sled_id)
         }
+        BlueprintEditCommands::BumpNexusGeneration => {
+            let current_generation = builder.nexus_generation();
+            let current_max = blueprint
+                .all_nexus_zones(BlueprintZoneDisposition::is_in_service)
+                .fold(
+                    current_generation,
+                    |current_max, (_sled_id, _zone_config, nexus_config)| {
+                        std::cmp::max(
+                            nexus_config.nexus_generation,
+                            current_max,
+                        )
+                    },
+                );
+            ensure!(
+                current_max > current_generation,
+                "cannot bump blueprint generation (currently \
+                 {current_generation}) past highest deployed Nexus \
+                 generation (currently {current_max})",
+            );
+            let next = current_generation.next();
+            builder.set_nexus_generation(next);
+            format!("nexus generation: {current_generation} -> {next}")
+        }
         BlueprintEditCommands::SetRemoveMupdateOverride { sled_id, value } => {
             let sled_id = sled_id.to_sled_id(system.description())?;
             builder
@@ -2235,12 +2255,16 @@ fn cmd_blueprint_edit(
                 .context("failed to set host phase 2 source")?;
             rv
         }
-        BlueprintEditCommands::ExpungeZone { zone_id } => {
-            let sled_id = sled_with_zone(&builder, &zone_id)?;
-            builder
-                .sled_expunge_zone(sled_id, zone_id)
-                .context("failed to expunge zone")?;
-            format!("expunged zone {zone_id} from sled {sled_id}")
+        BlueprintEditCommands::ExpungeZones { zone_ids } => {
+            let mut rv = String::new();
+            for zone_id in zone_ids {
+                let sled_id = sled_with_zone(&builder, &zone_id)?;
+                builder.sled_expunge_zone(sled_id, zone_id).with_context(
+                    || format!("failed to expunge zone {zone_id}"),
+                )?;
+                swriteln!(rv, "expunged zone {zone_id} from sled {sled_id}");
+            }
+            rv
         }
         BlueprintEditCommands::MarkForCleanup { zone_id } => {
             let sled_id = sled_with_zone(&builder, &zone_id)?;
@@ -2320,7 +2344,8 @@ fn cmd_blueprint_edit(
         }
     };
 
-    let mut new_blueprint = builder.build();
+    let mut new_blueprint =
+        builder.build(BlueprintSource::ReconfiguratorCliEdit);
 
     // Normally `builder.build()` would construct the cockroach fingerprint
     // based on what we read from CRDB and put into the planning input, but
@@ -2808,32 +2833,6 @@ fn mupdate_source_to_description(
     }
 }
 
-fn extract_tuf_repo_description(
-    log: &slog::Logger,
-    filename: &Utf8Path,
-) -> anyhow::Result<TufRepoDescription> {
-    let file = std::fs::File::open(filename)
-        .with_context(|| format!("open {:?}", filename))?;
-    let buf = std::io::BufReader::new(file);
-    let rt =
-        tokio::runtime::Runtime::new().context("creating tokio runtime")?;
-    let repo_hash = ArtifactHash([0; 32]);
-    let artifacts_with_plan = rt.block_on(async {
-        ArtifactsWithPlan::from_zip(
-            buf,
-            None,
-            repo_hash,
-            ControlPlaneZonesMode::Split,
-            VerificationMode::BlindlyTrustAnything,
-            log,
-        )
-        .await
-        .with_context(|| format!("unpacking {:?}", filename))
-    })?;
-    let description = artifacts_with_plan.description().clone();
-    Ok(description)
-}
-
 fn cmd_tuf_assemble(
     sim: &ReconfiguratorSim,
     args: TufAssembleArgs,
@@ -2864,30 +2863,12 @@ fn cmd_tuf_assemble(
         Utf8PathBuf::from(format!("repo-{}.zip", manifest.system_version))
     };
 
-    if output_path.exists() {
-        bail!("output path `{output_path}` already exists");
-    }
-
-    // Just use a fixed key for now.
-    //
-    // In the future we may want to test changing the TUF key.
-    let mut tufaceous_args = vec![
-        "tufaceous",
-        "--key",
-        DEFAULT_TUFACEOUS_KEY,
-        "assemble",
-        manifest_path.as_str(),
-        output_path.as_str(),
-    ];
-    if args.allow_non_semver {
-        tufaceous_args.push("--allow-non-semver");
-    }
-    let args = tufaceous::Args::try_parse_from(tufaceous_args)
-        .expect("args are valid so this shouldn't fail");
-    let rt =
-        tokio::runtime::Runtime::new().context("creating tokio runtime")?;
-    rt.block_on(async move { args.exec(&sim.log).await })
-        .context("error executing tufaceous assemble")?;
+    tuf_assemble(
+        &sim.log,
+        &manifest_path,
+        &output_path,
+        args.allow_non_semver,
+    )?;
 
     let rv = format!(
         "created {} for system version {}",

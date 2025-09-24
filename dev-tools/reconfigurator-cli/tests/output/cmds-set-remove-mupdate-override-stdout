@@ -364,7 +364,7 @@ parent:    df06bb57-ad42-4431-9206-abff322896c7
 
  PENDING MGS-MANAGED UPDATES: 0
 
-empty planning report for blueprint 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba.
+blueprint source: edited directly with reconfigurator-cli
 
 
 
@@ -666,7 +666,7 @@ internal DNS:
 -       AAAA fd00:1122:3344:107::22
 -   name: c800ba17-240e-4b72-8ae6-afc30b6baa96.host          (records: 1)
 -       AAAA fd00:1122:3344:107::21
-    unchanged names: 51 (records: 67)
+    unchanged names: 52 (records: 70)
 
 external DNS:
   DNS zone: "oxide.example" (unchanged)
@@ -990,7 +990,7 @@ parent:    afb09faf-a586-4483-9289-04d4f1d8ba23
 
  PENDING MGS-MANAGED UPDATES: 0
 
-empty planning report for blueprint ce365dff-2cdb-4f35-a186-b15e20e1e700.
+blueprint source: edited directly with reconfigurator-cli
 
 
 
@@ -1015,7 +1015,7 @@ to:   blueprint ce365dff-2cdb-4f35-a186-b15e20e1e700
 
 internal DNS:
   DNS zone: "control-plane.oxide.internal" (unchanged)
-    unchanged names: 52 (records: 73)
+    unchanged names: 53 (records: 76)
 
 external DNS:
   DNS zone: "oxide.example" (unchanged)
