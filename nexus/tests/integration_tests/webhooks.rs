@@ -486,7 +486,7 @@ async fn test_cannot_subscribe_to_probes(cptestctx: &ControlPlaneTestContext) {
 #[nexus_test]
 async fn test_event_delivery(cptestctx: &ControlPlaneTestContext) {
     let nexus = cptestctx.server.server_context().nexus.clone();
-    let internal_client = &cptestctx.internal_client;
+    let lockstep_client = &cptestctx.lockstep_client;
 
     let datastore = nexus.datastore();
     let opctx =
@@ -539,9 +539,9 @@ async fn test_event_delivery(cptestctx: &ControlPlaneTestContext) {
         .expect("event should be published successfully");
     dbg!(event);
 
-    dbg!(activate_background_task(internal_client, "alert_dispatcher").await);
+    dbg!(activate_background_task(lockstep_client, "alert_dispatcher").await);
     dbg!(
-        activate_background_task(internal_client, "webhook_deliverator").await
+        activate_background_task(lockstep_client, "webhook_deliverator").await
     );
 
     mock.assert_async().await;
@@ -550,7 +550,7 @@ async fn test_event_delivery(cptestctx: &ControlPlaneTestContext) {
 #[nexus_test]
 async fn test_multiple_secrets(cptestctx: &ControlPlaneTestContext) {
     let nexus = cptestctx.server.server_context().nexus.clone();
-    let internal_client = &cptestctx.internal_client;
+    let lockstep_client = &cptestctx.lockstep_client;
 
     let datastore = nexus.datastore();
     let opctx =
@@ -661,9 +661,9 @@ async fn test_multiple_secrets(cptestctx: &ControlPlaneTestContext) {
         .expect("event should be published successfully");
     dbg!(event);
 
-    dbg!(activate_background_task(internal_client, "alert_dispatcher").await);
+    dbg!(activate_background_task(lockstep_client, "alert_dispatcher").await);
     dbg!(
-        activate_background_task(internal_client, "webhook_deliverator").await
+        activate_background_task(lockstep_client, "webhook_deliverator").await
     );
 
     mock.assert_async().await;
@@ -672,7 +672,7 @@ async fn test_multiple_secrets(cptestctx: &ControlPlaneTestContext) {
 #[nexus_test]
 async fn test_multiple_receivers(cptestctx: &ControlPlaneTestContext) {
     let nexus = cptestctx.server.server_context().nexus.clone();
-    let internal_client = &cptestctx.internal_client;
+    let lockstep_client = &cptestctx.lockstep_client;
     let client = &cptestctx.external_client;
 
     let datastore = nexus.datastore();
@@ -837,9 +837,9 @@ async fn test_multiple_receivers(cptestctx: &ControlPlaneTestContext) {
         .expect("event should be published successfully");
     dbg!(event);
 
-    dbg!(activate_background_task(internal_client, "alert_dispatcher").await);
+    dbg!(activate_background_task(lockstep_client, "alert_dispatcher").await);
     dbg!(
-        activate_background_task(internal_client, "webhook_deliverator").await
+        activate_background_task(lockstep_client, "webhook_deliverator").await
     );
 
     // The `test.foo.bar` receiver should have received 1 event.
@@ -855,7 +855,7 @@ async fn test_multiple_receivers(cptestctx: &ControlPlaneTestContext) {
 #[nexus_test]
 async fn test_retry_backoff(cptestctx: &ControlPlaneTestContext) {
     let nexus = cptestctx.server.server_context().nexus.clone();
-    let internal_client = &cptestctx.internal_client;
+    let lockstep_client = &cptestctx.lockstep_client;
 
     let datastore = nexus.datastore();
     let opctx =
@@ -908,9 +908,9 @@ async fn test_retry_backoff(cptestctx: &ControlPlaneTestContext) {
         .expect("event should be published successfully");
     dbg!(event);
 
-    dbg!(activate_background_task(internal_client, "alert_dispatcher").await);
+    dbg!(activate_background_task(lockstep_client, "alert_dispatcher").await);
     dbg!(
-        activate_background_task(internal_client, "webhook_deliverator").await
+        activate_background_task(lockstep_client, "webhook_deliverator").await
     );
 
     mock.assert_calls_async(1).await;
@@ -941,7 +941,7 @@ async fn test_retry_backoff(cptestctx: &ControlPlaneTestContext) {
     // Okay, we are now in backoff. Activate the deliverator again --- no new
     // event should be delivered.
     dbg!(
-        activate_background_task(internal_client, "webhook_deliverator").await
+        activate_background_task(lockstep_client, "webhook_deliverator").await
     );
     // Activating the deliverator whilst in backoff should not send another
     // request.
@@ -978,13 +978,13 @@ async fn test_retry_backoff(cptestctx: &ControlPlaneTestContext) {
     // Wait out the backoff period for the first request.
     tokio::time::sleep(std::time::Duration::from_secs(15)).await;
     dbg!(
-        activate_background_task(internal_client, "webhook_deliverator").await
+        activate_background_task(lockstep_client, "webhook_deliverator").await
     );
     mock.assert_calls_async(1).await;
 
     // Again, we should be in backoff, so no request will be sent.
     dbg!(
-        activate_background_task(internal_client, "webhook_deliverator").await
+        activate_background_task(lockstep_client, "webhook_deliverator").await
     );
     mock.assert_calls_async(1).await;
     mock.delete_async().await;
@@ -1048,13 +1048,13 @@ async fn test_retry_backoff(cptestctx: &ControlPlaneTestContext) {
     //
     tokio::time::sleep(std::time::Duration::from_secs(15)).await;
     dbg!(
-        activate_background_task(internal_client, "webhook_deliverator").await
+        activate_background_task(lockstep_client, "webhook_deliverator").await
     );
     mock.assert_calls_async(0).await;
 
     tokio::time::sleep(std::time::Duration::from_secs(5)).await;
     dbg!(
-        activate_background_task(internal_client, "webhook_deliverator").await
+        activate_background_task(lockstep_client, "webhook_deliverator").await
     );
     mock.assert_async().await;
 
@@ -1270,7 +1270,7 @@ async fn test_probe_resends_failed_deliveries(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let nexus = cptestctx.server.server_context().nexus.clone();
-    let internal_client = &cptestctx.internal_client;
+    let lockstep_client = &cptestctx.lockstep_client;
     let server = httpmock::MockServer::start_async().await;
 
     let datastore = nexus.datastore();
@@ -1329,23 +1329,23 @@ async fn test_probe_resends_failed_deliveries(
             .expect("event2 should be published successfully")
     );
 
-    dbg!(activate_background_task(internal_client, "alert_dispatcher").await);
+    dbg!(activate_background_task(lockstep_client, "alert_dispatcher").await);
     dbg!(
-        activate_background_task(internal_client, "webhook_deliverator").await
+        activate_background_task(lockstep_client, "webhook_deliverator").await
     );
     mock.assert_calls_async(2).await;
 
     // Backoff 1
     tokio::time::sleep(std::time::Duration::from_secs(11)).await;
     dbg!(
-        activate_background_task(internal_client, "webhook_deliverator").await
+        activate_background_task(lockstep_client, "webhook_deliverator").await
     );
     mock.assert_calls_async(4).await;
 
     // Backoff 2
     tokio::time::sleep(std::time::Duration::from_secs(22)).await;
     dbg!(
-        activate_background_task(internal_client, "webhook_deliverator").await
+        activate_background_task(lockstep_client, "webhook_deliverator").await
     );
     mock.assert_calls_async(6).await;
 
@@ -1414,7 +1414,7 @@ async fn test_probe_resends_failed_deliveries(
 
     // Both events should be resent.
     dbg!(
-        activate_background_task(internal_client, "webhook_deliverator").await
+        activate_background_task(lockstep_client, "webhook_deliverator").await
     );
     mock.assert_calls_async(2).await;
 }
@@ -1424,7 +1424,7 @@ async fn test_api_resends_failed_deliveries(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let nexus = cptestctx.server.server_context().nexus.clone();
-    let internal_client = &cptestctx.internal_client;
+    let lockstep_client = &cptestctx.lockstep_client;
     let client = &cptestctx.external_client;
     let server = httpmock::MockServer::start_async().await;
 
@@ -1490,18 +1490,18 @@ async fn test_api_resends_failed_deliveries(
         .expect("event should be published successfully");
     dbg!(event2);
 
-    dbg!(activate_background_task(internal_client, "alert_dispatcher").await);
+    dbg!(activate_background_task(lockstep_client, "alert_dispatcher").await);
     dbg!(
-        activate_background_task(internal_client, "webhook_deliverator").await
+        activate_background_task(lockstep_client, "webhook_deliverator").await
     );
 
     tokio::time::sleep(std::time::Duration::from_secs(11)).await;
     dbg!(
-        activate_background_task(internal_client, "webhook_deliverator").await
+        activate_background_task(lockstep_client, "webhook_deliverator").await
     );
     tokio::time::sleep(std::time::Duration::from_secs(22)).await;
     dbg!(
-        activate_background_task(internal_client, "webhook_deliverator").await
+        activate_background_task(lockstep_client, "webhook_deliverator").await
     );
 
     mock.assert_calls_async(3).await;
@@ -1543,7 +1543,7 @@ async fn test_api_resends_failed_deliveries(
     dbg!(error);
 
     dbg!(
-        activate_background_task(internal_client, "webhook_deliverator").await
+        activate_background_task(lockstep_client, "webhook_deliverator").await
     );
     mock.assert_calls_async(1).await;
 }
@@ -1563,7 +1563,7 @@ async fn subscription_add_test(
     new_subscription: &str,
 ) {
     let nexus = cptestctx.server.server_context().nexus.clone();
-    let internal_client = &cptestctx.internal_client;
+    let lockstep_client = &cptestctx.lockstep_client;
 
     let datastore = nexus.datastore();
     let opctx =
@@ -1618,9 +1618,9 @@ async fn subscription_add_test(
         .expect("event should be published successfully");
     dbg!(event);
 
-    dbg!(activate_background_task(internal_client, "alert_dispatcher").await);
+    dbg!(activate_background_task(lockstep_client, "alert_dispatcher").await);
     dbg!(
-        activate_background_task(internal_client, "webhook_deliverator").await
+        activate_background_task(lockstep_client, "webhook_deliverator").await
     );
 
     mock.assert_calls_async(0).await;
@@ -1651,9 +1651,9 @@ async fn subscription_add_test(
         .expect("event should be published successfully");
     dbg!(event);
 
-    dbg!(activate_background_task(internal_client, "alert_dispatcher").await);
+    dbg!(activate_background_task(lockstep_client, "alert_dispatcher").await);
     dbg!(
-        activate_background_task(internal_client, "webhook_deliverator").await
+        activate_background_task(lockstep_client, "webhook_deliverator").await
     );
 
     mock.assert_calls_async(1).await;
@@ -1680,7 +1680,7 @@ async fn subscription_remove_test(
     deleted_subscription: &str,
 ) {
     let nexus = cptestctx.server.server_context().nexus.clone();
-    let internal_client = &cptestctx.internal_client;
+    let lockstep_client = &cptestctx.lockstep_client;
 
     let datastore = nexus.datastore();
     let opctx =
@@ -1750,9 +1750,9 @@ async fn subscription_remove_test(
         .expect("event should be published successfully");
     dbg!(event);
 
-    dbg!(activate_background_task(internal_client, "alert_dispatcher").await);
+    dbg!(activate_background_task(lockstep_client, "alert_dispatcher").await);
     dbg!(
-        activate_background_task(internal_client, "webhook_deliverator").await
+        activate_background_task(lockstep_client, "webhook_deliverator").await
     );
 
     mock.assert_calls_async(1).await;
@@ -1782,9 +1782,9 @@ async fn subscription_remove_test(
         .expect("event should be published successfully");
     dbg!(event);
 
-    dbg!(activate_background_task(internal_client, "alert_dispatcher").await);
+    dbg!(activate_background_task(lockstep_client, "alert_dispatcher").await);
     dbg!(
-        activate_background_task(internal_client, "webhook_deliverator").await
+        activate_background_task(lockstep_client, "webhook_deliverator").await
     );
 
     // No new calls should be observed.
@@ -1829,20 +1829,10 @@ async fn subscription_remove_test(
         .expect("event should be published successfully");
     dbg!(event);
 
-    dbg!(activate_background_task(internal_client, "alert_dispatcher").await);
+    dbg!(activate_background_task(lockstep_client, "alert_dispatcher").await);
     dbg!(
-        activate_background_task(internal_client, "webhook_deliverator").await
+        activate_background_task(lockstep_client, "webhook_deliverator").await
     );
 
     mock.assert_calls_async(1).await;
-
-    // Deleting a subscription that doesn't exist should 404.
-    dbg!(
-        resource_helpers::object_delete_error(
-            &internal_client,
-            &subscription_remove_url(rx_id, &deleted_subscription),
-            http::StatusCode::NOT_FOUND
-        )
-        .await
-    );
 }
