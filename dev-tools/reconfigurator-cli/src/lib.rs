@@ -3029,14 +3029,14 @@ fn cmd_load_example(
     let (example, blueprint) = builder.build();
 
     // Generate the internal and external DNS configs based on the blueprint.
-    // XXX-dap need to figure out what to do here.
     let sleds_by_id = make_sleds_by_id(&example.system)?;
-    let blueprint_generation =
+    let blueprint_nexus_generation =
         blueprint_active_nexus_generation_historical(&blueprint);
+    assert_eq!(blueprint.nexus_generation, Generation::new());
     let internal_dns = blueprint_internal_dns_config(
         &blueprint,
         &sleds_by_id,
-        blueprint_generation,
+        blueprint.nexus_generation,
         &Default::default(),
     )?;
     let external_dns_zone_name =
@@ -3045,7 +3045,7 @@ fn cmd_load_example(
         &blueprint,
         state.config_mut().silo_names(),
         external_dns_zone_name,
-        blueprint_generation,
+        blueprint_nexus_generation,
     );
 
     let blueprint_id = blueprint.id;

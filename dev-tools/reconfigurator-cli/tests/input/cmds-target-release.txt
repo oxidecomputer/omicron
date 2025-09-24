@@ -470,8 +470,26 @@ blueprint-diff latest
 blueprint-plan latest latest
 blueprint-diff latest
 
+# Check the latest blueprint's DNS configuration against what's currently in
+# DNS.  We haven't been updating the simulated DNS along the way, so this will
+# show a lot of delta that we don't care about for all the zones that got
+# updated.  What's important here is that the Nexus DNS entries have not changed
+# despite having provisioned new zones.  This verifies that DNS configuration
+# correctly excludes Nexus instances at a newer generation than the system is
+# running, even if the blueprint generation matches those newer instances.
+blueprint-diff-dns internal 1 latest
+blueprint-diff-dns external 1 latest
+
 # Bump the set of active Nexus zones; this simulates Nexus handoff.
 set active-nexus-gen 2
+
+# Diff'ing DNS again will still show all that extra delta, but it will also
+# show a change to both internal DNS and external DNS to reflect the change
+# in the in-service Nexus zones.  This output verifies that DNS configuration
+# correctly depends on the current active Nexus generation, not just the
+# blueprint.
+blueprint-diff-dns internal 1 latest
+blueprint-diff-dns external 1 latest
 
 # Planning should now expunge one of the old Nexus zones.
 blueprint-plan latest latest
