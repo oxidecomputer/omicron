@@ -1104,7 +1104,7 @@ mod test {
             SocketAddrV6::new(Ipv6Addr::LOCALHOST, mgs.port, 0, 0).into();
 
         // Test fault recovery for nat propogation
-        // Start a new dendrite instance
+        // Start a new dendrite instance for switch0
         let new_switch0 =
             omicron_test_utils::dev::dendrite::DendriteInstance::start(
                 port,
