@@ -7872,6 +7872,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "assert_matches",
+ "dns-service-client",
  "dropshot",
  "futures",
  "internal-dns-resolver",
