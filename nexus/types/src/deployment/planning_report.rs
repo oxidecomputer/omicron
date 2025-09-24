@@ -1154,6 +1154,9 @@ impl fmt::Display for PlanningZoneUpdatesStepReport {
 )]
 #[serde(rename_all = "snake_case", tag = "type")]
 pub enum ZoneUpdatesWaitingOn {
+    /// Waiting on blocked updates to RoT bootloader / RoT / SP / Host OS.
+    BlockedMgsUpdates,
+
     /// Waiting on discretionary zone placement.
     DiscretionaryZones,
 
@@ -1163,8 +1166,6 @@ pub enum ZoneUpdatesWaitingOn {
     /// Waiting on updates to RoT bootloader / RoT / SP / Host OS.
     PendingMgsUpdates,
 
-    /// Waiting on blocked updates to RoT bootloader / RoT / SP / Host OS.
-    BlockedMgsUpdates,
 
     /// Waiting on the same set of blockers zone adds are waiting on.
     ZoneAddBlockers,
@@ -1173,13 +1174,13 @@ pub enum ZoneUpdatesWaitingOn {
 impl ZoneUpdatesWaitingOn {
     pub fn as_str(&self) -> &'static str {
         match self {
+            Self::BlockedMgsUpdates => {
+                "blocked MGS updates (RoT bootloader / RoT / SP / Host OS)"
+            }
             Self::DiscretionaryZones => "discretionary zones",
             Self::InventoryPropagation => "zone propagation to inventory",
             Self::PendingMgsUpdates => {
                 "pending MGS updates (RoT bootloader / RoT / SP / Host OS)"
-            }
-            Self::BlockedMgsUpdates => {
-                "blocked MGS updates (RoT bootloader / RoT / SP / Host OS)"
             }
             Self::ZoneAddBlockers => "zone add blockers",
         }
