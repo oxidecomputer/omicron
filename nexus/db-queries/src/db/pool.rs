@@ -49,7 +49,7 @@ struct SingleHostResolver {
 }
 
 impl SingleHostResolver {
-    fn new(config: &DbConfig) -> Self {
+    fn new(config: DbConfig) -> Self {
         let backends = Arc::new(BTreeMap::from([(
             backend::Name::new("singleton"),
             backend::Backend { address: config.url.address() },
@@ -66,7 +66,7 @@ impl Resolver for SingleHostResolver {
 }
 
 fn make_single_host_resolver(
-    config: &DbConfig,
+    config: DbConfig,
 ) -> qorb::resolver::BoxedResolver {
     Box::new(SingleHostResolver::new(config))
 }
@@ -88,12 +88,9 @@ fn make_postgres_connector(
     ))
 }
 
-pub enum ConnectWith<'a> {
-    /// Uses a resolver to connect to the database.
+enum ConnectWith<'a> {
     Resolver(&'a QorbResolver),
-
-    /// Connects to a single hard-coded database node.
-    SingleHost(&'a DbConfig),
+    SingleHost(Box<DbConfig>),
 }
 
 /// Utility for building [`Pool`]s.
@@ -105,7 +102,15 @@ pub struct PoolBuilder<'a> {
 }
 
 impl<'a> PoolBuilder<'a> {
-    pub fn new(log: &'a Logger, connect_with: ConnectWith<'a>) -> Self {
+    /// Uses a resolver to connect to the database.
+    pub fn new(log: &'a Logger, resolver: &'a QorbResolver) -> Self {
+        let connect_with = ConnectWith::Resolver(resolver);
+        Self { log, connect_with, policy: None, collect_backtraces: None }
+    }
+
+    /// Connects to a single hard-coded database node.
+    pub fn new_single_host(log: &'a Logger, config: DbConfig) -> Self {
+        let connect_with = ConnectWith::SingleHost(Box::new(config));
         Self { log, connect_with, policy: None, collect_backtraces: None }
     }
 
@@ -127,7 +132,7 @@ impl<'a> PoolBuilder<'a> {
                 (resolver.for_service(ServiceName::Cockroach), "crdb")
             }
             ConnectWith::SingleHost(config) => {
-                (make_single_host_resolver(config), "crdb-single-host")
+                (make_single_host_resolver(*config), "crdb-single-host")
             }
         };
         let connector = make_postgres_connector(log);
@@ -351,7 +356,7 @@ mod test {
         let mut db = crdb::test_setup_database(log).await;
         let cfg = crate::db::Config { url: db.pg_config().clone() };
         {
-            let pool = PoolBuilder::new(&log, ConnectWith::SingleHost(&cfg))
+            let pool = PoolBuilder::new_single_host(&log, cfg)
                 .collect_backtraces(false)
                 .build();
             pool.terminate().await;
@@ -370,7 +375,7 @@ mod test {
         let mut db = crdb::test_setup_database(log).await;
         let cfg = crate::db::Config { url: db.pg_config().clone() };
         {
-            let pool = PoolBuilder::new(&log, ConnectWith::SingleHost(&cfg))
+            let pool = PoolBuilder::new_single_host(&log, cfg)
                 .collect_backtraces(false)
                 .build();
             drop(pool);

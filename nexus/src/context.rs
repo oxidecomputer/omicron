@@ -119,9 +119,9 @@ pub(crate) struct ConsoleConfig {
 }
 
 impl ServerContext {
-    /// Create a new context with the given rack id and log.  This creates the
-    /// underlying nexus as well.
-    pub async fn new(
+    // Create a new context with the given rack id and log.  This creates the
+    // underlying nexus as well.
+    async fn new(
         rack_id: Uuid,
         log: Logger,
         config: &NexusConfig,
@@ -265,34 +265,36 @@ impl ServerContext {
         //
         // It must be explicitly terminated, so be cautious about returning
         // results beyond this point.
-        let pool = match &config.deployment.database {
+        let pool_builder = match &config.deployment.database {
             nexus_config::Database::FromUrl { url } => {
                 info!(
                     log, "Setting up qorb database pool from a single host";
                     "url" => #?url,
                 );
-                db::PoolBuilder::new(
-                    &log,
-                    db::ConnectWith::SingleHost(&db::Config {
-                        url: url.clone(),
-                    }),
-                )
-                .build()
+                let cfg = db::Config { url: url.clone() };
+
+                db::PoolBuilder::new_single_host(&log, cfg)
             }
             nexus_config::Database::FromDns => {
                 info!(
                     log, "Setting up qorb database pool from DNS";
                     "dns_addrs" => ?qorb_resolver.bootstrap_dns_ips(),
                 );
-                db::PoolBuilder::new(
-                    &log,
-                    db::ConnectWith::Resolver(&qorb_resolver),
-                )
-                .build()
+                db::PoolBuilder::new(&log, &qorb_resolver)
             }
         };
 
-        let pool = Arc::new(pool);
+        // If explicitly requested, backtrace collection of database connections can be
+        // overwritten.
+        let pool_builder =
+            if let Some(collect) = config.pkg.tunables.collect_backtraces {
+                pool_builder.collect_backtraces(collect)
+            } else {
+                pool_builder
+            };
+
+        let pool = Arc::new(pool_builder.build());
+
         let nexus = match Nexus::new_with_id(
             rack_id,
             log.new(o!("component" => "nexus")),

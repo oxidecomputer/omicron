@@ -135,11 +135,8 @@ async fn create_datastore(
 
     let db_config = nexus_db_queries::db::Config { url };
     let pool = Arc::new(
-        nexus_db_queries::db::PoolBuilder::new(
-            &log,
-            nexus_db_queries::db::ConnectWith::SingleHost(&db_config),
-        )
-        .build(),
+        nexus_db_queries::db::PoolBuilder::new_single_host(&log, db_config)
+            .build(),
     );
     DataStore::new_failfast(log, pool)
         .await

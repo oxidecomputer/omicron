@@ -827,11 +827,9 @@ impl MigrationContext<'_> {
     // before a schema migration.
     async fn populate_pool_and_connection(&self, version: Version) {
         use nexus_db_queries::db;
-        let pool = db::PoolBuilder::new(
+        let pool = db::PoolBuilder::new_single_host(
             self.log,
-            db::ConnectWith::SingleHost(&db::Config {
-                url: self.crdb.pg_config().clone(),
-            }),
+            db::Config { url: self.crdb.pg_config().clone() },
         )
         .collect_backtraces(false)
         .build();

@@ -37,7 +37,7 @@ fn new_pool(log: &Logger, db: &CockroachInstance) -> Arc<db::Pool> {
     let cfg = db::Config { url: db.pg_config().clone() };
 
     Arc::new(
-        db::PoolBuilder::new(&log, db::ConnectWith::SingleHost(&cfg))
+        db::PoolBuilder::new_single_host(&log, cfg)
             .collect_backtraces(false)
             .build(),
     )
@@ -328,7 +328,7 @@ async fn datastore_test(
 
     let cfg = db::Config { url: db.pg_config().clone() };
     let pool = Arc::new(
-        db::PoolBuilder::new(&log, db::ConnectWith::SingleHost(&cfg))
+        db::PoolBuilder::new_single_host(&log, cfg)
             .collect_backtraces(false)
             .build(),
     );
