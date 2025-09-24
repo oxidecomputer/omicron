@@ -1021,7 +1021,7 @@ pub enum ZoneUpdatesWaitingOn {
     /// Waiting on discretionary zone placement.
     DiscretionaryZones,
 
-    /// Waiting on zones to propagate to inventory,
+    /// Waiting on zones to propagate to inventory.
     InventoryPropagation,
 
     /// Waiting on updates to RoT / SP / Host OS / etc.
