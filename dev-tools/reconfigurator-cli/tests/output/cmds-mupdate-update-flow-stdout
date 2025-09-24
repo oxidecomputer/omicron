@@ -2564,7 +2564,7 @@ planner config:
   - sleds have deployment units with image sources not set to Artifact:
     - sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: 6 zones
 
-* adding zones despite being blocked, as specified by the `add_zones_with_mupdate_override` planner config option
+* adding zones despite being blocked, because: planner config `add_zones_with_mupdate_override` is true
 * discretionary zone placement waiting for NTP zones on sleds: c3bc4c6d-fdde-4fc4-8493-89d2a1e5ee6b
 * missing NTP zone on sled c3bc4c6d-fdde-4fc4-8493-89d2a1e5ee6b
 * only placed 0/1 desired nexus zones
