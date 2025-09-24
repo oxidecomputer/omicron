@@ -9956,7 +9956,7 @@
             ]
           },
           {
-            "description": "Waiting on zones to propagate to inventory,",
+            "description": "Waiting on zones to propagate to inventory.",
             "type": "object",
             "properties": {
               "type": {
