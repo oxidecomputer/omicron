@@ -962,9 +962,9 @@ opt-level = 3
 # [patch.crates-io]
 # diesel = { path = "../../diesel/diesel" }
 # dropshot = { path = "../dropshot/dropshot" }
-# dropshot-api-manager = { path = "../dropshot/dropshot-api-manager" }
-# dropshot-api-manager-types = { path = "../dropshot/dropshot-api-manager-types" }
 # dropshot_endpoint = { path = "../dropshot/dropshot_endpoint" }
+# dropshot-api-manager = { path = "../dropshot-api-manager/crates/dropshot-api-manager" }
+# dropshot-api-manager-types = { path = "../dropshot-api-manager/crates/dropshot-api-manager-types" }
 # progenitor = { path = "../progenitor/progenitor" }
 # progenitor-client = { path = "../progenitor/progenitor-client" }
 # steno = { path = "../steno" }
