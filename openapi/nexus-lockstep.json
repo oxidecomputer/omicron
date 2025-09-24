@@ -5222,6 +5222,10 @@
               "$ref": "#/components/schemas/PlanningAddSufficientZonesExist"
             }
           },
+          "target_release_generation_is_one": {
+            "description": "Set to true if the target release generation is 1, which would allow zones to be added.",
+            "type": "boolean"
+          },
           "waiting_on": {
             "nullable": true,
             "description": "What are we waiting on to start zone additions?",
@@ -5243,7 +5247,8 @@
           "sleds_waiting_for_ntp_zone",
           "sleds_without_ntp_zones_in_inventory",
           "sleds_without_zpools_for_ntp_zones",
-          "sufficient_zones_exist"
+          "sufficient_zones_exist",
+          "target_release_generation_is_one"
         ]
       },
       "PlanningAddSufficientZonesExist": {
