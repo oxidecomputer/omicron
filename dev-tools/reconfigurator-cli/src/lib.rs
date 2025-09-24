@@ -2443,16 +2443,26 @@ fn cmd_blueprint_diff(
     // each blueprint.  To do that we need to construct a list of sleds suitable
     // for the executor.
     let sleds_by_id = make_sleds_by_id(state.system().description())?;
+
+    // It's tricky to figure out which active Nexus generation number to use
+    // when diff'ing blueprints.  What's currently active might be wholly
+    // different from what's here.  (Imagine generation 7 is active and these
+    // blueprints are from Nexus generation 4.)  What's most likely useful is
+    // picking the Nexus generation of the blueprint itself.
+    let blueprint1_active_nexus_generation =
+        blueprint_active_nexus_generation_historical(&blueprint1);
+    let blueprint2_active_nexus_generation =
+        blueprint_active_nexus_generation_historical(&blueprint2);
     let internal_dns_config1 = blueprint_internal_dns_config(
         &blueprint1,
         &sleds_by_id,
-        blueprint1.nexus_generation,
+        blueprint1_active_nexus_generation,
         &Default::default(),
     )?;
     let internal_dns_config2 = blueprint_internal_dns_config(
         &blueprint2,
         &sleds_by_id,
-        blueprint2.nexus_generation,
+        blueprint2_active_nexus_generation,
         &Default::default(),
     )?;
     let dns_diff = DnsDiff::new(&internal_dns_config1, &internal_dns_config2)
@@ -2464,13 +2474,13 @@ fn cmd_blueprint_diff(
         &blueprint1,
         state.config().silo_names(),
         external_dns_zone_name.to_owned(),
-        blueprint1.nexus_generation,
+        blueprint1_active_nexus_generation,
     );
     let external_dns_config2 = blueprint_external_dns_config(
         &blueprint2,
         state.config().silo_names(),
         external_dns_zone_name.to_owned(),
-        blueprint2.nexus_generation,
+        blueprint2_active_nexus_generation,
     );
     let dns_diff = DnsDiff::new(&external_dns_config1, &external_dns_config2)
         .context("failed to assemble external DNS diff")?;
@@ -2528,13 +2538,21 @@ fn cmd_blueprint_diff_dns(
         }
     };
 
+    // This command is already comparing a blueprint against current simulated
+    // state, so we determine the active Nexus generation accordingly.
+    let mut rv = String::new();
+    let (blueprint_active_generation, warning) =
+        blueprint_active_nexus_generation_current(&state, &blueprint);
+    if let Some(warning) = warning {
+        swriteln!(rv, "{warning}");
+    }
     let blueprint_dns_zone = match dns_group {
         CliDnsGroup::Internal => {
             let sleds_by_id = make_sleds_by_id(state.system().description())?;
             blueprint_internal_dns_config(
                 blueprint,
                 &sleds_by_id,
-                blueprint.nexus_generation,
+                blueprint_active_generation,
                 &Default::default(),
             )?
         }
@@ -2542,14 +2560,15 @@ fn cmd_blueprint_diff_dns(
             blueprint,
             state.config().silo_names(),
             state.config().external_dns_zone_name().to_owned(),
-            blueprint.nexus_generation,
+            blueprint_active_generation,
         ),
     };
 
     let existing_dns_zone = existing_dns_config.sole_zone()?;
     let dns_diff = DnsDiff::new(&existing_dns_zone, &blueprint_dns_zone)
         .context("failed to assemble DNS diff")?;
-    Ok(Some(dns_diff.to_string()))
+    swrite!(rv, "{}", dns_diff);
+    Ok(Some(rv))
 }
 
 fn cmd_blueprint_save(
@@ -3010,11 +3029,14 @@ fn cmd_load_example(
     let (example, blueprint) = builder.build();
 
     // Generate the internal and external DNS configs based on the blueprint.
+    // XXX-dap need to figure out what to do here.
     let sleds_by_id = make_sleds_by_id(&example.system)?;
+    let blueprint_generation =
+        blueprint_active_nexus_generation_historical(&blueprint);
     let internal_dns = blueprint_internal_dns_config(
         &blueprint,
         &sleds_by_id,
-        blueprint.nexus_generation,
+        blueprint_generation,
         &Default::default(),
     )?;
     let external_dns_zone_name =
@@ -3023,7 +3045,7 @@ fn cmd_load_example(
         &blueprint,
         state.config_mut().silo_names(),
         external_dns_zone_name,
-        blueprint.nexus_generation,
+        blueprint_generation,
     );
 
     let blueprint_id = blueprint.id;
@@ -3089,4 +3111,39 @@ fn cmd_file_contents(args: FileContentsArgs) -> anyhow::Result<Option<String>> {
     );
 
     Ok(Some(s))
+}
+
+fn blueprint_active_nexus_generation_historical(
+    blueprint: &Blueprint,
+) -> Generation {
+    blueprint.nexus_generation
+}
+
+fn blueprint_active_nexus_generation_current(
+    state: &SimState,
+    blueprint: &Blueprint,
+) -> (Generation, Option<anyhow::Error>) {
+    let sim_generation = state.config().active_nexus_zone_generation();
+    if blueprint.all_nexus_zones(BlueprintZoneDisposition::is_in_service).any(
+        |(_sled_id, _zone_config, nexus_config)| {
+            nexus_config.nexus_generation == sim_generation
+        },
+    ) {
+        return (sim_generation, None);
+    }
+
+    return (
+        blueprint.nexus_generation,
+        Some(anyhow!(
+            "warning: needed to determine an \"active\" Nexus \
+             generation, and would prefer the current simulated \
+             generation ({sim_generation}), but it does not \
+             correspond to any Nexus zone in blueprint {}.  This \
+             is common for blueprints older than the current \
+             simulated state.  Using blueprint generation ({}) \
+             instead.",
+            blueprint.id,
+            blueprint.nexus_generation
+        )),
+    );
 }
