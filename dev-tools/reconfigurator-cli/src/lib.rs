@@ -2450,9 +2450,9 @@ fn cmd_blueprint_diff(
     // blueprints are from Nexus generation 4.)  What's most likely useful is
     // picking the Nexus generation of the blueprint itself.
     let blueprint1_active_nexus_generation =
-        blueprint_active_nexus_generation_historical(&blueprint1);
+        blueprint_active_nexus_generation(&blueprint1);
     let blueprint2_active_nexus_generation =
-        blueprint_active_nexus_generation_historical(&blueprint2);
+        blueprint_active_nexus_generation(&blueprint2);
     let internal_dns_config1 = blueprint_internal_dns_config(
         &blueprint1,
         &sleds_by_id,
@@ -2538,14 +2538,8 @@ fn cmd_blueprint_diff_dns(
         }
     };
 
-    // This command is already comparing a blueprint against current simulated
-    // state, so we determine the active Nexus generation accordingly.
-    let mut rv = String::new();
-    let (blueprint_active_generation, warning) =
-        blueprint_active_nexus_generation_current(&state, &blueprint);
-    if let Some(warning) = warning {
-        swriteln!(rv, "{warning}");
-    }
+    let blueprint_active_generation =
+        blueprint_active_nexus_generation(&blueprint);
     let blueprint_dns_zone = match dns_group {
         CliDnsGroup::Internal => {
             let sleds_by_id = make_sleds_by_id(state.system().description())?;
@@ -2567,8 +2561,7 @@ fn cmd_blueprint_diff_dns(
     let existing_dns_zone = existing_dns_config.sole_zone()?;
     let dns_diff = DnsDiff::new(&existing_dns_zone, &blueprint_dns_zone)
         .context("failed to assemble DNS diff")?;
-    swrite!(rv, "{}", dns_diff);
-    Ok(Some(rv))
+    Ok(Some(dns_diff.to_string()))
 }
 
 fn cmd_blueprint_save(
@@ -3031,12 +3024,11 @@ fn cmd_load_example(
     // Generate the internal and external DNS configs based on the blueprint.
     let sleds_by_id = make_sleds_by_id(&example.system)?;
     let blueprint_nexus_generation =
-        blueprint_active_nexus_generation_historical(&blueprint);
-    assert_eq!(blueprint.nexus_generation, Generation::new());
+        blueprint_active_nexus_generation(&blueprint);
     let internal_dns = blueprint_internal_dns_config(
         &blueprint,
         &sleds_by_id,
-        blueprint.nexus_generation,
+        blueprint_nexus_generation,
         &Default::default(),
     )?;
     let external_dns_zone_name =
@@ -3113,37 +3105,29 @@ fn cmd_file_contents(args: FileContentsArgs) -> anyhow::Result<Option<String>> {
     Ok(Some(s))
 }
 
-fn blueprint_active_nexus_generation_historical(
-    blueprint: &Blueprint,
-) -> Generation {
+/// Returns the "active Nexus generation" to use for a historical blueprint
+/// (i.e., a blueprint that may not have been generated or executed against the
+/// current simulated state).  This is used for `blueprint-diff`, for example,
+/// which avoids assuming anything about the simulated state in comparing the
+/// two blueprints.
+///
+/// In general, the active Nexus generation for a blueprint is not well-defined.
+/// We cannot know what the active Nexus generation was at some point in the
+/// past.  But we do know that it's one of these two values:
+///
+/// - `blueprint.nexus_generation - 1`, if this blueprint was created as part
+///   of an upgrade, starting with the point where the Nexus handoff was
+///   initiated (inclusive) and ending with the first blueprint after the
+///   handoff (exclusive).  In most cases, this means that this is the single
+///   blueprint during an upgrade that triggered the handoff.
+/// - `blueprint.nexus_generation` otherwise (which includes all other
+///   blueprints that are created during an upgrade and all blueprints created
+///   outside of an upgrade).
+///
+/// This implementation always returns `blueprint.nexus_generation`.  In the
+/// second case above, this is always correct.  In the first case, this is
+/// basically equivalent to assuming that the Nexus handoff had happened
+/// instantaneously when the blueprint was created.
+fn blueprint_active_nexus_generation(blueprint: &Blueprint) -> Generation {
     blueprint.nexus_generation
-}
-
-fn blueprint_active_nexus_generation_current(
-    state: &SimState,
-    blueprint: &Blueprint,
-) -> (Generation, Option<anyhow::Error>) {
-    let sim_generation = state.config().active_nexus_zone_generation();
-    if blueprint.all_nexus_zones(BlueprintZoneDisposition::is_in_service).any(
-        |(_sled_id, _zone_config, nexus_config)| {
-            nexus_config.nexus_generation == sim_generation
-        },
-    ) {
-        return (sim_generation, None);
-    }
-
-    return (
-        blueprint.nexus_generation,
-        Some(anyhow!(
-            "warning: needed to determine an \"active\" Nexus \
-             generation, and would prefer the current simulated \
-             generation ({sim_generation}), but it does not \
-             correspond to any Nexus zone in blueprint {}.  This \
-             is common for blueprints older than the current \
-             simulated state.  Using blueprint generation ({}) \
-             instead.",
-            blueprint.id,
-            blueprint.nexus_generation
-        )),
-    );
 }
