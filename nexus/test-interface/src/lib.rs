@@ -48,12 +48,12 @@ use std::sync::Arc;
 
 #[async_trait]
 pub trait NexusServer: Send + Sync + 'static {
-    type InternalServer: Send + Sync + 'static;
+    type InternalServer: InternalServer;
 
     async fn start_internal(
         config: &NexusConfig,
         log: &Logger,
-    ) -> Result<(Self::InternalServer, SocketAddr), String>;
+    ) -> Result<Self::InternalServer, String>;
 
     /// Stops the execution of a `Self::InternalServer`.
     ///
@@ -88,6 +88,7 @@ pub trait NexusServer: Send + Sync + 'static {
     async fn get_http_server_external_address(&self) -> SocketAddr;
     async fn get_http_server_techport_address(&self) -> SocketAddr;
     async fn get_http_server_internal_address(&self) -> SocketAddr;
+    async fn get_http_server_lockstep_address(&self) -> SocketAddr;
 
     // Previously, as a dataset was created (within the sled agent),
     // we'd use an internal API from Nexus to record that the dataset
@@ -127,4 +128,9 @@ pub trait NexusServer: Send + Sync + 'static {
     ) -> Result<Option<Collection>, Error>;
 
     async fn close(self);
+}
+
+pub trait InternalServer: Send + Sync + 'static {
+    fn get_http_server_internal_address(&self) -> SocketAddr;
+    fn get_http_server_lockstep_address(&self) -> SocketAddr;
 }

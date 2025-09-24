@@ -32,8 +32,9 @@ itertools.workspace = true
 newtype_derive.workspace = true
 omicron-uuid-kinds.workspace = true
 openssl.workspace = true
-oxql-types.workspace = true
+oximeter-db.workspace = true
 oxnet.workspace = true
+oxql-types.workspace = true
 parse-display.workspace = true
 regex.workspace = true
 schemars = { workspace = true, features = ["chrono", "uuid1", "url"] }

@@ -2643,20 +2643,20 @@
               }
             ]
           },
-          "report": {
-            "description": "Report on the planning session that resulted in this blueprint",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/PlanningReport"
-              }
-            ]
-          },
           "sleds": {
             "description": "A map of sled id -> desired configuration of the sled.",
             "type": "object",
             "additionalProperties": {
               "$ref": "#/components/schemas/BlueprintSledConfig"
             }
+          },
+          "source": {
+            "description": "Source of this blueprint (can include planning report)",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BlueprintSource"
+              }
+            ]
           },
           "target_release_minimum_generation": {
             "description": "The minimum release generation to accept for target release configuration. Target release configuration with a generation less than this number will be ignored.\n\nFor example, let's say that the current target release generation is 5. Then, when reconfigurator detects a MUPdate:\n\n* the target release is ignored in favor of the install dataset * this field is set to 6\n\nOnce an operator sets a new target release, its generation will be 6 or higher. Reconfigurator will then know that it is back in charge of driving the system to the target release.",
@@ -2684,8 +2684,8 @@
           "oximeter_read_mode",
           "oximeter_read_version",
           "pending_mgs_updates",
-          "report",
           "sleds",
+          "source",
           "target_release_minimum_generation",
           "time_created"
         ]
@@ -2922,6 +2922,14 @@
               }
             ]
           },
+          "source": {
+            "description": "source of the blueprint (for debugging)",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BlueprintSource"
+              }
+            ]
+          },
           "target_release_minimum_generation": {
             "description": "The minimum generation for the target release.\n\nSee [`Blueprint::target_release_minimum_generation`].",
             "allOf": [
@@ -2944,6 +2952,7 @@
           "id",
           "internal_dns_version",
           "nexus_generation",
+          "source",
           "target_release_minimum_generation",
           "time_created"
         ]
@@ -3085,6 +3094,127 @@
           "sled_agent_generation",
           "state",
           "zones"
+        ]
+      },
+      "BlueprintSource": {
+        "description": "Description of the source of a blueprint.",
+        "oneOf": [
+          {
+            "description": "The initial blueprint created by the rack setup service.",
+            "type": "object",
+            "properties": {
+              "source": {
+                "type": "string",
+                "enum": [
+                  "rss"
+                ]
+              }
+            },
+            "required": [
+              "source"
+            ]
+          },
+          {
+            "description": "A blueprint created by the planner, and we still have the associated planning report.",
+            "type": "object",
+            "properties": {
+              "add": {
+                "$ref": "#/components/schemas/PlanningAddStepReport"
+              },
+              "cockroachdb_settings": {
+                "$ref": "#/components/schemas/PlanningCockroachdbSettingsStepReport"
+              },
+              "decommission": {
+                "$ref": "#/components/schemas/PlanningDecommissionStepReport"
+              },
+              "expunge": {
+                "$ref": "#/components/schemas/PlanningExpungeStepReport"
+              },
+              "mgs_updates": {
+                "$ref": "#/components/schemas/PlanningMgsUpdatesStepReport"
+              },
+              "nexus_generation_bump": {
+                "$ref": "#/components/schemas/PlanningNexusGenerationBumpReport"
+              },
+              "noop_image_source": {
+                "$ref": "#/components/schemas/PlanningNoopImageSourceStepReport"
+              },
+              "planner_config": {
+                "description": "The configuration in effect for this planning run.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/PlannerConfig"
+                  }
+                ]
+              },
+              "source": {
+                "type": "string",
+                "enum": [
+                  "planner"
+                ]
+              },
+              "zone_updates": {
+                "$ref": "#/components/schemas/PlanningZoneUpdatesStepReport"
+              }
+            },
+            "required": [
+              "add",
+              "cockroachdb_settings",
+              "decommission",
+              "expunge",
+              "mgs_updates",
+              "nexus_generation_bump",
+              "noop_image_source",
+              "planner_config",
+              "source",
+              "zone_updates"
+            ]
+          },
+          {
+            "description": "A blueprint created by the planner but loaded from the database, so we no longer have the associated planning report.",
+            "type": "object",
+            "properties": {
+              "source": {
+                "type": "string",
+                "enum": [
+                  "planner_loaded_from_database"
+                ]
+              }
+            },
+            "required": [
+              "source"
+            ]
+          },
+          {
+            "description": "This blueprint was created by one of `reconfigurator-cli`'s blueprint editing subcommands.",
+            "type": "object",
+            "properties": {
+              "source": {
+                "type": "string",
+                "enum": [
+                  "reconfigurator_cli_edit"
+                ]
+              }
+            },
+            "required": [
+              "source"
+            ]
+          },
+          {
+            "description": "This blueprint was constructed by hand by an automated test.",
+            "type": "object",
+            "properties": {
+              "source": {
+                "type": "string",
+                "enum": [
+                  "test"
+                ]
+              }
+            },
+            "required": [
+              "source"
+            ]
+          }
         ]
       },
       "BlueprintTarget": {
@@ -3569,6 +3699,12 @@
                 "description": "The address at which the internal nexus server is reachable.",
                 "type": "string"
               },
+              "lockstep_port": {
+                "description": "The port at which the lockstep server is reachable. This shares the same IP address with `internal_address`.",
+                "type": "integer",
+                "format": "uint16",
+                "minimum": 0
+              },
               "nexus_generation": {
                 "description": "Generation number for this Nexus zone. This is used to coordinate handoff between old and new Nexus instances during updates. See RFD 588.",
                 "allOf": [
@@ -3597,6 +3733,7 @@
               "external_ip",
               "external_tls",
               "internal_address",
+              "lockstep_port",
               "nexus_generation",
               "nic",
               "type"
@@ -6224,6 +6361,70 @@
         "description": "Password hashes must be in PHC (Password Hashing Competition) string format.  Passwords must be hashed with Argon2id.  Password hashes may be rejected if the parameters appear not to be secure enough.",
         "type": "string"
       },
+      "NexusGenerationBumpWaitingOn": {
+        "oneOf": [
+          {
+            "description": "Waiting for the planner to finish updating all non-Nexus zones",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "found_old_non_nexus_zones"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "Waiting for the planner to deploy new-generation Nexus zones",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "missing_new_nexus_in_blueprint"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "Waiting for `db_metadata_nexus` records to be deployed for new-generation Nexus zones",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "missing_nexus_database_access_records"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "Waiting for newly deployed Nexus zones to appear to inventory",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "missing_new_nexus_in_inventory"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          }
+        ]
+      },
       "NodeName": {
         "description": "Unique name for a saga [`Node`]\n\nEach node requires a string name that's unique within its DAG.  The name is used to identify its output.  Nodes that depend on a given node (either directly or indirectly) can access the node's output using its name.",
         "type": "string"
@@ -6595,6 +6796,13 @@
               "internal_address": {
                 "description": "The address at which the internal nexus server is reachable.",
                 "type": "string"
+              },
+              "lockstep_port": {
+                "description": "The port at which the internal lockstep server is reachable. This shares the same IP address with `internal_address`.",
+                "default": 12232,
+                "type": "integer",
+                "format": "uint16",
+                "minimum": 0
               },
               "nic": {
                 "description": "The service vNIC providing external connectivity using OPTE.",
@@ -7319,6 +7527,63 @@
           "pending_mgs_updates"
         ]
       },
+      "PlanningNexusGenerationBumpReport": {
+        "oneOf": [
+          {
+            "description": "We have no reason to bump the Nexus generation number.",
+            "type": "object",
+            "properties": {
+              "component": {
+                "type": "string",
+                "enum": [
+                  "nothing_to_report"
+                ]
+              }
+            },
+            "required": [
+              "component"
+            ]
+          },
+          {
+            "description": "We are waiting on some condition before we can bump the Nexus generation.",
+            "type": "object",
+            "properties": {
+              "component": {
+                "type": "string",
+                "enum": [
+                  "waiting_on"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/NexusGenerationBumpWaitingOn"
+              }
+            },
+            "required": [
+              "component",
+              "value"
+            ]
+          },
+          {
+            "description": "We are bumping the Nexus generation number to this value.",
+            "type": "object",
+            "properties": {
+              "component": {
+                "type": "string",
+                "enum": [
+                  "bumping_generation"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/Generation"
+              }
+            },
+            "required": [
+              "component",
+              "value"
+            ]
+          }
+        ]
+      },
       "PlanningNoopImageSourceConverted": {
         "description": "How many of the total install-dataset zones and/or host phase 2 slots were noop-converted to use the artifact store on a particular sled.",
         "type": "object",
@@ -7587,60 +7852,6 @@
           "zone_config"
         ]
       },
-      "PlanningReport": {
-        "description": "A full blueprint planning report. Other than the blueprint ID, each field corresponds to a step in the update planner, i.e., a subroutine of `omicron_nexus::reconfigurator::planning::Planner::do_plan`.\n\nThe intent of a planning report is to capture information useful to an operator or developer about the planning process itself, especially if it has become \"stuck\" (unable to proceed with an update). It is *not* a summary of the plan (blueprint), but rather a description of non-fatal conditions the planner is waiting on, unexpected or invalid configurations encountered during planning, etc. The planner may make internal decisions based on the step reports; the intent is that an operator may make administrative decisions based on the full report.\n\nOnly successful planning runs are currently covered by this report. Failures to plan (i.e., to generate a valid blueprint) are represented by `nexus-reconfigurator-planning::blueprint_builder::Error`.",
-        "type": "object",
-        "properties": {
-          "add": {
-            "$ref": "#/components/schemas/PlanningAddStepReport"
-          },
-          "blueprint_id": {
-            "description": "The blueprint produced by the planning run this report describes.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/TypedUuidForBlueprintKind"
-              }
-            ]
-          },
-          "cockroachdb_settings": {
-            "$ref": "#/components/schemas/PlanningCockroachdbSettingsStepReport"
-          },
-          "decommission": {
-            "$ref": "#/components/schemas/PlanningDecommissionStepReport"
-          },
-          "expunge": {
-            "$ref": "#/components/schemas/PlanningExpungeStepReport"
-          },
-          "mgs_updates": {
-            "$ref": "#/components/schemas/PlanningMgsUpdatesStepReport"
-          },
-          "noop_image_source": {
-            "$ref": "#/components/schemas/PlanningNoopImageSourceStepReport"
-          },
-          "planner_config": {
-            "description": "The configuration in effect for this planning run.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/PlannerConfig"
-              }
-            ]
-          },
-          "zone_updates": {
-            "$ref": "#/components/schemas/PlanningZoneUpdatesStepReport"
-          }
-        },
-        "required": [
-          "add",
-          "blueprint_id",
-          "cockroachdb_settings",
-          "decommission",
-          "expunge",
-          "mgs_updates",
-          "noop_image_source",
-          "planner_config",
-          "zone_updates"
-        ]
-      },
       "PlanningZoneUpdatesStepReport": {
         "type": "object",
         "properties": {
@@ -7685,13 +7896,20 @@
                 "$ref": "#/components/schemas/ZoneUpdatesWaitingOn"
               }
             ]
+          },
+          "waiting_zones": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ZoneWaitingToExpunge"
+            }
           }
         },
         "required": [
           "expunged_zones",
           "out_of_date_zones",
           "unsafe_zones",
-          "updated_zones"
+          "updated_zones",
+          "waiting_zones"
         ]
       },
       "PortConfigV2": {
@@ -9987,6 +10205,7 @@
         ]
       },
       "ZoneUnsafeToShutdown": {
+        "description": "Zones which should not be shut down, because their lack of availability could be problematic for the successful functioning of the deployed system.",
         "oneOf": [
           {
             "type": "object",
@@ -10120,6 +10339,29 @@
             },
             "required": [
               "type"
+            ]
+          }
+        ]
+      },
+      "ZoneWaitingToExpunge": {
+        "description": "Out-of-date zones which are not yet ready to be expunged.\n\nFor example, out-of-date Nexus zones should not be expunged until handoff has completed.",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "nexus"
+                ]
+              },
+              "zone_generation": {
+                "$ref": "#/components/schemas/Generation"
+              }
+            },
+            "required": [
+              "type",
+              "zone_generation"
             ]
           }
         ]

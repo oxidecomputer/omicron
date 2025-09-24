@@ -14,6 +14,8 @@ use nexus_db_queries::db::DataStore;
 use nexus_reconfigurator_planning::planner::Planner;
 use nexus_reconfigurator_planning::planner::PlannerRng;
 use nexus_reconfigurator_preparation::PlanningInputFromDb;
+use nexus_types::deployment::BlueprintSource;
+use nexus_types::deployment::PlanningReport;
 use nexus_types::deployment::{Blueprint, BlueprintTarget};
 use nexus_types::internal_api::background::BlueprintPlannerStatus;
 use omicron_common::api::external::LookupType;
@@ -257,7 +259,25 @@ impl BlueprintPlanner {
         }
 
         // We have a new target!
-        let report = blueprint.report.clone();
+
+        // We just ran the planner, so we should always get its report. This
+        // output is for debugging only, though, so just make an empty one in
+        // the unreachable arms.
+        let report = match &blueprint.source {
+            BlueprintSource::Planner(report) => Arc::clone(report),
+            BlueprintSource::Rss
+            | BlueprintSource::PlannerLoadedFromDatabase
+            | BlueprintSource::ReconfiguratorCliEdit
+            | BlueprintSource::Test => {
+                warn!(
+                    &opctx.log,
+                    "ran planner, but got unexpected blueprint source; \
+                     generating an empty planning report";
+                    "source" => ?&blueprint.source,
+                );
+                Arc::new(PlanningReport::new())
+            }
+        };
         self.tx_blueprint.send_replace(Some(Arc::new((target, blueprint))));
         BlueprintPlannerStatus::Targeted {
             parent_blueprint_id,
@@ -339,7 +359,14 @@ mod test {
                 version: 1,
                 config: ReconfiguratorConfig {
                     planner_enabled: true,
-                    planner_config: PlannerConfig::default(),
+                    planner_config: PlannerConfig {
+                        // Set this config to true because we'd like to test
+                        // adding zones even if no target release is set. In the
+                        // future, we'll allow adding zones if no target release
+                        // has ever been set, in which case we can go back to
+                        // setting this field to false.
+                        add_zones_with_mupdate_override: true,
+                    },
                 },
                 time_modified: now_db_precision(),
             }),
@@ -364,10 +391,9 @@ mod test {
             BlueprintPlannerStatus::Targeted {
                 parent_blueprint_id,
                 blueprint_id,
-                report,
+                report: _,
             } if parent_blueprint_id == initial_blueprint.id
-                && blueprint_id != initial_blueprint.id
-                && blueprint_id == report.blueprint_id =>
+                && blueprint_id != initial_blueprint.id =>
             {
                 blueprint_id
             }

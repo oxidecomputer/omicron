@@ -244,10 +244,10 @@ mod test {
     };
     use nexus_types::deployment::{
         Blueprint, BlueprintHostPhase2DesiredSlots, BlueprintSledConfig,
-        BlueprintTarget, BlueprintZoneConfig, BlueprintZoneDisposition,
-        BlueprintZoneImageSource, BlueprintZoneType,
+        BlueprintSource, BlueprintTarget, BlueprintZoneConfig,
+        BlueprintZoneDisposition, BlueprintZoneImageSource, BlueprintZoneType,
         CockroachDbPreserveDowngrade, OximeterReadMode, PendingMgsUpdates,
-        PlanningReport, blueprint_zone_type,
+        blueprint_zone_type,
     };
     use nexus_types::external_api::views::SledState;
     use omicron_common::api::external;
@@ -328,7 +328,7 @@ mod test {
             time_created: chrono::Utc::now(),
             creator: "test".to_string(),
             comment: "test blueprint".to_string(),
-            report: PlanningReport::new(id),
+            source: BlueprintSource::Test,
         };
 
         datastore

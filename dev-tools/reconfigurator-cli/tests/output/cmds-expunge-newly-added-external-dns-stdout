@@ -335,7 +335,7 @@ parent:    06c88262-f435-410e-ba98-101bed41ec27
 
  PENDING MGS-MANAGED UPDATES: 0
 
-empty planning report for blueprint 3f00b694-1b16-4aaa-8f78-e6b3a527b434.
+blueprint source: constructed by an automated test
 
 
 
@@ -482,7 +482,7 @@ internal DNS:
 -       SRV  port  5353 8c0a1969-15b6-4165-ba6d-a27c24151037.host.control-plane.oxide.internal
 +       SRV  port  5353 1dc649b1-2ce2-4a85-bc1f-b8a3ef23a70e.host.control-plane.oxide.internal
 +       SRV  port  5353 8c0a1969-15b6-4165-ba6d-a27c24151037.host.control-plane.oxide.internal
-    unchanged names: 91 (records: 103)
+    unchanged names: 92 (records: 106)
 
 external DNS:
 * DNS zone: "oxide.example": 
@@ -833,19 +833,39 @@ parent:    3f00b694-1b16-4aaa-8f78-e6b3a527b434
 
  PENDING MGS-MANAGED UPDATES: 0
 
-empty planning report for blueprint 366b0b68-d80e-4bc1-abd3-dc69837847e0.
+blueprint source: edited directly with reconfigurator-cli
+
+
+
+
+> # Set the add_zones_with_mupdate_override planner config to ensure that zone
+> # adds happen despite zone image sources not being Artifact.
+> set planner-config --add-zones-with-mupdate-override true
+planner config updated:
+*   add zones with mupdate override:   false -> true
 
 
 
 > # blueprint-plan will place a new external DNS zone, diff DNS to see the new zone has `ns<N>` and NS records.
 > blueprint-plan 366b0b68-d80e-4bc1-abd3-dc69837847e0
 INFO skipping noop image source check for all sleds, reason: no target release is currently set
-INFO system in initial release state no update artifacts available (no update necessary)
 generated blueprint 9c998c1d-1a7b-440a-ae0c-40f781dea6e2 based on parent blueprint 366b0b68-d80e-4bc1-abd3-dc69837847e0
-planning report for blueprint 9c998c1d-1a7b-440a-ae0c-40f781dea6e2:
+blueprint source: planner with report:
+planning report:
+planner config:
+    add zones with mupdate override:   true
+
+* zone adds and updates are blocked:
+  - sleds have deployment units with image sources not set to Artifact:
+    - sled 711ac7f8-d19e-4572-bdb9-e9b50f6e362a: 15 zones
+    - sled 9dc50690-f9bf-4520-bf80-051d0f465c2c: 15 zones
+    - sled a88790de-5962-4871-8686-61c1fd5b7094: 15 zones
+
+* adding zones despite being blocked, as specified by the `add_zones_with_mupdate_override` planner config option
 * discretionary zones placed:
   * external_dns zone on sled 711ac7f8-d19e-4572-bdb9-e9b50f6e362a from source install dataset
 * zone updates waiting on discretionary zones
+
 
 
 > blueprint-diff 366b0b68-d80e-4bc1-abd3-dc69837847e0 9c998c1d-1a7b-440a-ae0c-40f781dea6e2
@@ -985,7 +1005,7 @@ internal DNS:
 +       SRV  port  5353 fe2d5287-24e3-4071-b214-2640b097a759.host.control-plane.oxide.internal
 +   name: fe2d5287-24e3-4071-b214-2640b097a759.host          (records: 1)
 +       AAAA fd00:1122:3344:103::30
-    unchanged names: 91 (records: 103)
+    unchanged names: 92 (records: 106)
 
 external DNS:
 * DNS zone: "oxide.example": 
@@ -1339,10 +1359,22 @@ parent:    366b0b68-d80e-4bc1-abd3-dc69837847e0
 
  PENDING MGS-MANAGED UPDATES: 0
 
-planning report for blueprint 9c998c1d-1a7b-440a-ae0c-40f781dea6e2:
+blueprint source: planner with report:
+planning report:
+planner config:
+    add zones with mupdate override:   true
+
+* zone adds and updates are blocked:
+  - sleds have deployment units with image sources not set to Artifact:
+    - sled 711ac7f8-d19e-4572-bdb9-e9b50f6e362a: 15 zones
+    - sled 9dc50690-f9bf-4520-bf80-051d0f465c2c: 15 zones
+    - sled a88790de-5962-4871-8686-61c1fd5b7094: 15 zones
+
+* adding zones despite being blocked, as specified by the `add_zones_with_mupdate_override` planner config option
 * discretionary zones placed:
   * external_dns zone on sled 711ac7f8-d19e-4572-bdb9-e9b50f6e362a from source install dataset
 * zone updates waiting on discretionary zones
+
 
 
 
@@ -1485,7 +1517,7 @@ internal DNS:
 -       SRV  port  5353 fe2d5287-24e3-4071-b214-2640b097a759.host.control-plane.oxide.internal
 +       SRV  port  5353 1dc649b1-2ce2-4a85-bc1f-b8a3ef23a70e.host.control-plane.oxide.internal
 +       SRV  port  5353 fe2d5287-24e3-4071-b214-2640b097a759.host.control-plane.oxide.internal
-    unchanged names: 91 (records: 103)
+    unchanged names: 92 (records: 106)
 
 external DNS:
 * DNS zone: "oxide.example": 

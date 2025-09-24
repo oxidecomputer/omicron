@@ -97,8 +97,19 @@ pub fn blueprint_internal_dns_config(
             ) => (ServiceName::Cockroach, address),
             BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
                 internal_address,
+                lockstep_port,
                 ..
-            }) => (ServiceName::Nexus, internal_address),
+            }) => {
+                // Add both the `nexus` service as well as the `nexus-lockstep`
+                // service. Continue so we don't fall through and call
+                // `host_zone_with_one_backend`.
+                dns_builder.host_zone_nexus(
+                    zone.id,
+                    *internal_address,
+                    *lockstep_port,
+                )?;
+                continue 'all_zones;
+            }
             BlueprintZoneType::Crucible(blueprint_zone_type::Crucible {
                 address,
                 ..

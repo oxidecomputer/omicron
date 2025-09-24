@@ -212,7 +212,7 @@ parent:    184f10b3-61cb-41ef-9b93-3489b2bac559
 
  PENDING MGS-MANAGED UPDATES: 0
 
-empty planning report for blueprint dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21.
+blueprint source: constructed by an automated test
 
 
 
@@ -310,7 +310,7 @@ internal DNS:
 -       AAAA fd00:1122:3344:103::26
 -   name: _crucible._tcp.694bd14f-cb24-4be4-bb19-876e79cda2c8 (records: 1)
 -       SRV  port 32345 694bd14f-cb24-4be4-bb19-876e79cda2c8.host.control-plane.oxide.internal
-    unchanged names: 49 (records: 63)
+    unchanged names: 50 (records: 66)
 
 external DNS:
   DNS zone: "oxide.example" (unchanged)
@@ -478,7 +478,7 @@ internal DNS:
 -       SRV  port 32345 dfac80b4-a887-430a-ae87-a4e065dba787.host.control-plane.oxide.internal
 -   name: dfac80b4-a887-430a-ae87-a4e065dba787.host          (records: 1)
 -       AAAA fd00:1122:3344:101::26
-    unchanged names: 45 (records: 59)
+    unchanged names: 46 (records: 62)
 
 external DNS:
   DNS zone: "oxide.example" (unchanged)
