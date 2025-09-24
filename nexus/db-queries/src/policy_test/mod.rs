@@ -145,7 +145,7 @@ async fn test_iam_prep(
 /// users and role assignments.
 #[tokio::test(flavor = "multi_thread")]
 async fn test_iam_roles_behavior() {
-    let logctx = dev::test_setup_log("test_iam_roles");
+    let logctx = dev::test_setup_log("test_iam_roles_behavior");
     let db = TestDatabase::new_with_datastore(&logctx.log).await;
     let (opctx, datastore) = (db.opctx(), db.datastore());
 

@@ -264,6 +264,7 @@ impl_dyn_authorized_resource_for_resource!(authz::PhysicalDisk);
 impl_dyn_authorized_resource_for_resource!(authz::Project);
 impl_dyn_authorized_resource_for_resource!(authz::ProjectImage);
 impl_dyn_authorized_resource_for_resource!(authz::SamlIdentityProvider);
+impl_dyn_authorized_resource_for_resource!(authz::ScimClientBearerToken);
 impl_dyn_authorized_resource_for_resource!(authz::Service);
 impl_dyn_authorized_resource_for_resource!(authz::Silo);
 impl_dyn_authorized_resource_for_resource!(authz::SiloGroup);
