@@ -2443,14 +2443,26 @@ fn cmd_blueprint_diff(
     // each blueprint.  To do that we need to construct a list of sleds suitable
     // for the executor.
     let sleds_by_id = make_sleds_by_id(state.system().description())?;
+
+    // It's tricky to figure out which active Nexus generation number to use
+    // when diff'ing blueprints.  What's currently active might be wholly
+    // different from what's here.  (Imagine generation 7 is active and these
+    // blueprints are from Nexus generation 4.)  What's most likely useful is
+    // picking the Nexus generation of the blueprint itself.
+    let blueprint1_active_nexus_generation =
+        blueprint_active_nexus_generation(&blueprint1);
+    let blueprint2_active_nexus_generation =
+        blueprint_active_nexus_generation(&blueprint2);
     let internal_dns_config1 = blueprint_internal_dns_config(
         &blueprint1,
         &sleds_by_id,
+        blueprint1_active_nexus_generation,
         &Default::default(),
     )?;
     let internal_dns_config2 = blueprint_internal_dns_config(
         &blueprint2,
         &sleds_by_id,
+        blueprint2_active_nexus_generation,
         &Default::default(),
     )?;
     let dns_diff = DnsDiff::new(&internal_dns_config1, &internal_dns_config2)
@@ -2462,11 +2474,13 @@ fn cmd_blueprint_diff(
         &blueprint1,
         state.config().silo_names(),
         external_dns_zone_name.to_owned(),
+        blueprint1_active_nexus_generation,
     );
     let external_dns_config2 = blueprint_external_dns_config(
         &blueprint2,
         state.config().silo_names(),
         external_dns_zone_name.to_owned(),
+        blueprint2_active_nexus_generation,
     );
     let dns_diff = DnsDiff::new(&external_dns_config1, &external_dns_config2)
         .context("failed to assemble external DNS diff")?;
@@ -2524,12 +2538,15 @@ fn cmd_blueprint_diff_dns(
         }
     };
 
+    let blueprint_active_generation =
+        blueprint_active_nexus_generation(&blueprint);
     let blueprint_dns_zone = match dns_group {
         CliDnsGroup::Internal => {
             let sleds_by_id = make_sleds_by_id(state.system().description())?;
             blueprint_internal_dns_config(
                 blueprint,
                 &sleds_by_id,
+                blueprint_active_generation,
                 &Default::default(),
             )?
         }
@@ -2537,6 +2554,7 @@ fn cmd_blueprint_diff_dns(
             blueprint,
             state.config().silo_names(),
             state.config().external_dns_zone_name().to_owned(),
+            blueprint_active_generation,
         ),
     };
 
@@ -3005,9 +3023,12 @@ fn cmd_load_example(
 
     // Generate the internal and external DNS configs based on the blueprint.
     let sleds_by_id = make_sleds_by_id(&example.system)?;
+    let blueprint_nexus_generation =
+        blueprint_active_nexus_generation(&blueprint);
     let internal_dns = blueprint_internal_dns_config(
         &blueprint,
         &sleds_by_id,
+        blueprint_nexus_generation,
         &Default::default(),
     )?;
     let external_dns_zone_name =
@@ -3016,6 +3037,7 @@ fn cmd_load_example(
         &blueprint,
         state.config_mut().silo_names(),
         external_dns_zone_name,
+        blueprint_nexus_generation,
     );
 
     let blueprint_id = blueprint.id;
@@ -3081,4 +3103,31 @@ fn cmd_file_contents(args: FileContentsArgs) -> anyhow::Result<Option<String>> {
     );
 
     Ok(Some(s))
+}
+
+/// Returns the "active Nexus generation" to use for a historical blueprint
+/// (i.e., a blueprint that may not have been generated or executed against the
+/// current simulated state).  This is used for `blueprint-diff`, for example,
+/// which avoids assuming anything about the simulated state in comparing the
+/// two blueprints.
+///
+/// In general, the active Nexus generation for a blueprint is not well-defined.
+/// We cannot know what the active Nexus generation was at some point in the
+/// past.  But we do know that it's one of these two values:
+///
+/// - `blueprint.nexus_generation - 1`, if this blueprint was created as part
+///   of an upgrade, starting with the point where the Nexus handoff was
+///   initiated (inclusive) and ending with the first blueprint after the
+///   handoff (exclusive).  In most cases, this means that this is the single
+///   blueprint during an upgrade that triggered the handoff.
+/// - `blueprint.nexus_generation` otherwise (which includes all other
+///   blueprints that are created during an upgrade and all blueprints created
+///   outside of an upgrade).
+///
+/// This implementation always returns `blueprint.nexus_generation`.  In the
+/// second case above, this is always correct.  In the first case, this is
+/// basically equivalent to assuming that the Nexus handoff had happened
+/// instantaneously when the blueprint was created.
+fn blueprint_active_nexus_generation(blueprint: &Blueprint) -> Generation {
+    blueprint.nexus_generation
 }

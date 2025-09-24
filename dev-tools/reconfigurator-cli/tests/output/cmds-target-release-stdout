@@ -3237,6 +3237,7 @@ planning report:
 * waiting for NTP zones to appear in inventory on sleds: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
 * sleds getting NTP zones and which have other services already, making them eligible for discretionary zones: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
 * missing NTP zone on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
+* zone updates waiting on zone propagation to inventory
 * waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
@@ -5327,6 +5328,7 @@ planning report:
 * waiting for NTP zones to appear in inventory on sleds: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
 * sleds getting NTP zones and which have other services already, making them eligible for discretionary zones: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
 * missing NTP zone on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
+* zone updates waiting on zone propagation to inventory
 * waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
@@ -7092,6 +7094,7 @@ planning report:
 * waiting for NTP zones to appear in inventory on sleds: d81c6a84-79b8-4958-ae41-ea46c9b19763
 * sleds getting NTP zones and which have other services already, making them eligible for discretionary zones: d81c6a84-79b8-4958-ae41-ea46c9b19763
 * missing NTP zone on sled d81c6a84-79b8-4958-ae41-ea46c9b19763
+* zone updates waiting on zone propagation to inventory
 * waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
@@ -7893,48 +7896,12 @@ to:   blueprint d69e1109-06be-4469-8876-4292dc7885d7
 
 
 internal DNS:
-* DNS zone: "control-plane.oxide.internal": 
-+   name: 90dbd6f3-9bcb-4a62-ad85-d61f5b3a36ad.host          (records: 1)
-+       AAAA fd00:1122:3344:103::2b
-+   name: 9ae90740-7fdb-4073-ae43-048f2fca3d69.host          (records: 1)
-+       AAAA fd00:1122:3344:102::2c
-*   name: _nexus-lockstep._tcp                               (records: 3 -> 6)
--       SRV  port 12232 0c71b3b2-6ceb-4e8f-b020-b08675e83038.host.control-plane.oxide.internal
--       SRV  port 12232 3eeb8d49-eb1a-43f8-bb64-c2338421c2c6.host.control-plane.oxide.internal
--       SRV  port 12232 466a9f29-62bf-4e63-924a-b9efdb86afec.host.control-plane.oxide.internal
-+       SRV  port 12232 0c71b3b2-6ceb-4e8f-b020-b08675e83038.host.control-plane.oxide.internal
-+       SRV  port 12232 3eeb8d49-eb1a-43f8-bb64-c2338421c2c6.host.control-plane.oxide.internal
-+       SRV  port 12232 466a9f29-62bf-4e63-924a-b9efdb86afec.host.control-plane.oxide.internal
-+       SRV  port 12232 90dbd6f3-9bcb-4a62-ad85-d61f5b3a36ad.host.control-plane.oxide.internal
-+       SRV  port 12232 9ae90740-7fdb-4073-ae43-048f2fca3d69.host.control-plane.oxide.internal
-+       SRV  port 12232 d516d61b-fd96-46ad-a743-78eec814ee90.host.control-plane.oxide.internal
-*   name: _nexus._tcp                                        (records: 3 -> 6)
--       SRV  port 12221 0c71b3b2-6ceb-4e8f-b020-b08675e83038.host.control-plane.oxide.internal
--       SRV  port 12221 3eeb8d49-eb1a-43f8-bb64-c2338421c2c6.host.control-plane.oxide.internal
--       SRV  port 12221 466a9f29-62bf-4e63-924a-b9efdb86afec.host.control-plane.oxide.internal
-+       SRV  port 12221 0c71b3b2-6ceb-4e8f-b020-b08675e83038.host.control-plane.oxide.internal
-+       SRV  port 12221 3eeb8d49-eb1a-43f8-bb64-c2338421c2c6.host.control-plane.oxide.internal
-+       SRV  port 12221 466a9f29-62bf-4e63-924a-b9efdb86afec.host.control-plane.oxide.internal
-+       SRV  port 12221 90dbd6f3-9bcb-4a62-ad85-d61f5b3a36ad.host.control-plane.oxide.internal
-+       SRV  port 12221 9ae90740-7fdb-4073-ae43-048f2fca3d69.host.control-plane.oxide.internal
-+       SRV  port 12221 d516d61b-fd96-46ad-a743-78eec814ee90.host.control-plane.oxide.internal
-+   name: d516d61b-fd96-46ad-a743-78eec814ee90.host          (records: 1)
-+       AAAA fd00:1122:3344:101::2b
-    unchanged names: 50 (records: 62)
+  DNS zone: "control-plane.oxide.internal" (unchanged)
+    unchanged names: 52 (records: 68)
 
 external DNS:
-* DNS zone: "oxide.example": 
-*   name: example-silo.sys                                   (records: 3 -> 6)
--       A    192.0.2.2
--       A    192.0.2.3
--       A    192.0.2.4
-+       A    192.0.2.2
-+       A    192.0.2.7
-+       A    192.0.2.3
-+       A    192.0.2.6
-+       A    192.0.2.4
-+       A    192.0.2.5
-    unchanged names: 4 (records: 6)
+  DNS zone: "oxide.example" (unchanged)
+    unchanged names: 5 (records: 9)
 
 
 
@@ -7955,6 +7922,9 @@ generated inventory collection 7349431d-718a-4353-a1ee-357ce2aeeb28 from configu
 
 > # Planning now should bump the top-level `nexus_generation` to 2, indicating
 > # that we want handoff to begin.
+> # Note that `blueprint-diff` will show the DNS changes as though the handoff has
+> # happened already because that command does not take into account simulated
+> # state.
 > blueprint-plan latest latest
 INFO performed noop zone image source checks on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, num_total: 10, num_already_artifact: 10, num_eligible: 0, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
@@ -8001,12 +7971,45 @@ to:   blueprint 12f19448-6a10-4b4b-ae19-a8c94a566097
 
 
 internal DNS:
-  DNS zone: "control-plane.oxide.internal" (unchanged)
-    unchanged names: 55 (records: 77)
+* DNS zone: "control-plane.oxide.internal": 
+-   name: 0c71b3b2-6ceb-4e8f-b020-b08675e83038.host          (records: 1)
+-       AAAA fd00:1122:3344:101::22
+-   name: 3eeb8d49-eb1a-43f8-bb64-c2338421c2c6.host          (records: 1)
+-       AAAA fd00:1122:3344:103::22
+-   name: 466a9f29-62bf-4e63-924a-b9efdb86afec.host          (records: 1)
+-       AAAA fd00:1122:3344:102::22
++   name: 90dbd6f3-9bcb-4a62-ad85-d61f5b3a36ad.host          (records: 1)
++       AAAA fd00:1122:3344:103::2b
++   name: 9ae90740-7fdb-4073-ae43-048f2fca3d69.host          (records: 1)
++       AAAA fd00:1122:3344:102::2c
+*   name: _nexus-lockstep._tcp                               (records: 3 -> 3)
+-       SRV  port 12232 0c71b3b2-6ceb-4e8f-b020-b08675e83038.host.control-plane.oxide.internal
+-       SRV  port 12232 3eeb8d49-eb1a-43f8-bb64-c2338421c2c6.host.control-plane.oxide.internal
+-       SRV  port 12232 466a9f29-62bf-4e63-924a-b9efdb86afec.host.control-plane.oxide.internal
++       SRV  port 12232 90dbd6f3-9bcb-4a62-ad85-d61f5b3a36ad.host.control-plane.oxide.internal
++       SRV  port 12232 9ae90740-7fdb-4073-ae43-048f2fca3d69.host.control-plane.oxide.internal
++       SRV  port 12232 d516d61b-fd96-46ad-a743-78eec814ee90.host.control-plane.oxide.internal
+*   name: _nexus._tcp                                        (records: 3 -> 3)
+-       SRV  port 12221 0c71b3b2-6ceb-4e8f-b020-b08675e83038.host.control-plane.oxide.internal
+-       SRV  port 12221 3eeb8d49-eb1a-43f8-bb64-c2338421c2c6.host.control-plane.oxide.internal
+-       SRV  port 12221 466a9f29-62bf-4e63-924a-b9efdb86afec.host.control-plane.oxide.internal
++       SRV  port 12221 90dbd6f3-9bcb-4a62-ad85-d61f5b3a36ad.host.control-plane.oxide.internal
++       SRV  port 12221 9ae90740-7fdb-4073-ae43-048f2fca3d69.host.control-plane.oxide.internal
++       SRV  port 12221 d516d61b-fd96-46ad-a743-78eec814ee90.host.control-plane.oxide.internal
++   name: d516d61b-fd96-46ad-a743-78eec814ee90.host          (records: 1)
++       AAAA fd00:1122:3344:101::2b
+    unchanged names: 47 (records: 59)
 
 external DNS:
-  DNS zone: "oxide.example" (unchanged)
-    unchanged names: 5 (records: 12)
+* DNS zone: "oxide.example": 
+*   name: example-silo.sys                                   (records: 3 -> 3)
+-       A    192.0.2.2
+-       A    192.0.2.3
+-       A    192.0.2.4
++       A    192.0.2.7
++       A    192.0.2.6
++       A    192.0.2.5
+    unchanged names: 4 (records: 6)
 
 
 
@@ -8059,11 +8062,11 @@ to:   blueprint 4713f6c4-e8ba-4a28-87a0-df75ebf7b8b6
 
 internal DNS:
   DNS zone: "control-plane.oxide.internal" (unchanged)
-    unchanged names: 55 (records: 77)
+    unchanged names: 52 (records: 68)
 
 external DNS:
   DNS zone: "oxide.example" (unchanged)
-    unchanged names: 5 (records: 12)
+    unchanged names: 5 (records: 9)
 
 
 
@@ -8194,50 +8197,12 @@ to:   blueprint 6d830d26-547e-492b-adfe-c5c4ad9c3751
 
 
 internal DNS:
-* DNS zone: "control-plane.oxide.internal": 
--   name: 466a9f29-62bf-4e63-924a-b9efdb86afec.host          (records: 1)
--       AAAA fd00:1122:3344:102::22
-*   name: _nexus-lockstep._tcp                               (records: 6 -> 5)
--       SRV  port 12232 0c71b3b2-6ceb-4e8f-b020-b08675e83038.host.control-plane.oxide.internal
--       SRV  port 12232 3eeb8d49-eb1a-43f8-bb64-c2338421c2c6.host.control-plane.oxide.internal
--       SRV  port 12232 466a9f29-62bf-4e63-924a-b9efdb86afec.host.control-plane.oxide.internal
--       SRV  port 12232 90dbd6f3-9bcb-4a62-ad85-d61f5b3a36ad.host.control-plane.oxide.internal
--       SRV  port 12232 9ae90740-7fdb-4073-ae43-048f2fca3d69.host.control-plane.oxide.internal
--       SRV  port 12232 d516d61b-fd96-46ad-a743-78eec814ee90.host.control-plane.oxide.internal
-+       SRV  port 12232 0c71b3b2-6ceb-4e8f-b020-b08675e83038.host.control-plane.oxide.internal
-+       SRV  port 12232 3eeb8d49-eb1a-43f8-bb64-c2338421c2c6.host.control-plane.oxide.internal
-+       SRV  port 12232 90dbd6f3-9bcb-4a62-ad85-d61f5b3a36ad.host.control-plane.oxide.internal
-+       SRV  port 12232 9ae90740-7fdb-4073-ae43-048f2fca3d69.host.control-plane.oxide.internal
-+       SRV  port 12232 d516d61b-fd96-46ad-a743-78eec814ee90.host.control-plane.oxide.internal
-*   name: _nexus._tcp                                        (records: 6 -> 5)
--       SRV  port 12221 0c71b3b2-6ceb-4e8f-b020-b08675e83038.host.control-plane.oxide.internal
--       SRV  port 12221 3eeb8d49-eb1a-43f8-bb64-c2338421c2c6.host.control-plane.oxide.internal
--       SRV  port 12221 466a9f29-62bf-4e63-924a-b9efdb86afec.host.control-plane.oxide.internal
--       SRV  port 12221 90dbd6f3-9bcb-4a62-ad85-d61f5b3a36ad.host.control-plane.oxide.internal
--       SRV  port 12221 9ae90740-7fdb-4073-ae43-048f2fca3d69.host.control-plane.oxide.internal
--       SRV  port 12221 d516d61b-fd96-46ad-a743-78eec814ee90.host.control-plane.oxide.internal
-+       SRV  port 12221 0c71b3b2-6ceb-4e8f-b020-b08675e83038.host.control-plane.oxide.internal
-+       SRV  port 12221 3eeb8d49-eb1a-43f8-bb64-c2338421c2c6.host.control-plane.oxide.internal
-+       SRV  port 12221 90dbd6f3-9bcb-4a62-ad85-d61f5b3a36ad.host.control-plane.oxide.internal
-+       SRV  port 12221 9ae90740-7fdb-4073-ae43-048f2fca3d69.host.control-plane.oxide.internal
-+       SRV  port 12221 d516d61b-fd96-46ad-a743-78eec814ee90.host.control-plane.oxide.internal
-    unchanged names: 52 (records: 64)
+  DNS zone: "control-plane.oxide.internal" (unchanged)
+    unchanged names: 52 (records: 68)
 
 external DNS:
-* DNS zone: "oxide.example": 
-*   name: example-silo.sys                                   (records: 6 -> 5)
--       A    192.0.2.2
--       A    192.0.2.7
--       A    192.0.2.3
--       A    192.0.2.6
--       A    192.0.2.4
--       A    192.0.2.5
-+       A    192.0.2.7
-+       A    192.0.2.3
-+       A    192.0.2.6
-+       A    192.0.2.4
-+       A    192.0.2.5
-    unchanged names: 4 (records: 6)
+  DNS zone: "oxide.example" (unchanged)
+    unchanged names: 5 (records: 9)
 
 
 
@@ -8361,44 +8326,12 @@ to:   blueprint 8e0cc787-e068-4a45-97ed-21029cbe4ddf
 
 
 internal DNS:
-* DNS zone: "control-plane.oxide.internal": 
--   name: 0c71b3b2-6ceb-4e8f-b020-b08675e83038.host          (records: 1)
--       AAAA fd00:1122:3344:101::22
-*   name: _nexus-lockstep._tcp                               (records: 5 -> 4)
--       SRV  port 12232 0c71b3b2-6ceb-4e8f-b020-b08675e83038.host.control-plane.oxide.internal
--       SRV  port 12232 3eeb8d49-eb1a-43f8-bb64-c2338421c2c6.host.control-plane.oxide.internal
--       SRV  port 12232 90dbd6f3-9bcb-4a62-ad85-d61f5b3a36ad.host.control-plane.oxide.internal
--       SRV  port 12232 9ae90740-7fdb-4073-ae43-048f2fca3d69.host.control-plane.oxide.internal
--       SRV  port 12232 d516d61b-fd96-46ad-a743-78eec814ee90.host.control-plane.oxide.internal
-+       SRV  port 12232 3eeb8d49-eb1a-43f8-bb64-c2338421c2c6.host.control-plane.oxide.internal
-+       SRV  port 12232 90dbd6f3-9bcb-4a62-ad85-d61f5b3a36ad.host.control-plane.oxide.internal
-+       SRV  port 12232 9ae90740-7fdb-4073-ae43-048f2fca3d69.host.control-plane.oxide.internal
-+       SRV  port 12232 d516d61b-fd96-46ad-a743-78eec814ee90.host.control-plane.oxide.internal
-*   name: _nexus._tcp                                        (records: 5 -> 4)
--       SRV  port 12221 0c71b3b2-6ceb-4e8f-b020-b08675e83038.host.control-plane.oxide.internal
--       SRV  port 12221 3eeb8d49-eb1a-43f8-bb64-c2338421c2c6.host.control-plane.oxide.internal
--       SRV  port 12221 90dbd6f3-9bcb-4a62-ad85-d61f5b3a36ad.host.control-plane.oxide.internal
--       SRV  port 12221 9ae90740-7fdb-4073-ae43-048f2fca3d69.host.control-plane.oxide.internal
--       SRV  port 12221 d516d61b-fd96-46ad-a743-78eec814ee90.host.control-plane.oxide.internal
-+       SRV  port 12221 3eeb8d49-eb1a-43f8-bb64-c2338421c2c6.host.control-plane.oxide.internal
-+       SRV  port 12221 90dbd6f3-9bcb-4a62-ad85-d61f5b3a36ad.host.control-plane.oxide.internal
-+       SRV  port 12221 9ae90740-7fdb-4073-ae43-048f2fca3d69.host.control-plane.oxide.internal
-+       SRV  port 12221 d516d61b-fd96-46ad-a743-78eec814ee90.host.control-plane.oxide.internal
-    unchanged names: 51 (records: 63)
+  DNS zone: "control-plane.oxide.internal" (unchanged)
+    unchanged names: 52 (records: 68)
 
 external DNS:
-* DNS zone: "oxide.example": 
-*   name: example-silo.sys                                   (records: 5 -> 4)
--       A    192.0.2.7
--       A    192.0.2.3
--       A    192.0.2.6
--       A    192.0.2.4
--       A    192.0.2.5
-+       A    192.0.2.7
-+       A    192.0.2.6
-+       A    192.0.2.4
-+       A    192.0.2.5
-    unchanged names: 4 (records: 6)
+  DNS zone: "oxide.example" (unchanged)
+    unchanged names: 5 (records: 9)
 
 
 
@@ -8519,38 +8452,12 @@ to:   blueprint e31c9054-8549-4c68-acf9-a01f68d1fc9b
 
 
 internal DNS:
-* DNS zone: "control-plane.oxide.internal": 
--   name: 3eeb8d49-eb1a-43f8-bb64-c2338421c2c6.host          (records: 1)
--       AAAA fd00:1122:3344:103::22
-*   name: _nexus-lockstep._tcp                               (records: 4 -> 3)
--       SRV  port 12232 3eeb8d49-eb1a-43f8-bb64-c2338421c2c6.host.control-plane.oxide.internal
--       SRV  port 12232 90dbd6f3-9bcb-4a62-ad85-d61f5b3a36ad.host.control-plane.oxide.internal
--       SRV  port 12232 9ae90740-7fdb-4073-ae43-048f2fca3d69.host.control-plane.oxide.internal
--       SRV  port 12232 d516d61b-fd96-46ad-a743-78eec814ee90.host.control-plane.oxide.internal
-+       SRV  port 12232 90dbd6f3-9bcb-4a62-ad85-d61f5b3a36ad.host.control-plane.oxide.internal
-+       SRV  port 12232 9ae90740-7fdb-4073-ae43-048f2fca3d69.host.control-plane.oxide.internal
-+       SRV  port 12232 d516d61b-fd96-46ad-a743-78eec814ee90.host.control-plane.oxide.internal
-*   name: _nexus._tcp                                        (records: 4 -> 3)
--       SRV  port 12221 3eeb8d49-eb1a-43f8-bb64-c2338421c2c6.host.control-plane.oxide.internal
--       SRV  port 12221 90dbd6f3-9bcb-4a62-ad85-d61f5b3a36ad.host.control-plane.oxide.internal
--       SRV  port 12221 9ae90740-7fdb-4073-ae43-048f2fca3d69.host.control-plane.oxide.internal
--       SRV  port 12221 d516d61b-fd96-46ad-a743-78eec814ee90.host.control-plane.oxide.internal
-+       SRV  port 12221 90dbd6f3-9bcb-4a62-ad85-d61f5b3a36ad.host.control-plane.oxide.internal
-+       SRV  port 12221 9ae90740-7fdb-4073-ae43-048f2fca3d69.host.control-plane.oxide.internal
-+       SRV  port 12221 d516d61b-fd96-46ad-a743-78eec814ee90.host.control-plane.oxide.internal
-    unchanged names: 50 (records: 62)
+  DNS zone: "control-plane.oxide.internal" (unchanged)
+    unchanged names: 52 (records: 68)
 
 external DNS:
-* DNS zone: "oxide.example": 
-*   name: example-silo.sys                                   (records: 4 -> 3)
--       A    192.0.2.7
--       A    192.0.2.6
--       A    192.0.2.4
--       A    192.0.2.5
-+       A    192.0.2.7
-+       A    192.0.2.6
-+       A    192.0.2.5
-    unchanged names: 4 (records: 6)
+  DNS zone: "oxide.example" (unchanged)
+    unchanged names: 5 (records: 9)
 
 
 

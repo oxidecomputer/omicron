@@ -48,6 +48,16 @@ impl PersistentState {
         }
     }
 
+    pub fn new_lrtq_only(lrtq: LrtqShareData) -> PersistentState {
+        PersistentState {
+            lrtq: Some(lrtq),
+            configs: IdOrdMap::new(),
+            shares: BTreeMap::new(),
+            commits: BTreeSet::new(),
+            expunged: None,
+        }
+    }
+
     pub fn rack_id(&self) -> Option<RackUuid> {
         self.latest_config().map(|c| c.rack_id).or_else(|| {
             self.lrtq
