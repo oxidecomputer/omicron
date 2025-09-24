@@ -1,0 +1,77 @@
+# Load example system
+load-example --nsleds 3 --ndisks-per-sled 3
+
+# Print the initial configuration
+show
+
+# Create TUF repos
+tuf-assemble ../../update-common/manifests/fake.toml
+
+set target-release repo-1.0.0.zip
+
+# Update the install dataset on all sleds to the target release.
+# This will cause zones to be noop converted over to Artifact,
+# unblocking upgrades.
+sled-update-install-dataset serial0 --to-target-release
+sled-update-install-dataset serial1 --to-target-release
+sled-update-install-dataset serial2 --to-target-release
+
+# I wish there was a less painful way of doing this!
+# Manually update the:
+# - RT Bootloader
+# - ROT
+# - SP
+# - Host Phase 1 (both slots)
+# - Host Phase 2 (both slots)
+#
+# To match what is requested by the blueprint.
+
+sled-update-rot-bootloader serial0 --stage0 1.0.0
+sled-update-rot-bootloader serial1 --stage0 1.0.0
+sled-update-rot-bootloader serial2 --stage0 1.0.0
+
+sled-update-rot serial0 --slot-a 1.0.0
+sled-update-rot serial1 --slot-a 1.0.0
+sled-update-rot serial2 --slot-a 1.0.0
+
+sled-update-rot serial0 --slot-b 1.0.0
+sled-update-rot serial1 --slot-b 1.0.0
+sled-update-rot serial2 --slot-b 1.0.0
+
+sled-update-sp serial0 --active 1.0.0
+sled-update-sp serial1 --active 1.0.0
+sled-update-sp serial2 --active 1.0.0
+
+sled-update-host-phase1 serial0 --active A --slot-a 1.0.0
+sled-update-host-phase1 serial1 --active A --slot-a 1.0.0
+sled-update-host-phase1 serial2 --active A --slot-a 1.0.0
+
+sled-update-host-phase1 serial0 --slot-b b99d5273ba1418bebb19d74b701d716896409566d41de76ada71bded4c9b166b
+sled-update-host-phase1 serial1 --slot-b b99d5273ba1418bebb19d74b701d716896409566d41de76ada71bded4c9b166b
+sled-update-host-phase1 serial2 --slot-b b99d5273ba1418bebb19d74b701d716896409566d41de76ada71bded4c9b166b
+
+sled-update-host-phase2 serial0 --boot-disk A --slot-a 1.0.0
+sled-update-host-phase2 serial1 --boot-disk A --slot-a 1.0.0
+sled-update-host-phase2 serial2 --boot-disk A --slot-a 1.0.0
+
+sled-update-host-phase2 serial0 --boot-disk B --slot-b d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47
+sled-update-host-phase2 serial1 --boot-disk B --slot-b d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47
+sled-update-host-phase2 serial2 --boot-disk B --slot-b d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47
+
+# Migrate from Install -> Artifact
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+# Also set the Omicron config for all sleds to reflect the
+# corresponding image sources.
+sled-set serial0 omicron-config latest
+sled-set serial1 omicron-config latest
+sled-set serial2 omicron-config latest
+
+# Generate inventory once more to reflect the omicron config changes.
+inventory-generate
+inventory-show latest
+
+blueprint-plan latest latest
+blueprint-diff latest
