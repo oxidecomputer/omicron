@@ -486,6 +486,10 @@ impl PlanningMupdateOverrideStepReport {
 )]
 #[serde(rename_all = "snake_case")]
 #[serde(tag = "type", content = "value")]
+// TODO-K: Separate into enums for each component as suggested in
+// https://github.com/oxidecomputer/omicron/pull/9001#discussion_r2372863166
+// and including more detailed information as suggested in
+// https://github.com/oxidecomputer/omicron/pull/9001#discussion_r2372842378
 pub enum FailedMgsUpdateReason {
     /// The active host phase 1 slot does not match the boot disk
     #[error("active phase 1 slot {0:?} does not match boot disk")]
