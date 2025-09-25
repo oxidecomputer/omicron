@@ -15,6 +15,8 @@ use nexus_test_utils::background::run_tuf_artifact_replication_step;
 use nexus_test_utils::background::wait_tuf_artifact_replication_step;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils::resource_helpers::object_get;
+use nexus_test_utils::resource_helpers::object_get_error;
+use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use nexus_test_utils::test_setup;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::views;
@@ -168,16 +170,12 @@ async fn test_repo_upload_unconfigured() -> Result<()> {
 
     // Attempt to fetch a repository description from Nexus. This should fail
     // with a 404 error.
-    {
-        make_get_request(
-            client,
-            "1.0.0".parse().unwrap(),
-            StatusCode::NOT_FOUND,
-        )
-        .execute()
-        .await
-        .context("repository fetch should have failed with 404 error")?;
-    }
+    object_get_error(
+        client,
+        "/v1/system/update/repository/1.0.0",
+        StatusCode::NOT_FOUND,
+    )
+    .await;
 
     cptestctx.teardown().await;
     Ok(())
@@ -313,18 +311,11 @@ async fn test_repo_upload() -> Result<()> {
 
     // Now get the repository that was just uploaded.
     let mut get_description = {
-        let response = make_get_request(
+        let response = object_get::<TufRepoGetResponse>(
             client,
-            "1.0.0".parse().unwrap(), // this is the system version of the fake manifest
-            StatusCode::OK,
+            "/v1/system/update/repository/1.0.0",
         )
-        .execute()
-        .await
-        .context("error fetching repository")?;
-
-        let response =
-            serde_json::from_slice::<TufRepoGetResponse>(&response.body)
-                .context("error deserializing response body")?;
+        .await;
         response.description
     };
 
@@ -501,12 +492,11 @@ async fn test_repo_upload() -> Result<()> {
 
         // Now get the repository that was just uploaded and make sure the
         // artifact list is the same.
-        let response: TufRepoGetResponse =
-            make_get_request(client, "2.0.0".parse().unwrap(), StatusCode::OK)
-                .execute()
-                .await
-                .context("error fetching repository")?
-                .parsed_body()?;
+        let response = object_get::<TufRepoGetResponse>(
+            client,
+            "/v1/system/update/repository/2.0.0",
+        )
+        .await;
         let mut get_description = response.description;
         get_description.sort_artifacts();
 
@@ -604,23 +594,6 @@ async fn test_repo_upload() -> Result<()> {
 
     cptestctx.teardown().await;
     Ok(())
-}
-
-fn make_get_request(
-    client: &dropshot::test_util::ClientTestContext,
-    system_version: Version,
-    expected_status: StatusCode,
-) -> NexusRequest<'_> {
-    let request = NexusRequest::new(
-        RequestBuilder::new(
-            client,
-            Method::GET,
-            &format!("/v1/system/update/repository/{system_version}"),
-        )
-        .expect_status(Some(expected_status)),
-    )
-    .authn_as(AuthnMode::PrivilegedUser);
-    request
 }
 
 #[derive(Debug, Deserialize)]
@@ -786,6 +759,7 @@ async fn test_update_status() -> Result<()> {
     cptestctx.teardown().await;
     Ok(())
 }
+
 #[nexus_test]
 async fn test_repo_prune(cptestctx: &ControlPlaneTestContext) {
     let logctx = &cptestctx.logctx;
@@ -825,4 +799,129 @@ async fn test_repo_prune(cptestctx: &ControlPlaneTestContext) {
     assert!(repos.iter().any(|r| r.id() == repo2id));
     assert!(repos.iter().any(|r| r.id() == repo3id));
     assert!(repos.iter().any(|r| r.id() == repo4id));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_repo_list() -> Result<()> {
+    let cptestctx = test_setup::<omicron_nexus::Server>(
+        "test_update_repo_list",
+        3, // 4 total sled agents
+    )
+    .await;
+    let client = &cptestctx.external_client;
+    let logctx = &cptestctx.logctx;
+
+    // Initially, list should be empty
+    let initial_list: ResultsPage<TufRepoGetResponse> =
+        objects_list_page_authz(client, "/v1/system/update/repositories").await;
+    assert_eq!(initial_list.items.len(), 0);
+    assert!(initial_list.next_page.is_none());
+
+    // Add a trust root
+    let trust_root = TestTrustRoot::generate().await?;
+    trust_root.to_upload_request(client, StatusCode::CREATED).execute().await?;
+
+    // Upload first repository (system version 1.0.0)
+    let repo1 = trust_root.assemble_repo(&logctx.log, &[]).await?;
+    let upload_response1 = repo1
+        .into_upload_request(client, StatusCode::OK)
+        .execute()
+        .await
+        .context("error uploading first repository")?;
+    let response1 =
+        serde_json::from_slice::<TufRepoInsertResponse>(&upload_response1.body)
+            .context("error deserializing first response body")?;
+    assert_eq!(response1.status, TufRepoInsertStatus::Inserted);
+
+    // Upload second repository (system version 2.0.0)
+    let tweaks = &[ManifestTweak::SystemVersion("2.0.0".parse().unwrap())];
+    let repo2 = trust_root.assemble_repo(&logctx.log, tweaks).await?;
+    let upload_response2 = repo2
+        .into_upload_request(client, StatusCode::OK)
+        .execute()
+        .await
+        .context("error uploading second repository")?;
+    let response2 =
+        serde_json::from_slice::<TufRepoInsertResponse>(&upload_response2.body)
+            .context("error deserializing second response body")?;
+    assert_eq!(response2.status, TufRepoInsertStatus::Inserted);
+
+    // Upload third repository (system version 3.0.0)
+    let tweaks = &[ManifestTweak::SystemVersion("3.0.0".parse().unwrap())];
+    let repo3 = trust_root.assemble_repo(&logctx.log, tweaks).await?;
+    let upload_response3 = repo3
+        .into_upload_request(client, StatusCode::OK)
+        .execute()
+        .await
+        .context("error uploading third repository")?;
+    let response3 =
+        serde_json::from_slice::<TufRepoInsertResponse>(&upload_response3.body)
+            .context("error deserializing third response body")?;
+    assert_eq!(response3.status, TufRepoInsertStatus::Inserted);
+
+    // List repositories - should return all 3, ordered by creation time (newest first)
+    let list: ResultsPage<TufRepoGetResponse> =
+        objects_list_page_authz(client, "/v1/system/update/repositories").await;
+
+    assert_eq!(list.items.len(), 3);
+
+    // Repositories should be ordered by creation time descending (newest first)
+    // Since repo3 was created last, it should be first in the list
+    let system_versions: Vec<String> = list
+        .items
+        .iter()
+        .map(|item| item.description.repo.system_version.to_string())
+        .collect();
+    assert_eq!(system_versions, vec!["3.0.0", "2.0.0", "1.0.0"]);
+
+    // Verify that each response contains the correct artifacts
+    for (i, item) in list.items.iter().enumerate() {
+        let expected_version = match i {
+            0 => "3.0.0",
+            1 => "2.0.0",
+            2 => "1.0.0",
+            _ => panic!("unexpected index"),
+        };
+        assert_eq!(
+            item.description.repo.system_version.to_string(),
+            expected_version
+        );
+
+        // Verify artifacts are present (should have Zone artifacts)
+        let zone_artifacts: Vec<_> = item
+            .description
+            .artifacts
+            .iter()
+            .filter(|artifact| {
+                artifact.id.kind == KnownArtifactKind::Zone.into()
+            })
+            .collect();
+        assert_eq!(zone_artifacts.len(), 2, "should have 2 zone artifacts");
+
+        // Should not have ControlPlane artifacts (they get decomposed into Zones)
+        assert!(!item.description.artifacts.iter().any(|artifact| {
+            artifact.id.kind == KnownArtifactKind::ControlPlane.into()
+        }));
+    }
+
+    // Test pagination by setting a small limit
+    let paginated_list = objects_list_page_authz::<TufRepoGetResponse>(
+        client,
+        "/v1/system/update/repositories?limit=2",
+    )
+    .await;
+
+    assert_eq!(paginated_list.items.len(), 2);
+    assert!(paginated_list.next_page.is_some());
+
+    // First two items should be 3.0.0 and 2.0.0 (newest first)
+    let paginated_versions: Vec<String> = paginated_list
+        .items
+        .iter()
+        .map(|item| item.description.repo.system_version.to_string())
+        .collect();
+    assert_eq!(paginated_versions, vec!["3.0.0", "2.0.0"]);
+
+    cptestctx.teardown().await;
+    Ok(())
 }

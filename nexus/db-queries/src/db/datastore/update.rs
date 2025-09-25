@@ -481,7 +481,6 @@ impl DataStore {
             (dsl::time_created, dsl::id),
             pagparams,
         )
-        .order_by((dsl::time_created.desc(), dsl::id))
         .select(TufRepo::as_select())
         .load_async(&*conn)
         .await
