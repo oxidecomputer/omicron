@@ -5317,10 +5317,17 @@
         "properties": {
           "pending_mgs_updates": {
             "$ref": "#/components/schemas/PendingMgsUpdates"
+          },
+          "unsafe_zones": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ZoneUnsafeToShutdown"
+            }
           }
         },
         "required": [
-          "pending_mgs_updates"
+          "pending_mgs_updates",
+          "unsafe_zones"
         ]
       },
       "PlanningNexusGenerationBumpReport": {

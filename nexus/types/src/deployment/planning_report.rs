@@ -480,9 +480,7 @@ impl PlanningMgsUpdatesStepReport {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.pending_mgs_updates.is_empty()
-        // TODO-K: uncommenting this destroys all the updates!!!
-        // && self.unsafe_zones.is_empty()
+        self.pending_mgs_updates.is_empty() && self.unsafe_zones.is_empty()
     }
 }
 

@@ -1414,8 +1414,6 @@ impl<'a> Planner<'a> {
             let unsafe_zones: Vec<_> = zones
                 .into_iter()
                 .filter(|zone| {
-                    // TODO-K: Check what to do with the report, is it even
-                    // necessary in this case?
                     !self.can_zone_be_shut_down_safely(
                         zone,
                         &mut report.unsafe_zones
@@ -1427,7 +1425,7 @@ impl<'a> Planner<'a> {
             if !unsafe_zones.is_empty() {
                 let unsafe_zone_kinds: Vec<_> = unsafe_zones
                 .iter()
-                .map(|zone| zone.kind())
+                .map(|zone| zone.kind().report_str())
                 .collect();
 
                 info!(
@@ -2336,7 +2334,7 @@ impl<'a> Planner<'a> {
         // We return false for all zone kinds if there are still
         // pending updates for components earlier in the update ordering
         // than zones: RoT bootloader / RoT / SP / Host OS.
-        mgs_updates.is_empty()
+        mgs_updates.pending_mgs_updates.is_empty()
     }
 
     fn all_non_nexus_zones_using_new_image(&self) -> Result<bool, Error> {
@@ -2465,7 +2463,6 @@ impl<'a> Planner<'a> {
         &self,
         zone: &BlueprintZoneConfig,
         unsafe_zones: &mut BTreeMap<OmicronZoneUuid, ZoneUnsafeToShutdown>,
-        // report: &mut PlanningZoneUpdatesStepReport,
     ) -> bool {
         use ZoneUnsafeToShutdown::*;
         match zone.zone_type.kind() {
