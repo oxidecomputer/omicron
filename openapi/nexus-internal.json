@@ -1161,6 +1161,40 @@
           "port"
         ]
       },
+      "BlockedMgsUpdate": {
+        "type": "object",
+        "properties": {
+          "baseboard_id": {
+            "description": "id of the baseboard that we attempted to update",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BaseboardId"
+              }
+            ]
+          },
+          "component": {
+            "description": "type of SP component that we attempted to update",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MgsUpdateComponent"
+              }
+            ]
+          },
+          "reason": {
+            "description": "reason why the update failed",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/FailedMgsUpdateReason"
+              }
+            ]
+          }
+        },
+        "required": [
+          "baseboard_id",
+          "component",
+          "reason"
+        ]
+      },
       "Blueprint": {
         "description": "Describes a complete set of software and configuration for the system",
         "type": "object",
@@ -2215,6 +2249,18 @@
         "format": "uint64",
         "minimum": 0
       },
+      "CabooseWhich": {
+        "description": "Describes which caboose this is (which component, which slot)",
+        "type": "string",
+        "enum": [
+          "sp_slot0",
+          "sp_slot1",
+          "rot_slot_a",
+          "rot_slot_b",
+          "stage0",
+          "stage0_next"
+        ]
+      },
       "Certificate": {
         "type": "object",
         "properties": {
@@ -3177,6 +3223,280 @@
           }
         ]
       },
+      "FailedMgsUpdateReason": {
+        "description": "Describes the reason why an SP component failed to update",
+        "oneOf": [
+          {
+            "description": "The active host phase 1 slot does not match the boot disk",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "active_host_phase1_slot_boot_disk_mismatch"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/M2Slot"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "description": "The active host phase 1 hash was not found in inventory",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "active_host_phase1_hash_not_in_inventory"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/M2Slot"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "description": "The active host phase 1 slot was not found in inventory",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "active_host_phase1_slot_not_in_inventory"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "The component's caboose was missing a value for \"sign\"",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "caboose_missing_sign"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/CabooseWhich"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "description": "The component's caboose was not found in the inventory",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "caboose_not_in_inventory"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/CabooseWhich"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "description": "The version in the caboose or artifact was not able to be parsed",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "failed_version_parse"
+                ]
+              },
+              "value": {
+                "type": "object",
+                "properties": {
+                  "caboose": {
+                    "$ref": "#/components/schemas/CabooseWhich"
+                  },
+                  "err": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "caboose",
+                  "err"
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "description": "The inactive host phase 1 hash was not found in inventory",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "inactive_host_phase1_hash_not_in_inventory"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/M2Slot"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "description": "Last reconciliation details were not found in inventory",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "last_reconciliation_not_in_inventory"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "No artifact with the required conditions for the component was found",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "no_matching_artifact_found"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "RoT state was not found in inventory",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "rot_state_not_in_inventory"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "Sled agent info was not found in inventory",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "sled_agent_info_not_in_inventory"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "The component's corresponding SP was not found in the inventory",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "sp_not_in_inventory"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "Too many artifacts with the required conditions for the component were found",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "too_many_matching_artifacts"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "The sled agent reported an error determining the boot disk",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "unable_to_determine_boot_disk"
+                ]
+              },
+              "value": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "description": "The sled agent reported an error retrieving boot disk phase 2 image details",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "unable_to_retrieve_boot_disk_phase2_image"
+                ]
+              },
+              "value": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          }
+        ]
+      },
       "Generation": {
         "description": "Generation numbers stored in the database, used for optimistic concurrency control",
         "type": "integer",
@@ -3435,6 +3755,15 @@
         "pattern": "^([0-9a-fA-F]{0,2}:){5}[0-9a-fA-F]{0,2}$",
         "minLength": 5,
         "maxLength": 17
+      },
+      "MgsUpdateComponent": {
+        "type": "string",
+        "enum": [
+          "sp",
+          "rot",
+          "rot_bootloader",
+          "host_os"
+        ]
       },
       "MigrationRuntimeState": {
         "description": "An update from a sled regarding the state of a migration, indicating the role of the VMM whose migration state was updated.",
@@ -4382,6 +4711,12 @@
       "PlanningMgsUpdatesStepReport": {
         "type": "object",
         "properties": {
+          "blocked_mgs_updates": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BlockedMgsUpdate"
+            }
+          },
           "pending_mgs_updates": {
             "$ref": "#/components/schemas/PendingMgsUpdates"
           },
@@ -4393,6 +4728,7 @@
           }
         },
         "required": [
+          "blocked_mgs_updates",
           "pending_mgs_updates",
           "unsafe_zones"
         ]
@@ -6011,6 +6347,21 @@
       "ZoneUpdatesWaitingOn": {
         "oneOf": [
           {
+            "description": "Waiting on blocked updates to RoT bootloader / RoT / SP / Host OS.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "blocked_mgs_updates"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
             "description": "Waiting on discretionary zone placement.",
             "type": "object",
             "properties": {
@@ -6041,7 +6392,7 @@
             ]
           },
           {
-            "description": "Waiting on updates to RoT / SP / Host OS / etc.",
+            "description": "Waiting on updates to RoT bootloader / RoT / SP / Host OS.",
             "type": "object",
             "properties": {
               "type": {

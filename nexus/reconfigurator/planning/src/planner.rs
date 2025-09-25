@@ -235,7 +235,7 @@ impl<'a> Planner<'a> {
         let mgs_updates = if add_update_blocked_reasons.is_empty() {
             self.do_plan_mgs_updates()?
         } else {
-            PlanningMgsUpdatesStepReport::new()
+            PlanningMgsUpdatesStepReport::empty()
         };
 
         // Likewise for zone additions, unless overridden by the config, or
@@ -271,12 +271,17 @@ impl<'a> Planner<'a> {
             PlanningZoneUpdatesStepReport::waiting_on(
                 ZoneUpdatesWaitingOn::DiscretionaryZones,
             )
-        } else if !mgs_updates.is_empty() {
+        } else if !mgs_updates.pending_mgs_updates.is_empty() {
             // ... or if there are still pending updates for the RoT / SP /
             // Host OS / etc. ...
-            // TODO This is not quite right.  See oxidecomputer/omicron#8285.
             PlanningZoneUpdatesStepReport::waiting_on(
                 ZoneUpdatesWaitingOn::PendingMgsUpdates,
+            )
+        } else if !mgs_updates.blocked_mgs_updates.is_empty() {
+            // ... or if there are blocked updates for the RoT / SP / Host OS /
+            // RoT bootloader.
+            PlanningZoneUpdatesStepReport::waiting_on(
+                ZoneUpdatesWaitingOn::BlockedMgsUpdates,
             )
         } else if !add.add_update_blocked_reasons.is_empty() {
             // ... or if there are pending zone add blockers.
@@ -1385,7 +1390,7 @@ impl<'a> Planner<'a> {
     fn do_plan_mgs_updates(
         &mut self,
     ) -> Result<PlanningMgsUpdatesStepReport, Error> {
-        let mut report = PlanningMgsUpdatesStepReport::new();
+        let mut report = PlanningMgsUpdatesStepReport::empty();
         // Determine which baseboards we will consider updating.
         //
         // Sleds may be present but not adopted as part of the control plane.
@@ -1468,16 +1473,19 @@ impl<'a> Planner<'a> {
             } else {
                 ImpossibleUpdatePolicy::Reevaluate
             };
-        let PlannedMgsUpdates { pending_updates, pending_host_phase_2_changes } =
-            plan_mgs_updates(
-                &self.log,
-                &self.inventory,
-                &included_baseboards,
-                current_updates,
-                current_artifacts,
-                NUM_CONCURRENT_MGS_UPDATES,
-                impossible_update_policy,
-            );
+        let PlannedMgsUpdates {
+            pending_updates,
+            pending_host_phase_2_changes,
+            blocked_mgs_updates,
+        } = plan_mgs_updates(
+            &self.log,
+            &self.inventory,
+            &included_baseboards,
+            current_updates,
+            current_artifacts,
+            NUM_CONCURRENT_MGS_UPDATES,
+            impossible_update_policy,
+        );
         if pending_updates != *current_updates {
             // This will only add comments if our set of updates changed _and_
             // we have at least one update. If we went from "some updates" to
@@ -1492,7 +1500,9 @@ impl<'a> Planner<'a> {
 
         self.blueprint.pending_mgs_updates_replace_all(pending_updates.clone());
 
+        // TODO-K: Make this better
         report.pending_mgs_updates = pending_updates;
+        report.blocked_mgs_updates = blocked_mgs_updates;
         Ok(report)
     }
 
@@ -6283,7 +6293,7 @@ pub(crate) mod test {
         };
     }
 
-    fn create_artifacts_at_version(
+    fn create_zone_artifacts_at_version(
         version: &ArtifactVersion,
     ) -> Vec<TufArtifactMeta> {
         vec![
@@ -6300,6 +6310,66 @@ pub(crate) mod test {
             fake_zone_artifact!(InternalNtp, version.clone()),
             fake_zone_artifact!(Nexus, version.clone()),
             fake_zone_artifact!(Oximeter, version.clone()),
+            // We create artifacts with the versions (or hash) set to those of
+            // the example system to simulate an environment that does not need
+            // SP component updates.
+            TufArtifactMeta {
+                id: ArtifactId {
+                    name: "host-os-phase-1".to_string(),
+                    version: version.clone(),
+                    kind: ArtifactKind::GIMLET_HOST_PHASE_1,
+                },
+                hash: ArtifactHash([1; 32]),
+                size: 0,
+                board: None,
+                sign: None,
+            },
+            TufArtifactMeta {
+                id: ArtifactId {
+                    name: "host-os-phase-2".to_string(),
+                    version: version.clone(),
+                    kind: ArtifactKind::HOST_PHASE_2,
+                },
+                hash: ArtifactHash(hex_literal::hex!(
+                    "7cd830e1682d50620de0f5c24b8cca15937eb10d2a415ade6ad28c0d314408eb"
+                )),
+                size: 0,
+                board: None,
+                sign: None,
+            },
+            TufArtifactMeta {
+                id: ArtifactId {
+                    name: sp_sim::SIM_GIMLET_BOARD.to_string(),
+                    version: ArtifactVersion::new("0.0.1").unwrap(),
+                    kind: KnownArtifactKind::GimletSp.into(),
+                },
+                hash: ArtifactHash([0; 32]),
+                size: 0,
+                board: Some(sp_sim::SIM_GIMLET_BOARD.to_string()),
+                sign: None,
+            },
+            TufArtifactMeta {
+                id: ArtifactId {
+                    name: sp_sim::SIM_ROT_BOARD.to_string(),
+                    version: ArtifactVersion::new("0.0.1").unwrap(),
+                    kind: ArtifactKind::GIMLET_ROT_IMAGE_B,
+                },
+                hash: ArtifactHash([0; 32]),
+                size: 0,
+                board: Some(sp_sim::SIM_ROT_BOARD.to_string()),
+                sign: Some("sign-gimlet".into()),
+            },
+            TufArtifactMeta {
+                id: ArtifactId {
+                    name: sp_sim::SIM_ROT_BOARD.to_string(),
+                    version: ArtifactVersion::new("0.0.1").unwrap(),
+                    kind: ArtifactKind::GIMLET_ROT_STAGE0,
+                },
+                hash: ArtifactHash([0; 32]),
+                size: 0,
+                board: Some(sp_sim::SIM_ROT_BOARD.to_string()),
+                sign: Some("sign-gimlet".into()),
+            },
         ]
     }
 
@@ -6355,7 +6425,7 @@ pub(crate) mod test {
             },
             hash: fake_hash,
         };
-        let artifacts = create_artifacts_at_version(&version);
+        let artifacts = create_zone_artifacts_at_version(&version);
         let description =
             TargetReleaseDescription::TufRepo(TufRepoDescription {
                 repo: TufRepoMeta {
@@ -6811,7 +6881,7 @@ pub(crate) mod test {
             },
             hash: fake_hash,
         };
-        let artifacts = create_artifacts_at_version(&version);
+        let artifacts = create_zone_artifacts_at_version(&version);
         let description =
             TargetReleaseDescription::TufRepo(TufRepoDescription {
                 repo: TufRepoMeta {
@@ -7242,7 +7312,7 @@ pub(crate) mod test {
             },
             hash: fake_hash,
         };
-        let artifacts = create_artifacts_at_version(&version);
+        let artifacts = create_zone_artifacts_at_version(&version);
         let description =
             TargetReleaseDescription::TufRepo(TufRepoDescription {
                 repo: TufRepoMeta {
@@ -7680,8 +7750,7 @@ pub(crate) mod test {
             },
             hash: fake_hash,
         };
-        let artifacts = create_artifacts_at_version(&version);
-
+        let artifacts = create_zone_artifacts_at_version(&version);
         let description =
             TargetReleaseDescription::TufRepo(TufRepoDescription {
                 repo: TufRepoMeta {
@@ -7953,7 +8022,8 @@ pub(crate) mod test {
             },
             hash: fake_hash,
         };
-
+        // We use generation 2 to represent the first generation with a TUF repo
+        // attached.
         let description =
             TargetReleaseDescription::TufRepo(TufRepoDescription {
                 repo: TufRepoMeta {
@@ -7963,7 +8033,7 @@ pub(crate) mod test {
                     system_version: Version::new(1, 0, 0),
                     file_name: String::from(""),
                 },
-                artifacts: create_artifacts_at_version(&version),
+                artifacts: create_zone_artifacts_at_version(&version),
             });
         example.system.set_target_release_and_old_repo(description);
 
@@ -8291,12 +8361,12 @@ pub(crate) mod test {
         // Next: Set the target to "2.0.0", upgrade everything except
         // Nexus.
         bp_generator.set_new_tuf_repo_with_artifacts(
-            create_artifacts_at_version(&artifact_version_1),
+            create_zone_artifacts_at_version(&artifact_version_1),
             Version::new(1, 0, 0),
         );
         bp_generator.set_old_tuf_repo_to_target();
         bp_generator.set_new_tuf_repo_with_artifacts(
-            create_artifacts_at_version(&artifact_version_2),
+            create_zone_artifacts_at_version(&artifact_version_2),
             Version::new(2, 0, 0),
         );
         let image_source_1 =
@@ -8417,6 +8487,8 @@ pub(crate) mod test {
             rng.next_system_rng(),
         )
         .nexus_count(3)
+        .with_target_release_0_0_1()
+        .expect("set target release to 0.0.1")
         .build();
         verify_blueprint(&blueprint);
 
@@ -8439,8 +8511,11 @@ pub(crate) mod test {
                 .blueprint
                 .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
                 .all(|(_, z)| matches!(
-                    z.image_source,
-                    BlueprintZoneImageSource::InstallDataset
+                    &z.image_source,
+                    BlueprintZoneImageSource::Artifact { version, hash: _ }
+                        if version == &BlueprintArtifactVersion::Available {
+                            version: ArtifactVersion::new_const("0.0.1")
+                        }
                 ))
         );
 
@@ -8452,12 +8527,12 @@ pub(crate) mod test {
             ArtifactVersion::new_static("2.0.0-nexus-gen-test")
                 .expect("can't parse artifact version");
         bp_generator.set_new_tuf_repo_with_artifacts(
-            create_artifacts_at_version(&artifact_version_1),
+            create_zone_artifacts_at_version(&artifact_version_1),
             Version::new(1, 0, 0),
         );
         bp_generator.set_old_tuf_repo_to_target();
         bp_generator.set_new_tuf_repo_with_artifacts(
-            create_artifacts_at_version(&artifact_version_2),
+            create_zone_artifacts_at_version(&artifact_version_2),
             Version::new(2, 0, 0),
         );
         let image_source_1 =

@@ -20,6 +20,7 @@ use crate::mgs_updates::sp::try_make_update_sp;
 use gateway_types::rot::RotSlot;
 use nexus_types::deployment::ExpectedActiveRotSlot;
 use nexus_types::deployment::ExpectedVersion;
+use nexus_types::deployment::MgsUpdateComponent;
 use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdateDetails;
 use nexus_types::deployment::PendingMgsUpdateRotBootloaderDetails;
@@ -27,6 +28,7 @@ use nexus_types::deployment::PendingMgsUpdateRotDetails;
 use nexus_types::deployment::PendingMgsUpdateSpDetails;
 use nexus_types::deployment::PendingMgsUpdates;
 use nexus_types::deployment::TargetReleaseDescription;
+use nexus_types::deployment::planning_report::BlockedMgsUpdate;
 use nexus_types::inventory::BaseboardId;
 use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::Collection;
@@ -64,6 +66,44 @@ pub(crate) struct PlannedMgsUpdates {
     /// Pending changes to sleds' host phase 2 contents; each of these should
     /// result in a change to the respective sled's `BlueprintSledConfig`.
     pub(crate) pending_host_phase_2_changes: PendingHostPhase2Changes,
+
+    /// Updates to components that cannot be planned due to a failure in a
+    /// previous attempt.
+    pub(crate) blocked_mgs_updates: Vec<BlockedMgsUpdate>,
+}
+
+impl PlannedMgsUpdates {
+    fn new() -> Self {
+        Self {
+            pending_updates: PendingMgsUpdates::new(),
+            pending_host_phase_2_changes: PendingHostPhase2Changes::empty(),
+            blocked_mgs_updates: Vec::new(),
+        }
+    }
+
+    fn add_pending_update(
+        &mut self,
+        pending_update: PendingMgsUpdate,
+    ) -> &mut Self {
+        self.pending_updates.insert(pending_update);
+        self
+    }
+
+    fn add_blocked_update(
+        &mut self,
+        blocked_update: BlockedMgsUpdate,
+    ) -> &mut Self {
+        self.blocked_mgs_updates.push(blocked_update);
+        self
+    }
+
+    fn set_pending_host_os_phase2_changes(
+        &mut self,
+        pending_host_os_phase2_changes: PendingHostPhase2Changes,
+    ) -> &mut Self {
+        self.pending_host_phase_2_changes = pending_host_os_phase2_changes;
+        self
+    }
 }
 
 /// Generates a new set of `PendingMgsUpdates` based on:
@@ -93,6 +133,7 @@ pub(crate) fn plan_mgs_updates(
     let mut pending_updates = PendingMgsUpdates::new();
     let mut pending_host_phase_2_changes = PendingHostPhase2Changes::empty();
     let mut boards_preferred = BTreeSet::new();
+    let mut blocked_mgs_updates = Vec::new();
 
     // Determine the status of all currently pending updates by comparing what
     // they were trying to do (and their preconditions) against the current
@@ -162,13 +203,15 @@ pub(crate) fn plan_mgs_updates(
     // containing artifacts), then we cannot configure more updates.
     let current_artifacts = match current_artifacts {
         TargetReleaseDescription::Initial => {
-            warn!(
+            info!(
                 log,
-                "cannot issue more MGS-driven updates (no current artifacts)",
+                "system in initial release state \
+                no update artifacts available (no update necessary)",
             );
             return PlannedMgsUpdates {
                 pending_updates,
                 pending_host_phase_2_changes,
+                blocked_mgs_updates,
             };
         }
         TargetReleaseDescription::TufRepo(description) => description,
@@ -194,23 +237,40 @@ pub(crate) fn plan_mgs_updates(
             return PlannedMgsUpdates {
                 pending_updates,
                 pending_host_phase_2_changes,
+                blocked_mgs_updates,
             };
         }
 
-        match try_make_update(log, board, inventory, current_artifacts) {
-            Some((update, mut host_phase_2)) => {
-                info!(log, "configuring MGS-driven update"; &update);
-                pending_updates.insert(update);
-                pending_host_phase_2_changes.append(&mut host_phase_2);
-            }
-            None => {
-                info!(log, "skipping board for MGS-driven update"; board);
+        // `try_make_update` will always return at most a single update at a
+        // time. This means that this instance of `PlannedMgsUpdates` describes
+        // a single device update
+        let PlannedMgsUpdates {
+            pending_updates: updates,
+            pending_host_phase_2_changes: mut host_phase_2,
+            blocked_mgs_updates: mut blocked_updates,
+        } = try_make_update(log, board, inventory, current_artifacts);
+
+        if let Some(update) = updates.into_iter().next() {
+            info!(log, "configuring MGS-driven update"; update);
+            pending_updates.insert(update.clone());
+        } else {
+            if blocked_mgs_updates.is_empty() && host_phase_2.is_empty() {
+                info!(log, "skipping board for MGS-driven update (no update necessary)"; board);
+            } else {
+                info!(log, "skipping board for MGS-driven update (found issues)"; board);
             }
         }
+
+        pending_host_phase_2_changes.append(&mut host_phase_2);
+        blocked_mgs_updates.append(&mut blocked_updates);
     }
 
     info!(log, "ran out of boards for MGS-driven update");
-    PlannedMgsUpdates { pending_updates, pending_host_phase_2_changes }
+    PlannedMgsUpdates {
+        pending_updates,
+        pending_host_phase_2_changes,
+        blocked_mgs_updates,
+    }
 }
 
 #[derive(Debug)]
@@ -495,33 +555,91 @@ fn try_make_update(
     baseboard_id: &Arc<BaseboardId>,
     inventory: &Collection,
     current_artifacts: &TufRepoDescription,
-) -> Option<(PendingMgsUpdate, PendingHostPhase2Changes)> {
+) -> PlannedMgsUpdates {
+    let mut pending_actions = PlannedMgsUpdates::new();
+
     // We try MGS-driven update components in a hardcoded priority order until
     // any of them returns `Some`.  The order is described in RFD 565 section
     // "Update Sequence".
-    if let Some(update) = try_make_update_rot_bootloader(
-        log,
-        baseboard_id,
-        inventory,
-        current_artifacts,
-    )
-    .or_else(|| {
-        try_make_update_rot(log, baseboard_id, inventory, current_artifacts)
-    })
-    .or_else(|| {
-        try_make_update_sp(log, baseboard_id, inventory, current_artifacts)
-    }) {
-        // We have a non-host update; there are no pending host phase 2 changes
-        // necessary.
-        return Some((update, PendingHostPhase2Changes::empty()));
+    for component in [
+        MgsUpdateComponent::RotBootloader,
+        MgsUpdateComponent::Rot,
+        MgsUpdateComponent::Sp,
+        MgsUpdateComponent::HostOs,
+    ] {
+        let update_attempt = match component {
+            MgsUpdateComponent::RotBootloader => {
+                try_make_update_rot_bootloader(
+                    log,
+                    baseboard_id,
+                    inventory,
+                    current_artifacts,
+                )
+            }
+            MgsUpdateComponent::Rot => try_make_update_rot(
+                log,
+                baseboard_id,
+                inventory,
+                current_artifacts,
+            ),
+            MgsUpdateComponent::Sp => try_make_update_sp(
+                log,
+                baseboard_id,
+                inventory,
+                current_artifacts,
+            ),
+            MgsUpdateComponent::HostOs => {
+                match host_phase_1::try_make_update(
+                    log,
+                    baseboard_id,
+                    inventory,
+                    current_artifacts,
+                ) {
+                    Ok(pending_update) => {
+                        // Host updates also return host OS phase 2 changes;
+                        // pull those out here and insert them into
+                        // `pending_actions`, then return the typical pending
+                        // update (which will itself be inserted into
+                        // `pending_actions` below).
+                        if let Some((update, host_os_phase_2_changes)) =
+                            pending_update
+                        {
+                            pending_actions.set_pending_host_os_phase2_changes(
+                                host_os_phase_2_changes,
+                            );
+                            Ok(Some(update))
+                        } else {
+                            Ok(None)
+                        }
+                    }
+                    Err(e) => Err(e),
+                }
+            }
+        };
+
+        match update_attempt {
+            Ok(None) => {
+                // No update needed; try the next component.
+                continue;
+            }
+            // If there is a pending or blocked MGS-driven update, we break so
+            // we can return it immediately.
+            Ok(Some(update)) => {
+                pending_actions.add_pending_update(update);
+                break;
+            }
+            Err(e) => {
+                pending_actions.add_blocked_update(BlockedMgsUpdate {
+                    baseboard_id: baseboard_id.clone(),
+                    component,
+                    reason: e,
+                });
+                break;
+            }
+        }
     }
 
-    host_phase_1::try_make_update(
-        log,
-        baseboard_id,
-        inventory,
-        current_artifacts,
-    )
+    pending_actions
 }
 
 #[cfg(test)]
@@ -544,13 +662,217 @@ mod test {
     use dropshot::ConfigLogging;
     use dropshot::ConfigLoggingLevel;
     use gateway_client::types::SpType;
+    use iddqd::IdOrdMap;
     use nexus_types::deployment::ExpectedVersion;
+    use nexus_types::deployment::MgsUpdateComponent;
     use nexus_types::deployment::PendingMgsUpdateDetails;
     use nexus_types::deployment::PendingMgsUpdateSpDetails;
     use nexus_types::deployment::PendingMgsUpdates;
     use nexus_types::deployment::TargetReleaseDescription;
+    use nexus_types::deployment::planning_report::BlockedMgsUpdate;
+    use nexus_types::deployment::planning_report::FailedMgsUpdateReason;
+    use nexus_types::inventory::BaseboardId;
+    use nexus_types::inventory::CabooseWhich;
     use omicron_test_utils::dev::LogContext;
+    use std::collections::BTreeSet;
+    use std::sync::Arc;
     use strum::IntoEnumIterator;
+
+    // Confirm our behaviour for skipped updates
+    #[test]
+    fn test_blocked_updates() {
+        let test_name = "planning_mgs_updates_blocked_updates";
+        let logctx = LogContext::new(
+            test_name,
+            &ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Debug },
+        );
+        let log = &logctx.log;
+        let test_boards = TestBoards::new(test_name);
+
+        // Initial setup: One of every possible SP component will need to be
+        // updated
+        let collection = test_boards
+            .collection_builder()
+            .stage0_version_exception(SpType::Sled, 0, ARTIFACT_VERSION_1)
+            .rot_active_version_exception(SpType::Sled, 0, ARTIFACT_VERSION_1)
+            .sp_active_version_exception(SpType::Sled, 0, ARTIFACT_VERSION_1)
+            .host_active_exception(
+                0,
+                ARTIFACT_HASH_HOST_PHASE_1_V1,
+                ARTIFACT_HASH_HOST_PHASE_2_V1,
+            )
+            .build();
+        let current_updates = PendingMgsUpdates::new();
+        let nmax_updates = 1;
+        let impossible_update_policy = ImpossibleUpdatePolicy::Reevaluate;
+        let repo = test_boards.tuf_repo();
+
+        // Instead of using the baseboards from the collection, we create a new
+        // fake baseboard that the planner will not recognise
+        let mut fake_boards = BTreeSet::new();
+        let fake_board = Arc::new(BaseboardId {
+            part_number: "fake_part".to_string(),
+            serial_number: "fake_serial".to_string(),
+        });
+        fake_boards.insert(fake_board.clone());
+
+        let PlannedMgsUpdates {
+            pending_updates: updates,
+            blocked_mgs_updates,
+            ..
+        } = plan_mgs_updates(
+            log,
+            &collection,
+            &fake_boards,
+            &current_updates,
+            &TargetReleaseDescription::TufRepo(repo.clone()),
+            nmax_updates,
+            impossible_update_policy,
+        );
+
+        // The planner should only gather the first failed update (RoT
+        // bootloader), and report no pending updates. There will only be a
+        // single entry as there is only a single fake board.
+        let expected_blocked_updates = vec![BlockedMgsUpdate {
+            baseboard_id: fake_board.clone(),
+            component: MgsUpdateComponent::RotBootloader,
+            reason: FailedMgsUpdateReason::SpNotInInventory,
+        }];
+        assert_eq!(blocked_mgs_updates, expected_blocked_updates);
+        assert!(updates.is_empty());
+
+        // Now we build a the collection so it only reports updates necessary
+        // for the RoT, SP and Host OS.
+        let mut collection = test_boards
+            .collection_builder()
+            .rot_active_version_exception(SpType::Sled, 0, ARTIFACT_VERSION_1)
+            .sp_active_version_exception(SpType::Sled, 0, ARTIFACT_VERSION_1)
+            .host_active_exception(
+                0,
+                ARTIFACT_HASH_HOST_PHASE_1_V1,
+                ARTIFACT_HASH_HOST_PHASE_2_V1,
+            )
+            .build();
+
+        // Let's remove all RoT information to force a failed update
+        for baseboard_id in &collection.baseboards {
+            collection.rots.remove(baseboard_id);
+        }
+
+        let PlannedMgsUpdates {
+            pending_updates: updates,
+            blocked_mgs_updates,
+            ..
+        } = plan_mgs_updates(
+            log,
+            &collection,
+            &collection.baseboards,
+            &current_updates,
+            &TargetReleaseDescription::TufRepo(repo.clone()),
+            nmax_updates,
+            impossible_update_policy,
+        );
+
+        // The planner should only gather the first RoT failed update of
+        // each of the boards, and report no pending updates
+        let mut expected_blocked_updates = Vec::new();
+        for baseboard_id in &collection.baseboards {
+            expected_blocked_updates.push(BlockedMgsUpdate {
+                baseboard_id: baseboard_id.clone(),
+                component: MgsUpdateComponent::Rot,
+                reason: FailedMgsUpdateReason::RotStateNotInInventory,
+            });
+        }
+        assert_eq!(blocked_mgs_updates, expected_blocked_updates);
+        assert!(updates.is_empty());
+
+        // Like before we build a collection that only reports updates necessary
+        // for the SP and Host OS.
+        let mut collection = test_boards
+            .collection_builder()
+            .sp_active_version_exception(SpType::Sled, 0, ARTIFACT_VERSION_1)
+            .host_active_exception(
+                0,
+                ARTIFACT_HASH_HOST_PHASE_1_V1,
+                ARTIFACT_HASH_HOST_PHASE_2_V1,
+            )
+            .build();
+
+        // Let's remove SP slot 0 caboose information to force a failed update
+        collection.cabooses_found.remove(&CabooseWhich::SpSlot0);
+
+        let PlannedMgsUpdates {
+            pending_updates: updates,
+            blocked_mgs_updates,
+            ..
+        } = plan_mgs_updates(
+            log,
+            &collection,
+            &collection.baseboards,
+            &current_updates,
+            &TargetReleaseDescription::TufRepo(repo.clone()),
+            nmax_updates,
+            impossible_update_policy,
+        );
+
+        // The planner should only gather the first SP failed update of
+        // each of the boards, and report no pending updates
+        let mut expected_blocked_updates = Vec::new();
+        for baseboard_id in &collection.baseboards {
+            expected_blocked_updates.push(BlockedMgsUpdate {
+                baseboard_id: baseboard_id.clone(),
+                component: MgsUpdateComponent::Sp,
+                reason: FailedMgsUpdateReason::CabooseNotInInventory(
+                    CabooseWhich::SpSlot0,
+                ),
+            });
+        }
+        assert_eq!(blocked_mgs_updates, expected_blocked_updates);
+        assert!(updates.is_empty());
+
+        // Now we create one more collection where only the Host OS needs an
+        // update
+        let mut collection = test_boards
+            .collection_builder()
+            .host_active_exception(
+                0,
+                ARTIFACT_HASH_HOST_PHASE_1_V1,
+                ARTIFACT_HASH_HOST_PHASE_2_V1,
+            )
+            .build();
+
+        // Remove sled agent info to force a failed update
+        collection.sled_agents = IdOrdMap::new();
+
+        let PlannedMgsUpdates {
+            pending_updates: updates,
+            blocked_mgs_updates,
+            ..
+        } = plan_mgs_updates(
+            log,
+            &collection,
+            &collection.baseboards,
+            &current_updates,
+            &TargetReleaseDescription::TufRepo(repo.clone()),
+            nmax_updates,
+            impossible_update_policy,
+        );
+
+        // The planner should only gather the first Host OS failed update of
+        // each of the sled boards, and report no pending updates
+        let mut expected_blocked_updates = Vec::new();
+        for baseboard_id in &collection.baseboards {
+            if baseboard_id.part_number == "dummy_sled" {
+                expected_blocked_updates.push(BlockedMgsUpdate {
+                    baseboard_id: baseboard_id.clone(),
+                    component: MgsUpdateComponent::HostOs,
+                    reason: FailedMgsUpdateReason::SledAgentInfoNotInInventory,
+                });
+            }
+        }
+        assert_eq!(blocked_mgs_updates, expected_blocked_updates);
+        assert!(updates.is_empty());
+    }
 
     // Confirm our behavior for impossible updates
     #[test]
@@ -738,6 +1060,7 @@ mod test {
             let PlannedMgsUpdates {
                 pending_updates: new_updates,
                 mut pending_host_phase_2_changes,
+                ..
             } = plan_mgs_updates(
                 log,
                 &collection,
@@ -866,6 +1189,7 @@ mod test {
         let PlannedMgsUpdates {
             pending_updates: all_updates,
             mut pending_host_phase_2_changes,
+            ..
         } = plan_mgs_updates(
             log,
             &collection,
@@ -910,6 +1234,7 @@ mod test {
         let PlannedMgsUpdates {
             pending_updates: all_updates,
             mut pending_host_phase_2_changes,
+            ..
         } = plan_mgs_updates(
             log,
             &collection,
@@ -952,6 +1277,7 @@ mod test {
         let PlannedMgsUpdates {
             pending_updates: all_updates,
             mut pending_host_phase_2_changes,
+            ..
         } = plan_mgs_updates(
             log,
             &collection,
@@ -993,6 +1319,7 @@ mod test {
         let PlannedMgsUpdates {
             pending_updates: all_updates,
             mut pending_host_phase_2_changes,
+            ..
         } = plan_mgs_updates(
             log,
             &collection,
@@ -1026,6 +1353,7 @@ mod test {
         let PlannedMgsUpdates {
             pending_updates: all_updates_done,
             pending_host_phase_2_changes,
+            ..
         } = plan_mgs_updates(
             log,
             &collection,
