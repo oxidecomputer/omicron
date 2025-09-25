@@ -375,9 +375,9 @@ pub enum Reincarnatability {
 
 impl InstanceAutoRestart {
     /// The default cooldown used when an instance has no overridden cooldown.
-    pub const DEFAULT_COOLDOWN: TimeDelta = match TimeDelta::try_hours(1) {
+    pub const DEFAULT_COOLDOWN: TimeDelta = match TimeDelta::try_minutes(5) {
         Some(delta) => delta,
-        None => unreachable!(), // 1 hour should be representable...
+        None => unreachable!(), // 5 minutesshould be representable...
     };
 
     /// The default policy used when an instance does not override the
