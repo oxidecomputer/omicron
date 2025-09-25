@@ -17,7 +17,7 @@ use clickhouse_admin_types::ClickhouseKeeperClusterMembership;
 use daft::Diffable;
 pub use gateway_client::types::PowerState;
 pub use gateway_client::types::RotImageError;
-pub use gateway_client::types::SpType;
+pub use gateway_types::component::SpType;
 pub use gateway_types::rot::RotSlot;
 use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;

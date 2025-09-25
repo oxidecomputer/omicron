@@ -543,12 +543,12 @@ mod test {
     use super::test_helpers::TestBoards;
     use dropshot::ConfigLogging;
     use dropshot::ConfigLoggingLevel;
-    use gateway_client::types::SpType;
     use nexus_types::deployment::ExpectedVersion;
     use nexus_types::deployment::PendingMgsUpdateDetails;
     use nexus_types::deployment::PendingMgsUpdateSpDetails;
     use nexus_types::deployment::PendingMgsUpdates;
     use nexus_types::deployment::TargetReleaseDescription;
+    use nexus_types::inventory::SpType;
     use omicron_test_utils::dev::LogContext;
     use strum::IntoEnumIterator;
 

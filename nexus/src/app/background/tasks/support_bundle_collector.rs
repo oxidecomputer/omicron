@@ -1384,7 +1384,7 @@ async fn save_sp_dumps(
     sp_dumps_dir: Utf8PathBuf,
 ) -> anyhow::Result<()> {
     let dump_count = mgs_client
-        .sp_task_dump_count(sp.type_, sp.slot)
+        .sp_task_dump_count(&sp.type_, sp.slot)
         .await
         .context("failed to get task dump count from SP")?
         .into_inner();
@@ -1394,7 +1394,7 @@ async fn save_sp_dumps(
 
     for i in 0..dump_count {
         let task_dump = mgs_client
-            .sp_task_dump_get(sp.type_, sp.slot, i)
+            .sp_task_dump_get(&sp.type_, sp.slot, i)
             .await
             .with_context(|| format!("failed to get task dump {i} from SP"))?
             .into_inner();
