@@ -134,8 +134,10 @@ async fn create_datastore(
     .context("failed to parse constructed postgres URL")?;
 
     let db_config = nexus_db_queries::db::Config { url };
-    let pool =
-        Arc::new(nexus_db_queries::db::Pool::new_single_host(log, &db_config));
+    let pool = Arc::new(
+        nexus_db_queries::db::PoolBuilder::new_single_host(&log, db_config)
+            .build(),
+    );
     DataStore::new_failfast(log, pool)
         .await
         .context("creating DataStore")

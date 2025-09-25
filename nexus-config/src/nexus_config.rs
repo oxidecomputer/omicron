@@ -273,6 +273,7 @@ pub struct MgdConfig {
 struct UnvalidatedTunables {
     max_vpc_ipv4_subnet_prefix: u8,
     load_timeout: Option<std::time::Duration>,
+    collect_backtraces: Option<bool>,
 }
 
 /// Configuration for HTTP clients to external services.
@@ -301,6 +302,12 @@ pub struct Tunables {
     ///
     /// If "None", nexus loops forever during initialization.
     pub load_timeout: Option<std::time::Duration>,
+
+    /// Should backtraces be collected for database connections?
+    ///
+    /// If "None", uses the default configured by the `PoolBuilder`
+    /// in nexus_db_queries.
+    pub collect_backtraces: Option<bool>,
 }
 
 // Convert from the unvalidated tunables, verifying each parameter as needed.
@@ -312,6 +319,7 @@ impl TryFrom<UnvalidatedTunables> for Tunables {
         Ok(Tunables {
             max_vpc_ipv4_subnet_prefix: unvalidated.max_vpc_ipv4_subnet_prefix,
             load_timeout: unvalidated.load_timeout,
+            collect_backtraces: unvalidated.collect_backtraces,
         })
     }
 }
@@ -363,6 +371,7 @@ impl Default for Tunables {
         Tunables {
             max_vpc_ipv4_subnet_prefix: MAX_VPC_IPV4_SUBNET_PREFIX,
             load_timeout: None,
+            collect_backtraces: None,
         }
     }
 }
@@ -1201,7 +1210,8 @@ mod test {
                     schema: None,
                     tunables: Tunables {
                         max_vpc_ipv4_subnet_prefix: 27,
-                        load_timeout: None
+                        load_timeout: None,
+                        collect_backtraces: None,
                     },
                     dendrite: HashMap::from([(
                         SwitchLocation::Switch0,

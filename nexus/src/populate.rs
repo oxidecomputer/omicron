@@ -363,7 +363,11 @@ mod test {
         let logctx = dev::test_setup_log("test_populator");
         let db = TestDatabase::new_populate_schema_only(&logctx.log).await;
         let cfg = db::Config { url: db.crdb().pg_config().clone() };
-        let pool = Arc::new(db::Pool::new_single_host(&logctx.log, &cfg));
+        let pool = Arc::new(
+            db::PoolBuilder::new_single_host(&logctx.log, cfg.clone())
+                .collect_backtraces(false)
+                .build(),
+        );
         let datastore = Arc::new(
             db::DataStore::new(
                 &logctx.log,
@@ -418,8 +422,15 @@ mod test {
         //
         // If we try again with a broken database, we should get a
         // ServiceUnavailable error, which indicates a transient failure.
-        let pool =
-            Arc::new(db::Pool::new_single_host_failfast(&logctx.log, &cfg));
+        let pool = Arc::new(
+            db::PoolBuilder::new_single_host(&logctx.log, cfg)
+                .policy(qorb::policy::Policy {
+                    claim_timeout: tokio::time::Duration::from_millis(1),
+                    ..Default::default()
+                })
+                .collect_backtraces(false)
+                .build(),
+        );
         // We need to create the datastore before tearing down the database, as
         // it verifies the schema version of the DB while booting.
         let datastore = Arc::new(

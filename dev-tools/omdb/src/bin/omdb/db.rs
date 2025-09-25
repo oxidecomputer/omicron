@@ -289,7 +289,7 @@ impl DbUrlOptions {
 
         let db_config = db::Config { url: db_url.clone() };
         let pool =
-            Arc::new(db::Pool::new_single_host(&log.clone(), &db_config));
+            Arc::new(db::PoolBuilder::new_single_host(&log, db_config).build());
 
         // Being a dev tool, we want to try this operation even if the schema
         // doesn't match what we expect.  So we use `DataStore::new_unchecked()`

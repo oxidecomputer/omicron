@@ -826,12 +826,13 @@ impl MigrationContext<'_> {
     // Typically called as a part of a "before" function, to set up a connection
     // before a schema migration.
     async fn populate_pool_and_connection(&self, version: Version) {
-        let pool = nexus_db_queries::db::Pool::new_single_host(
+        use nexus_db_queries::db;
+        let pool = db::PoolBuilder::new_single_host(
             self.log,
-            &nexus_db_queries::db::Config {
-                url: self.crdb.pg_config().clone(),
-            },
-        );
+            db::Config { url: self.crdb.pg_config().clone() },
+        )
+        .collect_backtraces(false)
+        .build();
         let conn = pool.claim().await.expect("failed to get pooled connection");
 
         let mut map = self.pool_and_conn.lock().unwrap();

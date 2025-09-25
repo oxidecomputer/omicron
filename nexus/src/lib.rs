@@ -70,8 +70,8 @@ pub struct InternalServer {
 }
 
 impl InternalServer {
-    /// Start a nexus server.
-    pub async fn start(
+    // Start a nexus server.
+    async fn start(
         config: &NexusConfig,
         log: &Logger,
     ) -> Result<InternalServer, String> {

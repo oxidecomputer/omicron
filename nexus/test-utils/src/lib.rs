@@ -828,6 +828,8 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                 planner_enabled: false,
                 planner_config: PlannerConfig::default(),
             });
+        // In tests, disable backtrace collection.
+        self.config.pkg.tunables.collect_backtraces = Some(false);
         self.config.deployment.internal_dns = InternalDns::FromAddress {
             address: self
                 .internal_dns
