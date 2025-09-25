@@ -145,6 +145,7 @@ impl From<gateway_messages::ignition::SystemType> for SpIgnitionSystemType {
             SystemType::Sidecar => Self::Sidecar,
             SystemType::Psc => Self::Psc,
             SystemType::Unknown(id) => Self::Unknown { id },
+            // `0x4` is the ignition value per RFD 142
             SystemType::Cosmo => Self::Unknown { id: 0x4 },
         }
     }

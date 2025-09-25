@@ -33,7 +33,7 @@ pub struct SpIgnitionInfo {
     pub details: SpIgnition,
 }
 
-/// Ignition command.
+/// Ignition action to take
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, JsonSchema,
 )]
@@ -85,9 +85,13 @@ pub enum SpIgnition {
         power: bool,
         ctrl_detect_0: bool,
         ctrl_detect_1: bool,
+        /// Fault from the A3 power domain
         flt_a3: bool,
+        /// Fault from the A2 power domain
         flt_a2: bool,
+        /// Fault from the RoT
         flt_rot: bool,
+        /// Fault from the SP
         flt_sp: bool,
     },
 }

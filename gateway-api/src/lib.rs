@@ -18,7 +18,6 @@ use gateway_types::{
     component_details::SpComponentDetails,
     host::{ComponentFirmwareHashStatus, HostStartupOptions},
     ignition,
-    //ignition::{IgnitionCommand, SpIgnitionInfo},
     rot::{RotCfpa, RotCfpaSlot, RotCmpa, RotState},
     sensor::SpSensorReading,
     task_dump::TaskDump,
