@@ -62,16 +62,15 @@ impl SprocketsServer {
     pub(super) async fn run(self) {
         loop {
             // Sprockets actually _uses_ the key here!
-            // TODO: Once we have a corpus, use it.
-            // Will we ever have one at RSS time?
-            let corpus = vec![];
-            let acceptor = match self.listener.accept(corpus).await {
-                Ok(acceptor) => acceptor,
-                Err(err) => {
-                    error!(self.log, "accept() failed"; &err);
-                    continue;
-                }
-            };
+            // We don't have corpus files yet, so pass in an empty Vec
+            let (stream, remote_addr) =
+                match self.listener.accept(vec![]).await.await {
+                    Ok(conn) => conn,
+                    Err(err) => {
+                        error!(self.log, "accept() failed"; "err" => #%err);
+                        continue;
+                    }
+                };
 
             let log = self.log.new(o!("remote_addr" => acceptor.addr()));
             info!(log, "TCP connection accepted");

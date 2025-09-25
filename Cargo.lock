@@ -59,7 +59,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5a15f179cd60c4584b8a8c596927aadc462e27f2ca70c04e0071964a73ba7a75"
 dependencies = [
  "cfg-if",
- "getrandom 0.3.4",
+ "getrandom 0.3.3",
  "once_cell",
  "version_check",
  "zerocopy 0.8.27",
@@ -524,7 +524,7 @@ source = "git+https://github.com/oxidecomputer/dice-util?rev=4b408edc1d00f108ddf
 dependencies = [
  "const-oid",
  "der",
- "getrandom 0.3.4",
+ "getrandom 0.3.3",
  "hex",
  "hubpack",
  "rats-corim",
@@ -533,7 +533,7 @@ dependencies = [
  "serde_with",
  "sha3",
  "static_assertions",
- "thiserror 2.0.17",
+ "thiserror 2.0.16",
 ]
 
 [[package]]
@@ -2632,9 +2632,9 @@ dependencies = [
  "hubpack",
  "serde",
  "serde-big-array",
- "thiserror 2.0.17",
+ "thiserror 2.0.16",
  "x509-cert",
- "zerocopy 0.8.27",
+ "zerocopy 0.8.26",
 ]
 
 [[package]]
@@ -2653,7 +2653,7 @@ dependencies = [
  "rats-corim",
  "sha3",
  "tempfile",
- "thiserror 2.0.17",
+ "thiserror 2.0.16",
  "x509-cert",
 ]
 
@@ -3921,6 +3921,7 @@ dependencies = [
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "proptest",
+ "schemars",
  "schemars 0.8.22",
  "serde",
  "test-strategy",
@@ -3978,14 +3979,14 @@ dependencies = [
 
 [[package]]
 name = "getrandom"
-version = "0.3.4"
+version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "899def5c37c4fd7b2664648c28120ecec138e4d395b459e5ca34f9cce2dd77fd"
+checksum = "26145e563e54f2cadc477553f1ec5ee650b00862f0a58bcd12cbdc5f0ea2d2f4"
 dependencies = [
  "cfg-if",
  "libc",
  "r-efi",
- "wasip2",
+ "wasi 0.14.7+wasi-0.2.4",
 ]
 
 [[package]]
@@ -8803,7 +8804,7 @@ dependencies = [
  "gateway-messages",
  "generic-array",
  "getrandom 0.2.15",
- "getrandom 0.3.4",
+ "getrandom 0.3.3",
  "group",
  "hashbrown 0.16.0",
  "heck 0.4.1",
@@ -10567,6 +10568,28 @@ dependencies = [
 
 [[package]]
 name = "progenitor-impl"
+version = "0.9.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "37adc80a94c9cae890e82deeeecc9d8f2a5cb153256caaf1bf0f03611e537214"
+dependencies = [
+ "heck 0.5.0",
+ "http",
+ "indexmap 2.11.4",
+ "openapiv3",
+ "proc-macro2",
+ "quote",
+ "regex",
+ "schemars 0.8.22",
+ "serde",
+ "serde_json",
+ "syn 2.0.106",
+ "thiserror 2.0.17",
+ "typify 0.3.0",
+ "unicode-ident",
+]
+
+[[package]]
+name = "progenitor-impl"
 version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b17e5363daa50bf1cccfade6b0fb970d2278758fd5cfa9ab69f25028e4b1afa3"
@@ -10618,6 +10641,24 @@ dependencies = [
  "openapiv3",
  "proc-macro2",
  "progenitor-impl 0.8.0",
+ "quote",
+ "schemars 0.8.22",
+ "serde",
+ "serde_json",
+ "serde_tokenstream",
+ "serde_yaml",
+ "syn 2.0.106",
+]
+
+[[package]]
+name = "progenitor-macro"
+version = "0.9.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fc3b2b9f0d5ba58375c5e8e89d5dff949108e234c1d9f22a3336d2be4daaf292"
+dependencies = [
+ "openapiv3",
+ "proc-macro2",
+ "progenitor-impl 0.9.1",
  "quote",
  "schemars 0.8.22",
  "serde",
@@ -11004,7 +11045,7 @@ version = "0.9.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "99d9a13982dcf210057a8a78572b2217b667c3beacbf3a0d8b454f6f82837d38"
 dependencies = [
- "getrandom 0.3.4",
+ "getrandom 0.3.3",
 ]
 
 [[package]]
@@ -11087,7 +11128,7 @@ dependencies = [
  "serde",
  "serde_with",
  "strum 0.26.3",
- "thiserror 2.0.17",
+ "thiserror 2.0.16",
 ]
 
 [[package]]
@@ -12402,7 +12443,7 @@ dependencies = [
  "chrono",
  "hex",
  "indexmap 1.9.3",
- "indexmap 2.11.4",
+ "indexmap 2.11.0",
  "schemars 0.9.0",
  "schemars 1.0.4",
  "serde",
@@ -13193,7 +13234,6 @@ dependencies = [
 [[package]]
 name = "sprockets-tls"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/sprockets.git?rev=7da1f0b5dcd3d631da18b43ba78a84b1a2b425ee#7da1f0b5dcd3d631da18b43ba78a84b1a2b425ee"
 dependencies = [
  "anyhow",
  "attest-data",
@@ -13718,7 +13758,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e8a64e3985349f2441a1a9ef0b853f869006c3855f2cda6862a94d26ebb9d6a1"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.3.3",
  "once_cell",
  "rustix 1.0.7",
  "windows-sys 0.59.0",
@@ -14604,6 +14644,7 @@ dependencies = [
  "sled-agent-types",
  "slog",
  "slog-error-chain",
+ "sprockets-tls",
  "static_assertions",
  "subtle",
  "test-strategy",
@@ -15296,7 +15337,7 @@ version = "1.18.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2f87b8aa10b915a06587d0dec516c282ff295b475d94abf425d62b57710070a2"
 dependencies = [
- "getrandom 0.3.4",
+ "getrandom 0.3.3",
  "js-sys",
  "serde",
  "wasm-bindgen",
@@ -15477,6 +15518,15 @@ name = "wasi"
 version = "0.11.0+wasi-snapshot-preview1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9c8d87e72b64a3b4db28d11ce29237c246188f4f51057d65a7eab63b7987e423"
+
+[[package]]
+name = "wasi"
+version = "0.14.7+wasi-0.2.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "883478de20367e224c0090af9cf5f9fa85bed63a95c1abf3afc5c083ebc06e8c"
+dependencies = [
+ "wasip2",
+]
 
 [[package]]
 name = "wasip2"

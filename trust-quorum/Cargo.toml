@@ -28,6 +28,7 @@ sha3.workspace = true
 sled-agent-types.workspace = true
 slog.workspace = true
 slog-error-chain.workspace = true
+sprockets-tls.workspace = true
 static_assertions.workspace = true
 subtle.workspace = true
 thiserror.workspace = true
