@@ -1295,14 +1295,20 @@ fn print_task_blueprint_planner(details: &serde_json::Value) {
         BlueprintPlannerStatus::Error(error) => {
             println!("    task did not complete successfully: {error}");
         }
-        BlueprintPlannerStatus::Unchanged { parent_blueprint_id } => {
+        BlueprintPlannerStatus::Unchanged { parent_blueprint_id, report } => {
             println!("    plan unchanged from parent {parent_blueprint_id}");
+            println!("{report}");
         }
-        BlueprintPlannerStatus::Planned { parent_blueprint_id, error } => {
+        BlueprintPlannerStatus::Planned {
+            parent_blueprint_id,
+            error,
+            report,
+        } => {
             println!(
                 "    planned new blueprint from parent {parent_blueprint_id}, \
                      but could not make it the target: {error}"
             );
+            println!("{report}");
         }
         BlueprintPlannerStatus::Targeted { blueprint_id, report, .. } => {
             println!(
