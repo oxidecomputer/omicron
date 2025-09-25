@@ -158,7 +158,9 @@ impl ClickhouseAllocator {
                 return bump_gen_if_necessary(new_config);
             }
 
-            // Save the log index for next time through the loop
+            // Save the log index from inventory because we are going to
+            // need to use it to see if inventory has changed next time
+            // through the planner.
             new_config.highest_seen_keeper_leader_committed_log_index =
                 inventory_membership.leader_committed_log_index;
 
@@ -244,9 +246,9 @@ impl ClickhouseAllocator {
                 new_config.keepers.remove(zone_id);
 
                 if inventory_updated {
-                    // Save the log from inventory because we are going to need
-                    // to use it to see if inventory has changed next time through
-                    // the planner.
+                    // Save the log index from inventory because we are going to
+                    // need to use it to see if inventory has changed next time
+                    // through the planner.
                     new_config.highest_seen_keeper_leader_committed_log_index =
                         inventory_membership.leader_committed_log_index;
                 }
@@ -265,9 +267,9 @@ impl ClickhouseAllocator {
                     .insert(*zone_id, new_config.max_used_keeper_id);
 
                 if inventory_updated {
-                    // Save the log from inventory because we are going to need
-                    // to use it to see if inventory has changed next time through
-                    // the planner.
+                    // Save the log index from inventory because we are going to
+                    // need to use it to see if inventory has changed next time
+                    // through the planner.
                     new_config.highest_seen_keeper_leader_committed_log_index =
                         inventory_membership.leader_committed_log_index;
                 }
