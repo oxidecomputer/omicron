@@ -863,6 +863,8 @@ wiped system
 
 > load state.json
 loaded data from "state.json"
+warnings:
+  could not determine active Nexus generation from serialized state: no target blueprint set (using default of 1)
 result:
   system:
     using collection 6e066695-94bc-4250-bd63-fd799c166cc1 as source of sled inventory data
@@ -875,6 +877,7 @@ result:
   config:
     configured external DNS zone name: oxide.example
     configured silo names: example-silo
+    active Nexus generation: 1
 
 
 > sled-show dde1c0e2-b10d-4621-b420-f179f7a7a00a

@@ -239,11 +239,24 @@ impl<'a> Planner<'a> {
             PlanningMgsUpdatesStepReport::new(PendingMgsUpdates::new())
         };
 
-        // Likewise for zone additions, unless overridden by the config.
+        // Likewise for zone additions, unless overridden by the config, or
+        // unless a target release has never been set (i.e. we're effectively in
+        // a pre-Nexus-driven-update world).
+        //
+        // We don't have to check for the minimum target release generation in
+        // this case. On a freshly-installed or MUPdated system, Nexus will find
+        // the mupdate overrides and clear them. The act of clearing mupdate
+        // overrides always sets the minimum generation to the current target
+        // release generation plus one, so the minimum generation will always be
+        // exactly 2.
         let add_zones_with_mupdate_override =
             self.input.planner_config().add_zones_with_mupdate_override;
+        let target_release_generation_is_one =
+            self.input.tuf_repo().target_release_generation
+                == Generation::from_u32(1);
         let mut add = if add_update_blocked_reasons.is_empty()
             || add_zones_with_mupdate_override
+            || target_release_generation_is_one
         {
             self.do_plan_add(&mgs_updates)?
         } else {
@@ -251,6 +264,7 @@ impl<'a> Planner<'a> {
         };
         add.add_update_blocked_reasons = add_update_blocked_reasons;
         add.add_zones_with_mupdate_override = add_zones_with_mupdate_override;
+        add.target_release_generation_is_one = target_release_generation_is_one;
 
         let zone_updates = if add.any_discretionary_zones_placed() {
             // Do not update any zones if we've added any discretionary zones
@@ -1584,8 +1598,6 @@ impl<'a> Planner<'a> {
         &mut self,
         mgs_updates: &PlanningMgsUpdatesStepReport,
     ) -> Result<PlanningZoneUpdatesStepReport, Error> {
-        let mut report = PlanningZoneUpdatesStepReport::new();
-
         let zones_currently_updating =
             self.get_zones_not_yet_propagated_to_inventory();
         if !zones_currently_updating.is_empty() {
@@ -1593,8 +1605,12 @@ impl<'a> Planner<'a> {
                 self.log, "some zones not yet up-to-date";
                 "zones_currently_updating" => ?zones_currently_updating,
             );
-            return Ok(report);
+            return Ok(PlanningZoneUpdatesStepReport::waiting_on(
+                ZoneUpdatesWaitingOn::InventoryPropagation,
+            ));
         }
+
+        let mut report = PlanningZoneUpdatesStepReport::new();
 
         // Find the zones with out-of-date images
         let out_of_date_zones = self.get_out_of_date_zones();
@@ -2760,12 +2776,6 @@ pub(crate) mod test {
         .build();
         verify_blueprint(&blueprint1);
 
-        // Set this chicken switch so that zones are added even though image
-        // sources are currently InstallDataset.
-        let mut config = example.system.get_planner_config();
-        config.add_zones_with_mupdate_override = true;
-        example.system.set_planner_config(config);
-
         let input = example
             .system
             .to_planning_input_builder()
@@ -2959,7 +2969,7 @@ pub(crate) mod test {
 
         // Use our example system with one sled and one Nexus instance as a
         // starting point.
-        let (mut example, blueprint1) =
+        let (example, blueprint1) =
             ExampleSystemBuilder::new(&logctx.log, TEST_NAME)
                 .nsleds(1)
                 .nexus_count(1)
@@ -2971,12 +2981,6 @@ pub(crate) mod test {
             .next()
             .map(|sa| sa.sled_id)
             .unwrap();
-
-        // Set this chicken switch so that zones are added even though image
-        // sources are currently InstallDataset.
-        let mut config = example.system.get_planner_config();
-        config.add_zones_with_mupdate_override = true;
-        example.system.set_planner_config(config);
 
         let input = example
             .system
@@ -3072,15 +3076,9 @@ pub(crate) mod test {
         let logctx = test_setup_log(TEST_NAME);
 
         // Use our example system as a starting point.
-        let (mut example, blueprint1) =
+        let (example, blueprint1) =
             ExampleSystemBuilder::new(&logctx.log, TEST_NAME).build();
         let collection = example.collection;
-
-        // Set this chicken switch so that zones are added even though image
-        // sources are currently InstallDataset.
-        let mut config = example.system.get_planner_config();
-        config.add_zones_with_mupdate_override = true;
-        example.system.set_planner_config(config);
 
         // This blueprint should only have 3 Nexus zones: one on each sled.
         assert_eq!(blueprint1.sleds.len(), 3);
@@ -3169,15 +3167,9 @@ pub(crate) mod test {
         let logctx = test_setup_log(TEST_NAME);
 
         // Use our example system as a starting point.
-        let (mut example, mut blueprint1) =
+        let (example, mut blueprint1) =
             ExampleSystemBuilder::new(&logctx.log, TEST_NAME).build();
         let collection = example.collection;
-
-        // Set this chicken switch so that zones are added even though image
-        // sources are currently InstallDataset.
-        let mut config = example.system.get_planner_config();
-        config.add_zones_with_mupdate_override = true;
-        example.system.set_planner_config(config);
 
         example
             .system
@@ -3323,15 +3315,9 @@ pub(crate) mod test {
         let logctx = test_setup_log(TEST_NAME);
 
         // Use our example system as a starting point.
-        let (mut example, blueprint1) =
+        let (example, blueprint1) =
             ExampleSystemBuilder::new(&logctx.log, TEST_NAME).build();
         let collection = example.collection;
-
-        // Set this chicken switch so that zones are added even though image
-        // sources are currently InstallDataset.
-        let mut config = example.system.get_planner_config();
-        config.add_zones_with_mupdate_override = true;
-        example.system.set_planner_config(config);
 
         // Expunge the first sled we see, which will result in a Nexus external
         // IP no longer being associated with a running zone, and a new Nexus
@@ -3441,15 +3427,9 @@ pub(crate) mod test {
         let logctx = test_setup_log(TEST_NAME);
 
         // Use our example system as a starting point.
-        let (mut example, blueprint1) =
+        let (example, blueprint1) =
             ExampleSystemBuilder::new(&logctx.log, TEST_NAME).build();
         let collection = example.collection;
-
-        // Set this chicken switch so that zones are added even though image
-        // sources are currently InstallDataset.
-        let mut config = example.system.get_planner_config();
-        config.add_zones_with_mupdate_override = true;
-        example.system.set_planner_config(config);
 
         let input = example
             .system
@@ -3639,14 +3619,9 @@ pub(crate) mod test {
         let logctx = test_setup_log(TEST_NAME);
 
         // Create an example system with a single sled
-        let (mut example, blueprint1) =
+        let (example, blueprint1) =
             ExampleSystemBuilder::new(&logctx.log, TEST_NAME).nsleds(1).build();
         let collection = example.collection;
-        // Set this chicken switch so that zones are added even though zones are
-        // currently InstallDataset.
-        let mut config = example.system.get_planner_config();
-        config.add_zones_with_mupdate_override = true;
-        example.system.set_planner_config(config);
 
         let mut builder = example
             .system
@@ -3747,15 +3722,9 @@ pub(crate) mod test {
         let logctx = test_setup_log(TEST_NAME);
 
         // Create an example system with a single sled
-        let (mut example, mut blueprint1) =
+        let (example, mut blueprint1) =
             ExampleSystemBuilder::new(&logctx.log, TEST_NAME).nsleds(1).build();
         let collection = example.collection;
-
-        // Set this chicken switch so that zones are added even though image
-        // sources are currently InstallDataset.
-        let mut config = example.system.get_planner_config();
-        config.add_zones_with_mupdate_override = true;
-        example.system.set_planner_config(config);
 
         let mut builder = example
             .system
@@ -3835,15 +3804,9 @@ pub(crate) mod test {
 
         // Create an example system with two sleds. We're going to expunge one
         // of these sleds.
-        let (mut example, blueprint1) =
+        let (example, blueprint1) =
             ExampleSystemBuilder::new(&logctx.log, TEST_NAME).nsleds(2).build();
         let mut collection = example.collection;
-
-        // Set this chicken switch so that zones are added even though image
-        // sources are currently InstallDataset.
-        let mut config = example.system.get_planner_config();
-        config.add_zones_with_mupdate_override = true;
-        example.system.set_planner_config(config);
 
         // The initial blueprint configuration has generation 2
         let (sled_id, sled_config) =
@@ -4205,18 +4168,12 @@ pub(crate) mod test {
         let logctx = test_setup_log(TEST_NAME);
 
         // Create an example system with a single sled
-        let (mut example, blueprint1) =
+        let (example, blueprint1) =
             ExampleSystemBuilder::new(&logctx.log, TEST_NAME)
                 .nsleds(1)
                 .nexus_count(2)
                 .build();
         let collection = example.collection;
-
-        // Set this chicken switch so that zones are added even though image
-        // sources are currently InstallDataset.
-        let mut config = example.system.get_planner_config();
-        config.add_zones_with_mupdate_override = true;
-        example.system.set_planner_config(config);
 
         let mut builder = example
             .system
@@ -4356,15 +4313,9 @@ pub(crate) mod test {
         // and decommissioned sleds. (When we add more kinds of
         // non-provisionable states in the future, we'll have to add more
         // sleds.)
-        let (mut example, mut blueprint1) =
+        let (example, mut blueprint1) =
             ExampleSystemBuilder::new(&logctx.log, TEST_NAME).nsleds(5).build();
         let collection = example.collection;
-
-        // Set this chicken switch so that zones are added even though image
-        // sources are currently InstallDataset.
-        let mut config = example.system.get_planner_config();
-        config.add_zones_with_mupdate_override = true;
-        example.system.set_planner_config(config);
 
         // This blueprint should only have 5 Nexus zones: one on each sled.
         assert_eq!(blueprint1.sleds.len(), 5);
@@ -4691,14 +4642,8 @@ pub(crate) mod test {
         let logctx = test_setup_log(TEST_NAME);
 
         // Use our example system as a starting point.
-        let (mut example, blueprint1) =
+        let (example, blueprint1) =
             ExampleSystemBuilder::new(&logctx.log, TEST_NAME).build();
-
-        // Set this chicken switch so that zones are added even though image
-        // sources are currently InstallDataset.
-        let mut config = example.system.get_planner_config();
-        config.add_zones_with_mupdate_override = true;
-        example.system.set_planner_config(config);
 
         let collection = example.collection;
 
@@ -4984,15 +4929,9 @@ pub(crate) mod test {
         let logctx = test_setup_log(TEST_NAME);
 
         // Use our example system as a starting point.
-        let (mut example, blueprint1) =
+        let (example, blueprint1) =
             ExampleSystemBuilder::new(&logctx.log, TEST_NAME).build();
         let collection = example.collection;
-
-        // Set this chicken switch so that zones are added even though image
-        // sources are currently InstallDataset.
-        let mut config = example.system.get_planner_config();
-        config.add_zones_with_mupdate_override = true;
-        example.system.set_planner_config(config);
 
         // We should start with CRUCIBLE_PANTRY_REDUNDANCY pantries spread out
         // to at most 1 per sled. Find one of the sleds running one.
@@ -5069,15 +5008,9 @@ pub(crate) mod test {
         let logctx = test_setup_log(TEST_NAME);
 
         // Use our example system as a starting point.
-        let (mut example, blueprint1) =
+        let (example, blueprint1) =
             ExampleSystemBuilder::new(&logctx.log, TEST_NAME).build();
         let collection = example.collection;
-
-        // Set this chicken switch so that zones are added even though image
-        // sources are currently InstallDataset.
-        let mut config = example.system.get_planner_config();
-        config.add_zones_with_mupdate_override = true;
-        example.system.set_planner_config(config);
 
         // We should start with one ClickHouse zone. Find out which sled it's on.
         let clickhouse_sleds = blueprint1
@@ -5150,16 +5083,10 @@ pub(crate) mod test {
         let log = logctx.log.clone();
 
         // Use our example system.
-        let (mut example, blueprint1) =
+        let (example, blueprint1) =
             ExampleSystemBuilder::new(&logctx.log, TEST_NAME).build();
         let mut collection = example.collection;
         verify_blueprint(&blueprint1);
-
-        // Set this chicken switch so that zones are added even though image
-        // sources are currently InstallDataset.
-        let mut config = example.system.get_planner_config();
-        config.add_zones_with_mupdate_override = true;
-        example.system.set_planner_config(config);
 
         // We shouldn't have a clickhouse cluster config, as we don't have a
         // clickhouse policy set yet
@@ -5508,15 +5435,9 @@ pub(crate) mod test {
         let log = logctx.log.clone();
 
         // Use our example system.
-        let (mut example, blueprint1) =
+        let (example, blueprint1) =
             ExampleSystemBuilder::new(&log, TEST_NAME).build();
         let mut collection = example.collection;
-
-        // Set this chicken switch so that zones are added even though image
-        // sources are currently InstallDataset.
-        let mut config = example.system.get_planner_config();
-        config.add_zones_with_mupdate_override = true;
-        example.system.set_planner_config(config);
 
         let mut input_builder = example
             .system
@@ -5739,15 +5660,9 @@ pub(crate) mod test {
         let log = logctx.log.clone();
 
         // Use our example system.
-        let (mut example, blueprint1) =
+        let (example, blueprint1) =
             ExampleSystemBuilder::new(&log, TEST_NAME).build();
         let collection = example.collection;
-
-        // Set this chicken switch so that zones are added even though image
-        // sources are currently InstallDataset.
-        let mut config = example.system.get_planner_config();
-        config.add_zones_with_mupdate_override = true;
-        example.system.set_planner_config(config);
 
         let mut input_builder = example
             .system
@@ -6135,15 +6050,9 @@ pub(crate) mod test {
         let log = logctx.log.clone();
 
         // Use our example system.
-        let (mut example, blueprint1) =
+        let (example, blueprint1) =
             ExampleSystemBuilder::new(&log, TEST_NAME).build();
         let mut collection = example.collection;
-
-        // Set this chicken switch so that zones are added even though image
-        // sources are currently InstallDataset.
-        let mut config = example.system.get_planner_config();
-        config.add_zones_with_mupdate_override = true;
-        example.system.set_planner_config(config);
 
         // Find a internal DNS zone we'll use for our test.
         let (sled_id, internal_dns_config) = blueprint1

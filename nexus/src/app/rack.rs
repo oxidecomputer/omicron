@@ -222,6 +222,7 @@ impl super::Nexus {
                 &request.blueprint,
                 vec![silo_name],
                 request.external_dns_zone_name,
+                request.blueprint.nexus_generation,
             );
         for (name, records) in external_dns_config.records.into_iter() {
             dns_update.add_name(name, records)?;

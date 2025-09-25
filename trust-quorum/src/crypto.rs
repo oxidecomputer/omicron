@@ -67,6 +67,10 @@ impl LrtqShare {
             Sha3_256::digest(&self.0).as_slice().try_into().unwrap(),
         ))
     }
+
+    pub fn inner(&self) -> &Vec<u8> {
+        &self.0
+    }
 }
 
 #[derive(
@@ -86,6 +90,12 @@ impl std::fmt::Debug for Sha3_256Digest {
             write!(f, "{:x?}", v)?;
         }
         Ok(())
+    }
+}
+
+impl From<ShareDigestLrtq> for bootstore::Sha3_256Digest {
+    fn from(value: ShareDigestLrtq) -> Self {
+        bootstore::Sha3_256Digest::new(value.0.0)
     }
 }
 

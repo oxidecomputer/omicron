@@ -44,6 +44,29 @@ impl TestState {
         TestState { tq_state: TqState::new(log), skipped_actions: 0 }
     }
 
+    fn initial_config_lrtq(
+        &self,
+        config: GeneratedConfiguration,
+    ) -> Vec<Event> {
+        // `tq_state` doesn't create the member universe until the first event is
+        // applied. We duplicate it here so we can create that initial config
+        // event.
+        let member_universe =
+            trust_quorum_test_utils::member_universe(MEMBER_UNIVERSE_SIZE);
+        let members: BTreeSet<PlatformId> = config
+            .members
+            .iter()
+            .map(|index| member_universe[*index].clone())
+            .collect();
+        let coordinator =
+            members.first().cloned().expect("at least one member");
+        let config = NexusConfig::new_lrtq(coordinator, members);
+        vec![Event::InitialSetupLrtq {
+            member_universe_size: MEMBER_UNIVERSE_SIZE,
+            config,
+        }]
+    }
+
     fn initial_config_events(
         &self,
         config: GeneratedConfiguration,
@@ -404,6 +427,29 @@ impl TestState {
         }
     }
 
+    fn action_to_events_upgrade_from_lrtq(
+        &self,
+        coordinator: Selector,
+    ) -> Vec<Event> {
+        let mut new_config = self.tq_state.nexus.latest_config().clone();
+        let new_epoch = new_config.epoch.next();
+        new_config.epoch = new_epoch;
+        let coordinator = coordinator.select(new_config.members.iter()).clone();
+        new_config.coordinator = coordinator.clone();
+        new_config.op = NexusOp::Preparing;
+        new_config.prepared_members.clear();
+        new_config.committed_members.clear();
+
+        let mut events = vec![Event::LrtqUpgrade(new_config)];
+
+        if self.tq_state.crashed_nodes.contains(&coordinator) {
+            // This simulates a timeout on the reply from the coordinator which
+            // triggers an abort.
+            events.push(Event::AbortConfiguration(new_epoch));
+        }
+        events
+    }
+
     fn action_to_events_reconfigure(
         &self,
         num_added_nodes: usize,
@@ -411,8 +457,12 @@ impl TestState {
         threshold: Index,
         coordinator: Selector,
     ) -> Vec<Event> {
+        if self.tq_state.nexus.needs_upgrade_from_lrtq() {
+            return self.action_to_events_upgrade_from_lrtq(coordinator);
+        }
         let latest_epoch = self.tq_state.nexus.latest_config().epoch;
         let last_committed_config = self.tq_state.nexus.last_committed_config();
+
         // We must leave at least one node available to coordinate between the
         // new and old configurations.
         let (new_members, coordinator) = match last_committed_config {
@@ -693,7 +743,17 @@ impl TestState {
                 let mut new_config = latest_config.clone();
                 new_config.epoch = latest_config.epoch.next();
                 new_config.op = NexusOp::Preparing;
-                let event = Event::Reconfigure(new_config.clone());
+                new_config.prepared_members.clear();
+                new_config.committed_members.clear();
+
+                // If we are currently upgrading LRTQ, then we must perform
+                // an upgrade and complete that rather than a reconfigure.
+                let event = if self.tq_state.nexus.needs_upgrade_from_lrtq() {
+                    Event::LrtqUpgrade(new_config.clone())
+                } else {
+                    Event::Reconfigure(new_config.clone())
+                };
+
                 self.record_and_apply_event(event, event_log)?;
 
                 // Deliver all envelopes related to `Event::Reconfigure`
@@ -717,6 +777,12 @@ impl TestState {
 
                 // At this point all the rack secrets should be available.
                 self.compare_all_loaded_rack_secrets(&new_config);
+            }
+            NexusOp::LrtqCommitted => {
+                // Nothing to do here.
+                //
+                // The test run was so short that we never even tried to upgrade
+                // out of LRTQ.
             }
         }
 
@@ -957,7 +1023,7 @@ impl TestState {
                         prepare_acks, ..
                     } = cs.op()
                     {
-                        (prepare_acks.clone(), cs.reconfigure_msg().epoch())
+                        (prepare_acks.clone(), cs.msg().epoch())
                     } else {
                         (BTreeSet::new(), Epoch(0))
                     }
@@ -1110,6 +1176,10 @@ pub enum Action {
     /// Generate a new configuration by adding a number of *new* (non-expunged)
     /// nodes to the cluster from `member_universe` and removing the specific
     /// nodes in the current cluster given by the indices `removed_nodes`.
+    ///
+    /// In the case of an ongoing LRTQ upgrade, `num_addded_nodes`, `num_removed_nodes`,
+    /// and `threshold` fields will be ignored, as the same set of nodes will be used
+    /// for the new trust quorum group as in the LRTQ group.
     #[weight(1)]
     Reconfigure {
         #[strategy(0..MAX_ADDED_NODES)]
@@ -1183,6 +1253,11 @@ pub struct GeneratedConfiguration {
 
 #[derive(Debug, Arbitrary)]
 pub struct TestInput {
+    // The initial configuration should sometimes be LRTQ to test upgrades from
+    // LRTQ. In the case of LRTQ, we will ignore the `initial_down_nodes` field
+    // of `TestInput`, since LRTQ requires full availability at RSS time.
+    upgrade_from_lrtq: bool,
+
     initial_config: GeneratedConfiguration,
 
     // We choose a set of nodes to be crashed, resulting in them being
@@ -1210,8 +1285,14 @@ fn test_trust_quorum_protocol(input: TestInput) {
     let mut state = TestState::new(log.clone());
 
     // Perform the initial setup
-    let events = state
-        .initial_config_events(input.initial_config, input.initial_down_nodes);
+    let events = if input.upgrade_from_lrtq {
+        state.initial_config_lrtq(input.initial_config)
+    } else {
+        state.initial_config_events(
+            input.initial_config,
+            input.initial_down_nodes,
+        )
+    };
     for event in events {
         event_log.record(&event);
         state.tq_state.apply_event(event);
