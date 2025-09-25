@@ -6,6 +6,8 @@
 
 use std::collections::HashMap;
 
+use chrono::{DateTime, Utc};
+
 use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
@@ -14,6 +16,7 @@ use crate::db::datastore::target_release::RecentTargetReleases;
 use crate::db::model::SemverVersion;
 use crate::db::pagination::Paginator;
 use crate::db::pagination::paginated;
+use crate::db::pagination::paginated_multicolumn;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
 use diesel::result::Error as DieselError;
@@ -458,6 +461,43 @@ impl DataStore {
         get_generation(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// List all TUF repositories ordered by creation time (descending).
+    pub async fn tuf_repo_list(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, (DateTime<Utc>, Uuid)>,
+    ) -> ListResultVec<TufRepoDescription> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+
+        use nexus_db_schema::schema::tuf_repo::dsl;
+
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        // Order by time_created descending (newest first), then by id for stable pagination
+        let repos = paginated_multicolumn(
+            dsl::tuf_repo,
+            (dsl::time_created, dsl::id),
+            pagparams,
+        )
+        .order_by((dsl::time_created.desc(), dsl::id))
+        .select(TufRepo::as_select())
+        .load_async(&*conn)
+        .await
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        // For each repo, fetch its artifacts
+        let mut results = Vec::new();
+        for repo in repos {
+            let artifacts =
+                artifacts_for_repo(repo.id.into(), &conn).await.map_err(
+                    |e| public_error_from_diesel(e, ErrorHandler::Server),
+                )?;
+            results.push(TufRepoDescription { repo, artifacts });
+        }
+
+        Ok(results)
     }
 
     /// List the trusted TUF root roles in the trust store.

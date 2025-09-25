@@ -5,6 +5,7 @@
 //! Software Updates
 
 use bytes::Bytes;
+use chrono::{DateTime, Utc};
 use dropshot::HttpError;
 use futures::Stream;
 use nexus_auth::authz;
@@ -105,6 +106,17 @@ impl super::Nexus {
     ) -> Result<TufRepoDescription, HttpError> {
         self.db_datastore
             .tuf_repo_get_by_version(opctx, system_version.into())
+            .await
+            .map_err(HttpError::from)
+    }
+
+    pub(crate) async fn updates_list_repositories(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, (DateTime<Utc>, Uuid)>,
+    ) -> Result<Vec<TufRepoDescription>, HttpError> {
+        self.db_datastore
+            .tuf_repo_list(opctx, pagparams)
             .await
             .map_err(HttpError::from)
     }

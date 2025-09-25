@@ -2988,6 +2988,20 @@ pub trait NexusExternalApi {
         path_params: Path<params::UpdatesGetRepositoryParams>,
     ) -> Result<HttpResponseOk<TufRepoGetResponse>, HttpError>;
 
+    /// List all TUF repositories
+    ///
+    /// Returns a paginated list of all TUF repositories ordered by creation time
+    /// (descending), with the most recently created repositories appearing first.
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/update/repositories",
+        tags = ["system/update"],
+    }]
+    async fn system_update_repository_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedByTimeAndId>,
+    ) -> Result<HttpResponseOk<ResultsPage<TufRepoGetResponse>>, HttpError>;
+
     /// List root roles in the updates trust store
     ///
     /// A root role is a JSON document describing the cryptographic keys that

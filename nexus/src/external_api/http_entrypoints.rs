@@ -17,6 +17,7 @@ use crate::app::external_endpoints::authority_for_request;
 use crate::app::support_bundles::SupportBundleQueryType;
 use crate::context::ApiContext;
 use crate::external_api::shared;
+use chrono::{DateTime, Utc};
 use dropshot::Body;
 use dropshot::EmptyScanParams;
 use dropshot::Header;
@@ -113,6 +114,7 @@ use propolis_client::support::tungstenite::protocol::{
 };
 use range_requests::PotentialRange;
 use ref_cast::RefCast;
+use uuid::Uuid;
 
 type NexusApiDescription = ApiDescription<ApiContext>;
 
@@ -6679,6 +6681,63 @@ impl NexusExternalApi for NexusExternalApiImpl {
             Ok(HttpResponseOk(TufRepoGetResponse {
                 description: description.into_external(),
             }))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn system_update_repository_list(
+        rqctx: RequestContext<ApiContext>,
+        query_params: Query<PaginatedByTimeAndId>,
+    ) -> Result<HttpResponseOk<ResultsPage<TufRepoGetResponse>>, HttpError>
+    {
+        let apictx = rqctx.context();
+        let nexus = &apictx.context.nexus;
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let query = query_params.into_inner();
+            let pagparams = data_page_params_for(&rqctx, &query)?;
+            let repos =
+                nexus.updates_list_repositories(&opctx, &pagparams).await?;
+
+            // Create a helper struct to maintain the association between response and database info
+            struct TufRepoWithMeta {
+                response: TufRepoGetResponse,
+                time_created: DateTime<Utc>,
+                repo_id: Uuid,
+            }
+
+            let items: Vec<TufRepoWithMeta> = repos
+                .into_iter()
+                .map(|description| {
+                    let time_created = description.repo.time_created;
+                    let repo_id = description.repo.id.into_untyped_uuid();
+                    let response = TufRepoGetResponse {
+                        description: description.into_external(),
+                    };
+                    TufRepoWithMeta { response, time_created, repo_id }
+                })
+                .collect();
+
+            let responses: Vec<TufRepoGetResponse> =
+                items.iter().map(|item| item.response.clone()).collect();
+
+            Ok(HttpResponseOk(ScanByTimeAndId::results_page(
+                &query,
+                responses,
+                &|_scan_params, item: &TufRepoGetResponse| {
+                    // Find the corresponding metadata for this response
+                    let meta = items
+                        .iter()
+                        .find(|meta| std::ptr::eq(&meta.response, item))
+                        .expect("Response should have corresponding metadata");
+                    (meta.time_created, meta.repo_id)
+                },
+            )?))
         };
         apictx
             .context
