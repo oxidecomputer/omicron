@@ -3143,7 +3143,7 @@ dependencies = [
  "internet-checksum",
  "ispf",
  "macaddr",
- "nexus-client",
+ "nexus-lockstep-client",
  "omicron-sled-agent",
  "omicron-test-utils",
  "omicron-uuid-kinds",
@@ -6670,6 +6670,43 @@ dependencies = [
 ]
 
 [[package]]
+name = "nexus-lockstep-api"
+version = "0.1.0"
+dependencies = [
+ "dropshot",
+ "http",
+ "nexus-types",
+ "omicron-common",
+ "omicron-uuid-kinds",
+ "omicron-workspace-hack",
+ "schemars",
+ "serde",
+ "uuid",
+]
+
+[[package]]
+name = "nexus-lockstep-client"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "futures",
+ "iddqd",
+ "nexus-types",
+ "omicron-common",
+ "omicron-uuid-kinds",
+ "omicron-workspace-hack",
+ "oxnet",
+ "progenitor 0.10.0",
+ "regress",
+ "reqwest",
+ "schemars",
+ "serde",
+ "serde_json",
+ "slog",
+ "uuid",
+]
+
+[[package]]
 name = "nexus-macros-common"
 version = "0.1.0"
 dependencies = [
@@ -6794,8 +6831,8 @@ dependencies = [
  "camino",
  "camino-tempfile",
  "clap",
- "nexus-client",
  "nexus-db-queries",
+ "nexus-lockstep-client",
  "nexus-reconfigurator-preparation",
  "nexus-test-utils",
  "nexus-test-utils-macros",
@@ -7090,9 +7127,9 @@ dependencies = [
  "illumos-utils",
  "internal-dns-resolver",
  "internal-dns-types",
- "nexus-client",
  "nexus-config",
  "nexus-db-queries",
+ "nexus-lockstep-client",
  "nexus-sled-agent-shared",
  "nexus-test-interface",
  "nexus-types",
@@ -7835,16 +7872,17 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "assert_matches",
+ "dns-service-client",
  "dropshot",
  "futures",
  "internal-dns-resolver",
  "internal-dns-types",
  "live-tests-macros",
- "nexus-client",
  "nexus-config",
  "nexus-db-model",
  "nexus-db-queries",
  "nexus-inventory",
+ "nexus-lockstep-client",
  "nexus-reconfigurator-planning",
  "nexus-reconfigurator-preparation",
  "nexus-sled-agent-shared",
@@ -7945,7 +7983,6 @@ dependencies = [
  "mg-admin-client",
  "nexus-auth",
  "nexus-background-task-interface",
- "nexus-client",
  "nexus-config",
  "nexus-db-lookup",
  "nexus-db-model",
@@ -7955,6 +7992,8 @@ dependencies = [
  "nexus-external-api",
  "nexus-internal-api",
  "nexus-inventory",
+ "nexus-lockstep-api",
+ "nexus-lockstep-client",
  "nexus-metrics-producer-gc",
  "nexus-mgs-updates",
  "nexus-networking",
@@ -8126,7 +8165,6 @@ dependencies = [
  "ipnetwork",
  "itertools 0.14.0",
  "multimap",
- "nexus-client",
  "nexus-config",
  "nexus-db-errors",
  "nexus-db-lookup",
@@ -8134,6 +8172,7 @@ dependencies = [
  "nexus-db-queries",
  "nexus-db-schema",
  "nexus-inventory",
+ "nexus-lockstep-client",
  "nexus-reconfigurator-preparation",
  "nexus-saga-recovery",
  "nexus-sled-agent-shared",
@@ -8776,6 +8815,7 @@ dependencies = [
  "newtype_derive",
  "nexus-external-api",
  "nexus-internal-api",
+ "nexus-lockstep-api",
  "ntp-admin-api",
  "omicron-workspace-hack",
  "openapi-lint",
@@ -12424,8 +12464,11 @@ name = "sled-agent-api"
 version = "0.1.0"
 dependencies = [
  "camino",
+ "chrono",
  "dropshot",
  "http",
+ "id-map",
+ "iddqd",
  "nexus-sled-agent-shared",
  "omicron-common",
  "omicron-uuid-kinds",
@@ -14406,6 +14449,7 @@ dependencies = [
 name = "trust-quorum-test-utils"
 version = "0.1.0"
 dependencies = [
+ "bootstore",
  "camino",
  "daft",
  "dropshot",
@@ -14413,8 +14457,10 @@ dependencies = [
  "iddqd",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
+ "secrecy 0.10.3",
  "serde",
  "serde_json",
+ "sled-hardware-types",
  "slog",
  "trust-quorum",
 ]

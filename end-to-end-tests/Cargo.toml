@@ -8,19 +8,31 @@ license = "MPL-2.0"
 workspace = true
 
 [dependencies]
+anstyle.workspace = true
 anyhow = { workspace = true, features = ["backtrace"] }
 async-trait.workspace = true
 base64.workspace = true
 bytes.workspace = true
 chrono.workspace = true
-http.workspace = true
+clap.workspace = true
+colored.workspace = true
+# On Git commit for trust-dns -> hickory switch.
+# Switch back to released versions of dhcproto on next release.
+dhcproto = { git = "https://github.com/bluecatengineering/dhcproto.git", rev = "120da6fcd8a7be84d417d372634ead84ce07e6da" }
 futures.workspace = true
+hickory-resolver.workspace = true
+http.workspace = true
+humantime.workspace = true
 internal-dns-resolver.workspace = true
 internal-dns-types.workspace = true
-nexus-client.workspace = true
+internet-checksum.workspace = true
+ispf.workspace = true
+macaddr.workspace = true
+nexus-lockstep-client.workspace = true
 omicron-sled-agent.workspace = true
 omicron-test-utils.workspace = true
 omicron-uuid-kinds.workspace = true
+omicron-workspace-hack.workspace = true
 oxide-client.workspace = true
 oxide-tokio-rt.workspace = true
 rand.workspace = true
@@ -32,21 +44,8 @@ serde_json.workspace = true
 sled-agent-types.workspace = true
 slog.workspace = true
 slog-error-chain.workspace = true
+socket2.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 toml.workspace = true
-hickory-resolver.workspace = true
 uuid.workspace = true
-omicron-workspace-hack.workspace = true
-ispf.workspace = true
-internet-checksum.workspace = true
-humantime.workspace = true
-socket2.workspace = true
-colored.workspace = true
-anstyle.workspace = true
-clap.workspace = true
-macaddr.workspace = true
-
-# On Git commit for trust-dns -> hickory switch.
-# Switch back to released versions of dhcproto on next release.
-dhcproto = { git = "https://github.com/bluecatengineering/dhcproto.git", rev = "120da6fcd8a7be84d417d372634ead84ce07e6da" }

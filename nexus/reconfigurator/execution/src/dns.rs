@@ -22,6 +22,7 @@ use nexus_types::internal_api::params::DnsConfigZone;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::InternalContext;
 use omicron_common::bail_unless;
+use omicron_uuid_kinds::OmicronZoneUuid;
 use slog::{debug, info, o};
 
 pub(crate) async fn deploy_dns(
@@ -31,6 +32,7 @@ pub(crate) async fn deploy_dns(
     blueprint: &Blueprint,
     sleds_by_id: &IdOrdMap<Sled>,
     overrides: &Overridables,
+    nexus_id: OmicronZoneUuid,
 ) -> Result<(), Error> {
     // First, fetch the current DNS configs.
     let internal_dns_config_current = datastore
@@ -42,6 +44,11 @@ pub(crate) async fn deploy_dns(
         .await
         .internal_context("reading current DNS (external)")?;
 
+    // Determine the currently-active Nexus generation based on the fact that
+    // the Nexus executing this blueprint must itself be active.
+    let active_nexus_generation =
+        blueprint.find_generation_for_self(nexus_id)?;
+
     // We could check here that the DNS version we found isn't newer than when
     // the blueprint was generated.  But we have to check later when we try to
     // update the database anyway.  And we're not wasting much effort allowing
@@ -49,11 +56,13 @@ pub(crate) async fn deploy_dns(
     // we know it's being hit when we exercise this condition.
 
     // Next, construct the DNS config represented by the blueprint.
-    let internal_dns_zone_blueprint =
-        blueprint_internal_dns_config(blueprint, sleds_by_id, overrides)
-            .map_err(|e| Error::InternalError {
-                internal_message: e.to_string(),
-            })?;
+    let internal_dns_zone_blueprint = blueprint_internal_dns_config(
+        blueprint,
+        sleds_by_id,
+        active_nexus_generation,
+        overrides,
+    )
+    .map_err(|e| Error::InternalError { internal_message: e.to_string() })?;
     let silos = datastore
         .silo_list_all_batched(opctx, Discoverability::All)
         .await
@@ -83,6 +92,7 @@ pub(crate) async fn deploy_dns(
         blueprint,
         &silos,
         external_dns_zone_name,
+        active_nexus_generation,
     );
 
     // Deploy the changes.
@@ -580,6 +590,7 @@ mod test {
                 )
             }
             OmicronZoneType::Nexus {
+                lockstep_port,
                 external_dns_servers,
                 external_ip,
                 external_tls,
@@ -591,6 +602,7 @@ mod test {
                 )?;
                 BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
                     internal_address,
+                    lockstep_port,
                     external_ip: OmicronZoneExternalFloatingIp {
                         id: external_ip_id,
                         ip: external_ip,
@@ -647,6 +659,7 @@ mod test {
         let blueprint_dns = blueprint_internal_dns_config(
             &blueprint,
             &IdOrdMap::new(),
+            blueprint.nexus_generation,
             &Default::default(),
         )
         .unwrap();
@@ -784,6 +797,7 @@ mod test {
         let mut blueprint_dns_zone = blueprint_internal_dns_config(
             &blueprint,
             &sleds_by_id,
+            blueprint.nexus_generation,
             &Default::default(),
         )
         .unwrap();
@@ -990,6 +1004,7 @@ mod test {
             ServiceName::InternalDns,
             ServiceName::ExternalDns,
             ServiceName::Nexus,
+            ServiceName::NexusLockstep,
             ServiceName::Oximeter,
             ServiceName::Dendrite,
             ServiceName::CruciblePantry,
@@ -1079,6 +1094,7 @@ mod test {
             &blueprint,
             &[],
             String::from("oxide.test"),
+            blueprint.nexus_generation,
         );
         assert_eq!(external_dns_zone.zone_name, "oxide.test");
         // We'll only have external DNS nameserver records - the A/AAAA records
@@ -1126,6 +1142,7 @@ mod test {
             &blueprint,
             std::slice::from_ref(my_silo.name()),
             String::from("oxide.test"),
+            blueprint.nexus_generation,
         );
         assert_eq!(external_dns_zone.zone_name, String::from("oxide.test"));
         let records = &external_dns_zone.records;
@@ -1192,6 +1209,7 @@ mod test {
             &blueprint,
             std::slice::from_ref(my_silo.name()),
             String::from("oxide.test"),
+            blueprint.nexus_generation,
         );
         let silo_records = &external_dns_zone
             .records
@@ -1642,17 +1660,20 @@ mod test {
         // Nothing was removed.
         assert!(diff.names_removed().next().is_none());
 
-        // The SRV record for Nexus itself ought to have changed, growing one
-        // more record -- for the new AAAA record above.
+        // The SRV records for both nexus (internal) and nexus-lockstep ought
+        // to have changed, growing one more record -- for the new AAAA record
+        // above.
         let changed: Vec<_> = diff.names_changed().collect();
-        assert_eq!(changed.len(), 1);
-        let (name, old_records, new_records) = changed[0];
-        assert_eq!(name, ServiceName::Nexus.dns_name());
-        let new_srv = subset_plus_one(old_records, new_records);
-        let DnsRecord::Srv(new_srv) = new_srv else {
-            panic!("expected SRV record, found {:?}", new_srv);
-        };
-        assert_eq!(new_srv.target, new_zone_host.fqdn());
+        assert_eq!(changed.len(), 2);
+        assert_eq!(changed[0].0, ServiceName::NexusLockstep.dns_name());
+        assert_eq!(changed[1].0, ServiceName::Nexus.dns_name());
+        for (_, old_records, new_records) in changed {
+            let new_srv = subset_plus_one(old_records, new_records);
+            let DnsRecord::Srv(new_srv) = new_srv else {
+                panic!("expected SRV record, found {:?}", new_srv);
+            };
+            assert_eq!(new_srv.target, new_zone_host.fqdn());
+        }
 
         // As for external DNS: all existing names ought to have been changed,
         // gaining a new A record for the new host.

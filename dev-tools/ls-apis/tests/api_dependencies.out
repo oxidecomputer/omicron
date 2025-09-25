@@ -70,6 +70,8 @@ Nexus Internal API (client: nexus-client)
     consumed by: oximeter-collector (omicron/oximeter/collector) via 1 path
     consumed by: propolis-server (propolis/bin/propolis-server) via 3 paths
 
+Nexus Internal Lockstep API (client: nexus-lockstep-client)
+
 NTP Admin (client: ntp-admin-client)
     consumed by: omicron-nexus (omicron/nexus) via 2 paths
     consumed by: omicron-sled-agent (omicron/sled-agent) via 2 paths
