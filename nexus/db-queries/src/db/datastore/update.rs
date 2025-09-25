@@ -469,7 +469,9 @@ impl DataStore {
     ) -> ListResultVec<TufRepoDescription> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
 
-        use nexus_db_schema::schema::tuf_repo::dsl;
+        use nexus_db_schema::schema::tuf_artifact;
+        use nexus_db_schema::schema::tuf_repo;
+        use nexus_db_schema::schema::tuf_repo_artifact;
 
         let conn = self.pool_connection_authorized(opctx).await?;
 
@@ -482,8 +484,9 @@ impl DataStore {
             limit: pagparams.limit,
         };
 
+        // First get the paginated repos
         let repos =
-            paginated(dsl::tuf_repo, dsl::system_version, &db_pagparams)
+            paginated(tuf_repo::table, tuf_repo::system_version, &db_pagparams)
                 .select(TufRepo::as_select())
                 .load_async(&*conn)
                 .await
@@ -491,13 +494,47 @@ impl DataStore {
                     public_error_from_diesel(e, ErrorHandler::Server)
                 })?;
 
-        // For each repo, fetch its artifacts
+        if repos.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Get all repo IDs for the artifacts query
+        let repo_ids: Vec<_> = repos.iter().map(|repo| repo.id).collect();
+
+        // Fetch all artifacts for these repos in a single query
+        let repo_artifacts: Vec<(TufRepo, TufArtifact)> =
+            tuf_repo::table
+                .filter(tuf_repo::id.eq_any(repo_ids))
+                .inner_join(
+                    tuf_repo_artifact::table
+                        .on(tuf_repo::id.eq(tuf_repo_artifact::tuf_repo_id)),
+                )
+                .inner_join(tuf_artifact::table.on(
+                    tuf_repo_artifact::tuf_artifact_id.eq(tuf_artifact::id),
+                ))
+                .select((TufRepo::as_select(), TufArtifact::as_select()))
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+
+        // Group artifacts by repo ID
+        let mut artifacts_by_repo: HashMap<
+            TypedUuid<TufRepoKind>,
+            Vec<TufArtifact>,
+        > = HashMap::new();
+        for (repo, artifact) in repo_artifacts {
+            artifacts_by_repo.entry(repo.id.into()).or_default().push(artifact);
+        }
+
+        // Build the final results, maintaining the original pagination order
         let mut results = Vec::new();
         for repo in repos {
-            let artifacts =
-                artifacts_for_repo(repo.id.into(), &conn).await.map_err(
-                    |e| public_error_from_diesel(e, ErrorHandler::Server),
-                )?;
+            let artifacts = artifacts_by_repo
+                .get(&repo.id.into())
+                .cloned()
+                .unwrap_or_default();
             results.push(TufRepoDescription { repo, artifacts });
         }
 
