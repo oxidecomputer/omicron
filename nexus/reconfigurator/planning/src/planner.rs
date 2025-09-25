@@ -1421,19 +1421,20 @@ impl<'a> Planner<'a> {
                 })
                 .collect();
 
-            // TODO-K: Improve or remove log
             if !unsafe_zones.is_empty() {
                 let unsafe_zone_kinds: Vec<_> = unsafe_zones
                 .iter()
                 .map(|zone| zone.kind().report_str())
                 .collect();
 
+                let zone_str = unsafe_zone_kinds.join(", ");
+
                 info!(
                     self.log,
-                    "skipping board for MGS-driven update, serial_number: {}, part_number: {} due to unsafe zones: {:?}",
+                    "skipping board for MGS-driven update, serial_number: {}, part_number: {} due to unsafe zones: {}",
                     baseboard_id.serial_number,
                     baseboard_id.part_number,
-                    unsafe_zone_kinds
+                    zone_str
                 );
             }
 
