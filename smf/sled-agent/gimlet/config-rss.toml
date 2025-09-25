@@ -1,0 +1,148 @@
+# RSS (Rack Setup Service) "stand-in" configuration.
+#
+# This file conforms to the schema for "RackInitializeRequest" in the Bootstrap
+# Agent API.  See the `RackInitializeRequest` type in bootstrap-agent or its
+# OpenAPI spec (in openapi/bootstrap-agent.json in the root of this workspace).
+
+# Only include "our own sled" in the bootstrap network
+bootstrap_discovery.type = "only_ours"
+
+ntp_servers = [ "ntp.eng.oxide.computer" ]
+dns_servers = [ "1.1.1.1", "9.9.9.9" ]
+skip_timesync = true
+
+# Delegated external DNS zone name
+#
+# The rack provides separate external API and console endpoints for each Silo.
+# These are named `$silo_name.sys.$external_dns_zone_name`.  For a Silo called
+# "eng" with delegated domain "oxide.example", the API would be accessible at
+# "eng.sys.oxide.example".  The rack runs external DNS servers that serve A/AAAA
+# records for these DNS names.
+#
+# In a real deployment, the operator would own this DNS domain and delegate it
+# to the rack.  That means adding glue records in their DNS servers for the
+# parent domain that point to the rack's external DNS servers.
+#
+# In development, we usually use a fake domain here and configure clients to use
+# the rack's external DNS server as their normal DNS server.  Programmatically,
+# we do this with a custom reqwest Resolver.  Using curl or the Oxide CLI, you
+# can do this with the `--resolve` option.  In practice, people often skip DNS
+# altogether (which also means skipping TLS).
+external_dns_zone_name = "oxide.test"
+
+# IP addresses for authoritative external DNS servers operated by the rack for
+# the DNS domain delegated to the rack by the customer. Each of these addresses
+# must be contained in one of the "internal services" IP Pool ranges listed
+# below.
+external_dns_ips = [ "192.168.1.20", "192.168.1.21" ]
+
+# Initial TLS certificates for the external API
+#
+# You should probably leave this field empty even if you want to configure TLS.
+# If you want to configure TLS, the easier approach is to put the certificate
+# chain and private key into PEM-format files called "initial-tls-cert.pem" and
+# "initial-tls-key.pem", respectively, in the same place as this configuration
+# file.  They will be loaded and inserted into this array as part of loading
+# this file.  If for some reason you must put the contents inline here, see the
+# API documentation for the structure of these objects.
+#
+# However you provide the initial certificates, these will become associated
+# with the "recovery" Silo that's created during initial setup (i.e., with
+# Wicket, in a real system).  Immediately after that setup, users will go to
+# https://recovery.sys.$external_dns_zone_name to reach the web console to
+# finish initial setup.  The rack will serve one of these TLS certificates at
+# that time.  Once in the console, the user would generally create another Silo
+# with its own certificate(s).
+#
+# When configuring TLS, you typically only need one entry here.  Each entry is
+# more accurately called a TLS certificate _chain_.
+#
+# If no initial TLS certificates are provided, then your external API will be
+# configured to listen only for plaintext HTTP on port 80.
+external_certificates = []
+
+# The IP ranges configured as part of the "internal services" IP Pool
+#
+# This is a range of *external* IP addresses that will be assigned to the
+# External DNS server(s) and Nexus instances.  These are the IPs that users
+# *outside* the rack will use to reach these services.  These will also be used
+# by services like NTP as their externally-facing address for NAT.
+#
+# For more on this and what to put here, see docs/how-to-run.adoc.
+[[internal_services_ip_pool_ranges]]
+first = "192.168.1.20"
+last = "192.168.1.29"
+
+# TODO - this configuration is subject to change going forward. Ultimately these
+# parameters should be provided to the control plane via wicket, but we need to
+# put these parameters somewhere in the meantime so that the Nexus API will be
+# reachable upon Rack startup.
+
+# Configuration to bring up Boundary Services and make Nexus reachable from the
+# outside.  See docs/how-to-run.adoc for more on what to put here.
+[rack_network_config]
+# The /56 subnet for this rack.  This subnet is internal to the rack and fully
+# managed by Omicron, so you can pick anything you want within the IPv6 Unique
+# Local Address (ULA) range.  The rack-specific /56 subnet also implies the
+# parent /48 AZ subnet.
+#              |............|    <- This /48 is the AZ Subnet
+#              |...............| <- This /56 is the Rack Subnet
+rack_subnet = "fd00:1122:3344:0100::/56"
+
+# A range of IP addresses used by Boundary Services on the external network.  In
+# a real system, these would be addresses of the uplink ports on the Sidecar.
+# With softnpu, only one address is used.
+infra_ip_first = "192.168.1.30"
+infra_ip_last = "192.168.1.30"
+
+# Configurations for BGP routers to run on the scrimlets.
+bgp = []
+
+# You can configure multiple uplinks by repeating the following stanza
+[[rack_network_config.ports]]
+# Routes associated with this port.
+routes = [{nexthop = "192.168.1.199", destination = "0.0.0.0/0"}]
+# Addresses associated with this port.
+addresses = [{address = "192.168.1.30/32"}]
+# Name of the uplink port.  This should always be "qsfp0" when using softnpu.
+port = "qsfp0"
+# The speed of this port.
+uplink_port_speed = "40G"
+# The forward error correction mode for this port.
+uplink_port_fec="none"
+# Do not use autonegotiation
+autoneg = false
+# Switch to use for the uplink. For single-rack deployments this can be
+# "switch0" (upper slot) or "switch1" (lower slot). For single-node softnpu
+# and dendrite stub environments, use "switch0"
+switch = "switch0"
+# Neighbors we expect to peer with over BGP on this port.
+bgp_peers = []
+
+# An allowlist of source IPs that can make requests to user-facing services can
+# be specified here. It can be written as the string "any" ...
+[allowed_source_ips]
+allow = "any"
+
+# ... or as a list of IP subnets, like so:
+# allow = "list"
+# ips = ["10.0.0.1/32", "192.168.1.0/24"]
+#
+# Note that single IP addresses must include the netmask as well, so `/32` or
+# `/128`.
+
+# Configuration for the initial Silo, user, and password.
+#
+# You don't need to change the silo or user names.
+[recovery_silo]
+silo_name = "recovery"
+user_name = "recovery"
+# The following is a hash for the password "oxide".  This is (obviously) only
+# intended for transient deployments in development with no sensitive data or
+# resources.  You can change this value to any other supported hash.  The only
+# things that need to be changed with this hash are (1) the instructions given
+# to individuals running this program who then want to log in as this user, and
+# (2) the end-to-end tests, which use this password to log in to a
+# newly-initialized rack.  For more on what's supported, see the API docs for
+# this type and the specific constraints in the omicron-passwords crate.
+user_password_hash = "$argon2id$v=19$m=98304,t=23,p=1$Effh/p6M2ZKdnpJFeGqtGQ$ZtUwcVODAvUAVK6EQ5FJMv+GMlUCo9PQQsy9cagL+EU"

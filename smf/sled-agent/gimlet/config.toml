@@ -13,6 +13,7 @@ sled_mode = "auto"
 # TODO: This field should be removed once Gimlets have the ability to auto-detect
 # this information.
 sidecar_revision.physical = "b"
+skip_timesync = true
 
 # An optional data link from which we extract a MAC address.
 # This is used as a unique identifier for the bootstrap address.
@@ -71,5 +72,7 @@ path = "/dev/stdout"
 if_exists = "append"
 
 [sprockets]
-resolve = { which = "ipcc" }
-roots = ["/usr/share/oxide/idcerts/staging.pem", "/usr/share/oxide/idcerts/production.pem"]
+#resolve = { which = "ipcc" }
+#roots = ["/usr/share/oxide/idcerts/staging.pem", "/usr/share/oxide/idcerts/production.pem"]
+resolve = { which = "local", priv_key = "/opt/oxide/sled-agent/pkg/sprockets-auth.key.pem", cert_chain = "/opt/oxide/sled-agent/pkg/sprockets-chain.pem" }
+roots = ["/opt/oxide/sled-agent/pkg/root.cert.pem"]
