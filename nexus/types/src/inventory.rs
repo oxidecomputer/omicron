@@ -318,6 +318,7 @@ impl Collection {
     Serialize,
     JsonSchema,
 )]
+#[cfg_attr(test, derive(test_strategy::Arbitrary))]
 pub struct BaseboardId {
     /// Oxide Part Number
     pub part_number: String,
