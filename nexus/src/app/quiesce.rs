@@ -571,6 +571,7 @@ mod test {
 
     fn verify_quiesced(
         before: DateTime<Utc>,
+        before_instant: Instant,
         after: DateTime<Utc>,
         status: QuiesceStatus,
     ) {
@@ -598,7 +599,7 @@ mod test {
         assert!(duration_total >= duration_draining_sagas);
         assert!(duration_total >= duration_draining_db);
         assert!(duration_total >= duration_recording_quiesce);
-        assert!(duration_total <= (after - before).to_std().unwrap());
+        assert!(duration_total <= before_instant.elapsed());
         assert!(status.sagas.sagas_pending.is_empty());
         assert!(status.db_claims.is_empty());
     }
@@ -643,6 +644,7 @@ mod test {
         // If we quiesce the only Nexus while it's not doing anything, that
         // should complete quickly.
         let before = Utc::now();
+        let before_instant = Instant::now();
         let _ = nexus_client
             .quiesce_start()
             .await
@@ -650,7 +652,7 @@ mod test {
         let rv =
             wait_quiesce(log, &nexus_client, Duration::from_secs(30)).await;
         let after = Utc::now();
-        verify_quiesced(before, after, rv);
+        verify_quiesced(before, before_instant, after, rv);
     }
 
     /// Exercise non-trivial app-level quiesce in an environment with just one
@@ -694,6 +696,7 @@ mod test {
 
         // Start quiescing.
         let before = Utc::now();
+        let before_instant = Instant::now();
         let _ = nexus_client
             .quiesce_start()
             .await
@@ -801,7 +804,7 @@ mod test {
         let rv =
             wait_quiesce(log, &nexus_client, Duration::from_secs(30)).await;
         let after = Utc::now();
-        verify_quiesced(before, after, rv);
+        verify_quiesced(before, before_instant, after, rv);
 
         // Just to be sure, make sure we can neither create new saga nor access
         // the database.
