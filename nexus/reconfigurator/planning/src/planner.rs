@@ -38,7 +38,6 @@ use nexus_types::deployment::CockroachDbClusterVersion;
 use nexus_types::deployment::CockroachDbPreserveDowngrade;
 use nexus_types::deployment::CockroachDbSettings;
 use nexus_types::deployment::DiskFilter;
-use nexus_types::deployment::PendingMgsUpdates;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledDetails;
 use nexus_types::deployment::SledFilter;
@@ -236,7 +235,7 @@ impl<'a> Planner<'a> {
         let mgs_updates = if add_update_blocked_reasons.is_empty() {
             self.do_plan_mgs_updates()?
         } else {
-            PlanningMgsUpdatesStepReport::new(PendingMgsUpdates::new())
+            PlanningMgsUpdatesStepReport::new()
         };
 
         // Likewise for zone additions, unless overridden by the config, or
@@ -1386,6 +1385,7 @@ impl<'a> Planner<'a> {
     fn do_plan_mgs_updates(
         &mut self,
     ) -> Result<PlanningMgsUpdatesStepReport, Error> {
+        let mut report = PlanningMgsUpdatesStepReport::new();
         // Determine which baseboards we will consider updating.
         //
         // Sleds may be present but not adopted as part of the control plane.
@@ -1418,7 +1418,7 @@ impl<'a> Planner<'a> {
                     // necessary in this case?
                     !self.can_zone_be_shut_down_safely(
                         zone,
-                        &mut PlanningZoneUpdatesStepReport::new()
+                        &mut report.unsafe_zones
                     )
                 })
                 .collect();
@@ -1492,7 +1492,9 @@ impl<'a> Planner<'a> {
             .apply_pending_host_phase_2_changes(pending_host_phase_2_changes)?;
 
         self.blueprint.pending_mgs_updates_replace_all(pending_updates.clone());
-        Ok(PlanningMgsUpdatesStepReport::new(pending_updates))
+
+        report.pending_mgs_updates = pending_updates;
+        Ok(report)
     }
 
     // Returns the zones which appear in the blueprint on commissioned sleds,
@@ -1628,7 +1630,10 @@ impl<'a> Planner<'a> {
             .into_iter()
             .filter(|(_, zone, _)| {
                 self.are_zones_ready_for_updates(mgs_updates)
-                    && self.can_zone_be_shut_down_safely(&zone, &mut report)
+                    && self.can_zone_be_shut_down_safely(
+                        &zone,
+                        &mut report.unsafe_zones,
+                    )
             })
             .partition(|(_, zone, _)| zone.zone_type.is_nexus());
 
@@ -2459,7 +2464,8 @@ impl<'a> Planner<'a> {
     fn can_zone_be_shut_down_safely(
         &self,
         zone: &BlueprintZoneConfig,
-        report: &mut PlanningZoneUpdatesStepReport,
+        unsafe_zones: &mut BTreeMap<OmicronZoneUuid, ZoneUnsafeToShutdown>,
+        // report: &mut PlanningZoneUpdatesStepReport,
     ) -> bool {
         use ZoneUnsafeToShutdown::*;
         match zone.zone_type.kind() {
@@ -2469,8 +2475,8 @@ impl<'a> Planner<'a> {
                 // We must hear from all nodes
                 let all_statuses = &self.inventory.cockroach_status;
                 if all_statuses.len() < COCKROACHDB_REDUNDANCY {
-                    report.unsafe_zone(
-                        zone,
+                    unsafe_zones.insert(
+                        zone.id,
                         Cockroachdb { reason: NotEnoughNodes },
                     );
                     return false;
@@ -2482,15 +2488,15 @@ impl<'a> Planner<'a> {
                     let Some(ranges_underreplicated) =
                         status.ranges_underreplicated
                     else {
-                        report.unsafe_zone(
-                            zone,
+                        unsafe_zones.insert(
+                            zone.id,
                             Cockroachdb { reason: MissingUnderreplicatedStat },
                         );
                         return false;
                     };
                     if ranges_underreplicated != 0 {
-                        report.unsafe_zone(
-                            zone,
+                        unsafe_zones.insert(
+                            zone.id,
                             Cockroachdb {
                                 reason: UnderreplicatedRanges {
                                     n: ranges_underreplicated,
@@ -2500,15 +2506,15 @@ impl<'a> Planner<'a> {
                         return false;
                     }
                     let Some(live_nodes) = status.liveness_live_nodes else {
-                        report.unsafe_zone(
-                            zone,
+                        unsafe_zones.insert(
+                            zone.id,
                             Cockroachdb { reason: MissingLiveNodesStat },
                         );
                         return false;
                     };
                     if live_nodes < COCKROACHDB_REDUNDANCY as u64 {
-                        report.unsafe_zone(
-                            zone,
+                        unsafe_zones.insert(
+                            zone.id,
                             Cockroachdb {
                                 reason: NotEnoughLiveNodes { live_nodes },
                             },
@@ -2549,8 +2555,8 @@ impl<'a> Planner<'a> {
                 }
 
                 if synchronized_boundary_ntp_count < BOUNDARY_NTP_REDUNDANCY {
-                    report.unsafe_zone(
-                        zone,
+                    unsafe_zones.insert(
+                        zone.id,
                         BoundaryNtp {
                             total_boundary_ntp_zones: boundary_ntp_zones.len(),
                             synchronized_count: synchronized_boundary_ntp_count,
@@ -2613,8 +2619,8 @@ impl<'a> Planner<'a> {
                 if synchronized_internal_dns_count >= INTERNAL_DNS_REDUNDANCY {
                     true
                 } else {
-                    report.unsafe_zone(
-                        zone,
+                    unsafe_zones.insert(
+                        zone.id,
                         InternalDns {
                             total_internal_dns_zones: internal_dns_zones.len(),
                             synchronized_count: synchronized_internal_dns_count,

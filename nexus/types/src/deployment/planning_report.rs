@@ -71,9 +71,7 @@ impl PlanningReport {
             expunge: PlanningExpungeStepReport::new(),
             decommission: PlanningDecommissionStepReport::new(),
             noop_image_source: PlanningNoopImageSourceStepReport::new(),
-            mgs_updates: PlanningMgsUpdatesStepReport::new(
-                PendingMgsUpdates::new(),
-            ),
+            mgs_updates: PlanningMgsUpdatesStepReport::new(),
             add: PlanningAddStepReport::new(),
             zone_updates: PlanningZoneUpdatesStepReport::new(),
             nexus_generation_bump: PlanningNexusGenerationBumpReport::new(),
@@ -470,21 +468,27 @@ impl PlanningMupdateOverrideStepReport {
 )]
 pub struct PlanningMgsUpdatesStepReport {
     pub pending_mgs_updates: PendingMgsUpdates,
+    pub unsafe_zones: BTreeMap<OmicronZoneUuid, ZoneUnsafeToShutdown>,
 }
 
 impl PlanningMgsUpdatesStepReport {
-    pub fn new(pending_mgs_updates: PendingMgsUpdates) -> Self {
-        Self { pending_mgs_updates }
+    pub fn new() -> Self {
+        Self {
+            pending_mgs_updates: PendingMgsUpdates::new(),
+            unsafe_zones: BTreeMap::new(),
+        }
     }
 
     pub fn is_empty(&self) -> bool {
         self.pending_mgs_updates.is_empty()
+        // TODO-K: uncommenting this destroys all the updates!!!
+        // && self.unsafe_zones.is_empty()
     }
 }
 
 impl fmt::Display for PlanningMgsUpdatesStepReport {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let Self { pending_mgs_updates } = self;
+        let Self { pending_mgs_updates, unsafe_zones } = self;
         if !pending_mgs_updates.is_empty() {
             let n = pending_mgs_updates.len();
             let s = plural(n);
@@ -497,6 +501,21 @@ impl fmt::Display for PlanningMgsUpdatesStepReport {
                 )?;
             }
         }
+
+        // TODO-K: Is it too redundant to print this out? If we're trying to update
+        // an unsafe zone, then we'll get this information twice I think. Once for
+        // the MGS update check, and once for the zone update check
+        if !unsafe_zones.is_empty() {
+            let (n, s) = plural_map(unsafe_zones);
+            writeln!(
+                f,
+                "* {n} zone{s} not ready to shut down safely for an MGS driven update:"
+            )?;
+            for (zone_id, reason) in unsafe_zones.iter() {
+                writeln!(f, "  * zone {zone_id}: {reason}")?;
+            }
+        }
+
         Ok(())
     }
 }
