@@ -570,14 +570,14 @@ pub struct PlanningMgsUpdatesStepReport {
 }
 
 impl PlanningMgsUpdatesStepReport {
-    // TODO-K: Improve this
-    pub fn new(
-        pending_mgs_updates: PendingMgsUpdates,
-        blocked_mgs_updates: Vec<BlockedMgsUpdate>,
-        unsafe_zones: BTreeMap<OmicronZoneUuid, ZoneUnsafeToShutdown>,
-    ) -> Self {
-        Self { blocked_mgs_updates, pending_mgs_updates, unsafe_zones}
-    }
+    // TODO-K: Do we need this?
+    //pub fn new(
+    //    pending_mgs_updates: PendingMgsUpdates,
+    //    blocked_mgs_updates: Vec<BlockedMgsUpdate>,
+    //    unsafe_zones: BTreeMap<OmicronZoneUuid, ZoneUnsafeToShutdown>,
+    //) -> Self {
+    //    Self { blocked_mgs_updates, pending_mgs_updates, unsafe_zones}
+    //}
 
     pub fn empty() -> Self {
         Self {
