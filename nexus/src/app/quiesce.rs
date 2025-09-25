@@ -535,6 +535,7 @@ mod test {
     use std::collections::BTreeSet;
     use std::sync::Arc;
     use std::time::Duration;
+    use std::time::Instant;
     use tokio::sync::watch;
     use uuid::Uuid;
 
