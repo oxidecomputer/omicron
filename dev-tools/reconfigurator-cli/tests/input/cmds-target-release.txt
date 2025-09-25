@@ -459,6 +459,9 @@ inventory-generate
 
 # Planning now should bump the top-level `nexus_generation` to 2, indicating
 # that we want handoff to begin.
+# Note that `blueprint-diff` will show the DNS changes as though the handoff has
+# happened already because that command does not take into account simulated
+# state.
 blueprint-plan latest latest
 blueprint-diff latest
 

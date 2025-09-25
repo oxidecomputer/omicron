@@ -861,7 +861,7 @@ planner config:
     - sled 9dc50690-f9bf-4520-bf80-051d0f465c2c: 15 zones
     - sled a88790de-5962-4871-8686-61c1fd5b7094: 15 zones
 
-* adding zones despite being blocked, as specified by the `add_zones_with_mupdate_override` planner config option
+* adding zones despite being blocked, because: planner config `add_zones_with_mupdate_override` is true, target release generation is 1
 * discretionary zones placed:
   * external_dns zone on sled 711ac7f8-d19e-4572-bdb9-e9b50f6e362a from source install dataset
 * zone updates waiting on discretionary zones
@@ -1370,7 +1370,7 @@ planner config:
     - sled 9dc50690-f9bf-4520-bf80-051d0f465c2c: 15 zones
     - sled a88790de-5962-4871-8686-61c1fd5b7094: 15 zones
 
-* adding zones despite being blocked, as specified by the `add_zones_with_mupdate_override` planner config option
+* adding zones despite being blocked, because: planner config `add_zones_with_mupdate_override` is true, target release generation is 1
 * discretionary zones placed:
   * external_dns zone on sled 711ac7f8-d19e-4572-bdb9-e9b50f6e362a from source install dataset
 * zone updates waiting on discretionary zones

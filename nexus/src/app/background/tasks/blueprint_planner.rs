@@ -22,6 +22,7 @@ use omicron_common::api::external::LookupType;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::GenericUuid as _;
 use serde_json::json;
+use slog_error_chain::InlineErrorChain;
 use std::sync::Arc;
 use tokio::sync::watch::{self, Receiver, Sender};
 
@@ -292,7 +293,16 @@ impl BackgroundTask for BlueprintPlanner {
         &'a mut self,
         opctx: &'a OpContext,
     ) -> BoxFuture<'a, serde_json::Value> {
-        Box::pin(async move { json!(self.plan(opctx).await) })
+        Box::pin(async move {
+            let status = self.plan(opctx).await;
+            match serde_json::to_value(status) {
+                Ok(val) => val,
+                Err(err) => json!({
+                    "error": format!("could not serialize task status: {}",
+                                     InlineErrorChain::new(&err)),
+                }),
+            }
+        })
     }
 }
 
@@ -359,14 +369,7 @@ mod test {
                 version: 1,
                 config: ReconfiguratorConfig {
                     planner_enabled: true,
-                    planner_config: PlannerConfig {
-                        // Set this config to true because we'd like to test
-                        // adding zones even if no target release is set. In the
-                        // future, we'll allow adding zones if no target release
-                        // has ever been set, in which case we can go back to
-                        // setting this field to false.
-                        add_zones_with_mupdate_override: true,
-                    },
+                    planner_config: PlannerConfig::default(),
                 },
                 time_modified: now_db_precision(),
             }),
