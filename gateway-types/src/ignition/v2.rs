@@ -61,9 +61,9 @@ impl From<IgnitionCommand> for gateway_messages::IgnitionCommand {
 }
 
 /// State of an ignition target.
-///
-/// TODO: Ignition returns much more information than we're reporting here: do
-/// we want to expand this?
+//
+// TODO: Ignition returns much more information than we're reporting here: do
+// we want to expand this?
 #[derive(
     Debug,
     Clone,
