@@ -478,7 +478,7 @@ impl DataStore {
                 recovery_user_id.as_ref().to_owned(),
             ),
 
-            UserProvisionType::Jit => {
+            UserProvisionType::Jit | UserProvisionType::Scim => {
                 unreachable!("match at start of function should prevent this");
             }
         };
@@ -1266,16 +1266,21 @@ mod test {
             )
             .await
             .expect("failed to list users");
+
         assert_eq!(silo_users.len(), 1);
-        assert_eq!(
-            silo_users[0].external_id(),
-            rack_init.recovery_user_id.as_ref()
-        );
+
+        let db::datastore::SiloUser::ApiOnly(silo_user) = &silo_users[0] else {
+            panic!("wrong user type");
+        };
+
+        assert_eq!(silo_user.external_id, rack_init.recovery_user_id.as_ref());
+
         let authz_silo_user = authz::SiloUser::new(
             authz_silo,
             silo_users[0].id(),
             LookupType::by_id(silo_users[0].id()),
         );
+
         let hash = datastore
             .silo_user_password_hash_fetch(&opctx, &authz_silo_user)
             .await

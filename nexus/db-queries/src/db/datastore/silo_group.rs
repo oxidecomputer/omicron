@@ -47,6 +47,9 @@ pub enum SiloGroup {
 
     /// A Group created during an authenticated SAML login
     Jit(SiloGroupJit),
+
+    /// A Group created by a SCIM provisioning client
+    Scim(SiloGroupScim),
 }
 
 impl SiloGroup {
@@ -54,6 +57,7 @@ impl SiloGroup {
         match &self {
             SiloGroup::ApiOnly(u) => u.id,
             SiloGroup::Jit(u) => u.id,
+            SiloGroup::Scim(u) => u.id,
         }
     }
 
@@ -61,13 +65,7 @@ impl SiloGroup {
         match &self {
             SiloGroup::ApiOnly(u) => u.silo_id,
             SiloGroup::Jit(u) => u.silo_id,
-        }
-    }
-
-    pub fn external_id(&self) -> &str {
-        match &self {
-            SiloGroup::ApiOnly(u) => &u.external_id,
-            SiloGroup::Jit(u) => &u.external_id,
+            SiloGroup::Scim(u) => u.silo_id,
         }
     }
 }
@@ -87,7 +85,7 @@ impl From<model::SiloGroup> for SiloGroup {
                     // having a null external id.
                     external_id: record
                         .external_id
-                        .expect("constraint lookup_silo_group_by_silo exists"),
+                        .expect("constraint external_id_consistency exists"),
                 })
             }
 
@@ -102,7 +100,22 @@ impl From<model::SiloGroup> for SiloGroup {
                 // external id
                 external_id: record
                     .external_id
-                    .expect("constraint lookup_silo_group_by_silo exists"),
+                    .expect("constraint external_id_consistency exists"),
+            }),
+
+            UserProvisionType::Scim => SiloGroup::Scim(SiloGroupScim {
+                id: record.id(),
+                time_created: record.time_created(),
+                time_modified: record.time_modified(),
+                time_deleted: record.time_deleted,
+                silo_id: record.silo_id,
+                // About the expect here: the mentioned database constraint
+                // prevents a group with provision type 'scim' from having a
+                // null display name
+                display_name: record
+                    .display_name
+                    .expect("constraint display_name_consistency exists"),
+                external_id: record.external_id,
             }),
         }
     }
@@ -113,6 +126,7 @@ impl From<SiloGroup> for model::SiloGroup {
         match u {
             SiloGroup::ApiOnly(u) => u.into(),
             SiloGroup::Jit(u) => u.into(),
+            SiloGroup::Scim(u) => u.into(),
         }
     }
 }
@@ -122,6 +136,7 @@ impl From<SiloGroup> for views::Group {
         match u {
             SiloGroup::ApiOnly(u) => u.into(),
             SiloGroup::Jit(u) => u.into(),
+            SiloGroup::Scim(u) => u.into(),
         }
     }
 }
@@ -163,6 +178,7 @@ impl From<SiloGroupApiOnly> for model::SiloGroup {
             silo_id: u.silo_id,
             external_id: Some(u.external_id),
             user_provision_type: UserProvisionType::ApiOnly,
+            display_name: None,
         }
     }
 }
@@ -221,6 +237,7 @@ impl From<SiloGroupJit> for model::SiloGroup {
             silo_id: u.silo_id,
             external_id: Some(u.external_id),
             user_provision_type: UserProvisionType::Jit,
+            display_name: None,
         }
     }
 }
@@ -242,6 +259,73 @@ impl From<SiloGroupJit> for views::Group {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct SiloGroupScim {
+    pub id: SiloGroupUuid,
+    pub time_created: DateTime<Utc>,
+    pub time_modified: DateTime<Utc>,
+    pub time_deleted: Option<DateTime<Utc>>,
+    pub silo_id: Uuid,
+
+    /// The identity provider's ID for this group.
+    pub display_name: String,
+
+    pub external_id: Option<String>,
+}
+
+impl SiloGroupScim {
+    pub fn new(
+        silo_id: Uuid,
+        id: SiloGroupUuid,
+        display_name: String,
+        external_id: Option<String>,
+    ) -> Self {
+        Self {
+            id,
+            time_created: Utc::now(),
+            time_modified: Utc::now(),
+            time_deleted: None,
+            silo_id,
+            display_name,
+            external_id,
+        }
+    }
+}
+
+impl From<SiloGroupScim> for model::SiloGroup {
+    fn from(u: SiloGroupScim) -> model::SiloGroup {
+        model::SiloGroup {
+            identity: model::SiloGroupIdentity {
+                id: u.id.into(),
+                time_created: u.time_created,
+                time_modified: u.time_modified,
+            },
+            time_deleted: u.time_deleted,
+            silo_id: u.silo_id,
+            external_id: u.external_id,
+            user_provision_type: UserProvisionType::Scim,
+            display_name: Some(u.display_name),
+        }
+    }
+}
+
+impl From<SiloGroupScim> for SiloGroup {
+    fn from(u: SiloGroupScim) -> SiloGroup {
+        SiloGroup::Scim(u)
+    }
+}
+
+impl From<SiloGroupScim> for views::Group {
+    fn from(u: SiloGroupScim) -> views::Group {
+        views::Group {
+            id: u.id,
+            // TODO the use of display name as display_name is temporary
+            display_name: u.display_name,
+            silo_id: u.silo_id,
+        }
+    }
+}
+
 /// Different types of group have different fields that are considered unique,
 /// and therefore lookup needs to be typed as well.
 #[derive(Debug)]
@@ -249,6 +333,8 @@ pub enum SiloGroupLookup<'a> {
     ApiOnly { external_id: &'a str },
 
     Jit { external_id: &'a str },
+
+    Scim { display_name: &'a str },
 }
 
 impl<'a> SiloGroupLookup<'a> {
@@ -256,6 +342,7 @@ impl<'a> SiloGroupLookup<'a> {
         match &self {
             SiloGroupLookup::ApiOnly { .. } => UserProvisionType::ApiOnly,
             SiloGroupLookup::Jit { .. } => UserProvisionType::Jit,
+            SiloGroupLookup::Scim { .. } => UserProvisionType::Scim,
         }
     }
 }
@@ -421,6 +508,19 @@ impl DataStore {
                 .filter(dsl::silo_id.eq(authz_silo.id()))
                 .filter(dsl::user_provision_type.eq(lookup_user_provision_type))
                 .filter(dsl::external_id.eq(external_id.to_string()))
+                .filter(dsl::time_deleted.is_null())
+                .select(model::SiloGroup::as_select())
+                .first_async(&*conn)
+                .await
+                .optional()
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?,
+
+            SiloGroupLookup::Scim { display_name } => dsl::silo_group
+                .filter(dsl::silo_id.eq(authz_silo.id()))
+                .filter(dsl::user_provision_type.eq(lookup_user_provision_type))
+                .filter(dsl::display_name.eq(display_name.to_string()))
                 .filter(dsl::time_deleted.is_null())
                 .select(model::SiloGroup::as_select())
                 .first_async(&*conn)

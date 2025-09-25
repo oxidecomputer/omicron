@@ -192,62 +192,73 @@ impl DataStore {
         let silo_admin_group_ensure_query = if let Some(ref admin_group_name) =
             new_silo_params.admin_group_name
         {
-            let silo_admin_group =
+            let maybe_silo_admin_group =
                 match new_silo_params.identity_mode.user_provision_type() {
                     shared::UserProvisionType::ApiOnly => {
-                        db::model::SiloGroup::new_api_only_group(
+                        Some(db::model::SiloGroup::new_api_only_group(
                             silo_group_id,
                             silo_id,
                             admin_group_name.clone(),
-                        )
+                        ))
                     }
 
                     shared::UserProvisionType::Jit => {
-                        db::model::SiloGroup::new_jit_group(
+                        Some(db::model::SiloGroup::new_jit_group(
                             silo_group_id,
                             silo_id,
                             admin_group_name.clone(),
-                        )
+                        ))
+                    }
+
+                    shared::UserProvisionType::Scim => {
+                        // Do not create any group automatically, the SCIM
+                        // provisioning client is responsible for all user and
+                        // group CRUD.
+                        None
                     }
                 };
 
-            let silo_admin_group_ensure_query =
-                DataStore::silo_group_ensure_query(
-                    &nexus_opctx,
-                    &authz_silo,
-                    silo_admin_group,
-                )
-                .await?;
+            if let Some(silo_admin_group) = maybe_silo_admin_group {
+                let silo_admin_group_ensure_query =
+                    DataStore::silo_group_ensure_query(
+                        &nexus_opctx,
+                        &authz_silo,
+                        silo_admin_group,
+                    )
+                    .await?;
 
-            Some(silo_admin_group_ensure_query)
+                Some(silo_admin_group_ensure_query)
+            } else {
+                None
+            }
         } else {
             None
         };
 
-        let silo_admin_group_role_assignment_queries = if new_silo_params
-            .admin_group_name
-            .is_some()
-        {
-            // Grant silo admin role for members of the admin group.
-            let policy = shared::Policy {
-                role_assignments: vec![shared::RoleAssignment::for_silo_group(
-                    silo_group_id,
-                    SiloRole::Admin,
-                )],
+        let silo_admin_group_role_assignment_queries =
+            if silo_admin_group_ensure_query.is_some() {
+                // Grant silo admin role for members of the admin group.
+                let policy = shared::Policy {
+                    role_assignments: vec![
+                        shared::RoleAssignment::for_silo_group(
+                            silo_group_id,
+                            SiloRole::Admin,
+                        ),
+                    ],
+                };
+
+                let silo_admin_group_role_assignment_queries =
+                    DataStore::role_assignment_replace_visible_queries(
+                        opctx,
+                        &authz_silo,
+                        &policy.role_assignments,
+                    )
+                    .await?;
+
+                Some(silo_admin_group_role_assignment_queries)
+            } else {
+                None
             };
-
-            let silo_admin_group_role_assignment_queries =
-                DataStore::role_assignment_replace_visible_queries(
-                    opctx,
-                    &authz_silo,
-                    &policy.role_assignments,
-                )
-                .await?;
-
-            Some(silo_admin_group_role_assignment_queries)
-        } else {
-            None
-        };
 
         // This method uses nested transactions, which are not supported
         // with retryable transactions.

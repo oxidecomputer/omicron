@@ -29,6 +29,13 @@ pub struct SiloUser {
     pub external_id: Option<String>,
 
     pub user_provision_type: UserProvisionType,
+
+    /// For SCIM users, user name must be Some.
+    pub user_name: Option<String>,
+
+    /// For SCIM users, active describes whether or not the user is allowed to
+    /// have active sessions.
+    pub active: Option<bool>,
 }
 
 impl SiloUser {
@@ -43,6 +50,8 @@ impl SiloUser {
             silo_id,
             external_id: Some(external_id),
             user_provision_type: UserProvisionType::ApiOnly,
+            user_name: None,
+            active: None,
         }
     }
 
@@ -57,6 +66,26 @@ impl SiloUser {
             silo_id,
             external_id: Some(external_id),
             user_provision_type: UserProvisionType::Jit,
+            user_name: None,
+            active: None,
+        }
+    }
+
+    pub fn new_scim_user(
+        silo_id: Uuid,
+        user_id: SiloUserUuid,
+        user_name: String,
+        external_id: Option<String>,
+        active: Option<bool>,
+    ) -> Self {
+        Self {
+            identity: SiloUserIdentity::new(user_id),
+            time_deleted: None,
+            silo_id,
+            external_id,
+            user_provision_type: UserProvisionType::Scim,
+            user_name: Some(user_name),
+            active,
         }
     }
 }

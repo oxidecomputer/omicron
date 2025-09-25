@@ -34,6 +34,9 @@ pub struct SiloGroup {
     pub external_id: Option<String>,
 
     pub user_provision_type: UserProvisionType,
+
+    /// For SCIM groups, display name must be Some.
+    pub display_name: Option<String>,
 }
 
 impl SiloGroup {
@@ -48,6 +51,7 @@ impl SiloGroup {
             silo_id,
             user_provision_type: UserProvisionType::ApiOnly,
             external_id: Some(external_id),
+            display_name: None,
         }
     }
 
@@ -62,6 +66,23 @@ impl SiloGroup {
             silo_id,
             user_provision_type: UserProvisionType::Jit,
             external_id: Some(external_id),
+            display_name: None,
+        }
+    }
+
+    pub fn new_scim_group(
+        id: SiloGroupUuid,
+        silo_id: Uuid,
+        display_name: String,
+        external_id: Option<String>,
+    ) -> Self {
+        Self {
+            identity: SiloGroupIdentity::new(id),
+            time_deleted: None,
+            silo_id,
+            user_provision_type: UserProvisionType::Scim,
+            external_id,
+            display_name: Some(display_name),
         }
     }
 }

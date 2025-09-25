@@ -23865,6 +23865,13 @@
             "enum": [
               "local_only"
             ]
+          },
+          {
+            "description": "Users are authenticated with SAML using an external authentication provider. Users and groups are managed with SCIM API calls, likely from the same authentication provider.",
+            "type": "string",
+            "enum": [
+              "saml_scim"
+            ]
           }
         ]
       },
