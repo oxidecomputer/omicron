@@ -1,0 +1,100 @@
+# Load example system
+load-example --nsleds 3 --ndisks-per-sled 3
+
+# Print the default target release
+show
+
+# Create a TUF repository from a fake manifest. (The output TUF repo is
+# written to a temporary directory that this invocation of `reconfigurator-cli`
+# is running out of as its working directory.)
+#
+# This is used to simulate the initial version of the system.
+tuf-assemble ../../update-common/manifests/fake-0.0.1.toml
+
+# Load the target release from the assembled TUF repository.
+set target-release repo-0.0.1.zip
+
+# Print the default target release.
+show
+
+# Update the install dataset on all sleds to the target release.
+# This will cause zones to be noop converted over to Artifact,
+# unblocking upgrades.
+sled-update-install-dataset serial0 --to-target-release
+sled-update-install-dataset serial1 --to-target-release
+sled-update-install-dataset serial2 --to-target-release
+
+# Generate inventory, then do a planning run to ensure that all zones
+# are set to Artifact.
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+# The above blueprint includes a pending MGS update, which we should delete
+# (we want to start from a fresh state).
+blueprint-edit latest delete-sp-update serial0
+# Also set the Omicron config for all sleds to reflect the
+# corresponding image sources.
+sled-set serial0 omicron-config latest
+sled-set serial1 omicron-config latest
+sled-set serial2 omicron-config latest
+# Generate inventory once more to reflect the omicron config changes.
+inventory-generate
+inventory-show latest
+
+# Setup is now done -- create another TUF repository which will act as the
+# target release being updated to.
+tuf-assemble ../../update-common/manifests/fake.toml
+
+# Load the target release from the assembled TUF repository.
+set target-release repo-1.0.0.zip
+
+# First, print out what we've got.
+sled-list
+blueprint-list
+inventory-list
+
+# Retrieve blueprint information to know which zones to expunge
+blueprint-list
+blueprint-show 58d5e830-0884-47d8-a7cd-b2b3751adeb4
+
+# We expunge a single internal_dns zone
+blueprint-edit 58d5e830-0884-47d8-a7cd-b2b3751adeb4 expunge-zones 99e2f30b-3174-40bf-a78a-90da8abba8ca
+blueprint-diff af934083-59b5-4bf6-8966-6fb5292c29e1
+
+# Attempt to upgrade one RoT bootloader. We should see two zones skipped and
+# a safe one to update
+blueprint-plan latest latest
+blueprint-diff latest
+
+# We generate another plan, there should be no changes
+blueprint-plan latest latest
+blueprint-diff latest
+
+# Now, forcibly update the simulated RoT bootloader in all sleds to reflect that
+# the update completed.
+# Collect inventory from it and use that collection for another planning step.
+# This should report that the update completed, and show errors again for the
+# RoT on two sleds
+sled-update-rot-bootloader 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 --stage0 1.0.0
+sled-update-rot-bootloader 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c --stage0 1.0.0
+sled-update-rot-bootloader d81c6a84-79b8-4958-ae41-ea46c9b19763 --stage0 1.0.0
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+# We repeat the same process with the RoT expecting to see the same errors with
+# the SP updates
+sled-update-rot 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 --slot-b 1.0.0 --active-slot b --persistent-boot-preference b
+sled-update-rot 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c --slot-b 1.0.0 --active-slot b --persistent-boot-preference b
+sled-update-rot d81c6a84-79b8-4958-ae41-ea46c9b19763 --slot-b 1.0.0 --active-slot b --persistent-boot-preference b
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+# And once more to see the errors with the Host OS
+sled-update-sp 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 --active 1.0.0
+sled-update-sp 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c --active 1.0.0
+sled-update-sp d81c6a84-79b8-4958-ae41-ea46c9b19763 --active 1.0.0
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest

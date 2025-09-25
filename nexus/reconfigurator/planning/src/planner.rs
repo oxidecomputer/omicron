@@ -38,7 +38,6 @@ use nexus_types::deployment::CockroachDbClusterVersion;
 use nexus_types::deployment::CockroachDbPreserveDowngrade;
 use nexus_types::deployment::CockroachDbSettings;
 use nexus_types::deployment::DiskFilter;
-use nexus_types::deployment::PendingMgsUpdates;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledDetails;
 use nexus_types::deployment::SledFilter;
@@ -236,7 +235,7 @@ impl<'a> Planner<'a> {
         let mgs_updates = if add_update_blocked_reasons.is_empty() {
             self.do_plan_mgs_updates()?
         } else {
-            PlanningMgsUpdatesStepReport::new(PendingMgsUpdates::new())
+            PlanningMgsUpdatesStepReport::new()
         };
 
         // Likewise for zone additions, unless overridden by the config, or
@@ -1386,6 +1385,7 @@ impl<'a> Planner<'a> {
     fn do_plan_mgs_updates(
         &mut self,
     ) -> Result<PlanningMgsUpdatesStepReport, Error> {
+        let mut report = PlanningMgsUpdatesStepReport::new();
         // Determine which baseboards we will consider updating.
         //
         // Sleds may be present but not adopted as part of the control plane.
@@ -1397,26 +1397,64 @@ impl<'a> Planner<'a> {
         // For better or worse, switches and PSCs do not have the same idea of
         // being adopted into the control plane.  If they're present, they're
         // part of the system, and we will update them.
-        let included_sled_baseboards: BTreeSet<_> = self
+        let mut included_sled_baseboards: BTreeMap<_, _> = self
             .input
             .all_sleds(SledFilter::SpsUpdatedByReconfigurator)
-            .map(|(_sled_id, details)| &details.baseboard_id)
+            .map(|(sled_id, details)| (&details.baseboard_id, sled_id))
             .collect();
 
-        let included_baseboards =
-            self.inventory
-                .sps
-                .iter()
-                .filter_map(|(baseboard_id, sp_state)| {
-                    let do_include = match sp_state.sp_type {
-                        SpType::Sled => included_sled_baseboards
-                            .contains(baseboard_id.as_ref()),
-                        SpType::Power => true,
-                        SpType::Switch => true,
-                    };
-                    do_include.then_some(baseboard_id.clone())
+        // We only keep sled baseboards that do not contain zones that are
+        // unsafe to shut down
+        included_sled_baseboards.retain(|baseboard_id, sled_id| {
+            let zones = self.blueprint.current_sled_zones(
+                *sled_id,
+                BlueprintZoneDisposition::is_in_service,
+            );
+
+            let unsafe_zones: Vec<_> = zones
+                .into_iter()
+                .filter(|zone| {
+                    !self.can_zone_be_shut_down_safely(
+                        zone,
+                        &mut report.unsafe_zones
+                    )
                 })
                 .collect();
+
+            if !unsafe_zones.is_empty() {
+                let unsafe_zone_kinds: Vec<_> = unsafe_zones
+                .iter()
+                .map(|zone| zone.kind().report_str())
+                .collect();
+
+                let zone_str = unsafe_zone_kinds.join(", ");
+
+                info!(
+                    self.log,
+                    "skipping board for MGS-driven update, serial_number: {}, part_number: {} due to unsafe zones: {}",
+                    baseboard_id.serial_number,
+                    baseboard_id.part_number,
+                    zone_str
+                );
+            }
+
+            unsafe_zones.is_empty()
+        });
+
+        let included_baseboards = self
+            .inventory
+            .sps
+            .iter()
+            .filter_map(|(baseboard_id, sp_state)| {
+                let do_include = match sp_state.sp_type {
+                    SpType::Sled => included_sled_baseboards
+                        .contains_key(baseboard_id.as_ref()),
+                    SpType::Power => true,
+                    SpType::Switch => true,
+                };
+                do_include.then_some(baseboard_id.clone())
+            })
+            .collect();
 
         // Compute the new set of PendingMgsUpdates.
         let current_updates =
@@ -1453,7 +1491,9 @@ impl<'a> Planner<'a> {
             .apply_pending_host_phase_2_changes(pending_host_phase_2_changes)?;
 
         self.blueprint.pending_mgs_updates_replace_all(pending_updates.clone());
-        Ok(PlanningMgsUpdatesStepReport::new(pending_updates))
+
+        report.pending_mgs_updates = pending_updates;
+        Ok(report)
     }
 
     // Returns the zones which appear in the blueprint on commissioned sleds,
@@ -1589,7 +1629,10 @@ impl<'a> Planner<'a> {
             .into_iter()
             .filter(|(_, zone, _)| {
                 self.are_zones_ready_for_updates(mgs_updates)
-                    && self.can_zone_be_shut_down_safely(&zone, &mut report)
+                    && self.can_zone_be_shut_down_safely(
+                        &zone,
+                        &mut report.unsafe_zones,
+                    )
             })
             .partition(|(_, zone, _)| zone.zone_type.is_nexus());
 
@@ -2292,7 +2335,7 @@ impl<'a> Planner<'a> {
         // We return false for all zone kinds if there are still
         // pending updates for components earlier in the update ordering
         // than zones: RoT bootloader / RoT / SP / Host OS.
-        mgs_updates.is_empty()
+        mgs_updates.pending_mgs_updates.is_empty()
     }
 
     fn all_non_nexus_zones_using_new_image(&self) -> Result<bool, Error> {
@@ -2420,7 +2463,7 @@ impl<'a> Planner<'a> {
     fn can_zone_be_shut_down_safely(
         &self,
         zone: &BlueprintZoneConfig,
-        report: &mut PlanningZoneUpdatesStepReport,
+        unsafe_zones: &mut BTreeMap<OmicronZoneUuid, ZoneUnsafeToShutdown>,
     ) -> bool {
         use ZoneUnsafeToShutdown::*;
         match zone.zone_type.kind() {
@@ -2430,8 +2473,8 @@ impl<'a> Planner<'a> {
                 // We must hear from all nodes
                 let all_statuses = &self.inventory.cockroach_status;
                 if all_statuses.len() < COCKROACHDB_REDUNDANCY {
-                    report.unsafe_zone(
-                        zone,
+                    unsafe_zones.insert(
+                        zone.id,
                         Cockroachdb { reason: NotEnoughNodes },
                     );
                     return false;
@@ -2443,15 +2486,15 @@ impl<'a> Planner<'a> {
                     let Some(ranges_underreplicated) =
                         status.ranges_underreplicated
                     else {
-                        report.unsafe_zone(
-                            zone,
+                        unsafe_zones.insert(
+                            zone.id,
                             Cockroachdb { reason: MissingUnderreplicatedStat },
                         );
                         return false;
                     };
                     if ranges_underreplicated != 0 {
-                        report.unsafe_zone(
-                            zone,
+                        unsafe_zones.insert(
+                            zone.id,
                             Cockroachdb {
                                 reason: UnderreplicatedRanges {
                                     n: ranges_underreplicated,
@@ -2461,15 +2504,15 @@ impl<'a> Planner<'a> {
                         return false;
                     }
                     let Some(live_nodes) = status.liveness_live_nodes else {
-                        report.unsafe_zone(
-                            zone,
+                        unsafe_zones.insert(
+                            zone.id,
                             Cockroachdb { reason: MissingLiveNodesStat },
                         );
                         return false;
                     };
                     if live_nodes < COCKROACHDB_REDUNDANCY as u64 {
-                        report.unsafe_zone(
-                            zone,
+                        unsafe_zones.insert(
+                            zone.id,
                             Cockroachdb {
                                 reason: NotEnoughLiveNodes { live_nodes },
                             },
@@ -2510,8 +2553,8 @@ impl<'a> Planner<'a> {
                 }
 
                 if synchronized_boundary_ntp_count < BOUNDARY_NTP_REDUNDANCY {
-                    report.unsafe_zone(
-                        zone,
+                    unsafe_zones.insert(
+                        zone.id,
                         BoundaryNtp {
                             total_boundary_ntp_zones: boundary_ntp_zones.len(),
                             synchronized_count: synchronized_boundary_ntp_count,
@@ -2574,8 +2617,8 @@ impl<'a> Planner<'a> {
                 if synchronized_internal_dns_count >= INTERNAL_DNS_REDUNDANCY {
                     true
                 } else {
-                    report.unsafe_zone(
-                        zone,
+                    unsafe_zones.insert(
+                        zone.id,
                         InternalDns {
                             total_internal_dns_zones: internal_dns_zones.len(),
                             synchronized_count: synchronized_internal_dns_count,
