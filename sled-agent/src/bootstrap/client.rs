@@ -114,6 +114,8 @@ impl Client {
         let stream = SprocketsClient::connect(
             self.sprockets_conf.clone(),
             self.addr,
+            // We don't have corpus files yet
+            vec![],
             log.clone(),
         )
         .await

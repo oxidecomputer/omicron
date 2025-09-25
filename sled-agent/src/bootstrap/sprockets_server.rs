@@ -59,16 +59,18 @@ impl SprocketsServer {
     /// which is cancel-safe. Note that cancelling this
     /// server does not necessarily cancel any outstanding requests that it has
     /// already received (and which may still be executing).
-    pub(super) async fn run(mut self) {
+    pub(super) async fn run(self) {
         loop {
             // Sprockets actually _uses_ the key here!
-            let (stream, remote_addr) = match self.listener.accept().await {
-                Ok(conn) => conn,
-                Err(err) => {
-                    error!(self.log, "accept() failed"; "err" => #%err);
-                    continue;
-                }
-            };
+            // We don't have corpus files yet, so pass in an empty Vec
+            let (stream, remote_addr) =
+                match self.listener.accept(vec![]).await.await {
+                    Ok(conn) => conn,
+                    Err(err) => {
+                        error!(self.log, "accept() failed"; "err" => #%err);
+                        continue;
+                    }
+                };
 
             let log = self.log.new(o!("remote_addr" => remote_addr));
             info!(log, "Accepted connection");
