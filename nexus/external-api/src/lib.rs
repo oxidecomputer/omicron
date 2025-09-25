@@ -24,7 +24,7 @@ use nexus_types::{
 use omicron_common::api::external::{
     http_pagination::{
         PaginatedById, PaginatedByName, PaginatedByNameOrId,
-        PaginatedByTimeAndId,
+        PaginatedByTimeAndId, PaginatedByVersion,
     },
     *,
 };
@@ -2990,8 +2990,8 @@ pub trait NexusExternalApi {
 
     /// List all TUF repositories
     ///
-    /// Returns a paginated list of all TUF repositories ordered by creation time
-    /// (descending), with the most recently created repositories appearing first.
+    /// Returns a paginated list of all TUF repositories ordered by system
+    /// version (newest first by default).
     #[endpoint {
         method = GET,
         path = "/v1/system/update/repositories",
@@ -2999,7 +2999,7 @@ pub trait NexusExternalApi {
     }]
     async fn system_update_repository_list(
         rqctx: RequestContext<Self::Context>,
-        query_params: Query<PaginatedByTimeAndId>,
+        query_params: Query<PaginatedByVersion>,
     ) -> Result<HttpResponseOk<ResultsPage<TufRepoGetResponse>>, HttpError>;
 
     /// List root roles in the updates trust store

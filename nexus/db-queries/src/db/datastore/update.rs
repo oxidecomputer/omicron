@@ -6,8 +6,6 @@
 
 use std::collections::HashMap;
 
-use chrono::{DateTime, Utc};
-
 use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
@@ -16,7 +14,6 @@ use crate::db::datastore::target_release::RecentTargetReleases;
 use crate::db::model::SemverVersion;
 use crate::db::pagination::Paginator;
 use crate::db::pagination::paginated;
-use crate::db::pagination::paginated_multicolumn;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
 use diesel::result::Error as DieselError;
@@ -36,6 +33,7 @@ use omicron_common::api::external::{Error, InternalContext};
 use omicron_uuid_kinds::TufRepoKind;
 use omicron_uuid_kinds::TypedUuid;
 use omicron_uuid_kinds::{GenericUuid, TufRepoUuid};
+use semver::Version;
 use swrite::{SWrite, swrite};
 use tufaceous_artifact::ArtifactVersion;
 use uuid::Uuid;
@@ -463,11 +461,11 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
-    /// List all TUF repositories ordered by creation time (descending).
+    /// List all TUF repositories ordered by system version (newest first by default).
     pub async fn tuf_repo_list(
         &self,
         opctx: &OpContext,
-        pagparams: &DataPageParams<'_, (DateTime<Utc>, Uuid)>,
+        pagparams: &DataPageParams<'_, Version>,
     ) -> ListResultVec<TufRepoDescription> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
 
@@ -475,16 +473,23 @@ impl DataStore {
 
         let conn = self.pool_connection_authorized(opctx).await?;
 
-        // Order by time_created descending (newest first), then by id for stable pagination
-        let repos = paginated_multicolumn(
-            dsl::tuf_repo,
-            (dsl::time_created, dsl::id),
-            pagparams,
-        )
-        .select(TufRepo::as_select())
-        .load_async(&*conn)
-        .await
-        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+        let marker_owner = pagparams
+            .marker
+            .map(|version| SemverVersion::from(version.clone()));
+        let db_pagparams = DataPageParams {
+            marker: marker_owner.as_ref(),
+            direction: pagparams.direction,
+            limit: pagparams.limit,
+        };
+
+        let repos =
+            paginated(dsl::tuf_repo, dsl::system_version, &db_pagparams)
+                .select(TufRepo::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
 
         // For each repo, fetch its artifacts
         let mut results = Vec::new();

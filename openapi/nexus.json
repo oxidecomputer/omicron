@@ -10909,7 +10909,7 @@
           "system/update"
         ],
         "summary": "List all TUF repositories",
-        "description": "Returns a paginated list of all TUF repositories ordered by creation time (descending), with the most recently created repositories appearing first.",
+        "description": "Returns a paginated list of all TUF repositories ordered by system version (newest first by default).",
         "operationId": "system_update_repository_list",
         "parameters": [
           {
@@ -10936,7 +10936,7 @@
             "in": "query",
             "name": "sort_by",
             "schema": {
-              "$ref": "#/components/schemas/TimeAndIdSortMode"
+              "$ref": "#/components/schemas/VersionSortMode"
             }
           }
         ],
@@ -28043,6 +28043,25 @@
         "enum": [
           "ascending",
           "descending"
+        ]
+      },
+      "VersionSortMode": {
+        "description": "Supported sort modes when scanning by semantic version",
+        "oneOf": [
+          {
+            "description": "Sort in increasing semantic version order (oldest first)",
+            "type": "string",
+            "enum": [
+              "version_ascending"
+            ]
+          },
+          {
+            "description": "Sort in decreasing semantic version order (newest first)",
+            "type": "string",
+            "enum": [
+              "version_descending"
+            ]
+          }
         ]
       },
       "NameSortMode": {

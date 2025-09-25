@@ -17,7 +17,6 @@ use crate::app::external_endpoints::authority_for_request;
 use crate::app::support_bundles::SupportBundleQueryType;
 use crate::context::ApiContext;
 use crate::external_api::shared;
-use chrono::{DateTime, Utc};
 use dropshot::Body;
 use dropshot::EmptyScanParams;
 use dropshot::Header;
@@ -95,10 +94,12 @@ use omicron_common::api::external::http_pagination::PaginatedById;
 use omicron_common::api::external::http_pagination::PaginatedByName;
 use omicron_common::api::external::http_pagination::PaginatedByNameOrId;
 use omicron_common::api::external::http_pagination::PaginatedByTimeAndId;
+use omicron_common::api::external::http_pagination::PaginatedByVersion;
 use omicron_common::api::external::http_pagination::ScanById;
 use omicron_common::api::external::http_pagination::ScanByName;
 use omicron_common::api::external::http_pagination::ScanByNameOrId;
 use omicron_common::api::external::http_pagination::ScanByTimeAndId;
+use omicron_common::api::external::http_pagination::ScanByVersion;
 use omicron_common::api::external::http_pagination::ScanParams;
 use omicron_common::api::external::http_pagination::data_page_params_for;
 use omicron_common::api::external::http_pagination::marker_for_id;
@@ -114,7 +115,6 @@ use propolis_client::support::tungstenite::protocol::{
 };
 use range_requests::PotentialRange;
 use ref_cast::RefCast;
-use uuid::Uuid;
 
 type NexusApiDescription = ApiDescription<ApiContext>;
 
@@ -6691,7 +6691,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
     async fn system_update_repository_list(
         rqctx: RequestContext<ApiContext>,
-        query_params: Query<PaginatedByTimeAndId>,
+        query_params: Query<PaginatedByVersion>,
     ) -> Result<HttpResponseOk<ResultsPage<TufRepoGetResponse>>, HttpError>
     {
         let apictx = rqctx.context();
@@ -6704,38 +6704,18 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let repos =
                 nexus.updates_list_repositories(&opctx, &pagparams).await?;
 
-            // Create a helper struct to maintain the association between response and database info
-            struct TufRepoWithMeta {
-                response: TufRepoGetResponse,
-                time_created: DateTime<Utc>,
-                repo_id: Uuid,
-            }
-
-            let items: Vec<TufRepoWithMeta> = repos
+            let responses: Vec<TufRepoGetResponse> = repos
                 .into_iter()
-                .map(|description| {
-                    let time_created = description.repo.time_created;
-                    let repo_id = description.repo.id.into_untyped_uuid();
-                    let response = TufRepoGetResponse {
-                        description: description.into_external(),
-                    };
-                    TufRepoWithMeta { response, time_created, repo_id }
+                .map(|description| TufRepoGetResponse {
+                    description: description.into_external(),
                 })
                 .collect();
 
-            let responses: Vec<TufRepoGetResponse> =
-                items.iter().map(|item| item.response.clone()).collect();
-
-            Ok(HttpResponseOk(ScanByTimeAndId::results_page(
+            Ok(HttpResponseOk(ScanByVersion::results_page(
                 &query,
                 responses,
                 &|_scan_params, item: &TufRepoGetResponse| {
-                    // Find the corresponding metadata for this response
-                    let meta = items
-                        .iter()
-                        .find(|meta| std::ptr::eq(&meta.response, item))
-                        .expect("Response should have corresponding metadata");
-                    (meta.time_created, meta.repo_id)
+                    item.description.repo.system_version.clone()
                 },
             )?))
         };

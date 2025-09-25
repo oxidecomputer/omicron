@@ -859,14 +859,13 @@ async fn test_repo_list() -> Result<()> {
             .context("error deserializing third response body")?;
     assert_eq!(response3.status, TufRepoInsertStatus::Inserted);
 
-    // List repositories - should return all 3, ordered by creation time (newest first)
+    // List repositories - should return all 3, ordered by system version (newest first)
     let list: ResultsPage<TufRepoGetResponse> =
         objects_list_page_authz(client, "/v1/system/update/repositories").await;
 
     assert_eq!(list.items.len(), 3);
 
-    // Repositories should be ordered by creation time descending (newest first)
-    // Since repo3 was created last, it should be first in the list
+    // Repositories should be ordered by system version descending (newest first)
     let system_versions: Vec<String> = list
         .items
         .iter()
@@ -904,6 +903,23 @@ async fn test_repo_list() -> Result<()> {
         }));
     }
 
+    // Request ascending order and expect the versions oldest-first
+    let ascending_list: ResultsPage<TufRepoGetResponse> =
+        objects_list_page_authz(
+            client,
+            "/v1/system/update/repositories?sort_by=ascending",
+        )
+        .await;
+
+    assert_eq!(ascending_list.items.len(), 3);
+
+    let ascending_versions: Vec<String> = ascending_list
+        .items
+        .iter()
+        .map(|item| item.description.repo.system_version.to_string())
+        .collect();
+    assert_eq!(ascending_versions, vec!["1.0.0", "2.0.0", "3.0.0"]);
+
     // Test pagination by setting a small limit
     let paginated_list = objects_list_page_authz::<TufRepoGetResponse>(
         client,
@@ -921,6 +937,19 @@ async fn test_repo_list() -> Result<()> {
         .map(|item| item.description.repo.system_version.to_string())
         .collect();
     assert_eq!(paginated_versions, vec!["3.0.0", "2.0.0"]);
+
+    // Fetch the next page via the returned page token and expect the remaining repo
+    let next_page_url = format!(
+        "/v1/system/update/repositories?limit=2&page_token={}",
+        paginated_list.next_page.clone().expect("expected next page token"),
+    );
+    let next_page: ResultsPage<TufRepoGetResponse> =
+        objects_list_page_authz(client, &next_page_url).await;
+    assert_eq!(next_page.items.len(), 1);
+    assert_eq!(
+        next_page.items[0].description.repo.system_version.to_string(),
+        "1.0.0"
+    );
 
     cptestctx.teardown().await;
     Ok(())
