@@ -32,7 +32,7 @@ async fn get_set_target_release() -> Result<()> {
     // There is no target release before one has ever been specified
     let status: views::UpdateStatus =
         object_get(client, "/v1/system/update/status").await;
-    assert_eq!(status.target_release, None);
+    assert_eq!(status.target_release.0, None);
 
     // Attempting to set an invalid system version should fail.
     let system_version = Version::new(0, 0, 0);
@@ -68,7 +68,7 @@ async fn get_set_target_release() -> Result<()> {
         let status: views::UpdateStatus =
             object_get(client, "/v1/system/update/status").await;
 
-        let target_release = status.target_release.unwrap();
+        let target_release = status.target_release.0.unwrap();
         let after = Utc::now();
         assert!(target_release.time_requested >= before);
         assert!(target_release.time_requested <= after);
@@ -100,7 +100,7 @@ async fn get_set_target_release() -> Result<()> {
         let status: views::UpdateStatus =
             object_get(client, "/v1/system/update/status").await;
 
-        let target_release = status.target_release.unwrap();
+        let target_release = status.target_release.0.unwrap();
         let after = Utc::now();
         assert!(target_release.time_requested >= before);
         assert!(target_release.time_requested <= after);

@@ -26182,13 +26182,14 @@
             ]
           },
           "time_last_progress": {
-            "description": "Time of last meaningful change to update status\n\nInternally, this represents the last time a blueprint (proposed system configuration) was made a target by the update system.",
+            "description": "Time of last meaningful change to update status\n\nInternally, this represents the last time a blueprint (proposed system configuration) was made a target by the update system. In other words, it's the last time the system decided on a next step to take.",
             "type": "string",
             "format": "date-time"
           }
         },
         "required": [
           "components_by_release_version",
+          "target_release",
           "time_last_progress"
         ]
       },

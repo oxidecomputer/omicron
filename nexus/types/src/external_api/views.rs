@@ -17,7 +17,7 @@ pub use omicron_common::api::external::IpVersion;
 use omicron_common::api::external::{
     AffinityPolicy, AllowedSourceIps as ExternalAllowedSourceIps, ByteCount,
     Digest, Error, FailureDomain, IdentityMetadata, InstanceState, Name,
-    ObjectIdentity, SimpleIdentity, SimpleIdentityOrName,
+    Nullable, ObjectIdentity, SimpleIdentity, SimpleIdentityOrName,
 };
 use omicron_uuid_kinds::*;
 use oxnet::{Ipv4Net, Ipv6Net};
@@ -1557,7 +1557,7 @@ pub struct UpdatesTrustRoot {
     pub root_role: TufSignedRootRole,
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct UpdateStatus {
     /// Current target release of the rack's system software
     ///
@@ -1568,7 +1568,7 @@ pub struct UpdateStatus {
     /// rack should eventually correspond to the release described here.
     ///
     /// Will only be null if a target release has never been set.
-    pub target_release: Option<TargetRelease>,
+    pub target_release: Nullable<TargetRelease>,
 
     /// Count of components running each release version
     pub components_by_release_version: BTreeMap<String, usize>,
@@ -1576,7 +1576,8 @@ pub struct UpdateStatus {
     /// Time of last meaningful change to update status
     ///
     /// Internally, this represents the last time a blueprint (proposed system
-    /// configuration) was made a target by the update system.
+    /// configuration) was made a target by the update system. In other words,
+    /// it's the last time the system decided on a next step to take.
     pub time_last_progress: DateTime<Utc>,
 }
 

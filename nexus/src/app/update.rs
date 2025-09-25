@@ -18,6 +18,7 @@ use nexus_types::external_api::views;
 use nexus_types::internal_api::views as internal_views;
 use nexus_types::inventory::RotSlot;
 use omicron_common::api::external::InternalContext;
+use omicron_common::api::external::Nullable;
 use omicron_common::api::external::{
     DataPageParams, Error, TufRepoInsertResponse, TufRepoInsertStatus,
 };
@@ -190,7 +191,7 @@ impl super::Nexus {
             .time_made_target;
 
         Ok(views::UpdateStatus {
-            target_release,
+            target_release: Nullable(target_release),
             components_by_release_version,
             time_last_progress,
         })
