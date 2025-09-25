@@ -5639,13 +5639,29 @@
           "desired_image_source": {
             "$ref": "#/components/schemas/BlueprintZoneImageSource"
           },
-          "zone_config": {
-            "$ref": "#/components/schemas/BlueprintZoneConfig"
+          "zone": {
+            "$ref": "#/components/schemas/PlanningReportBlueprintZone"
           }
         },
         "required": [
           "desired_image_source",
-          "zone_config"
+          "zone"
+        ]
+      },
+      "PlanningReportBlueprintZone": {
+        "description": "Reduced form of a `BlueprintZoneConfig` stored in a [`PlanningReport`].",
+        "type": "object",
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/TypedUuidForOmicronZoneKind"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ZoneKind"
+          }
+        },
+        "required": [
+          "id",
+          "kind"
         ]
       },
       "PlanningZoneUpdatesStepReport": {
@@ -5656,7 +5672,7 @@
             "additionalProperties": {
               "type": "array",
               "items": {
-                "$ref": "#/components/schemas/BlueprintZoneConfig"
+                "$ref": "#/components/schemas/PlanningReportBlueprintZone"
               }
             }
           },
@@ -5680,7 +5696,7 @@
             "additionalProperties": {
               "type": "array",
               "items": {
-                "$ref": "#/components/schemas/BlueprintZoneConfig"
+                "$ref": "#/components/schemas/PlanningReportBlueprintZone"
               }
             }
           },
@@ -6979,6 +6995,24 @@
               "type"
             ]
           }
+        ]
+      },
+      "ZoneKind": {
+        "description": "Like [`OmicronZoneType`], but without any associated data.\n\nThis enum is meant to correspond exactly 1:1 with `OmicronZoneType`.\n\n# String representations of this type\n\nThere are no fewer than six string representations for this type, all slightly different from each other.\n\n1. [`Self::zone_prefix`]: Used to construct zone names. 2. [`Self::service_prefix`]: Used to construct SMF service names. 3. [`Self::name_prefix`]: Used to construct `Name` instances. 4. [`Self::report_str`]: Used for reporting and testing. 5. [`Self::artifact_id_name`]: Used to match TUF artifact IDs. 6. [`Self::artifact_in_install_dataset`]: Used to match zone image tarballs in the install dataset. (This method is equivalent to appending `.tar.gz` to the result of [`Self::zone_prefix`].)\n\nThere is no `Display` impl to ensure that users explicitly choose the representation they want. (Please play close attention to this! The functions are all similar but different, and we don't currently have great type safety around the choice.)\n\n## Adding new representations\n\nIf you have a new use case for a string representation, please reuse one of the six representations if at all possible. If you must add a new one, please add it here rather than doing something ad-hoc in the calling code so it's more legible.",
+        "type": "string",
+        "enum": [
+          "boundary_ntp",
+          "clickhouse",
+          "clickhouse_keeper",
+          "clickhouse_server",
+          "cockroach_db",
+          "crucible",
+          "crucible_pantry",
+          "external_dns",
+          "internal_dns",
+          "internal_ntp",
+          "nexus",
+          "oximeter"
         ]
       },
       "ZoneStatus": {
