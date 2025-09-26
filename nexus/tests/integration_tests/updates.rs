@@ -8,6 +8,7 @@ use camino_tempfile::{Builder, Utf8TempPath};
 use chrono::{DateTime, Duration, Timelike, Utc};
 use dropshot::ResultsPage;
 use http::{Method, StatusCode};
+use nexus_db_model::SemverVersion;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::pub_test_utils::helpers::insert_test_tuf_repo;
 use nexus_test_utils::background::activate_background_task;
@@ -21,7 +22,7 @@ use nexus_test_utils::test_setup;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::views;
 use nexus_types::external_api::views::{TufRepoUpload, TufRepoUploadStatus};
-use omicron_common::api::external::TufArtifactMeta;
+use omicron_common::api::external::{DataPageParams, TufArtifactMeta};
 use pretty_assertions::assert_eq;
 use semver::Version;
 use serde::Deserialize;
@@ -36,21 +37,39 @@ use tufaceous_lib::assemble::{ArtifactManifest, OmicronRepoAssembler};
 use tufaceous_lib::assemble::{DeserializedManifest, ManifestTweak};
 
 use crate::integration_tests::target_release::set_target_release;
+use uuid::Uuid;
 
 const TRUST_ROOTS_URL: &str = "/v1/system/update/trust-roots";
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
 
-/// Fetch artifacts for a repository using the lockstep API
-async fn fetch_repo_artifacts(
-    lockstep_client: &dropshot::test_util::ClientTestContext,
+/// Get artifacts for a repository using the datastore directly, sorted by ID
+async fn get_repo_artifacts(
+    cptestctx: &ControlPlaneTestContext,
     version: &str,
 ) -> Vec<TufArtifactMeta> {
-    let url = format!("/deployment/repositories/{}/artifacts", version);
-    objects_list_page_authz::<TufArtifactMeta>(lockstep_client, &url)
+    let datastore = cptestctx.server.server_context().nexus.datastore();
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
+    let system_version = SemverVersion::from(
+        version.parse::<Version>().expect("version should parse"),
+    );
+    let pagparams = DataPageParams::<Uuid>::max_page();
+
+    let artifacts = datastore
+        .tuf_repo_artifacts_list_by_version(&opctx, system_version, &pagparams)
         .await
-        .items
+        .expect("should get artifacts");
+
+    let mut result: Vec<TufArtifactMeta> = artifacts
+        .into_iter()
+        .map(|artifact| artifact.into_external())
+        .collect();
+
+    // Sort artifacts by their ID for consistent comparison
+    result.sort_by(|a, b| a.id.cmp(&b.id));
+    result
 }
 
 pub struct TestTrustRoot {
@@ -228,9 +247,8 @@ async fn test_repo_upload() -> Result<()> {
         response.repo
     };
 
-    // Fetch artifacts using the new lockstep endpoint
-    let initial_artifacts =
-        fetch_repo_artifacts(&cptestctx.lockstep_client, "1.0.0").await;
+    // Get artifacts using the datastore directly
+    let initial_artifacts = get_repo_artifacts(&cptestctx, "1.0.0").await;
     let unique_sha256_count = initial_artifacts
         .iter()
         .map(|artifact| artifact.hash)
@@ -304,17 +322,11 @@ async fn test_repo_upload() -> Result<()> {
         response.repo
     };
 
-    // Fetch artifacts again and compare them
-    let mut reupload_artifacts =
-        fetch_repo_artifacts(&cptestctx.lockstep_client, "1.0.0").await;
-    let mut initial_artifacts_sorted = initial_artifacts.clone();
-
-    // Sort artifacts by their ID for comparison (same order as ArtifactId::cmp)
-    initial_artifacts_sorted.sort_by(|a, b| a.id.cmp(&b.id));
-    reupload_artifacts.sort_by(|a, b| a.id.cmp(&b.id));
+    // Get artifacts again and compare them
+    let reupload_artifacts = get_repo_artifacts(&cptestctx, "1.0.0").await;
 
     assert_eq!(
-        initial_artifacts_sorted, reupload_artifacts,
+        initial_artifacts, reupload_artifacts,
         "initial artifacts match reupload artifacts"
     );
 
@@ -471,9 +483,8 @@ async fn test_repo_upload() -> Result<()> {
             .context("error deserializing response body")?;
         assert_eq!(response.status, TufRepoUploadStatus::Inserted);
 
-        // Fetch artifacts for the 2.0.0 repository
-        let artifacts_2_0_0 =
-            fetch_repo_artifacts(&cptestctx.lockstep_client, "2.0.0").await;
+        // Get artifacts for the 2.0.0 repository
+        let artifacts_2_0_0 = get_repo_artifacts(&cptestctx, "2.0.0").await;
 
         // The artifacts should be exactly the same as the 1.0.0 repo we
         // uploaded, other than the installinator document (which will have
