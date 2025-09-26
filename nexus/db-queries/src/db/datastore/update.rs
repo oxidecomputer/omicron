@@ -41,7 +41,7 @@ use uuid::Uuid;
 
 /// The return value of [`DataStore::tuf_repo_insert`].
 ///
-/// This is similar to [`external::TufRepoInsertResponse`], but uses
+/// This is similar to [`views::TufRepoUpload`], but uses
 /// nexus-db-model's types instead of external types.
 pub struct TufRepoInsertResponse {
     pub recorded: TufRepoDescription,
@@ -458,7 +458,7 @@ impl DataStore {
     }
 
     /// List all TUF repositories (without artifacts) ordered by system version (newest first by default).
-    pub async fn tuf_repo_list_no_artifacts(
+    pub async fn tuf_repo_list(
         &self,
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Version>,

@@ -103,22 +103,18 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         system_version: Version,
-    ) -> Result<nexus_db_model::TufRepo, HttpError> {
+    ) -> Result<nexus_db_model::TufRepo, Error> {
         self.db_datastore
             .tuf_repo_get_by_version(opctx, system_version.into())
             .await
-            .map_err(HttpError::from)
     }
 
     pub(crate) async fn updates_list_repositories(
         &self,
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Version>,
-    ) -> Result<Vec<nexus_db_model::TufRepo>, HttpError> {
-        self.db_datastore
-            .tuf_repo_list_no_artifacts(opctx, pagparams)
-            .await
-            .map_err(HttpError::from)
+    ) -> Result<Vec<nexus_db_model::TufRepo>, Error> {
+        self.db_datastore.tuf_repo_list(opctx, pagparams).await
     }
 
     pub(crate) async fn updates_add_trust_root(
