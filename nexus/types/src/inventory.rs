@@ -473,6 +473,7 @@ pub struct HostPhase1FlashHash {
     JsonSchema,
 )]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(test, derive(test_strategy::Arbitrary))]
 pub enum CabooseWhich {
     SpSlot0,
     SpSlot1,

@@ -500,6 +500,7 @@ impl PlanningMupdateOverrideStepReport {
 )]
 #[serde(rename_all = "snake_case")]
 #[serde(tag = "type", content = "value")]
+#[cfg_attr(test, derive(test_strategy::Arbitrary))]
 // TODO-K: Separate into enums for each component as suggested in
 // https://github.com/oxidecomputer/omicron/pull/9001#discussion_r2372863166
 // and including more detailed information as suggested in
@@ -557,6 +558,7 @@ pub enum FailedMgsUpdateReason {
 #[derive(
     Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Diffable, JsonSchema,
 )]
+#[cfg_attr(test, derive(test_strategy::Arbitrary))]
 pub struct BlockedMgsUpdate {
     /// id of the baseboard that we attempted to update
     pub baseboard_id: Arc<BaseboardId>,
