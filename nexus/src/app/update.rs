@@ -9,7 +9,7 @@ use dropshot::HttpError;
 use futures::Stream;
 use nexus_auth::authz;
 use nexus_db_lookup::LookupPath;
-use nexus_db_model::{Generation, TufRepoDescription, TufTrustRoot};
+use nexus_db_model::{Generation, TufTrustRoot};
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::{datastore::SQL_BATCH_SIZE, pagination::Paginator};
 use nexus_types::deployment::TargetReleaseDescription;
@@ -102,7 +102,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         system_version: Version,
-    ) -> Result<TufRepoDescription, HttpError> {
+    ) -> Result<nexus_db_model::TufRepo, HttpError> {
         self.db_datastore
             .tuf_repo_get_by_version(opctx, system_version.into())
             .await
@@ -113,9 +113,9 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Version>,
-    ) -> Result<Vec<TufRepoDescription>, HttpError> {
+    ) -> Result<Vec<nexus_db_model::TufRepo>, HttpError> {
         self.db_datastore
-            .tuf_repo_list(opctx, pagparams)
+            .tuf_repo_list_no_artifacts(opctx, pagparams)
             .await
             .map_err(HttpError::from)
     }

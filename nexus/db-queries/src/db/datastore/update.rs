@@ -148,19 +148,19 @@ impl DataStore {
         Ok(TufRepoDescription { repo, artifacts })
     }
 
-    /// Returns the TUF repo description corresponding to this system version.
+    /// Returns the TUF repo corresponding to this system version.
     pub async fn tuf_repo_get_by_version(
         &self,
         opctx: &OpContext,
         system_version: SemverVersion,
-    ) -> LookupResult<TufRepoDescription> {
+    ) -> LookupResult<TufRepo> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
 
         use nexus_db_schema::schema::tuf_repo::dsl;
 
         let conn = self.pool_connection_authorized(opctx).await?;
 
-        let repo = dsl::tuf_repo
+        dsl::tuf_repo
             .filter(dsl::system_version.eq(system_version.clone()))
             .select(TufRepo::as_select())
             .first_async::<TufRepo>(&*conn)
@@ -173,12 +173,7 @@ impl DataStore {
                         LookupType::ByCompositeId(system_version.to_string()),
                     ),
                 )
-            })?;
-
-        let artifacts = artifacts_for_repo(repo.id.into(), &conn)
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
-        Ok(TufRepoDescription { repo, artifacts })
+            })
     }
 
     /// Given a TUF repo ID, get its version. We could use `tuf_repo_get_by_id`,
@@ -461,17 +456,15 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
-    /// List all TUF repositories ordered by system version (newest first by default).
-    pub async fn tuf_repo_list(
+    /// List all TUF repositories (without artifacts) ordered by system version (newest first by default).
+    pub async fn tuf_repo_list_no_artifacts(
         &self,
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Version>,
-    ) -> ListResultVec<TufRepoDescription> {
+    ) -> ListResultVec<TufRepo> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
 
-        use nexus_db_schema::schema::tuf_artifact;
         use nexus_db_schema::schema::tuf_repo;
-        use nexus_db_schema::schema::tuf_repo_artifact;
 
         let conn = self.pool_connection_authorized(opctx).await?;
 
@@ -484,61 +477,11 @@ impl DataStore {
             limit: pagparams.limit,
         };
 
-        // First get the paginated repos
-        let repos =
-            paginated(tuf_repo::table, tuf_repo::system_version, &db_pagparams)
-                .select(TufRepo::as_select())
-                .load_async(&*conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                })?;
-
-        if repos.is_empty() {
-            return Ok(Vec::new());
-        }
-
-        // Get all repo IDs for the artifacts query
-        let repo_ids: Vec<_> = repos.iter().map(|repo| repo.id).collect();
-
-        // Fetch all artifacts for these repos in a single query
-        let repo_artifacts: Vec<(TufRepo, TufArtifact)> =
-            tuf_repo::table
-                .filter(tuf_repo::id.eq_any(repo_ids))
-                .inner_join(
-                    tuf_repo_artifact::table
-                        .on(tuf_repo::id.eq(tuf_repo_artifact::tuf_repo_id)),
-                )
-                .inner_join(tuf_artifact::table.on(
-                    tuf_repo_artifact::tuf_artifact_id.eq(tuf_artifact::id),
-                ))
-                .select((TufRepo::as_select(), TufArtifact::as_select()))
-                .load_async(&*conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                })?;
-
-        // Group artifacts by repo ID
-        let mut artifacts_by_repo: HashMap<
-            TypedUuid<TufRepoKind>,
-            Vec<TufArtifact>,
-        > = HashMap::new();
-        for (repo, artifact) in repo_artifacts {
-            artifacts_by_repo.entry(repo.id.into()).or_default().push(artifact);
-        }
-
-        // Build the final results, maintaining the original pagination order
-        let mut results = Vec::new();
-        for repo in repos {
-            let artifacts = artifacts_by_repo
-                .get(&repo.id.into())
-                .cloned()
-                .unwrap_or_default();
-            results.push(TufRepoDescription { repo, artifacts });
-        }
-
-        Ok(results)
+        paginated(tuf_repo::table, tuf_repo::system_version, &db_pagparams)
+            .select(TufRepo::as_select())
+            .load_async(&*conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     /// List the trusted TUF root roles in the trust store.

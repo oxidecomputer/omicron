@@ -20,9 +20,8 @@ use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use nexus_test_utils::test_setup;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::views;
-use nexus_types::external_api::views::UpdatesTrustRoot;
 use omicron_common::api::external::{
-    TufRepoGetResponse, TufRepoInsertResponse, TufRepoInsertStatus,
+    TufRepoInsertResponse, TufRepoInsertStatus,
 };
 use pretty_assertions::assert_eq;
 use semver::Version;
@@ -310,20 +309,25 @@ async fn test_repo_upload() -> Result<()> {
     );
 
     // Now get the repository that was just uploaded.
-    let mut get_description = {
-        let response = object_get::<TufRepoGetResponse>(
-            client,
-            "/v1/system/update/repository/1.0.0",
-        )
-        .await;
-        response.description
-    };
+    let get_repo = object_get::<views::TufRepo>(
+        client,
+        "/v1/system/update/repository/1.0.0",
+    )
+    .await;
 
-    get_description.sort_artifacts();
-
+    // Compare just the repo metadata (not artifacts)
     assert_eq!(
-        initial_description, get_description,
-        "initial description matches fetched description"
+        initial_description.repo.hash,
+        get_repo.hash.into(),
+        "repo hash matches"
+    );
+    assert_eq!(
+        initial_description.repo.system_version, get_repo.system_version,
+        "system version matches"
+    );
+    assert_eq!(
+        initial_description.repo.valid_until, get_repo.valid_until,
+        "valid_until matches"
     );
 
     // Upload a new repository with the same system version but a different
@@ -490,22 +494,15 @@ async fn test_repo_upload() -> Result<()> {
             "artifacts for 1.0.0 and 2.0.0 should match"
         );
 
-        // Now get the repository that was just uploaded and make sure the
-        // artifact list is the same.
-        let response = object_get::<TufRepoGetResponse>(
+        // Now get the repository that was just uploaded.
+        let get_repo = object_get::<views::TufRepo>(
             client,
             "/v1/system/update/repository/2.0.0",
         )
         .await;
-        let mut get_description = response.description;
-        get_description.sort_artifacts();
 
-        assert_eq!(
-            description, get_description,
-            "initial description matches fetched description"
-        );
-
-        installinator_doc_1
+        // Validate the repo metadata
+        assert_eq!(get_repo.system_version.to_string(), "2.0.0");
     };
     // The installinator document changed, so the generation number is bumped to
     // 3.
@@ -624,7 +621,7 @@ async fn test_trust_root_operations(cptestctx: &ControlPlaneTestContext) {
         TestTrustRoot::generate().await.expect("trust root generation failed");
 
     // POST /v1/system/update/trust-roots
-    let trust_root_view: UpdatesTrustRoot = trust_root
+    let trust_root_view: views::UpdatesTrustRoot = trust_root
         .to_upload_request(client, StatusCode::CREATED)
         .execute()
         .await
@@ -635,20 +632,21 @@ async fn test_trust_root_operations(cptestctx: &ControlPlaneTestContext) {
     // GET /v1/system/update/trust-roots
     let request = RequestBuilder::new(client, Method::GET, TRUST_ROOTS_URL)
         .expect_status(Some(StatusCode::OK));
-    let response: ResultsPage<UpdatesTrustRoot> = NexusRequest::new(request)
-        .authn_as(AuthnMode::PrivilegedUser)
-        .execute()
-        .await
-        .expect("trust root list failed")
-        .parsed_body()
-        .expect("failed to parse list response");
+    let response: ResultsPage<views::UpdatesTrustRoot> =
+        NexusRequest::new(request)
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute()
+            .await
+            .expect("trust root list failed")
+            .parsed_body()
+            .expect("failed to parse list response");
     assert_eq!(response.items, std::slice::from_ref(&trust_root_view.clone()));
 
     // GET /v1/system/update/trust-roots/{id}
     let id_url = format!("{TRUST_ROOTS_URL}/{}", trust_root_view.id);
     let request = RequestBuilder::new(client, Method::GET, &id_url)
         .expect_status(Some(StatusCode::OK));
-    let response: UpdatesTrustRoot = NexusRequest::new(request)
+    let response: views::UpdatesTrustRoot = NexusRequest::new(request)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
@@ -667,13 +665,14 @@ async fn test_trust_root_operations(cptestctx: &ControlPlaneTestContext) {
         .expect("trust root delete failed");
     let request = RequestBuilder::new(client, Method::GET, TRUST_ROOTS_URL)
         .expect_status(Some(StatusCode::OK));
-    let response: ResultsPage<UpdatesTrustRoot> = NexusRequest::new(request)
-        .authn_as(AuthnMode::PrivilegedUser)
-        .execute()
-        .await
-        .expect("trust root list after delete failed")
-        .parsed_body()
-        .expect("failed to parse list after delete response");
+    let response: ResultsPage<views::UpdatesTrustRoot> =
+        NexusRequest::new(request)
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute()
+            .await
+            .expect("trust root list after delete failed")
+            .parsed_body()
+            .expect("failed to parse list after delete response");
     assert!(response.items.is_empty());
 }
 
@@ -812,7 +811,7 @@ async fn test_repo_list() -> Result<()> {
     let logctx = &cptestctx.logctx;
 
     // Initially, list should be empty
-    let initial_list: ResultsPage<TufRepoGetResponse> =
+    let initial_list: ResultsPage<views::TufRepo> =
         objects_list_page_authz(client, "/v1/system/update/repositories").await;
     assert_eq!(initial_list.items.len(), 0);
     assert!(initial_list.next_page.is_none());
@@ -860,20 +859,17 @@ async fn test_repo_list() -> Result<()> {
     assert_eq!(response3.status, TufRepoInsertStatus::Inserted);
 
     // List repositories - should return all 3, ordered by system version (newest first)
-    let list: ResultsPage<TufRepoGetResponse> =
+    let list: ResultsPage<views::TufRepo> =
         objects_list_page_authz(client, "/v1/system/update/repositories").await;
 
     assert_eq!(list.items.len(), 3);
 
     // Repositories should be ordered by system version descending (newest first)
-    let system_versions: Vec<String> = list
-        .items
-        .iter()
-        .map(|item| item.description.repo.system_version.to_string())
-        .collect();
+    let system_versions: Vec<String> =
+        list.items.iter().map(|item| item.system_version.to_string()).collect();
     assert_eq!(system_versions, vec!["3.0.0", "2.0.0", "1.0.0"]);
 
-    // Verify that each response contains the correct artifacts
+    // Verify that each response contains the correct system version
     for (i, item) in list.items.iter().enumerate() {
         let expected_version = match i {
             0 => "3.0.0",
@@ -881,47 +877,27 @@ async fn test_repo_list() -> Result<()> {
             2 => "1.0.0",
             _ => panic!("unexpected index"),
         };
-        assert_eq!(
-            item.description.repo.system_version.to_string(),
-            expected_version
-        );
-
-        // Verify artifacts are present (should have Zone artifacts)
-        let zone_artifacts: Vec<_> = item
-            .description
-            .artifacts
-            .iter()
-            .filter(|artifact| {
-                artifact.id.kind == KnownArtifactKind::Zone.into()
-            })
-            .collect();
-        assert_eq!(zone_artifacts.len(), 2, "should have 2 zone artifacts");
-
-        // Should not have ControlPlane artifacts (they get decomposed into Zones)
-        assert!(!item.description.artifacts.iter().any(|artifact| {
-            artifact.id.kind == KnownArtifactKind::ControlPlane.into()
-        }));
+        assert_eq!(item.system_version.to_string(), expected_version);
     }
 
     // Request ascending order and expect the versions oldest-first
-    let ascending_list: ResultsPage<TufRepoGetResponse> =
-        objects_list_page_authz(
-            client,
-            "/v1/system/update/repositories?sort_by=ascending",
-        )
-        .await;
+    let ascending_list: ResultsPage<views::TufRepo> = objects_list_page_authz(
+        client,
+        "/v1/system/update/repositories?sort_by=ascending",
+    )
+    .await;
 
     assert_eq!(ascending_list.items.len(), 3);
 
     let ascending_versions: Vec<String> = ascending_list
         .items
         .iter()
-        .map(|item| item.description.repo.system_version.to_string())
+        .map(|item| item.system_version.to_string())
         .collect();
     assert_eq!(ascending_versions, vec!["1.0.0", "2.0.0", "3.0.0"]);
 
     // Test pagination by setting a small limit
-    let paginated_list = objects_list_page_authz::<TufRepoGetResponse>(
+    let paginated_list = objects_list_page_authz::<views::TufRepo>(
         client,
         "/v1/system/update/repositories?limit=2",
     )
@@ -934,7 +910,7 @@ async fn test_repo_list() -> Result<()> {
     let paginated_versions: Vec<String> = paginated_list
         .items
         .iter()
-        .map(|item| item.description.repo.system_version.to_string())
+        .map(|item| item.system_version.to_string())
         .collect();
     assert_eq!(paginated_versions, vec!["3.0.0", "2.0.0"]);
 
@@ -943,13 +919,10 @@ async fn test_repo_list() -> Result<()> {
         "/v1/system/update/repositories?limit=2&page_token={}",
         paginated_list.next_page.clone().expect("expected next page token"),
     );
-    let next_page: ResultsPage<TufRepoGetResponse> =
+    let next_page: ResultsPage<views::TufRepo> =
         objects_list_page_authz(client, &next_page_url).await;
     assert_eq!(next_page.items.len(), 1);
-    assert_eq!(
-        next_page.items[0].description.repo.system_version.to_string(),
-        "1.0.0"
-    );
+    assert_eq!(next_page.items[0].system_version.to_string(), "1.0.0");
 
     cptestctx.teardown().await;
     Ok(())

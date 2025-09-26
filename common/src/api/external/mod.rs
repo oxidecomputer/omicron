@@ -3526,13 +3526,6 @@ pub enum TufRepoInsertStatus {
     Inserted,
 }
 
-/// Data about a successful TUF repo get from Nexus.
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub struct TufRepoGetResponse {
-    /// The description of the repository.
-    pub description: TufRepoDescription,
-}
 
 #[derive(
     Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq, ObjectIdentity,

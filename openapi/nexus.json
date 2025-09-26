@@ -10946,7 +10946,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/TufRepoGetResponseResultsPage"
+                  "$ref": "#/components/schemas/TufRepoResultsPage"
                 }
               }
             }
@@ -11038,7 +11038,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/TufRepoGetResponse"
+                  "$ref": "#/components/schemas/TufRepo"
                 }
               }
             }
@@ -25933,6 +25933,44 @@
           "size"
         ]
       },
+      "TufRepo": {
+        "description": "Metadata about a TUF repository",
+        "type": "object",
+        "properties": {
+          "file_name": {
+            "description": "The file name of the repository\n\nThis is purely used for debugging and may not always be correct (e.g., with wicket, we read the file contents from stdin so we don't know the correct file name).",
+            "type": "string"
+          },
+          "hash": {
+            "description": "The hash of the repository.\n\nThis is a slight abuse of `ArtifactHash`, since that's the hash of individual artifacts within the repository. However, we use it here for convenience.",
+            "type": "string",
+            "format": "hex string (32 bytes)"
+          },
+          "system_version": {
+            "description": "The system version in artifacts.json",
+            "type": "string",
+            "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$"
+          },
+          "targets_role_version": {
+            "description": "The version of the targets role",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "valid_until": {
+            "description": "The time until which the repo is valid",
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "file_name",
+          "hash",
+          "system_version",
+          "targets_role_version",
+          "valid_until"
+        ]
+      },
       "TufRepoDescription": {
         "description": "A description of an uploaded TUF repository.",
         "type": "object",
@@ -25956,44 +25994,6 @@
         "required": [
           "artifacts",
           "repo"
-        ]
-      },
-      "TufRepoGetResponse": {
-        "description": "Data about a successful TUF repo get from Nexus.",
-        "type": "object",
-        "properties": {
-          "description": {
-            "description": "The description of the repository.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/TufRepoDescription"
-              }
-            ]
-          }
-        },
-        "required": [
-          "description"
-        ]
-      },
-      "TufRepoGetResponseResultsPage": {
-        "description": "A single page of results",
-        "type": "object",
-        "properties": {
-          "items": {
-            "description": "list of items on this page of results",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/TufRepoGetResponse"
-            }
-          },
-          "next_page": {
-            "nullable": true,
-            "description": "token used to fetch the next page of results (if any)",
-            "type": "string"
-          }
-        },
-        "required": [
-          "items"
         ]
       },
       "TufRepoInsertResponse": {
@@ -26077,6 +26077,27 @@
           "system_version",
           "targets_role_version",
           "valid_until"
+        ]
+      },
+      "TufRepoResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TufRepo"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
         ]
       },
       "TxEqConfig": {

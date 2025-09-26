@@ -6674,6 +6674,7 @@ dependencies = [
  "openapiv3",
  "oximeter-types 0.1.0",
  "oxql-types",
+ "tufaceous-artifact",
 ]
 
 [[package]]

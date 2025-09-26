@@ -2986,7 +2986,7 @@ pub trait NexusExternalApi {
     async fn system_update_get_repository(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::UpdatesGetRepositoryParams>,
-    ) -> Result<HttpResponseOk<TufRepoGetResponse>, HttpError>;
+    ) -> Result<HttpResponseOk<views::TufRepo>, HttpError>;
 
     /// List all TUF repositories
     ///
@@ -3000,7 +3000,7 @@ pub trait NexusExternalApi {
     async fn system_update_repository_list(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<PaginatedByVersion>,
-    ) -> Result<HttpResponseOk<ResultsPage<TufRepoGetResponse>>, HttpError>;
+    ) -> Result<HttpResponseOk<ResultsPage<views::TufRepo>>, HttpError>;
 
     /// List root roles in the updates trust store
     ///

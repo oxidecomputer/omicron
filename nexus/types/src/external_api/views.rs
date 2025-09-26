@@ -15,9 +15,9 @@ use chrono::Utc;
 use daft::Diffable;
 pub use omicron_common::api::external::IpVersion;
 use omicron_common::api::external::{
-    AffinityPolicy, AllowedSourceIps as ExternalAllowedSourceIps, ByteCount,
-    Digest, Error, FailureDomain, IdentityMetadata, InstanceState, Name,
-    Nullable, ObjectIdentity, SimpleIdentity, SimpleIdentityOrName,
+    self, AffinityPolicy, AllowedSourceIps as ExternalAllowedSourceIps,
+    ByteCount, Digest, Error, FailureDomain, IdentityMetadata, InstanceState,
+    Name, Nullable, ObjectIdentity, SimpleIdentity, SimpleIdentityOrName,
 };
 use omicron_uuid_kinds::*;
 use oxnet::{Ipv4Net, Ipv6Net};
@@ -30,6 +30,7 @@ use std::fmt;
 use std::net::IpAddr;
 use std::sync::LazyLock;
 use strum::{EnumIter, IntoEnumIterator};
+use tufaceous_artifact::ArtifactHash;
 use url::Url;
 use uuid::Uuid;
 
@@ -1588,6 +1589,45 @@ pub struct UpdateStatus {
     /// make sure of the operator's intent. To resume update, set a new target
     /// release.
     pub paused: bool,
+}
+
+/// Metadata about a TUF repository
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+pub struct TufRepo {
+    /// The hash of the repository.
+    ///
+    /// This is a slight abuse of `ArtifactHash`, since that's the hash of
+    /// individual artifacts within the repository. However, we use it here for
+    /// convenience.
+    pub hash: ArtifactHash,
+
+    /// The version of the targets role
+    pub targets_role_version: u64,
+
+    /// The time until which the repo is valid
+    pub valid_until: DateTime<Utc>,
+
+    /// The system version in artifacts.json
+    pub system_version: Version,
+
+    /// The file name of the repository
+    ///
+    /// This is purely used for debugging and may not always be correct (e.g.,
+    /// with wicket, we read the file contents from stdin so we don't know the
+    /// correct file name).
+    pub file_name: String,
+}
+
+impl From<external::TufRepoMeta> for TufRepo {
+    fn from(meta: external::TufRepoMeta) -> Self {
+        Self {
+            hash: meta.hash,
+            targets_role_version: meta.targets_role_version,
+            valid_until: meta.valid_until,
+            system_version: meta.system_version,
+            file_name: meta.file_name,
+        }
+    }
 }
 
 fn expected_one_of<T: strum::VariantArray + fmt::Display>() -> String {

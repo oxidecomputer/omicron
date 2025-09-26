@@ -85,7 +85,6 @@ use omicron_common::api::external::ServiceIcmpConfig;
 use omicron_common::api::external::SwitchPort;
 use omicron_common::api::external::SwitchPortSettings;
 use omicron_common::api::external::SwitchPortSettingsIdentity;
-use omicron_common::api::external::TufRepoGetResponse;
 use omicron_common::api::external::TufRepoInsertResponse;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_common::api::external::VpcFirewallRules;
@@ -6668,19 +6667,17 @@ impl NexusExternalApi for NexusExternalApiImpl {
     async fn system_update_get_repository(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::UpdatesGetRepositoryParams>,
-    ) -> Result<HttpResponseOk<TufRepoGetResponse>, HttpError> {
+    ) -> Result<HttpResponseOk<views::TufRepo>, HttpError> {
         let apictx = rqctx.context();
         let nexus = &apictx.context.nexus;
         let handler = async {
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
             let params = path_params.into_inner();
-            let description = nexus
+            let repo = nexus
                 .updates_get_repository(&opctx, params.system_version)
                 .await?;
-            Ok(HttpResponseOk(TufRepoGetResponse {
-                description: description.into_external(),
-            }))
+            Ok(HttpResponseOk(repo.into_external().into()))
         };
         apictx
             .context
@@ -6692,7 +6689,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
     async fn system_update_repository_list(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<PaginatedByVersion>,
-    ) -> Result<HttpResponseOk<ResultsPage<TufRepoGetResponse>>, HttpError>
+    ) -> Result<HttpResponseOk<ResultsPage<views::TufRepo>>, HttpError>
     {
         let apictx = rqctx.context();
         let nexus = &apictx.context.nexus;
@@ -6704,18 +6701,16 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let repos =
                 nexus.updates_list_repositories(&opctx, &pagparams).await?;
 
-            let responses: Vec<TufRepoGetResponse> = repos
+            let responses: Vec<views::TufRepo> = repos
                 .into_iter()
-                .map(|description| TufRepoGetResponse {
-                    description: description.into_external(),
-                })
+                .map(|repo| repo.into_external().into())
                 .collect();
 
             Ok(HttpResponseOk(ScanByVersion::results_page(
                 &query,
                 responses,
-                &|_scan_params, item: &TufRepoGetResponse| {
-                    item.description.repo.system_version.clone()
+                &|_scan_params, item: &views::TufRepo| {
+                    item.system_version.clone()
                 },
             )?))
         };
@@ -6881,7 +6876,6 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .datastore()
                 .tuf_repo_get_by_version(&opctx, system_version.into())
                 .await?
-                .repo
                 .id;
             let next_target_release =
                 nexus_db_model::TargetRelease::new_system_version(
