@@ -22,6 +22,18 @@ pub const AZ_PREFIX: u8 = 48;
 pub const RACK_PREFIX: u8 = 56;
 pub const SLED_PREFIX: u8 = 64;
 
+// Multicast constants
+
+/// IPv4 Source-Specific Multicast (SSM) subnet as defined in RFC 4607:
+/// <https://tools.ietf.org/html/rfc4607>.
+pub const IPV4_SSM_SUBNET: oxnet::Ipv4Net =
+    oxnet::Ipv4Net::new_unchecked(Ipv4Addr::new(232, 0, 0, 0), 8);
+
+/// IPv6 Source-Specific Multicast (SSM) flag field value as defined in RFC 4607:
+/// <https://tools.ietf.org/html/rfc4607>.
+/// This is the flags nibble (high nibble of second byte) for FF3x::/32 addresses.
+pub const IPV6_SSM_FLAG_FIELD: u8 = 3;
+
 /// maximum possible value for a tcp or udp port
 pub const MAX_PORT: u16 = u16::MAX;
 

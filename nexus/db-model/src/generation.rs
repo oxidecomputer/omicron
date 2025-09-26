@@ -8,6 +8,7 @@ use diesel::pg::Pg;
 use diesel::serialize::{self, ToSql};
 use diesel::sql_types;
 use omicron_common::api::external;
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::convert::TryFrom;
 
@@ -23,6 +24,7 @@ use std::convert::TryFrom;
     FromSqlRow,
     Serialize,
     Deserialize,
+    JsonSchema,
 )]
 #[diesel(sql_type = sql_types::BigInt)]
 #[repr(transparent)]
