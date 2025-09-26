@@ -10,11 +10,17 @@ use super::BlueprintZoneImageSource;
 use super::CockroachDbPreserveDowngrade;
 use super::PendingMgsUpdates;
 use super::PlannerConfig;
+use crate::deployment::MgsUpdateComponent;
+use crate::inventory::BaseboardId;
+use crate::inventory::CabooseWhich;
 
 use daft::Diffable;
+use iddqd::IdOrdItem;
+use iddqd::id_upcast;
 use indent_write::fmt::IndentWriter;
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use omicron_common::api::external::Generation;
+use omicron_common::disk::M2Slot;
 use omicron_common::policy::COCKROACHDB_REDUNDANCY;
 use omicron_uuid_kinds::MupdateOverrideUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
@@ -24,11 +30,12 @@ use omicron_uuid_kinds::ZpoolUuid;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
-
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::fmt;
 use std::fmt::Write;
+use std::sync::Arc;
+use thiserror::Error;
 
 /// A full blueprint planning report. Other than the blueprint ID, each
 /// field corresponds to a step in the update planner, i.e., a subroutine
@@ -73,9 +80,7 @@ impl PlanningReport {
             expunge: PlanningExpungeStepReport::new(),
             decommission: PlanningDecommissionStepReport::new(),
             noop_image_source: PlanningNoopImageSourceStepReport::new(),
-            mgs_updates: PlanningMgsUpdatesStepReport::new(
-                PendingMgsUpdates::new(),
-            ),
+            mgs_updates: PlanningMgsUpdatesStepReport::empty(),
             add: PlanningAddStepReport::new(),
             zone_updates: PlanningZoneUpdatesStepReport::new(),
             nexus_generation_bump: PlanningNexusGenerationBumpReport::new(),
@@ -479,27 +484,129 @@ impl PlanningMupdateOverrideStepReport {
     }
 }
 
+/// Describes the reason why an SP component failed to update
+#[derive(
+    Error,
+    Debug,
+    Deserialize,
+    Serialize,
+    PartialEq,
+    Eq,
+    Diffable,
+    PartialOrd,
+    JsonSchema,
+    Ord,
+    Clone,
+)]
+#[serde(rename_all = "snake_case")]
+#[serde(tag = "type", content = "value")]
+// TODO-K: Separate into enums for each component as suggested in
+// https://github.com/oxidecomputer/omicron/pull/9001#discussion_r2372863166
+// and including more detailed information as suggested in
+// https://github.com/oxidecomputer/omicron/pull/9001#discussion_r2372842378
+pub enum FailedMgsUpdateReason {
+    /// The active host phase 1 slot does not match the boot disk
+    #[error("active phase 1 slot {0:?} does not match boot disk")]
+    ActiveHostPhase1SlotBootDiskMismatch(M2Slot),
+    /// The active host phase 1 hash was not found in inventory
+    #[error("active host phase 1 hash for slot {0:?} is not in inventory")]
+    ActiveHostPhase1HashNotInInventory(M2Slot),
+    /// The active host phase 1 slot was not found in inventory
+    #[error("active host phase 1 slot is not in inventory")]
+    ActiveHostPhase1SlotNotInInventory,
+    /// The component's caboose was missing a value for "sign"
+    #[error("caboose for {0:?} is missing sign")]
+    CabooseMissingSign(CabooseWhich),
+    /// The component's caboose was not found in the inventory
+    #[error("caboose for {0:?} is not in inventory")]
+    CabooseNotInInventory(CabooseWhich),
+    /// The version in the caboose or artifact was not able to be parsed
+    #[error("version from caboose {caboose:?} could not be parsed: {err}")]
+    FailedVersionParse { caboose: CabooseWhich, err: String },
+    /// The inactive host phase 1 hash was not found in inventory
+    #[error("inactive host phase 1 hash for slot {0:?} is not in inventory")]
+    InactiveHostPhase1HashNotInInventory(M2Slot),
+    /// Last reconciliation details were not found in inventory
+    #[error("sled agent last reconciliation is not in inventory")]
+    LastReconciliationNotInInventory,
+    /// No artifact with the required conditions for the component was found
+    #[error("no matching artifact was found")]
+    NoMatchingArtifactFound,
+    /// RoT state was not found in inventory
+    #[error("rot state is not in inventory")]
+    RotStateNotInInventory,
+    /// Sled agent info was not found in inventory
+    #[error("sled agent info is not in inventory")]
+    SledAgentInfoNotInInventory,
+    /// The component's corresponding SP was not found in the inventory
+    #[error("corresponding SP is not in inventory")]
+    SpNotInInventory,
+    /// Too many artifacts with the required conditions for the component were
+    /// found
+    #[error("too many matching artifacts were found")]
+    TooManyMatchingArtifacts,
+    /// The sled agent reported an error determining the boot disk
+    #[error("sled agent was unable to determine the boot disk: {0:?}")]
+    UnableToDetermineBootDisk(String),
+    /// The sled agent reported an error retrieving boot disk phase 2 image
+    /// details
+    #[error("sled agent was unable to retrieve boot disk phase 2 image: {0:?}")]
+    UnableToRetrieveBootDiskPhase2Image(String),
+}
+
+#[derive(
+    Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Diffable, JsonSchema,
+)]
+pub struct BlockedMgsUpdate {
+    /// id of the baseboard that we attempted to update
+    pub baseboard_id: Arc<BaseboardId>,
+    /// type of SP component that we attempted to update
+    pub component: MgsUpdateComponent,
+    /// reason why the update failed
+    pub reason: FailedMgsUpdateReason,
+}
+
+impl IdOrdItem for BlockedMgsUpdate {
+    type Key<'a> = &'a BaseboardId;
+    fn key(&self) -> Self::Key<'_> {
+        &*self.baseboard_id
+    }
+    id_upcast!();
+}
+
 #[derive(
     Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Diffable, JsonSchema,
 )]
 #[cfg_attr(test, derive(test_strategy::Arbitrary))]
 pub struct PlanningMgsUpdatesStepReport {
     pub pending_mgs_updates: PendingMgsUpdates,
+    pub blocked_mgs_updates: Vec<BlockedMgsUpdate>,
 }
 
 impl PlanningMgsUpdatesStepReport {
-    pub fn new(pending_mgs_updates: PendingMgsUpdates) -> Self {
-        Self { pending_mgs_updates }
+    pub fn new(
+        pending_mgs_updates: PendingMgsUpdates,
+        blocked_mgs_updates: Vec<BlockedMgsUpdate>,
+    ) -> Self {
+        Self { pending_mgs_updates, blocked_mgs_updates }
+    }
+
+    pub fn empty() -> Self {
+        Self {
+            pending_mgs_updates: PendingMgsUpdates::new(),
+            blocked_mgs_updates: Vec::new(),
+        }
     }
 
     pub fn is_empty(&self) -> bool {
         self.pending_mgs_updates.is_empty()
+            && self.blocked_mgs_updates.is_empty()
     }
 }
 
 impl fmt::Display for PlanningMgsUpdatesStepReport {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let Self { pending_mgs_updates } = self;
+        let Self { pending_mgs_updates, blocked_mgs_updates } = self;
         if !pending_mgs_updates.is_empty() {
             let n = pending_mgs_updates.len();
             let s = plural(n);
@@ -509,6 +616,18 @@ impl fmt::Display for PlanningMgsUpdatesStepReport {
                     f,
                     "  * {}: {:?}",
                     update.baseboard_id, update.details
+                )?;
+            }
+        }
+        if !blocked_mgs_updates.is_empty() {
+            let n = blocked_mgs_updates.len();
+            let s = plural(n);
+            writeln!(f, "* {n} blocked MGS update{s}:")?;
+            for update in blocked_mgs_updates {
+                writeln!(
+                    f,
+                    "  * {} {}: {}",
+                    update.baseboard_id, update.component, update.reason
                 )?;
             }
         }
@@ -1123,13 +1242,16 @@ impl PlanningReportBlueprintZone {
 #[serde(rename_all = "snake_case", tag = "type")]
 #[cfg_attr(test, derive(test_strategy::Arbitrary))]
 pub enum ZoneUpdatesWaitingOn {
+    /// Waiting on blocked updates to RoT bootloader / RoT / SP / Host OS.
+    BlockedMgsUpdates,
+
     /// Waiting on discretionary zone placement.
     DiscretionaryZones,
 
     /// Waiting on zones to propagate to inventory.
     InventoryPropagation,
 
-    /// Waiting on updates to RoT / SP / Host OS / etc.
+    /// Waiting on updates to RoT bootloader / RoT / SP / Host OS.
     PendingMgsUpdates,
 
     /// Waiting on the same set of blockers zone adds are waiting on.
@@ -1139,10 +1261,13 @@ pub enum ZoneUpdatesWaitingOn {
 impl ZoneUpdatesWaitingOn {
     pub fn as_str(&self) -> &'static str {
         match self {
+            Self::BlockedMgsUpdates => {
+                "blocked MGS updates (RoT bootloader / RoT / SP / Host OS)"
+            }
             Self::DiscretionaryZones => "discretionary zones",
             Self::InventoryPropagation => "zone propagation to inventory",
             Self::PendingMgsUpdates => {
-                "pending MGS updates (RoT / SP / Host OS / etc.)"
+                "pending MGS updates (RoT bootloader / RoT / SP / Host OS)"
             }
             Self::ZoneAddBlockers => "zone add blockers",
         }

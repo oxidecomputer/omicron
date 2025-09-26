@@ -30,7 +30,7 @@ impl EreportRequest {
         let Self { sled, restart_id, start_ena, committed_ena, limit } = self;
         client
             .sp_ereports_ingest(
-                gateway_client::types::SpType::Sled,
+                &SpType::Sled,
                 sled,
                 committed_ena.as_ref(),
                 limit.try_into().unwrap(),

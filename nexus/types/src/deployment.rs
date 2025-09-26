@@ -22,6 +22,7 @@ use blueprint_display::BpDatasetsTableSchema;
 use blueprint_display::BpHostPhase2TableSchema;
 use blueprint_display::BpTableColumn;
 use daft::Diffable;
+use gateway_types::component::SpType;
 use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
 use iddqd::id_ord_map::Entry;
@@ -58,6 +59,7 @@ use slog::Key;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::fmt;
+use std::fmt::Display;
 use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
 use std::sync::Arc;
@@ -72,7 +74,7 @@ mod clickhouse;
 pub mod execution;
 mod network_resources;
 mod planning_input;
-mod planning_report;
+pub mod planning_report;
 mod reconfigurator_config;
 mod zone_type;
 
@@ -82,7 +84,6 @@ use anyhow::bail;
 pub use blueprint_diff::BlueprintDiffSummary;
 use blueprint_display::BpPendingMgsUpdates;
 pub use clickhouse::ClickhouseClusterConfig;
-use gateway_client::types::SpType;
 use gateway_types::rot::RotSlot;
 pub use network_resources::AddNetworkResourceError;
 pub use network_resources::OmicronZoneExternalFloatingAddr;
@@ -1454,6 +1455,39 @@ impl fmt::Display for BlueprintHostPhase2DesiredContents {
 }
 
 #[derive(
+    Debug,
+    Deserialize,
+    Serialize,
+    PartialEq,
+    Eq,
+    Diffable,
+    PartialOrd,
+    JsonSchema,
+    Ord,
+    Clone,
+    Copy,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum MgsUpdateComponent {
+    Sp,
+    Rot,
+    RotBootloader,
+    HostOs,
+}
+
+impl Display for MgsUpdateComponent {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            MgsUpdateComponent::HostOs => "Host OS",
+            MgsUpdateComponent::Rot => "RoT",
+            MgsUpdateComponent::RotBootloader => "RoT Bootloader",
+            MgsUpdateComponent::Sp => "SP",
+        };
+        write!(f, "{s}")
+    }
+}
+
+#[derive(
     Clone, Debug, Eq, PartialEq, Deserialize, Serialize, JsonSchema, Diffable,
 )]
 #[cfg_attr(test, derive(test_strategy::Arbitrary))]
@@ -1543,11 +1577,6 @@ pub struct PendingMgsUpdate {
 
     // location of the baseboard (that we'd pass to MGS)
     /// what type of baseboard this is
-    #[cfg_attr(test, strategy(proptest::prop_oneof![
-        proptest::strategy::Just(SpType::Sled),
-        proptest::strategy::Just(SpType::Power),
-        proptest::strategy::Just(SpType::Switch),
-    ]))]
     pub sp_type: SpType,
     /// last known MGS slot (cubby number) of the baseboard
     pub slot_id: u16,
@@ -1650,6 +1679,21 @@ pub enum PendingMgsUpdateDetails {
     /// We write the phase 1 via MGS, and have a precheck condition that
     /// sled-agent has already written the matching phase 2.
     HostPhase1(PendingMgsUpdateHostPhase1Details),
+}
+
+impl From<&PendingMgsUpdateDetails> for MgsUpdateComponent {
+    fn from(details: &PendingMgsUpdateDetails) -> Self {
+        match &details {
+            PendingMgsUpdateDetails::Rot { .. } => MgsUpdateComponent::Rot,
+            PendingMgsUpdateDetails::RotBootloader { .. } => {
+                MgsUpdateComponent::RotBootloader
+            }
+            PendingMgsUpdateDetails::Sp { .. } => MgsUpdateComponent::Sp,
+            PendingMgsUpdateDetails::HostPhase1(_) => {
+                MgsUpdateComponent::HostOs
+            }
+        }
+    }
 }
 
 impl slog::KV for PendingMgsUpdateDetails {
@@ -2367,7 +2411,7 @@ mod test {
     use super::PendingMgsUpdateSpDetails;
     use super::PendingMgsUpdates;
     use crate::inventory::BaseboardId;
-    use gateway_client::types::SpType;
+    use gateway_types::component::SpType;
 
     #[test]
     fn test_serialize_pending_mgs_updates() {

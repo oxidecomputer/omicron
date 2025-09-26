@@ -75,7 +75,6 @@ progenitor::generate_api!(
         SpIgnition = { derives = [PartialEq, Eq, PartialOrd, Ord] },
         SpIgnitionSystemType = { derives = [Copy, PartialEq, Eq, PartialOrd, Ord] },
         SpState = { derives = [PartialEq, Eq, PartialOrd, Ord] },
-        SpType = { derives = [daft::Diffable, PartialEq, Eq, PartialOrd, Ord] },
         SpUpdateStatus = { derives = [PartialEq, Hash, Eq] },
         UpdatePreparationProgress = { derives = [PartialEq, Hash, Eq] },
     },
@@ -84,6 +83,7 @@ progenitor::generate_api!(
         Ena = ereport_types::Ena,
         Ereport = ereport_types::Ereport,
         Ereports = ereport_types::Ereports,
+        SpType = gateway_types::component::SpType,
         TaskDump = gateway_types::task_dump::TaskDump,
         TypedUuidForEreporterRestartKind = omicron_uuid_kinds::EreporterRestartUuid,
         TypedUuidForMupdateKind = omicron_uuid_kinds::MupdateUuid,
@@ -129,7 +129,7 @@ impl Client {
     /// handful of seconds on real hardware.
     pub async fn host_phase_1_flash_hash_calculate_with_timeout(
         &self,
-        sp_type: types::SpType,
+        sp_type: gateway_types::component::SpType,
         sp_slot: u16,
         phase1_slot: u16,
         timeout: Duration,
@@ -163,7 +163,7 @@ impl Client {
 
         let need_to_start_hashing = match self
             .sp_component_hash_firmware_get(
-                sp_type,
+                &sp_type,
                 sp_slot,
                 PHASE1_FLASH,
                 phase1_slot,
@@ -189,7 +189,7 @@ impl Client {
             // catch a `HashInProgress` error here and return an HTTP success.
             // We'll return any other error.
             self.sp_component_hash_firmware_start(
-                sp_type,
+                &sp_type,
                 sp_slot,
                 PHASE1_FLASH,
                 phase1_slot,
@@ -209,7 +209,7 @@ impl Client {
             }
             match self
                 .sp_component_hash_firmware_get(
-                    sp_type,
+                    &sp_type,
                     sp_slot,
                     PHASE1_FLASH,
                     phase1_slot,
