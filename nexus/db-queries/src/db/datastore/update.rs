@@ -18,8 +18,8 @@ use nexus_db_errors::OptionalError;
 use nexus_db_errors::{ErrorHandler, public_error_from_diesel};
 use nexus_db_lookup::DbConnection;
 use nexus_db_model::{
-    ArtifactHash, TufArtifact, TufRepo, TufRepoDescription, TufTrustRoot,
-    to_db_typed_uuid,
+    ArtifactHash, DbTypedUuid, TufArtifact, TufRepo, TufRepoDescription,
+    TufTrustRoot, to_db_typed_uuid,
 };
 use omicron_common::api::external::{
     self, CreateResult, DataPageParams, DeleteResult, Generation,
@@ -173,6 +173,28 @@ impl DataStore {
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
         Ok(TufRepoDescription { repo, artifacts })
+    }
+
+    /// Given a TUF repo ID, get its version. We could use `tuf_repo_get_by_id`,
+    /// but that makes an additional query for the artifacts that we don't need
+    /// in the code that uses this method.
+    pub async fn tuf_repo_get_version(
+        &self,
+        opctx: &OpContext,
+        tuf_repo_id: &DbTypedUuid<TufRepoKind>,
+    ) -> LookupResult<semver::Version> {
+        opctx
+            .authorize(authz::Action::Read, &authz::TARGET_RELEASE_CONFIG)
+            .await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
+        use nexus_db_schema::schema::tuf_repo;
+        tuf_repo::table
+            .select(tuf_repo::system_version)
+            .filter(tuf_repo::id.eq(tuf_repo_id.into_untyped_uuid()))
+            .first_async::<SemverVersion>(&*conn)
+            .await
+            .map(|v| v.0)
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     /// Returns the list of all TUF repo artifacts known to the system.

@@ -7,15 +7,12 @@
 use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
-use crate::db::model::{
-    Generation, SemverVersion, TargetRelease, TargetReleaseSource,
-};
+use crate::db::model::{Generation, TargetRelease};
 use async_bb8_diesel::AsyncRunQueryDsl as _;
 use diesel::insert_into;
 use diesel::prelude::*;
 use nexus_db_errors::{ErrorHandler, public_error_from_diesel};
 use nexus_db_schema::schema::target_release::dsl;
-use nexus_types::external_api::views;
 use omicron_common::api::external::{CreateResult, Error, LookupResult};
 
 impl DataStore {
@@ -83,49 +80,6 @@ impl DataStore {
             .get_result_async(&*conn)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
-    }
-
-    /// Convert a model-level target release to an external view.
-    /// This method lives here because we have to look up the version
-    /// corresponding to the TUF repo.
-    pub async fn target_release_view(
-        &self,
-        opctx: &OpContext,
-        target_release: &TargetRelease,
-    ) -> LookupResult<views::TargetRelease> {
-        opctx
-            .authorize(authz::Action::Read, &authz::TARGET_RELEASE_CONFIG)
-            .await?;
-        let conn = self.pool_connection_authorized(opctx).await?;
-        let release_source = match target_release.release_source {
-            TargetReleaseSource::Unspecified => {
-                views::TargetReleaseSource::Unspecified
-            }
-            TargetReleaseSource::SystemVersion => {
-                use nexus_db_schema::schema::tuf_repo;
-                if let Some(tuf_repo_id) = target_release.tuf_repo_id {
-                    views::TargetReleaseSource::SystemVersion {
-                        version: tuf_repo::table
-                            .select(tuf_repo::system_version)
-                            .filter(tuf_repo::id.eq(tuf_repo_id))
-                            .first_async::<SemverVersion>(&*conn)
-                            .await
-                            .map_err(|e| {
-                                public_error_from_diesel(
-                                    e,
-                                    ErrorHandler::Server,
-                                )
-                            })?
-                            .into(),
-                    }
-                } else {
-                    return Err(Error::internal_error(
-                        "missing TUF repo ID for specified system version",
-                    ));
-                }
-            }
-        };
-        Ok(target_release.into_external(release_source))
     }
 }
 
