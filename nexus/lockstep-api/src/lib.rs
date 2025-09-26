@@ -44,7 +44,6 @@ use nexus_types::internal_api::views::QuiesceStatus;
 use nexus_types::internal_api::views::Saga;
 use nexus_types::internal_api::views::UpdateStatus;
 use omicron_common::api::external::Instance;
-use omicron_common::api::external::TufArtifactMeta;
 use omicron_common::api::external::http_pagination::PaginatedById;
 use omicron_common::api::external::http_pagination::PaginatedByTimeAndId;
 use omicron_uuid_kinds::*;
@@ -304,17 +303,6 @@ pub trait NexusLockstepApi {
     async fn update_status(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<UpdateStatus>, HttpError>;
-
-    /// List artifacts for a TUF repository by version
-    #[endpoint {
-        method = GET,
-        path = "/deployment/repositories/{version}/artifacts"
-    }]
-    async fn tuf_repo_artifacts_list(
-        rqctx: RequestContext<Self::Context>,
-        path_params: Path<TufRepoVersionPathParam>,
-        query_params: Query<PaginatedById>,
-    ) -> Result<HttpResponseOk<ResultsPage<TufArtifactMeta>>, HttpError>;
 
     /// List uninitialized sleds
     #[endpoint {
@@ -581,10 +569,4 @@ pub struct SledId {
 #[derive(Deserialize, JsonSchema)]
 pub struct VersionPathParam {
     pub version: u32,
-}
-
-/// Path parameters for TUF repository version requests
-#[derive(Deserialize, JsonSchema)]
-pub struct TufRepoVersionPathParam {
-    pub version: String,
 }
