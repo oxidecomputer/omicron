@@ -91,6 +91,7 @@ use nexus_sled_agent_shared::inventory::BootPartitionDetails;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventory;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryResult;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryStatus;
+use nexus_sled_agent_shared::inventory::MeasurementResolverInventory;
 use nexus_sled_agent_shared::inventory::MupdateOverrideNonBootInventory;
 use nexus_sled_agent_shared::inventory::OmicronSledConfig;
 use nexus_sled_agent_shared::inventory::OrphanedDataset;
@@ -3146,6 +3147,7 @@ impl DataStore {
                             datasets: IdMap::default(),
                             zones: IdMap::default(),
                             host_phase_2: sled_config.host_phase_2.into(),
+                            measurements: sled_config.measurements.into(),
                         },
                     });
                 }
@@ -3948,6 +3950,9 @@ impl DataStore {
                     ))
                 })?;
 
+            // XXX FIXME
+            let measurement_resolver = MeasurementResolverInventory::new_fake();
+
             let sled_agent = nexus_types::inventory::SledAgent {
                 time_collected: s.time_collected,
                 source: s.source,
@@ -3984,6 +3989,7 @@ impl DataStore {
                 reconciler_status,
                 last_reconciliation,
                 zone_image_resolver,
+                measurement_resolver,
             };
             sled_agents
                 .insert_unique(sled_agent)
@@ -4329,6 +4335,7 @@ impl ConfigReconcilerRows {
             config.generation,
             config.remove_mupdate_override,
             config.host_phase_2.clone(),
+            config.measurements.clone(),
         ));
         self.disks.extend(config.disks.iter().map(|disk| {
             InvOmicronSledConfigDisk::new(

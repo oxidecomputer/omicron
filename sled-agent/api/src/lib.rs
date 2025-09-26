@@ -55,6 +55,9 @@ use uuid::Uuid;
 /// Copies of data types that changed between v3 and v4.
 mod v3;
 
+/// Copies of data types that changed between v4 and v5.
+mod v4;
+
 api_versions!([
     // WHEN CHANGING THE API (part 1 of 2):
     //
@@ -67,6 +70,7 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
+    (6, MEASUREMENTS),
     (5, NEWTYPE_UUID_BUMP),
     (4, ADD_NEXUS_LOCKSTEP_PORT_TO_INVENTORY),
     (3, ADD_SWITCH_ZONE_OPERATOR_POLICY),
@@ -326,7 +330,7 @@ pub trait SledAgentApi {
     #[endpoint {
         method = PUT,
         path = "/omicron-config",
-        versions = VERSION_ADD_NEXUS_LOCKSTEP_PORT_TO_INVENTORY..,
+        versions = VERSION_MEASUREMENTS..,
     }]
     async fn omicron_config_put(
         rqctx: RequestContext<Self::Context>,
@@ -342,6 +346,19 @@ pub trait SledAgentApi {
     async fn v3_omicron_config_put(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<v3::OmicronSledConfig>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        Self::omicron_config_put(rqctx, body.map(Into::into)).await
+    }
+
+    #[endpoint {
+        operation_id = "omicron_config_put",
+        method = PUT,
+        path = "/omicron-config",
+        versions = VERSION_ADD_NEXUS_LOCKSTEP_PORT_TO_INVENTORY..VERSION_MEASUREMENTS,
+    }]
+    async fn v4_omicron_config_put(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<v4::OmicronSledConfig>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         Self::omicron_config_put(rqctx, body.map(Into::into)).await
     }
@@ -568,7 +585,7 @@ pub trait SledAgentApi {
     #[endpoint {
         method = GET,
         path = "/inventory",
-        versions = VERSION_ADD_NEXUS_LOCKSTEP_PORT_TO_INVENTORY..,
+        versions = VERSION_MEASUREMENTS..,
     }]
     async fn inventory(
         rqctx: RequestContext<Self::Context>,
@@ -584,6 +601,20 @@ pub trait SledAgentApi {
     async fn v3_inventory(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<v3::Inventory>, HttpError> {
+        let HttpResponseOk(inventory) = Self::inventory(rqctx).await?;
+        Ok(HttpResponseOk(inventory.into()))
+    }
+
+    /// Fetch basic information about this sled
+    #[endpoint {
+        operation_id = "inventory",
+        method = GET,
+        path = "/inventory",
+        versions = VERSION_ADD_NEXUS_LOCKSTEP_PORT_TO_INVENTORY..VERSION_MEASUREMENTS,
+    }]
+    async fn v4_inventory(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<v4::Inventory>, HttpError> {
         let HttpResponseOk(inventory) = Self::inventory(rqctx).await?;
         Ok(HttpResponseOk(inventory.into()))
     }

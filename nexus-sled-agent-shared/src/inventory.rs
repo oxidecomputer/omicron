@@ -130,6 +130,7 @@ pub struct Inventory {
     pub reconciler_status: ConfigReconcilerInventoryStatus,
     pub last_reconciliation: Option<ConfigReconcilerInventory>,
     pub zone_image_resolver: ZoneImageResolverInventory,
+    pub measurement_resolver: MeasurementResolverInventory,
 }
 
 /// Describes the last attempt made by the sled-agent-config-reconciler to
@@ -1036,6 +1037,8 @@ pub struct OmicronSledConfig {
     pub remove_mupdate_override: Option<MupdateOverrideUuid>,
     #[serde(default = "HostPhase2DesiredSlots::current_contents")]
     pub host_phase_2: HostPhase2DesiredSlots,
+    #[serde(default = "OmicronMeasurements::measurements_defaults")]
+    pub measurements: OmicronMeasurements,
 }
 
 impl Default for OmicronSledConfig {
@@ -1047,6 +1050,7 @@ impl Default for OmicronSledConfig {
             zones: IdMap::default(),
             remove_mupdate_override: None,
             host_phase_2: HostPhase2DesiredSlots::current_contents(),
+            measurements: OmicronMeasurements::measurements_defaults(),
         }
     }
 }
@@ -1763,6 +1767,384 @@ impl OmicronZoneImageSource {
     // outside of `serde(default)`.
     pub fn deserialize_default() -> Self {
         OmicronZoneImageSource::InstallDataset
+    }
+}
+
+/// Where the measurement source is located
+///
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    Hash,
+    PartialOrd,
+    Ord,
+    JsonSchema,
+    Deserialize,
+    Serialize,
+    Diffable,
+)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum OmicronMeasurementSetDesiredContents {
+    /// This measurement source is whatever happens to be on the sled's
+    /// "install" dataset.
+    ///
+    /// This is whatever was put in place at the factory or by the latest
+    /// MUPdate. The image used here can vary by sled and even over time (if the
+    /// sled gets MUPdated again). We expect this to be only used for
+    /// emergencies
+    InstallDataset,
+
+    /// This measurement source source are the artifacts matching this hash from the TUF
+    /// artifact store (aka "TUF repo depot").
+    ///
+    /// This originates from TUF repos uploaded to Nexus which are then
+    /// replicated out to all sleds.
+    #[serde(rename_all = "snake_case")]
+    Artifacts { hashes: Vec<ArtifactHash> },
+}
+
+fn measurement_set_default() -> OmicronMeasurementSetDesiredContents {
+    OmicronMeasurementSetDesiredContents::InstallDataset
+}
+
+/// Describes the set of reference measurements for a sled
+#[derive(
+    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
+)]
+pub struct OmicronMeasurements {
+    #[serde(default = "measurement_set_default")]
+    pub previous: OmicronMeasurementSetDesiredContents,
+    #[serde(default = "measurement_set_default")]
+    pub current: OmicronMeasurementSetDesiredContents,
+}
+
+impl OmicronMeasurements {
+    pub fn measurements_defaults() -> OmicronMeasurements {
+        OmicronMeasurements {
+            previous: measurement_set_default(),
+            current: measurement_set_default(),
+        }
+    }
+}
+
+/// Inventory representation of a single measurement artifact on a boot disk.
+///
+/// Part of [`ZoneManifestBootInventory`].
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
+pub struct MeasurementArtifactInventory {
+    /// The name of the measurement file on disk
+    pub file_name: String,
+
+    /// The full path to the measuerement file.
+    #[schemars(schema_with = "path_schema")]
+    pub path: Utf8PathBuf,
+
+    /// The expected size of the file, in bytes.
+    pub expected_size: u64,
+
+    /// The expected digest of the file's contents.
+    pub expected_hash: ArtifactHash,
+
+    /// The status of the artifact.
+    ///
+    /// This is `Ok(())` if the artifact is present and matches the expected
+    /// size and digest, or an error message if it is missing or does not match.
+    #[serde(with = "snake_case_result")]
+    #[schemars(schema_with = "SnakeCaseResult::<(), String>::json_schema")]
+    pub status: Result<(), String>,
+}
+
+impl MeasurementArtifactInventory {
+    /// Returns a displayer for this inventory.
+    pub fn display(&self) -> MeasurementArtifactInventoryDisplay<'_> {
+        MeasurementArtifactInventoryDisplay { inner: self }
+    }
+}
+
+/// Displayer for [`MeasurementArtifactInventory`].
+#[derive(Clone, Debug)]
+pub struct MeasurementArtifactInventoryDisplay<'a> {
+    inner: &'a MeasurementArtifactInventory,
+}
+
+impl fmt::Display for MeasurementArtifactInventoryDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let MeasurementArtifactInventory {
+            file_name,
+            // We don't show the path here because surrounding code typically
+            // displays the path. We could make this controllable in the future
+            // via a method on `MeasurementArtifactInventoryDisplay`.
+            path: _,
+            expected_size,
+            expected_hash,
+            status,
+        } = self.inner;
+        write!(
+            f,
+            "{file_name} (expected {expected_size} bytes \
+             with hash {expected_hash}): ",
+        )?;
+        match status {
+            Ok(()) => write!(f, "ok"),
+            Err(message) => write!(f, "error: {message}"),
+        }
+    }
+}
+
+/// Inventory representation of measurement resolver status and health.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
+pub struct MeasurementResolverInventory {
+    /// The zone manifest status.
+    pub measurement_manifest: MeasurementManifestInventory,
+
+    /// The mupdate override status.
+    pub mupdate_override: MupdateOverrideInventory,
+}
+
+impl MeasurementResolverInventory {
+    /// Returns a new, fake inventory for tests.
+    pub fn new_fake() -> Self {
+        Self {
+            measurement_manifest: MeasurementManifestInventory::new_fake(),
+            mupdate_override: MupdateOverrideInventory::new_fake(),
+        }
+    }
+
+    /// Returns a displayer for this inventory.
+    pub fn display(&self) -> MeasurementResolverInventoryDisplay<'_> {
+        MeasurementResolverInventoryDisplay { inner: self }
+    }
+}
+
+/// Displayer for a [`MeasurementResolverInventory`]
+pub struct MeasurementResolverInventoryDisplay<'a> {
+    inner: &'a MeasurementResolverInventory,
+}
+
+impl fmt::Display for MeasurementResolverInventoryDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let MeasurementResolverInventory {
+            measurement_manifest,
+            mupdate_override,
+        } = self.inner;
+
+        writeln!(f, "measurement manifest:")?;
+        let mut indented = IndentWriter::new("    ", f);
+        // Use write! rather than writeln! because zone_manifest.display()
+        // always produces a newline at the end.
+        write!(indented, "{}", measurement_manifest.display())?;
+        let f = indented.into_inner();
+
+        writeln!(f, "mupdate override:")?;
+        let mut indented = IndentWriter::new("    ", f);
+        // Use write! rather than writeln! because mupdate_override.display()
+        // always produces a newline at the end.
+        write!(indented, "{}", mupdate_override.display())?;
+
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
+pub struct MeasurementManifestInventory {
+    /// The full path to the zone manifest file on the boot disk.
+    #[schemars(schema_with = "path_schema")]
+    pub boot_disk_path: Utf8PathBuf,
+
+    /// The manifest read from the boot disk, and whether the manifest is valid.
+    #[serde(with = "snake_case_result")]
+    #[schemars(
+        schema_with = "SnakeCaseResult::<ZoneManifestBootInventory, String>::json_schema"
+    )]
+    pub boot_inventory: Result<MeasurementManifestBootInventory, String>,
+
+    /// Information about the install dataset on non-boot disks.
+    pub non_boot_status: Vec<MeasurementManifestNonBootInventory>,
+}
+
+impl MeasurementManifestInventory {
+    /// Returns a new, empty inventory for tests.
+    pub fn new_fake() -> Self {
+        Self {
+            boot_disk_path: Utf8PathBuf::from("/fake/path/install/zones.json"),
+            boot_inventory: Ok(MeasurementManifestBootInventory::new_fake()),
+            non_boot_status: Vec::new(),
+        }
+    }
+
+    /// Returns a displayer for this inventory.
+    pub fn display(&self) -> MeasurementManifestInventoryDisplay<'_> {
+        MeasurementManifestInventoryDisplay { inner: self }
+    }
+}
+
+/// Displayer for a [`ZoneManifestInventory`]
+#[derive(Clone, Debug)]
+pub struct MeasurementManifestInventoryDisplay<'a> {
+    inner: &'a MeasurementManifestInventory,
+}
+
+impl fmt::Display for MeasurementManifestInventoryDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut f = f;
+
+        let MeasurementManifestInventory {
+            boot_disk_path,
+            boot_inventory,
+            non_boot_status,
+        } = self.inner;
+        writeln!(f, "path on boot disk: {}", boot_disk_path)?;
+
+        match boot_inventory {
+            Ok(boot_inventory) => {
+                writeln!(f, "boot disk inventory:")?;
+                let mut indented = IndentWriter::new("    ", f);
+                // Use write! rather than writeln! because
+                // boot_inventory.display() always ends with a newline.
+                write!(indented, "{}", boot_inventory.display())?;
+                f = indented.into_inner();
+            }
+            Err(error) => {
+                writeln!(
+                    f,
+                    "error obtaining zone manifest on boot disk: {error}"
+                )?;
+            }
+        }
+
+        if non_boot_status.is_empty() {
+            writeln!(f, "no non-boot disks")?;
+        } else {
+            writeln!(f, "non-boot disk status:")?;
+            for non_boot in non_boot_status {
+                let mut indented = IndentWriter::new_skip_initial("    ", f);
+                writeln!(indented, "  - {}", non_boot.display())?;
+                f = indented.into_inner();
+            }
+        }
+
+        Ok(())
+    }
+}
+
+/// Inventory representation of zone artifacts on the boot disk.
+///
+/// Part of [`ZoneManifestInventory`].
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
+pub struct MeasurementManifestBootInventory {
+    /// The manifest source.
+    ///
+    /// In production this is [`OmicronZoneManifestSource::Installinator`], but
+    /// in some development and testing flows Sled Agent synthesizes zone
+    /// manifests. In those cases, the source is
+    /// [`OmicronZoneManifestSource::SledAgent`].
+    pub source: OmicronZoneManifestSource,
+
+    /// The artifacts on disk.
+    pub artifacts: Vec<MeasurementArtifactInventory>,
+}
+
+impl MeasurementManifestBootInventory {
+    /// Returns a new, empty inventory for tests.
+    ///
+    /// For a more representative selection of real zones, see `representative`
+    /// in `nexus-inventory`.
+    pub fn new_fake() -> Self {
+        Self {
+            source: OmicronZoneManifestSource::Installinator {
+                mupdate_id: MupdateUuid::nil(),
+            },
+            artifacts: Vec::new(),
+        }
+    }
+
+    /// Returns a displayer for this inventory.
+    pub fn display(&self) -> MeasurementManifestBootInventoryDisplay<'_> {
+        MeasurementManifestBootInventoryDisplay { inner: self }
+    }
+}
+
+/// Displayer for a [`ZoneManifestBootInventory`].
+#[derive(Clone, Debug)]
+pub struct MeasurementManifestBootInventoryDisplay<'a> {
+    inner: &'a MeasurementManifestBootInventory,
+}
+
+impl fmt::Display for MeasurementManifestBootInventoryDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut f = f;
+
+        let MeasurementManifestBootInventory { source, artifacts } = self.inner;
+        writeln!(f, "manifest generated by {}", source)?;
+        if artifacts.is_empty() {
+            writeln!(
+                f,
+                "no artifacts in install dataset \
+                 (this should only be seen in simulated systems)"
+            )?;
+        } else {
+            writeln!(f, "artifacts in install dataset:")?;
+
+            for artifact in artifacts {
+                let mut indented = IndentWriter::new_skip_initial("    ", f);
+                writeln!(indented, "  - {}", artifact.display())?;
+                f = indented.into_inner();
+            }
+        }
+
+        Ok(())
+    }
+}
+
+/// Inventory representation of a zone manifest on a non-boot disk.
+///
+/// Unlike [`ZoneManifestBootInventory`] which is structured since
+/// Reconfigurator makes decisions based on it, information about non-boot disks
+/// is purely advisory. For simplicity, we store information in an unstructured
+/// format.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
+pub struct MeasurementManifestNonBootInventory {
+    /// The full path to the zone manifest JSON on the non-boot disk.
+    #[schemars(schema_with = "path_schema")]
+    pub path: Utf8PathBuf,
+
+    /// Whether the status is valid.
+    pub is_valid: bool,
+
+    /// A message describing the status.
+    ///
+    /// If `is_valid` is true, then the message describes the list of artifacts
+    /// found and their hashes.
+    ///     
+    /// If `is_valid` is false, then this message describes the reason for the
+    /// invalid status. This could include errors reading the zone manifest, or
+    /// zone file mismatches.
+    pub message: String,
+}
+
+impl MeasurementManifestNonBootInventory {
+    /// Returns a displayer for this inventory.
+    pub fn display(&self) -> MeasurementManifestNonBootInventoryDisplay<'_> {
+        MeasurementManifestNonBootInventoryDisplay { inner: self }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct MeasurementManifestNonBootInventoryDisplay<'a> {
+    inner: &'a MeasurementManifestNonBootInventory,
+}
+
+impl fmt::Display for MeasurementManifestNonBootInventoryDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let MeasurementManifestNonBootInventory { path, is_valid, message } =
+            self.inner;
+        write!(
+            f,
+            "{path} ({}): {message}",
+            if *is_valid { "valid" } else { "invalid" },
+        )
     }
 }
 

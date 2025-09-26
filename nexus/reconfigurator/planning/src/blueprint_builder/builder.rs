@@ -14,6 +14,7 @@ use crate::blueprint_editor::ExternalSnatNetworkingChoice;
 use crate::blueprint_editor::NoAvailableDnsSubnets;
 use crate::blueprint_editor::SledEditError;
 use crate::blueprint_editor::SledEditor;
+use crate::measurements::PendingMeasurements;
 use crate::mgs_updates::PendingHostPhase2Changes;
 use crate::planner::NoopConvertInfo;
 use crate::planner::NoopConvertSledIneligibleReason;
@@ -36,6 +37,8 @@ use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintDatasetDisposition;
 use nexus_types::deployment::BlueprintHostPhase2DesiredContents;
 use nexus_types::deployment::BlueprintHostPhase2DesiredSlots;
+use nexus_types::deployment::BlueprintMeasurementSetDesiredContents;
+use nexus_types::deployment::BlueprintMeasurementsDesiredContents;
 use nexus_types::deployment::BlueprintPhysicalDiskConfig;
 use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
 use nexus_types::deployment::BlueprintSledConfig;
@@ -580,6 +583,7 @@ impl<'a> BlueprintBuilder<'a> {
                     remove_mupdate_override: None,
                     host_phase_2:
                         BlueprintHostPhase2DesiredSlots::current_contents(),
+                    measurements: BlueprintMeasurementsDesiredContents::default_contents(),
                 };
                 (sled_id, config)
             })
@@ -790,6 +794,18 @@ impl<'a> BlueprintBuilder<'a> {
             ))
         })?;
         Ok(editor.host_phase_2())
+    }
+
+    pub fn current_sled_measurements(
+        &self,
+        sled_id: SledUuid,
+    ) -> Result<BlueprintMeasurementsDesiredContents, Error> {
+        let editor = self.sled_editors.get(&sled_id).ok_or_else(|| {
+            Error::Planner(anyhow!(
+                "tried to get host phase 2 for unknown sled {sled_id}"
+            ))
+        })?;
+        Ok(editor.measurements())
     }
 
     /// Assemble a final [`Blueprint`] based on the contents of the builder
@@ -2021,6 +2037,16 @@ impl<'a> BlueprintBuilder<'a> {
         Ok(final_counts.difference_since(initial_counts))
     }
 
+    pub(crate) fn apply_pending_measurement_updates(
+        &mut self,
+        changes: PendingMeasurements,
+    ) -> Result<(), Error> {
+        for (sled_id, measurement) in changes.into_iter() {
+            self.sled_set_current_measurements(sled_id, measurement)?;
+        }
+        Ok(())
+    }
+
     pub(crate) fn apply_pending_host_phase_2_changes(
         &mut self,
         changes: PendingHostPhase2Changes,
@@ -2043,6 +2069,36 @@ impl<'a> BlueprintBuilder<'a> {
         })?;
         editor
             .set_host_phase_2(host_phase_2)
+            .map_err(|err| Error::SledEditError { sled_id, err })
+    }
+
+    pub fn sled_set_current_measurements(
+        &mut self,
+        sled_id: SledUuid,
+        measurements: BlueprintMeasurementSetDesiredContents,
+    ) -> Result<(), Error> {
+        let editor = self.sled_editors.get_mut(&sled_id).ok_or_else(|| {
+            Error::Planner(anyhow!(
+                "tried to change measurements on unknown sled {sled_id}"
+            ))
+        })?;
+        editor
+            .set_current_measurements(measurements)
+            .map_err(|err| Error::SledEditError { sled_id, err })
+    }
+
+    pub fn sled_set_measurements(
+        &mut self,
+        sled_id: SledUuid,
+        measurements: BlueprintMeasurementsDesiredContents,
+    ) -> Result<(), Error> {
+        let editor = self.sled_editors.get_mut(&sled_id).ok_or_else(|| {
+            Error::Planner(anyhow!(
+                "tried to change measurements on unknown sled {sled_id}"
+            ))
+        })?;
+        editor
+            .set_measurements(measurements)
             .map_err(|err| Error::SledEditError { sled_id, err })
     }
 

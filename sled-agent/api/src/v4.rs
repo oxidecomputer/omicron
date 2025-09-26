@@ -238,6 +238,10 @@ pub enum OmicronZoneType {
     Nexus {
         /// The address at which the internal nexus server is reachable.
         internal_address: SocketAddrV6,
+        /// The port at which the internal lockstep server is reachable. This
+        /// shares the same IP address with `internal_address`.
+        #[serde(default = "default_nexus_lockstep_port")]
+        lockstep_port: u16,
         /// The address at which the external nexus server is reachable.
         external_ip: IpAddr,
         /// The service vNIC providing external connectivity using OPTE.
@@ -250,6 +254,10 @@ pub enum OmicronZoneType {
     Oximeter {
         address: SocketAddrV6,
     },
+}
+
+fn default_nexus_lockstep_port() -> u16 {
+    omicron_common::address::NEXUS_LOCKSTEP_PORT
 }
 
 impl From<OmicronZoneType> for inventory::OmicronZoneType {
@@ -313,13 +321,14 @@ impl From<OmicronZoneType> for inventory::OmicronZoneType {
             OmicronZoneType::Nexus {
                 internal_address,
                 external_ip,
+                lockstep_port,
                 nic,
                 external_tls,
                 external_dns_servers,
             } => Self::Nexus {
                 internal_address,
-                lockstep_port: NEXUS_LOCKSTEP_PORT,
                 external_ip,
+                lockstep_port,
                 nic,
                 external_tls,
                 external_dns_servers,
@@ -391,13 +400,14 @@ impl From<inventory::OmicronZoneType> for OmicronZoneType {
             }
             inventory::OmicronZoneType::Nexus {
                 internal_address,
-                lockstep_port: _,
+                lockstep_port,
                 external_ip,
                 nic,
                 external_tls,
                 external_dns_servers,
             } => Self::Nexus {
                 internal_address,
+                lockstep_port,
                 external_ip,
                 nic,
                 external_tls,

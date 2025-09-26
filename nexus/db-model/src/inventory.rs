@@ -60,7 +60,8 @@ use nexus_sled_agent_shared::inventory::ZoneManifestBootInventory;
 use nexus_sled_agent_shared::inventory::ZoneManifestInventory;
 use nexus_sled_agent_shared::inventory::ZoneManifestNonBootInventory;
 use nexus_sled_agent_shared::inventory::{
-    ConfigReconcilerInventoryResult, OmicronSledConfig, OmicronZoneConfig,
+    ConfigReconcilerInventoryResult, OmicronMeasurementSetDesiredContents,
+    OmicronMeasurements, OmicronSledConfig, OmicronZoneConfig,
     OmicronZoneDataset, OmicronZoneImageSource, OmicronZoneType,
 };
 use nexus_types::inventory::HostPhase1ActiveSlot;
@@ -2126,6 +2127,8 @@ pub struct InvOmicronSledConfig {
 
     #[diesel(embed)]
     pub host_phase_2: DbHostPhase2DesiredSlots,
+    #[diesel(embed)]
+    pub measurements: DbOmicronMeasurements,
 }
 
 impl InvOmicronSledConfig {
@@ -2135,6 +2138,7 @@ impl InvOmicronSledConfig {
         generation: external::Generation,
         remove_mupdate_override: Option<MupdateOverrideUuid>,
         host_phase_2: HostPhase2DesiredSlots,
+        measurements: OmicronMeasurements,
     ) -> Self {
         Self {
             inv_collection_id: inv_collection_id.into(),
@@ -2142,6 +2146,48 @@ impl InvOmicronSledConfig {
             generation: Generation(generation),
             remove_mupdate_override: remove_mupdate_override.map(From::from),
             host_phase_2: host_phase_2.into(),
+            measurements: measurements.into(),
+        }
+    }
+}
+
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = inv_omicron_sled_config)]
+pub struct DbOmicronMeasurements {
+    pub measurements_previous: Option<Vec<ArtifactHash>>,
+    pub measurements_current: Option<Vec<ArtifactHash>>,
+}
+
+impl From<OmicronMeasurements> for DbOmicronMeasurements {
+    fn from(value: OmicronMeasurements) -> Self {
+        let remap = |desired| match desired {
+            OmicronMeasurementSetDesiredContents::InstallDataset => None,
+            OmicronMeasurementSetDesiredContents::Artifacts { hashes } => {
+                Some(hashes.into_iter().map(|x| ArtifactHash(x)).collect())
+            }
+        };
+        Self {
+            measurements_previous: remap(value.previous),
+            measurements_current: remap(value.current),
+        }
+    }
+}
+
+impl From<DbOmicronMeasurements> for OmicronMeasurements {
+    fn from(value: DbOmicronMeasurements) -> Self {
+        let remap =
+            |maybe_artifact: Option<Vec<ArtifactHash>>| match maybe_artifact {
+                None => OmicronMeasurementSetDesiredContents::InstallDataset,
+                Some(hashes) => {
+                    let hashes = hashes.into_iter().map(|ArtifactHash(x)| x);
+                    OmicronMeasurementSetDesiredContents::Artifacts {
+                        hashes: hashes.collect(),
+                    }
+                }
+            };
+        Self {
+            previous: remap(value.measurements_previous),
+            current: remap(value.measurements_current),
         }
     }
 }

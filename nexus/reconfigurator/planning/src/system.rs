@@ -22,6 +22,7 @@ use nexus_sled_agent_shared::inventory::Inventory;
 use nexus_sled_agent_shared::inventory::InventoryDataset;
 use nexus_sled_agent_shared::inventory::InventoryDisk;
 use nexus_sled_agent_shared::inventory::InventoryZpool;
+use nexus_sled_agent_shared::inventory::MeasurementResolverInventory;
 use nexus_sled_agent_shared::inventory::MupdateOverrideBootInventory;
 use nexus_sled_agent_shared::inventory::OmicronSledConfig;
 use nexus_sled_agent_shared::inventory::SledCpuFamily;
@@ -1391,6 +1392,7 @@ impl Sled {
                 ),
                 // XXX: return something more reasonable here?
                 zone_image_resolver: ZoneImageResolverInventory::new_fake(),
+                measurement_resolver: MeasurementResolverInventory::new_fake(),
             }
         };
 
@@ -1569,6 +1571,7 @@ impl Sled {
             reconciler_status: inv_sled_agent.reconciler_status.clone(),
             last_reconciliation: inv_sled_agent.last_reconciliation.clone(),
             zone_image_resolver: inv_sled_agent.zone_image_resolver.clone(),
+            measurement_resolver: inv_sled_agent.measurement_resolver.clone(),
         };
 
         Sled {

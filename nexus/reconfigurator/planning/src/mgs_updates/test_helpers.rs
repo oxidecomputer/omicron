@@ -1139,6 +1139,7 @@ impl<'a> TestBoardCollectionBuilder<'a> {
                     zones: IdMap::new(),
                     remove_mupdate_override: None,
                     host_phase_2: HostPhase2DesiredSlots::current_contents(),
+                    measurements: OmicronMeasurements::measurement_default(),
                 };
 
                 // The only sled-agent fields that matter for the purposes of

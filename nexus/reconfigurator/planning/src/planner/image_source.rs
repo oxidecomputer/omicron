@@ -7,15 +7,18 @@ use std::{collections::HashMap, fmt};
 use anyhow::anyhow;
 use iddqd::{IdOrdItem, IdOrdMap, id_ord_map::RefMut, id_upcast};
 use nexus_sled_agent_shared::inventory::{
-    BootPartitionContents, BootPartitionDetails, ZoneKind,
-    ZoneManifestBootInventory,
+    BootPartitionContents, BootPartitionDetails,
+    MeasurementManifestBootInventory, ZoneKind, ZoneManifestBootInventory,
 };
 use nexus_types::{
     deployment::{
         BlueprintArtifactVersion, BlueprintHostPhase2DesiredContents,
-        BlueprintHostPhase2DesiredSlots, BlueprintZoneConfig,
-        BlueprintZoneDisposition, BlueprintZoneImageSource, PlanningInput,
-        SledFilter, TargetReleaseDescription,
+        BlueprintHostPhase2DesiredSlots,
+        BlueprintMeasurementSetDesiredContents,
+        BlueprintMeasurementsDesiredContents, BlueprintSingleMeasurement,
+        BlueprintZoneConfig, BlueprintZoneDisposition,
+        BlueprintZoneImageSource, PlanningInput, SledFilter,
+        TargetReleaseDescription,
     },
     inventory::Collection,
 };
@@ -93,6 +96,35 @@ impl NoopConvertInfo {
                 }
             };
 
+            let measurement_manifest = match &inv_sled
+                .measurement_resolver
+                .measurement_manifest
+                .boot_inventory
+            {
+                Ok(zm) => zm,
+                Err(message) => {
+                    sleds
+                        .insert_unique(NoopConvertSledInfo {
+                            sled_id,
+                            status: NoopConvertSledStatus::Ineligible(
+                                NoopConvertSledIneligibleReason::ManifestError {
+                                    message: message.to_owned(),
+                                },
+                            ),
+                        })
+                        .expect("sled IDs are unique");
+                    continue;
+                }
+            };
+
+            let measurements = blueprint.current_sled_measurements(sled_id)?;
+
+            let measurements = NoopConvertMeasurements::new(
+                measurements,
+                measurement_manifest,
+                &artifacts_by_hash,
+            );
+
             // Out of these, which zones' hashes (as reported in the zone
             // manifest) match the corresponding ones in the TUF repo?
             let zones = blueprint
@@ -126,12 +158,14 @@ impl NoopConvertInfo {
                         mupdate_override_id,
                         zones,
                         host_phase_2: Box::new(host_phase_2),
+                        measurements,
                     },
                 )
             } else {
                 NoopConvertSledStatus::Eligible(NoopConvertSledEligible {
                     zones,
                     host_phase_2,
+                    measurements,
                 })
             };
 
@@ -279,6 +313,7 @@ impl NoopConvertSledStatus {
 pub(crate) struct NoopConvertSledEligible {
     pub(crate) zones: IdOrdMap<NoopConvertZoneInfo>,
     pub(crate) host_phase_2: NoopConvertHostPhase2Slots,
+    pub(crate) measurements: NoopConvertMeasurements,
 }
 
 impl NoopConvertSledEligible {
@@ -305,6 +340,7 @@ impl NoopConvertSledEligible {
         }
 
         self.host_phase_2.log_to(log);
+        self.measurements.log_to(log);
     }
 }
 
@@ -375,6 +411,9 @@ pub(crate) enum NoopConvertSledIneligibleReason {
         ///
         /// Stored for reasons similar to `zones` above.
         host_phase_2: Box<NoopConvertHostPhase2Slots>,
+
+        /// Information about measurements
+        measurements: NoopConvertMeasurements,
     },
 
     /// An error was obtained while retrieving mupdate override information.
@@ -769,4 +808,152 @@ pub(crate) enum NoopConvertHostPhase2IneligibleReason {
     /// An artifact matching the host phase 2 contents was not found in the TUF
     /// repository.
     NotInTufRepo { expected_hash: ArtifactHash },
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) enum NoopConvertMeasurementContents {
+    AlreadyArtifact { artifacts: Vec<BlueprintSingleMeasurement> },
+    Ineligible(NoopConvertMeasurementsIneligibleReason),
+    Eligible(BlueprintMeasurementSetDesiredContents),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) enum NoopConvertMeasurementsIneligibleReason {
+    //NotInManifest,
+    //ArtifactError { message: String },
+    NotInTufRepo { expected_hash: ArtifactHash },
+}
+
+impl NoopConvertMeasurementContents {
+    fn new(
+        current: BlueprintMeasurementSetDesiredContents,
+        measurement_manifest: &MeasurementManifestBootInventory,
+        artifacts_by_hash: &HashMap<ArtifactHash, &TufArtifactMeta>,
+    ) -> Self {
+        match current {
+            BlueprintMeasurementSetDesiredContents::Artifacts { artifacts } => {
+                Self::AlreadyArtifact { artifacts }
+            }
+            BlueprintMeasurementSetDesiredContents::InstallDataset => {
+                let mut artifacts = Vec::new();
+                for artifact in &measurement_manifest.artifacts {
+                    if let Some(meta) =
+                        artifacts_by_hash.get(&artifact.expected_hash)
+                    {
+                        artifacts.push(BlueprintSingleMeasurement {
+                            version: BlueprintArtifactVersion::Available {
+                                version: meta.id.version.clone(),
+                            },
+                            hash: meta.hash,
+                        });
+                    } else {
+                        return Self::Ineligible(
+                            NoopConvertMeasurementsIneligibleReason::NotInTufRepo { expected_hash: artifact.expected_hash }
+                        );
+                    }
+                }
+                Self::Eligible(
+                    BlueprintMeasurementSetDesiredContents::Artifacts {
+                        artifacts,
+                    },
+                )
+            }
+        }
+    }
+
+    pub(crate) fn is_already_artifact(&self) -> bool {
+        matches!(self, Self::AlreadyArtifact { .. })
+    }
+
+    pub(crate) fn is_eligible(&self) -> bool {
+        matches!(self, Self::Eligible(_))
+    }
+
+    fn log_to(&self, log: &slog::Logger) {
+        match self {
+            NoopConvertMeasurementContents::AlreadyArtifact {
+                artifacts: _,
+            } => {
+                // Use debug to avoid spamming reconfigurator-cli output for
+                // this generally expected case.
+                debug!(
+                    log,
+                    "measurement has its image source set to Artifact already";
+                    //"artifacts" => %artifacts,
+                    //"version" => %version,
+                    //"hash" => %hash,
+                );
+            }
+            NoopConvertMeasurementContents::Eligible(new_image_source) => {
+                debug!(
+                    log,
+                    "measurement may be eligible for noop image source conversion";
+                    // XXX FIXME????
+                    "new_image_source" => %new_image_source,
+                );
+            }
+            NoopConvertMeasurementContents::Ineligible(
+                NoopConvertMeasurementsIneligibleReason::NotInTufRepo {
+                    expected_hash,
+                },
+            ) => {
+                // If a MUPdate happens, sleds should all be MUPdated to the
+                // same version, so the TUF repo is expected to contain all the
+                // hashes. The only time that isn't the case is right after a
+                // MUPdate when the TUF repo hasn't been uploaded yet. This
+                // isn't quite a warning or error case, so log this at the INFO
+                // level.
+                info!(
+                    log,
+                    "install dataset artifact hash not found in TUF repo, \
+                     ignoring for noop checks";
+                    "expected_hash" => %expected_hash,
+                );
+            }
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct NoopConvertMeasurements {
+    pub(crate) previous: NoopConvertMeasurementContents,
+    pub(crate) current: NoopConvertMeasurementContents,
+}
+
+impl NoopConvertMeasurements {
+    fn new(
+        measurement: BlueprintMeasurementsDesiredContents,
+        measurement_manifest: &MeasurementManifestBootInventory,
+        artifacts_by_hash: &HashMap<ArtifactHash, &TufArtifactMeta>,
+    ) -> Self {
+        Self {
+            previous: NoopConvertMeasurementContents::new(
+                measurement.previous,
+                measurement_manifest,
+                artifacts_by_hash,
+            ),
+            current: NoopConvertMeasurementContents::new(
+                measurement.current,
+                measurement_manifest,
+                artifacts_by_hash,
+            ),
+        }
+    }
+
+    /// Returns true if both slots are already set to Artifact.
+    pub(crate) fn both_already_artifact(&self) -> bool {
+        self.previous.is_already_artifact()
+            && self.current.is_already_artifact()
+    }
+
+    fn log_to(&self, log: &slog::Logger) {
+        {
+            let log = log.new(o!("set" => "previous"));
+            self.previous.log_to(&log);
+        }
+        {
+            let log = log.new(o!("set" => "current"));
+            self.current.log_to(&log);
+        }
+    }
 }

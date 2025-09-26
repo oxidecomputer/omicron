@@ -684,6 +684,7 @@ mod tests {
     use illumos_utils::zpool::ZpoolName;
     use nexus_sled_agent_shared::inventory::HostPhase2DesiredContents;
     use nexus_sled_agent_shared::inventory::HostPhase2DesiredSlots;
+    use nexus_sled_agent_shared::inventory::OmicronMeasurement;
     use nexus_sled_agent_shared::inventory::OmicronZoneConfig;
     use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
     use nexus_sled_agent_shared::inventory::OmicronZoneType;
@@ -910,6 +911,7 @@ mod tests {
             zones: IdMap::default(),
             remove_mupdate_override: None,
             host_phase_2: HostPhase2DesiredSlots::current_contents(),
+            measurements: OmicronMeasurements::measurement_default(),
         }
     }
 
@@ -1112,6 +1114,7 @@ mod tests {
             .collect(),
             remove_mupdate_override: None,
             host_phase_2: HostPhase2DesiredSlots::current_contents(),
+            measurements: OmicronMeasurements::measurement_default(),
         };
 
         // The ledger task should reject this config due to a missing artifact.

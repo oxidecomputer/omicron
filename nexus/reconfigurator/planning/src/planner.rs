@@ -14,6 +14,7 @@ use crate::blueprint_builder::Error;
 use crate::blueprint_builder::Operation;
 use crate::blueprint_editor::DisksEditError;
 use crate::blueprint_editor::SledEditError;
+use crate::measurements::plan_measurement_updates;
 use crate::mgs_updates::ImpossibleUpdatePolicy;
 use crate::mgs_updates::PlannedMgsUpdates;
 use crate::mgs_updates::plan_mgs_updates;
@@ -291,6 +292,8 @@ impl<'a> Planner<'a> {
         } else {
             self.do_plan_zone_updates(&mgs_updates)?
         };
+
+        self.do_plan_measurements()?;
 
         // We may need to bump the top-level Nexus generation number
         // to update Nexus zones.
@@ -649,11 +652,43 @@ impl<'a> Planner<'a> {
         Ok(())
     }
 
+    fn do_plan_measurements(
+        &mut self,
+        // report: &mut PlanningMeasurementsStepReport,
+    ) -> Result<(), Error> {
+        // The measurements are a property of the sled agent which
+        // we look up via sled_id
+        let included_sled_ids: BTreeSet<_> = self
+            .input
+            .all_sleds(SledFilter::InService)
+            .map(|(s, _)| s)
+            .collect();
+
+        let current_artifacts = self.input.tuf_repo().description();
+
+        // XXX check against current set??
+        // XXX impossible updates
+        // XXX mupdates????
+
+        let measurement_updates = plan_measurement_updates(
+            &self.log,
+            &included_sled_ids,
+            &current_artifacts,
+        );
+        self.blueprint
+            .apply_pending_measurement_updates(measurement_updates)?;
+
+        // XXX useful data
+        //repot.dummy = 0xf;
+        Ok(())
+    }
+
     fn do_plan_noop_image_source(
         &mut self,
         noop_info: NoopConvertInfo,
     ) -> Result<PlanningNoopImageSourceStepReport, Error> {
         use nexus_types::deployment::PlanningNoopImageSourceSkipSledHostPhase2Reason as SkipSledHostPhase2Reason;
+        use nexus_types::deployment::PlanningNoopImageSourceSkipSledMeasurementsReason as SkipSledMeasurementsReason;
         use nexus_types::deployment::PlanningNoopImageSourceSkipSledZonesReason as SkipSledZonesReason;
 
         let mut report = PlanningNoopImageSourceStepReport::new();
@@ -692,7 +727,18 @@ impl<'a> Planner<'a> {
                     false
                 };
 
-            if skipped_zones && skipped_host_phase_2 {
+            let skipped_measurements =
+                if eligible.measurements.both_already_artifact() {
+                    report.skip_sled_measurements(
+                        sled.sled_id,
+                        SkipSledMeasurementsReason::BothSlotsAlreadyArtifact,
+                    );
+                    true
+                } else {
+                    false
+                };
+
+            if skipped_zones && skipped_host_phase_2 && skipped_measurements {
                 // Nothing to do, continue to the next sled.
                 continue;
             }
@@ -700,13 +746,18 @@ impl<'a> Planner<'a> {
             if zone_counts.num_eligible > 0
                 || eligible.host_phase_2.slot_a.is_eligible()
                 || eligible.host_phase_2.slot_b.is_eligible()
+                || eligible.measurements.current.is_eligible()
+                || eligible.measurements.previous.is_eligible()
             {
+                // XXX FIXME
                 report.converted(
                     sled.sled_id,
                     zone_counts.num_eligible,
                     zone_counts.num_install_dataset(),
                     eligible.host_phase_2.slot_a.is_eligible(),
                     eligible.host_phase_2.slot_b.is_eligible(),
+                    eligible.measurements.current.is_eligible(),
+                    eligible.measurements.previous.is_eligible(),
                 );
             }
 

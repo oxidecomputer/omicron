@@ -25,6 +25,8 @@ use nexus_sled_agent_shared::inventory::Inventory;
 use nexus_sled_agent_shared::inventory::InventoryDataset;
 use nexus_sled_agent_shared::inventory::InventoryDisk;
 use nexus_sled_agent_shared::inventory::InventoryZpool;
+use nexus_sled_agent_shared::inventory::MeasurementResolverInventory;
+use nexus_sled_agent_shared::inventory::OmicronMeasurements;
 use nexus_sled_agent_shared::inventory::OmicronSledConfig;
 use nexus_sled_agent_shared::inventory::OmicronZonesConfig;
 use nexus_sled_agent_shared::inventory::OrphanedDataset;
@@ -389,6 +391,7 @@ pub fn representative() -> Representative {
         zones: sled14.zones.into_iter().collect(),
         remove_mupdate_override: None,
         host_phase_2: HostPhase2DesiredSlots::current_contents(),
+        measurements: OmicronMeasurements::measurements_defaults(),
     };
     let sled16 = OmicronSledConfig {
         generation: sled16.generation,
@@ -397,6 +400,7 @@ pub fn representative() -> Representative {
         zones: sled16.zones.into_iter().collect(),
         remove_mupdate_override: None,
         host_phase_2: HostPhase2DesiredSlots::current_contents(),
+        measurements: OmicronMeasurements::measurements_defaults(),
     };
     let sled17 = OmicronSledConfig {
         generation: sled17.generation,
@@ -405,6 +409,7 @@ pub fn representative() -> Representative {
         zones: sled17.zones.into_iter().collect(),
         remove_mupdate_override: None,
         host_phase_2: HostPhase2DesiredSlots::current_contents(),
+        measurements: OmicronMeasurements::measurements_defaults(),
     };
 
     // Create iterator producing fixed IDs.
@@ -553,6 +558,7 @@ pub fn representative() -> Representative {
                     deserialized_zone_manifest: true,
                     has_mupdate_override: true,
                 }),
+                measurement_resolver(),
             ),
         )
         .unwrap();
@@ -585,6 +591,7 @@ pub fn representative() -> Representative {
                     deserialized_zone_manifest: false,
                     has_mupdate_override: false,
                 }),
+                measurement_resolver(),
             ),
         )
         .unwrap();
@@ -615,6 +622,7 @@ pub fn representative() -> Representative {
                 zone_image_resolver(ZoneImageResolverExampleKind::Mismatch {
                     has_mupdate_override: true,
                 }),
+                measurement_resolver(),
             ),
         )
         .unwrap();
@@ -640,6 +648,7 @@ pub fn representative() -> Representative {
                 None,
                 // Simulate an error here.
                 zone_image_resolver(ZoneImageResolverExampleKind::Error),
+                measurement_resolver(),
             ),
         )
         .unwrap();
@@ -760,6 +769,11 @@ pub enum ZoneImageResolverExampleKind {
 
     /// Errors while reading the zone manifest and mupdate override status.
     Error,
+}
+
+pub fn measurement_resolver() -> MeasurementResolverInventory {
+    // XXX
+    todo!()
 }
 
 /// Generate an example zone image resolver inventory.
@@ -914,6 +928,7 @@ pub fn sled_agent(
     datasets: Vec<InventoryDataset>,
     ledgered_sled_config: Option<OmicronSledConfig>,
     zone_image_resolver: ZoneImageResolverInventory,
+    measurement_resolver: MeasurementResolverInventory,
 ) -> Inventory {
     // Assume the `ledgered_sled_config` was reconciled successfully.
     let last_reconciliation = ledgered_sled_config.clone().map(|config| {
@@ -975,5 +990,6 @@ pub fn sled_agent(
         reconciler_status,
         last_reconciliation,
         zone_image_resolver,
+        measurement_resolver,
     }
 }

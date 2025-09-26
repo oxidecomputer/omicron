@@ -24,9 +24,9 @@ use dropshot::RequestContext;
 use dropshot::StreamingBody;
 use dropshot::TypedBody;
 use dropshot::endpoint;
-use nexus_sled_agent_shared::inventory::Inventory;
-use nexus_sled_agent_shared::inventory::OmicronSledConfig;
-use nexus_sled_agent_shared::inventory::SledRole;
+//use nexus_sled_agent_shared::inventory::Inventory;
+//use nexus_sled_agent_shared::inventory::OmicronSledConfig;
+//use nexus_sled_agent_shared::inventory::SledRole;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::SledVmmState;
 use omicron_common::api::internal::shared::ExternalIpGatewayMap;
@@ -321,9 +321,26 @@ impl SledAgentApi for SledAgentSimImpl {
     }
 
     /// Fetch basic information about this sled
-    async fn inventory(
+    async fn inventory_initial(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<Inventory>, HttpError> {
+    ) -> Result<
+        HttpResponseOk<nexus_sled_agent_shared::inventory::initial::Inventory>,
+        HttpError,
+    > {
+        let sa = rqctx.context();
+        Ok(HttpResponseOk(
+            sa.inventory(rqctx.server.local_addr)
+                .map_err(|e| HttpError::for_internal_error(format!("{:#}", e)))?
+                .into(),
+        ))
+    }
+
+    async fn inventory_v4(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<
+        HttpResponseOk<nexus_sled_agent_shared::inventory::v4::Inventory>,
+        HttpError,
+    > {
         let sa = rqctx.context();
         Ok(HttpResponseOk(
             sa.inventory(rqctx.server.local_addr).map_err(|e| {
@@ -332,9 +349,23 @@ impl SledAgentApi for SledAgentSimImpl {
         ))
     }
 
-    async fn omicron_config_put(
+    async fn omicron_config_put_initial(
         rqctx: RequestContext<Self::Context>,
-        body: TypedBody<OmicronSledConfig>,
+        body: TypedBody<
+            nexus_sled_agent_shared::inventory::initial::OmicronSledConfig,
+        >,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = rqctx.context();
+        let body_args = body.into_inner();
+        sa.set_omicron_config(body_args.into())?;
+        Ok(HttpResponseUpdatedNoContent())
+    }
+
+    async fn omicron_config_put_v4(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<
+            nexus_sled_agent_shared::inventory::v4::OmicronSledConfig,
+        >,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let sa = rqctx.context();
         let body_args = body.into_inner();
@@ -679,9 +710,21 @@ impl SledAgentApi for SledAgentSimImpl {
         method_unimplemented()
     }
 
-    async fn sled_role_get(
+    async fn sled_role_get_initial(
         _rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<SledRole>, HttpError> {
+    ) -> Result<
+        HttpResponseOk<nexus_sled_agent_shared::inventory::initial::SledRole>,
+        HttpError,
+    > {
+        method_unimplemented()
+    }
+
+    async fn sled_role_get_v4(
+        _rqctx: RequestContext<Self::Context>,
+    ) -> Result<
+        HttpResponseOk<nexus_sled_agent_shared::inventory::v4::SledRole>,
+        HttpError,
+    > {
         method_unimplemented()
     }
 

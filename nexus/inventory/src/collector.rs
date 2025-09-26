@@ -722,6 +722,7 @@ mod test {
     use id_map::IdMap;
     use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryStatus;
     use nexus_sled_agent_shared::inventory::HostPhase2DesiredSlots;
+    use nexus_sled_agent_shared::inventory::OmicronMeasurements;
     use nexus_sled_agent_shared::inventory::OmicronSledConfig;
     use nexus_sled_agent_shared::inventory::OmicronZoneConfig;
     use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
@@ -752,6 +753,7 @@ mod test {
             zones,
             remove_mupdate_override,
             host_phase_2,
+            measurements: _,
         } = config;
 
         swriteln!(s, "        generation: {generation}");
@@ -1003,6 +1005,7 @@ mod test {
                 .collect(),
                 remove_mupdate_override: None,
                 host_phase_2: HostPhase2DesiredSlots::current_contents(),
+                measurements: OmicronMeasurements::measurement_default(),
             })
             .await
             .expect("failed to write initial zone version to fake sled agent");

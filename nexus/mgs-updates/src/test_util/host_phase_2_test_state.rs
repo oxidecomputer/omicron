@@ -127,7 +127,7 @@ impl HostPhase2TestContext {
             .version_policy(dropshot::VersionPolicy::Dynamic(Box::new(
                 dropshot::ClientSpecifiesVersionInHeader::new(
                     omicron_common::api::VERSION_HEADER,
-                    sled_agent_api::VERSION_NEWTYPE_UUID_BUMP,
+                    sled_agent_api::VERSION_MEASUREMENTS,
                 ),
             )))
             .start()
@@ -207,6 +207,7 @@ mod api_impl {
     use nexus_sled_agent_shared::inventory::HostPhase2DesiredSlots;
     use nexus_sled_agent_shared::inventory::Inventory;
     use nexus_sled_agent_shared::inventory::MupdateOverrideInventory;
+    use nexus_sled_agent_shared::inventory::OmicronMeasurements;
     use nexus_sled_agent_shared::inventory::OmicronSledConfig;
     use nexus_sled_agent_shared::inventory::SledCpuFamily;
     use nexus_sled_agent_shared::inventory::SledRole;
@@ -246,7 +247,18 @@ mod api_impl {
     impl sled_agent_api::SledAgentApi for HostPhase2SledAgentImpl {
         type Context = HostPhase2SledAgentContext;
 
-        async fn inventory(
+        async fn inventory_initial(
+            _rqctx: RequestContext<Self::Context>,
+        ) -> Result<
+            HttpResponseOk<
+                nexus_sled_agent_shared::inventory::initial::Inventory,
+            >,
+            HttpError,
+        > {
+            unimplemented!();
+        }
+
+        async fn inventory_v4(
             rqctx: RequestContext<Self::Context>,
         ) -> Result<HttpResponseOk<Inventory>, HttpError> {
             let ctx = rqctx.context();
@@ -310,6 +322,7 @@ mod api_impl {
                     slot_a: HostPhase2DesiredContents::CurrentContents,
                     slot_b: HostPhase2DesiredContents::CurrentContents,
                 },
+                measurements: OmicronMeasurements::default_measurements(),
             };
 
             Ok(HttpResponseOk(Inventory {
@@ -517,14 +530,34 @@ mod api_impl {
             unimplemented!()
         }
 
-        async fn omicron_config_put(
+        async fn omicron_config_put_v4(
             _rqctx: RequestContext<Self::Context>,
             _body: TypedBody<OmicronSledConfig>,
         ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
             unimplemented!()
         }
 
-        async fn sled_role_get(
+        async fn omicron_config_put_initial(
+            _rqctx: RequestContext<Self::Context>,
+            _body: TypedBody<
+                nexus_sled_agent_shared::inventory::initial::OmicronSledConfig,
+            >,
+        ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+            unimplemented!()
+        }
+
+        async fn sled_role_get_initial(
+            _rqctx: RequestContext<Self::Context>,
+        ) -> Result<
+            HttpResponseOk<
+                nexus_sled_agent_shared::inventory::initial::SledRole,
+            >,
+            HttpError,
+        > {
+            unimplemented!()
+        }
+
+        async fn sled_role_get_v4(
             _rqctx: RequestContext<Self::Context>,
         ) -> Result<HttpResponseOk<SledRole>, HttpError> {
             unimplemented!()

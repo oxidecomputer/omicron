@@ -601,6 +601,8 @@ impl ServiceInner {
                     zones: zones_config.zones.into_iter().collect(),
                     remove_mupdate_override: None,
                     host_phase_2: HostPhase2DesiredSlots::current_contents(),
+                    // XXX FIXME
+                    measurements: id_map::IdMap::default(),
                 };
 
                 self.set_config_on_sled(*sled_address, sled_config).await?;

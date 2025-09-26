@@ -619,6 +619,7 @@ fn display_sleds(
             reconciler_status,
             last_reconciliation,
             zone_image_resolver,
+            measurement_resolver,
         } = sled;
 
         writeln!(
@@ -724,6 +725,14 @@ fn display_sleds(
             // Use write! rather than writeln! since zone_image_resolver.display()
             // always produces a newline at the end.
             write!(indent2, "{}", zone_image_resolver.display())?;
+        }
+
+        writeln!(indented, "measurement resolver status:")?;
+        {
+            let mut indent2 = IndentWriter::new("    ", &mut indented);
+            // Use write! rather than writeln! since zone_image_resolver.display()
+            // always produces a newline at the end.
+            write!(indent2, "{}", measurement_resolver.display())?;
         }
 
         if let Some(last_reconciliation) = &last_reconciliation {
@@ -1099,6 +1108,8 @@ fn display_sled_config(
         zones,
         remove_mupdate_override,
         host_phase_2,
+        // XXX FIXME
+        measurements: _,
     } = config;
 
     writeln!(f, "\n{label} SLED CONFIG")?;

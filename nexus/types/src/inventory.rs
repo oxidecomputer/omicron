@@ -28,6 +28,7 @@ use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryStatus;
 use nexus_sled_agent_shared::inventory::InventoryDataset;
 use nexus_sled_agent_shared::inventory::InventoryDisk;
 use nexus_sled_agent_shared::inventory::InventoryZpool;
+use nexus_sled_agent_shared::inventory::MeasurementResolverInventory;
 use nexus_sled_agent_shared::inventory::OmicronSledConfig;
 use nexus_sled_agent_shared::inventory::OmicronZoneConfig;
 use nexus_sled_agent_shared::inventory::SledCpuFamily;
@@ -704,6 +705,7 @@ pub struct SledAgent {
     pub reconciler_status: ConfigReconcilerInventoryStatus,
     pub last_reconciliation: Option<ConfigReconcilerInventory>,
     pub zone_image_resolver: ZoneImageResolverInventory,
+    pub measurement_resolver: MeasurementResolverInventory,
 }
 
 impl IdOrdItem for SledAgent {

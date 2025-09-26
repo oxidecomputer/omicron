@@ -20,12 +20,15 @@ use iddqd::IdOrdMap;
 use iddqd::id_ord_map::Entry;
 use illumos_utils::zpool::ZpoolName;
 use itertools::Either;
+use measurements::MeasurementEditor;
 use nexus_sled_agent_shared::inventory::MupdateOverrideBootInventory;
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::BlueprintDatasetConfig;
 use nexus_types::deployment::BlueprintDatasetDisposition;
 use nexus_types::deployment::BlueprintHostPhase2DesiredContents;
 use nexus_types::deployment::BlueprintHostPhase2DesiredSlots;
+use nexus_types::deployment::BlueprintMeasurementSetDesiredContents;
+use nexus_types::deployment::BlueprintMeasurementsDesiredContents;
 use nexus_types::deployment::BlueprintPhysicalDiskConfig;
 use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
 use nexus_types::deployment::BlueprintSledConfig;
@@ -55,6 +58,7 @@ use underlay_ip_allocator::SledUnderlayIpAllocator;
 mod datasets;
 mod disks;
 mod host_phase_2;
+mod measurements;
 mod scalar;
 mod underlay_ip_allocator;
 mod zones;
@@ -392,6 +396,31 @@ impl SledEditor {
         self.as_active_mut()?.mark_expunged_zone_ready_for_cleanup(zone_id)
     }
 
+    pub fn measurements(&self) -> BlueprintMeasurementsDesiredContents {
+        match &self.0 {
+            InnerSledEditor::Active(editor) => editor.measurements(),
+            InnerSledEditor::Decommissioned(edited) => {
+                edited.config.measurements.clone()
+            }
+        }
+    }
+
+    pub fn set_measurements(
+        &mut self,
+        measurements: BlueprintMeasurementsDesiredContents,
+    ) -> Result<(), SledEditError> {
+        self.as_active_mut()?.set_measurements(measurements)?;
+        Ok(())
+    }
+
+    pub fn set_current_measurements(
+        &mut self,
+        measurements: BlueprintMeasurementSetDesiredContents,
+    ) -> Result<(), SledEditError> {
+        self.as_active_mut()?.set_current_measurements(measurements)?;
+        Ok(())
+    }
+
     /// Sets the image source for a zone, returning the old image source.
     pub fn set_zone_image_source(
         &mut self,
@@ -482,6 +511,7 @@ struct ActiveSledEditor {
     datasets: DatasetsEditor,
     remove_mupdate_override: ScalarEditor<Option<MupdateOverrideUuid>>,
     host_phase_2: HostPhase2Editor,
+    measurements: MeasurementEditor,
     debug_force_generation_bump: bool,
 }
 
@@ -519,6 +549,7 @@ impl ActiveSledEditor {
                 config.remove_mupdate_override,
             ),
             host_phase_2: HostPhase2Editor::new(config.host_phase_2),
+            measurements: MeasurementEditor::new(config.measurements),
             debug_force_generation_bump: false,
         })
     }
@@ -541,6 +572,9 @@ impl ActiveSledEditor {
             host_phase_2: HostPhase2Editor::new(
                 BlueprintHostPhase2DesiredSlots::current_contents(),
             ),
+            measurements: MeasurementEditor::new(
+                BlueprintMeasurementsDesiredContents::default_contents(),
+            ),
             debug_force_generation_bump: false,
         }
     }
@@ -553,6 +587,7 @@ impl ActiveSledEditor {
             self.remove_mupdate_override.is_modified();
         let changed_host_phase_2 = self.host_phase_2.is_modified();
         let mut sled_agent_generation = self.incoming_sled_agent_generation;
+        let changed_measurements = self.measurements.is_modified();
 
         let scalar_edits = EditedSledScalarEdits {
             debug_force_generation_bump: self.debug_force_generation_bump,
@@ -566,6 +601,7 @@ impl ActiveSledEditor {
             || zones_counts.has_nonzero_counts()
             || remove_mupdate_override_is_modified
             || changed_host_phase_2
+            || changed_measurements
         {
             sled_agent_generation = sled_agent_generation.next();
         }
@@ -581,6 +617,7 @@ impl ActiveSledEditor {
                     .remove_mupdate_override
                     .finalize(),
                 host_phase_2: self.host_phase_2.finalize(),
+                measurements: self.measurements.finalize(),
             },
             edit_counts: SledEditCounts {
                 disks: disks_counts,
@@ -650,6 +687,10 @@ impl ActiveSledEditor {
 
     pub fn host_phase_2(&self) -> BlueprintHostPhase2DesiredSlots {
         self.host_phase_2.value()
+    }
+
+    pub fn measurements(&self) -> BlueprintMeasurementsDesiredContents {
+        self.measurements.value()
     }
 
     pub fn ensure_disk(
@@ -778,6 +819,20 @@ impl ActiveSledEditor {
         Ok(self.zones.set_zone_image_source(zone_id, image_source)?)
     }
 
+    pub fn set_measurements(
+        &mut self,
+        measurements: BlueprintMeasurementsDesiredContents,
+    ) -> Result<BlueprintMeasurementsDesiredContents, SledEditError> {
+        Ok(self.measurements.set_value(measurements))
+    }
+
+    pub fn set_current_measurements(
+        &mut self,
+        measurements: BlueprintMeasurementSetDesiredContents,
+    ) -> Result<BlueprintMeasurementsDesiredContents, SledEditError> {
+        Ok(self.measurements.set_current_measurements(measurements))
+    }
+
     /// Sets the desired host phase 2 contents for this sled.
     ///
     /// Returns the old host phase 2 contents.
@@ -863,6 +918,7 @@ impl ActiveSledEditor {
                         NoopConvertSledStatus::Eligible(eligible) => {
                             // Transition to Ineligible with the new override.
                             let zones = mem::take(&mut eligible.zones);
+                            //let measurements = mem::take(&mut eligible.measurements);
                             info.status = NoopConvertSledStatus::Ineligible(
                                 MupdateOverride {
                                     mupdate_override_id: inv_override
@@ -871,6 +927,8 @@ impl ActiveSledEditor {
                                     host_phase_2: Box::new(
                                         eligible.host_phase_2.clone(),
                                     ),
+                                    // XXX I do not think this is correct
+                                    measurements: eligible.measurements.clone(),
                                 },
                             );
                         }
@@ -936,6 +994,7 @@ impl ActiveSledEditor {
                                 mupdate_override_id,
                                 zones,
                                 host_phase_2,
+                                measurements,
                             },
                         ) => {
                             // Check that the mupdate override is the same as
@@ -948,10 +1007,13 @@ impl ActiveSledEditor {
                                 self.set_remove_mupdate_override(None);
                                 let zones =
                                     mem::replace(zones, IdOrdMap::new());
+                                //let measurements = NoopConvertMeasurements::
                                 info.status = NoopConvertSledStatus::Eligible(
                                     NoopConvertSledEligible {
                                         zones,
                                         host_phase_2: *host_phase_2.clone(),
+                                        // XXX I do not think this is correct
+                                        measurements: measurements.clone(),
                                     },
                                 );
                                 Ok(EnsureMupdateOverrideAction::BpClearOverride {

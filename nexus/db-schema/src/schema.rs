@@ -1839,6 +1839,8 @@ table! {
         remove_mupdate_override -> Nullable<Uuid>,
         host_phase_2_desired_slot_a -> Nullable<Text>,
         host_phase_2_desired_slot_b -> Nullable<Text>,
+        measurements_previous -> Nullable<Array<Text>>,
+        measurements_current -> Nullable<Array<Text>>,
     }
 }
 

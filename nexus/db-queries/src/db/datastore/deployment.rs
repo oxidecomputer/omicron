@@ -76,6 +76,7 @@ use nexus_db_schema::enums::HwM2SlotEnum;
 use nexus_db_schema::enums::HwRotSlotEnum;
 use nexus_db_schema::enums::SpTypeEnum;
 use nexus_types::deployment::Blueprint;
+use nexus_types::deployment::BlueprintMeasurementsDesiredContents;
 use nexus_types::deployment::BlueprintMetadata;
 use nexus_types::deployment::BlueprintSledConfig;
 use nexus_types::deployment::BlueprintSource;
@@ -707,6 +708,9 @@ impl DataStore {
                             .map(|id| id.into()),
                         host_phase_2: s
                             .host_phase_2(slot_a_version, slot_b_version),
+                        // XXX DATABASE OH NO
+                        measurements: BlueprintMeasurementsDesiredContents::default_contents(),
+                        //measurements: s.measurements.into(),
                     };
                     let old = sled_configs.insert(s.sled_id.into(), config);
                     bail_unless!(
