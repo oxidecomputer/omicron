@@ -11,6 +11,8 @@ use nexus_db_lookup::lookup;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
+use nexus_db_queries::db::datastore::SiloGroup;
+use nexus_db_queries::db::datastore::SiloUser;
 use nexus_db_queries::db::model::Name;
 use nexus_types::external_api::params;
 use omicron_common::api::external::DataPageParams;
@@ -70,7 +72,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
-    ) -> ListResultVec<db::model::SiloUser> {
+    ) -> ListResultVec<SiloUser> {
         let authz_silo = opctx
             .authn
             .silo_required()
@@ -88,7 +90,7 @@ impl super::Nexus {
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
         group_id: &SiloGroupUuid,
-    ) -> ListResultVec<db::model::SiloUser> {
+    ) -> ListResultVec<SiloUser> {
         let authz_silo = opctx
             .authn
             .silo_required()
@@ -115,7 +117,7 @@ impl super::Nexus {
     pub(crate) async fn silo_user_fetch_self(
         &self,
         opctx: &OpContext,
-    ) -> LookupResult<db::model::SiloUser> {
+    ) -> LookupResult<SiloUser> {
         let &actor = opctx
             .authn
             .actor_required()
@@ -124,14 +126,14 @@ impl super::Nexus {
             .silo_user_actor(&actor)?
             .fetch()
             .await?;
-        Ok(db_silo_user)
+        Ok(db_silo_user.into())
     }
 
     pub(crate) async fn silo_user_fetch_groups_for_self(
         &self,
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
-    ) -> ListResultVec<db::model::SiloGroup> {
+    ) -> ListResultVec<SiloGroup> {
         self.db_datastore.silo_groups_for_self(opctx, pagparams).await
     }
 
@@ -141,7 +143,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
-    ) -> ListResultVec<db::model::SiloGroup> {
+    ) -> ListResultVec<SiloGroup> {
         let authz_silo = opctx
             .authn
             .silo_required()
