@@ -21,8 +21,8 @@ sled-update-install-dataset serial2 --to-target-release
 # - RT Bootloader
 # - ROT
 # - SP
-# - Host Phase 1 (both slots)
-# - Host Phase 2 (both slots)
+# - Host Phase 1
+# - Host Phase 2
 #
 # To match what is requested by the blueprint.
 
@@ -65,5 +65,83 @@ sled-set serial2 omicron-config latest
 inventory-generate
 inventory-show latest
 
+blueprint-plan latest latest
+blueprint-show latest
+
+# Intentionally downgrade Nexus
+#
+# Note that the artifact hash here is totally synthetic -- we just want to push
+# the system into a state where it wants to upgrade ONLY Nexus.
+
+blueprint-edit latest set-zone-image 466a9f29-62bf-4e63-924a-b9efdb86afec artifact 0.0.1 5d835e8666bd5cf65be66efbca6847b24e41fd85993448a211ad7be5fea559ab
+blueprint-edit latest set-zone-image 0c71b3b2-6ceb-4e8f-b020-b08675e83038 artifact 0.0.1 5d835e8666bd5cf65be66efbca6847b24e41fd85993448a211ad7be5fea559ab
+blueprint-edit latest set-zone-image 3eeb8d49-eb1a-43f8-bb64-c2338421c2c6 artifact 0.0.1 5d835e8666bd5cf65be66efbca6847b24e41fd85993448a211ad7be5fea559ab
+
+# Make sure the "not-upgraded-yet" Nexuses are appearing in inventory
+sled-set serial0 omicron-config latest
+sled-set serial1 omicron-config latest
+sled-set serial2 omicron-config latest
+inventory-generate
+
+# The test effectively starts here:
+#
+# - Nexus is running at version 0.0.1
+# - The rest of the system is running at 1.0.0
+# - Blueprint planning should try to move from 0.0.1 -> 1.0.0 for Nexus
+
+# Should add three Nexuses at the new version
+blueprint-plan latest latest
+blueprint-diff latest
+
+# If we try to plan again, nothing happens.
+# The report should say why: These zones haven't propagated to inventory yet.
+blueprint-plan latest latest
+
+# Show the list of inventories - the one at the bottom is the "most recent"
+# one, and we're going to go back-in-time to it later.
+inventory-list
+
+sled-set serial0 omicron-config latest
+sled-set serial1 omicron-config latest
+sled-set serial2 omicron-config latest
+
+inventory-generate
+
+# If we have the Database records, but we use an old inventory,
+# we won't see the new Nexus zones yet.
+#
+# This will refuse to bump the Nexus generation ("new Nexus zones
+# are not in inventory yet")
+blueprint-plan latest b1bda47d-2c19-4fba-96e3-d9df28db7436
+
+# If we're missing the "NotYet" records, we'll refuse to bump the Nexus
+# generation ("new Nexus zones do not have database records yet")
+set not-yet-nexus-zones
+blueprint-plan latest latest
+set not-yet-nexus-zones-infer
+
+# Bump the nexus generation to "2".
+# This will cause the "0.0.1" zones to be considered out-of-date
+blueprint-plan latest latest
+blueprint-diff latest
+
+# If we try to plan again, we still keep these old Nexus zones around.
+# This is expected! The old Nexuses are still part of the "active" set.
+blueprint-plan latest latest
+blueprint-diff latest
+
+# Now: Pretend we're one of the new Nexuses, planning a blueprint.
+set active-nexus-gen 2
+
+# Now expungement can complete
+# (Three Nexuses, expunged one at a time)
+blueprint-plan latest latest
+blueprint-diff latest
+blueprint-plan latest latest
+blueprint-diff latest
+blueprint-plan latest latest
+blueprint-diff latest
+
+# Should be a no-op
 blueprint-plan latest latest
 blueprint-diff latest
