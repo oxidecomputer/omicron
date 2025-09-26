@@ -32,3 +32,49 @@ pub fn run_subcmd(mut command: Command) -> Result<()> {
 
     Ok(())
 }
+
+/// Creates and prepares a `std::process::Command` for the `cargo` executable.
+pub(crate) fn cargo_command() -> Command {
+    let cargo =
+        std::env::var("CARGO").unwrap_or_else(|_| String::from("cargo"));
+    let mut command = Command::new(&cargo);
+
+    for (key, _) in std::env::vars_os() {
+        let Some(key) = key.to_str() else { continue };
+        if SANITIZED_ENV_VARS.matches(key) {
+            command.env_remove(key);
+        }
+    }
+
+    command
+}
+
+#[derive(Debug)]
+pub(crate) struct SanitizedEnvVars {
+    // At the moment we only ban some prefixes, but we may also want to ban env
+    // vars by exact name in the future.
+    prefixes: &'static [&'static str],
+}
+
+impl SanitizedEnvVars {
+    const fn new() -> Self {
+        // Remove many of the environment variables set in
+        // https://doc.rust-lang.org/cargo/reference/environment-variables.html#environment-variables-cargo-sets-for-build-scripts.
+        // This is done to avoid recompilation with crates like ring between
+        // `cargo clippy` and `cargo xtask clippy`. (This is really a bug in
+        // both ring's build script and in Cargo.)
+        //
+        // The current list is informed by looking at ring's build script, so
+        // it's not guaranteed to be exhaustive and it may need to grow over
+        // time.
+        let prefixes = &["CARGO_PKG_", "CARGO_MANIFEST_", "CARGO_CFG_"];
+        Self { prefixes }
+    }
+
+    pub(crate) fn matches(&self, key: &str) -> bool {
+        self.prefixes.iter().any(|prefix| key.starts_with(prefix))
+    }
+}
+
+pub(crate) static SANITIZED_ENV_VARS: SanitizedEnvVars =
+    SanitizedEnvVars::new();
