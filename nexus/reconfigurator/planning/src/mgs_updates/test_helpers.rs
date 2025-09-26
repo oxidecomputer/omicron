@@ -31,6 +31,7 @@ use nexus_sled_agent_shared::inventory::ZoneImageResolverInventory;
 use nexus_types::deployment::BlueprintArtifactVersion;
 use nexus_types::deployment::BlueprintHostPhase2DesiredContents;
 use nexus_types::deployment::ExpectedVersion;
+use nexus_types::deployment::MgsUpdateComponent;
 use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdateDetails;
 use nexus_types::deployment::PendingMgsUpdateHostPhase1Details;
@@ -139,27 +140,6 @@ const ROT_SIGN_PSC: &str =
     "2222222222222222222222222222222222222222222222222222222222222222";
 const ROT_SIGN_SWITCH: &str =
     "3333333333333333333333333333333333333333333333333333333333333333";
-
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
-pub(super) enum MgsUpdateComponent {
-    Sp,
-    Rot,
-    RotBootloader,
-    HostOs,
-}
-
-impl From<&'_ PendingMgsUpdateDetails> for MgsUpdateComponent {
-    fn from(value: &'_ PendingMgsUpdateDetails) -> Self {
-        match value {
-            PendingMgsUpdateDetails::Rot { .. } => Self::Rot,
-            PendingMgsUpdateDetails::RotBootloader { .. } => {
-                Self::RotBootloader
-            }
-            PendingMgsUpdateDetails::Sp { .. } => Self::Sp,
-            PendingMgsUpdateDetails::HostPhase1(_) => Self::HostOs,
-        }
-    }
-}
 
 /// Description of a single fake board (sled, switch, or PSC).
 #[derive(Debug)]
@@ -635,7 +615,7 @@ impl ExpectedUpdates {
     ) {
         let sp_type = update.sp_type;
         let sp_slot = update.slot_id;
-        let component = MgsUpdateComponent::from(&update.details);
+        let component: MgsUpdateComponent = (&update.details).into();
         println!("found update: {} slot {}", sp_type, sp_slot);
         let ExpectedUpdate { expected_serial, expected_artifact, .. } = self
             .updates

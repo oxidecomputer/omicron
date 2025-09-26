@@ -493,11 +493,18 @@ pub enum BlueprintPlannerStatus {
 
     /// Planning produced a blueprint identital to the current target,
     /// so we threw it away and did nothing.
-    Unchanged { parent_blueprint_id: BlueprintUuid },
+    Unchanged {
+        parent_blueprint_id: BlueprintUuid,
+        report: Arc<PlanningReport>,
+    },
 
     /// Planning produced a new blueprint, but we failed to make it
     /// the current target and so deleted it.
-    Planned { parent_blueprint_id: BlueprintUuid, error: String },
+    Planned {
+        parent_blueprint_id: BlueprintUuid,
+        error: String,
+        report: Arc<PlanningReport>,
+    },
 
     /// Planing succeeded, and we saved and made the new blueprint the
     /// current target.

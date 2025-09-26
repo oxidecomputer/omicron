@@ -59,6 +59,7 @@ use slog::Key;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::fmt;
+use std::fmt::Display;
 use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
 use std::sync::Arc;
@@ -73,7 +74,7 @@ mod clickhouse;
 pub mod execution;
 mod network_resources;
 mod planning_input;
-mod planning_report;
+pub mod planning_report;
 mod reconfigurator_config;
 mod zone_type;
 
@@ -1452,6 +1453,39 @@ impl fmt::Display for BlueprintHostPhase2DesiredContents {
 }
 
 #[derive(
+    Debug,
+    Deserialize,
+    Serialize,
+    PartialEq,
+    Eq,
+    Diffable,
+    PartialOrd,
+    JsonSchema,
+    Ord,
+    Clone,
+    Copy,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum MgsUpdateComponent {
+    Sp,
+    Rot,
+    RotBootloader,
+    HostOs,
+}
+
+impl Display for MgsUpdateComponent {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            MgsUpdateComponent::HostOs => "Host OS",
+            MgsUpdateComponent::Rot => "RoT",
+            MgsUpdateComponent::RotBootloader => "RoT Bootloader",
+            MgsUpdateComponent::Sp => "SP",
+        };
+        write!(f, "{s}")
+    }
+}
+
+#[derive(
     Clone, Debug, Eq, PartialEq, Deserialize, Serialize, JsonSchema, Diffable,
 )]
 pub struct PendingMgsUpdates {
@@ -1636,6 +1670,21 @@ pub enum PendingMgsUpdateDetails {
     /// We write the phase 1 via MGS, and have a precheck condition that
     /// sled-agent has already written the matching phase 2.
     HostPhase1(PendingMgsUpdateHostPhase1Details),
+}
+
+impl From<&PendingMgsUpdateDetails> for MgsUpdateComponent {
+    fn from(details: &PendingMgsUpdateDetails) -> Self {
+        match &details {
+            PendingMgsUpdateDetails::Rot { .. } => MgsUpdateComponent::Rot,
+            PendingMgsUpdateDetails::RotBootloader { .. } => {
+                MgsUpdateComponent::RotBootloader
+            }
+            PendingMgsUpdateDetails::Sp { .. } => MgsUpdateComponent::Sp,
+            PendingMgsUpdateDetails::HostPhase1(_) => {
+                MgsUpdateComponent::HostOs
+            }
+        }
+    }
 }
 
 impl slog::KV for PendingMgsUpdateDetails {
