@@ -10,9 +10,9 @@ workspace = true
 [dependencies]
 chrono.workspace = true
 dropshot.workspace = true
+dropshot-api-manager-types.workspace = true
 internal-dns-types.workspace = true
 omicron-workspace-hack.workspace = true
-openapi-manager-types.workspace = true
 schemars.workspace = true
 semver.workspace = true
 serde.workspace = true

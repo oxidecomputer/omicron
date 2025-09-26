@@ -12,10 +12,8 @@ use dropshot::{
     HttpError, HttpResponseCreated, HttpResponseOk,
     HttpResponseUpdatedNoContent, Path, Query, RequestContext, TypedBody,
 };
+use dropshot_api_manager_types::api_versions;
 use omicron_common::api::external::Generation;
-use openapi_manager_types::{
-    SupportedVersion, SupportedVersions, api_versions,
-};
 
 api_versions!([
     // NOTE: These versions will be used across **all three** APIs defined in
