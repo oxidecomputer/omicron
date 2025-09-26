@@ -237,6 +237,9 @@ fn show_sps_from_ignition(
                         ..
                     } => "Gimlet".to_string(),
                     SpIgnition::Yes {
+                        id: SpIgnitionSystemType::Cosmo, ..
+                    } => "Cosmo".to_string(),
+                    SpIgnition::Yes {
                         id: SpIgnitionSystemType::Sidecar,
                         ..
                     } => "Sidecar".to_string(),

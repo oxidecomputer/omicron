@@ -79,33 +79,6 @@ impl From<gateway_messages::IgnitionState> for SpIgnition {
     }
 }
 
-/// Ignition command.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, JsonSchema,
-)]
-#[serde(rename_all = "snake_case")]
-pub enum IgnitionCommand {
-    PowerOn,
-    PowerOff,
-    PowerReset,
-}
-
-impl From<IgnitionCommand> for gateway_messages::IgnitionCommand {
-    fn from(cmd: IgnitionCommand) -> Self {
-        match cmd {
-            IgnitionCommand::PowerOn => {
-                gateway_messages::IgnitionCommand::PowerOn
-            }
-            IgnitionCommand::PowerOff => {
-                gateway_messages::IgnitionCommand::PowerOff
-            }
-            IgnitionCommand::PowerReset => {
-                gateway_messages::IgnitionCommand::PowerReset
-            }
-        }
-    }
-}
-
 /// TODO: Do we want to bake in specific board names, or use raw u16 ID numbers?
 #[derive(
     Debug,
@@ -135,6 +108,8 @@ impl From<gateway_messages::ignition::SystemType> for SpIgnitionSystemType {
             SystemType::Sidecar => Self::Sidecar,
             SystemType::Psc => Self::Psc,
             SystemType::Unknown(id) => Self::Unknown { id },
+            // `0x4` is the ignition value per RFD 142
+            SystemType::Cosmo => Self::Unknown { id: 0x4 },
         }
     }
 }
