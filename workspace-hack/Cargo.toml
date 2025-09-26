@@ -280,6 +280,8 @@ url = { version = "2.5.4", features = ["serde"] }
 usdt = { version = "0.5.0" }
 usdt-impl = { version = "0.5.0", default-features = false, features = ["asm", "des"] }
 uuid = { version = "1.18.1", features = ["serde", "v4"] }
+vergen = { version = "9.0.6", features = ["cargo", "rustc"] }
+vergen-lib = { version = "0.1.6", features = ["cargo", "git", "rustc"] }
 winnow-ca01ad9e24f5d932 = { package = "winnow", version = "0.7.10" }
 x509-cert = { version = "0.2.5" }
 zerocopy-c38e5c1d305a1b54 = { package = "zerocopy", version = "0.8.26", default-features = false, features = ["derive", "simd"] }
