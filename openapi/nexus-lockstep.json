@@ -551,6 +551,70 @@
         }
       }
     },
+    "/deployment/repositories/{version}/artifacts": {
+      "get": {
+        "summary": "List artifacts for a TUF repository by version",
+        "operationId": "tuf_repo_artifacts_list",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "version",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/IdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TufArtifactMetaResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": []
+        }
+      }
+    },
     "/deployment/update-status": {
       "get": {
         "summary": "Show deployed versions of artifacts",
@@ -1368,6 +1432,29 @@
           "signaled",
           "timeout",
           "dependency"
+        ]
+      },
+      "ArtifactId": {
+        "description": "An identifier for an artifact.",
+        "type": "object",
+        "properties": {
+          "kind": {
+            "description": "The kind of artifact this is.",
+            "type": "string"
+          },
+          "name": {
+            "description": "The artifact's name.",
+            "type": "string"
+          },
+          "version": {
+            "description": "The artifact's version.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "name",
+          "version"
         ]
       },
       "ArtifactVersion": {
@@ -7489,6 +7576,72 @@
             "type": "string"
           }
         }
+      },
+      "TufArtifactMeta": {
+        "description": "Metadata about an individual TUF artifact.\n\nFound within a `TufRepoDescription`.",
+        "type": "object",
+        "properties": {
+          "board": {
+            "nullable": true,
+            "description": "Contents of the `BORD` field of a Hubris archive caboose. Only applicable to artifacts that are Hubris archives.\n\nThis field should always be `Some(_)` if `sign` is `Some(_)`, but the opposite is not true (SP images will have a `board` but not a `sign`).",
+            "type": "string"
+          },
+          "hash": {
+            "description": "The hash of the artifact.",
+            "type": "string",
+            "format": "hex string (32 bytes)"
+          },
+          "id": {
+            "description": "The artifact ID.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ArtifactId"
+              }
+            ]
+          },
+          "sign": {
+            "nullable": true,
+            "description": "Contents of the `SIGN` field of a Hubris archive caboose, i.e., an identifier for the set of valid signing keys. Currently only applicable to RoT image and bootloader artifacts, where it will be an LPC55 Root Key Table Hash (RKTH).",
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0
+            }
+          },
+          "size": {
+            "description": "The size of the artifact in bytes.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "hash",
+          "id",
+          "size"
+        ]
+      },
+      "TufArtifactMetaResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TufArtifactMeta"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
       },
       "TufRepoVersion": {
         "oneOf": [

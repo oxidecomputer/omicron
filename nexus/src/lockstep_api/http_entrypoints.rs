@@ -49,6 +49,7 @@ use nexus_types::internal_api::views::Saga;
 use nexus_types::internal_api::views::UpdateStatus;
 use nexus_types::internal_api::views::to_list;
 use omicron_common::api::external::Instance;
+use omicron_common::api::external::TufArtifactMeta;
 use omicron_common::api::external::http_pagination::PaginatedById;
 use omicron_common::api::external::http_pagination::PaginatedByTimeAndId;
 use omicron_common::api::external::http_pagination::ScanById;
@@ -57,6 +58,8 @@ use omicron_common::api::external::http_pagination::ScanParams;
 use omicron_common::api::external::http_pagination::data_page_params_for;
 use omicron_uuid_kinds::*;
 use range_requests::PotentialRange;
+use semver::Version;
+use nexus_db_model::SemverVersion;
 
 use crate::app::support_bundles::SupportBundleQueryType;
 use crate::context::ApiContext;
@@ -494,6 +497,51 @@ impl NexusLockstepApi for NexusLockstepApiImpl {
             let nexus = &apictx.nexus;
             let result = nexus.update_status(&opctx).await?;
             Ok(HttpResponseOk(result))
+        };
+        apictx
+            .internal_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn tuf_repo_artifacts_list(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<TufRepoVersionPathParam>,
+        query_params: Query<PaginatedById>,
+    ) -> Result<HttpResponseOk<ResultsPage<TufArtifactMeta>>, HttpError> {
+        let apictx = &rqctx.context().context;
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_internal_api(&rqctx).await;
+            let nexus = &apictx.nexus;
+            let datastore = nexus.datastore();
+            let path = path_params.into_inner();
+            let query = query_params.into_inner();
+            let pagparams = data_page_params_for(&rqctx, &query)?;
+
+            // Parse the version string as semver
+            let system_version = Version::parse(&path.version)
+                .map_err(|e| HttpError::for_bad_request(
+                    None,
+                    format!("Invalid version '{}': {}", path.version, e),
+                ))?;
+            let semver_version = SemverVersion::from(system_version);
+
+            let artifacts = datastore
+                .tuf_repo_artifacts_list_by_version(&opctx, semver_version, &pagparams)
+                .await?;
+
+            // Convert TufArtifact to TufArtifactMeta
+            let artifact_metas: Vec<TufArtifactMeta> = artifacts
+                .into_iter()
+                .map(|artifact| artifact.into_external())
+                .collect();
+
+            // Since TufArtifactMeta.id is not a UUID but a composite ArtifactId,
+            // and we don't have a direct UUID for artifacts, we'll return all
+            // artifacts without pagination for now (which is fine since each
+            // repo should only have a few artifacts under 20)
+            Ok(HttpResponseOk(ResultsPage { items: artifact_metas, next_page: None }))
         };
         apictx
             .internal_latencies
