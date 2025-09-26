@@ -2975,7 +2975,7 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
         query: Query<params::UpdatesPutRepositoryParams>,
         body: StreamingBody,
-    ) -> Result<HttpResponseOk<TufRepoInsertResponse>, HttpError>;
+    ) -> Result<HttpResponseOk<views::TufRepoUpload>, HttpError>;
 
     /// Fetch system release repository description by version
     #[endpoint {

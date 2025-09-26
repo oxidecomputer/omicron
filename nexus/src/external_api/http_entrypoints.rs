@@ -85,7 +85,6 @@ use omicron_common::api::external::ServiceIcmpConfig;
 use omicron_common::api::external::SwitchPort;
 use omicron_common::api::external::SwitchPortSettings;
 use omicron_common::api::external::SwitchPortSettingsIdentity;
-use omicron_common::api::external::TufRepoInsertResponse;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_common::api::external::VpcFirewallRules;
 use omicron_common::api::external::http_pagination::PaginatedBy;
@@ -6644,7 +6643,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<ApiContext>,
         query: Query<params::UpdatesPutRepositoryParams>,
         body: StreamingBody,
-    ) -> Result<HttpResponseOk<TufRepoInsertResponse>, HttpError> {
+    ) -> Result<HttpResponseOk<views::TufRepoUpload>, HttpError> {
         let apictx = rqctx.context();
         let nexus = &apictx.context.nexus;
         let handler = async {
@@ -6655,7 +6654,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let update = nexus
                 .updates_put_repository(&opctx, body, query.file_name)
                 .await?;
-            Ok(HttpResponseOk(update))
+            let repo_upload = update.into_external();
+            Ok(HttpResponseOk(repo_upload))
         };
         apictx
             .context
@@ -6689,8 +6689,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
     async fn system_update_repository_list(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<PaginatedByVersion>,
-    ) -> Result<HttpResponseOk<ResultsPage<views::TufRepo>>, HttpError>
-    {
+    ) -> Result<HttpResponseOk<ResultsPage<views::TufRepo>>, HttpError> {
         let apictx = rqctx.context();
         let nexus = &apictx.context.nexus;
         let handler = async {

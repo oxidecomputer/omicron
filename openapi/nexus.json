@@ -10999,7 +10999,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/TufRepoInsertResponse"
+                  "$ref": "#/components/schemas/TufRepoUpload"
                 }
               }
             }
@@ -14647,29 +14647,6 @@
             ]
           }
         }
-      },
-      "ArtifactId": {
-        "description": "An identifier for an artifact.",
-        "type": "object",
-        "properties": {
-          "kind": {
-            "description": "The kind of artifact this is.",
-            "type": "string"
-          },
-          "name": {
-            "description": "The artifact's name.",
-            "type": "string"
-          },
-          "version": {
-            "description": "The artifact's version.",
-            "type": "string"
-          }
-        },
-        "required": [
-          "kind",
-          "name",
-          "version"
-        ]
       },
       "AuditLogEntry": {
         "description": "Audit log entry",
@@ -25888,51 +25865,6 @@
           "items"
         ]
       },
-      "TufArtifactMeta": {
-        "description": "Metadata about an individual TUF artifact.\n\nFound within a `TufRepoDescription`.",
-        "type": "object",
-        "properties": {
-          "board": {
-            "nullable": true,
-            "description": "Contents of the `BORD` field of a Hubris archive caboose. Only applicable to artifacts that are Hubris archives.\n\nThis field should always be `Some(_)` if `sign` is `Some(_)`, but the opposite is not true (SP images will have a `board` but not a `sign`).",
-            "type": "string"
-          },
-          "hash": {
-            "description": "The hash of the artifact.",
-            "type": "string",
-            "format": "hex string (32 bytes)"
-          },
-          "id": {
-            "description": "The artifact ID.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/ArtifactId"
-              }
-            ]
-          },
-          "sign": {
-            "nullable": true,
-            "description": "Contents of the `SIGN` field of a Hubris archive caboose, i.e., an identifier for the set of valid signing keys. Currently only applicable to RoT image and bootloader artifacts, where it will be an LPC55 Root Key Table Hash (RKTH).",
-            "type": "array",
-            "items": {
-              "type": "integer",
-              "format": "uint8",
-              "minimum": 0
-            }
-          },
-          "size": {
-            "description": "The size of the artifact in bytes.",
-            "type": "integer",
-            "format": "uint64",
-            "minimum": 0
-          }
-        },
-        "required": [
-          "hash",
-          "id",
-          "size"
-        ]
-      },
       "TufRepo": {
         "description": "Metadata about a TUF repository",
         "type": "object",
@@ -25971,114 +25903,6 @@
           "valid_until"
         ]
       },
-      "TufRepoDescription": {
-        "description": "A description of an uploaded TUF repository.",
-        "type": "object",
-        "properties": {
-          "artifacts": {
-            "description": "Information about the artifacts present in the repository.",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/TufArtifactMeta"
-            }
-          },
-          "repo": {
-            "description": "Information about the repository.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/TufRepoMeta"
-              }
-            ]
-          }
-        },
-        "required": [
-          "artifacts",
-          "repo"
-        ]
-      },
-      "TufRepoInsertResponse": {
-        "description": "Data about a successful TUF repo import into Nexus.",
-        "type": "object",
-        "properties": {
-          "recorded": {
-            "description": "The repository as present in the database.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/TufRepoDescription"
-              }
-            ]
-          },
-          "status": {
-            "description": "Whether this repository already existed or is new.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/TufRepoInsertStatus"
-              }
-            ]
-          }
-        },
-        "required": [
-          "recorded",
-          "status"
-        ]
-      },
-      "TufRepoInsertStatus": {
-        "description": "Status of a TUF repo import.\n\nPart of `TufRepoInsertResponse`.",
-        "oneOf": [
-          {
-            "description": "The repository already existed in the database.",
-            "type": "string",
-            "enum": [
-              "already_exists"
-            ]
-          },
-          {
-            "description": "The repository did not exist, and was inserted into the database.",
-            "type": "string",
-            "enum": [
-              "inserted"
-            ]
-          }
-        ]
-      },
-      "TufRepoMeta": {
-        "description": "Metadata about a TUF repository.\n\nFound within a `TufRepoDescription`.",
-        "type": "object",
-        "properties": {
-          "file_name": {
-            "description": "The file name of the repository.\n\nThis is purely used for debugging and may not always be correct (e.g. with wicket, we read the file contents from stdin so we don't know the correct file name).",
-            "type": "string"
-          },
-          "hash": {
-            "description": "The hash of the repository.\n\nThis is a slight abuse of `ArtifactHash`, since that's the hash of individual artifacts within the repository. However, we use it here for convenience.",
-            "type": "string",
-            "format": "hex string (32 bytes)"
-          },
-          "system_version": {
-            "description": "The system version in artifacts.json.",
-            "type": "string",
-            "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$"
-          },
-          "targets_role_version": {
-            "description": "The version of the targets role.",
-            "type": "integer",
-            "format": "uint64",
-            "minimum": 0
-          },
-          "valid_until": {
-            "description": "The time until which the repo is valid.",
-            "type": "string",
-            "format": "date-time"
-          }
-        },
-        "required": [
-          "file_name",
-          "hash",
-          "system_version",
-          "targets_role_version",
-          "valid_until"
-        ]
-      },
       "TufRepoResultsPage": {
         "description": "A single page of results",
         "type": "object",
@@ -26098,6 +25922,40 @@
         },
         "required": [
           "items"
+        ]
+      },
+      "TufRepoUpload": {
+        "type": "object",
+        "properties": {
+          "repo": {
+            "$ref": "#/components/schemas/TufRepo"
+          },
+          "status": {
+            "$ref": "#/components/schemas/TufRepoUploadStatus"
+          }
+        },
+        "required": [
+          "repo",
+          "status"
+        ]
+      },
+      "TufRepoUploadStatus": {
+        "description": "Whether the uploaded TUF repo already existed or was new and had to be inserted. Part of `TufRepoUpload`.",
+        "oneOf": [
+          {
+            "description": "The repository already existed in the database",
+            "type": "string",
+            "enum": [
+              "already_exists"
+            ]
+          },
+          {
+            "description": "The repository did not exist, and was inserted into the database",
+            "type": "string",
+            "enum": [
+              "inserted"
+            ]
+          }
         ]
       },
       "TxEqConfig": {

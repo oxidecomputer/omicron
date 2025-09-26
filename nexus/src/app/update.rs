@@ -11,6 +11,7 @@ use nexus_auth::authz;
 use nexus_db_lookup::LookupPath;
 use nexus_db_model::{Generation, TufTrustRoot};
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db::datastore::update::TufRepoInsertResponse;
 use nexus_db_queries::db::{datastore::SQL_BATCH_SIZE, pagination::Paginator};
 use nexus_types::deployment::TargetReleaseDescription;
 use nexus_types::external_api::shared::TufSignedRootRole;
@@ -20,7 +21,7 @@ use nexus_types::inventory::RotSlot;
 use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::Nullable;
 use omicron_common::api::external::{
-    DataPageParams, Error, TufRepoInsertResponse, TufRepoInsertStatus,
+    DataPageParams, Error, TufRepoInsertStatus,
 };
 use omicron_common::disk::M2Slot;
 use omicron_uuid_kinds::{GenericUuid, TufTrustRootUuid};
@@ -95,7 +96,7 @@ impl super::Nexus {
             self.background_tasks.task_tuf_artifact_replication.activate();
         }
 
-        Ok(response.into_external())
+        Ok(response)
     }
 
     pub(crate) async fn updates_get_repository(

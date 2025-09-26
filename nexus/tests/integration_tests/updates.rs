@@ -20,9 +20,7 @@ use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use nexus_test_utils::test_setup;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::views;
-use omicron_common::api::external::{
-    TufRepoInsertResponse, TufRepoInsertStatus,
-};
+use nexus_types::external_api::views::{TufRepoUpload, TufRepoUploadStatus};
 use pretty_assertions::assert_eq;
 use semver::Version;
 use serde::Deserialize;
@@ -205,20 +203,19 @@ async fn test_repo_upload() -> Result<()> {
     let repo = trust_root.assemble_repo(&logctx.log, &[]).await?;
 
     // Generate a repository and upload it to Nexus.
-    let mut initial_description = {
+    let mut initial_repo = {
         let response = repo
             .to_upload_request(client, StatusCode::OK)
             .execute()
             .await
             .context("error uploading repository")?;
 
-        let response =
-            serde_json::from_slice::<TufRepoInsertResponse>(&response.body)
-                .context("error deserializing response body")?;
-        assert_eq!(response.status, TufRepoInsertStatus::Inserted);
-        response.recorded
+        let response = serde_json::from_slice::<TufRepoUpload>(&response.body)
+            .context("error deserializing response body")?;
+        assert_eq!(response.status, TufRepoUploadStatus::Inserted);
+        response.repo
     };
-    let unique_sha256_count = initial_description
+    let unique_sha256_count = initial_repo
         .artifacts
         .iter()
         .map(|artifact| artifact.hash)
@@ -227,7 +224,7 @@ async fn test_repo_upload() -> Result<()> {
     // The repository description should have `Zone` artifacts instead of the
     // composite `ControlPlane` artifact.
     assert_eq!(
-        initial_description
+        initial_repo
             .artifacts
             .iter()
             .filter_map(|artifact| {
@@ -240,7 +237,7 @@ async fn test_repo_upload() -> Result<()> {
             .collect::<Vec<_>>(),
         ["zone-1", "zone-2"]
     );
-    assert!(!initial_description.artifacts.iter().any(|artifact| {
+    assert!(!initial_repo.artifacts.iter().any(|artifact| {
         artifact.id.kind == KnownArtifactKind::ControlPlane.into()
     }));
     // The generation number should now be 2.
@@ -287,18 +284,17 @@ async fn test_repo_upload() -> Result<()> {
             .await
             .context("error uploading repository a second time")?;
 
-        let response =
-            serde_json::from_slice::<TufRepoInsertResponse>(&response.body)
-                .context("error deserializing response body")?;
-        assert_eq!(response.status, TufRepoInsertStatus::AlreadyExists);
-        response.recorded
+        let response = serde_json::from_slice::<TufRepoUpload>(&response.body)
+            .context("error deserializing response body")?;
+        assert_eq!(response.status, TufRepoUploadStatus::AlreadyExists);
+        response.repo
     };
 
-    initial_description.sort_artifacts();
+    initial_repo.sort_artifacts();
     reupload_description.sort_artifacts();
 
     assert_eq!(
-        initial_description, reupload_description,
+        initial_repo, reupload_description,
         "initial description matches reupload"
     );
 
@@ -309,24 +305,20 @@ async fn test_repo_upload() -> Result<()> {
     );
 
     // Now get the repository that was just uploaded.
-    let get_repo = object_get::<views::TufRepo>(
+    let repo = object_get::<views::TufRepo>(
         client,
         "/v1/system/update/repository/1.0.0",
     )
     .await;
 
     // Compare just the repo metadata (not artifacts)
+    assert_eq!(initial_repo.hash, repo.hash, "repo hash matches");
     assert_eq!(
-        initial_description.repo.hash,
-        get_repo.hash.into(),
-        "repo hash matches"
-    );
-    assert_eq!(
-        initial_description.repo.system_version, get_repo.system_version,
+        initial_repo.system_version, repo.system_version,
         "system version matches"
     );
     assert_eq!(
-        initial_description.repo.valid_until, get_repo.valid_until,
+        initial_repo.valid_until, repo.valid_until,
         "valid_until matches"
     );
 
@@ -441,18 +433,17 @@ async fn test_repo_upload() -> Result<()> {
                 (should succeed)",
             )?;
 
-        let response =
-            serde_json::from_slice::<TufRepoInsertResponse>(&response.body)
-                .context("error deserializing response body")?;
-        assert_eq!(response.status, TufRepoInsertStatus::Inserted);
-        let mut description = response.recorded;
+        let response = serde_json::from_slice::<TufRepoUpload>(&response.body)
+            .context("error deserializing response body")?;
+        assert_eq!(response.status, TufRepoUploadStatus::Inserted);
+        let mut description = response.repo;
         description.sort_artifacts();
 
         // The artifacts should be exactly the same as the 1.0.0 repo we
         // uploaded, other than the installinator document (which will have
         // system version 2.0.0).
         let mut installinator_doc_1 = None;
-        let filtered_artifacts_1 = initial_description
+        let filtered_artifacts_1 = initial_repo
             .artifacts
             .iter()
             .filter(|artifact| {
@@ -828,9 +819,9 @@ async fn test_repo_list() -> Result<()> {
         .await
         .context("error uploading first repository")?;
     let response1 =
-        serde_json::from_slice::<TufRepoInsertResponse>(&upload_response1.body)
+        serde_json::from_slice::<TufRepoUpload>(&upload_response1.body)
             .context("error deserializing first response body")?;
-    assert_eq!(response1.status, TufRepoInsertStatus::Inserted);
+    assert_eq!(response1.status, TufRepoUploadStatus::Inserted);
 
     // Upload second repository (system version 2.0.0)
     let tweaks = &[ManifestTweak::SystemVersion("2.0.0".parse().unwrap())];
@@ -841,9 +832,9 @@ async fn test_repo_list() -> Result<()> {
         .await
         .context("error uploading second repository")?;
     let response2 =
-        serde_json::from_slice::<TufRepoInsertResponse>(&upload_response2.body)
+        serde_json::from_slice::<TufRepoUpload>(&upload_response2.body)
             .context("error deserializing second response body")?;
-    assert_eq!(response2.status, TufRepoInsertStatus::Inserted);
+    assert_eq!(response2.status, TufRepoUploadStatus::Inserted);
 
     // Upload third repository (system version 3.0.0)
     let tweaks = &[ManifestTweak::SystemVersion("3.0.0".parse().unwrap())];
@@ -854,9 +845,9 @@ async fn test_repo_list() -> Result<()> {
         .await
         .context("error uploading third repository")?;
     let response3 =
-        serde_json::from_slice::<TufRepoInsertResponse>(&upload_response3.body)
+        serde_json::from_slice::<TufRepoUpload>(&upload_response3.body)
             .context("error deserializing third response body")?;
-    assert_eq!(response3.status, TufRepoInsertStatus::Inserted);
+    assert_eq!(response3.status, TufRepoUploadStatus::Inserted);
 
     // List repositories - should return all 3, ordered by system version (newest first)
     let list: ResultsPage<views::TufRepo> =
@@ -883,7 +874,7 @@ async fn test_repo_list() -> Result<()> {
     // Request ascending order and expect the versions oldest-first
     let ascending_list: ResultsPage<views::TufRepo> = objects_list_page_authz(
         client,
-        "/v1/system/update/repositories?sort_by=ascending",
+        "/v1/system/update/repositories?sort_by=version_ascending",
     )
     .await;
 

@@ -1630,6 +1630,35 @@ impl From<external::TufRepoMeta> for TufRepo {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+pub struct TufRepoUpload {
+    pub repo: TufRepo,
+    pub status: TufRepoUploadStatus,
+}
+
+/// Whether the uploaded TUF repo already existed or was new and had to be
+/// inserted. Part of `TufRepoUpload`.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum TufRepoUploadStatus {
+    /// The repository already existed in the database
+    AlreadyExists,
+
+    /// The repository did not exist, and was inserted into the database
+    Inserted,
+}
+
+impl From<external::TufRepoInsertStatus> for TufRepoUploadStatus {
+    fn from(status: external::TufRepoInsertStatus) -> Self {
+        match status {
+            external::TufRepoInsertStatus::AlreadyExists => Self::AlreadyExists,
+            external::TufRepoInsertStatus::Inserted => Self::Inserted,
+        }
+    }
+}
+
 fn expected_one_of<T: strum::VariantArray + fmt::Display>() -> String {
     use std::fmt::Write;
     let mut msg = "expected one of:".to_string();
