@@ -5,7 +5,11 @@
 //! `omdb db db_metadata` subcommands
 
 use super::display_option_blank;
+
+use crate::check_allow_destructive::DestructiveOperationToken;
 use anyhow::Context;
+use anyhow::bail;
+use clap::ArgAction;
 use clap::Args;
 use clap::Subcommand;
 use nexus_db_model::DbMetadataNexusState;
@@ -27,8 +31,37 @@ pub struct DbMetadataArgs {
 
 #[derive(Debug, Subcommand, Clone)]
 pub enum DbMetadataCommands {
+    /// Lists the `db_metadata_nexus` records for all Nexuses.
     #[clap(alias = "ls-nexus")]
     ListNexus,
+
+    /// !!! DANGEROUS !!! Updates a `db_metadata_nexus` record to 'Quiesced'
+    ///
+    /// THIS OPERATION IS DANGEROUS. It is the responsibility of the caller
+    /// to ensure that the specified Nexus zone is not running.
+    ///
+    /// If the Nexus being updated is actually running, this operation
+    /// may cause arbitrary data corruption, as it can allow multiple Nexuses
+    /// at distinct database verions to inadvertently be running concurrently.
+    ///
+    /// This operation is intended to assist in the explicit case where a Nexus
+    /// is unable to finish marking itself quiesced during the handoff process,
+    /// and cannot be expunged.
+    ForceNexusQuiesce(ForceNexusQuiesceArgs),
+}
+
+#[derive(Debug, Args, Clone)]
+pub struct ForceNexusQuiesceArgs {
+    /// The UUID of the Nexus zone to be marked quiesced
+    id: OmicronZoneUuid,
+
+    /// If "true": don't bother parsing the target blueprint to identify the
+    /// validity of the [`id`] argument.
+    ///
+    /// Forcing Nexus to quiesce is already an unsafe operation; this makes
+    /// it even less safe. Use with caution.
+    #[arg(long, action=ArgAction::SetTrue)]
+    ignore_target_blueprint: bool,
 }
 
 // DB Metadata
@@ -149,6 +182,45 @@ pub async fn cmd_db_metadata_list_nexus(
         .with(tabled::settings::Padding::new(0, 1, 0, 0))
         .to_string();
     println!("{}", table);
+
+    Ok(())
+}
+
+pub async fn cmd_db_metadata_force_nexus_quiesce(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    args: &ForceNexusQuiesceArgs,
+    _destruction_token: DestructiveOperationToken,
+) -> Result<(), anyhow::Error> {
+    if !args.ignore_target_blueprint {
+        let (_, current_target_blueprint) = datastore
+            .blueprint_target_get_current_full(opctx)
+            .await
+            .context("loading current target blueprint")?;
+        let nexus_generation = current_target_blueprint
+            .all_nexus_zones(BlueprintZoneDisposition::is_in_service)
+            .find_map(|(_, zone, nexus_zone)| {
+                if zone.id == args.id {
+                    Some(nexus_zone.nexus_generation)
+                } else {
+                    None
+                }
+            });
+
+        let Some(gen) = nexus_generation else {
+            bail!("Nexus {} not found in blueprint", args.id);
+        };
+        let bp_gen = current_target_blueprint.nexus_generation;
+        if bp_gen <= gen {
+            bail!(
+                "Nexus {} not ready to quiesce (nexus generation {gen} >= blueprint gen {bp_gen})",
+                args.id
+            );
+        }
+    }
+
+    datastore.database_nexus_access_update_quiesced(args.id).await?;
+    println!("Quiesced {}", args.id);
 
     Ok(())
 }
