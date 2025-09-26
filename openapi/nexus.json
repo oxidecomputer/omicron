@@ -10961,16 +10961,14 @@
         "x-dropshot-pagination": {
           "required": []
         }
-      }
-    },
-    "/v1/system/update/repository": {
+      },
       "put": {
         "tags": [
           "system/update"
         ],
         "summary": "Upload system release repository",
         "description": "System release repositories are verified by the updates trust store.",
-        "operationId": "system_update_put_repository",
+        "operationId": "system_update_repository_upload",
         "parameters": [
           {
             "in": "query",
@@ -11013,13 +11011,13 @@
         }
       }
     },
-    "/v1/system/update/repository/{system_version}": {
+    "/v1/system/update/repositories/{system_version}": {
       "get": {
         "tags": [
           "system/update"
         ],
         "summary": "Fetch system release repository description by version",
-        "operationId": "system_update_get_repository",
+        "operationId": "system_update_repository_view",
         "parameters": [
           {
             "in": "path",

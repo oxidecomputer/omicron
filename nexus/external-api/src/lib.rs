@@ -2967,11 +2967,11 @@ pub trait NexusExternalApi {
     /// System release repositories are verified by the updates trust store.
     #[endpoint {
         method = PUT,
-        path = "/v1/system/update/repository",
+        path = "/v1/system/update/repositories",
         tags = ["system/update"],
         request_body_max_bytes = PUT_UPDATE_REPOSITORY_MAX_BYTES,
     }]
-    async fn system_update_put_repository(
+    async fn system_update_repository_upload(
         rqctx: RequestContext<Self::Context>,
         query: Query<params::UpdatesPutRepositoryParams>,
         body: StreamingBody,
@@ -2980,10 +2980,10 @@ pub trait NexusExternalApi {
     /// Fetch system release repository description by version
     #[endpoint {
         method = GET,
-        path = "/v1/system/update/repository/{system_version}",
+        path = "/v1/system/update/repositories/{system_version}",
         tags = ["system/update"],
     }]
-    async fn system_update_get_repository(
+    async fn system_update_repository_view(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::UpdatesGetRepositoryParams>,
     ) -> Result<HttpResponseOk<views::TufRepo>, HttpError>;

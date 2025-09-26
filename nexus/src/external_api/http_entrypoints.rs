@@ -6639,7 +6639,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
     // Updates
 
-    async fn system_update_put_repository(
+    async fn system_update_repository_upload(
         rqctx: RequestContext<ApiContext>,
         query: Query<params::UpdatesPutRepositoryParams>,
         body: StreamingBody,
@@ -6664,7 +6664,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
-    async fn system_update_get_repository(
+    async fn system_update_repository_view(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::UpdatesGetRepositoryParams>,
     ) -> Result<HttpResponseOk<views::TufRepo>, HttpError> {
