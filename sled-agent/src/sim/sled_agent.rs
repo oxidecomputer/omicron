@@ -56,14 +56,16 @@ use propolis_client::{
 };
 use range_requests::PotentialRange;
 use sled_agent_api::SupportBundleMetadata;
+use sled_agent_api::v5::InstanceMulticastMembership;
 use sled_agent_types::disk::DiskStateRequested;
 use sled_agent_types::early_networking::{
     EarlyNetworkConfig, EarlyNetworkConfigBody,
 };
 use sled_agent_types::instance::{
-    InstanceEnsureBody, InstanceExternalIpBody, VmmPutStateResponse,
-    VmmStateRequested, VmmUnregisterResponse,
+    InstanceExternalIpBody, VmmPutStateResponse, VmmStateRequested,
+    VmmUnregisterResponse,
 };
+
 use slog::Logger;
 use std::collections::{HashMap, HashSet};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
@@ -99,6 +101,9 @@ pub struct SledAgent {
     /// lists of external IPs assigned to instances
     pub external_ips:
         Mutex<HashMap<PropolisUuid, HashSet<InstanceExternalIpBody>>>,
+    /// multicast group memberships for instances
+    pub multicast_groups:
+        Mutex<HashMap<PropolisUuid, HashSet<InstanceMulticastMembership>>>,
     pub vpc_routes: Mutex<HashMap<RouterId, RouteSet>>,
     config: Config,
     fake_zones: Mutex<OmicronZonesConfig>,
@@ -180,6 +185,7 @@ impl SledAgent {
             simulated_upstairs,
             v2p_mappings: Mutex::new(HashSet::new()),
             external_ips: Mutex::new(HashMap::new()),
+            multicast_groups: Mutex::new(HashMap::new()),
             vpc_routes: Mutex::new(HashMap::new()),
             mock_propolis: futures::lock::Mutex::new(None),
             config: config.clone(),
@@ -197,12 +203,40 @@ impl SledAgent {
     /// Idempotently ensures that the given API Instance (described by
     /// `api_instance`) exists on this server in the given runtime state
     /// (described by `target`).
+    // Keep the v1 method for compatibility but it just delegates to v2
+    pub async fn instance_register_v1(
+        self: &Arc<Self>,
+        propolis_id: PropolisUuid,
+        instance: sled_agent_types::instance::InstanceEnsureBody,
+    ) -> Result<SledVmmState, Error> {
+        // Convert v1 to v5 for internal processing
+        let v5_instance = sled_agent_api::v5::InstanceEnsureBody {
+            vmm_spec: instance.vmm_spec,
+            local_config: sled_agent_api::v5::InstanceSledLocalConfig {
+                hostname: instance.local_config.hostname,
+                nics: instance.local_config.nics,
+                source_nat: instance.local_config.source_nat,
+                ephemeral_ip: instance.local_config.ephemeral_ip,
+                floating_ips: instance.local_config.floating_ips,
+                multicast_groups: Vec::new(), // v1 doesn't support multicast
+                firewall_rules: instance.local_config.firewall_rules,
+                dhcp_config: instance.local_config.dhcp_config,
+            },
+            vmm_runtime: instance.vmm_runtime,
+            instance_id: instance.instance_id,
+            migration_id: instance.migration_id,
+            propolis_addr: instance.propolis_addr,
+            metadata: instance.metadata,
+        };
+        self.instance_register(propolis_id, v5_instance).await
+    }
+
     pub async fn instance_register(
         self: &Arc<Self>,
         propolis_id: PropolisUuid,
-        instance: InstanceEnsureBody,
+        instance: sled_agent_api::v5::InstanceEnsureBody,
     ) -> Result<SledVmmState, Error> {
-        let InstanceEnsureBody {
+        let sled_agent_api::v5::InstanceEnsureBody {
             vmm_spec,
             local_config,
             instance_id,
@@ -679,6 +713,44 @@ impl SledAgent {
         let my_eips = eips.entry(propolis_id).or_default();
 
         my_eips.remove(&body_args);
+
+        Ok(())
+    }
+
+    pub async fn instance_join_multicast_group(
+        &self,
+        propolis_id: PropolisUuid,
+        membership: &sled_agent_api::v5::InstanceMulticastMembership,
+    ) -> Result<(), Error> {
+        if !self.vmms.contains_key(&propolis_id.into_untyped_uuid()).await {
+            return Err(Error::internal_error(
+                "can't join multicast group for VMM that's not registered",
+            ));
+        }
+
+        let mut groups = self.multicast_groups.lock().unwrap();
+        let my_groups = groups.entry(propolis_id).or_default();
+
+        my_groups.insert(membership.clone());
+
+        Ok(())
+    }
+
+    pub async fn instance_leave_multicast_group(
+        &self,
+        propolis_id: PropolisUuid,
+        membership: &sled_agent_api::v5::InstanceMulticastMembership,
+    ) -> Result<(), Error> {
+        if !self.vmms.contains_key(&propolis_id.into_untyped_uuid()).await {
+            return Err(Error::internal_error(
+                "can't leave multicast group for VMM that's not registered",
+            ));
+        }
+
+        let mut groups = self.multicast_groups.lock().unwrap();
+        let my_groups = groups.entry(propolis_id).or_default();
+
+        my_groups.remove(membership);
 
         Ok(())
     }

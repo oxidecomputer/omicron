@@ -349,6 +349,10 @@ task: "metrics_producer_gc"
     unregisters Oximeter metrics producers that have not renewed their lease
 
 
+task: "multicast_group_reconciler"
+    reconciles multicast group state with dendrite switch configuration
+
+
 task: "nat_garbage_collector"
     prunes soft-deleted NAT entries from nat_entry table based on a
     predetermined retention policy
@@ -647,6 +651,12 @@ task: "metrics_producer_gc"
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
 warning: unknown background task: "metrics_producer_gc" (don't know how to interpret details: Object {"expiration": String("<REDACTED_TIMESTAMP>"), "pruned": Array []})
+
+task: "multicast_group_reconciler"
+  configured period: every <REDACTED_DURATION>m
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+warning: unknown background task: "multicast_group_reconciler" (don't know how to interpret details: Object {"errors": Array [String("failed to create multicast dataplane client: Internal Error: failed to build DPD clients")], "groups_created": Number(0), "groups_deleted": Number(0), "groups_verified": Number(0), "members_deleted": Number(0), "members_processed": Number(0)})
 
 task: "phantom_disks"
   configured period: every <REDACTED_DURATION>s
@@ -1165,6 +1175,12 @@ task: "metrics_producer_gc"
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
 warning: unknown background task: "metrics_producer_gc" (don't know how to interpret details: Object {"expiration": String("<REDACTED_TIMESTAMP>"), "pruned": Array []})
+
+task: "multicast_group_reconciler"
+  configured period: every <REDACTED_DURATION>m
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+warning: unknown background task: "multicast_group_reconciler" (don't know how to interpret details: Object {"errors": Array [String("failed to create multicast dataplane client: Internal Error: failed to build DPD clients")], "groups_created": Number(0), "groups_deleted": Number(0), "groups_verified": Number(0), "members_deleted": Number(0), "members_processed": Number(0)})
 
 task: "phantom_disks"
   configured period: every <REDACTED_DURATION>s

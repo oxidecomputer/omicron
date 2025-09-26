@@ -15,6 +15,7 @@ camino-tempfile.workspace = true
 chrono.workspace = true
 crucible-agent-client.workspace = true
 dns-server.workspace = true
+dpd-client.workspace = true
 dns-service-client.workspace = true
 dropshot.workspace = true
 futures.workspace = true

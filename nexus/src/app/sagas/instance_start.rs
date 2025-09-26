@@ -22,7 +22,7 @@ use nexus_db_queries::{authn, authz, db};
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid, PropolisUuid, SledUuid};
 use serde::{Deserialize, Serialize};
-use slog::info;
+use slog::{error, info};
 use steno::ActionError;
 
 /// Parameters to the instance start saga.
@@ -111,6 +111,7 @@ declare_saga_actions! {
     ENSURE_RUNNING -> "ensure_running" {
         + sis_ensure_running
     }
+
 }
 
 /// Node name for looking up the VMM record once it has been registered with the
@@ -621,7 +622,7 @@ async fn sis_ensure_registered(
             .await
             .map_err(ActionError::action_failed)?;
 
-    osagactx
+    let register_result = osagactx
         .nexus()
         .instance_ensure_registered(
             &opctx,
@@ -635,31 +636,64 @@ async fn sis_ensure_registered(
             &vmm_record,
             InstanceRegisterReason::Start { vmm_id: propolis_id },
         )
-        .await
-        .map_err(|err| match err {
-            InstanceStateChangeError::SledAgent(inner) => {
-                info!(osagactx.log(),
-                      "start saga: sled agent failed to register instance";
-                      "instance_id" => %instance_id,
-                      "sled_id" =>  %sled_id,
-                      "error" => ?inner,
-                      "start_reason" => ?params.reason);
+        .await;
 
-                // Don't set the instance to Failed in this case. Instead, allow
-                // the saga to unwind and restore the instance to the Stopped
-                // state (matching what would happen if there were a failure
-                // prior to this point).
-                ActionError::action_failed(Error::from(inner))
-            }
-            InstanceStateChangeError::Other(inner) => {
+    // Handle the result and update multicast members if successful
+    let vmm_record = match register_result {
+        Ok(vmm_record) => {
+            // Update multicast group members with the instance's sled_id now that it's registered
+            if let Err(e) = osagactx
+                .datastore()
+                .multicast_group_member_update_sled_id(
+                    &opctx,
+                    instance_id,
+                    Some(sled_id.into()),
+                )
+                .await
+            {
+                // Log but don't fail the saga - the reconciler will fix this later
                 info!(osagactx.log(),
-                      "start saga: internal error registering instance";
+                      "start saga: failed to update multicast member sled_id, reconciler will fix";
                       "instance_id" => %instance_id,
-                      "error" => ?inner,
-                      "start_reason" => ?params.reason);
-                ActionError::action_failed(inner)
+                      "sled_id" => %sled_id,
+                      "error" => ?e);
+            } else {
+                info!(osagactx.log(),
+                      "start saga: updated multicast member sled_id";
+                      "instance_id" => %instance_id,
+                      "sled_id" => %sled_id);
             }
-        })
+            vmm_record
+        }
+        Err(err) => {
+            return Err(match err {
+                InstanceStateChangeError::SledAgent(inner) => {
+                    info!(osagactx.log(),
+                          "start saga: sled agent failed to register instance";
+                          "instance_id" => %instance_id,
+                          "sled_id" =>  %sled_id,
+                          "error" => ?inner,
+                          "start_reason" => ?params.reason);
+
+                    // Don't set the instance to Failed in this case. Instead, allow
+                    // the saga to unwind and restore the instance to the Stopped
+                    // state (matching what would happen if there were a failure
+                    // prior to this point).
+                    ActionError::action_failed(Error::from(inner))
+                }
+                InstanceStateChangeError::Other(inner) => {
+                    info!(osagactx.log(),
+                          "start saga: internal error registering instance";
+                          "instance_id" => %instance_id,
+                          "error" => ?inner,
+                          "start_reason" => ?params.reason);
+                    ActionError::action_failed(inner)
+                }
+            });
+        }
+    };
+
+    Ok(vmm_record)
 }
 
 async fn sis_ensure_registered_undo(
@@ -696,11 +730,13 @@ async fn sis_ensure_registered_undo(
     // writing back the state returned from sled agent). Otherwise, try to
     // reason about the next action from the specific kind of error that was
     // returned.
-    if let Err(e) = osagactx
+    let unregister_result = osagactx
         .nexus()
         .instance_ensure_unregistered(&propolis_id, &sled_id)
-        .await
-    {
+        .await;
+
+    // Handle the unregister result
+    if let Err(e) = unregister_result {
         error!(osagactx.log(),
                "start saga: failed to unregister instance from sled";
                "instance_id" => %instance_id,
@@ -769,6 +805,27 @@ async fn sis_ensure_registered_undo(
             }
         }
     } else {
+        datastore
+            .multicast_group_member_update_sled_id(
+                &opctx,
+                instance_id.into_untyped_uuid(),
+                None,
+            )
+            .await
+            .map(|_| {
+                info!(osagactx.log(),
+                      "start saga: cleared multicast member sled_id during undo";
+                      "instance_id" => %instance_id);
+            })
+            .map_err(|e| {
+                // Log but don't fail the undo - the reconciler will fix this later
+                info!(osagactx.log(),
+                      "start saga: failed to clear multicast member sled_id during undo, reconciler will fix";
+                      "instance_id" => %instance_id,
+                      "error" => ?e);
+            })
+            .ok(); // Ignore the result
+
         Ok(())
     }
 }
@@ -885,6 +942,7 @@ mod test {
                 start: false,
                 auto_restart_policy: Default::default(),
                 anti_affinity_groups: Vec::new(),
+                multicast_groups: Vec::new(),
             },
         )
         .await

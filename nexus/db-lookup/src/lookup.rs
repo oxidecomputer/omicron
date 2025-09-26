@@ -347,6 +347,10 @@ impl<'a> LookupPath<'a> {
         AddressLot::OwnedName(Root { lookup_root: self }, name)
     }
 
+    pub fn multicast_group_id(self, id: Uuid) -> MulticastGroup<'a> {
+        MulticastGroup::PrimaryKey(Root { lookup_root: self }, id)
+    }
+
     pub fn loopback_address(
         self,
         rack_id: Uuid,
@@ -727,6 +731,14 @@ lookup_resource! {
 
 lookup_resource! {
     name = "FloatingIp",
+    ancestors = [ "Silo", "Project" ],
+    lookup_by_name = true,
+    soft_deletes = true,
+    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+}
+
+lookup_resource! {
+    name = "MulticastGroup",
     ancestors = [ "Silo", "Project" ],
     lookup_by_name = true,
     soft_deletes = true,

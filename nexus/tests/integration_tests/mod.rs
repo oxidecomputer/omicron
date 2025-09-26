@@ -30,6 +30,7 @@ mod internet_gateway;
 mod ip_pools;
 mod metrics;
 mod metrics_querier;
+mod multicast;
 mod oximeter;
 mod pantry;
 mod password_login;

@@ -439,6 +439,8 @@ pub struct BackgroundTaskConfig {
     pub webhook_deliverator: WebhookDeliveratorConfig,
     /// configuration for SP ereport ingester task
     pub sp_ereport_ingester: SpEreportIngesterConfig,
+    /// configuration for multicast group reconciler task
+    pub multicast_group_reconciler: MulticastGroupReconcilerConfig,
 }
 
 #[serde_as]
@@ -836,6 +838,21 @@ impl Default for SpEreportIngesterConfig {
     }
 }
 
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct MulticastGroupReconcilerConfig {
+    /// period (in seconds) for periodic activations of the background task that
+    /// reconciles multicast group state with dendrite switch configuration
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
+}
+
+impl Default for MulticastGroupReconcilerConfig {
+    fn default() -> Self {
+        Self { period_secs: Duration::from_secs(60) }
+    }
+}
+
 /// Configuration for a nexus server
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct PackageConfig {
@@ -1126,6 +1143,7 @@ mod test {
             webhook_deliverator.first_retry_backoff_secs = 45
             webhook_deliverator.second_retry_backoff_secs = 46
             sp_ereport_ingester.period_secs = 47
+            multicast_group_reconciler.period_secs = 60
             [default_region_allocation_strategy]
             type = "random"
             seed = 0
@@ -1359,6 +1377,10 @@ mod test {
                             period_secs: Duration::from_secs(47),
                             disable: false,
                         },
+                        multicast_group_reconciler:
+                            MulticastGroupReconcilerConfig {
+                                period_secs: Duration::from_secs(60),
+                            },
                     },
                     default_region_allocation_strategy:
                         crate::nexus_config::RegionAllocationStrategy::Random {
@@ -1453,6 +1475,7 @@ mod test {
             alert_dispatcher.period_secs = 42
             webhook_deliverator.period_secs = 43
             sp_ereport_ingester.period_secs = 44
+            multicast_group_reconciler.period_secs = 60
 
             [default_region_allocation_strategy]
             type = "random"

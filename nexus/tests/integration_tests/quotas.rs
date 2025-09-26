@@ -114,6 +114,7 @@ impl ResourceAllocator {
                 start: false,
                 auto_restart_policy: Default::default(),
                 anti_affinity_groups: Vec::new(),
+                multicast_groups: Vec::new(),
             },
         )
         .authn_as(self.auth.clone())
