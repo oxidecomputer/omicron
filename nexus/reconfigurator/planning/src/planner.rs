@@ -5224,9 +5224,10 @@ pub(crate) mod test {
         );
         assert_eq!(bp4_config.keepers, bp3_config.keepers);
         assert_eq!(bp4_config.servers, bp3_config.servers);
+        // The blueprint shouldn't update solely because the log index changed
         assert_eq!(
             bp4_config.highest_seen_keeper_leader_committed_log_index,
-            1
+            0
         );
 
         // Let's bump the clickhouse target to 5 via policy so that we can add
@@ -5388,9 +5389,10 @@ pub(crate) mod test {
         );
         assert_eq!(bp8_config.keepers, bp7_config.keepers);
         assert_eq!(bp7_config.keepers.len(), target_keepers as usize);
+        // The blueprint should not change solely due to the log index in inventory changing
         assert_eq!(
             bp8_config.highest_seen_keeper_leader_committed_log_index,
-            3
+            2
         );
 
         logctx.cleanup_successful();
