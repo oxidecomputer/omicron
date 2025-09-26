@@ -6,6 +6,9 @@ use crate::deployment::PlanningReport;
 use crate::external_api::views;
 use chrono::DateTime;
 use chrono::Utc;
+use iddqd::IdOrdItem;
+use iddqd::IdOrdMap;
+use iddqd::id_upcast;
 use omicron_common::api::external::Generation;
 use omicron_uuid_kinds::AlertReceiverUuid;
 use omicron_uuid_kinds::AlertUuid;
@@ -13,7 +16,9 @@ use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
+use omicron_uuid_kinds::TufRepoUuid;
 use omicron_uuid_kinds::WebhookDeliveryUuid;
+use semver::Version;
 use serde::Deserialize;
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -377,6 +382,32 @@ pub enum TufArtifactReplicationOperation {
     List,
     Put { hash: ArtifactHash },
     Copy { hash: ArtifactHash, source_sled: SledUuid },
+}
+
+#[derive(Debug, Serialize)]
+pub struct TufRepoPrunerStatus {
+    pub repos_keep: IdOrdMap<TufRepoInfo>,
+    pub repos_prune: IdOrdMap<TufRepoInfo>,
+    pub warnings: Vec<String>,
+    pub nkeep_recent_releases: u8,
+    pub nkeep_recent_uploads: u8,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct TufRepoInfo {
+    pub id: TufRepoUuid,
+    pub system_version: Version,
+    pub time_created: DateTime<Utc>,
+}
+
+impl IdOrdItem for TufRepoInfo {
+    type Key<'a> = &'a TufRepoUuid;
+
+    fn key(&self) -> Self::Key<'_> {
+        &self.id
+    }
+
+    id_upcast!();
 }
 
 /// The status of an `blueprint_rendezvous` background task activation.

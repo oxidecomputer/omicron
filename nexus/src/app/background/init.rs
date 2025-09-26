@@ -926,6 +926,7 @@ impl BackgroundTasksInitializer {
             period: config.tuf_repo_pruner.period_secs,
             task_impl: Box::new(tuf_repo_pruner::TufRepoPruner::new(
                 datastore.clone(),
+                config.tuf_repo_pruner.clone()
             )),
             opctx: opctx.child(BTreeMap::new()),
             watchers: vec![],
