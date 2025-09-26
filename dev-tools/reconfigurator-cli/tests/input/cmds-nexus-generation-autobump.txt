@@ -42,21 +42,13 @@ sled-update-sp serial0 --active 1.0.0
 sled-update-sp serial1 --active 1.0.0
 sled-update-sp serial2 --active 1.0.0
 
-sled-update-host-phase1 serial0 --active A --slot-a 1.0.0
-sled-update-host-phase1 serial1 --active A --slot-a 1.0.0
-sled-update-host-phase1 serial2 --active A --slot-a 1.0.0
+sled-update-host-phase1 serial0 --slot-a b99d5273ba1418bebb19d74b701d716896409566d41de76ada71bded4c9b166b
+sled-update-host-phase1 serial1 --slot-a b99d5273ba1418bebb19d74b701d716896409566d41de76ada71bded4c9b166b
+sled-update-host-phase1 serial2 --slot-a b99d5273ba1418bebb19d74b701d716896409566d41de76ada71bded4c9b166b
 
-sled-update-host-phase1 serial0 --slot-b b99d5273ba1418bebb19d74b701d716896409566d41de76ada71bded4c9b166b
-sled-update-host-phase1 serial1 --slot-b b99d5273ba1418bebb19d74b701d716896409566d41de76ada71bded4c9b166b
-sled-update-host-phase1 serial2 --slot-b b99d5273ba1418bebb19d74b701d716896409566d41de76ada71bded4c9b166b
-
-sled-update-host-phase2 serial0 --boot-disk A --slot-a 1.0.0
-sled-update-host-phase2 serial1 --boot-disk A --slot-a 1.0.0
-sled-update-host-phase2 serial2 --boot-disk A --slot-a 1.0.0
-
-sled-update-host-phase2 serial0 --boot-disk B --slot-b d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47
-sled-update-host-phase2 serial1 --boot-disk B --slot-b d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47
-sled-update-host-phase2 serial2 --boot-disk B --slot-b d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47
+sled-update-host-phase2 serial0 --boot-disk A --slot-a d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47
+sled-update-host-phase2 serial1 --boot-disk A --slot-a d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47
+sled-update-host-phase2 serial2 --boot-disk A --slot-a d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47
 
 # Migrate from Install -> Artifact
 inventory-generate
