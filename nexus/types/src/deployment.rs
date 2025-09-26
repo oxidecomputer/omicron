@@ -22,6 +22,7 @@ use blueprint_display::BpDatasetsTableSchema;
 use blueprint_display::BpHostPhase2TableSchema;
 use blueprint_display::BpTableColumn;
 use daft::Diffable;
+use gateway_types::component::SpType;
 use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
 use iddqd::id_ord_map::Entry;
@@ -83,7 +84,6 @@ use anyhow::bail;
 pub use blueprint_diff::BlueprintDiffSummary;
 use blueprint_display::BpPendingMgsUpdates;
 pub use clickhouse::ClickhouseClusterConfig;
-use gateway_client::types::SpType;
 use gateway_types::rot::RotSlot;
 pub use network_resources::AddNetworkResourceError;
 pub use network_resources::OmicronZoneExternalFloatingAddr;
@@ -2383,7 +2383,7 @@ mod test {
     use super::PendingMgsUpdateSpDetails;
     use super::PendingMgsUpdates;
     use crate::inventory::BaseboardId;
-    use gateway_client::types::SpType;
+    use gateway_types::component::SpType;
 
     #[test]
     fn test_serialize_pending_mgs_updates() {

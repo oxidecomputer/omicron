@@ -6,6 +6,7 @@ use crate::deployment::PlanningReport;
 use crate::external_api::views;
 use chrono::DateTime;
 use chrono::Utc;
+use gateway_types::component::SpType;
 use omicron_common::api::external::Generation;
 use omicron_uuid_kinds::AlertReceiverUuid;
 use omicron_uuid_kinds::AlertUuid;
@@ -596,7 +597,7 @@ pub struct SpEreportIngesterStatus {
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq)]
 pub struct SpEreporterStatus {
-    pub sp_type: crate::inventory::SpType,
+    pub sp_type: SpType,
     pub slot: u16,
     #[serde(flatten)]
     pub status: EreporterStatus,
