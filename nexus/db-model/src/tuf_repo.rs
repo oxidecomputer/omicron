@@ -30,8 +30,6 @@ use uuid::Uuid;
 
 /// A description of a TUF update: a repo, along with the artifacts it
 /// contains.
-///
-/// This is the internal variant of [`external::TufRepoDescription`].
 #[derive(Debug, Clone)]
 pub struct TufRepoDescription {
     /// The repository.
@@ -64,7 +62,6 @@ impl TufRepoDescription {
         }
     }
 
-    /// Converts self into [`external::TufRepoDescription`].
     pub fn into_external(self) -> external::TufRepoDescription {
         external::TufRepoDescription {
             repo: self.repo.into_external(),
@@ -78,8 +75,6 @@ impl TufRepoDescription {
 }
 
 /// A record representing an uploaded TUF repository.
-///
-/// This is the internal variant of [`external::TufRepoMeta`].
 #[derive(
     Queryable, Identifiable, Insertable, Clone, Debug, Selectable, AsChangeset,
 )]
@@ -134,7 +129,6 @@ impl TufRepo {
         )
     }
 
-    /// Converts self into [`external::TufRepoMeta`].
     pub fn into_external(self) -> external::TufRepoMeta {
         external::TufRepoMeta {
             hash: self.sha256.into(),
@@ -153,6 +147,18 @@ impl TufRepo {
     /// Returns the targets role version.
     pub fn targets_role_version(&self) -> u64 {
         self.targets_role_version as u64
+    }
+}
+
+impl From<TufRepo> for views::TufRepo {
+    fn from(repo: TufRepo) -> views::TufRepo {
+        views::TufRepo {
+            hash: repo.sha256.into(),
+            targets_role_version: repo.targets_role_version as u64,
+            valid_until: repo.valid_until,
+            system_version: repo.system_version.into(),
+            file_name: repo.file_name,
+        }
     }
 }
 
@@ -411,5 +417,46 @@ impl FromSql<Jsonb, diesel::pg::Pg> for DbTufSignedRootRole {
         serde_json::from_value(value)
             .map(DbTufSignedRootRole)
             .map_err(|e| e.into())
+    }
+}
+
+// The following aren't real models in the sense that they represent DB data,
+// but they are the return types of datastore functions
+
+/// Status of a TUF repo import
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TufRepoUploadStatus {
+    /// The repository already existed in the database
+    AlreadyExists,
+
+    /// The repository did not exist, and was inserted into the database
+    Inserted,
+}
+
+impl From<TufRepoUploadStatus> for views::TufRepoUploadStatus {
+    fn from(status: TufRepoUploadStatus) -> Self {
+        match status {
+            TufRepoUploadStatus::AlreadyExists => {
+                views::TufRepoUploadStatus::AlreadyExists
+            }
+            TufRepoUploadStatus::Inserted => {
+                views::TufRepoUploadStatus::Inserted
+            }
+        }
+    }
+}
+
+/// The return value of the tuf repo insert function
+pub struct TufRepoUpload {
+    pub recorded: TufRepoDescription,
+    pub status: TufRepoUploadStatus,
+}
+
+impl From<TufRepoUpload> for views::TufRepoUpload {
+    fn from(upload: TufRepoUpload) -> Self {
+        views::TufRepoUpload {
+            repo: upload.recorded.repo.into(),
+            status: upload.status.into(),
+        }
     }
 }

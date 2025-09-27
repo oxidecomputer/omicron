@@ -3504,19 +3504,6 @@ pub struct TufArtifactMeta {
     pub sign: Option<Vec<u8>>,
 }
 
-/// Status of a TUF repo import.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, JsonSchema,
-)]
-#[serde(rename_all = "snake_case")]
-pub enum TufRepoInsertStatus {
-    /// The repository already existed in the database.
-    AlreadyExists,
-
-    /// The repository did not exist, and was inserted into the database.
-    Inserted,
-}
-
 #[derive(
     Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq, ObjectIdentity,
 )]

@@ -22,13 +22,12 @@ use nexus_db_errors::{ErrorHandler, public_error_from_diesel};
 use nexus_db_lookup::DbConnection;
 use nexus_db_model::{
     ArtifactHash, DbTypedUuid, TargetRelease, TufArtifact, TufRepo,
-    TufRepoDescription, TufTrustRoot, to_db_typed_uuid,
+    TufRepoDescription, TufRepoUpload, TufRepoUploadStatus, TufTrustRoot,
+    to_db_typed_uuid,
 };
-use nexus_types::external_api::views;
 use omicron_common::api::external::{
     self, CreateResult, DataPageParams, DeleteResult, Generation,
-    ListResultVec, LookupResult, LookupType, ResourceType, TufRepoInsertStatus,
-    UpdateResult,
+    ListResultVec, LookupResult, LookupType, ResourceType, UpdateResult,
 };
 use omicron_common::api::external::{Error, InternalContext};
 use omicron_uuid_kinds::TufRepoKind;
@@ -38,24 +37,6 @@ use semver::Version;
 use swrite::{SWrite, swrite};
 use tufaceous_artifact::ArtifactVersion;
 use uuid::Uuid;
-
-/// The return value of [`DataStore::tuf_repo_insert`].
-///
-/// This is similar to [`views::TufRepoUpload`], but uses
-/// nexus-db-model's types instead of external types.
-pub struct TufRepoInsertResponse {
-    pub recorded: TufRepoDescription,
-    pub status: TufRepoInsertStatus,
-}
-
-impl TufRepoInsertResponse {
-    pub fn into_external(self) -> views::TufRepoUpload {
-        views::TufRepoUpload {
-            repo: self.recorded.repo.into_external().into(),
-            status: self.status.into(),
-        }
-    }
-}
 
 async fn artifacts_for_repo(
     repo_id: TypedUuid<TufRepoKind>,
@@ -90,7 +71,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         description: &external::TufRepoDescription,
-    ) -> CreateResult<TufRepoInsertResponse> {
+    ) -> CreateResult<TufRepoUpload> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
         let log = opctx.log.new(
             slog::o!(
@@ -581,7 +562,7 @@ async fn insert_impl(
     conn: async_bb8_diesel::Connection<DbConnection>,
     desc: &external::TufRepoDescription,
     err: OptionalError<InsertError>,
-) -> Result<TufRepoInsertResponse, DieselError> {
+) -> Result<TufRepoUpload, DieselError> {
     // Load the current generation from the database and increment it, then
     // use that when creating the `TufRepoDescription`. If we determine there
     // are any artifacts to be inserted, we update the generation to this value
@@ -618,9 +599,9 @@ async fn insert_impl(
 
             let recorded =
                 TufRepoDescription { repo: existing_repo, artifacts };
-            return Ok(TufRepoInsertResponse {
+            return Ok(TufRepoUpload {
                 recorded,
-                status: TufRepoInsertStatus::AlreadyExists,
+                status: TufRepoUploadStatus::AlreadyExists,
             });
         }
 
@@ -824,10 +805,7 @@ async fn insert_impl(
     }
 
     let recorded = TufRepoDescription { repo, artifacts: all_artifacts };
-    Ok(TufRepoInsertResponse {
-        recorded,
-        status: TufRepoInsertStatus::Inserted,
-    })
+    Ok(TufRepoUpload { recorded, status: TufRepoUploadStatus::Inserted })
 }
 
 async fn get_generation(

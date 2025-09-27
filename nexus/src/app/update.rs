@@ -9,9 +9,10 @@ use dropshot::HttpError;
 use futures::Stream;
 use nexus_auth::authz;
 use nexus_db_lookup::LookupPath;
+use nexus_db_model::TufRepoUpload;
+use nexus_db_model::TufRepoUploadStatus;
 use nexus_db_model::{Generation, TufTrustRoot};
 use nexus_db_queries::context::OpContext;
-use nexus_db_queries::db::datastore::update::TufRepoInsertResponse;
 use nexus_db_queries::db::{datastore::SQL_BATCH_SIZE, pagination::Paginator};
 use nexus_types::deployment::TargetReleaseDescription;
 use nexus_types::external_api::shared::TufSignedRootRole;
@@ -20,9 +21,7 @@ use nexus_types::internal_api::views as internal_views;
 use nexus_types::inventory::RotSlot;
 use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::Nullable;
-use omicron_common::api::external::{
-    DataPageParams, Error, TufRepoInsertStatus,
-};
+use omicron_common::api::external::{DataPageParams, Error};
 use omicron_common::disk::M2Slot;
 use omicron_uuid_kinds::{GenericUuid, TufTrustRootUuid};
 use semver::Version;
@@ -38,7 +37,7 @@ impl super::Nexus {
         opctx: &OpContext,
         body: impl Stream<Item = Result<Bytes, HttpError>> + Send + Sync + 'static,
         file_name: String,
-    ) -> Result<TufRepoInsertResponse, HttpError> {
+    ) -> Result<TufRepoUpload, HttpError> {
         let mut trusted_roots = Vec::new();
         let mut paginator = Paginator::new(
             SQL_BATCH_SIZE,
@@ -76,7 +75,7 @@ impl super::Nexus {
         // carries with it the `Utf8TempDir`s storing the artifacts) into the
         // artifact replication background task, then immediately activate the
         // task.
-        if response.status == TufRepoInsertStatus::Inserted {
+        if response.status == TufRepoUploadStatus::Inserted {
             self.tuf_artifact_replication_tx
                 .send(artifacts_with_plan)
                 .await

@@ -6654,8 +6654,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let update = nexus
                 .updates_put_repository(&opctx, body, query.file_name)
                 .await?;
-            let repo_upload = update.into_external();
-            Ok(HttpResponseOk(repo_upload))
+            Ok(HttpResponseOk(update.into()))
         };
         apictx
             .context
@@ -6677,7 +6676,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let repo = nexus
                 .updates_get_repository(&opctx, params.system_version)
                 .await?;
-            Ok(HttpResponseOk(repo.into_external().into()))
+            Ok(HttpResponseOk(repo.into()))
         };
         apictx
             .context
@@ -6700,10 +6699,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let repos =
                 nexus.updates_list_repositories(&opctx, &pagparams).await?;
 
-            let responses: Vec<views::TufRepo> = repos
-                .into_iter()
-                .map(|repo| repo.into_external().into())
-                .collect();
+            let responses: Vec<views::TufRepo> =
+                repos.into_iter().map(Into::into).collect();
 
             Ok(HttpResponseOk(ScanByVersion::results_page(
                 &query,

@@ -15,9 +15,9 @@ use chrono::Utc;
 use daft::Diffable;
 pub use omicron_common::api::external::IpVersion;
 use omicron_common::api::external::{
-    self, AffinityPolicy, AllowedSourceIps as ExternalAllowedSourceIps,
-    ByteCount, Digest, Error, FailureDomain, IdentityMetadata, InstanceState,
-    Name, Nullable, ObjectIdentity, SimpleIdentity, SimpleIdentityOrName,
+    AffinityPolicy, AllowedSourceIps as ExternalAllowedSourceIps, ByteCount,
+    Digest, Error, FailureDomain, IdentityMetadata, InstanceState, Name,
+    Nullable, ObjectIdentity, SimpleIdentity, SimpleIdentityOrName,
 };
 use omicron_uuid_kinds::*;
 use oxnet::{Ipv4Net, Ipv6Net};
@@ -1618,18 +1618,6 @@ pub struct TufRepo {
     pub file_name: String,
 }
 
-impl From<external::TufRepoMeta> for TufRepo {
-    fn from(meta: external::TufRepoMeta) -> Self {
-        Self {
-            hash: meta.hash,
-            targets_role_version: meta.targets_role_version,
-            valid_until: meta.valid_until,
-            system_version: meta.system_version,
-            file_name: meta.file_name,
-        }
-    }
-}
-
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 pub struct TufRepoUpload {
     pub repo: TufRepo,
@@ -1648,15 +1636,6 @@ pub enum TufRepoUploadStatus {
 
     /// The repository did not exist, and was inserted into the database
     Inserted,
-}
-
-impl From<external::TufRepoInsertStatus> for TufRepoUploadStatus {
-    fn from(status: external::TufRepoInsertStatus) -> Self {
-        match status {
-            external::TufRepoInsertStatus::AlreadyExists => Self::AlreadyExists,
-            external::TufRepoInsertStatus::Inserted => Self::Inserted,
-        }
-    }
 }
 
 fn expected_one_of<T: strum::VariantArray + fmt::Display>() -> String {
