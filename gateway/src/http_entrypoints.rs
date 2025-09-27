@@ -926,41 +926,13 @@ impl GatewayApi for GatewayImpl {
         apictx.latencies.instrument_dropshot_handler(&rqctx, handler).await
     }
 
-    async fn ignition_command_v1(
-        rqctx: RequestContext<Self::Context>,
-        path: Path<ignition::v1::PathSpIgnitionCommand>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let apictx = rqctx.context();
-        let mgmt_switch = &apictx.mgmt_switch;
-        let ignition::v1::PathSpIgnitionCommand { sp, command } =
-            path.into_inner();
-        let sp_id = sp.into();
-
-        let handler = async {
-            let ignition_target = mgmt_switch.ignition_target(sp_id)?;
-
-            mgmt_switch
-                .ignition_controller()
-                .ignition_command(ignition_target, command.into())
-                .await
-                .map_err(|err| SpCommsError::SpCommunicationFailed {
-                    sp: sp_id,
-                    err,
-                })?;
-
-            Ok(HttpResponseUpdatedNoContent {})
-        };
-        apictx.latencies.instrument_dropshot_handler(&rqctx, handler).await
-    }
-
     async fn ignition_command(
         rqctx: RequestContext<Self::Context>,
         path: Path<PathSpIgnitionCommand>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let apictx = rqctx.context();
         let mgmt_switch = &apictx.mgmt_switch;
-        let ignition::v2::PathSpIgnitionCommand { sp, command } =
-            path.into_inner();
+        let PathSpIgnitionCommand { sp, command } = path.into_inner();
         let sp_id = sp.into();
 
         let handler = async {

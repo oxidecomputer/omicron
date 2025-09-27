@@ -3997,7 +3997,7 @@
         ]
       },
       "IgnitionCommand": {
-        "description": "Ignition action to take",
+        "description": "Ignition command.",
         "type": "string",
         "enum": [
           "power_on",

@@ -7,16 +7,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::component::SpIdentifier;
 
-#[derive(Deserialize, JsonSchema)]
-pub struct PathSpIgnitionCommand {
-    /// ID for the SP that the gateway service translates into the appropriate
-    /// port for communicating with the given SP.
-    #[serde(flatten)]
-    pub sp: SpIdentifier,
-    /// Ignition command to perform on the targeted SP.
-    pub command: IgnitionCommand,
-}
-
 #[derive(
     Debug,
     Clone,
@@ -31,33 +21,6 @@ pub struct PathSpIgnitionCommand {
 pub struct SpIgnitionInfo {
     pub id: SpIdentifier,
     pub details: SpIgnition,
-}
-
-/// Ignition action to take
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, JsonSchema,
-)]
-#[serde(rename_all = "snake_case")]
-pub enum IgnitionCommand {
-    PowerOn,
-    PowerOff,
-    PowerReset,
-}
-
-impl From<IgnitionCommand> for gateway_messages::IgnitionCommand {
-    fn from(cmd: IgnitionCommand) -> Self {
-        match cmd {
-            IgnitionCommand::PowerOn => {
-                gateway_messages::IgnitionCommand::PowerOn
-            }
-            IgnitionCommand::PowerOff => {
-                gateway_messages::IgnitionCommand::PowerOff
-            }
-            IgnitionCommand::PowerReset => {
-                gateway_messages::IgnitionCommand::PowerReset
-            }
-        }
-    }
 }
 
 /// State of an ignition target.

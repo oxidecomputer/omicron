@@ -472,26 +472,6 @@ pub trait GatewayApi {
     #[endpoint {
         method = POST,
         path = "/ignition/{type}/{slot}/{command}",
-        operation_id = "ignition_command",
-        versions = VERSION_INITIAL..VERSION_COSMO
-    }]
-    async fn ignition_command_v1(
-        rqctx: RequestContext<Self::Context>,
-        path: Path<ignition::v1::PathSpIgnitionCommand>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
-
-    /// Send an ignition command targeting a specific SP.
-    ///
-    /// This endpoint can be used to transition a target between A2 and A3 (via
-    /// power-on / power-off) or reset it.
-    ///
-    /// The management network traffic caused by requests to this endpoint is
-    /// between this MGS instance and its local ignition controller, _not_ the
-    /// SP targeted by the command.
-    #[endpoint {
-        method = POST,
-        path = "/ignition/{type}/{slot}/{command}",
-        versions = VERSION_COSMO..
     }]
     async fn ignition_command(
         rqctx: RequestContext<Self::Context>,
