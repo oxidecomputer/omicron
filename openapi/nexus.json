@@ -8241,6 +8241,193 @@
         }
       }
     },
+    "/v1/system/identity-providers/scim/tokens": {
+      "get": {
+        "tags": [
+          "system/silos"
+        ],
+        "operationId": "scim_idp_get_tokens",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "silo",
+            "description": "Name or ID of the silo",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Array_of_ScimClientBearerToken",
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ScimClientBearerToken"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "system/silos"
+        ],
+        "operationId": "scim_idp_create_token",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "silo",
+            "description": "Name or ID of the silo",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScimClientBearerTokenCreateResponse"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "system/silos"
+        ],
+        "operationId": "scim_idp_delete_all_tokens",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "silo",
+            "description": "Name or ID of the silo",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/identity-providers/scim/tokens/{token_id}": {
+      "get": {
+        "tags": [
+          "system/silos"
+        ],
+        "operationId": "scim_idp_get_token_by_id",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "token_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "query",
+            "name": "silo",
+            "description": "Name or ID of the silo",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScimClientBearerToken"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "system/silos"
+        ],
+        "operationId": "scim_idp_delete_token_by_id",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "token_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "query",
+            "name": "silo",
+            "description": "Name or ID of the silo",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/v1/system/ip-pools": {
       "get": {
         "tags": [
@@ -23643,6 +23830,55 @@
           "slo_url",
           "sp_client_id",
           "technical_contact_email"
+        ]
+      },
+      "ScimClientBearerToken": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "time_created": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_expires": {
+            "nullable": true,
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "time_created"
+        ]
+      },
+      "ScimClientBearerTokenCreateResponse": {
+        "description": "The POST response is the only time the generated bearer token is returned to the client.",
+        "type": "object",
+        "properties": {
+          "bearer_token": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "time_created": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_expires": {
+            "nullable": true,
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "bearer_token",
+          "id",
+          "time_created"
         ]
       },
       "ServiceIcmpConfig": {
