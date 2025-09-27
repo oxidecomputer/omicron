@@ -916,10 +916,8 @@ impl GatewayApi for GatewayImpl {
                     err,
                 })?;
 
-            let info = SpIgnitionInfo {
-                id: sp_id.into(),
-                details: state.into(),
-            };
+            let info =
+                SpIgnitionInfo { id: sp_id.into(), details: state.into() };
             Ok(HttpResponseOk(info))
         };
         apictx.latencies.instrument_dropshot_handler(&rqctx, handler).await
