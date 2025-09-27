@@ -18,7 +18,7 @@ use gateway_types::{
     component_details::SpComponentDetails,
     host::{ComponentFirmwareHashStatus, HostStartupOptions},
     ignition,
-    ignition::{PathSpIgnitionCommand, SpIgnitionInfo},
+    ignition::{IgnitionCommand, SpIgnitionInfo},
     rot::{RotCfpa, RotCfpaSlot, RotCmpa, RotState},
     sensor::SpSensorReading,
     task_dump::TaskDump,
@@ -717,4 +717,14 @@ pub struct GetCfpaParams {
 )]
 pub struct GetRotBootInfoParams {
     pub version: u8,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct PathSpIgnitionCommand {
+    /// ID for the SP that the gateway service translates into the appropriate
+    /// port for communicating with the given SP.
+    #[serde(flatten)]
+    pub sp: SpIdentifier,
+    /// Ignition command to perform on the targeted SP.
+    pub command: IgnitionCommand,
 }

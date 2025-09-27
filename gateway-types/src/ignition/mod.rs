@@ -4,22 +4,11 @@
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use crate::component::SpIdentifier;
 
 pub mod v1;
 pub mod v2;
 
 pub use v2::*;
-
-#[derive(Deserialize, JsonSchema)]
-pub struct PathSpIgnitionCommand {
-    /// ID for the SP that the gateway service translates into the appropriate
-    /// port for communicating with the given SP.
-    #[serde(flatten)]
-    pub sp: SpIdentifier,
-    /// Ignition command to perform on the targeted SP.
-    pub command: IgnitionCommand,
-}
 
 /// Ignition command.
 #[derive(
