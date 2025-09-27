@@ -7852,7 +7852,7 @@
         ]
       },
       "IgnitionCommand": {
-        "description": "Ignition action to take\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"Ignition action to take\", \"type\": \"string\", \"enum\": [ \"power_on\", \"power_off\", \"power_reset\" ] } ``` </details>",
+        "description": "Ignition command.\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"Ignition command.\", \"type\": \"string\", \"enum\": [ \"power_on\", \"power_off\", \"power_reset\" ] } ``` </details>",
         "type": "string",
         "enum": [
           "power_on",
