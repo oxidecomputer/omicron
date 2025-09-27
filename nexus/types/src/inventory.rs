@@ -318,6 +318,7 @@ impl Collection {
     Serialize,
     JsonSchema,
 )]
+#[cfg_attr(test, derive(test_strategy::Arbitrary))]
 pub struct BaseboardId {
     /// Oxide Part Number
     pub part_number: String,
@@ -472,6 +473,7 @@ pub struct HostPhase1FlashHash {
     JsonSchema,
 )]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(test, derive(test_strategy::Arbitrary))]
 pub enum CabooseWhich {
     SpSlot0,
     SpSlot1,

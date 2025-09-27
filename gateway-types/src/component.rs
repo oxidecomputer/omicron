@@ -28,6 +28,7 @@ use crate::rot::RotState;
     Diffable,
 )]
 #[serde(rename_all = "lowercase")]
+#[cfg_attr(any(test, feature = "testing"), derive(test_strategy::Arbitrary))]
 pub enum SpType {
     Sled,
     Power,
