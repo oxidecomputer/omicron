@@ -23,7 +23,8 @@ use nexus_db_model::{
 };
 use omicron_common::api::external::{
     self, CreateResult, DataPageParams, DeleteResult, Generation,
-    ListResultVec, LookupResult, LookupType, ResourceType, TufRepoInsertStatus, UpdateResult,
+    ListResultVec, LookupResult, LookupType, ResourceType, TufRepoInsertStatus,
+    UpdateResult,
 };
 use omicron_uuid_kinds::TufRepoKind;
 use omicron_uuid_kinds::TypedUuid;

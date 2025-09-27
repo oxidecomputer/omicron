@@ -167,7 +167,7 @@ impl DataStore {
         for target_release in rows {
             if let Some(repo_id) = target_release.tuf_repo_id {
                 rv.insert(repo_id.into());
-                if rv.len() >= usize::from(u8::from(count)) {
+                if rv.len() >= usize::from(count) {
                     return Ok(rv);
                 }
             }
