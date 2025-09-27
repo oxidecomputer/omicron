@@ -41,6 +41,8 @@ use gateway_types::component_details::SpComponentDetails;
 use gateway_types::host::ComponentFirmwareHashStatus;
 use gateway_types::host::HostStartupOptions;
 use gateway_types::ignition;
+use gateway_types::ignition::PathSpIgnitionCommand;
+use gateway_types::ignition::SpIgnitionInfo;
 use gateway_types::rot::RotCfpa;
 use gateway_types::rot::RotCfpaSlot;
 use gateway_types::rot::RotCmpa;
@@ -846,10 +848,9 @@ impl GatewayApi for GatewayImpl {
         apictx.latencies.instrument_dropshot_handler(&rqctx, handler).await
     }
 
-    async fn ignition_list_v2(
+    async fn ignition_list(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<Vec<ignition::v2::SpIgnitionInfo>>, HttpError>
-    {
+    ) -> Result<HttpResponseOk<Vec<SpIgnitionInfo>>, HttpError> {
         let apictx = rqctx.context();
         let mgmt_switch = &apictx.mgmt_switch;
         let handler = async {
@@ -896,10 +897,10 @@ impl GatewayApi for GatewayImpl {
         apictx.latencies.instrument_dropshot_handler(&rqctx, handler).await
     }
 
-    async fn ignition_get_v2(
+    async fn ignition_get(
         rqctx: RequestContext<Self::Context>,
         path: Path<PathSp>,
-    ) -> Result<HttpResponseOk<ignition::v2::SpIgnitionInfo>, HttpError> {
+    ) -> Result<HttpResponseOk<SpIgnitionInfo>, HttpError> {
         let apictx = rqctx.context();
         let mgmt_switch = &apictx.mgmt_switch;
 
@@ -952,9 +953,9 @@ impl GatewayApi for GatewayImpl {
         apictx.latencies.instrument_dropshot_handler(&rqctx, handler).await
     }
 
-    async fn ignition_command_v2(
+    async fn ignition_command(
         rqctx: RequestContext<Self::Context>,
-        path: Path<ignition::v2::PathSpIgnitionCommand>,
+        path: Path<PathSpIgnitionCommand>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let apictx = rqctx.context();
         let mgmt_switch = &apictx.mgmt_switch;
