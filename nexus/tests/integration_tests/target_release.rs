@@ -13,8 +13,9 @@ use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::{NexusRequest, RequestBuilder};
 use nexus_test_utils::test_setup;
 use nexus_types::external_api::params::SetTargetReleaseParams;
-use nexus_types::external_api::views::{TargetRelease, TargetReleaseSource};
-use omicron_common::api::external::TufRepoInsertResponse;
+use nexus_types::external_api::views::{
+    TargetRelease, TargetReleaseSource, TufRepoUpload,
+};
 use semver::Version;
 use tufaceous_artifact::{ArtifactVersion, KnownArtifactKind};
 use tufaceous_lib::assemble::ManifestTweak;
@@ -61,14 +62,14 @@ async fn get_set_target_release() -> Result<()> {
     {
         let before = Utc::now();
         let system_version = Version::new(1, 0, 0);
-        let response: TufRepoInsertResponse = trust_root
+        let response: TufRepoUpload = trust_root
             .assemble_repo(&logctx.log, &[])
             .await?
             .into_upload_request(client, StatusCode::OK)
             .execute()
             .await?
             .parsed_body()?;
-        assert_eq!(system_version, response.recorded.repo.system_version);
+        assert_eq!(system_version, response.repo.system_version);
 
         let target_release =
             set_target_release(client, system_version.clone()).await?;
@@ -93,14 +94,14 @@ async fn get_set_target_release() -> Result<()> {
                 version: ArtifactVersion::new("non-semver-2").unwrap(),
             },
         ];
-        let response: TufRepoInsertResponse = trust_root
+        let response: TufRepoUpload = trust_root
             .assemble_repo(&logctx.log, tweaks)
             .await?
             .into_upload_request(client, StatusCode::OK)
             .execute()
             .await?
             .parsed_body()?;
-        assert_eq!(system_version, response.recorded.repo.system_version);
+        assert_eq!(system_version, response.repo.system_version);
 
         let target_release =
             set_target_release(client, system_version.clone()).await?;

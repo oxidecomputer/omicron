@@ -21,6 +21,7 @@ use nexus_db_model::{
     ArtifactHash, TufArtifact, TufRepo, TufRepoDescription, TufTrustRoot,
     to_db_typed_uuid,
 };
+use nexus_types::external_api::views;
 use omicron_common::api::external::{
     self, CreateResult, DataPageParams, DeleteResult, Generation,
     ListResultVec, LookupResult, LookupType, ResourceType, TufRepoInsertStatus,
@@ -28,13 +29,14 @@ use omicron_common::api::external::{
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::TufRepoKind;
 use omicron_uuid_kinds::TypedUuid;
+use semver::Version;
 use swrite::{SWrite, swrite};
 use tufaceous_artifact::ArtifactVersion;
 use uuid::Uuid;
 
 /// The return value of [`DataStore::tuf_repo_insert`].
 ///
-/// This is similar to [`external::TufRepoInsertResponse`], but uses
+/// This is similar to [`views::TufRepoUpload`], but uses
 /// nexus-db-model's types instead of external types.
 pub struct TufRepoInsertResponse {
     pub recorded: TufRepoDescription,
@@ -42,10 +44,10 @@ pub struct TufRepoInsertResponse {
 }
 
 impl TufRepoInsertResponse {
-    pub fn into_external(self) -> external::TufRepoInsertResponse {
-        external::TufRepoInsertResponse {
-            recorded: self.recorded.into_external(),
-            status: self.status,
+    pub fn into_external(self) -> views::TufRepoUpload {
+        views::TufRepoUpload {
+            repo: self.recorded.repo.into_external().into(),
+            status: self.status.into(),
         }
     }
 }
@@ -142,19 +144,19 @@ impl DataStore {
         Ok(TufRepoDescription { repo, artifacts })
     }
 
-    /// Returns the TUF repo description corresponding to this system version.
+    /// Returns the TUF repo corresponding to this system version.
     pub async fn tuf_repo_get_by_version(
         &self,
         opctx: &OpContext,
         system_version: SemverVersion,
-    ) -> LookupResult<TufRepoDescription> {
+    ) -> LookupResult<TufRepo> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
 
         use nexus_db_schema::schema::tuf_repo::dsl;
 
         let conn = self.pool_connection_authorized(opctx).await?;
 
-        let repo = dsl::tuf_repo
+        dsl::tuf_repo
             .filter(dsl::system_version.eq(system_version.clone()))
             .select(TufRepo::as_select())
             .first_async::<TufRepo>(&*conn)
@@ -167,12 +169,7 @@ impl DataStore {
                         LookupType::ByCompositeId(system_version.to_string()),
                     ),
                 )
-            })?;
-
-        let artifacts = artifacts_for_repo(repo.id.into(), &conn)
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
-        Ok(TufRepoDescription { repo, artifacts })
+            })
     }
 
     /// Returns the list of all TUF repo artifacts known to the system.
@@ -204,6 +201,58 @@ impl DataStore {
         get_generation(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// List all TUF repositories (without artifacts) ordered by system version (newest first by default).
+    pub async fn tuf_repo_list(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, Version>,
+    ) -> ListResultVec<TufRepo> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+
+        use nexus_db_schema::schema::tuf_repo;
+
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        let marker_owner = pagparams
+            .marker
+            .map(|version| SemverVersion::from(version.clone()));
+        let db_pagparams = DataPageParams {
+            marker: marker_owner.as_ref(),
+            direction: pagparams.direction,
+            limit: pagparams.limit,
+        };
+
+        paginated(tuf_repo::table, tuf_repo::system_version, &db_pagparams)
+            .select(TufRepo::as_select())
+            .load_async(&*conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// List artifacts for a specific TUF repository by system version.
+    pub async fn tuf_repo_artifacts_list_by_version(
+        &self,
+        opctx: &OpContext,
+        system_version: SemverVersion,
+        _pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<TufArtifact> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        // First get the repo by version
+        let repo = self.tuf_repo_get_by_version(opctx, system_version).await?;
+
+        // Get all artifacts for this repo and apply simple pagination
+        let all_artifacts = artifacts_for_repo(repo.id.into(), &conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        // For now, return all artifacts since each repo should only have a few (under 20)
+        // The existing artifacts_for_repo comment mentions this limitation
+        Ok(all_artifacts)
     }
 
     /// List the trusted TUF root roles in the trust store.

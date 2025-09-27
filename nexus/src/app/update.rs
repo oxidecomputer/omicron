@@ -9,12 +9,13 @@ use dropshot::HttpError;
 use futures::Stream;
 use nexus_auth::authz;
 use nexus_db_lookup::LookupPath;
-use nexus_db_model::{TufRepoDescription, TufTrustRoot};
+use nexus_db_model::TufTrustRoot;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db::datastore::update::TufRepoInsertResponse;
 use nexus_db_queries::db::{datastore::SQL_BATCH_SIZE, pagination::Paginator};
 use nexus_types::external_api::shared::TufSignedRootRole;
 use omicron_common::api::external::{
-    DataPageParams, Error, TufRepoInsertResponse, TufRepoInsertStatus,
+    DataPageParams, Error, TufRepoInsertStatus,
 };
 use omicron_uuid_kinds::{GenericUuid, TufTrustRootUuid};
 use semver::Version;
@@ -87,18 +88,25 @@ impl super::Nexus {
             self.background_tasks.task_tuf_artifact_replication.activate();
         }
 
-        Ok(response.into_external())
+        Ok(response)
     }
 
     pub(crate) async fn updates_get_repository(
         &self,
         opctx: &OpContext,
         system_version: Version,
-    ) -> Result<TufRepoDescription, HttpError> {
+    ) -> Result<nexus_db_model::TufRepo, Error> {
         self.db_datastore
             .tuf_repo_get_by_version(opctx, system_version.into())
             .await
-            .map_err(HttpError::from)
+    }
+
+    pub(crate) async fn updates_list_repositories(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, Version>,
+    ) -> Result<Vec<nexus_db_model::TufRepo>, Error> {
+        self.db_datastore.tuf_repo_list(opctx, pagparams).await
     }
 
     pub(crate) async fn updates_add_trust_root(
