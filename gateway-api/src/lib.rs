@@ -18,6 +18,7 @@ use gateway_types::{
     component_details::SpComponentDetails,
     host::{ComponentFirmwareHashStatus, HostStartupOptions},
     ignition,
+    ignition::{PathSpIgnitionCommand, SpIgnitionInfo},
     rot::{RotCfpa, RotCfpaSlot, RotCmpa, RotState},
     sensor::SpSensorReading,
     task_dump::TaskDump,
@@ -423,12 +424,11 @@ pub trait GatewayApi {
     #[endpoint {
         method = GET,
         path = "/ignition",
-        operation_id = "ignition_list",
         versions = VERSION_COSMO..
     }]
-    async fn ignition_list_v2(
+    async fn ignition_list(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<Vec<ignition::v2::SpIgnitionInfo>>, HttpError>;
+    ) -> Result<HttpResponseOk<Vec<SpIgnitionInfo>>, HttpError>;
 
     /// Get SP info via Ignition
     ///
@@ -454,13 +454,12 @@ pub trait GatewayApi {
     #[endpoint {
         method = GET,
         path = "/ignition/{type}/{slot}",
-        operation_id = "ignition_get",
         versions = VERSION_COSMO..
     }]
-    async fn ignition_get_v2(
+    async fn ignition_get(
         rqctx: RequestContext<Self::Context>,
         path: Path<PathSp>,
-    ) -> Result<HttpResponseOk<ignition::v2::SpIgnitionInfo>, HttpError>;
+    ) -> Result<HttpResponseOk<SpIgnitionInfo>, HttpError>;
 
     /// Send an ignition command targeting a specific SP.
     ///
@@ -492,12 +491,11 @@ pub trait GatewayApi {
     #[endpoint {
         method = POST,
         path = "/ignition/{type}/{slot}/{command}",
-        operation_id = "ignition_command",
         versions = VERSION_COSMO..
     }]
-    async fn ignition_command_v2(
+    async fn ignition_command(
         rqctx: RequestContext<Self::Context>,
-        path: Path<ignition::v2::PathSpIgnitionCommand>,
+        path: Path<PathSpIgnitionCommand>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
     /// Get the current power state of a sled via its SP.
