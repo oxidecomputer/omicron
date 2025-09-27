@@ -27,7 +27,6 @@ use omicron_common::api::external::{
     UpdateResult,
 };
 use omicron_uuid_kinds::TufRepoKind;
-use omicron_uuid_kinds::TufRepoUuid;
 use omicron_uuid_kinds::TypedUuid;
 use omicron_uuid_kinds::{GenericUuid, TufRepoUuid};
 use swrite::{SWrite, swrite};
