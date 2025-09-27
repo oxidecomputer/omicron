@@ -41,7 +41,6 @@ use gateway_types::component_details::SpComponentDetails;
 use gateway_types::host::ComponentFirmwareHashStatus;
 use gateway_types::host::HostStartupOptions;
 use gateway_types::ignition;
-use gateway_types::ignition::PathSpIgnitionCommand;
 use gateway_types::ignition::SpIgnitionInfo;
 use gateway_types::rot::RotCfpa;
 use gateway_types::rot::RotCfpaSlot;
@@ -857,7 +856,7 @@ impl GatewayApi for GatewayImpl {
             let out = mgmt_switch
                 .bulk_ignition_state()
                 .await?
-                .map(|(id, state)| ignition::v2::SpIgnitionInfo {
+                .map(|(id, state)| SpIgnitionInfo {
                     id: id.into(),
                     details: state.into(),
                 })
@@ -917,7 +916,7 @@ impl GatewayApi for GatewayImpl {
                     err,
                 })?;
 
-            let info = ignition::v2::SpIgnitionInfo {
+            let info = SpIgnitionInfo {
                 id: sp_id.into(),
                 details: state.into(),
             };
