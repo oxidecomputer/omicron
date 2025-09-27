@@ -31,7 +31,7 @@ bstr = { version = "1.10.0" }
 buf-list = { version = "1.0.3", default-features = false, features = ["tokio1"] }
 byteorder = { version = "1.5.0" }
 bytes = { version = "1.10.1", features = ["serde"] }
-chrono = { version = "0.4.41", features = ["serde"] }
+chrono = { version = "0.4.42", features = ["serde"] }
 cipher = { version = "0.4.4", default-features = false, features = ["block-padding", "zeroize"] }
 clap = { version = "4.5.41", features = ["cargo", "derive", "env", "wrap_help"] }
 clap_builder = { version = "4.5.41", default-features = false, features = ["cargo", "color", "env", "std", "suggestions", "usage", "wrap_help"] }
@@ -166,7 +166,7 @@ buf-list = { version = "1.0.3", default-features = false, features = ["tokio1"] 
 byteorder = { version = "1.5.0" }
 bytes = { version = "1.10.1", features = ["serde"] }
 cc = { version = "1.2.30", default-features = false, features = ["parallel"] }
-chrono = { version = "0.4.41", features = ["serde"] }
+chrono = { version = "0.4.42", features = ["serde"] }
 cipher = { version = "0.4.4", default-features = false, features = ["block-padding", "zeroize"] }
 clap = { version = "4.5.41", features = ["cargo", "derive", "env", "wrap_help"] }
 clap_builder = { version = "4.5.41", default-features = false, features = ["cargo", "color", "env", "std", "suggestions", "usage", "wrap_help"] }
