@@ -269,13 +269,16 @@ impl NexusSaga for SagaInstanceCreate {
             )?;
         }
 
-        // Allocate an external IP address for the default outbound connectivity
-        builder.append(Node::action(
-            "snat_ip_id",
-            "CreateSnatIpId",
-            ACTION_GENERATE_ID.as_ref(),
-        ));
-        builder.append(create_snat_ip_action());
+        // Allocate an external IP address for the default outbound
+        // connectivity, if there are no explicit IP addresses.
+        if need_snat_ip(params) {
+            builder.append(Node::action(
+                "snat_ip_id",
+                "CreateSnatIpId",
+                ACTION_GENERATE_ID.as_ref(),
+            ));
+            builder.append(create_snat_ip_action());
+        }
 
         // See the comment above where we add nodes for creating NICs.  We use
         // the same pattern here.
@@ -734,7 +737,17 @@ async fn create_default_primary_network_interface(
     Ok(())
 }
 
+// Return `true` if we need to allocate an SNAT IP for this instance.
+//
+// This is currently done only if there is no other external IP address for the
+// instance.
+fn need_snat_ip(params: &Params) -> bool {
+    params.create_params.external_ips.is_empty()
+}
+
 /// Create an external IP address for instance source NAT.
+///
+/// Note that we only do this if there is no other outbound connectivity.
 async fn sic_allocate_instance_snat_ip(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
