@@ -9,8 +9,8 @@ use std::collections::HashMap;
 use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
-use crate::db::model::SemverVersion;
-use crate::db::pagination::paginated;
+use crate::db::datastore::SQL_BATCH_SIZE;
+use crate::db::pagination::{Paginator, paginated};
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
 use diesel::result::Error as DieselError;
@@ -18,8 +18,8 @@ use nexus_db_errors::OptionalError;
 use nexus_db_errors::{ErrorHandler, public_error_from_diesel};
 use nexus_db_lookup::DbConnection;
 use nexus_db_model::{
-    ArtifactHash, TufArtifact, TufRepo, TufRepoDescription, TufTrustRoot,
-    to_db_typed_uuid,
+    ArtifactHash, DbTypedUuid, SemverVersion, TufArtifact, TufRepo,
+    TufRepoDescription, TufTrustRoot, to_db_typed_uuid,
 };
 use omicron_common::api::external::{
     self, CreateResult, DataPageParams, DeleteResult, Generation,
@@ -27,6 +27,7 @@ use omicron_common::api::external::{
 };
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::TufRepoKind;
+use omicron_uuid_kinds::TufRepoUuid;
 use omicron_uuid_kinds::TypedUuid;
 use swrite::{SWrite, swrite};
 use tufaceous_artifact::ArtifactVersion;
@@ -57,19 +58,28 @@ async fn artifacts_for_repo(
     use nexus_db_schema::schema::tuf_artifact::dsl as tuf_artifact_dsl;
     use nexus_db_schema::schema::tuf_repo_artifact::dsl as tuf_repo_artifact_dsl;
 
-    let join_on_dsl =
-        tuf_artifact_dsl::id.eq(tuf_repo_artifact_dsl::tuf_artifact_id);
-    // Don't bother paginating because each repo should only have a few (under
-    // 20) artifacts.
-    tuf_repo_artifact_dsl::tuf_repo_artifact
-        .filter(
-            tuf_repo_artifact_dsl::tuf_repo_id
-                .eq(nexus_db_model::to_db_typed_uuid(repo_id)),
+    let mut artifacts = Vec::new();
+    let mut paginator =
+        Paginator::new(SQL_BATCH_SIZE, dropshot::PaginationOrder::Ascending);
+    while let Some(p) = paginator.next() {
+        let batch = paginated(
+            tuf_repo_artifact_dsl::tuf_repo_artifact,
+            tuf_repo_artifact_dsl::tuf_artifact_id,
+            &p.current_pagparams(),
         )
-        .inner_join(tuf_artifact_dsl::tuf_artifact.on(join_on_dsl))
+        .filter(
+            tuf_repo_artifact_dsl::tuf_repo_id.eq(to_db_typed_uuid(repo_id)),
+        )
+        .inner_join(tuf_artifact_dsl::tuf_artifact.on(
+            tuf_artifact_dsl::id.eq(tuf_repo_artifact_dsl::tuf_artifact_id),
+        ))
         .select(TufArtifact::as_select())
         .load_async(conn)
-        .await
+        .await?;
+        paginator = p.found_batch(&batch, &|artifact| artifact.id);
+        artifacts.extend(batch);
+    }
+    Ok(artifacts)
 }
 
 impl DataStore {
@@ -191,6 +201,61 @@ impl DataStore {
             .filter(dsl::generation_added.le(generation))
             .select(TufArtifact::as_select())
             .load_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// Return the current TUF repo generation number and the IDs for all
+    /// unpruned TUF repos.
+    ///
+    /// This method reads the generation number and paginates through all the
+    /// repositories internally to ensure a consistent read. (There is a small
+    /// maximum number of repositories that can be present due to the storage
+    /// quota for repository artifacts.)
+    pub async fn tuf_list_repos_for_replication(
+        &self,
+        opctx: &OpContext,
+    ) -> LookupResult<(Generation, Vec<TufRepoUuid>)> {
+        use nexus_db_schema::schema::tuf_repo::dsl;
+
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
+        self.transaction_retry_wrapper("tuf_list_repos_for_replication")
+            .transaction(&conn, |conn| async move {
+                let generation = get_generation(&conn).await?;
+                let mut ids = Vec::new();
+                let mut paginator = Paginator::new(
+                    SQL_BATCH_SIZE,
+                    dropshot::PaginationOrder::Ascending,
+                );
+                while let Some(p) = paginator.next() {
+                    let batch: Vec<DbTypedUuid<TufRepoKind>> = paginated(
+                        dsl::tuf_repo,
+                        dsl::id,
+                        &p.current_pagparams(),
+                    )
+                    .filter(dsl::time_pruned.is_null())
+                    .select(dsl::id)
+                    .load_async(&conn)
+                    .await?;
+                    paginator = p.found_batch(&batch, &|id| *id);
+                    ids.extend(batch.into_iter().map(TufRepoUuid::from));
+                }
+                Ok((generation, ids))
+            })
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// List the artifacts present in a TUF repo.
+    pub async fn tuf_list_repo_artifacts(
+        &self,
+        opctx: &OpContext,
+        repo_id: TufRepoUuid,
+    ) -> ListResultVec<TufArtifact> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
+        artifacts_for_repo(repo_id, &conn)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
