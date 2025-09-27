@@ -1500,8 +1500,22 @@ fn default_nexus_lockstep_port() -> u16 {
 /// please add it here rather than doing something ad-hoc in the calling code
 /// so it's more legible.
 #[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, EnumIter,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    PartialOrd,
+    Ord,
+    Diffable,
+    EnumIter,
+    Deserialize,
+    Serialize,
+    JsonSchema,
 )]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(any(test, feature = "testing"), derive(test_strategy::Arbitrary))]
 pub enum ZoneKind {
     BoundaryNtp,
     Clickhouse,

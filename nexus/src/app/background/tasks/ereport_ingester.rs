@@ -390,7 +390,7 @@ impl Ingester {
             );
             let res = client
                 .sp_ereports_ingest(
-                    sp_type,
+                    &sp_type,
                     slot,
                     committed_ena.as_ref(),
                     LIMIT,

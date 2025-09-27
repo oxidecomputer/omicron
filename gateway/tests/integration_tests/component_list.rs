@@ -32,11 +32,8 @@ async fn component_list() {
     assert!(sim_state.iter().all(|sp| sp.state.is_ok()));
 
     // Get the component list for sled 0.
-    let resp = client
-        .sp_component_list(gateway_client::types::SpType::Sled, 0)
-        .await
-        .unwrap()
-        .into_inner();
+    let resp =
+        client.sp_component_list(&SpType::Sled, 0).await.unwrap().into_inner();
 
     assert_eq!(
         resp.components,
@@ -135,11 +132,8 @@ async fn component_list() {
     );
 
     // Get the component list for sled 1.
-    let resp = client
-        .sp_component_list(gateway_client::types::SpType::Sled, 1)
-        .await
-        .unwrap()
-        .into_inner();
+    let resp =
+        client.sp_component_list(&SpType::Sled, 1).await.unwrap().into_inner();
 
     assert_eq!(
         resp.components,
@@ -239,7 +233,7 @@ async fn component_list() {
 
     // Get the component list for switch 0.
     let resp = client
-        .sp_component_list(gateway_client::types::SpType::Switch, 0)
+        .sp_component_list(&SpType::Switch, 0)
         .await
         .unwrap()
         .into_inner();

@@ -656,7 +656,12 @@ impl From<ByteCount> for i64 {
     Diffable,
 )]
 #[daft(leaf)]
-pub struct Generation(u64);
+#[cfg_attr(any(test, feature = "testing"), derive(test_strategy::Arbitrary))]
+pub struct Generation(
+    // Generations are restricted to 2**63 - 1 as documented above.
+    #[cfg_attr(any(test, feature = "testing"), strategy(0..=i64::MAX as u64))]
+    u64,
+);
 
 impl Generation {
     // `as` is a little distasteful because it allows lossy conversion, but we
