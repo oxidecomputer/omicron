@@ -4338,7 +4338,7 @@
         ]
       },
       "SpIgnition": {
-        "description": "State of an ignition target.\n\nTODO: Ignition returns much more information than we're reporting here: do we want to expand this?\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"State of an ignition target.\\n\\nTODO: Ignition returns much more information than we're reporting here: do we want to expand this?\", \"oneOf\": [ { \"type\": \"object\", \"required\": [ \"present\" ], \"properties\": { \"present\": { \"type\": \"string\", \"enum\": [ \"no\" ] } } }, { \"type\": \"object\", \"required\": [ \"ctrl_detect_0\", \"ctrl_detect_1\", \"flt_a2\", \"flt_a3\", \"flt_rot\", \"flt_sp\", \"id\", \"power\", \"present\" ], \"properties\": { \"ctrl_detect_0\": { \"type\": \"boolean\" }, \"ctrl_detect_1\": { \"type\": \"boolean\" }, \"flt_a2\": { \"type\": \"boolean\" }, \"flt_a3\": { \"type\": \"boolean\" }, \"flt_rot\": { \"type\": \"boolean\" }, \"flt_sp\": { \"type\": \"boolean\" }, \"id\": { \"$ref\": \"#/components/schemas/SpIgnitionSystemType\" }, \"power\": { \"type\": \"boolean\" }, \"present\": { \"type\": \"string\", \"enum\": [ \"yes\" ] } } } ] } ``` </details>",
+        "description": "State of an ignition target.\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"State of an ignition target.\", \"oneOf\": [ { \"type\": \"object\", \"required\": [ \"present\" ], \"properties\": { \"present\": { \"type\": \"string\", \"enum\": [ \"no\" ] } } }, { \"type\": \"object\", \"required\": [ \"ctrl_detect_0\", \"ctrl_detect_1\", \"flt_a2\", \"flt_a3\", \"flt_rot\", \"flt_sp\", \"id\", \"power\", \"present\" ], \"properties\": { \"ctrl_detect_0\": { \"type\": \"boolean\" }, \"ctrl_detect_1\": { \"type\": \"boolean\" }, \"flt_a2\": { \"description\": \"Fault from the A2 power domain\", \"type\": \"boolean\" }, \"flt_a3\": { \"description\": \"Fault from the A3 power domain\", \"type\": \"boolean\" }, \"flt_rot\": { \"description\": \"Fault from the RoT\", \"type\": \"boolean\" }, \"flt_sp\": { \"description\": \"Fault from the SP\", \"type\": \"boolean\" }, \"id\": { \"$ref\": \"#/components/schemas/SpIgnitionSystemType\" }, \"power\": { \"type\": \"boolean\" }, \"present\": { \"type\": \"string\", \"enum\": [ \"yes\" ] } } } ] } ``` </details>",
         "oneOf": [
           {
             "type": "object",
@@ -4364,15 +4364,19 @@
                 "type": "boolean"
               },
               "flt_a2": {
+                "description": "Fault from the A2 power domain",
                 "type": "boolean"
               },
               "flt_a3": {
+                "description": "Fault from the A3 power domain",
                 "type": "boolean"
               },
               "flt_rot": {
+                "description": "Fault from the RoT",
                 "type": "boolean"
               },
               "flt_sp": {
+                "description": "Fault from the SP",
                 "type": "boolean"
               },
               "id": {
@@ -7848,7 +7852,7 @@
         ]
       },
       "IgnitionCommand": {
-        "description": "Ignition command.\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"Ignition command.\", \"type\": \"string\", \"enum\": [ \"power_on\", \"power_off\", \"power_reset\" ] } ``` </details>",
+        "description": "Ignition action to take\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"Ignition action to take\", \"type\": \"string\", \"enum\": [ \"power_on\", \"power_off\", \"power_reset\" ] } ``` </details>",
         "type": "string",
         "enum": [
           "power_on",
