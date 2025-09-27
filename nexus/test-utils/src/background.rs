@@ -420,6 +420,7 @@ pub async fn wait_tuf_artifact_replication_step(
         );
     };
 
+    dbg!(&last_result_completed);
     let status = serde_json::from_value::<TufArtifactReplicationStatus>(
         last_result_completed.details,
     )
@@ -444,6 +445,7 @@ pub async fn run_tuf_artifact_replication_step(
         );
     };
 
+    dbg!(&last_result_completed);
     let status = serde_json::from_value::<TufArtifactReplicationStatus>(
         last_result_completed.details,
     )

@@ -68,9 +68,7 @@ use futures::future::{BoxFuture, FutureExt};
 use futures::stream::{FuturesUnordered, Stream, StreamExt};
 use http::StatusCode;
 use nexus_auth::context::OpContext;
-use nexus_db_queries::db::{
-    DataStore, datastore::SQL_BATCH_SIZE, pagination::Paginator,
-};
+use nexus_db_queries::db::DataStore;
 use nexus_networking::sled_client_from_address;
 use nexus_types::deployment::SledFilter;
 use nexus_types::identity::Asset;
@@ -79,7 +77,7 @@ use nexus_types::internal_api::background::{
     TufArtifactReplicationRequest, TufArtifactReplicationStatus,
 };
 use omicron_common::api::external::Generation;
-use omicron_uuid_kinds::{GenericUuid, SledUuid};
+use omicron_uuid_kinds::SledUuid;
 use rand::seq::{IndexedRandom, SliceRandom};
 use serde_json::json;
 use sled_agent_client::types::ArtifactConfig;
@@ -592,19 +590,13 @@ impl ArtifactReplication {
         &self,
         opctx: &OpContext,
     ) -> Result<(ArtifactConfig, Inventory)> {
-        let generation = self.datastore.tuf_get_generation(opctx).await?;
+        let (generation, repo_ids) =
+            self.datastore.tuf_list_repos_for_replication(opctx).await?;
         let mut inventory = Inventory::default();
-        let mut paginator = Paginator::new(
-            SQL_BATCH_SIZE,
-            dropshot::PaginationOrder::Ascending,
-        );
-        while let Some(p) = paginator.next() {
-            let batch = self
-                .datastore
-                .tuf_list_repos(opctx, generation, &p.current_pagparams())
-                .await?;
-            paginator = p.found_batch(&batch, &|a| a.id.into_untyped_uuid());
-            for artifact in batch {
+        for repo_id in repo_ids {
+            for artifact in
+                self.datastore.tuf_list_repo_artifacts(opctx, repo_id).await?
+            {
                 inventory.0.entry(artifact.sha256.0).or_insert_with(|| {
                     ArtifactPresence { sleds: BTreeMap::new(), local: None }
                 });
@@ -785,6 +777,7 @@ mod tests {
     use std::fmt::Write;
 
     use expectorate::assert_contents;
+    use omicron_uuid_kinds::GenericUuid;
     use rand::{Rng, SeedableRng, rngs::StdRng};
 
     use super::*;
