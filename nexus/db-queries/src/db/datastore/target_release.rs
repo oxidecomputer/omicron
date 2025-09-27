@@ -17,6 +17,8 @@ use nexus_db_errors::{ErrorHandler, public_error_from_diesel};
 use nexus_db_schema::schema::target_release::dsl;
 use nexus_types::external_api::views;
 use omicron_common::api::external::{CreateResult, Error, LookupResult};
+use omicron_uuid_kinds::TufRepoUuid;
+use std::collections::BTreeSet;
 
 impl DataStore {
     /// Fetch the current target release, i.e., the row with the largest
@@ -126,6 +128,67 @@ impl DataStore {
             }
         };
         Ok(target_release.into_external(release_source))
+    }
+
+    /// Lists the most recent N distinct target releases
+    pub async fn target_release_fetch_recent_distinct(
+        &self,
+        opctx: &OpContext,
+        count: u8,
+    ) -> Result<BTreeSet<TufRepoUuid>, Error> {
+        opctx
+            .authorize(authz::Action::Read, &authz::TARGET_RELEASE_CONFIG)
+            .await?;
+
+        // In almost all cases, `count` = 2 and we only need to look back two
+        // rows to find the most recent target releases.  But we do allow this
+        // to be configurable, and there are cases where the same release can
+        // appear in sequential `target_release` rows (e.g., after a MUPdate).
+        //
+        // We want to avoid a loop so that this function can be used in contexts
+        // that don't want to take an arbitrary amount of time.
+        //
+        // The solution: `count` is a `u8`, so it can be at most 255.  We'll
+        // multiply this by 4 to account for an unbelievable number of MUPdates.
+        // That's still small enough to do in one go.  If we're wrong and can't
+        // find enough distinct releases, we'll return an error.  (This seems
+        // extremely unlikely.)
+        let limit = 4 * u16::from(count);
+        let conn = self.pool_connection_authorized(opctx).await?;
+        let rows = dsl::target_release
+            .select(TargetRelease::as_select())
+            .order_by(dsl::generation.desc())
+            .limit(i64::from(limit))
+            .load_async(&*conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+        let nfound = rows.len();
+        let mut rv = BTreeSet::new();
+        for target_release in rows {
+            if let Some(repo_id) = target_release.tuf_repo_id {
+                rv.insert(repo_id.into());
+                if rv.len() >= usize::from(count) {
+                    return Ok(rv);
+                }
+            }
+        }
+
+        // We ran out of rows before finding enough distinct target releases.
+        // If we got `limit` rows, there may have been more that we didn't
+        // search.  This is the case we called "extremely unlikely" above.
+        // Return an error in that case.
+        if nfound == usize::from(limit) {
+            return Err(Error::internal_error(&format!(
+                "looking for {} distinct releases in the most recent {} \
+                 target_release rows, but found only {} before giving up",
+                count,
+                limit,
+                rv.len(),
+            )));
+        }
+
+        // Otherwise, that's it: we found all the releases that were there.
+        Ok(rv)
     }
 }
 

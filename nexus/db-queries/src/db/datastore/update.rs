@@ -24,11 +24,12 @@ use nexus_db_model::{
 use omicron_common::api::external::{
     self, CreateResult, DataPageParams, DeleteResult, Generation,
     ListResultVec, LookupResult, LookupType, ResourceType, TufRepoInsertStatus,
+    UpdateResult,
 };
-use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::TufRepoKind;
 use omicron_uuid_kinds::TufRepoUuid;
 use omicron_uuid_kinds::TypedUuid;
+use omicron_uuid_kinds::{GenericUuid, TufRepoUuid};
 use swrite::{SWrite, swrite};
 use tufaceous_artifact::ArtifactVersion;
 use uuid::Uuid;
@@ -203,6 +204,45 @@ impl DataStore {
             .load_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// Pages through the list of all not-yet-pruned TUF repos in the system
+    pub async fn tuf_list_repos_unpruned(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<TufRepo> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+
+        use nexus_db_schema::schema::tuf_repo::dsl;
+
+        paginated(dsl::tuf_repo, dsl::id, pagparams)
+            .filter(dsl::time_pruned.is_null())
+            .select(TufRepo::as_select())
+            .load_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// Marks the given TUF repo as eligible for pruning
+    pub async fn tuf_repo_mark_pruned(
+        &self,
+        opctx: &OpContext,
+        tuf_repo_id: TufRepoUuid,
+    ) -> UpdateResult<()> {
+        use nexus_db_schema::schema::tuf_repo::dsl;
+
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+
+        let conn = self.pool_connection_authorized(opctx).await?;
+        diesel::update(dsl::tuf_repo)
+            .filter(dsl::id.eq(to_db_typed_uuid(tuf_repo_id)))
+            .filter(dsl::time_pruned.is_null())
+            .set(dsl::time_pruned.eq(chrono::Utc::now()))
+            .execute_async(&*conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+            .map(|_| ())
     }
 
     /// Return the current TUF repo generation number and the IDs for all
