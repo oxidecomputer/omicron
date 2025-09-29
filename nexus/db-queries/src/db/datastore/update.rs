@@ -839,6 +839,7 @@ fn display_kind_hash(kind: &str, hash: ArtifactHash) -> String {
 #[cfg(test)]
 mod test {
     use crate::db::DataStore;
+    use crate::db::datastore::SQL_BATCH_SIZE;
     use crate::db::pub_test_utils::TestDatabase;
     use nexus_auth::context::OpContext;
     use nexus_db_model::TargetRelease;
@@ -849,12 +850,18 @@ mod test {
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::TufRepoUuid;
     use slog_error_chain::InlineErrorChain;
+    use std::collections::BTreeSet;
     use tufaceous_artifact::ArtifactHash;
     use tufaceous_artifact::ArtifactKind;
     use tufaceous_artifact::ArtifactVersion;
 
-    fn make_test_repo(version: u8) -> TufRepoDescription {
-        let hash = ArtifactHash([version; 32]);
+    fn make_test_repo(version: u32) -> TufRepoDescription {
+        // We just need a unique hash for each repo.  We'll key it on the
+        // version for determinism.
+        let version_bytes = version.to_le_bytes();
+        let hash_bytes: [u8; 32] =
+            std::array::from_fn(|i| version_bytes[i % 4]);
+        let hash = ArtifactHash(hash_bytes);
         let version = semver::Version::new(u64::from(version), 0, 0);
         let artifact_version = ArtifactVersion::new(version.to_string())
             .expect("valid artifact version");
@@ -883,7 +890,7 @@ mod test {
     async fn make_and_insert(
         opctx: &OpContext,
         datastore: &DataStore,
-        version: u8,
+        version: u32,
     ) -> TufRepoUuid {
         let repo = make_test_repo(version);
         datastore
@@ -1069,6 +1076,47 @@ mod test {
                 .expect("listing all repos");
             assert!(repos.iter().any(|r| r.id() == repo_id));
         }
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    /// Tests pagination behavior around `tuf_list_repos_unpruned_batched()`.
+    ///
+    /// The behavior of filtering out pruned repos is tested in
+    /// test_repo_mark_pruned().
+    #[tokio::test]
+    async fn test_list_unpruned() {
+        let logctx = dev::test_setup_log("test_list_unpruned");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let repos = datastore
+            .tuf_list_repos_unpruned_batched(opctx)
+            .await
+            .expect("listing all repos");
+        assert!(repos.is_empty());
+
+        // Make sure we have more than a page worth of TUF repos.
+        let count = u32::from(SQL_BATCH_SIZE.get()) + 3;
+        let mut expected_repos = BTreeSet::new();
+        for i in 0..count {
+            assert!(
+                expected_repos
+                    .insert(make_and_insert(opctx, datastore, i + 1).await)
+            );
+        }
+
+        // Fetch them.  Make sure we got them all and nothing else.
+        let repos = datastore
+            .tuf_list_repos_unpruned_batched(opctx)
+            .await
+            .expect("listing all repos");
+        assert_eq!(repos.len(), usize::try_from(count).unwrap());
+        for repo in repos {
+            assert!(expected_repos.remove(&repo.id()));
+        }
+        assert!(expected_repos.is_empty());
 
         db.terminate().await;
         logctx.cleanup_successful();
