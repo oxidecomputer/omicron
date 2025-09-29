@@ -199,3 +199,130 @@ fn decide_prune(
         }
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::decide_prune;
+    use iddqd::IdOrdMap;
+    use nexus_types::internal_api::background::TufRepoInfo;
+    use nexus_types::internal_api::background::TufRepoPrunerStatus;
+    use omicron_uuid_kinds::TufRepoUuid;
+    use std::collections::BTreeSet;
+
+    fn make_test_repos() -> [TufRepoInfo; 6] {
+        [
+            TufRepoInfo {
+                id: TufRepoUuid::new_v4(),
+                time_created: "2025-09-26T01:00:00Z".parse().unwrap(),
+                system_version: "1.0.0".parse().unwrap(),
+            },
+            TufRepoInfo {
+                id: TufRepoUuid::new_v4(),
+                time_created: "2025-09-26T02:00:00Z".parse().unwrap(),
+                system_version: "2.0.0".parse().unwrap(),
+            },
+            TufRepoInfo {
+                id: TufRepoUuid::new_v4(),
+                time_created: "2025-09-26T03:00:00Z".parse().unwrap(),
+                system_version: "3.0.0".parse().unwrap(),
+            },
+            TufRepoInfo {
+                id: TufRepoUuid::new_v4(),
+                time_created: "2025-09-26T04:00:00Z".parse().unwrap(),
+                system_version: "4.0.0".parse().unwrap(),
+            },
+            TufRepoInfo {
+                id: TufRepoUuid::new_v4(),
+                time_created: "2025-09-26T05:00:00Z".parse().unwrap(),
+                system_version: "4.1.0".parse().unwrap(),
+            },
+            TufRepoInfo {
+                id: TufRepoUuid::new_v4(),
+                time_created: "2025-09-26T06:00:00Z".parse().unwrap(),
+                system_version: "4.2.0".parse().unwrap(),
+            },
+        ]
+    }
+
+    #[test]
+    fn test_decide_prune() {
+        let all_repos = make_test_repos();
+        let [r1, r2, r3, r4, r5, r6] = &all_repos;
+        let all_repos: IdOrdMap<_> = all_repos.clone().into_iter().collect();
+
+        // Trivial case
+        let mut status = TufRepoPrunerStatus {
+            repos_keep: IdOrdMap::new(),
+            repos_prune: IdOrdMap::new(),
+            warnings: Vec::new(),
+            nkeep_recent_releases: 2,
+            nkeep_recent_uploads: 1,
+        };
+        decide_prune(&IdOrdMap::new(), &BTreeSet::new(), &mut status);
+        assert!(status.warnings.is_empty());
+        assert!(status.repos_keep.is_empty());
+        assert!(status.repos_prune.is_empty());
+
+        // Simple case: have some target releases to keep, no uploads.
+        let releases_to_keep: BTreeSet<_> =
+            [r3.id, r4.id].into_iter().collect();
+        let mut status = TufRepoPrunerStatus {
+            repos_keep: IdOrdMap::new(),
+            repos_prune: IdOrdMap::new(),
+            warnings: Vec::new(),
+            nkeep_recent_releases: u8::try_from(releases_to_keep.len())
+                .unwrap(),
+            nkeep_recent_uploads: 0,
+        };
+        decide_prune(&all_repos, &releases_to_keep, &mut status);
+        assert!(status.warnings.is_empty());
+        assert_eq!(status.repos_keep.len(), 2);
+        assert!(status.repos_keep.contains_key(&r3.id));
+        assert!(status.repos_keep.contains_key(&r4.id));
+        assert_eq!(
+            status.repos_prune.len(),
+            all_repos.len() - releases_to_keep.len()
+        );
+        assert!(status.repos_keep.contains_key(&r1.id));
+        assert!(status.repos_keep.contains_key(&r2.id));
+        assert!(status.repos_keep.contains_key(&r5.id));
+        assert!(status.repos_keep.contains_key(&r6.id));
+
+        // Simple case: have no target releases to keep, but some uploads.
+        let releases_to_keep = BTreeSet::new();
+        let mut status = TufRepoPrunerStatus {
+            repos_keep: IdOrdMap::new(),
+            repos_prune: IdOrdMap::new(),
+            warnings: Vec::new(),
+            nkeep_recent_releases: u8::try_from(releases_to_keep.len())
+                .unwrap(),
+            nkeep_recent_uploads: 0,
+        };
+        decide_prune(&all_repos, &releases_to_keep, &mut status);
+        assert!(status.warnings.is_empty());
+        assert_eq!(status.repos_keep.len(), 2);
+        assert!(status.repos_keep.contains_key(&r3.id));
+        assert!(status.repos_keep.contains_key(&r4.id));
+        assert_eq!(
+            status.repos_prune.len(),
+            all_repos.len() - releases_to_keep.len()
+        );
+        assert!(status.repos_keep.contains_key(&r1.id));
+        assert!(status.repos_keep.contains_key(&r2.id));
+        assert!(status.repos_keep.contains_key(&r5.id));
+        assert!(status.repos_keep.contains_key(&r6.id));
+
+        // Case 1: a common case
+        // XXX-dap
+        // let releases_to_keep: BTreeSet<_> =
+        //     [r3.id, r4.id].into_iter().collect();
+        // let mut status = TufRepoPrunerStatus {
+        //     repos_keep: IdOrdMap::new(),
+        //     repos_prune: IdOrdMap::new(),
+        //     warnings: Vec::new(),
+        //     nkeep_recent_releases: u8::try_from(releases_to_keep.len())
+        //         .unwrap(),
+        //     nkeep_recent_uploads: 1,
+        // };
+    }
+}
