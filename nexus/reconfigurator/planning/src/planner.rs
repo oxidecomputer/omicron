@@ -20,7 +20,6 @@ use crate::mgs_updates::plan_mgs_updates;
 use crate::planner::image_source::NoopConvertHostPhase2Contents;
 use crate::planner::image_source::NoopConvertZoneStatus;
 use crate::planner::omicron_zone_placement::PlacementError;
-use gateway_client::types::SpType;
 use iddqd::IdOrdMap;
 use itertools::Itertools;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryResult;
@@ -38,7 +37,6 @@ use nexus_types::deployment::CockroachDbClusterVersion;
 use nexus_types::deployment::CockroachDbPreserveDowngrade;
 use nexus_types::deployment::CockroachDbSettings;
 use nexus_types::deployment::DiskFilter;
-use nexus_types::deployment::PendingMgsUpdates;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledDetails;
 use nexus_types::deployment::SledFilter;
@@ -57,6 +55,7 @@ use nexus_types::external_api::views::PhysicalDiskPolicy;
 use nexus_types::external_api::views::SledPolicy;
 use nexus_types::external_api::views::SledState;
 use nexus_types::inventory::Collection;
+use nexus_types::inventory::SpType;
 use omicron_common::api::external::Generation;
 use omicron_common::disk::M2Slot;
 use omicron_common::policy::BOUNDARY_NTP_REDUNDANCY;
@@ -236,7 +235,7 @@ impl<'a> Planner<'a> {
         let mgs_updates = if add_update_blocked_reasons.is_empty() {
             self.do_plan_mgs_updates()?
         } else {
-            PlanningMgsUpdatesStepReport::new(PendingMgsUpdates::new())
+            PlanningMgsUpdatesStepReport::empty()
         };
 
         // Likewise for zone additions, unless overridden by the config, or
@@ -272,12 +271,17 @@ impl<'a> Planner<'a> {
             PlanningZoneUpdatesStepReport::waiting_on(
                 ZoneUpdatesWaitingOn::DiscretionaryZones,
             )
-        } else if !mgs_updates.is_empty() {
+        } else if !mgs_updates.pending_mgs_updates.is_empty() {
             // ... or if there are still pending updates for the RoT / SP /
             // Host OS / etc. ...
-            // TODO This is not quite right.  See oxidecomputer/omicron#8285.
             PlanningZoneUpdatesStepReport::waiting_on(
                 ZoneUpdatesWaitingOn::PendingMgsUpdates,
+            )
+        } else if !mgs_updates.blocked_mgs_updates.is_empty() {
+            // ... or if there are blocked updates for the RoT / SP / Host OS /
+            // RoT bootloader.
+            PlanningZoneUpdatesStepReport::waiting_on(
+                ZoneUpdatesWaitingOn::BlockedMgsUpdates,
             )
         } else if !add.add_update_blocked_reasons.is_empty() {
             // ... or if there are pending zone add blockers.
@@ -1430,16 +1434,19 @@ impl<'a> Planner<'a> {
             } else {
                 ImpossibleUpdatePolicy::Reevaluate
             };
-        let PlannedMgsUpdates { pending_updates, pending_host_phase_2_changes } =
-            plan_mgs_updates(
-                &self.log,
-                &self.inventory,
-                &included_baseboards,
-                current_updates,
-                current_artifacts,
-                NUM_CONCURRENT_MGS_UPDATES,
-                impossible_update_policy,
-            );
+        let PlannedMgsUpdates {
+            pending_updates,
+            pending_host_phase_2_changes,
+            blocked_mgs_updates,
+        } = plan_mgs_updates(
+            &self.log,
+            &self.inventory,
+            &included_baseboards,
+            current_updates,
+            current_artifacts,
+            NUM_CONCURRENT_MGS_UPDATES,
+            impossible_update_policy,
+        );
         if pending_updates != *current_updates {
             // This will only add comments if our set of updates changed _and_
             // we have at least one update. If we went from "some updates" to
@@ -1453,7 +1460,10 @@ impl<'a> Planner<'a> {
             .apply_pending_host_phase_2_changes(pending_host_phase_2_changes)?;
 
         self.blueprint.pending_mgs_updates_replace_all(pending_updates.clone());
-        Ok(PlanningMgsUpdatesStepReport::new(pending_updates))
+        Ok(PlanningMgsUpdatesStepReport::new(
+            pending_updates,
+            blocked_mgs_updates,
+        ))
     }
 
     // Returns the zones which appear in the blueprint on commissioned sleds,
@@ -5213,9 +5223,10 @@ pub(crate) mod test {
         );
         assert_eq!(bp4_config.keepers, bp3_config.keepers);
         assert_eq!(bp4_config.servers, bp3_config.servers);
+        // The blueprint shouldn't update solely because the log index changed
         assert_eq!(
             bp4_config.highest_seen_keeper_leader_committed_log_index,
-            1
+            0
         );
 
         // Let's bump the clickhouse target to 5 via policy so that we can add
@@ -5377,9 +5388,10 @@ pub(crate) mod test {
         );
         assert_eq!(bp8_config.keepers, bp7_config.keepers);
         assert_eq!(bp7_config.keepers.len(), target_keepers as usize);
+        // The blueprint should not change solely due to the log index in inventory changing
         assert_eq!(
             bp8_config.highest_seen_keeper_leader_committed_log_index,
-            3
+            2
         );
 
         logctx.cleanup_successful();
@@ -6239,7 +6251,7 @@ pub(crate) mod test {
         };
     }
 
-    fn create_artifacts_at_version(
+    fn create_zone_artifacts_at_version(
         version: &ArtifactVersion,
     ) -> Vec<TufArtifactMeta> {
         vec![
@@ -6256,6 +6268,66 @@ pub(crate) mod test {
             fake_zone_artifact!(InternalNtp, version.clone()),
             fake_zone_artifact!(Nexus, version.clone()),
             fake_zone_artifact!(Oximeter, version.clone()),
+            // We create artifacts with the versions (or hash) set to those of
+            // the example system to simulate an environment that does not need
+            // SP component updates.
+            TufArtifactMeta {
+                id: ArtifactId {
+                    name: "host-os-phase-1".to_string(),
+                    version: version.clone(),
+                    kind: ArtifactKind::GIMLET_HOST_PHASE_1,
+                },
+                hash: ArtifactHash([1; 32]),
+                size: 0,
+                board: None,
+                sign: None,
+            },
+            TufArtifactMeta {
+                id: ArtifactId {
+                    name: "host-os-phase-2".to_string(),
+                    version: version.clone(),
+                    kind: ArtifactKind::HOST_PHASE_2,
+                },
+                hash: ArtifactHash(hex_literal::hex!(
+                    "7cd830e1682d50620de0f5c24b8cca15937eb10d2a415ade6ad28c0d314408eb"
+                )),
+                size: 0,
+                board: None,
+                sign: None,
+            },
+            TufArtifactMeta {
+                id: ArtifactId {
+                    name: sp_sim::SIM_GIMLET_BOARD.to_string(),
+                    version: ArtifactVersion::new("0.0.1").unwrap(),
+                    kind: KnownArtifactKind::GimletSp.into(),
+                },
+                hash: ArtifactHash([0; 32]),
+                size: 0,
+                board: Some(sp_sim::SIM_GIMLET_BOARD.to_string()),
+                sign: None,
+            },
+            TufArtifactMeta {
+                id: ArtifactId {
+                    name: sp_sim::SIM_ROT_BOARD.to_string(),
+                    version: ArtifactVersion::new("0.0.1").unwrap(),
+                    kind: ArtifactKind::GIMLET_ROT_IMAGE_B,
+                },
+                hash: ArtifactHash([0; 32]),
+                size: 0,
+                board: Some(sp_sim::SIM_ROT_BOARD.to_string()),
+                sign: Some("sign-gimlet".into()),
+            },
+            TufArtifactMeta {
+                id: ArtifactId {
+                    name: sp_sim::SIM_ROT_BOARD.to_string(),
+                    version: ArtifactVersion::new("0.0.1").unwrap(),
+                    kind: ArtifactKind::GIMLET_ROT_STAGE0,
+                },
+                hash: ArtifactHash([0; 32]),
+                size: 0,
+                board: Some(sp_sim::SIM_ROT_BOARD.to_string()),
+                sign: Some("sign-gimlet".into()),
+            },
         ]
     }
 
@@ -6311,7 +6383,7 @@ pub(crate) mod test {
             },
             hash: fake_hash,
         };
-        let artifacts = create_artifacts_at_version(&version);
+        let artifacts = create_zone_artifacts_at_version(&version);
         let description =
             TargetReleaseDescription::TufRepo(TufRepoDescription {
                 repo: TufRepoMeta {
@@ -6767,7 +6839,7 @@ pub(crate) mod test {
             },
             hash: fake_hash,
         };
-        let artifacts = create_artifacts_at_version(&version);
+        let artifacts = create_zone_artifacts_at_version(&version);
         let description =
             TargetReleaseDescription::TufRepo(TufRepoDescription {
                 repo: TufRepoMeta {
@@ -7198,7 +7270,7 @@ pub(crate) mod test {
             },
             hash: fake_hash,
         };
-        let artifacts = create_artifacts_at_version(&version);
+        let artifacts = create_zone_artifacts_at_version(&version);
         let description =
             TargetReleaseDescription::TufRepo(TufRepoDescription {
                 repo: TufRepoMeta {
@@ -7636,8 +7708,7 @@ pub(crate) mod test {
             },
             hash: fake_hash,
         };
-        let artifacts = create_artifacts_at_version(&version);
-
+        let artifacts = create_zone_artifacts_at_version(&version);
         let description =
             TargetReleaseDescription::TufRepo(TufRepoDescription {
                 repo: TufRepoMeta {
@@ -7909,7 +7980,8 @@ pub(crate) mod test {
             },
             hash: fake_hash,
         };
-
+        // We use generation 2 to represent the first generation with a TUF repo
+        // attached.
         let description =
             TargetReleaseDescription::TufRepo(TufRepoDescription {
                 repo: TufRepoMeta {
@@ -7919,7 +7991,7 @@ pub(crate) mod test {
                     system_version: Version::new(1, 0, 0),
                     file_name: String::from(""),
                 },
-                artifacts: create_artifacts_at_version(&version),
+                artifacts: create_zone_artifacts_at_version(&version),
             });
         example.system.set_target_release_and_old_repo(description);
 

@@ -148,7 +148,7 @@ planning report:
 * noop converting 8/8 install-dataset zones to artifact store on sled d81c6a84-79b8-4958-ae41-ea46c9b19763
 * 1 pending MGS update:
   * model0:serial0: Rot(PendingMgsUpdateRotDetails { expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: NoValidVersion, expected_persistent_boot_preference: A, expected_pending_persistent_boot_preference: None, expected_transient_boot_preference: None })
-* zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+* zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
 
 
 
@@ -1121,7 +1121,7 @@ planning report:
 * skipping noop zone image source check on sled d81c6a84-79b8-4958-ae41-ea46c9b19763: all 8 zones are already from artifacts
 * 1 pending MGS update:
   * model0:serial0: RotBootloader(PendingMgsUpdateRotBootloaderDetails { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: NoValidVersion })
-* zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+* zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
 * waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
@@ -1185,7 +1185,7 @@ planning report:
 * skipping noop zone image source check on sled d81c6a84-79b8-4958-ae41-ea46c9b19763: all 8 zones are already from artifacts
 * 1 pending MGS update:
   * model0:serial0: RotBootloader(PendingMgsUpdateRotBootloaderDetails { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: NoValidVersion })
-* zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+* zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
 * waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
@@ -1251,7 +1251,7 @@ planning report:
 * skipping noop zone image source check on sled d81c6a84-79b8-4958-ae41-ea46c9b19763: all 8 zones are already from artifacts
 * 1 pending MGS update:
   * model0:serial0: Rot(PendingMgsUpdateRotDetails { expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: NoValidVersion, expected_persistent_boot_preference: A, expected_pending_persistent_boot_preference: None, expected_transient_boot_preference: None })
-* zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+* zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
 * waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
@@ -1326,7 +1326,7 @@ planning report:
 * skipping noop zone image source check on sled d81c6a84-79b8-4958-ae41-ea46c9b19763: all 8 zones are already from artifacts
 * 1 pending MGS update:
   * model0:serial0: Sp(PendingMgsUpdateSpDetails { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: NoValidVersion })
-* zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+* zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
 * waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
@@ -1402,7 +1402,7 @@ planning report:
 * skipping noop zone image source check on sled d81c6a84-79b8-4958-ae41-ea46c9b19763: all 8 zones are already from artifacts
 * 1 pending MGS update:
   * model0:serial0: HostPhase1(PendingMgsUpdateHostPhase1Details { expected_active_phase_1_slot: A, expected_boot_disk: A, expected_active_phase_1_hash: ArtifactHash("0101010101010101010101010101010101010101010101010101010101010101"), expected_active_phase_2_hash: ArtifactHash("0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a"), expected_inactive_phase_1_hash: ArtifactHash("0202020202020202020202020202020202020202020202020202020202020202"), expected_inactive_phase_2_hash: ArtifactHash("d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47"), sled_agent_address: [fd00:1122:3344:101::1]:12345 })
-* zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+* zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
 * waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
@@ -1527,7 +1527,7 @@ planning report:
 * skipping noop zone image source check on sled d81c6a84-79b8-4958-ae41-ea46c9b19763: all 8 zones are already from artifacts
 * 1 pending MGS update:
   * model0:serial0: HostPhase1(PendingMgsUpdateHostPhase1Details { expected_active_phase_1_slot: A, expected_boot_disk: A, expected_active_phase_1_hash: ArtifactHash("0101010101010101010101010101010101010101010101010101010101010101"), expected_active_phase_2_hash: ArtifactHash("0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a"), expected_inactive_phase_1_hash: ArtifactHash("0202020202020202020202020202020202020202020202020202020202020202"), expected_inactive_phase_2_hash: ArtifactHash("d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47"), sled_agent_address: [fd00:1122:3344:101::1]:12345 })
-* zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+* zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
 * waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
@@ -1592,7 +1592,7 @@ planning report:
 * skipping noop zone image source check on sled d81c6a84-79b8-4958-ae41-ea46c9b19763: all 8 zones are already from artifacts
 * 1 pending MGS update:
   * model0:serial0: HostPhase1(PendingMgsUpdateHostPhase1Details { expected_active_phase_1_slot: A, expected_boot_disk: A, expected_active_phase_1_hash: ArtifactHash("0101010101010101010101010101010101010101010101010101010101010101"), expected_active_phase_2_hash: ArtifactHash("0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a"), expected_inactive_phase_1_hash: ArtifactHash("0202020202020202020202020202020202020202020202020202020202020202"), expected_inactive_phase_2_hash: ArtifactHash("d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47"), sled_agent_address: [fd00:1122:3344:101::1]:12345 })
-* zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+* zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
 * waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
@@ -1656,7 +1656,7 @@ planning report:
 * skipping noop zone image source check on sled d81c6a84-79b8-4958-ae41-ea46c9b19763: all 8 zones are already from artifacts
 * 1 pending MGS update:
   * model0:serial0: HostPhase1(PendingMgsUpdateHostPhase1Details { expected_active_phase_1_slot: A, expected_boot_disk: A, expected_active_phase_1_hash: ArtifactHash("0101010101010101010101010101010101010101010101010101010101010101"), expected_active_phase_2_hash: ArtifactHash("0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a"), expected_inactive_phase_1_hash: ArtifactHash("0202020202020202020202020202020202020202020202020202020202020202"), expected_inactive_phase_2_hash: ArtifactHash("d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47"), sled_agent_address: [fd00:1122:3344:101::1]:12345 })
-* zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+* zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
 * waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
@@ -1711,7 +1711,7 @@ INFO performed noop zone image source checks on sled, sled_id: d81c6a84-79b8-495
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
 INFO MGS-driven update completed (will remove it and re-evaluate board), artifact_version: 1.0.0, artifact_hash: b99d5273ba1418bebb19d74b701d716896409566d41de76ada71bded4c9b166b, sled_agent_address: [fd00:1122:3344:101::1]:12345, expected_inactive_phase_2_hash: d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47, expected_inactive_phase_1_hash: 0202020202020202020202020202020202020202020202020202020202020202, expected_active_phase_2_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a, expected_active_phase_1_hash: 0101010101010101010101010101010101010101010101010101010101010101, expected_boot_disk: A, expected_active_phase_1_slot: A, component: host_phase_1, sp_slot: 0, sp_type: Sled, serial_number: serial0, part_number: model0
-INFO skipping board for MGS-driven update, serial_number: serial0, part_number: model0
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial0, part_number: model0
 INFO configuring MGS-driven update, artifact_version: 1.0.0, artifact_hash: 5b0f601b1fbb8674db9c751a02f8b14f8e6d4e8470f4f7b686fecb2c49ec11f9, expected_stage0_next_version: NoValidVersion, expected_stage0_version: 0.0.1, component: rot_bootloader, sp_slot: 1, sp_type: Sled, serial_number: serial1, part_number: model1
 INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint afb09faf-a586-4483-9289-04d4f1d8ba23 based on parent blueprint c1a0d242-9160-40f4-96ae-61f8f40a0b1b
@@ -1722,7 +1722,7 @@ planning report:
 * skipping noop zone image source check on sled d81c6a84-79b8-4958-ae41-ea46c9b19763: all 8 zones are already from artifacts
 * 1 pending MGS update:
   * model1:serial1: RotBootloader(PendingMgsUpdateRotBootloaderDetails { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: NoValidVersion })
-* zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+* zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
 * waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
@@ -1799,7 +1799,7 @@ planning report:
 * skipping noop zone image source check on sled d81c6a84-79b8-4958-ae41-ea46c9b19763: all 8 zones are already from artifacts
 * 1 pending MGS update:
   * model1:serial1: RotBootloader(PendingMgsUpdateRotBootloaderDetails { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: Version(ArtifactVersion("0.5.0")) })
-* zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+* zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
 * waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
@@ -1871,7 +1871,7 @@ planning report:
 * skipping noop zone image source check on sled d81c6a84-79b8-4958-ae41-ea46c9b19763: all 8 zones are already from artifacts
 * 1 pending MGS update:
   * model1:serial1: Rot(PendingMgsUpdateRotDetails { expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: NoValidVersion, expected_persistent_boot_preference: A, expected_pending_persistent_boot_preference: None, expected_transient_boot_preference: None })
-* zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+* zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
 * waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
@@ -1947,7 +1947,7 @@ planning report:
 * skipping noop zone image source check on sled d81c6a84-79b8-4958-ae41-ea46c9b19763: all 8 zones are already from artifacts
 * 1 pending MGS update:
   * model1:serial1: Rot(PendingMgsUpdateRotDetails { expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: Version(ArtifactVersion("0.5.0")), expected_persistent_boot_preference: A, expected_pending_persistent_boot_preference: None, expected_transient_boot_preference: None })
-* zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+* zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
 * waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
@@ -2019,7 +2019,7 @@ planning report:
 * skipping noop zone image source check on sled d81c6a84-79b8-4958-ae41-ea46c9b19763: all 8 zones are already from artifacts
 * 1 pending MGS update:
   * model1:serial1: Sp(PendingMgsUpdateSpDetails { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: NoValidVersion })
-* zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+* zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
 * waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
@@ -2094,7 +2094,7 @@ planning report:
 * skipping noop zone image source check on sled d81c6a84-79b8-4958-ae41-ea46c9b19763: all 8 zones are already from artifacts
 * 1 pending MGS update:
   * model1:serial1: Sp(PendingMgsUpdateSpDetails { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: Version(ArtifactVersion("0.5.0")) })
-* zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+* zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
 * waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
@@ -2167,7 +2167,7 @@ planning report:
 * skipping noop zone image source check on sled d81c6a84-79b8-4958-ae41-ea46c9b19763: all 8 zones are already from artifacts
 * 1 pending MGS update:
   * model1:serial1: HostPhase1(PendingMgsUpdateHostPhase1Details { expected_active_phase_1_slot: A, expected_boot_disk: A, expected_active_phase_1_hash: ArtifactHash("0101010101010101010101010101010101010101010101010101010101010101"), expected_active_phase_2_hash: ArtifactHash("0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a"), expected_inactive_phase_1_hash: ArtifactHash("0202020202020202020202020202020202020202020202020202020202020202"), expected_inactive_phase_2_hash: ArtifactHash("d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47"), sled_agent_address: [fd00:1122:3344:102::1]:12345 })
-* zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+* zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
 * waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
@@ -2307,7 +2307,7 @@ planning report:
 * skipping noop zone image source check on sled d81c6a84-79b8-4958-ae41-ea46c9b19763: all 8 zones are already from artifacts
 * 1 pending MGS update:
   * model1:serial1: HostPhase1(PendingMgsUpdateHostPhase1Details { expected_active_phase_1_slot: A, expected_boot_disk: A, expected_active_phase_1_hash: ArtifactHash("0101010101010101010101010101010101010101010101010101010101010101"), expected_active_phase_2_hash: ArtifactHash("0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a"), expected_inactive_phase_1_hash: ArtifactHash("ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"), expected_inactive_phase_2_hash: ArtifactHash("d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47"), sled_agent_address: [fd00:1122:3344:102::1]:12345 })
-* zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+* zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
 * waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
@@ -2373,8 +2373,8 @@ INFO performed noop zone image source checks on sled, sled_id: d81c6a84-79b8-495
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
 INFO MGS-driven update completed (will remove it and re-evaluate board), artifact_version: 1.0.0, artifact_hash: b99d5273ba1418bebb19d74b701d716896409566d41de76ada71bded4c9b166b, sled_agent_address: [fd00:1122:3344:102::1]:12345, expected_inactive_phase_2_hash: d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47, expected_inactive_phase_1_hash: ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff, expected_active_phase_2_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a, expected_active_phase_1_hash: 0101010101010101010101010101010101010101010101010101010101010101, expected_boot_disk: A, expected_active_phase_1_slot: A, component: host_phase_1, sp_slot: 1, sp_type: Sled, serial_number: serial1, part_number: model1
-INFO skipping board for MGS-driven update, serial_number: serial1, part_number: model1
-INFO skipping board for MGS-driven update, serial_number: serial0, part_number: model0
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial1, part_number: model1
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial0, part_number: model0
 INFO configuring MGS-driven update, artifact_version: 1.0.0, artifact_hash: 5b0f601b1fbb8674db9c751a02f8b14f8e6d4e8470f4f7b686fecb2c49ec11f9, expected_stage0_next_version: NoValidVersion, expected_stage0_version: 0.0.1, component: rot_bootloader, sp_slot: 2, sp_type: Sled, serial_number: serial2, part_number: model2
 INFO ran out of boards for MGS-driven update
 generated blueprint 13cfdd24-52ba-4e94-8c83-02e3a48fc746 based on parent blueprint 9a9e6c32-5a84-4020-a159-33dceff18d35
@@ -2385,7 +2385,7 @@ planning report:
 * skipping noop zone image source check on sled d81c6a84-79b8-4958-ae41-ea46c9b19763: all 8 zones are already from artifacts
 * 1 pending MGS update:
   * model2:serial2: RotBootloader(PendingMgsUpdateRotBootloaderDetails { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: NoValidVersion })
-* zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+* zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
 * waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
@@ -2456,7 +2456,7 @@ planning report:
 * skipping noop zone image source check on sled d81c6a84-79b8-4958-ae41-ea46c9b19763: all 8 zones are already from artifacts
 * 1 pending MGS update:
   * model2:serial2: Rot(PendingMgsUpdateRotDetails { expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: NoValidVersion, expected_persistent_boot_preference: A, expected_pending_persistent_boot_preference: None, expected_transient_boot_preference: None })
-* zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+* zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
 * waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
@@ -2531,7 +2531,7 @@ planning report:
 * skipping noop zone image source check on sled d81c6a84-79b8-4958-ae41-ea46c9b19763: all 8 zones are already from artifacts
 * 1 pending MGS update:
   * model2:serial2: Rot(PendingMgsUpdateRotDetails { expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: Version(ArtifactVersion("1.0.0")), expected_persistent_boot_preference: B, expected_pending_persistent_boot_preference: None, expected_transient_boot_preference: None })
-* zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+* zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
 * waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
@@ -2608,7 +2608,7 @@ planning report:
 * skipping noop zone image source check on sled d81c6a84-79b8-4958-ae41-ea46c9b19763: all 8 zones are already from artifacts
 * 1 pending MGS update:
   * model2:serial2: Rot(PendingMgsUpdateRotDetails { expected_active_slot: ExpectedActiveRotSlot { slot: B, version: ArtifactVersion("1.1.0") }, expected_inactive_version: Version(ArtifactVersion("0.0.2")), expected_persistent_boot_preference: B, expected_pending_persistent_boot_preference: Some(B), expected_transient_boot_preference: None })
-* zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+* zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
 * waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
@@ -2682,7 +2682,7 @@ planning report:
 * skipping noop zone image source check on sled d81c6a84-79b8-4958-ae41-ea46c9b19763: all 8 zones are already from artifacts
 * 1 pending MGS update:
   * model2:serial2: Rot(PendingMgsUpdateRotDetails { expected_active_slot: ExpectedActiveRotSlot { slot: B, version: ArtifactVersion("1.1.0") }, expected_inactive_version: Version(ArtifactVersion("0.0.2")), expected_persistent_boot_preference: B, expected_pending_persistent_boot_preference: None, expected_transient_boot_preference: Some(B) })
-* zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+* zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
 * waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
@@ -2754,7 +2754,7 @@ planning report:
 * skipping noop zone image source check on sled d81c6a84-79b8-4958-ae41-ea46c9b19763: all 8 zones are already from artifacts
 * 1 pending MGS update:
   * model2:serial2: Sp(PendingMgsUpdateSpDetails { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: NoValidVersion })
-* zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+* zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
 * waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
@@ -2825,7 +2825,7 @@ planning report:
 * skipping noop zone image source check on sled d81c6a84-79b8-4958-ae41-ea46c9b19763: all 8 zones are already from artifacts
 * 1 pending MGS update:
   * model2:serial2: HostPhase1(PendingMgsUpdateHostPhase1Details { expected_active_phase_1_slot: A, expected_boot_disk: A, expected_active_phase_1_hash: ArtifactHash("0101010101010101010101010101010101010101010101010101010101010101"), expected_active_phase_2_hash: ArtifactHash("0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a"), expected_inactive_phase_1_hash: ArtifactHash("0202020202020202020202020202020202020202020202020202020202020202"), expected_inactive_phase_2_hash: ArtifactHash("d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47"), sled_agent_address: [fd00:1122:3344:103::1]:12345 })
-* zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+* zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
 * waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
 
@@ -2950,9 +2950,9 @@ INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noo
 INFO performed noop zone image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 8, num_already_artifact: 8, num_eligible: 0, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO MGS-driven update completed (will remove it and re-evaluate board), artifact_version: 1.0.0, artifact_hash: b99d5273ba1418bebb19d74b701d716896409566d41de76ada71bded4c9b166b, sled_agent_address: [fd00:1122:3344:103::1]:12345, expected_inactive_phase_2_hash: d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47, expected_inactive_phase_1_hash: 0202020202020202020202020202020202020202020202020202020202020202, expected_active_phase_2_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a, expected_active_phase_1_hash: 0101010101010101010101010101010101010101010101010101010101010101, expected_boot_disk: A, expected_active_phase_1_slot: A, component: host_phase_1, sp_slot: 2, sp_type: Sled, serial_number: serial2, part_number: model2
-INFO skipping board for MGS-driven update, serial_number: serial2, part_number: model2
-INFO skipping board for MGS-driven update, serial_number: serial0, part_number: model0
-INFO skipping board for MGS-driven update, serial_number: serial1, part_number: model1
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial2, part_number: model2
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial0, part_number: model0
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial1, part_number: model1
 INFO ran out of boards for MGS-driven update
 generated blueprint b2295597-5788-482e-acf9-1731ec63fbd2 based on parent blueprint 459a45a5-616e-421f-873b-2fb08c36205c
 blueprint source: planner with report:
@@ -3084,9 +3084,9 @@ INFO performed noop zone image source checks on sled, sled_id: 98e6b7c2-2efa-41c
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO performed noop zone image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 8, num_already_artifact: 8, num_eligible: 0, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
-INFO skipping board for MGS-driven update, serial_number: serial0, part_number: model0
-INFO skipping board for MGS-driven update, serial_number: serial1, part_number: model1
-INFO skipping board for MGS-driven update, serial_number: serial2, part_number: model2
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial0, part_number: model0
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial1, part_number: model1
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial2, part_number: model2
 INFO ran out of boards for MGS-driven update
 generated blueprint 6fad8fd4-e825-433f-b76d-495484e068ce based on parent blueprint b2295597-5788-482e-acf9-1731ec63fbd2
 blueprint source: planner with report:
@@ -3223,9 +3223,9 @@ INFO performed noop zone image source checks on sled, sled_id: 98e6b7c2-2efa-41c
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO performed noop zone image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 8, num_already_artifact: 8, num_eligible: 0, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
-INFO skipping board for MGS-driven update, serial_number: serial0, part_number: model0
-INFO skipping board for MGS-driven update, serial_number: serial1, part_number: model1
-INFO skipping board for MGS-driven update, serial_number: serial2, part_number: model2
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial0, part_number: model0
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial1, part_number: model1
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial2, part_number: model2
 INFO ran out of boards for MGS-driven update
 INFO some zones not yet up-to-date, zones_currently_updating: [ZonePropagationIncomplete { zone_id: ba87399e-e9b7-4ee4-8cb7-0032822630e9 (service), zone_kind: InternalNtp, reason: MissingInInventory { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("67593d686ed04a1709f93972b71f4ebc148a9362120f65d239943e814a9a7439") } } }]
 generated blueprint 24b6e243-100c-428d-8ea6-35b504226f55 based on parent blueprint 6fad8fd4-e825-433f-b76d-495484e068ce
@@ -3359,9 +3359,9 @@ INFO performed noop zone image source checks on sled, sled_id: 98e6b7c2-2efa-41c
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO performed noop zone image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 8, num_already_artifact: 8, num_eligible: 0, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
-INFO skipping board for MGS-driven update, serial_number: serial0, part_number: model0
-INFO skipping board for MGS-driven update, serial_number: serial1, part_number: model1
-INFO skipping board for MGS-driven update, serial_number: serial2, part_number: model2
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial0, part_number: model0
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial1, part_number: model1
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial2, part_number: model2
 INFO ran out of boards for MGS-driven update
 generated blueprint 79fff7a2-2495-4c75-8465-4dc01bab48ce based on parent blueprint 24b6e243-100c-428d-8ea6-35b504226f55
 blueprint source: planner with report:
@@ -3509,9 +3509,9 @@ INFO performed noop zone image source checks on sled, sled_id: 98e6b7c2-2efa-41c
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO performed noop zone image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 8, num_already_artifact: 8, num_eligible: 0, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
-INFO skipping board for MGS-driven update, serial_number: serial0, part_number: model0
-INFO skipping board for MGS-driven update, serial_number: serial1, part_number: model1
-INFO skipping board for MGS-driven update, serial_number: serial2, part_number: model2
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial0, part_number: model0
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial1, part_number: model1
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial2, part_number: model2
 INFO ran out of boards for MGS-driven update
 generated blueprint 3bcc37b2-0c0b-44d0-b4ed-3bcb605e4312 based on parent blueprint 79fff7a2-2495-4c75-8465-4dc01bab48ce
 blueprint source: planner with report:
@@ -3660,9 +3660,9 @@ INFO performed noop zone image source checks on sled, sled_id: 98e6b7c2-2efa-41c
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO performed noop zone image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 8, num_already_artifact: 8, num_eligible: 0, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
-INFO skipping board for MGS-driven update, serial_number: serial0, part_number: model0
-INFO skipping board for MGS-driven update, serial_number: serial1, part_number: model1
-INFO skipping board for MGS-driven update, serial_number: serial2, part_number: model2
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial0, part_number: model0
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial1, part_number: model1
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial2, part_number: model2
 INFO ran out of boards for MGS-driven update
 generated blueprint 4d2eb6f3-7eb1-443a-8e76-7ecf05da2f6d based on parent blueprint 3bcc37b2-0c0b-44d0-b4ed-3bcb605e4312
 blueprint source: planner with report:
@@ -3789,9 +3789,9 @@ INFO performed noop zone image source checks on sled, sled_id: 98e6b7c2-2efa-41c
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO performed noop zone image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 8, num_already_artifact: 8, num_eligible: 0, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
-INFO skipping board for MGS-driven update, serial_number: serial0, part_number: model0
-INFO skipping board for MGS-driven update, serial_number: serial1, part_number: model1
-INFO skipping board for MGS-driven update, serial_number: serial2, part_number: model2
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial0, part_number: model0
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial1, part_number: model1
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial2, part_number: model2
 INFO ran out of boards for MGS-driven update
 generated blueprint e2125c83-b255-45c9-bc9b-802cff09a812 based on parent blueprint 4d2eb6f3-7eb1-443a-8e76-7ecf05da2f6d
 blueprint source: planner with report:
@@ -3942,9 +3942,9 @@ INFO performed noop zone image source checks on sled, sled_id: 98e6b7c2-2efa-41c
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO performed noop zone image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 8, num_already_artifact: 8, num_eligible: 0, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
-INFO skipping board for MGS-driven update, serial_number: serial0, part_number: model0
-INFO skipping board for MGS-driven update, serial_number: serial1, part_number: model1
-INFO skipping board for MGS-driven update, serial_number: serial2, part_number: model2
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial0, part_number: model0
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial1, part_number: model1
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial2, part_number: model2
 INFO ran out of boards for MGS-driven update
 generated blueprint f4a6848e-d13c-46e1-8c6a-944f886d7ba3 based on parent blueprint e2125c83-b255-45c9-bc9b-802cff09a812
 blueprint source: planner with report:
@@ -4096,9 +4096,9 @@ INFO performed noop zone image source checks on sled, sled_id: 98e6b7c2-2efa-41c
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO performed noop zone image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 8, num_already_artifact: 8, num_eligible: 0, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
-INFO skipping board for MGS-driven update, serial_number: serial0, part_number: model0
-INFO skipping board for MGS-driven update, serial_number: serial1, part_number: model1
-INFO skipping board for MGS-driven update, serial_number: serial2, part_number: model2
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial0, part_number: model0
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial1, part_number: model1
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial2, part_number: model2
 INFO ran out of boards for MGS-driven update
 generated blueprint 834e4dbe-3b71-443d-bd4c-20e8253abc0c based on parent blueprint f4a6848e-d13c-46e1-8c6a-944f886d7ba3
 blueprint source: planner with report:
@@ -4237,9 +4237,9 @@ INFO performed noop zone image source checks on sled, sled_id: 98e6b7c2-2efa-41c
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO performed noop zone image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 8, num_already_artifact: 8, num_eligible: 0, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
-INFO skipping board for MGS-driven update, serial_number: serial0, part_number: model0
-INFO skipping board for MGS-driven update, serial_number: serial1, part_number: model1
-INFO skipping board for MGS-driven update, serial_number: serial2, part_number: model2
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial0, part_number: model0
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial1, part_number: model1
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial2, part_number: model2
 INFO ran out of boards for MGS-driven update
 generated blueprint d9c5c5e3-c532-4c45-9ef5-22cb00f6a2e1 based on parent blueprint 834e4dbe-3b71-443d-bd4c-20e8253abc0c
 blueprint source: planner with report:
@@ -4379,9 +4379,9 @@ INFO performed noop zone image source checks on sled, sled_id: 98e6b7c2-2efa-41c
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO performed noop zone image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 8, num_already_artifact: 8, num_eligible: 0, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
-INFO skipping board for MGS-driven update, serial_number: serial0, part_number: model0
-INFO skipping board for MGS-driven update, serial_number: serial1, part_number: model1
-INFO skipping board for MGS-driven update, serial_number: serial2, part_number: model2
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial0, part_number: model0
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial1, part_number: model1
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial2, part_number: model2
 INFO ran out of boards for MGS-driven update
 generated blueprint e2deb7c0-2262-49fe-855f-4250c22afb36 based on parent blueprint d9c5c5e3-c532-4c45-9ef5-22cb00f6a2e1
 blueprint source: planner with report:
@@ -4513,9 +4513,9 @@ INFO performed noop zone image source checks on sled, sled_id: 98e6b7c2-2efa-41c
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO performed noop zone image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 8, num_already_artifact: 8, num_eligible: 0, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
-INFO skipping board for MGS-driven update, serial_number: serial0, part_number: model0
-INFO skipping board for MGS-driven update, serial_number: serial1, part_number: model1
-INFO skipping board for MGS-driven update, serial_number: serial2, part_number: model2
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial0, part_number: model0
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial1, part_number: model1
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial2, part_number: model2
 INFO ran out of boards for MGS-driven update
 generated blueprint 23ce505c-8991-44a5-8863-f2b906fba9cf based on parent blueprint e2deb7c0-2262-49fe-855f-4250c22afb36
 blueprint source: planner with report:
@@ -4650,9 +4650,9 @@ INFO performed noop zone image source checks on sled, sled_id: 98e6b7c2-2efa-41c
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO performed noop zone image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 8, num_already_artifact: 8, num_eligible: 0, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
-INFO skipping board for MGS-driven update, serial_number: serial0, part_number: model0
-INFO skipping board for MGS-driven update, serial_number: serial1, part_number: model1
-INFO skipping board for MGS-driven update, serial_number: serial2, part_number: model2
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial0, part_number: model0
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial1, part_number: model1
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial2, part_number: model2
 INFO ran out of boards for MGS-driven update
 generated blueprint c0d81ea6-909c-4efb-964e-beff67f6da0d based on parent blueprint 23ce505c-8991-44a5-8863-f2b906fba9cf
 blueprint source: planner with report:
@@ -4772,9 +4772,9 @@ INFO performed noop zone image source checks on sled, sled_id: 98e6b7c2-2efa-41c
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO performed noop zone image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 8, num_already_artifact: 8, num_eligible: 0, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
-INFO skipping board for MGS-driven update, serial_number: serial0, part_number: model0
-INFO skipping board for MGS-driven update, serial_number: serial1, part_number: model1
-INFO skipping board for MGS-driven update, serial_number: serial2, part_number: model2
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial0, part_number: model0
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial1, part_number: model1
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial2, part_number: model2
 INFO ran out of boards for MGS-driven update
 generated blueprint 60b55d33-5fec-4277-9864-935197eaead7 based on parent blueprint c0d81ea6-909c-4efb-964e-beff67f6da0d
 blueprint source: planner with report:
@@ -4914,9 +4914,9 @@ INFO performed noop zone image source checks on sled, sled_id: 98e6b7c2-2efa-41c
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO performed noop zone image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 8, num_already_artifact: 8, num_eligible: 0, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
-INFO skipping board for MGS-driven update, serial_number: serial0, part_number: model0
-INFO skipping board for MGS-driven update, serial_number: serial1, part_number: model1
-INFO skipping board for MGS-driven update, serial_number: serial2, part_number: model2
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial0, part_number: model0
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial1, part_number: model1
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial2, part_number: model2
 INFO ran out of boards for MGS-driven update
 generated blueprint aa13f40f-41ff-4b68-bee1-df2e1f805544 based on parent blueprint 60b55d33-5fec-4277-9864-935197eaead7
 blueprint source: planner with report:
@@ -5057,9 +5057,9 @@ INFO performed noop zone image source checks on sled, sled_id: 98e6b7c2-2efa-41c
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO performed noop zone image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 8, num_already_artifact: 8, num_eligible: 0, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
-INFO skipping board for MGS-driven update, serial_number: serial0, part_number: model0
-INFO skipping board for MGS-driven update, serial_number: serial1, part_number: model1
-INFO skipping board for MGS-driven update, serial_number: serial2, part_number: model2
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial0, part_number: model0
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial1, part_number: model1
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial2, part_number: model2
 INFO ran out of boards for MGS-driven update
 generated blueprint 316ccd9e-5c53-46c3-a2e9-20c3867b7111 based on parent blueprint aa13f40f-41ff-4b68-bee1-df2e1f805544
 blueprint source: planner with report:
@@ -5181,9 +5181,9 @@ INFO performed noop zone image source checks on sled, sled_id: 98e6b7c2-2efa-41c
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO performed noop zone image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 8, num_already_artifact: 8, num_eligible: 0, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
-INFO skipping board for MGS-driven update, serial_number: serial0, part_number: model0
-INFO skipping board for MGS-driven update, serial_number: serial1, part_number: model1
-INFO skipping board for MGS-driven update, serial_number: serial2, part_number: model2
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial0, part_number: model0
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial1, part_number: model1
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial2, part_number: model2
 INFO ran out of boards for MGS-driven update
 generated blueprint 02078c95-3d58-4b7b-a03f-9b160361c50a based on parent blueprint 316ccd9e-5c53-46c3-a2e9-20c3867b7111
 blueprint source: planner with report:
@@ -5314,9 +5314,9 @@ INFO performed noop zone image source checks on sled, sled_id: 98e6b7c2-2efa-41c
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO performed noop zone image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 8, num_already_artifact: 8, num_eligible: 0, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
-INFO skipping board for MGS-driven update, serial_number: serial0, part_number: model0
-INFO skipping board for MGS-driven update, serial_number: serial1, part_number: model1
-INFO skipping board for MGS-driven update, serial_number: serial2, part_number: model2
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial0, part_number: model0
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial1, part_number: model1
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial2, part_number: model2
 INFO ran out of boards for MGS-driven update
 INFO some zones not yet up-to-date, zones_currently_updating: [ZonePropagationIncomplete { zone_id: e14f91b0-0c41-48a0-919d-e5078d2b89b0 (service), zone_kind: InternalNtp, reason: MissingInInventory { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("67593d686ed04a1709f93972b71f4ebc148a9362120f65d239943e814a9a7439") } } }]
 generated blueprint e7a01ffc-6b0e-408b-917b-b1efe18b3110 based on parent blueprint 02078c95-3d58-4b7b-a03f-9b160361c50a
@@ -5450,9 +5450,9 @@ INFO performed noop zone image source checks on sled, sled_id: 98e6b7c2-2efa-41c
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO performed noop zone image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 8, num_already_artifact: 8, num_eligible: 0, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
-INFO skipping board for MGS-driven update, serial_number: serial0, part_number: model0
-INFO skipping board for MGS-driven update, serial_number: serial1, part_number: model1
-INFO skipping board for MGS-driven update, serial_number: serial2, part_number: model2
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial0, part_number: model0
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial1, part_number: model1
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial2, part_number: model2
 INFO ran out of boards for MGS-driven update
 generated blueprint 880e2ffc-8187-4275-a2f3-1b36aa2f4482 based on parent blueprint e7a01ffc-6b0e-408b-917b-b1efe18b3110
 blueprint source: planner with report:
@@ -5597,9 +5597,9 @@ INFO performed noop zone image source checks on sled, sled_id: 98e6b7c2-2efa-41c
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO performed noop zone image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 8, num_already_artifact: 8, num_eligible: 0, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
-INFO skipping board for MGS-driven update, serial_number: serial0, part_number: model0
-INFO skipping board for MGS-driven update, serial_number: serial1, part_number: model1
-INFO skipping board for MGS-driven update, serial_number: serial2, part_number: model2
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial0, part_number: model0
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial1, part_number: model1
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial2, part_number: model2
 INFO ran out of boards for MGS-driven update
 generated blueprint c4a20bcb-1a71-4e88-97b4-36d16f55daec based on parent blueprint 880e2ffc-8187-4275-a2f3-1b36aa2f4482
 blueprint source: planner with report:
@@ -5745,9 +5745,9 @@ INFO performed noop zone image source checks on sled, sled_id: 98e6b7c2-2efa-41c
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO performed noop zone image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 8, num_already_artifact: 8, num_eligible: 0, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
-INFO skipping board for MGS-driven update, serial_number: serial0, part_number: model0
-INFO skipping board for MGS-driven update, serial_number: serial1, part_number: model1
-INFO skipping board for MGS-driven update, serial_number: serial2, part_number: model2
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial0, part_number: model0
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial1, part_number: model1
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial2, part_number: model2
 INFO ran out of boards for MGS-driven update
 generated blueprint a2c6496d-98fc-444d-aa36-99508aa72367 based on parent blueprint c4a20bcb-1a71-4e88-97b4-36d16f55daec
 blueprint source: planner with report:
@@ -5883,9 +5883,9 @@ INFO performed noop zone image source checks on sled, sled_id: 98e6b7c2-2efa-41c
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO performed noop zone image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 8, num_already_artifact: 8, num_eligible: 0, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
-INFO skipping board for MGS-driven update, serial_number: serial0, part_number: model0
-INFO skipping board for MGS-driven update, serial_number: serial1, part_number: model1
-INFO skipping board for MGS-driven update, serial_number: serial2, part_number: model2
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial0, part_number: model0
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial1, part_number: model1
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial2, part_number: model2
 INFO ran out of boards for MGS-driven update
 generated blueprint 6ed56354-5941-40d1-a06c-b0e940701d52 based on parent blueprint a2c6496d-98fc-444d-aa36-99508aa72367
 blueprint source: planner with report:
@@ -6022,9 +6022,9 @@ INFO performed noop zone image source checks on sled, sled_id: 98e6b7c2-2efa-41c
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO performed noop zone image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 8, num_already_artifact: 8, num_eligible: 0, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
-INFO skipping board for MGS-driven update, serial_number: serial0, part_number: model0
-INFO skipping board for MGS-driven update, serial_number: serial1, part_number: model1
-INFO skipping board for MGS-driven update, serial_number: serial2, part_number: model2
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial0, part_number: model0
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial1, part_number: model1
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial2, part_number: model2
 INFO ran out of boards for MGS-driven update
 generated blueprint 9078c4ba-3a73-4b3f-ac2c-acb501f89cb2 based on parent blueprint 6ed56354-5941-40d1-a06c-b0e940701d52
 blueprint source: planner with report:
@@ -6156,9 +6156,9 @@ INFO performed noop zone image source checks on sled, sled_id: 98e6b7c2-2efa-41c
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO performed noop zone image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 8, num_already_artifact: 8, num_eligible: 0, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
-INFO skipping board for MGS-driven update, serial_number: serial0, part_number: model0
-INFO skipping board for MGS-driven update, serial_number: serial1, part_number: model1
-INFO skipping board for MGS-driven update, serial_number: serial2, part_number: model2
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial0, part_number: model0
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial1, part_number: model1
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial2, part_number: model2
 INFO ran out of boards for MGS-driven update
 generated blueprint 8763abc1-8a42-4932-b5a7-33109e0e0152 based on parent blueprint 9078c4ba-3a73-4b3f-ac2c-acb501f89cb2
 blueprint source: planner with report:
@@ -6278,9 +6278,9 @@ INFO performed noop zone image source checks on sled, sled_id: 98e6b7c2-2efa-41c
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO performed noop zone image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 8, num_already_artifact: 8, num_eligible: 0, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
-INFO skipping board for MGS-driven update, serial_number: serial0, part_number: model0
-INFO skipping board for MGS-driven update, serial_number: serial1, part_number: model1
-INFO skipping board for MGS-driven update, serial_number: serial2, part_number: model2
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial0, part_number: model0
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial1, part_number: model1
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial2, part_number: model2
 INFO ran out of boards for MGS-driven update
 generated blueprint 2b89e0d7-f15b-4474-8ac4-85959ed1bc88 based on parent blueprint 8763abc1-8a42-4932-b5a7-33109e0e0152
 blueprint source: planner with report:
@@ -6408,9 +6408,9 @@ INFO performed noop zone image source checks on sled, sled_id: 98e6b7c2-2efa-41c
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO performed noop zone image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 7, num_already_artifact: 7, num_eligible: 0, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
-INFO skipping board for MGS-driven update, serial_number: serial0, part_number: model0
-INFO skipping board for MGS-driven update, serial_number: serial1, part_number: model1
-INFO skipping board for MGS-driven update, serial_number: serial2, part_number: model2
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial0, part_number: model0
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial1, part_number: model1
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial2, part_number: model2
 INFO ran out of boards for MGS-driven update
 generated blueprint 7f6b7297-c2bc-4f67-b3c0-c8e555ebbdc4 based on parent blueprint 2b89e0d7-f15b-4474-8ac4-85959ed1bc88
 blueprint source: planner with report:
@@ -6539,9 +6539,9 @@ INFO performed noop zone image source checks on sled, sled_id: 98e6b7c2-2efa-41c
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO performed noop zone image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 8, num_already_artifact: 8, num_eligible: 0, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
-INFO skipping board for MGS-driven update, serial_number: serial0, part_number: model0
-INFO skipping board for MGS-driven update, serial_number: serial1, part_number: model1
-INFO skipping board for MGS-driven update, serial_number: serial2, part_number: model2
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial0, part_number: model0
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial1, part_number: model1
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial2, part_number: model2
 INFO ran out of boards for MGS-driven update
 generated blueprint 59630e63-c953-4807-9e84-9e750a79f68e based on parent blueprint 7f6b7297-c2bc-4f67-b3c0-c8e555ebbdc4
 blueprint source: planner with report:
@@ -6662,9 +6662,9 @@ INFO performed noop zone image source checks on sled, sled_id: 98e6b7c2-2efa-41c
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO performed noop zone image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 8, num_already_artifact: 8, num_eligible: 0, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
-INFO skipping board for MGS-driven update, serial_number: serial0, part_number: model0
-INFO skipping board for MGS-driven update, serial_number: serial1, part_number: model1
-INFO skipping board for MGS-driven update, serial_number: serial2, part_number: model2
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial0, part_number: model0
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial1, part_number: model1
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial2, part_number: model2
 INFO ran out of boards for MGS-driven update
 generated blueprint e93650dc-b5ba-4ec7-8550-9171c1ada194 based on parent blueprint 59630e63-c953-4807-9e84-9e750a79f68e
 blueprint source: planner with report:
@@ -6803,9 +6803,9 @@ INFO performed noop zone image source checks on sled, sled_id: 98e6b7c2-2efa-41c
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO performed noop zone image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 7, num_already_artifact: 7, num_eligible: 0, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
-INFO skipping board for MGS-driven update, serial_number: serial0, part_number: model0
-INFO skipping board for MGS-driven update, serial_number: serial1, part_number: model1
-INFO skipping board for MGS-driven update, serial_number: serial2, part_number: model2
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial0, part_number: model0
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial1, part_number: model1
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial2, part_number: model2
 INFO ran out of boards for MGS-driven update
 generated blueprint 90650737-8142-47a6-9a48-a10efc487e57 based on parent blueprint e93650dc-b5ba-4ec7-8550-9171c1ada194
 blueprint source: planner with report:
@@ -6945,9 +6945,9 @@ INFO performed noop zone image source checks on sled, sled_id: 98e6b7c2-2efa-41c
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO performed noop zone image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 8, num_already_artifact: 8, num_eligible: 0, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
-INFO skipping board for MGS-driven update, serial_number: serial0, part_number: model0
-INFO skipping board for MGS-driven update, serial_number: serial1, part_number: model1
-INFO skipping board for MGS-driven update, serial_number: serial2, part_number: model2
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial0, part_number: model0
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial1, part_number: model1
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial2, part_number: model2
 INFO ran out of boards for MGS-driven update
 generated blueprint 2182613d-dc9f-41eb-9c6a-d33801849caa based on parent blueprint 90650737-8142-47a6-9a48-a10efc487e57
 blueprint source: planner with report:
@@ -7080,9 +7080,9 @@ INFO performed noop zone image source checks on sled, sled_id: 98e6b7c2-2efa-41c
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO performed noop zone image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 7, num_already_artifact: 7, num_eligible: 0, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
-INFO skipping board for MGS-driven update, serial_number: serial0, part_number: model0
-INFO skipping board for MGS-driven update, serial_number: serial1, part_number: model1
-INFO skipping board for MGS-driven update, serial_number: serial2, part_number: model2
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial0, part_number: model0
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial1, part_number: model1
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial2, part_number: model2
 INFO ran out of boards for MGS-driven update
 INFO some zones not yet up-to-date, zones_currently_updating: [ZonePropagationIncomplete { zone_id: 9e2e0774-3cf6-4f75-9a12-92db05c77b81 (service), zone_kind: InternalNtp, reason: MissingInInventory { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("67593d686ed04a1709f93972b71f4ebc148a9362120f65d239943e814a9a7439") } } }]
 generated blueprint e8b088a8-7da0-480b-a2dc-75ffef068ece based on parent blueprint 2182613d-dc9f-41eb-9c6a-d33801849caa
@@ -7218,9 +7218,9 @@ INFO performed noop zone image source checks on sled, sled_id: 98e6b7c2-2efa-41c
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO performed noop zone image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 8, num_already_artifact: 8, num_eligible: 0, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
-INFO skipping board for MGS-driven update, serial_number: serial0, part_number: model0
-INFO skipping board for MGS-driven update, serial_number: serial1, part_number: model1
-INFO skipping board for MGS-driven update, serial_number: serial2, part_number: model2
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial0, part_number: model0
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial1, part_number: model1
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial2, part_number: model2
 INFO ran out of boards for MGS-driven update
 generated blueprint 810ea95a-4730-43dd-867e-1984aeb9d873 based on parent blueprint e8b088a8-7da0-480b-a2dc-75ffef068ece
 blueprint source: planner with report:
@@ -7346,9 +7346,9 @@ INFO performed noop zone image source checks on sled, sled_id: 98e6b7c2-2efa-41c
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO performed noop zone image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 8, num_already_artifact: 8, num_eligible: 0, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
-INFO skipping board for MGS-driven update, serial_number: serial0, part_number: model0
-INFO skipping board for MGS-driven update, serial_number: serial1, part_number: model1
-INFO skipping board for MGS-driven update, serial_number: serial2, part_number: model2
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial0, part_number: model0
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial1, part_number: model1
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial2, part_number: model2
 INFO ran out of boards for MGS-driven update
 generated blueprint 67c074ef-c52e-4ff1-851a-598c04dc2c8d based on parent blueprint 810ea95a-4730-43dd-867e-1984aeb9d873
 blueprint source: planner with report:
@@ -7492,9 +7492,9 @@ INFO performed noop zone image source checks on sled, sled_id: 98e6b7c2-2efa-41c
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO performed noop zone image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 7, num_already_artifact: 7, num_eligible: 0, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
-INFO skipping board for MGS-driven update, serial_number: serial0, part_number: model0
-INFO skipping board for MGS-driven update, serial_number: serial1, part_number: model1
-INFO skipping board for MGS-driven update, serial_number: serial2, part_number: model2
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial0, part_number: model0
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial1, part_number: model1
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial2, part_number: model2
 INFO ran out of boards for MGS-driven update
 generated blueprint 0a8d2f87-1d3e-4296-ba07-108940a7a57e based on parent blueprint 67c074ef-c52e-4ff1-851a-598c04dc2c8d
 blueprint source: planner with report:
@@ -7642,9 +7642,9 @@ INFO performed noop zone image source checks on sled, sled_id: 98e6b7c2-2efa-41c
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO performed noop zone image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 8, num_already_artifact: 8, num_eligible: 0, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
-INFO skipping board for MGS-driven update, serial_number: serial0, part_number: model0
-INFO skipping board for MGS-driven update, serial_number: serial1, part_number: model1
-INFO skipping board for MGS-driven update, serial_number: serial2, part_number: model2
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial0, part_number: model0
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial1, part_number: model1
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial2, part_number: model2
 INFO ran out of boards for MGS-driven update
 generated blueprint d69e1109-06be-4469-8876-4292dc7885d7 based on parent blueprint 0a8d2f87-1d3e-4296-ba07-108940a7a57e
 blueprint source: planner with report:
@@ -7932,9 +7932,9 @@ INFO performed noop zone image source checks on sled, sled_id: 98e6b7c2-2efa-41c
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO performed noop zone image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 9, num_already_artifact: 9, num_eligible: 0, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
-INFO skipping board for MGS-driven update, serial_number: serial0, part_number: model0
-INFO skipping board for MGS-driven update, serial_number: serial1, part_number: model1
-INFO skipping board for MGS-driven update, serial_number: serial2, part_number: model2
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial0, part_number: model0
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial1, part_number: model1
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial2, part_number: model2
 INFO ran out of boards for MGS-driven update
 generated blueprint 12f19448-6a10-4b4b-ae19-a8c94a566097 based on parent blueprint d69e1109-06be-4469-8876-4292dc7885d7
 blueprint source: planner with report:
@@ -7944,9 +7944,9 @@ planning report:
 * skipping noop zone image source check on sled d81c6a84-79b8-4958-ae41-ea46c9b19763: all 9 zones are already from artifacts
 * 3 remaining out-of-date zones
 * 3 zones waiting to be expunged:
-  * zone 0c71b3b2-6ceb-4e8f-b020-b08675e83038 (nexus): image out-of-date, but zone's nexus_generation 1 is still active
-  * zone 3eeb8d49-eb1a-43f8-bb64-c2338421c2c6 (nexus): image out-of-date, but zone's nexus_generation 1 is still active
-  * zone 466a9f29-62bf-4e63-924a-b9efdb86afec (nexus): image out-of-date, but zone's nexus_generation 1 is still active
+  * zone 0c71b3b2-6ceb-4e8f-b020-b08675e83038: nexus image out-of-date, but nexus_generation 1 is still active
+  * zone 3eeb8d49-eb1a-43f8-bb64-c2338421c2c6: nexus image out-of-date, but nexus_generation 1 is still active
+  * zone 466a9f29-62bf-4e63-924a-b9efdb86afec: nexus image out-of-date, but nexus_generation 1 is still active
 * updating top-level nexus_generation to: 2
 
 
@@ -8023,9 +8023,9 @@ INFO performed noop zone image source checks on sled, sled_id: 98e6b7c2-2efa-41c
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO performed noop zone image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 9, num_already_artifact: 9, num_eligible: 0, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
-INFO skipping board for MGS-driven update, serial_number: serial0, part_number: model0
-INFO skipping board for MGS-driven update, serial_number: serial1, part_number: model1
-INFO skipping board for MGS-driven update, serial_number: serial2, part_number: model2
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial0, part_number: model0
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial1, part_number: model1
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial2, part_number: model2
 INFO ran out of boards for MGS-driven update
 generated blueprint 4713f6c4-e8ba-4a28-87a0-df75ebf7b8b6 based on parent blueprint 12f19448-6a10-4b4b-ae19-a8c94a566097
 blueprint source: planner with report:
@@ -8035,9 +8035,9 @@ planning report:
 * skipping noop zone image source check on sled d81c6a84-79b8-4958-ae41-ea46c9b19763: all 9 zones are already from artifacts
 * 3 remaining out-of-date zones
 * 3 zones waiting to be expunged:
-  * zone 0c71b3b2-6ceb-4e8f-b020-b08675e83038 (nexus): image out-of-date, but zone's nexus_generation 1 is still active
-  * zone 3eeb8d49-eb1a-43f8-bb64-c2338421c2c6 (nexus): image out-of-date, but zone's nexus_generation 1 is still active
-  * zone 466a9f29-62bf-4e63-924a-b9efdb86afec (nexus): image out-of-date, but zone's nexus_generation 1 is still active
+  * zone 0c71b3b2-6ceb-4e8f-b020-b08675e83038: nexus image out-of-date, but nexus_generation 1 is still active
+  * zone 3eeb8d49-eb1a-43f8-bb64-c2338421c2c6: nexus image out-of-date, but nexus_generation 1 is still active
+  * zone 466a9f29-62bf-4e63-924a-b9efdb86afec: nexus image out-of-date, but nexus_generation 1 is still active
 
 
 
@@ -8223,9 +8223,9 @@ INFO performed noop zone image source checks on sled, sled_id: 98e6b7c2-2efa-41c
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO performed noop zone image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 9, num_already_artifact: 9, num_eligible: 0, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
-INFO skipping board for MGS-driven update, serial_number: serial0, part_number: model0
-INFO skipping board for MGS-driven update, serial_number: serial1, part_number: model1
-INFO skipping board for MGS-driven update, serial_number: serial2, part_number: model2
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial0, part_number: model0
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial1, part_number: model1
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial2, part_number: model2
 INFO ran out of boards for MGS-driven update
 generated blueprint e31c9054-8549-4c68-acf9-a01f68d1fc9b based on parent blueprint 8e0cc787-e068-4a45-97ed-21029cbe4ddf
 blueprint source: planner with report:
@@ -8428,9 +8428,9 @@ INFO performed noop zone image source checks on sled, sled_id: 98e6b7c2-2efa-41c
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO performed noop zone image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 9, num_already_artifact: 9, num_eligible: 0, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
-INFO skipping board for MGS-driven update, serial_number: serial0, part_number: model0
-INFO skipping board for MGS-driven update, serial_number: serial1, part_number: model1
-INFO skipping board for MGS-driven update, serial_number: serial2, part_number: model2
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial0, part_number: model0
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial1, part_number: model1
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial2, part_number: model2
 INFO ran out of boards for MGS-driven update
 generated blueprint 3e332949-6785-4aff-ad86-6134f5ce6152 based on parent blueprint e31c9054-8549-4c68-acf9-a01f68d1fc9b
 blueprint source: planner with report:
@@ -8556,9 +8556,9 @@ INFO performed noop zone image source checks on sled, sled_id: 98e6b7c2-2efa-41c
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO performed noop zone image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 9, num_already_artifact: 9, num_eligible: 0, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
-INFO skipping board for MGS-driven update, serial_number: serial0, part_number: model0
-INFO skipping board for MGS-driven update, serial_number: serial1, part_number: model1
-INFO skipping board for MGS-driven update, serial_number: serial2, part_number: model2
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial0, part_number: model0
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial1, part_number: model1
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial2, part_number: model2
 INFO ran out of boards for MGS-driven update
 generated blueprint 05685571-d61f-4754-a2b2-604ea8c45dff based on parent blueprint 3e332949-6785-4aff-ad86-6134f5ce6152
 blueprint source: planner with report:
@@ -8700,9 +8700,9 @@ INFO performed noop zone image source checks on sled, sled_id: 98e6b7c2-2efa-41c
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO performed noop zone image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 8, num_already_artifact: 8, num_eligible: 0, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
-INFO skipping board for MGS-driven update, serial_number: serial0, part_number: model0
-INFO skipping board for MGS-driven update, serial_number: serial1, part_number: model1
-INFO skipping board for MGS-driven update, serial_number: serial2, part_number: model2
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial0, part_number: model0
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial1, part_number: model1
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial2, part_number: model2
 INFO ran out of boards for MGS-driven update
 generated blueprint 008e1541-3d9d-4a50-a877-eed4a3cf86ab based on parent blueprint 05685571-d61f-4754-a2b2-604ea8c45dff
 blueprint source: planner with report:

@@ -622,6 +622,7 @@ impl DiskManagementError {
     Diffable,
     strum::EnumIter,
 )]
+#[cfg_attr(any(test, feature = "testing"), derive(test_strategy::Arbitrary))]
 pub enum M2Slot {
     A,
     B,

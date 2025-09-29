@@ -15,7 +15,6 @@ use crate::blueprint_editor::NoAvailableDnsSubnets;
 use crate::blueprint_editor::SledEditError;
 use crate::blueprint_editor::SledEditor;
 use crate::mgs_updates::PendingHostPhase2Changes;
-use crate::planner::NoopConvertGlobalIneligibleReason;
 use crate::planner::NoopConvertInfo;
 use crate::planner::NoopConvertSledIneligibleReason;
 use crate::planner::ZoneExpungeReason;
@@ -2739,9 +2738,6 @@ impl IdOrdItem for EnsureMupdateOverrideUpdatedZone {
 /// though inventory no longer has the sled.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum BpMupdateOverrideNotClearedReason {
-    /// There is a global reason noop conversions are not possible.
-    NoopGlobalIneligible(NoopConvertGlobalIneligibleReason),
-
     /// There is a sled-specific reason noop conversions are not possible.
     NoopSledIneligible(NoopConvertSledIneligibleReason),
 }
@@ -2749,12 +2745,6 @@ pub(crate) enum BpMupdateOverrideNotClearedReason {
 impl fmt::Display for BpMupdateOverrideNotClearedReason {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            BpMupdateOverrideNotClearedReason::NoopGlobalIneligible(reason) => {
-                write!(
-                    f,
-                    "no sleds can be noop-converted to Artifact: {reason}",
-                )
-            }
             BpMupdateOverrideNotClearedReason::NoopSledIneligible(reason) => {
                 write!(
                     f,

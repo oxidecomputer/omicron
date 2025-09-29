@@ -1476,6 +1476,40 @@
           "serial_number"
         ]
       },
+      "BlockedMgsUpdate": {
+        "type": "object",
+        "properties": {
+          "baseboard_id": {
+            "description": "id of the baseboard that we attempted to update",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BaseboardId"
+              }
+            ]
+          },
+          "component": {
+            "description": "type of SP component that we attempted to update",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MgsUpdateComponent"
+              }
+            ]
+          },
+          "reason": {
+            "description": "reason why the update failed",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/FailedMgsUpdateReason"
+              }
+            ]
+          }
+        },
+        "required": [
+          "baseboard_id",
+          "component",
+          "reason"
+        ]
+      },
       "Blueprint": {
         "description": "Describes a complete set of software and configuration for the system",
         "type": "object",
@@ -2696,6 +2730,18 @@
         "format": "uint64",
         "minimum": 0
       },
+      "CabooseWhich": {
+        "description": "Describes which caboose this is (which component, which slot)",
+        "type": "string",
+        "enum": [
+          "sp_slot0",
+          "sp_slot1",
+          "rot_slot_a",
+          "rot_slot_b",
+          "stage0",
+          "stage0_next"
+        ]
+      },
       "ClickhouseClusterConfig": {
         "description": "Global configuration for all clickhouse servers (replicas) and keepers",
         "type": "object",
@@ -3415,6 +3461,280 @@
           }
         ]
       },
+      "FailedMgsUpdateReason": {
+        "description": "Describes the reason why an SP component failed to update",
+        "oneOf": [
+          {
+            "description": "The active host phase 1 slot does not match the boot disk",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "active_host_phase1_slot_boot_disk_mismatch"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/M2Slot"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "description": "The active host phase 1 hash was not found in inventory",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "active_host_phase1_hash_not_in_inventory"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/M2Slot"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "description": "The active host phase 1 slot was not found in inventory",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "active_host_phase1_slot_not_in_inventory"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "The component's caboose was missing a value for \"sign\"",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "caboose_missing_sign"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/CabooseWhich"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "description": "The component's caboose was not found in the inventory",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "caboose_not_in_inventory"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/CabooseWhich"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "description": "The version in the caboose or artifact was not able to be parsed",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "failed_version_parse"
+                ]
+              },
+              "value": {
+                "type": "object",
+                "properties": {
+                  "caboose": {
+                    "$ref": "#/components/schemas/CabooseWhich"
+                  },
+                  "err": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "caboose",
+                  "err"
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "description": "The inactive host phase 1 hash was not found in inventory",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "inactive_host_phase1_hash_not_in_inventory"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/M2Slot"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "description": "Last reconciliation details were not found in inventory",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "last_reconciliation_not_in_inventory"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "No artifact with the required conditions for the component was found",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "no_matching_artifact_found"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "RoT state was not found in inventory",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "rot_state_not_in_inventory"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "Sled agent info was not found in inventory",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "sled_agent_info_not_in_inventory"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "The component's corresponding SP was not found in the inventory",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "sp_not_in_inventory"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "Too many artifacts with the required conditions for the component were found",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "too_many_matching_artifacts"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "The sled agent reported an error determining the boot disk",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "unable_to_determine_boot_disk"
+                ]
+              },
+              "value": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "description": "The sled agent reported an error retrieving boot disk phase 2 image details",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "unable_to_retrieve_boot_disk_phase2_image"
+                ]
+              },
+              "value": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          }
+        ]
+      },
       "Generation": {
         "description": "Generation numbers stored in the database, used for optimistic concurrency control",
         "type": "integer",
@@ -4035,6 +4355,15 @@
           "rot",
           "rot_bootloader",
           "sp"
+        ]
+      },
+      "MgsUpdateComponent": {
+        "type": "string",
+        "enum": [
+          "sp",
+          "rot",
+          "rot_bootloader",
+          "host_os"
         ]
       },
       "MgsUpdateDriverStatus": {
@@ -5222,6 +5551,10 @@
               "$ref": "#/components/schemas/PlanningAddSufficientZonesExist"
             }
           },
+          "target_release_generation_is_one": {
+            "description": "Set to true if the target release generation is 1, which would allow zones to be added.",
+            "type": "boolean"
+          },
           "waiting_on": {
             "nullable": true,
             "description": "What are we waiting on to start zone additions?",
@@ -5243,7 +5576,8 @@
           "sleds_waiting_for_ntp_zone",
           "sleds_without_ntp_zones_in_inventory",
           "sleds_without_zpools_for_ntp_zones",
-          "sufficient_zones_exist"
+          "sufficient_zones_exist",
+          "target_release_generation_is_one"
         ]
       },
       "PlanningAddSufficientZonesExist": {
@@ -5310,11 +5644,18 @@
       "PlanningMgsUpdatesStepReport": {
         "type": "object",
         "properties": {
+          "blocked_mgs_updates": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BlockedMgsUpdate"
+            }
+          },
           "pending_mgs_updates": {
             "$ref": "#/components/schemas/PendingMgsUpdates"
           }
         },
         "required": [
+          "blocked_mgs_updates",
           "pending_mgs_updates"
         ]
       },
@@ -5634,13 +5975,29 @@
           "desired_image_source": {
             "$ref": "#/components/schemas/BlueprintZoneImageSource"
           },
-          "zone_config": {
-            "$ref": "#/components/schemas/BlueprintZoneConfig"
+          "zone": {
+            "$ref": "#/components/schemas/PlanningReportBlueprintZone"
           }
         },
         "required": [
           "desired_image_source",
-          "zone_config"
+          "zone"
+        ]
+      },
+      "PlanningReportBlueprintZone": {
+        "description": "Reduced form of a `BlueprintZoneConfig` stored in a [`PlanningReport`].",
+        "type": "object",
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/TypedUuidForOmicronZoneKind"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ZoneKind"
+          }
+        },
+        "required": [
+          "id",
+          "kind"
         ]
       },
       "PlanningZoneUpdatesStepReport": {
@@ -5651,7 +6008,7 @@
             "additionalProperties": {
               "type": "array",
               "items": {
-                "$ref": "#/components/schemas/BlueprintZoneConfig"
+                "$ref": "#/components/schemas/PlanningReportBlueprintZone"
               }
             }
           },
@@ -5675,7 +6032,7 @@
             "additionalProperties": {
               "type": "array",
               "items": {
-                "$ref": "#/components/schemas/BlueprintZoneConfig"
+                "$ref": "#/components/schemas/PlanningReportBlueprintZone"
               }
             }
           },
@@ -6581,7 +6938,6 @@
         ]
       },
       "SpType": {
-        "description": "`SpType`\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"string\", \"enum\": [ \"sled\", \"power\", \"switch\" ] } ``` </details>",
         "type": "string",
         "enum": [
           "sled",
@@ -6976,6 +7332,24 @@
           }
         ]
       },
+      "ZoneKind": {
+        "description": "Like [`OmicronZoneType`], but without any associated data.\n\nThis enum is meant to correspond exactly 1:1 with `OmicronZoneType`.\n\n# String representations of this type\n\nThere are no fewer than six string representations for this type, all slightly different from each other.\n\n1. [`Self::zone_prefix`]: Used to construct zone names. 2. [`Self::service_prefix`]: Used to construct SMF service names. 3. [`Self::name_prefix`]: Used to construct `Name` instances. 4. [`Self::report_str`]: Used for reporting and testing. 5. [`Self::artifact_id_name`]: Used to match TUF artifact IDs. 6. [`Self::artifact_in_install_dataset`]: Used to match zone image tarballs in the install dataset. (This method is equivalent to appending `.tar.gz` to the result of [`Self::zone_prefix`].)\n\nThere is no `Display` impl to ensure that users explicitly choose the representation they want. (Please play close attention to this! The functions are all similar but different, and we don't currently have great type safety around the choice.)\n\n## Adding new representations\n\nIf you have a new use case for a string representation, please reuse one of the six representations if at all possible. If you must add a new one, please add it here rather than doing something ad-hoc in the calling code so it's more legible.",
+        "type": "string",
+        "enum": [
+          "boundary_ntp",
+          "clickhouse",
+          "clickhouse_keeper",
+          "clickhouse_server",
+          "cockroach_db",
+          "crucible",
+          "crucible_pantry",
+          "external_dns",
+          "internal_dns",
+          "internal_ntp",
+          "nexus",
+          "oximeter"
+        ]
+      },
       "ZoneStatus": {
         "type": "object",
         "properties": {
@@ -7073,6 +7447,21 @@
       "ZoneUpdatesWaitingOn": {
         "oneOf": [
           {
+            "description": "Waiting on blocked updates to RoT bootloader / RoT / SP / Host OS.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "blocked_mgs_updates"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
             "description": "Waiting on discretionary zone placement.",
             "type": "object",
             "properties": {
@@ -7088,7 +7477,22 @@
             ]
           },
           {
-            "description": "Waiting on updates to RoT / SP / Host OS / etc.",
+            "description": "Waiting on zones to propagate to inventory.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "inventory_propagation"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "Waiting on updates to RoT bootloader / RoT / SP / Host OS.",
             "type": "object",
             "properties": {
               "type": {

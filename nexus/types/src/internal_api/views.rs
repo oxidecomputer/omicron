@@ -13,7 +13,7 @@ use chrono::SecondsFormat;
 use chrono::Utc;
 use futures::future::ready;
 use futures::stream::StreamExt;
-use gateway_client::types::SpType;
+use gateway_types::component::SpType;
 use gateway_types::rot::RotSlot;
 use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
@@ -1126,7 +1126,7 @@ mod test {
     use crate::internal_api::views::UpdateAttemptStatus;
     use crate::inventory::BaseboardId;
     use chrono::Utc;
-    use gateway_client::types::SpType;
+    use gateway_types::component::SpType;
     use std::collections::VecDeque;
     use std::sync::Arc;
     use std::time::Instant;
