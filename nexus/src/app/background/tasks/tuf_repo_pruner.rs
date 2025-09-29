@@ -84,13 +84,21 @@ async fn tuf_repos_prune(
     let nkeep_recent_uploads =
         NKEEP_RECENT_UPLOADS_ALWAYS + config.nkeep_extra_newly_uploaded;
 
-    let all_tuf_repos = fetch_all_tuf_repos(opctx, datastore, SQL_BATCH_SIZE)
-        .await
-        .context("fetching all TUF repos")?;
+    // It's important that we fetch recent releases first because the returned
+    // structure contains a generation number that will be checked later in a
+    // transaction to avoid making any changes if the underlying state has
+    // changed.
+    //
+    // If we instead fetched this after listing TUF repos, there'd be a
+    // possibility that things changed between these steps and we pruned
+    // something anyway.
     let recent_releases = datastore
         .target_release_fetch_recent_distinct(opctx, nkeep_recent_releases)
         .await
         .context("listing recent target releases")?;
+    let all_tuf_repos = fetch_all_tuf_repos(opctx, datastore, SQL_BATCH_SIZE)
+        .await
+        .context("fetching all TUF repos")?;
 
     // After this point, errors are not fatal.  They just generate warnings.
     let mut status = TufRepoPrunerStatus {
