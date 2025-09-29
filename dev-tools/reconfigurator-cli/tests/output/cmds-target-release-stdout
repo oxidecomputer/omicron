@@ -14,6 +14,9 @@ internal DNS generations: 1
 external DNS generations: 1
 target number of Nexus instances: default
 target release (generation 1): unset
+active nexus zone generation: 1
+active nexus zones: inferred from generation
+not-yet nexus zones: inferred from generation
 planner config:
     add zones with mupdate override:   false
 
@@ -105,6 +108,9 @@ target release (generation 2): 0.0.1 (system-update-v0.0.1.zip)
     artifact: 7776db817d1f1b1a2f578050742e33bd4e805a4c76f36bce84dcb509b900249c switch_rot_image_b (fake-switch-rot version 0.0.1)
     artifact: 0686443d50db2247077dc70b6543cea9a90a9792de00e06c06cff4c91fa5a4a8 switch_rot_bootloader (fake-switch-rot-bootloader version 0.0.1)
     artifact: 657aaebc9c2f451446af0411a67a4bd057f39fa1b8a7fdc429ca4a2facd9344c installinator_document (installinator_document version 0.0.1)
+active nexus zone generation: 1
+active nexus zones: inferred from generation
+not-yet nexus zones: inferred from generation
 planner config:
     add zones with mupdate override:   false
 
@@ -994,6 +1000,9 @@ target release (generation 3): 1.0.0 (system-update-v1.0.0.zip)
     artifact: 32307d6d75c9707e8499ba4a4d379f99c0358237b6e190ff6a8024b470f62342 switch_rot_image_b (fake-switch-rot version 1.0.0)
     artifact: 70836d170abd5621f95bb4225987b27b3d3dd6168e73cd60e44309bdfeb94e98 switch_rot_bootloader (fake-switch-rot-bootloader version 1.0.0)
     artifact: a6a636b5d57813578766b3f1c2559abf9af5d8c86187538167937c476beeefa3 installinator_document (installinator_document version 1.0.0)
+active nexus zone generation: 1
+active nexus zones: inferred from generation
+not-yet nexus zones: inferred from generation
 planner config:
     add zones with mupdate override:   false
 
@@ -1014,6 +1023,9 @@ internal DNS generations:
 external DNS generations: 
 target number of Nexus instances: default
 target release (generation 1): unset
+active nexus zone generation: 1
+active nexus zones: inferred from generation
+not-yet nexus zones: inferred from generation
 planner config:
     add zones with mupdate override:   false
 
@@ -1073,6 +1085,9 @@ target release (generation 3): 1.0.0 (system-update-v1.0.0.zip)
     artifact: 32307d6d75c9707e8499ba4a4d379f99c0358237b6e190ff6a8024b470f62342 switch_rot_image_b (fake-switch-rot version 1.0.0)
     artifact: 70836d170abd5621f95bb4225987b27b3d3dd6168e73cd60e44309bdfeb94e98 switch_rot_bootloader (fake-switch-rot-bootloader version 1.0.0)
     artifact: a6a636b5d57813578766b3f1c2559abf9af5d8c86187538167937c476beeefa3 installinator_document (installinator_document version 1.0.0)
+active nexus zone generation: 1
+active nexus zones: inferred from generation
+not-yet nexus zones: inferred from generation
 planner config:
     add zones with mupdate override:   false
 
@@ -8084,9 +8099,9 @@ INFO performed noop zone image source checks on sled, sled_id: 98e6b7c2-2efa-41c
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO performed noop zone image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 9, num_already_artifact: 9, num_eligible: 0, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
-INFO skipping board for MGS-driven update, serial_number: serial0, part_number: model0
-INFO skipping board for MGS-driven update, serial_number: serial1, part_number: model1
-INFO skipping board for MGS-driven update, serial_number: serial2, part_number: model2
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial0, part_number: model0
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial1, part_number: model1
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial2, part_number: model2
 INFO ran out of boards for MGS-driven update
 generated blueprint 8e0cc787-e068-4a45-97ed-21029cbe4ddf based on parent blueprint 6d830d26-547e-492b-adfe-c5c4ad9c3751
 blueprint source: planner with report:
