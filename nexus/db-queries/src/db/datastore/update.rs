@@ -835,3 +835,242 @@ fn display_nvk(
 fn display_kind_hash(kind: &str, hash: ArtifactHash) -> String {
     format!("(kind: {kind}, hash: {hash})")
 }
+
+#[cfg(test)]
+mod test {
+    use crate::db::DataStore;
+    use crate::db::pub_test_utils::TestDatabase;
+    use nexus_auth::context::OpContext;
+    use nexus_db_model::TargetRelease;
+    use omicron_common::api::external::TufArtifactMeta;
+    use omicron_common::api::external::TufRepoDescription;
+    use omicron_common::api::external::TufRepoMeta;
+    use omicron_common::update::ArtifactId;
+    use omicron_test_utils::dev;
+    use omicron_uuid_kinds::TufRepoUuid;
+    use slog_error_chain::InlineErrorChain;
+    use tufaceous_artifact::ArtifactHash;
+    use tufaceous_artifact::ArtifactKind;
+    use tufaceous_artifact::ArtifactVersion;
+
+    fn make_test_repo(version: u8) -> TufRepoDescription {
+        let hash = ArtifactHash([version; 32]);
+        let version = semver::Version::new(u64::from(version), 0, 0);
+        let artifact_version = ArtifactVersion::new(version.to_string())
+            .expect("valid artifact version");
+        TufRepoDescription {
+            repo: TufRepoMeta {
+                hash,
+                targets_role_version: 0,
+                valid_until: chrono::Utc::now(),
+                system_version: version,
+                file_name: String::new(),
+            },
+            artifacts: vec![TufArtifactMeta {
+                id: ArtifactId {
+                    name: String::new(),
+                    version: artifact_version,
+                    kind: ArtifactKind::from_static("empty"),
+                },
+                hash,
+                size: 0,
+                board: None,
+                sign: None,
+            }],
+        }
+    }
+
+    async fn make_and_insert(
+        opctx: &OpContext,
+        datastore: &DataStore,
+        version: u8,
+    ) -> TufRepoUuid {
+        let repo = make_test_repo(version);
+        datastore
+            .tuf_repo_insert(opctx, &repo)
+            .await
+            .expect("inserting repo")
+            .recorded
+            .repo
+            .id()
+    }
+
+    #[tokio::test]
+    async fn test_repo_mark_pruned() {
+        let logctx = dev::test_setup_log("test_repo_mark_pruned");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Initially, there should be no TUF repos.
+        let repos = datastore
+            .tuf_list_repos_unpruned_batched(opctx)
+            .await
+            .expect("listing all repos");
+        assert!(repos.is_empty());
+
+        // Add one TUF repo to the database.
+        let repo1id = make_and_insert(opctx, datastore, 1).await;
+
+        // Make sure it's there.
+        let repos = datastore
+            .tuf_list_repos_unpruned_batched(opctx)
+            .await
+            .expect("listing all repos");
+        assert!(!repos.is_empty());
+        assert!(repos.iter().any(|r| r.id() == repo1id));
+
+        // Now prune that one.
+        let tuf_generation1 = datastore
+            .tuf_get_generation(opctx)
+            .await
+            .expect("fetching TUF generation");
+        let recent1 = datastore
+            .target_release_fetch_recent_distinct(opctx, 2)
+            .await
+            .expect("fetching recent target releases");
+        datastore
+            .tuf_repo_mark_pruned(opctx, tuf_generation1, &recent1, repo1id)
+            .await
+            .expect("pruning release");
+
+        // Make sure it was pruned.
+        let repos = datastore
+            .tuf_list_repos_unpruned_batched(opctx)
+            .await
+            .expect("listing all repos");
+        assert!(repos.is_empty());
+
+        // Now set up a more realistic case.
+        let old_target_repo1_id = make_and_insert(opctx, datastore, 2).await;
+        let old_target_repo2_id = make_and_insert(opctx, datastore, 3).await;
+        let old_target_repo3_id = make_and_insert(opctx, datastore, 4).await;
+        let old_target_repo4_id = make_and_insert(opctx, datastore, 5).await;
+        let new_upload1 = make_and_insert(opctx, datastore, 10).await;
+        let new_upload2 = make_and_insert(opctx, datastore, 11).await;
+        let new_upload3 = make_and_insert(opctx, datastore, 12).await;
+
+        // Make sure they're all there.
+        let repos = datastore
+            .tuf_list_repos_unpruned_batched(opctx)
+            .await
+            .expect("listing all repos");
+        assert_eq!(repos.len(), 7);
+
+        // Set the target release a few times.
+        let initial = datastore
+            .target_release_get_current(opctx)
+            .await
+            .expect("initial target release");
+        let mut next = initial;
+        for repo_id in
+            [old_target_repo2_id, old_target_repo3_id, old_target_repo4_id]
+        {
+            next = datastore
+                .target_release_insert(
+                    opctx,
+                    TargetRelease::new_system_version(&next, repo_id.into()),
+                )
+                .await
+                .expect("setting target release");
+        }
+
+        // We should be able to prune the following releases.
+        for repo_id in
+            [old_target_repo1_id, new_upload1, new_upload2, new_upload3]
+        {
+            let repos = datastore
+                .tuf_list_repos_unpruned_batched(opctx)
+                .await
+                .expect("listing all repos");
+            assert!(repos.iter().any(|r| r.id() == repo_id));
+
+            let tuf_generation = datastore
+                .tuf_get_generation(opctx)
+                .await
+                .expect("fetching TUF generation");
+            let recent = datastore
+                .target_release_fetch_recent_distinct(opctx, 3)
+                .await
+                .expect("fetching recent target releases");
+
+            // If we supply the initial TUF generation OR the initial "recent
+            // releases", this should fail because things have changed.
+            let error = datastore
+                .tuf_repo_mark_pruned(opctx, tuf_generation1, &recent, repo_id)
+                .await
+                .expect_err(
+                    "unexpectedly succeeded in pruning release with old \
+                     tuf_generation",
+                );
+            eprintln!(
+                "got error (expected one): {}",
+                InlineErrorChain::new(&error)
+            );
+            let error = datastore
+                .tuf_repo_mark_pruned(opctx, tuf_generation, &recent1, repo_id)
+                .await
+                .expect_err(
+                    "unexpectedly succeeded in pruning release with old \
+                     recent_releases",
+                );
+            eprintln!(
+                "got error (expected one): {}",
+                InlineErrorChain::new(&error)
+            );
+
+            // It should still be there.
+            let repos = datastore
+                .tuf_list_repos_unpruned_batched(opctx)
+                .await
+                .expect("listing all repos");
+            assert!(repos.iter().any(|r| r.id() == repo_id));
+
+            // With up-to-date info, this should succeed.
+            datastore
+                .tuf_repo_mark_pruned(opctx, tuf_generation, &recent, repo_id)
+                .await
+                .expect("pruning release");
+            let repos = datastore
+                .tuf_list_repos_unpruned_batched(opctx)
+                .await
+                .expect("listing all repos");
+            assert!(!repos.iter().any(|r| r.id() == repo_id));
+        }
+
+        // It should be illegal to prune the following releases because they're
+        // too recent target releases.
+        for repo_id in
+            [old_target_repo2_id, old_target_repo3_id, old_target_repo4_id]
+        {
+            let repos = datastore
+                .tuf_list_repos_unpruned_batched(opctx)
+                .await
+                .expect("listing all repos");
+            assert!(repos.iter().any(|r| r.id() == repo_id));
+            let tuf_generation = datastore
+                .tuf_get_generation(opctx)
+                .await
+                .expect("fetching TUF generation");
+            let recent = datastore
+                .target_release_fetch_recent_distinct(opctx, 3)
+                .await
+                .expect("fetching recent target releases");
+            let error = datastore
+                .tuf_repo_mark_pruned(opctx, tuf_generation, &recent, repo_id)
+                .await
+                .expect_err("unexpectedly pruned recent target release repo");
+            eprintln!(
+                "found error (expected one): {}",
+                InlineErrorChain::new(&error)
+            );
+            let repos = datastore
+                .tuf_list_repos_unpruned_batched(opctx)
+                .await
+                .expect("listing all repos");
+            assert!(repos.iter().any(|r| r.id() == repo_id));
+        }
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+}
