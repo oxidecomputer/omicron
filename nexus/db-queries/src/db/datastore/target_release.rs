@@ -16,7 +16,9 @@ use diesel::prelude::*;
 use nexus_db_errors::{ErrorHandler, public_error_from_diesel};
 use nexus_db_schema::schema::target_release::dsl;
 use nexus_types::external_api::views;
-use omicron_common::api::external::{CreateResult, Error, LookupResult};
+use omicron_common::api::external::{
+    CreateResult, Error, InternalContext, LookupResult,
+};
 use omicron_uuid_kinds::TufRepoUuid;
 use std::collections::BTreeSet;
 
@@ -135,11 +137,26 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         count: u8,
-    ) -> Result<BTreeSet<TufRepoUuid>, Error> {
+    ) -> Result<RecentTargetReleases, Error> {
         opctx
             .authorize(authz::Action::Read, &authz::TARGET_RELEASE_CONFIG)
             .await?;
 
+        // Fetch the current TUF repo generation.  This is used by some
+        // callers so that they can perform transactions later conditional
+        // on none of this having changed.
+        //
+        // As long as we fetch this before fetching the target release rows
+        // below, and the caller makes any changes they want conditional on this
+        // generation (which they need to do anyway for correctness), then we
+        // don't need to use a transaction in this function.
+        let tuf_generation = self
+            .tuf_get_generation(opctx)
+            .await
+            .internal_context("fetching TUF repo generation")?;
+
+        // Fetch recent rows from `target_release`.
+        //
         // In almost all cases, `count` = 2 and we only need to look back two
         // rows to find the most recent target releases.  But we do allow this
         // to be configurable, and there are cases where the same release can
@@ -161,14 +178,28 @@ impl DataStore {
             .limit(i64::from(limit))
             .load_async(&*conn)
             .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+            .map_err(|err| {
+                public_error_from_diesel(err, ErrorHandler::Server)
+            })?;
+        if rows.is_empty() {
+            return Err(Error::internal_error(
+                "unexpectedly found no rows in `target_release` table",
+            ));
+        }
+
+        let target_release_generation = rows[0].generation.0;
         let nfound = rows.len();
-        let mut rv = BTreeSet::new();
+        let mut releases = BTreeSet::new();
         for target_release in rows {
             if let Some(repo_id) = target_release.tuf_repo_id {
-                rv.insert(repo_id.into());
-                if rv.len() >= usize::from(count) {
-                    return Ok(rv);
+                releases.insert(repo_id.into());
+                if releases.len() >= usize::from(count) {
+                    return Ok(RecentTargetReleases {
+                        releases,
+                        count,
+                        tuf_generation,
+                        target_release_generation,
+                    });
                 }
             }
         }
@@ -183,13 +214,34 @@ impl DataStore {
                  target_release rows, but found only {} before giving up",
                 count,
                 limit,
-                rv.len(),
+                releases.len(),
             )));
         }
 
         // Otherwise, that's it: we found all the releases that were there.
-        Ok(rv)
+        Ok(RecentTargetReleases {
+            releases,
+            count,
+            tuf_generation,
+            target_release_generation,
+        })
     }
+}
+
+/// Represents information fetched about recent target releases
+pub struct RecentTargetReleases {
+    /// distinct target releases found
+    pub releases: BTreeSet<TufRepoUuid>,
+    /// how many releases we tried to find
+    pub(crate) count: u8,
+    /// tuf_generation value when we fetched these releases
+    /// (used to notice if new repos were added or removed while pruning)
+    pub(crate) tuf_generation: omicron_common::api::external::Generation,
+    /// latest target_release generation when we fetched these releases
+    /// (used to notice if a new target release has been set that could
+    /// invalidate this information)
+    pub(crate) target_release_generation:
+        omicron_common::api::external::Generation,
 }
 
 #[cfg(test)]

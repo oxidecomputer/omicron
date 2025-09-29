@@ -100,17 +100,32 @@ async fn tuf_repos_prune(
         nkeep_recent_releases,
         nkeep_recent_uploads,
     };
-    decide_prune(&all_tuf_repos, &recent_releases, &mut status);
-    for tuf_repo in &status.repos_prune {
-        if let Err(error) =
-            datastore.tuf_repo_mark_pruned(opctx, tuf_repo.id).await
+    decide_prune(&all_tuf_repos, &recent_releases.releases, &mut status);
+
+    // We're only going to prune one release at a time.
+    //
+    // We could do more, but that would require making `tuf_repo_mark_pruned()`
+    // accept a set, and then we'd want to bound that set, and in reality we
+    // only ever expect to get one at a time here.
+    let mut to_prune = status.repos_prune.iter();
+    if let Some(repo_to_prune) = to_prune.next() {
+        let prune_id = repo_to_prune.id;
+        if let Err(error) = datastore
+            .tuf_repo_mark_pruned(opctx, &recent_releases, prune_id)
+            .await
         {
             status.warnings.push(format!(
                 "failed to prune {}: {}",
-                tuf_repo.id,
+                prune_id,
                 InlineErrorChain::new(&error),
             ));
         };
+    }
+
+    for repo in to_prune {
+        status
+            .warnings
+            .push(format!("skipping prune {}: only pruning one", repo.id));
     }
 
     Ok(status)
