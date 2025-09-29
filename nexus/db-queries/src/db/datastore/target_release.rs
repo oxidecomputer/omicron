@@ -16,9 +16,7 @@ use diesel::prelude::*;
 use nexus_db_errors::{ErrorHandler, public_error_from_diesel};
 use nexus_db_schema::schema::target_release::dsl;
 use nexus_types::external_api::views;
-use omicron_common::api::external::{
-    CreateResult, Error, InternalContext, LookupResult,
-};
+use omicron_common::api::external::{CreateResult, Error, LookupResult};
 use omicron_uuid_kinds::TufRepoUuid;
 use std::collections::BTreeSet;
 
@@ -142,19 +140,6 @@ impl DataStore {
             .authorize(authz::Action::Read, &authz::TARGET_RELEASE_CONFIG)
             .await?;
 
-        // Fetch the current TUF repo generation.  This is used by some
-        // callers so that they can perform transactions later conditional
-        // on none of this having changed.
-        //
-        // As long as we fetch this before fetching the target release rows
-        // below, and the caller makes any changes they want conditional on this
-        // generation (which they need to do anyway for correctness), then we
-        // don't need to use a transaction in this function.
-        let tuf_generation = self
-            .tuf_get_generation(opctx)
-            .await
-            .internal_context("fetching TUF repo generation")?;
-
         // Fetch recent rows from `target_release`.
         //
         // In almost all cases, `count` = 2 and we only need to look back two
@@ -197,7 +182,6 @@ impl DataStore {
                     return Ok(RecentTargetReleases {
                         releases,
                         count,
-                        tuf_generation,
                         target_release_generation,
                     });
                 }
@@ -219,12 +203,7 @@ impl DataStore {
         }
 
         // Otherwise, that's it: we found all the releases that were there.
-        Ok(RecentTargetReleases {
-            releases,
-            count,
-            tuf_generation,
-            target_release_generation,
-        })
+        Ok(RecentTargetReleases { releases, count, target_release_generation })
     }
 }
 
@@ -234,9 +213,6 @@ pub struct RecentTargetReleases {
     pub releases: BTreeSet<TufRepoUuid>,
     /// how many releases we tried to find
     pub(crate) count: u8,
-    /// tuf_generation value when we fetched these releases
-    /// (used to notice if new repos were added or removed while pruning)
-    pub(crate) tuf_generation: omicron_common::api::external::Generation,
     /// latest target_release generation when we fetched these releases
     /// (used to notice if a new target release has been set that could
     /// invalidate this information)

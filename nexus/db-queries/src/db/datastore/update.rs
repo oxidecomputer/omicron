@@ -9,8 +9,10 @@ use std::collections::HashMap;
 use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
+use crate::db::datastore::SQL_BATCH_SIZE;
 use crate::db::datastore::target_release::RecentTargetReleases;
 use crate::db::model::SemverVersion;
+use crate::db::pagination::Paginator;
 use crate::db::pagination::paginated;
 use async_bb8_diesel::{AsyncConnection, AsyncRunQueryDsl};
 use diesel::prelude::*;
@@ -216,10 +218,58 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
+    /// Lists all unpruned TUF repos, making as many queries as needed to get
+    /// them all
+    ///
+    /// This should not be used from contexts that shouldn't make lots of
+    /// database queries (e.g., API endpoints).
+    ///
+    /// Since this involves pagination, this is not a consistent snapshot.
+    /// Consider using `tuf_get_generation()` before calling this function and
+    /// then making any subsequent queries conditional on the generation not
+    /// having changed.
+    pub async fn tuf_list_repos_unpruned_batched(
+        &self,
+        opctx: &OpContext,
+    ) -> ListResultVec<TufRepo> {
+        opctx.check_complex_operations_allowed()?;
+        let mut paginator = Paginator::new(
+            SQL_BATCH_SIZE,
+            dropshot::PaginationOrder::Ascending,
+        );
+        let mut rv = Vec::new();
+        while let Some(p) = paginator.next() {
+            let batch = self
+                .tuf_list_repos_unpruned(opctx, &p.current_pagparams())
+                .await
+                .internal_context("fetching page of TUF repos")?;
+            paginator = p.found_batch(&batch, &|a| a.id.into_untyped_uuid());
+            rv.extend(batch);
+        }
+        Ok(rv)
+    }
+
     /// Marks the given TUF repo as eligible for pruning
+    ///
+    /// Callers are expected to verify that it's safe to prune this TUF repo.
+    ///
+    /// `recent_releases` comes from `target_release_fetch_recent_distinct()`.
+    /// As part of verifying that it's safe to prune this TUF repo, callers are
+    /// expected to check that it's not the current or immediately previous
+    /// target release.
+    ///
+    /// This transaction will be conditional on:
+    ///
+    /// - the current TUF generation matching `initial_tuf_generation`
+    ///   (i.e., we will not prune a release if some other query has added or
+    ///   pruned a release since the caller fetched this generation)
+    /// - the current target release generation matching what it was when
+    ///   `recent_releases` was fetched (because this would invalidate the check
+    ///   mentioned above that we're not pruning the target release).
     pub async fn tuf_repo_mark_pruned(
         &self,
         opctx: &OpContext,
+        initial_tuf_generation: Generation,
         recent_releases: &RecentTargetReleases,
         tuf_repo_id: TufRepoUuid,
     ) -> UpdateResult<()> {
@@ -288,13 +338,13 @@ impl DataStore {
                 get_generation(&txn).await.map_err(|e| {
                     public_error_from_diesel(e, ErrorHandler::Server)
                 })?;
-            if tuf_generation_now != recent_releases.tuf_generation {
+            if tuf_generation_now != initial_tuf_generation {
                 return Err(TransactionError::CustomError(Error::conflict(
                     format!(
                         "bailing out to avoid risk of pruning too much: \
                          tuf repo generation has changed since check \
                          (currently {}, was {})",
-                        tuf_generation_now, recent_releases.tuf_generation,
+                        tuf_generation_now, initial_tuf_generation,
                     ),
                 )));
             }

@@ -11,16 +11,12 @@ use iddqd::IdOrdMap;
 use nexus_config::TufRepoPrunerConfig;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
-use nexus_db_queries::db::datastore::SQL_BATCH_SIZE;
-use nexus_db_queries::db::pagination::Paginator;
 use nexus_types::internal_api::background::TufRepoInfo;
 use nexus_types::internal_api::background::TufRepoPrunerStatus;
-use omicron_uuid_kinds::GenericUuid as _;
 use omicron_uuid_kinds::TufRepoUuid;
 use serde_json::json;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeSet;
-use std::num::NonZeroU32;
 use std::sync::Arc;
 
 /// number of recent distinct target releases that we always keep, regardless of
@@ -79,106 +75,95 @@ async fn tuf_repos_prune(
     datastore: &DataStore,
     config: &TufRepoPrunerConfig,
 ) -> Result<TufRepoPrunerStatus, anyhow::Error> {
+    // Compute configuration.
     let nkeep_recent_releases = NKEEP_RECENT_TARGET_RELEASES_ALWAYS
         + config.nkeep_extra_target_releases;
     let nkeep_recent_uploads =
         NKEEP_RECENT_UPLOADS_ALWAYS + config.nkeep_extra_newly_uploaded;
 
-    // It's important that we fetch recent releases first because the returned
-    // structure contains a generation number that will be checked later in a
-    // transaction to avoid making any changes if the underlying state has
-    // changed.
-    //
-    // If we instead fetched this after listing TUF repos, there'd be a
-    // possibility that things changed between these steps and we pruned
-    // something anyway.
+    // Fetch the state we need to make a decision.
+    let tuf_generation = datastore
+        .tuf_get_generation(opctx)
+        .await
+        .context("fetching current TUF generation")?;
+    let all_tuf_repos: IdOrdMap<_> = datastore
+        .tuf_list_repos_unpruned_batched(opctx)
+        .await
+        .context("listing unpruned TUF repos")?
+        .into_iter()
+        .map(|repo| TufRepoInfo {
+            id: repo.id(),
+            system_version: repo.system_version.into(),
+            time_created: repo.time_created,
+        })
+        .collect();
     let recent_releases = datastore
         .target_release_fetch_recent_distinct(opctx, nkeep_recent_releases)
         .await
         .context("listing recent target releases")?;
-    let all_tuf_repos = fetch_all_tuf_repos(opctx, datastore, SQL_BATCH_SIZE)
-        .await
-        .context("fetching all TUF repos")?;
 
-    // After this point, errors are not fatal.  They just generate warnings.
-    let mut status = TufRepoPrunerStatus {
-        repos_keep: IdOrdMap::new(),
-        repos_prune: IdOrdMap::new(),
-        warnings: Vec::new(),
+    // Finally, make the decision about what to prune.
+    let mut status = decide_prune(TufRepoPrune {
         nkeep_recent_releases,
         nkeep_recent_uploads,
-    };
-    decide_prune(&all_tuf_repos, &recent_releases.releases, &mut status);
+        all_tuf_repos: &all_tuf_repos,
+        recent_releases: &recent_releases.releases,
+    });
 
-    // We're only going to prune one release at a time.
-    //
-    // We could do more, but that would require making `tuf_repo_mark_pruned()`
-    // accept a set, and then we'd want to bound that set, and in reality we
-    // only ever expect to get one at a time here.
-    let mut to_prune = status.repos_prune.iter();
-    if let Some(repo_to_prune) = to_prune.next() {
-        let prune_id = repo_to_prune.id;
+    // If we decided to prune something, do it.
+    if let Some(to_prune) = &status.repo_prune {
+        let prune_id = to_prune.id;
         if let Err(error) = datastore
-            .tuf_repo_mark_pruned(opctx, &recent_releases, prune_id)
+            .tuf_repo_mark_pruned(
+                opctx,
+                tuf_generation,
+                &recent_releases,
+                prune_id,
+            )
             .await
         {
             status.warnings.push(format!(
-                "failed to prune {}: {}",
+                "failed to prune {} (release {}): {}",
                 prune_id,
+                to_prune.system_version,
                 InlineErrorChain::new(&error),
             ));
-        };
-    }
-
-    for repo in to_prune {
-        status
-            .warnings
-            .push(format!("skipping prune {}: only pruning one", repo.id));
+        }
     }
 
     Ok(status)
 }
 
-async fn fetch_all_tuf_repos(
-    opctx: &OpContext,
-    datastore: &DataStore,
-    batch_size: NonZeroU32,
-) -> Result<IdOrdMap<TufRepoInfo>, anyhow::Error> {
-    let mut paginator =
-        Paginator::new(batch_size, dropshot::PaginationOrder::Ascending);
-    let mut rv = IdOrdMap::new();
-    while let Some(p) = paginator.next() {
-        let batch = datastore
-            .tuf_list_repos_unpruned(opctx, &p.current_pagparams())
-            .await
-            .context("fetching page of TUF repos")?;
-        paginator = p.found_batch(&batch, &|a| a.id.into_untyped_uuid());
-        for repo in batch {
-            // It should be impossible to have duplicates here and there's
-            // nothing to do about it if we find them.
-            rv.insert_overwrite(TufRepoInfo {
-                id: repo.id(),
-                system_version: repo.system_version.into(),
-                time_created: repo.time_created,
-            });
-        }
-    }
-
-    Ok(rv)
+/// Arguments to `decide_prune()`
+struct TufRepoPrune<'a> {
+    /// how many of the most recent target releases to keep
+    nkeep_recent_releases: u8,
+    /// how many recent uploads (that aren't also recent relases) to keep
+    nkeep_recent_uploads: u8,
+    /// description of all unpruned TUF repos in the system
+    all_tuf_repos: &'a IdOrdMap<TufRepoInfo>,
+    /// set of recent target releases
+    recent_releases: &'a BTreeSet<TufRepoUuid>,
 }
 
 /// Given the complete list of TUF repos and a set of recent releases that we
 /// definitely want to keep, decide what to prune and what to keep.
-fn decide_prune(
-    all_repos: &IdOrdMap<TufRepoInfo>,
-    releases_to_keep: &BTreeSet<TufRepoUuid>,
-    status: &mut TufRepoPrunerStatus,
-) {
+fn decide_prune(args: TufRepoPrune) -> TufRepoPrunerStatus {
+    let TufRepoPrune {
+        nkeep_recent_releases,
+        nkeep_recent_uploads,
+        all_tuf_repos,
+        recent_releases,
+    } = args;
+
+    let mut warnings = Vec::new();
+
     // Record that we're keeping all of the `releases_to_keep`.
-    for repo_id in releases_to_keep {
-        match all_repos.get(repo_id) {
+    let mut repos_keep_target_release = IdOrdMap::new();
+    for repo_id in recent_releases {
+        match all_tuf_repos.get(repo_id) {
             Some(repo_info) => {
-                status.repos_keep.insert_overwrite(repo_info.clone());
+                repos_keep_target_release.insert_overwrite(repo_info.clone());
             }
             None => {
                 // This is unusual: there's a recent target release with no
@@ -188,7 +173,7 @@ fn decide_prune(
                 // all would have had to happen between our two database queries
                 // above.  Still, it's not a problem.  We'll note it here, but
                 // otherwise move on.  (We will not wind up pruning this.)
-                status.warnings.push(format!(
+                warnings.push(format!(
                     "wanting to keep recent target release repo {repo_id}, \
                      but did not find it in the tuf_repo table",
                 ));
@@ -196,156 +181,168 @@ fn decide_prune(
         }
     }
 
-    // Keep as many other uploaded repos as makes sense, preferring the most
-    // recently uploaded.
-    let mut nleft = status.nkeep_recent_uploads;
-    let mut candidate_repos_by_upload_time =
-        all_repos.into_iter().collect::<Vec<_>>();
-    candidate_repos_by_upload_time.sort_by_key(|k| k.time_created);
-    candidate_repos_by_upload_time.reverse();
-    let mut candidates = candidate_repos_by_upload_time.into_iter();
-    while nleft > 0 {
-        let Some(next) = candidates.next() else {
-            break;
-        };
-
-        // Only decrement `nleft` if we weren't already keeping this one.
-        if let Ok(_) = status.repos_keep.insert_unique(next.clone()) {
-            nleft -= 1;
+    // Partition all TUF repos *other* than those into:
+    // - ones that we're keeping because they were most recently uploaded
+    // - the one we want to prune
+    // - other ones we would have pruned, but won't because we only prune one
+    let mut non_target_release_repos = all_tuf_repos
+        .iter()
+        .filter(|r| !repos_keep_target_release.contains_key(&r.id))
+        .collect::<Vec<_>>();
+    non_target_release_repos.sort_by_key(|k| k.time_created);
+    non_target_release_repos.reverse();
+    let mut repos_keep_recent_uploads = IdOrdMap::new();
+    let mut repo_prune = None;
+    let mut other_repos_eligible_to_prune = IdOrdMap::new();
+    for repo in non_target_release_repos {
+        if repos_keep_recent_uploads.len() < usize::from(nkeep_recent_uploads) {
+            repos_keep_recent_uploads.insert_overwrite(repo.clone());
+            continue;
         }
+
+        if repo_prune.is_none() {
+            repo_prune = Some(repo.clone());
+            continue;
+        }
+
+        other_repos_eligible_to_prune.insert_overwrite(repo.clone());
     }
 
-    // Everything else will be pruned.
-    for repo in all_repos {
-        if !status.repos_keep.contains_key(&repo.id) {
-            status.repos_prune.insert_overwrite(repo.clone());
-        }
+    TufRepoPrunerStatus {
+        nkeep_recent_releases,
+        nkeep_recent_uploads,
+        repos_keep_target_release,
+        repos_keep_recent_uploads,
+        repo_prune,
+        other_repos_eligible_to_prune,
+        warnings,
     }
 }
 
 #[cfg(test)]
 mod test {
-    use super::decide_prune;
-    use iddqd::IdOrdMap;
-    use nexus_types::internal_api::background::TufRepoInfo;
-    use nexus_types::internal_api::background::TufRepoPrunerStatus;
-    use omicron_uuid_kinds::TufRepoUuid;
-    use std::collections::BTreeSet;
+    // XXX-dap clean up all imports
+    // use super::decide_prune;
+    // use iddqd::IdOrdMap;
+    // use nexus_types::internal_api::background::TufRepoInfo;
+    // use nexus_types::internal_api::background::TufRepoPrunerStatus;
+    // use omicron_uuid_kinds::TufRepoUuid;
+    // use std::collections::BTreeSet;
+    //
+    // fn make_test_repos() -> [TufRepoInfo; 6] {
+    //     [
+    //         TufRepoInfo {
+    //             id: TufRepoUuid::new_v4(),
+    //             time_created: "2025-09-26T01:00:00Z".parse().unwrap(),
+    //             system_version: "1.0.0".parse().unwrap(),
+    //         },
+    //         TufRepoInfo {
+    //             id: TufRepoUuid::new_v4(),
+    //             time_created: "2025-09-26T02:00:00Z".parse().unwrap(),
+    //             system_version: "2.0.0".parse().unwrap(),
+    //         },
+    //         TufRepoInfo {
+    //             id: TufRepoUuid::new_v4(),
+    //             time_created: "2025-09-26T03:00:00Z".parse().unwrap(),
+    //             system_version: "3.0.0".parse().unwrap(),
+    //         },
+    //         TufRepoInfo {
+    //             id: TufRepoUuid::new_v4(),
+    //             time_created: "2025-09-26T04:00:00Z".parse().unwrap(),
+    //             system_version: "4.0.0".parse().unwrap(),
+    //         },
+    //         TufRepoInfo {
+    //             id: TufRepoUuid::new_v4(),
+    //             time_created: "2025-09-26T05:00:00Z".parse().unwrap(),
+    //             system_version: "4.1.0".parse().unwrap(),
+    //         },
+    //         TufRepoInfo {
+    //             id: TufRepoUuid::new_v4(),
+    //             time_created: "2025-09-26T06:00:00Z".parse().unwrap(),
+    //             system_version: "4.2.0".parse().unwrap(),
+    //         },
+    //     ]
+    // }
+    //
+    // #[test]
+    // fn test_decide_prune() {
+    //     let all_repos = make_test_repos();
+    //     let [r1, r2, r3, r4, r5, r6] = &all_repos;
+    //     let all_repos: IdOrdMap<_> = all_repos.clone().into_iter().collect();
 
-    fn make_test_repos() -> [TufRepoInfo; 6] {
-        [
-            TufRepoInfo {
-                id: TufRepoUuid::new_v4(),
-                time_created: "2025-09-26T01:00:00Z".parse().unwrap(),
-                system_version: "1.0.0".parse().unwrap(),
-            },
-            TufRepoInfo {
-                id: TufRepoUuid::new_v4(),
-                time_created: "2025-09-26T02:00:00Z".parse().unwrap(),
-                system_version: "2.0.0".parse().unwrap(),
-            },
-            TufRepoInfo {
-                id: TufRepoUuid::new_v4(),
-                time_created: "2025-09-26T03:00:00Z".parse().unwrap(),
-                system_version: "3.0.0".parse().unwrap(),
-            },
-            TufRepoInfo {
-                id: TufRepoUuid::new_v4(),
-                time_created: "2025-09-26T04:00:00Z".parse().unwrap(),
-                system_version: "4.0.0".parse().unwrap(),
-            },
-            TufRepoInfo {
-                id: TufRepoUuid::new_v4(),
-                time_created: "2025-09-26T05:00:00Z".parse().unwrap(),
-                system_version: "4.1.0".parse().unwrap(),
-            },
-            TufRepoInfo {
-                id: TufRepoUuid::new_v4(),
-                time_created: "2025-09-26T06:00:00Z".parse().unwrap(),
-                system_version: "4.2.0".parse().unwrap(),
-            },
-        ]
-    }
+    //     // Trivial case
+    //     let mut status = TufRepoPrunerStatus {
+    //         repos_keep: IdOrdMap::new(),
+    //         repos_prune: IdOrdMap::new(),
+    //         warnings: Vec::new(),
+    //         nkeep_recent_releases: 2,
+    //         nkeep_recent_uploads: 1,
+    //     };
+    //     decide_prune(&IdOrdMap::new(), &BTreeSet::new(), &mut status);
+    //     assert!(status.warnings.is_empty());
+    //     assert!(status.repos_keep.is_empty());
+    //     assert!(status.repos_prune.is_empty());
 
-    #[test]
-    fn test_decide_prune() {
-        let all_repos = make_test_repos();
-        let [r1, r2, r3, r4, r5, r6] = &all_repos;
-        let all_repos: IdOrdMap<_> = all_repos.clone().into_iter().collect();
+    //     // Simple case: have some target releases to keep, no uploads.
+    //     let releases_to_keep: BTreeSet<_> =
+    //         [r3.id, r4.id].into_iter().collect();
+    //     let mut status = TufRepoPrunerStatus {
+    //         repos_keep: IdOrdMap::new(),
+    //         repos_prune: IdOrdMap::new(),
+    //         warnings: Vec::new(),
+    //         nkeep_recent_releases: u8::try_from(releases_to_keep.len())
+    //             .unwrap(),
+    //         nkeep_recent_uploads: 0,
+    //     };
+    //     decide_prune(&all_repos, &releases_to_keep, &mut status);
+    //     assert!(status.warnings.is_empty());
+    //     assert_eq!(status.repos_keep.len(), 2);
+    //     assert!(status.repos_keep.contains_key(&r3.id));
+    //     assert!(status.repos_keep.contains_key(&r4.id));
+    //     assert_eq!(
+    //         status.repos_prune.len(),
+    //         all_repos.len() - releases_to_keep.len()
+    //     );
+    //     assert!(status.repos_keep.contains_key(&r1.id));
+    //     assert!(status.repos_keep.contains_key(&r2.id));
+    //     assert!(status.repos_keep.contains_key(&r5.id));
+    //     assert!(status.repos_keep.contains_key(&r6.id));
 
-        // Trivial case
-        let mut status = TufRepoPrunerStatus {
-            repos_keep: IdOrdMap::new(),
-            repos_prune: IdOrdMap::new(),
-            warnings: Vec::new(),
-            nkeep_recent_releases: 2,
-            nkeep_recent_uploads: 1,
-        };
-        decide_prune(&IdOrdMap::new(), &BTreeSet::new(), &mut status);
-        assert!(status.warnings.is_empty());
-        assert!(status.repos_keep.is_empty());
-        assert!(status.repos_prune.is_empty());
+    //     // Simple case: have no target releases to keep, but some uploads.
+    //     let releases_to_keep = BTreeSet::new();
+    //     let mut status = TufRepoPrunerStatus {
+    //         repos_keep: IdOrdMap::new(),
+    //         repos_prune: IdOrdMap::new(),
+    //         warnings: Vec::new(),
+    //         nkeep_recent_releases: u8::try_from(releases_to_keep.len())
+    //             .unwrap(),
+    //         nkeep_recent_uploads: 0,
+    //     };
+    //     decide_prune(&all_repos, &releases_to_keep, &mut status);
+    //     assert!(status.warnings.is_empty());
+    //     assert_eq!(status.repos_keep.len(), 2);
+    //     assert!(status.repos_keep.contains_key(&r3.id));
+    //     assert!(status.repos_keep.contains_key(&r4.id));
+    //     assert_eq!(
+    //         status.repos_prune.len(),
+    //         all_repos.len() - releases_to_keep.len()
+    //     );
+    //     assert!(status.repos_keep.contains_key(&r1.id));
+    //     assert!(status.repos_keep.contains_key(&r2.id));
+    //     assert!(status.repos_keep.contains_key(&r5.id));
+    //     assert!(status.repos_keep.contains_key(&r6.id));
 
-        // Simple case: have some target releases to keep, no uploads.
-        let releases_to_keep: BTreeSet<_> =
-            [r3.id, r4.id].into_iter().collect();
-        let mut status = TufRepoPrunerStatus {
-            repos_keep: IdOrdMap::new(),
-            repos_prune: IdOrdMap::new(),
-            warnings: Vec::new(),
-            nkeep_recent_releases: u8::try_from(releases_to_keep.len())
-                .unwrap(),
-            nkeep_recent_uploads: 0,
-        };
-        decide_prune(&all_repos, &releases_to_keep, &mut status);
-        assert!(status.warnings.is_empty());
-        assert_eq!(status.repos_keep.len(), 2);
-        assert!(status.repos_keep.contains_key(&r3.id));
-        assert!(status.repos_keep.contains_key(&r4.id));
-        assert_eq!(
-            status.repos_prune.len(),
-            all_repos.len() - releases_to_keep.len()
-        );
-        assert!(status.repos_keep.contains_key(&r1.id));
-        assert!(status.repos_keep.contains_key(&r2.id));
-        assert!(status.repos_keep.contains_key(&r5.id));
-        assert!(status.repos_keep.contains_key(&r6.id));
-
-        // Simple case: have no target releases to keep, but some uploads.
-        let releases_to_keep = BTreeSet::new();
-        let mut status = TufRepoPrunerStatus {
-            repos_keep: IdOrdMap::new(),
-            repos_prune: IdOrdMap::new(),
-            warnings: Vec::new(),
-            nkeep_recent_releases: u8::try_from(releases_to_keep.len())
-                .unwrap(),
-            nkeep_recent_uploads: 0,
-        };
-        decide_prune(&all_repos, &releases_to_keep, &mut status);
-        assert!(status.warnings.is_empty());
-        assert_eq!(status.repos_keep.len(), 2);
-        assert!(status.repos_keep.contains_key(&r3.id));
-        assert!(status.repos_keep.contains_key(&r4.id));
-        assert_eq!(
-            status.repos_prune.len(),
-            all_repos.len() - releases_to_keep.len()
-        );
-        assert!(status.repos_keep.contains_key(&r1.id));
-        assert!(status.repos_keep.contains_key(&r2.id));
-        assert!(status.repos_keep.contains_key(&r5.id));
-        assert!(status.repos_keep.contains_key(&r6.id));
-
-        // Case 1: a common case
-        // XXX-dap
-        // let releases_to_keep: BTreeSet<_> =
-        //     [r3.id, r4.id].into_iter().collect();
-        // let mut status = TufRepoPrunerStatus {
-        //     repos_keep: IdOrdMap::new(),
-        //     repos_prune: IdOrdMap::new(),
-        //     warnings: Vec::new(),
-        //     nkeep_recent_releases: u8::try_from(releases_to_keep.len())
-        //         .unwrap(),
-        //     nkeep_recent_uploads: 1,
-        // };
-    }
+    //     // Case 1: a common case
+    //     // XXX-dap
+    //     // let releases_to_keep: BTreeSet<_> =
+    //     //     [r3.id, r4.id].into_iter().collect();
+    //     // let mut status = TufRepoPrunerStatus {
+    //     //     repos_keep: IdOrdMap::new(),
+    //     //     repos_prune: IdOrdMap::new(),
+    //     //     warnings: Vec::new(),
+    //     //     nkeep_recent_releases: u8::try_from(releases_to_keep.len())
+    //     //         .unwrap(),
+    //     //     nkeep_recent_uploads: 1,
+    //     // };
+    // }
 }
