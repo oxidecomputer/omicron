@@ -621,9 +621,6 @@ impl fmt::Display for PlanningMgsUpdatesStepReport {
             }
         }
 
-        // TODO-K: Is it too redundant to print this out? If we're trying to update
-        // an unsafe zone, then we'll get this information twice I think. Once for
-        // the MGS update check, and once for the zone update check
         if !unsafe_zones.is_empty() {
             let (n, s) = plural_map(unsafe_zones);
             writeln!(
