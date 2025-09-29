@@ -21,7 +21,9 @@ use indent_write::fmt::IndentWriter;
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use omicron_common::api::external::Generation;
 use omicron_common::disk::M2Slot;
+use omicron_common::policy::BOUNDARY_NTP_REDUNDANCY;
 use omicron_common::policy::COCKROACHDB_REDUNDANCY;
+use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
 use omicron_uuid_kinds::MupdateOverrideUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
@@ -605,7 +607,7 @@ impl PlanningMgsUpdatesStepReport {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.pending_mgs_updates.is_empty() 
+        self.pending_mgs_updates.is_empty()
             && self.unsafe_zones.is_empty()
             && self.blocked_mgs_updates.is_empty()
     }
@@ -613,7 +615,8 @@ impl PlanningMgsUpdatesStepReport {
 
 impl fmt::Display for PlanningMgsUpdatesStepReport {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let Self { blocked_mgs_updates, pending_mgs_updates, unsafe_zones } = self;
+        let Self { blocked_mgs_updates, pending_mgs_updates, unsafe_zones } =
+            self;
         if !pending_mgs_updates.is_empty() {
             let n = pending_mgs_updates.len();
             let s = plural(n);
@@ -1318,11 +1321,19 @@ impl fmt::Display for ZoneUnsafeToShutdown {
             Self::BoundaryNtp {
                 total_boundary_ntp_zones: t,
                 synchronized_count: s,
-            } => write!(f, "only {s}/{t} boundary NTP zones are synchronized"),
+            } => write!(
+                f,
+                "only {s}/{t} boundary NTP zones are synchronized; require at least {}",
+                BOUNDARY_NTP_REDUNDANCY
+            ),
             Self::InternalDns {
                 total_internal_dns_zones: t,
                 synchronized_count: s,
-            } => write!(f, "only {s}/{t} internal DNS zones are synchronized"),
+            } => write!(
+                f,
+                "only {s}/{t} internal DNS zones are synchronized; require at least {}",
+                INTERNAL_DNS_REDUNDANCY
+            ),
         }
     }
 }

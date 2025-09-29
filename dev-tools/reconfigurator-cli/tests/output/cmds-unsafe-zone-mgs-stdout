@@ -1340,8 +1340,8 @@ planning report:
 * 1 pending MGS update:
   * model1:serial1: RotBootloader(PendingMgsUpdateRotBootloaderDetails { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: NoValidVersion })
 * 2 zones not ready to shut down safely for an MGS driven update:
-  * zone 427ec88f-f467-42fa-9bbb-66a91a36103c: only 2/2 internal DNS zones are synchronized
-  * zone ea5b4030-b52f-44b2-8d70-45f15f987d01: only 2/2 internal DNS zones are synchronized
+  * zone 427ec88f-f467-42fa-9bbb-66a91a36103c: only 2/2 internal DNS zones are synchronized; require at least 3
+  * zone ea5b4030-b52f-44b2-8d70-45f15f987d01: only 2/2 internal DNS zones are synchronized; require at least 3
 * zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
 * waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
@@ -1409,8 +1409,8 @@ planning report:
 * 1 pending MGS update:
   * model1:serial1: RotBootloader(PendingMgsUpdateRotBootloaderDetails { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: NoValidVersion })
 * 2 zones not ready to shut down safely for an MGS driven update:
-  * zone 427ec88f-f467-42fa-9bbb-66a91a36103c: only 2/2 internal DNS zones are synchronized
-  * zone ea5b4030-b52f-44b2-8d70-45f15f987d01: only 2/2 internal DNS zones are synchronized
+  * zone 427ec88f-f467-42fa-9bbb-66a91a36103c: only 2/2 internal DNS zones are synchronized; require at least 3
+  * zone ea5b4030-b52f-44b2-8d70-45f15f987d01: only 2/2 internal DNS zones are synchronized; require at least 3
 * zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
 * waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
@@ -1487,8 +1487,8 @@ planning report:
 * 1 pending MGS update:
   * model1:serial1: Rot(PendingMgsUpdateRotDetails { expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: NoValidVersion, expected_persistent_boot_preference: A, expected_pending_persistent_boot_preference: None, expected_transient_boot_preference: None })
 * 2 zones not ready to shut down safely for an MGS driven update:
-  * zone 427ec88f-f467-42fa-9bbb-66a91a36103c: only 2/2 internal DNS zones are synchronized
-  * zone ea5b4030-b52f-44b2-8d70-45f15f987d01: only 2/2 internal DNS zones are synchronized
+  * zone 427ec88f-f467-42fa-9bbb-66a91a36103c: only 2/2 internal DNS zones are synchronized; require at least 3
+  * zone ea5b4030-b52f-44b2-8d70-45f15f987d01: only 2/2 internal DNS zones are synchronized; require at least 3
 * zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
 * waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
@@ -1571,8 +1571,8 @@ planning report:
 * 1 pending MGS update:
   * model1:serial1: Sp(PendingMgsUpdateSpDetails { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: NoValidVersion })
 * 2 zones not ready to shut down safely for an MGS driven update:
-  * zone 427ec88f-f467-42fa-9bbb-66a91a36103c: only 2/2 internal DNS zones are synchronized
-  * zone ea5b4030-b52f-44b2-8d70-45f15f987d01: only 2/2 internal DNS zones are synchronized
+  * zone 427ec88f-f467-42fa-9bbb-66a91a36103c: only 2/2 internal DNS zones are synchronized; require at least 3
+  * zone ea5b4030-b52f-44b2-8d70-45f15f987d01: only 2/2 internal DNS zones are synchronized; require at least 3
 * zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
 * waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
@@ -1654,8 +1654,8 @@ planning report:
 * 1 pending MGS update:
   * model1:serial1: HostPhase1(PendingMgsUpdateHostPhase1Details { expected_active_phase_1_slot: A, expected_boot_disk: A, expected_active_phase_1_hash: ArtifactHash("0101010101010101010101010101010101010101010101010101010101010101"), expected_active_phase_2_hash: ArtifactHash("0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a"), expected_inactive_phase_1_hash: ArtifactHash("0202020202020202020202020202020202020202020202020202020202020202"), expected_inactive_phase_2_hash: ArtifactHash("d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47"), sled_agent_address: [fd00:1122:3344:102::1]:12345 })
 * 2 zones not ready to shut down safely for an MGS driven update:
-  * zone 427ec88f-f467-42fa-9bbb-66a91a36103c: only 2/2 internal DNS zones are synchronized
-  * zone ea5b4030-b52f-44b2-8d70-45f15f987d01: only 2/2 internal DNS zones are synchronized
+  * zone 427ec88f-f467-42fa-9bbb-66a91a36103c: only 2/2 internal DNS zones are synchronized; require at least 3
+  * zone ea5b4030-b52f-44b2-8d70-45f15f987d01: only 2/2 internal DNS zones are synchronized; require at least 3
 * zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
 * waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
