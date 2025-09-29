@@ -22,6 +22,7 @@ use omicron_common::api::external::LookupType;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::GenericUuid as _;
 use serde_json::json;
+use slog_error_chain::InlineErrorChain;
 use std::sync::Arc;
 use tokio::sync::watch::{self, Receiver, Sender};
 
@@ -175,6 +176,25 @@ impl BlueprintPlanner {
             }
         };
 
+        // We just ran the planner, so we should always get its report. This
+        // output is for debugging only, though, so just make an empty one in
+        // the unreachable arms.
+        let report = match &blueprint.source {
+            BlueprintSource::Planner(report) => Arc::clone(report),
+            BlueprintSource::Rss
+            | BlueprintSource::PlannerLoadedFromDatabase
+            | BlueprintSource::ReconfiguratorCliEdit
+            | BlueprintSource::Test => {
+                warn!(
+                    &opctx.log,
+                    "ran planner, but got unexpected blueprint source; \
+                     generating an empty planning report";
+                    "source" => ?&blueprint.source,
+                );
+                Arc::new(PlanningReport::new())
+            }
+        };
+
         // Compare the new blueprint to its parent.
         {
             let summary = blueprint.diff_since_blueprint(&parent);
@@ -187,6 +207,7 @@ impl BlueprintPlanner {
                 );
                 return BlueprintPlannerStatus::Unchanged {
                     parent_blueprint_id,
+                    report,
                 };
             }
         }
@@ -254,30 +275,13 @@ impl BlueprintPlanner {
                 return BlueprintPlannerStatus::Planned {
                     parent_blueprint_id,
                     error: format!("{error}"),
+                    report,
                 };
             }
         }
 
         // We have a new target!
 
-        // We just ran the planner, so we should always get its report. This
-        // output is for debugging only, though, so just make an empty one in
-        // the unreachable arms.
-        let report = match &blueprint.source {
-            BlueprintSource::Planner(report) => Arc::clone(report),
-            BlueprintSource::Rss
-            | BlueprintSource::PlannerLoadedFromDatabase
-            | BlueprintSource::ReconfiguratorCliEdit
-            | BlueprintSource::Test => {
-                warn!(
-                    &opctx.log,
-                    "ran planner, but got unexpected blueprint source; \
-                     generating an empty planning report";
-                    "source" => ?&blueprint.source,
-                );
-                Arc::new(PlanningReport::new(blueprint.id))
-            }
-        };
         self.tx_blueprint.send_replace(Some(Arc::new((target, blueprint))));
         BlueprintPlannerStatus::Targeted {
             parent_blueprint_id,
@@ -292,7 +296,16 @@ impl BackgroundTask for BlueprintPlanner {
         &'a mut self,
         opctx: &'a OpContext,
     ) -> BoxFuture<'a, serde_json::Value> {
-        Box::pin(async move { json!(self.plan(opctx).await) })
+        Box::pin(async move {
+            let status = self.plan(opctx).await;
+            match serde_json::to_value(status) {
+                Ok(val) => val,
+                Err(err) => json!({
+                    "error": format!("could not serialize task status: {}",
+                                     InlineErrorChain::new(&err)),
+                }),
+            }
+        })
     }
 }
 
@@ -303,6 +316,7 @@ mod test {
     use crate::app::background::tasks::blueprint_load::TargetBlueprintLoader;
     use crate::app::background::tasks::inventory_collection::InventoryCollector;
     use crate::app::{background::Activator, quiesce::NexusQuiesceHandle};
+    use assert_matches::assert_matches;
     use nexus_inventory::now_db_precision;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::{
@@ -359,14 +373,7 @@ mod test {
                 version: 1,
                 config: ReconfiguratorConfig {
                     planner_enabled: true,
-                    planner_config: PlannerConfig {
-                        // Set this config to true because we'd like to test
-                        // adding zones even if no target release is set. In the
-                        // future, we'll allow adding zones if no target release
-                        // has ever been set, in which case we can go back to
-                        // setting this field to false.
-                        add_zones_with_mupdate_override: true,
-                    },
+                    planner_config: PlannerConfig::default(),
                 },
                 time_modified: now_db_precision(),
             }),
@@ -391,10 +398,9 @@ mod test {
             BlueprintPlannerStatus::Targeted {
                 parent_blueprint_id,
                 blueprint_id,
-                report,
+                report: _,
             } if parent_blueprint_id == initial_blueprint.id
-                && blueprint_id != initial_blueprint.id
-                && blueprint_id == report.blueprint_id =>
+                && blueprint_id != initial_blueprint.id =>
             {
                 blueprint_id
             }
@@ -418,11 +424,12 @@ mod test {
             planner.activate(&opctx).await,
         )
         .expect("can't re-activate planner");
-        assert_eq!(
+        assert_matches!(
             status,
             BlueprintPlannerStatus::Unchanged {
-                parent_blueprint_id: blueprint_id,
-            }
+                parent_blueprint_id,
+                report: _,
+            } if parent_blueprint_id == parent_blueprint_id
         );
 
         // Enable execution.
@@ -486,11 +493,12 @@ mod test {
             planner.activate(&opctx).await,
         )
         .expect("can't re-activate planner");
-        assert_eq!(
+        assert_matches!(
             status,
             BlueprintPlannerStatus::Unchanged {
-                parent_blueprint_id: blueprint_id,
-            }
+                parent_blueprint_id,
+                report: _,
+            } if parent_blueprint_id == blueprint_id
         );
     }
 }

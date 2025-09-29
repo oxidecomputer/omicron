@@ -22,6 +22,7 @@ use blueprint_display::BpDatasetsTableSchema;
 use blueprint_display::BpHostPhase2TableSchema;
 use blueprint_display::BpTableColumn;
 use daft::Diffable;
+use gateway_types::component::SpType;
 use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
 use iddqd::id_ord_map::Entry;
@@ -58,6 +59,7 @@ use slog::Key;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::fmt;
+use std::fmt::Display;
 use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
 use std::sync::Arc;
@@ -72,7 +74,7 @@ mod clickhouse;
 pub mod execution;
 mod network_resources;
 mod planning_input;
-mod planning_report;
+pub mod planning_report;
 mod reconfigurator_config;
 mod zone_type;
 
@@ -82,7 +84,6 @@ use anyhow::bail;
 pub use blueprint_diff::BlueprintDiffSummary;
 use blueprint_display::BpPendingMgsUpdates;
 pub use clickhouse::ClickhouseClusterConfig;
-use gateway_client::types::SpType;
 use gateway_types::rot::RotSlot;
 pub use network_resources::AddNetworkResourceError;
 pub use network_resources::OmicronZoneExternalFloatingAddr;
@@ -94,6 +95,7 @@ pub use network_resources::OmicronZoneExternalSnatIp;
 pub use network_resources::OmicronZoneNetworkResources;
 pub use network_resources::OmicronZoneNic;
 pub use network_resources::OmicronZoneNicEntry;
+use omicron_common::api::external::Error;
 pub use planning_input::ClickhouseMode;
 pub use planning_input::ClickhousePolicy;
 pub use planning_input::CockroachDbClusterVersion;
@@ -457,6 +459,28 @@ impl Blueprint {
         }
 
         Ok(gen)
+    }
+
+    /// Returns the Nexus generation number for Nexus `nexus_id`, which is
+    /// assumed to refer to the currently-running Nexus instance (the current
+    /// process)
+    pub fn find_generation_for_self(
+        &self,
+        nexus_id: OmicronZoneUuid,
+    ) -> Result<Generation, Error> {
+        for (_sled_id, zone_config, nexus_config) in
+            self.all_nexus_zones(BlueprintZoneDisposition::is_in_service)
+        {
+            if zone_config.id == nexus_id {
+                return Ok(nexus_config.nexus_generation);
+            }
+        }
+
+        Err(Error::internal_error(&format!(
+            "failed to determine generation of currently-running Nexus: \
+             did not find Nexus {} in blueprint {}",
+            nexus_id, self.id,
+        )))
     }
 }
 
@@ -1243,6 +1267,7 @@ impl fmt::Display for BlueprintZoneDisposition {
     Diffable,
 )]
 #[serde(tag = "type", rename_all = "snake_case")]
+#[cfg_attr(test, derive(test_strategy::Arbitrary))]
 pub enum BlueprintZoneImageSource {
     /// This zone's image source is whatever happens to be on the sled's
     /// "install" dataset.
@@ -1319,6 +1344,7 @@ impl fmt::Display for BlueprintZoneImageSource {
     Diffable,
 )]
 #[serde(tag = "artifact_version", rename_all = "snake_case")]
+#[cfg_attr(test, derive(test_strategy::Arbitrary))]
 pub enum BlueprintArtifactVersion {
     /// A specific version of the image is available.
     Available { version: ArtifactVersion },
@@ -1429,14 +1455,53 @@ impl fmt::Display for BlueprintHostPhase2DesiredContents {
 }
 
 #[derive(
+    Debug,
+    Deserialize,
+    Serialize,
+    PartialEq,
+    Eq,
+    Diffable,
+    PartialOrd,
+    JsonSchema,
+    Ord,
+    Clone,
+    Copy,
+)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(test, derive(test_strategy::Arbitrary))]
+pub enum MgsUpdateComponent {
+    Sp,
+    Rot,
+    RotBootloader,
+    HostOs,
+}
+
+impl Display for MgsUpdateComponent {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            MgsUpdateComponent::HostOs => "Host OS",
+            MgsUpdateComponent::Rot => "RoT",
+            MgsUpdateComponent::RotBootloader => "RoT Bootloader",
+            MgsUpdateComponent::Sp => "SP",
+        };
+        write!(f, "{s}")
+    }
+}
+
+#[derive(
     Clone, Debug, Eq, PartialEq, Deserialize, Serialize, JsonSchema, Diffable,
 )]
+#[cfg_attr(test, derive(test_strategy::Arbitrary))]
 pub struct PendingMgsUpdates {
     // The IdOrdMap key is the baseboard_id. Only one outstanding MGS-managed
     // update is allowed for a given baseboard.
     //
     // Note that keys aren't strings so this can't be serialized as a JSON map,
     // but IdOrdMap serializes as an array.
+    //
+    // For proptest, make this map small to avoid bloating the size of generated
+    // test data.
+    #[cfg_attr(test, any(((0, 16).into(), Default::default())))]
     by_baseboard: IdOrdMap<PendingMgsUpdate>,
 }
 
@@ -1505,6 +1570,7 @@ impl<'a> IntoIterator for &'a PendingMgsUpdates {
 #[derive(
     Clone, Debug, Eq, PartialEq, JsonSchema, Deserialize, Serialize, Diffable,
 )]
+#[cfg_attr(test, derive(test_strategy::Arbitrary))]
 pub struct PendingMgsUpdate {
     // identity of the baseboard
     /// id of the baseboard that we're going to update
@@ -1601,6 +1667,7 @@ impl PendingMgsUpdate {
     Clone, Debug, Eq, PartialEq, JsonSchema, Deserialize, Serialize, Diffable,
 )]
 #[serde(tag = "component", rename_all = "snake_case")]
+#[cfg_attr(test, derive(test_strategy::Arbitrary))]
 pub enum PendingMgsUpdateDetails {
     /// the SP itself is being updated
     Sp(PendingMgsUpdateSpDetails),
@@ -1613,6 +1680,21 @@ pub enum PendingMgsUpdateDetails {
     /// We write the phase 1 via MGS, and have a precheck condition that
     /// sled-agent has already written the matching phase 2.
     HostPhase1(PendingMgsUpdateHostPhase1Details),
+}
+
+impl From<&PendingMgsUpdateDetails> for MgsUpdateComponent {
+    fn from(details: &PendingMgsUpdateDetails) -> Self {
+        match &details {
+            PendingMgsUpdateDetails::Rot { .. } => MgsUpdateComponent::Rot,
+            PendingMgsUpdateDetails::RotBootloader { .. } => {
+                MgsUpdateComponent::RotBootloader
+            }
+            PendingMgsUpdateDetails::Sp { .. } => MgsUpdateComponent::Sp,
+            PendingMgsUpdateDetails::HostPhase1(_) => {
+                MgsUpdateComponent::HostOs
+            }
+        }
+    }
 }
 
 impl slog::KV for PendingMgsUpdateDetails {
@@ -1648,6 +1730,7 @@ impl slog::KV for PendingMgsUpdateDetails {
     Clone, Debug, Eq, PartialEq, JsonSchema, Deserialize, Serialize, Diffable,
 )]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(test, derive(test_strategy::Arbitrary))]
 pub struct PendingMgsUpdateSpDetails {
     // implicit: component = SP_ITSELF
     // implicit: firmware slot id = 0 (always 0 for SP itself)
@@ -1680,6 +1763,7 @@ impl slog::KV for PendingMgsUpdateSpDetails {
     Clone, Debug, Eq, PartialEq, JsonSchema, Deserialize, Serialize, Diffable,
 )]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(test, derive(test_strategy::Arbitrary))]
 pub struct PendingMgsUpdateRotDetails {
     // implicit: component = ROT
     // implicit: firmware slot id will be the inactive slot
@@ -1751,6 +1835,7 @@ impl slog::KV for PendingMgsUpdateRotDetails {
     Clone, Debug, Eq, PartialEq, JsonSchema, Deserialize, Serialize, Diffable,
 )]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(test, derive(test_strategy::Arbitrary))]
 pub struct PendingMgsUpdateRotBootloaderDetails {
     // implicit: component = STAGE0
     // implicit: firmware slot id = 1 (always 1 (Stage0Next) for RoT bootloader)
@@ -1787,6 +1872,7 @@ impl slog::KV for PendingMgsUpdateRotBootloaderDetails {
     Clone, Debug, Eq, PartialEq, JsonSchema, Deserialize, Serialize, Diffable,
 )]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(test, derive(test_strategy::Arbitrary))]
 pub struct PendingMgsUpdateHostPhase1Details {
     /// Which slot is currently active according to the SP.
     ///
@@ -1827,7 +1913,20 @@ pub struct PendingMgsUpdateHostPhase1Details {
     /// don't need to be able to represent an invalid inactive slot.
     pub expected_inactive_phase_2_hash: ArtifactHash,
     /// Address for contacting sled-agent to check phase 2 contents.
+    #[cfg_attr(test, strategy(socket_addr_v6_without_flowinfo()))]
     pub sled_agent_address: SocketAddrV6,
+}
+
+// For proptest, we pass in flowinfo = 0, because flowinfo doesn't roundtrip
+// through JSON.
+#[cfg(test)]
+fn socket_addr_v6_without_flowinfo()
+-> impl proptest::strategy::Strategy<Value = SocketAddrV6> {
+    use proptest::strategy::Strategy;
+
+    proptest::arbitrary::any::<(Ipv6Addr, u16, u32)>().prop_map(
+        |(addr, port, scope_id)| SocketAddrV6::new(addr, port, 0, scope_id),
+    )
 }
 
 impl slog::KV for PendingMgsUpdateHostPhase1Details {
@@ -1882,6 +1981,7 @@ impl slog::KV for PendingMgsUpdateHostPhase1Details {
     Clone, Debug, Eq, PartialEq, JsonSchema, Deserialize, Serialize, Diffable,
 )]
 #[serde(tag = "kind", content = "version", rename_all = "snake_case")]
+#[cfg_attr(test, derive(test_strategy::Arbitrary))]
 pub enum ExpectedVersion {
     /// We expect to find _no_ valid caboose in this slot
     NoValidVersion,
@@ -1914,6 +2014,7 @@ impl fmt::Display for ExpectedVersion {
 #[derive(
     Clone, Debug, Eq, PartialEq, JsonSchema, Deserialize, Serialize, Diffable,
 )]
+#[cfg_attr(test, derive(test_strategy::Arbitrary))]
 pub struct ExpectedActiveRotSlot {
     pub slot: RotSlot,
     pub version: ArtifactVersion,
@@ -2311,7 +2412,7 @@ mod test {
     use super::PendingMgsUpdateSpDetails;
     use super::PendingMgsUpdates;
     use crate::inventory::BaseboardId;
-    use gateway_client::types::SpType;
+    use gateway_types::component::SpType;
 
     #[test]
     fn test_serialize_pending_mgs_updates() {

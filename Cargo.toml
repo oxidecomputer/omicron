@@ -16,6 +16,7 @@ members = [
     "clients/gateway-client",
     "clients/installinator-client",
     "clients/nexus-client",
+    "clients/nexus-lockstep-client",
     "clients/ntp-admin-client",
     "clients/oxide-client",
     "clients/oximeter-client",
@@ -89,6 +90,7 @@ members = [
     "nexus/external-api",
     "nexus/internal-api",
     "nexus/inventory",
+    "nexus/lockstep-api",
     "nexus/macros-common",
     "nexus/metrics-producer-gc",
     "nexus/mgs-updates",
@@ -174,6 +176,7 @@ default-members = [
     "clients/gateway-client",
     "clients/installinator-client",
     "clients/nexus-client",
+    "clients/nexus-lockstep-client",
     "clients/ntp-admin-client",
     "clients/oxide-client",
     "clients/oximeter-client",
@@ -249,6 +252,7 @@ default-members = [
     "nexus/external-api",
     "nexus/internal-api",
     "nexus/inventory",
+    "nexus/lockstep-api",
     "nexus/macros-common",
     "nexus/metrics-producer-gc",
     "nexus/mgs-updates",
@@ -409,10 +413,10 @@ crossterm = { version = "0.29.0", features = ["event-stream"] }
 # NOTE: if you change the pinned revision of the `crucible` dependencies, you
 # must also update the references in package-manifest.toml to match the new
 # revision.
-crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "779775d5130ff7a4836f52f48b7e64d1479ee104" }
-crucible-pantry-client = { git = "https://github.com/oxidecomputer/crucible", rev = "779775d5130ff7a4836f52f48b7e64d1479ee104" }
-crucible-smf = { git = "https://github.com/oxidecomputer/crucible", rev = "779775d5130ff7a4836f52f48b7e64d1479ee104" }
-crucible-common = { git = "https://github.com/oxidecomputer/crucible", rev = "779775d5130ff7a4836f52f48b7e64d1479ee104" }
+crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "65ca41e821ef53ec9c28909357f23e3348169e4f" }
+crucible-pantry-client = { git = "https://github.com/oxidecomputer/crucible", rev = "65ca41e821ef53ec9c28909357f23e3348169e4f" }
+crucible-smf = { git = "https://github.com/oxidecomputer/crucible", rev = "65ca41e821ef53ec9c28909357f23e3348169e4f" }
+crucible-common = { git = "https://github.com/oxidecomputer/crucible", rev = "65ca41e821ef53ec9c28909357f23e3348169e4f" }
 # NOTE: See above!
 csv = "1.3.1"
 curve25519-dalek = "4"
@@ -545,6 +549,8 @@ nexus-defaults = { path = "nexus/defaults" }
 nexus-external-api = { path = "nexus/external-api" }
 nexus-inventory = { path = "nexus/inventory" }
 nexus-internal-api = { path = "nexus/internal-api" }
+nexus-lockstep-api = { path = "nexus/lockstep-api" }
+nexus-lockstep-client = { path = "clients/nexus-lockstep-client" }
 nexus-macros-common = { path = "nexus/macros-common" }
 nexus-metrics-producer-gc = { path = "nexus/metrics-producer-gc" }
 nexus-mgs-updates = { path = "nexus/mgs-updates" }
@@ -637,10 +643,10 @@ progenitor-client = "0.10.0"
 # NOTE: if you change the pinned revision of the `bhyve_api` and propolis
 # dependencies, you must also update the references in package-manifest.toml to
 # match the new revision.
-bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "23b06c2f452a97fac1dc12561d8451ce876d7c5a" }
-propolis_api_types = { git = "https://github.com/oxidecomputer/propolis", rev = "23b06c2f452a97fac1dc12561d8451ce876d7c5a" }
-propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "23b06c2f452a97fac1dc12561d8451ce876d7c5a" }
-propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "23b06c2f452a97fac1dc12561d8451ce876d7c5a" }
+bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "827e6615bfebfd94d41504dcd1517a0f22e3166a" }
+propolis_api_types = { git = "https://github.com/oxidecomputer/propolis", rev = "827e6615bfebfd94d41504dcd1517a0f22e3166a" }
+propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "827e6615bfebfd94d41504dcd1517a0f22e3166a" }
+propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "827e6615bfebfd94d41504dcd1517a0f22e3166a" }
 # NOTE: see above!
 proptest = "1.7.0"
 qorb = "0.4.1"

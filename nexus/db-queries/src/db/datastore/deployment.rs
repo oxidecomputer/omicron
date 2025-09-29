@@ -512,7 +512,10 @@ impl DataStore {
                 // Serialize and insert a debug log for the planning report
                 // created with this blueprint, if we have one.
                 if let BlueprintSource::Planner(report) = &blueprint.source {
-                    match DebugLogBlueprintPlanning::try_from(report.clone()) {
+                    match DebugLogBlueprintPlanning::new(
+                        blueprint_id,
+                        report.clone(),
+                    ) {
                         Ok(debug_log) => {
                             use nexus_db_schema::schema::debug_log_blueprint_planning::dsl;
                             let _ = diesel::insert_into(
@@ -4230,6 +4233,7 @@ mod tests {
                             0,
                             0,
                         ),
+                        lockstep_port: 0,
                         external_ip: OmicronZoneExternalFloatingIp {
                             id: ExternalIpUuid::new_v4(),
                             ip: "10.0.0.1".parse().unwrap(),

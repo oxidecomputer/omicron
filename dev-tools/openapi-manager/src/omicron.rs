@@ -13,6 +13,7 @@ use gateway_api::gateway_api_mod;
 use installinator_api::installinator_api_mod;
 use nexus_external_api::nexus_external_api_mod;
 use nexus_internal_api::nexus_internal_api_mod;
+use nexus_lockstep_api::nexus_lockstep_api_mod;
 use ntp_admin_api::ntp_admin_api_mod;
 use oximeter_api::oximeter_api_mod;
 use repo_depot_api::repo_depot_api_mod;
@@ -119,7 +120,7 @@ pub fn all_apis() -> Vec<ManagedApiConfig> {
         ManagedApiConfig {
             title: "Oxide Region API",
             versions: Versions::new_lockstep(semver::Version::new(
-                20250730, 0, 0,
+                20251008, 0, 0,
             )),
             description: "API for interacting with the Oxide control plane",
             boundary: ApiBoundary::External,
@@ -134,6 +135,15 @@ pub fn all_apis() -> Vec<ManagedApiConfig> {
             boundary: ApiBoundary::Internal,
             api_description: nexus_internal_api_mod::stub_api_description,
             ident: "nexus-internal",
+            extra_validation: None,
+        },
+        ManagedApiConfig {
+            title: "Nexus lockstep API",
+            versions: Versions::new_lockstep(semver::Version::new(0, 0, 1)),
+            description: "Nexus lockstep internal API",
+            boundary: ApiBoundary::Internal,
+            api_description: nexus_lockstep_api_mod::stub_api_description,
+            ident: "nexus-lockstep",
             extra_validation: None,
         },
         ManagedApiConfig {

@@ -9,24 +9,32 @@ use crate::common::reconfigurator::blueprint_wait_sled_configs_propagated;
 use anyhow::Context;
 use common::LiveTestContext;
 use common::reconfigurator::blueprint_edit_current_target;
+use internal_dns_types::config::DnsRecord;
+use internal_dns_types::names::ServiceName;
 use live_tests_macros::live_test;
-use nexus_client::types::QuiesceState;
 use nexus_db_model::DbMetadataNexusState;
+use nexus_lockstep_client::types::QuiesceState;
 use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
 use nexus_reconfigurator_preparation::PlanningInputFromDb;
+use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneImageSource;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::PlannerConfig;
 use nexus_types::deployment::blueprint_zone_type;
+use omicron_common::api::external::Generation;
 use omicron_test_utils::dev::poll::CondCheckError;
 use omicron_test_utils::dev::poll::wait_for_condition;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
 use slog::debug;
 use slog::info;
+use slog::o;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
+use std::net::IpAddr;
+use std::net::SocketAddr;
 use std::time::Duration;
 
 #[live_test]
@@ -307,6 +315,33 @@ async fn test_nexus_handoff(lc: &LiveTestContext) {
     }
     info!(log, "new Nexus instances are still not reachable (good)");
 
+    // This is the last point before triggering the handoff.  Check the contents
+    // of both internal and external DNS for Nexus.  We should only see the
+    // original Nexus zones.  It's a little hard to be sure this isn't working
+    // by accident: it's conceivable that the DNS behavior is wrong, but that we
+    // just haven't updated the DNS servers.  Since we expect no change to the
+    // DNS servers, there's nothing for us to wait for to be sure nothing
+    // changed.  The only way to be sure would be to dig into the blueprint
+    // execution state to confirm that we successfully propagated DNS for the
+    // blueprint that we executed.  That seems more trouble than it's worth
+    // here.  We do know that we got through at least some of this blueprint's
+    // execution, based on having seen the sled configurations get propagated to
+    // sled agent.
+    check_internal_dns(
+        log,
+        &blueprint_initial,
+        blueprint_initial.nexus_generation,
+    )
+    .await
+    .expect("internal DNS (before)");
+    check_external_dns(
+        log,
+        &blueprint_initial,
+        blueprint_initial.nexus_generation,
+    )
+    .await
+    .expect("external DNS (before)");
+
     // Complete the demo saga to unblock quiescing.
     demo_nexus
         .saga_demo_complete(&demo_saga.demo_saga_id)
@@ -423,4 +458,168 @@ async fn test_nexus_handoff(lc: &LiveTestContext) {
     )
     .await
     .expect("waiting for cleanup sled configs");
+
+    // Verify that DNS has been updated to reflect the handoff.  This time,
+    // since we expect a change, we can wait for it to happen.
+    wait_for_condition(
+        || async {
+            check_internal_dns(log, &blueprint_handoff, next_generation)
+                .await?;
+            check_external_dns(log, &blueprint_handoff, next_generation)
+                .await?;
+            Ok::<_, CondCheckError<anyhow::Error>>(())
+        },
+        &Duration::from_secs(1),
+        &Duration::from_secs(30),
+    )
+    .await
+    .expect("waiting for post-handoff DNS update");
+}
+
+/// Checks that current internal DNS reflects that the Nexus instances
+/// in-service right now are the ones having generation `active_generation`.
+///
+/// Returns `CondCheckError` on failure for use in `wait_for_condition`.
+async fn check_internal_dns(
+    log: &slog::Logger,
+    blueprint: &Blueprint,
+    active_generation: Generation,
+) -> Result<(), CondCheckError<anyhow::Error>> {
+    // Compute what we expect to find, based on which Nexus instances in the
+    // blueprint have the specified generation.
+    let expected_nexus_addrs = blueprint
+        .all_nexus_zones(BlueprintZoneDisposition::is_in_service)
+        .filter_map(|(_sled_id, _zone_cfg, nexus_config)| {
+            (nexus_config.nexus_generation == active_generation)
+                .then_some(nexus_config.internal_address)
+        })
+        .collect::<BTreeSet<_>>();
+
+    // Find the DNS server based on what's currently in the blueprint.
+    let dns_sockaddr = blueprint
+        .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+        .find_map(|(_sled_id, zone_cfg)| {
+            if let BlueprintZoneType::InternalDns(
+                blueprint_zone_type::InternalDns { dns_address, .. },
+            ) = &zone_cfg.zone_type
+            {
+                Some(dns_address)
+            } else {
+                None
+            }
+        })
+        .expect("at least one internal DNS server");
+
+    // Make a resolver using this DNS server.
+    let resolver_log = log.new(o!("component" => "VerifyInternalDnsResolver"));
+    let resolver = internal_dns_resolver::Resolver::new_from_addrs(
+        resolver_log,
+        &[SocketAddr::from(*dns_sockaddr)],
+    )
+    .context("creating resolver")
+    .map_err(CondCheckError::Failed)?;
+
+    // Finally, look up Nexus in DNS and compare it to what we expected.
+    let found_nexus_addrs = resolver
+        .lookup_all_socket_v6(ServiceName::Nexus)
+        .await
+        .map_err(|_| CondCheckError::NotYet)?
+        .into_iter()
+        .collect::<BTreeSet<_>>();
+    debug!(
+        log,
+        "check_internal_dns";
+        "expected" => ?expected_nexus_addrs,
+        "found" => ?found_nexus_addrs,
+    );
+
+    if expected_nexus_addrs == found_nexus_addrs {
+        Ok(())
+    } else {
+        Err(CondCheckError::NotYet)
+    }
+}
+
+/// Checks that current external DNS reflects that the Nexus instances
+/// in-service right now are the ones having generation `active_generation`.
+///
+/// Returns `CondCheckError` on failure for use in `wait_for_condition`.
+async fn check_external_dns(
+    log: &slog::Logger,
+    blueprint: &Blueprint,
+    active_generation: Generation,
+) -> Result<(), CondCheckError<anyhow::Error>> {
+    // Compute which Nexus instances we expect to find in external DNS based on
+    // what's in-service in the blueprint.
+    let expected_nexus_addrs = blueprint
+        .all_nexus_zones(BlueprintZoneDisposition::is_in_service)
+        .filter_map(|(_sled_id, _zone_cfg, nexus_config)| {
+            (nexus_config.nexus_generation == active_generation)
+                .then_some(nexus_config.external_ip.ip)
+        })
+        .collect::<BTreeSet<_>>();
+
+    // Find the DNS server based on what's currently in the blueprint.
+    let dns_http_sockaddr = blueprint
+        .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+        .find_map(|(_sled_id, zone_cfg)| {
+            if let BlueprintZoneType::ExternalDns(
+                blueprint_zone_type::ExternalDns { http_address, .. },
+            ) = &zone_cfg.zone_type
+            {
+                Some(http_address)
+            } else {
+                None
+            }
+        })
+        .expect("at least one external DNS server");
+
+    // Unfortunately for us, the external DNS servers are not necessarily
+    // reachable from where we are.  So we can't directly look up names in DNS.
+    // Instead, use the HTTP (config) interface.
+    let url = format!("http://{}", dns_http_sockaddr);
+    let client = dns_service_client::Client::new(&url, log.clone());
+    let config = client
+        .dns_config_get()
+        .await
+        .map_err(|_| CondCheckError::NotYet)?
+        .into_inner();
+
+    let found_nexus_addrs = config
+        .zones
+        .into_iter()
+        .next()
+        .expect("at least one external DNS zone")
+        .records
+        .into_iter()
+        .find_map(|(name, dns_records)| {
+            if !name.ends_with(".sys") {
+                return None;
+            }
+
+            Some(
+                dns_records
+                    .into_iter()
+                    .filter_map(|record| match record {
+                        DnsRecord::A(addr) => Some(IpAddr::from(addr)),
+                        DnsRecord::Aaaa(addr) => Some(IpAddr::from(addr)),
+                        _ => None,
+                    })
+                    .collect::<BTreeSet<_>>(),
+            )
+        })
+        .expect("at least one silo");
+
+    debug!(
+        log,
+        "check_external_dns";
+        "expected" => ?expected_nexus_addrs,
+        "found" => ?found_nexus_addrs,
+    );
+
+    if expected_nexus_addrs == found_nexus_addrs {
+        Ok(())
+    } else {
+        Err(CondCheckError::NotYet)
+    }
 }

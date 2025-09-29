@@ -57,6 +57,7 @@ omicron-workspace-hack.workspace = true
 [dev-dependencies]
 dropshot.workspace = true
 expectorate.workspace = true
+hex-literal.workspace = true
 maplit.workspace = true
 omicron-common = { workspace = true, features = ["testing"] }
 omicron-test-utils.workspace = true
