@@ -1,9 +1,6 @@
 # Load example system
 load-example --nsleds 3 --ndisks-per-sled 3
 
-# Print the default target release
-show
-
 # Create a TUF repository from a fake manifest. (The output TUF repo is
 # written to a temporary directory that this invocation of `reconfigurator-cli`
 # is running out of as its working directory.)
@@ -48,18 +45,15 @@ tuf-assemble ../../update-common/manifests/fake.toml
 # Load the target release from the assembled TUF repository.
 set target-release repo-1.0.0.zip
 
-# First, print out what we've got.
+# First, print out sled information.
 sled-list
-blueprint-list
-inventory-list
 
-# Retrieve blueprint information to know which zones to expunge
-blueprint-list
-blueprint-show 58d5e830-0884-47d8-a7cd-b2b3751adeb4
+# Retrieve blueprint information to know the ID of the zone to expunge
+blueprint-show latest
 
 # We expunge a single internal_dns zone
-blueprint-edit 58d5e830-0884-47d8-a7cd-b2b3751adeb4 expunge-zones 99e2f30b-3174-40bf-a78a-90da8abba8ca
-blueprint-diff af934083-59b5-4bf6-8966-6fb5292c29e1
+blueprint-edit latest expunge-zones 99e2f30b-3174-40bf-a78a-90da8abba8ca
+blueprint-diff latest
 
 # Attempt to upgrade one RoT bootloader. We should see two zones skipped and
 # a safe one to update
