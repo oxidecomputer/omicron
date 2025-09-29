@@ -1006,6 +1006,15 @@ async fn sic_join_instance_multicast_group(
     );
     let instance_id = repeat_saga_params.instance_id;
 
+    // Check if multicast is enabled
+    if !osagactx.nexus().multicast_enabled() {
+        debug!(osagactx.log(),
+               "multicast not enabled, skipping multicast group member attachment";
+               "instance_id" => %instance_id,
+               "group_name_or_id" => ?group_name_or_id);
+        return Ok(Some(()));
+    }
+
     // Look up the multicast group by name or ID using the existing nexus method
     let multicast_group_selector = params::MulticastGroupSelector {
         project: Some(NameOrId::Id(saga_params.project_id)),
@@ -1074,6 +1083,14 @@ async fn sic_join_instance_multicast_group_undo(
     else {
         return Ok(());
     };
+
+    // Check if multicast is enabled - if not, no cleanup needed since we didn't attach
+    if !osagactx.nexus().multicast_enabled() {
+        debug!(osagactx.log(),
+               "multicast not enabled, skipping multicast group member undo";
+               "group_name_or_id" => ?group_name_or_id);
+        return Ok(());
+    }
 
     // Look up the multicast group by name or ID using the existing nexus method
     let multicast_group_selector = params::MulticastGroupSelector {

@@ -140,6 +140,8 @@ pub(crate) struct MulticastGroupReconciler {
     member_concurrency_limit: usize,
     /// Maximum number of groups to process concurrently.
     group_concurrency_limit: usize,
+    /// Whether multicast functionality is enabled (or not).
+    enabled: bool,
 }
 
 impl MulticastGroupReconciler {
@@ -147,6 +149,7 @@ impl MulticastGroupReconciler {
         datastore: Arc<DataStore>,
         resolver: Resolver,
         sagas: Arc<dyn StartSaga>,
+        enabled: bool,
     ) -> Self {
         Self {
             datastore,
@@ -159,6 +162,7 @@ impl MulticastGroupReconciler {
             cache_ttl: Duration::from_secs(3600), // 1 hour - refresh topology mappings regularly
             member_concurrency_limit: 100,
             group_concurrency_limit: 100,
+            enabled,
         }
     }
 
@@ -178,6 +182,13 @@ impl BackgroundTask for MulticastGroupReconciler {
         opctx: &'a OpContext,
     ) -> BoxFuture<'a, serde_json::Value> {
         async move {
+            if !self.enabled {
+                info!(opctx.log, "multicast group reconciler not enabled");
+                let mut status = MulticastGroupReconcilerStatus::default();
+                status.disabled = true;
+                return json!(status);
+            }
+
             trace!(opctx.log, "multicast group reconciler activating");
             let status = self.run_reconciliation_pass(opctx).await;
 

@@ -39,6 +39,7 @@ pub(crate) type ControlPlaneTestContext =
 
 mod api;
 mod authorization;
+mod enablement;
 mod failures;
 mod groups;
 mod instances;

@@ -224,6 +224,9 @@ pub struct Nexus {
     /// The tunable parameters from a configuration file
     tunables: Tunables,
 
+    /// Whether multicast functionality is enabled - used by sagas and API endpoints to check if multicast operations should proceed
+    multicast_enabled: bool,
+
     /// Operational context used for Instance allocation
     opctx_alloc: OpContext,
 
@@ -500,6 +503,13 @@ impl Nexus {
             timeseries_client,
             webhook_delivery_client,
             tunables: config.pkg.tunables.clone(),
+            // Whether multicast functionality is enabled.
+            // This is used by instance-related sagas and API endpoints to check
+            // if multicast operations should proceed.
+            //
+            // NOTE: This is separate from the RPW reconciler timing config, which
+            // only controls how often the background task runs.
+            multicast_enabled: config.pkg.multicast.enabled,
             opctx_alloc: OpContext::for_background(
                 log.new(o!("component" => "InstanceAllocator")),
                 Arc::clone(&authz),
@@ -600,6 +610,7 @@ impl Nexus {
                     opctx: background_ctx,
                     datastore: db_datastore,
                     config: task_config.pkg.background_tasks,
+                    multicast_enabled: task_config.pkg.multicast.enabled,
                     rack_id,
                     nexus_id: task_config.deployment.id,
                     resolver,
@@ -649,6 +660,10 @@ impl Nexus {
 
     pub fn authz(&self) -> &Arc<authz::Authz> {
         &self.authz
+    }
+
+    pub fn multicast_enabled(&self) -> bool {
+        self.multicast_enabled
     }
 
     pub(crate) async fn wait_for_populate(&self) -> Result<(), anyhow::Error> {

@@ -363,6 +363,15 @@ impl super::Nexus {
     ) -> Result<(), Error> {
         let instance_id = authz_instance.id();
 
+        // Check if multicast is enabled - if not, skip all multicast operations
+        if !self.multicast_enabled() {
+            debug!(opctx.log,
+                   "multicast not enabled, skipping multicast group changes";
+                   "instance_id" => %instance_id,
+                   "requested_groups_count" => multicast_groups.len());
+            return Ok(());
+        }
+
         debug!(
             opctx.log,
             "processing multicast group changes";
@@ -948,13 +957,15 @@ impl super::Nexus {
             .await?;
 
         // Update multicast member state for this instance to "Left" and clear
-        // `sled_id`
-        self.db_datastore
-            .multicast_group_members_detach_by_instance(
-                opctx,
-                authz_instance.id(),
-            )
-            .await?;
+        // `sled_id` - only if multicast is enabled
+        if self.multicast_enabled() {
+            self.db_datastore
+                .multicast_group_members_detach_by_instance(
+                    opctx,
+                    authz_instance.id(),
+                )
+                .await?;
+        }
 
         // Activate multicast reconciler to handle switch-level changes
         self.background_tasks.task_multicast_group_reconciler.activate();

@@ -642,26 +642,29 @@ async fn sis_ensure_registered(
     let vmm_record = match register_result {
         Ok(vmm_record) => {
             // Update multicast group members with the instance's sled_id now that it's registered
-            if let Err(e) = osagactx
-                .datastore()
-                .multicast_group_member_update_sled_id(
-                    &opctx,
-                    instance_id,
-                    Some(sled_id.into()),
-                )
-                .await
-            {
-                // Log but don't fail the saga - the reconciler will fix this later
-                info!(osagactx.log(),
-                      "start saga: failed to update multicast member sled_id, reconciler will fix";
-                      "instance_id" => %instance_id,
-                      "sled_id" => %sled_id,
-                      "error" => ?e);
-            } else {
-                info!(osagactx.log(),
-                      "start saga: updated multicast member sled_id";
-                      "instance_id" => %instance_id,
-                      "sled_id" => %sled_id);
+            // Only do this if multicast is enabled - if disabled, no members exist to update
+            if osagactx.nexus().multicast_enabled() {
+                if let Err(e) = osagactx
+                    .datastore()
+                    .multicast_group_member_update_sled_id(
+                        &opctx,
+                        instance_id,
+                        Some(sled_id.into()),
+                    )
+                    .await
+                {
+                    // Log but don't fail the saga - the reconciler will fix this later
+                    info!(osagactx.log(),
+                          "start saga: failed to update multicast member sled_id, reconciler will fix";
+                          "instance_id" => %instance_id,
+                          "sled_id" => %sled_id,
+                          "error" => ?e);
+                } else {
+                    info!(osagactx.log(),
+                          "start saga: updated multicast member sled_id";
+                          "instance_id" => %instance_id,
+                          "sled_id" => %sled_id);
+                }
             }
             vmm_record
         }
@@ -805,26 +808,30 @@ async fn sis_ensure_registered_undo(
             }
         }
     } else {
-        datastore
-            .multicast_group_member_update_sled_id(
-                &opctx,
-                instance_id.into_untyped_uuid(),
-                None,
-            )
-            .await
-            .map(|_| {
-                info!(osagactx.log(),
-                      "start saga: cleared multicast member sled_id during undo";
-                      "instance_id" => %instance_id);
-            })
-            .map_err(|e| {
-                // Log but don't fail the undo - the reconciler will fix this later
-                info!(osagactx.log(),
-                      "start saga: failed to clear multicast member sled_id during undo, reconciler will fix";
-                      "instance_id" => %instance_id,
-                      "error" => ?e);
-            })
-            .ok(); // Ignore the result
+        // Only clear multicast member sled_id if multicast is enabled
+        // If disabled, no members exist to clear
+        if osagactx.nexus().multicast_enabled() {
+            datastore
+                .multicast_group_member_update_sled_id(
+                    &opctx,
+                    instance_id.into_untyped_uuid(),
+                    None,
+                )
+                .await
+                .map(|_| {
+                    info!(osagactx.log(),
+                          "start saga: cleared multicast member sled_id during undo";
+                          "instance_id" => %instance_id);
+                })
+                .map_err(|e| {
+                    // The reconciler will fix this later
+                    info!(osagactx.log(),
+                          "start saga: failed to clear multicast member sled_id during undo, reconciler will fix";
+                          "instance_id" => %instance_id,
+                          "error" => ?e);
+                })
+                .ok(); // Ignore the result
+        }
 
         Ok(())
     }

@@ -49,6 +49,18 @@ affinity_group_member_list               GET      /v1/affinity-groups/{affinity_
 affinity_group_update                    PUT      /v1/affinity-groups/{affinity_group}
 affinity_group_view                      GET      /v1/affinity-groups/{affinity_group}
 instance_affinity_group_list             GET      /v1/instances/{instance}/affinity-groups
+instance_multicast_group_join            PUT      /v1/instances/{instance}/multicast-groups/{multicast_group}
+instance_multicast_group_leave           DELETE   /v1/instances/{instance}/multicast-groups/{multicast_group}
+instance_multicast_group_list            GET      /v1/instances/{instance}/multicast-groups
+lookup_multicast_group_by_ip             GET      /v1/system/multicast-groups/by-ip/{address}
+multicast_group_create                   POST     /v1/multicast-groups
+multicast_group_delete                   DELETE   /v1/multicast-groups/{multicast_group}
+multicast_group_list                     GET      /v1/multicast-groups
+multicast_group_member_add               POST     /v1/multicast-groups/{multicast_group}/members
+multicast_group_member_list              GET      /v1/multicast-groups/{multicast_group}/members
+multicast_group_member_remove            DELETE   /v1/multicast-groups/{multicast_group}/members/{instance}
+multicast_group_update                   PUT      /v1/multicast-groups/{multicast_group}
+multicast_group_view                     GET      /v1/multicast-groups/{multicast_group}
 probe_create                             POST     /experimental/v1/probes
 probe_delete                             DELETE   /experimental/v1/probes/{probe}
 probe_list                               GET      /experimental/v1/probes
@@ -96,9 +108,6 @@ instance_ephemeral_ip_attach             POST     /v1/instances/{instance}/exter
 instance_ephemeral_ip_detach             DELETE   /v1/instances/{instance}/external-ips/ephemeral
 instance_external_ip_list                GET      /v1/instances/{instance}/external-ips
 instance_list                            GET      /v1/instances
-instance_multicast_group_join            PUT      /v1/instances/{instance}/multicast-groups/{multicast_group}
-instance_multicast_group_leave           DELETE   /v1/instances/{instance}/multicast-groups/{multicast_group}
-instance_multicast_group_list            GET      /v1/instances/{instance}/multicast-groups
 instance_network_interface_create        POST     /v1/network-interfaces
 instance_network_interface_delete        DELETE   /v1/network-interfaces/{interface}
 instance_network_interface_list          GET      /v1/network-interfaces
@@ -121,18 +130,6 @@ login_saml                               POST     /login/{silo_name}/saml/{provi
 API operations found with tag "metrics"
 OPERATION ID                             METHOD   URL PATH
 silo_metric                              GET      /v1/metrics/{metric_name}
-
-API operations found with tag "multicast-groups"
-OPERATION ID                             METHOD   URL PATH
-lookup_multicast_group_by_ip             GET      /v1/system/multicast-groups/by-ip/{address}
-multicast_group_create                   POST     /v1/multicast-groups
-multicast_group_delete                   DELETE   /v1/multicast-groups/{multicast_group}
-multicast_group_list                     GET      /v1/multicast-groups
-multicast_group_member_add               POST     /v1/multicast-groups/{multicast_group}/members
-multicast_group_member_list              GET      /v1/multicast-groups/{multicast_group}/members
-multicast_group_member_remove            DELETE   /v1/multicast-groups/{multicast_group}/members/{instance}
-multicast_group_update                   PUT      /v1/multicast-groups/{multicast_group}
-multicast_group_view                     GET      /v1/multicast-groups/{multicast_group}
 
 API operations found with tag "policy"
 OPERATION ID                             METHOD   URL PATH

@@ -4281,7 +4281,7 @@
     "/v1/instances/{instance}/multicast-groups": {
       "get": {
         "tags": [
-          "instances"
+          "experimental"
         ],
         "summary": "List multicast groups for instance",
         "operationId": "instance_multicast_group_list",
@@ -4327,7 +4327,7 @@
     "/v1/instances/{instance}/multicast-groups/{multicast_group}": {
       "put": {
         "tags": [
-          "instances"
+          "experimental"
         ],
         "summary": "Join multicast group",
         "operationId": "instance_multicast_group_join",
@@ -4380,7 +4380,7 @@
       },
       "delete": {
         "tags": [
-          "instances"
+          "experimental"
         ],
         "summary": "Leave multicast group",
         "operationId": "instance_multicast_group_leave",
@@ -6029,7 +6029,7 @@
     "/v1/multicast-groups": {
       "get": {
         "tags": [
-          "multicast-groups"
+          "experimental"
         ],
         "summary": "List all multicast groups.",
         "operationId": "multicast_group_list",
@@ -6096,7 +6096,7 @@
       },
       "post": {
         "tags": [
-          "multicast-groups"
+          "experimental"
         ],
         "summary": "Create a multicast group.",
         "operationId": "multicast_group_create",
@@ -6144,7 +6144,7 @@
     "/v1/multicast-groups/{multicast_group}": {
       "get": {
         "tags": [
-          "multicast-groups"
+          "experimental"
         ],
         "summary": "Fetch a multicast group.",
         "operationId": "multicast_group_view",
@@ -6188,7 +6188,7 @@
       },
       "put": {
         "tags": [
-          "multicast-groups"
+          "experimental"
         ],
         "summary": "Update a multicast group.",
         "operationId": "multicast_group_update",
@@ -6242,7 +6242,7 @@
       },
       "delete": {
         "tags": [
-          "multicast-groups"
+          "experimental"
         ],
         "summary": "Delete a multicast group.",
         "operationId": "multicast_group_delete",
@@ -6281,7 +6281,7 @@
     "/v1/multicast-groups/{multicast_group}/members": {
       "get": {
         "tags": [
-          "multicast-groups"
+          "experimental"
         ],
         "summary": "List members of a multicast group.",
         "operationId": "multicast_group_member_list",
@@ -6355,7 +6355,7 @@
       },
       "post": {
         "tags": [
-          "multicast-groups"
+          "experimental"
         ],
         "summary": "Add instance to a multicast group.",
         "operationId": "multicast_group_member_add",
@@ -6411,7 +6411,7 @@
     "/v1/multicast-groups/{multicast_group}/members/{instance}": {
       "delete": {
         "tags": [
-          "multicast-groups"
+          "experimental"
         ],
         "summary": "Remove instance from a multicast group.",
         "operationId": "multicast_group_member_remove",
@@ -9672,7 +9672,7 @@
     "/v1/system/multicast-groups/by-ip/{address}": {
       "get": {
         "tags": [
-          "multicast-groups"
+          "experimental"
         ],
         "summary": "Look up multicast group by IP address.",
         "operationId": "lookup_multicast_group_by_ip",

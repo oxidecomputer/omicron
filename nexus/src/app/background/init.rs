@@ -1001,6 +1001,7 @@ impl BackgroundTasksInitializer {
                 datastore.clone(),
                 resolver.clone(),
                 sagas.clone(),
+                args.multicast_enabled,
             )),
             opctx: opctx.child(BTreeMap::new()),
             watchers: vec![],
@@ -1033,6 +1034,8 @@ pub struct BackgroundTasksData {
     pub datastore: Arc<DataStore>,
     /// background task configuration
     pub config: BackgroundTaskConfig,
+    /// whether multicast functionality is enabled (or not)
+    pub multicast_enabled: bool,
     /// rack identifier
     pub rack_id: Uuid,
     /// nexus identifier

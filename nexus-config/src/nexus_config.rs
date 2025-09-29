@@ -853,6 +853,21 @@ impl Default for MulticastGroupReconcilerConfig {
     }
 }
 
+/// TODO: remove this when multicast is implemented end-to-end.
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+pub struct MulticastConfig {
+    /// Whether multicast functionality is enabled or not.
+    ///
+    /// When false, multicast API calls remain accessible but no actual
+    /// multicast operations occur (no switch programming, reconciler disabled).
+    /// Instance sagas will skip multicast operations. This allows gradual
+    /// rollout and testing of multicast configuration.
+    ///
+    /// Default: false (experimental feature, disabled by default)
+    #[serde(default)]
+    pub enabled: bool,
+}
+
 /// Configuration for a nexus server
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct PackageConfig {
@@ -884,6 +899,9 @@ pub struct PackageConfig {
     pub initial_reconfigurator_config: Option<ReconfiguratorConfig>,
     /// Background task configuration
     pub background_tasks: BackgroundTaskConfig,
+    /// Multicast feature configuration
+    #[serde(default)]
+    pub multicast: MulticastConfig,
     /// Default Crucible region allocation strategy
     pub default_region_allocation_strategy: RegionAllocationStrategy,
 }
@@ -1382,6 +1400,7 @@ mod test {
                                 period_secs: Duration::from_secs(60),
                             },
                     },
+                    multicast: MulticastConfig { enabled: false },
                     default_region_allocation_strategy:
                         crate::nexus_config::RegionAllocationStrategy::Random {
                             seed: Some(0)

@@ -150,6 +150,14 @@ async fn sid_leave_multicast_groups(
 
     let instance_id = params.authz_instance.id();
 
+    // Check if multicast is enabled - if not, no members exist to remove
+    if !osagactx.nexus().multicast_enabled() {
+        debug!(osagactx.log(),
+               "multicast not enabled, skipping multicast group member removal";
+               "instance_id" => %instance_id);
+        return Ok(());
+    }
+
     // Mark all multicast group memberships for this instance as deleted
     datastore
         .multicast_group_members_mark_for_removal(&opctx, instance_id)

@@ -137,6 +137,11 @@ impl InstanceUpdaterStatus {
 /// The status of a `multicast_group_reconciler` background task activation.
 #[derive(Default, Serialize, Deserialize, Debug)]
 pub struct MulticastGroupReconcilerStatus {
+    /// Whether the multicast reconciler is disabled due to the feature not
+    /// being enabled.
+    ///
+    /// We use disabled here to match other background task status structs.
+    pub disabled: bool,
     /// Number of multicast groups transitioned from "Creating" to "Active" state.
     pub groups_created: usize,
     /// Number of multicast groups cleaned up (transitioned to "Deleted" state).

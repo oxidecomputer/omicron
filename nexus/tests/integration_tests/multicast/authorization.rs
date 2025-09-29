@@ -20,18 +20,19 @@ use nexus_test_utils::resource_helpers::{
 };
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params::{
-    self as params, InstanceCreate, InstanceNetworkInterfaceAttachment,
-    IpPoolCreate, MulticastGroupCreate, MulticastGroupMemberAdd, ProjectCreate,
+    self, InstanceCreate, InstanceNetworkInterfaceAttachment, IpPoolCreate,
+    MulticastGroupCreate, MulticastGroupMemberAdd, ProjectCreate,
 };
 use nexus_types::external_api::shared::{SiloIdentityMode, SiloRole};
 use nexus_types::external_api::views::{
-    self as views, IpPool, IpPoolRange, IpVersion, MulticastGroup, Silo,
+    self, IpPool, IpPoolRange, IpVersion, MulticastGroup, MulticastGroupMember,
+    Silo,
 };
 use nexus_types::identity::Resource;
 use omicron_common::address::{IpRange, Ipv4Range};
 use omicron_common::api::external::{
-    ByteCount, Hostname, IdentityMetadataCreateParams, InstanceCpuCount,
-    NameOrId,
+    ByteCount, Hostname, IdentityMetadataCreateParams, Instance,
+    InstanceCpuCount, NameOrId,
 };
 
 use super::*;
@@ -89,7 +90,7 @@ async fn test_multicast_group_attach_fail_between_projects(
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
     };
-    let instance: omicron_common::api::external::Instance =
+    let instance: Instance =
         object_create(client, &instance_url, &instance_params).await;
 
     // Try to add the instance from project1 to the multicast group in project2
@@ -347,7 +348,7 @@ async fn test_multicast_group_rbac_permissions(
     .execute()
     .await
     .unwrap()
-    .parsed_body::<nexus_types::external_api::views::MulticastGroupMember>()
+    .parsed_body::<MulticastGroupMember>()
     .unwrap();
 }
 

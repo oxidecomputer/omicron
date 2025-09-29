@@ -1223,6 +1223,36 @@ async fn siu_commit_instance_updates(
 
         nexus.background_tasks.task_v2p_manager.activate();
         nexus.vpc_needed_notify_sleds();
+
+        // If this network config update was due to instance migration (sled change),
+        // update multicast member sled_id for faster convergence
+        if let Some(NetworkConfigUpdate::Update { new_sled_id, .. }) =
+            &update.network_config
+        {
+            if nexus.multicast_enabled() {
+                if let Err(e) = osagactx
+                    .datastore()
+                    .multicast_group_member_update_sled_id(
+                        &opctx,
+                        instance_id,
+                        Some((*new_sled_id).into()),
+                    )
+                    .await
+                {
+                    // The reconciler will fix this later
+                    info!(log,
+                          "instance update: failed to update multicast member sled_id after migration, reconciler will fix";
+                          "instance_id" => %instance_id,
+                          "new_sled_id" => %new_sled_id,
+                          "error" => ?e);
+                } else {
+                    info!(log,
+                          "instance update: updated multicast member sled_id after migration";
+                          "instance_id" => %instance_id,
+                          "new_sled_id" => %new_sled_id);
+                }
+            }
+        }
     }
 
     Ok(())

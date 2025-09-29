@@ -1029,7 +1029,7 @@ pub trait NexusExternalApi {
     #[endpoint {
         method = GET,
         path = "/v1/multicast-groups",
-        tags = ["multicast-groups"],
+        tags = ["experimental"],
     }]
     async fn multicast_group_list(
         rqctx: RequestContext<Self::Context>,
@@ -1040,7 +1040,7 @@ pub trait NexusExternalApi {
     #[endpoint {
         method = POST,
         path = "/v1/multicast-groups",
-        tags = ["multicast-groups"],
+        tags = ["experimental"],
     }]
     async fn multicast_group_create(
         rqctx: RequestContext<Self::Context>,
@@ -1052,7 +1052,7 @@ pub trait NexusExternalApi {
     #[endpoint {
         method = GET,
         path = "/v1/multicast-groups/{multicast_group}",
-        tags = ["multicast-groups"],
+        tags = ["experimental"],
     }]
     async fn multicast_group_view(
         rqctx: RequestContext<Self::Context>,
@@ -1064,7 +1064,7 @@ pub trait NexusExternalApi {
     #[endpoint {
         method = PUT,
         path = "/v1/multicast-groups/{multicast_group}",
-        tags = ["multicast-groups"],
+        tags = ["experimental"],
     }]
     async fn multicast_group_update(
         rqctx: RequestContext<Self::Context>,
@@ -1077,7 +1077,7 @@ pub trait NexusExternalApi {
     #[endpoint {
         method = DELETE,
         path = "/v1/multicast-groups/{multicast_group}",
-        tags = ["multicast-groups"],
+        tags = ["experimental"],
     }]
     async fn multicast_group_delete(
         rqctx: RequestContext<Self::Context>,
@@ -1089,7 +1089,7 @@ pub trait NexusExternalApi {
     #[endpoint {
         method = GET,
         path = "/v1/system/multicast-groups/by-ip/{address}",
-        tags = ["multicast-groups"],
+        tags = ["experimental"],
     }]
     async fn lookup_multicast_group_by_ip(
         rqctx: RequestContext<Self::Context>,
@@ -1100,7 +1100,7 @@ pub trait NexusExternalApi {
     #[endpoint {
         method = GET,
         path = "/v1/multicast-groups/{multicast_group}/members",
-        tags = ["multicast-groups"],
+        tags = ["experimental"],
     }]
     async fn multicast_group_member_list(
         rqctx: RequestContext<Self::Context>,
@@ -1112,7 +1112,7 @@ pub trait NexusExternalApi {
     #[endpoint {
         method = POST,
         path = "/v1/multicast-groups/{multicast_group}/members",
-        tags = ["multicast-groups"],
+        tags = ["experimental"],
     }]
     async fn multicast_group_member_add(
         rqctx: RequestContext<Self::Context>,
@@ -1125,7 +1125,7 @@ pub trait NexusExternalApi {
     #[endpoint {
         method = DELETE,
         path = "/v1/multicast-groups/{multicast_group}/members/{instance}",
-        tags = ["multicast-groups"],
+        tags = ["experimental"],
     }]
     async fn multicast_group_member_remove(
         rqctx: RequestContext<Self::Context>,
@@ -2350,7 +2350,7 @@ pub trait NexusExternalApi {
     #[endpoint {
         method = GET,
         path = "/v1/instances/{instance}/multicast-groups",
-        tags = ["instances"],
+        tags = ["experimental"],
     }]
     async fn instance_multicast_group_list(
         rqctx: RequestContext<Self::Context>,
@@ -2365,7 +2365,7 @@ pub trait NexusExternalApi {
     #[endpoint {
         method = PUT,
         path = "/v1/instances/{instance}/multicast-groups/{multicast_group}",
-        tags = ["instances"],
+        tags = ["experimental"],
     }]
     async fn instance_multicast_group_join(
         rqctx: RequestContext<Self::Context>,
@@ -2377,7 +2377,7 @@ pub trait NexusExternalApi {
     #[endpoint {
         method = DELETE,
         path = "/v1/instances/{instance}/multicast-groups/{multicast_group}",
-        tags = ["instances"],
+        tags = ["experimental"],
     }]
     async fn instance_multicast_group_leave(
         rqctx: RequestContext<Self::Context>,

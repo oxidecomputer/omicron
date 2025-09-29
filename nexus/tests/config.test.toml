@@ -182,6 +182,10 @@ read_only_region_replacement_start.period_secs = 999999
 sp_ereport_ingester.period_secs = 30
 multicast_group_reconciler.period_secs = 60
 
+[multicast]
+# Enable multicast functionality for tests (disabled by default in production)
+enabled = true
+
 [default_region_allocation_strategy]
 # we only have one sled in the test environment, so we need to use the
 # `Random` strategy, instead of `RandomWithDistinctSleds`
