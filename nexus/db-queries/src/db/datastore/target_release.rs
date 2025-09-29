@@ -208,6 +208,7 @@ impl DataStore {
 }
 
 /// Represents information fetched about recent target releases
+#[derive(Debug)]
 pub struct RecentTargetReleases {
     /// distinct target releases found
     pub releases: BTreeSet<TufRepoUuid>,
@@ -221,17 +222,21 @@ pub struct RecentTargetReleases {
 }
 
 #[cfg(test)]
-mod test {
-    use super::*;
+pub(crate) mod test {
+    use crate::db::DataStore;
     use crate::db::model::{Generation, TargetReleaseSource};
     use crate::db::pub_test_utils::TestDatabase;
     use chrono::{TimeDelta, Utc};
+    use nexus_auth::context::OpContext;
+    use nexus_db_model::TargetRelease;
     use omicron_common::api::external::{
         TufArtifactMeta, TufRepoDescription, TufRepoMeta,
     };
     use omicron_common::update::ArtifactId;
     use omicron_test_utils::dev;
+    use omicron_uuid_kinds::TufRepoUuid;
     use semver::Version;
+    use tufaceous_artifact::ArtifactHash;
     use tufaceous_artifact::{ArtifactKind, ArtifactVersion};
 
     #[tokio::test]
@@ -348,6 +353,224 @@ mod test {
             TargetReleaseSource::SystemVersion
         );
         assert_eq!(target_release.tuf_repo_id, Some(tuf_repo_id));
+
+        // Clean up.
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    pub(crate) fn make_test_repo(version: u32) -> TufRepoDescription {
+        // We just need a unique hash for each repo.  We'll key it on the
+        // version for determinism.
+        let version_bytes = version.to_le_bytes();
+        let hash_bytes: [u8; 32] =
+            std::array::from_fn(|i| version_bytes[i % 4]);
+        let hash = ArtifactHash(hash_bytes);
+        let version = semver::Version::new(u64::from(version), 0, 0);
+        let artifact_version = ArtifactVersion::new(version.to_string())
+            .expect("valid artifact version");
+        TufRepoDescription {
+            repo: TufRepoMeta {
+                hash,
+                targets_role_version: 0,
+                valid_until: chrono::Utc::now(),
+                system_version: version,
+                file_name: String::new(),
+            },
+            artifacts: vec![TufArtifactMeta {
+                id: ArtifactId {
+                    name: String::new(),
+                    version: artifact_version,
+                    kind: ArtifactKind::from_static("empty"),
+                },
+                hash,
+                size: 0,
+                board: None,
+                sign: None,
+            }],
+        }
+    }
+
+    pub(crate) async fn make_and_insert(
+        opctx: &OpContext,
+        datastore: &DataStore,
+        version: u32,
+    ) -> TufRepoUuid {
+        let repo = make_test_repo(version);
+        datastore
+            .tuf_repo_insert(opctx, &repo)
+            .await
+            .expect("inserting repo")
+            .recorded
+            .repo
+            .id()
+    }
+
+    #[tokio::test]
+    async fn test_recent_distinct() {
+        let logctx = dev::test_setup_log("target_release_datastore");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // From initial conditions, this should succeed but find nothing of
+        // note.  That's because on a freshly installed system, there's a row in
+        // the target_release table, but it has no system version in it.
+        let generation = datastore
+            .target_release_get_current(opctx)
+            .await
+            .unwrap()
+            .generation
+            .0;
+        let recent = datastore
+            .target_release_fetch_recent_distinct(opctx, 3)
+            .await
+            .unwrap();
+        assert_eq!(recent.count, 3);
+        assert!(recent.releases.is_empty());
+        assert_eq!(recent.target_release_generation, generation);
+
+        // Now insert a TUF repo and try again.  That alone shouldn't change
+        // anything.
+        let repo1id = make_and_insert(opctx, datastore, 1).await;
+        let target_release =
+            datastore.target_release_get_current(opctx).await.unwrap();
+        let last_generation = generation;
+        let generation = target_release.generation.0;
+        let recent = datastore
+            .target_release_fetch_recent_distinct(opctx, 3)
+            .await
+            .unwrap();
+        assert_eq!(recent.count, 3);
+        assert!(recent.releases.is_empty());
+        assert_eq!(last_generation, generation);
+        assert_eq!(recent.target_release_generation, generation);
+
+        // Now insert a target release and try again.
+        let target_release = datastore
+            .target_release_insert(
+                opctx,
+                TargetRelease::new_system_version(
+                    &target_release,
+                    repo1id.into(),
+                ),
+            )
+            .await
+            .unwrap();
+        let last_generation = generation;
+        let generation = target_release.generation.0;
+        assert_ne!(last_generation, generation);
+        let recent = datastore
+            .target_release_fetch_recent_distinct(opctx, 3)
+            .await
+            .unwrap();
+        assert_eq!(recent.count, 3);
+        assert_eq!(recent.releases.len(), 1);
+        assert!(recent.releases.contains(&repo1id));
+        assert_eq!(recent.target_release_generation, generation);
+
+        // Now insert a second distinct target release and try again.
+        let repo2id = make_and_insert(opctx, datastore, 2).await;
+        let target_release = datastore
+            .target_release_insert(
+                opctx,
+                TargetRelease::new_system_version(
+                    &target_release,
+                    repo2id.into(),
+                ),
+            )
+            .await
+            .unwrap();
+        let last_generation = generation;
+        let generation = target_release.generation.0;
+        assert_ne!(last_generation, generation);
+        let recent = datastore
+            .target_release_fetch_recent_distinct(opctx, 3)
+            .await
+            .unwrap();
+        assert_eq!(recent.count, 3);
+        assert_eq!(recent.releases.len(), 2);
+        assert!(recent.releases.contains(&repo1id));
+        assert!(recent.releases.contains(&repo2id));
+        assert_eq!(recent.target_release_generation, generation);
+
+        // If we only look back far enough for one, we'll only find one.
+        let recent = datastore
+            .target_release_fetch_recent_distinct(opctx, 1)
+            .await
+            .unwrap();
+        assert_eq!(recent.count, 1);
+        assert_eq!(recent.releases.len(), 1);
+        assert!(recent.releases.contains(&repo2id));
+        assert_eq!(recent.target_release_generation, generation);
+
+        // Set the target release to the same value again.  We'll use this to
+        // test that it looks back further than two rows when necessary.
+        let target_release = datastore
+            .target_release_insert(
+                opctx,
+                TargetRelease::new_system_version(
+                    &target_release,
+                    repo2id.into(),
+                ),
+            )
+            .await
+            .unwrap();
+        let generation = target_release.generation.0;
+        let recent = datastore
+            .target_release_fetch_recent_distinct(opctx, 3)
+            .await
+            .unwrap();
+        assert_eq!(recent.count, 3);
+        assert_eq!(recent.releases.len(), 2);
+        assert!(recent.releases.contains(&repo1id));
+        assert!(recent.releases.contains(&repo2id));
+        assert_eq!(recent.target_release_generation, generation);
+
+        // If we do that a total of 7 times (so, five more times), it will have
+        // to look back 8 rows to find two distinct releases, and it won't know
+        // if it's looked back far enough.
+        let mut target_release = target_release;
+        for i in 0..6 {
+            target_release = datastore
+                .target_release_insert(
+                    opctx,
+                    TargetRelease::new_system_version(
+                        &target_release,
+                        repo2id.into(),
+                    ),
+                )
+                .await
+                .unwrap();
+            let generation = target_release.generation.0;
+            if i < 5 {
+                let recent = datastore
+                    .target_release_fetch_recent_distinct(opctx, 2)
+                    .await
+                    .unwrap();
+                assert_eq!(recent.count, 2);
+                assert_eq!(recent.releases.len(), 2);
+                assert!(recent.releases.contains(&repo1id));
+                assert!(recent.releases.contains(&repo2id));
+                assert_eq!(recent.target_release_generation, generation);
+            } else {
+                let error = datastore
+                    .target_release_fetch_recent_distinct(opctx, 2)
+                    .await
+                    .unwrap_err();
+                eprintln!("got error (expected one): {}", error);
+                // It'll look further if we're looking for more distinct
+                // releases.
+                let recent = datastore
+                    .target_release_fetch_recent_distinct(opctx, 3)
+                    .await
+                    .unwrap();
+                assert_eq!(recent.count, 3);
+                assert_eq!(recent.releases.len(), 2);
+                assert!(recent.releases.contains(&repo1id));
+                assert!(recent.releases.contains(&repo2id));
+                assert_eq!(recent.target_release_generation, generation);
+            }
+        }
 
         // Clean up.
         db.terminate().await;

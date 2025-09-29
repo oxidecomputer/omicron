@@ -866,69 +866,13 @@ fn display_kind_hash(kind: &str, hash: ArtifactHash) -> String {
 
 #[cfg(test)]
 mod test {
-    use crate::db::DataStore;
     use crate::db::datastore::SQL_BATCH_SIZE;
+    use crate::db::datastore::target_release::test::make_and_insert;
     use crate::db::pub_test_utils::TestDatabase;
-    use nexus_auth::context::OpContext;
     use nexus_db_model::TargetRelease;
-    use omicron_common::api::external::TufArtifactMeta;
-    use omicron_common::api::external::TufRepoDescription;
-    use omicron_common::api::external::TufRepoMeta;
-    use omicron_common::update::ArtifactId;
     use omicron_test_utils::dev;
-    use omicron_uuid_kinds::TufRepoUuid;
     use slog_error_chain::InlineErrorChain;
     use std::collections::BTreeSet;
-    use tufaceous_artifact::ArtifactHash;
-    use tufaceous_artifact::ArtifactKind;
-    use tufaceous_artifact::ArtifactVersion;
-
-    fn make_test_repo(version: u32) -> TufRepoDescription {
-        // We just need a unique hash for each repo.  We'll key it on the
-        // version for determinism.
-        let version_bytes = version.to_le_bytes();
-        let hash_bytes: [u8; 32] =
-            std::array::from_fn(|i| version_bytes[i % 4]);
-        let hash = ArtifactHash(hash_bytes);
-        let version = semver::Version::new(u64::from(version), 0, 0);
-        let artifact_version = ArtifactVersion::new(version.to_string())
-            .expect("valid artifact version");
-        TufRepoDescription {
-            repo: TufRepoMeta {
-                hash,
-                targets_role_version: 0,
-                valid_until: chrono::Utc::now(),
-                system_version: version,
-                file_name: String::new(),
-            },
-            artifacts: vec![TufArtifactMeta {
-                id: ArtifactId {
-                    name: String::new(),
-                    version: artifact_version,
-                    kind: ArtifactKind::from_static("empty"),
-                },
-                hash,
-                size: 0,
-                board: None,
-                sign: None,
-            }],
-        }
-    }
-
-    async fn make_and_insert(
-        opctx: &OpContext,
-        datastore: &DataStore,
-        version: u32,
-    ) -> TufRepoUuid {
-        let repo = make_test_repo(version);
-        datastore
-            .tuf_repo_insert(opctx, &repo)
-            .await
-            .expect("inserting repo")
-            .recorded
-            .repo
-            .id()
-    }
 
     #[tokio::test]
     async fn test_repo_mark_pruned() {
@@ -1126,7 +1070,7 @@ mod test {
         assert!(repos.is_empty());
 
         // Make sure we have more than a page worth of TUF repos.
-        let count = u32::from(SQL_BATCH_SIZE.get()) + 3;
+        let count = SQL_BATCH_SIZE.get() + 3;
         let mut expected_repos = BTreeSet::new();
         for i in 0..count {
             assert!(
