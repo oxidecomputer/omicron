@@ -918,6 +918,9 @@ mod test {
         let datastore =
             cptestctx.server.server_context().nexus.datastore().clone();
 
+        // Create uplinks
+        // We only eagerly populate NAT entries on switches that have uplinks configured, so we need to
+        // do some switch configuration before starting the instance in order to test that section of logic
         let mut uplink0_params = params::SwitchPortSettingsCreate::new(
             IdentityMetadataCreateParams {
                 name: "test-uplink0".parse().unwrap(),
@@ -1011,6 +1014,7 @@ mod test {
             .await
             .expect("unable to update switch1 settings");
 
+        // Shutdown one of the switch daemons
         let switch0_dpd = cptestctx
             .dendrite
             .get_mut(&SwitchLocation::Switch0)
@@ -1048,6 +1052,7 @@ mod test {
             reason: Reason::User,
         };
 
+        // Start an instance
         let dag = create_saga_dag::<SagaInstanceStart>(params).unwrap();
         test_helpers::actions_succeed_idempotently(nexus, dag).await;
 
