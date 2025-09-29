@@ -2628,7 +2628,6 @@ pub(crate) mod test {
     use nexus_types::deployment::OmicronZoneExternalSnatIp;
     use nexus_types::deployment::SledDisk;
     use nexus_types::deployment::TargetReleaseDescription;
-    use nexus_types::deployment::TufRepoPolicy;
     use nexus_types::deployment::blueprint_zone_type;
     use nexus_types::deployment::blueprint_zone_type::InternalDns;
     use nexus_types::external_api::views::PhysicalDiskState;
