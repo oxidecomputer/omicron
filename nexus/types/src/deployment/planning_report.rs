@@ -501,11 +501,144 @@ impl PlanningMupdateOverrideStepReport {
 #[serde(rename_all = "snake_case")]
 #[serde(tag = "type", content = "value")]
 #[cfg_attr(test, derive(test_strategy::Arbitrary))]
-// TODO-K: Separate into enums for each component as suggested in
-// https://github.com/oxidecomputer/omicron/pull/9001#discussion_r2372863166
-// and including more detailed information as suggested in
-// https://github.com/oxidecomputer/omicron/pull/9001#discussion_r2372842378
 pub enum FailedMgsUpdateReason {
+    /// There was a failed Host OS update
+    #[error("failed Host OS update: {0:?}")]
+    HostOs(FailedHostOsUpdateReason),
+    /// There was a failed RoT update
+    #[error("failed RoT update: {0:?}")]
+    Rot(FailedRotUpdateReason),
+    /// There was a failed RoT bootloader update
+    #[error("failed RoT bootloader update: {0:?}")]
+    RotBootloader(FailedRotBootloaderUpdateReason),
+    /// There was a failed SP update
+    #[error("failed SP update: {0:?}")]
+    Sp(FailedSpUpdateReason),
+}
+
+/// Describes the reason why an RoT bootloader failed to update
+#[derive(
+    Error,
+    Debug,
+    Deserialize,
+    Serialize,
+    PartialEq,
+    Eq,
+    Diffable,
+    PartialOrd,
+    JsonSchema,
+    Ord,
+    Clone,
+)]
+#[serde(rename_all = "snake_case")]
+#[serde(tag = "type", content = "value")]
+#[cfg_attr(test, derive(test_strategy::Arbitrary))]
+pub enum FailedRotBootloaderUpdateReason {
+    /// The component's caboose was missing a value for "sign"
+    #[error("caboose for {0:?} is missing sign")]
+    CabooseMissingSign(CabooseWhich),
+    /// The component's caboose was not found in the inventory
+    #[error("caboose for {0:?} is not in inventory")]
+    CabooseNotInInventory(CabooseWhich),
+    /// The version in the caboose or artifact was not able to be parsed
+    #[error("version from caboose {caboose:?} could not be parsed: {err}")]
+    FailedVersionParse { caboose: CabooseWhich, err: String },
+    /// No artifact with the required conditions for the component was found
+    #[error("no matching artifact was found")]
+    NoMatchingArtifactFound,
+    /// The component's corresponding SP was not found in the inventory
+    #[error("corresponding SP is not in inventory")]
+    SpNotInInventory,
+}
+
+/// Describes the reason why an RoT failed to update
+#[derive(
+    Error,
+    Debug,
+    Deserialize,
+    Serialize,
+    PartialEq,
+    Eq,
+    Diffable,
+    PartialOrd,
+    JsonSchema,
+    Ord,
+    Clone,
+)]
+#[serde(rename_all = "snake_case")]
+#[serde(tag = "type", content = "value")]
+#[cfg_attr(test, derive(test_strategy::Arbitrary))]
+pub enum FailedRotUpdateReason {
+    /// The component's caboose was missing a value for "sign"
+    #[error("caboose for {0:?} is missing sign")]
+    CabooseMissingSign(CabooseWhich),
+    /// The component's caboose was not found in the inventory
+    #[error("caboose for {0:?} is not in inventory")]
+    CabooseNotInInventory(CabooseWhich),
+    /// The version in the caboose or artifact was not able to be parsed
+    #[error("version from caboose {caboose:?} could not be parsed: {err}")]
+    FailedVersionParse { caboose: CabooseWhich, err: String },
+    /// No artifact with the required conditions for the component was found
+    #[error("no matching artifact was found")]
+    NoMatchingArtifactFound,
+    /// RoT state was not found in inventory
+    #[error("rot state is not in inventory")]
+    RotStateNotInInventory,
+    /// The component's corresponding SP was not found in the inventory
+    #[error("corresponding SP is not in inventory")]
+    SpNotInInventory,
+}
+
+/// Describes the reason why an SP failed to update
+#[derive(
+    Error,
+    Debug,
+    Deserialize,
+    Serialize,
+    PartialEq,
+    Eq,
+    Diffable,
+    PartialOrd,
+    JsonSchema,
+    Ord,
+    Clone,
+)]
+#[serde(rename_all = "snake_case")]
+#[serde(tag = "type", content = "value")]
+#[cfg_attr(test, derive(test_strategy::Arbitrary))]
+pub enum FailedSpUpdateReason {
+    /// The component's caboose was not found in the inventory
+    #[error("caboose for {0:?} is not in inventory")]
+    CabooseNotInInventory(CabooseWhich),
+    /// The version in the caboose or artifact was not able to be parsed
+    #[error("version from caboose {caboose:?} could not be parsed: {err}")]
+    FailedVersionParse { caboose: CabooseWhich, err: String },
+    /// No artifact with the required conditions for the component was found
+    #[error("no matching artifact was found")]
+    NoMatchingArtifactFound,
+    /// The component's corresponding SP was not found in the inventory
+    #[error("corresponding SP is not in inventory")]
+    SpNotInInventory,
+}
+
+/// Describes the reason why a Host OS failed to update
+#[derive(
+    Error,
+    Debug,
+    Deserialize,
+    Serialize,
+    PartialEq,
+    Eq,
+    Diffable,
+    PartialOrd,
+    JsonSchema,
+    Ord,
+    Clone,
+)]
+#[serde(rename_all = "snake_case")]
+#[serde(tag = "type", content = "value")]
+#[cfg_attr(test, derive(test_strategy::Arbitrary))]
+pub enum FailedHostOsUpdateReason {
     /// The active host phase 1 slot does not match the boot disk
     #[error("active phase 1 slot {0:?} does not match boot disk")]
     ActiveHostPhase1SlotBootDiskMismatch(M2Slot),
@@ -515,9 +648,6 @@ pub enum FailedMgsUpdateReason {
     /// The active host phase 1 slot was not found in inventory
     #[error("active host phase 1 slot is not in inventory")]
     ActiveHostPhase1SlotNotInInventory,
-    /// The component's caboose was missing a value for "sign"
-    #[error("caboose for {0:?} is missing sign")]
-    CabooseMissingSign(CabooseWhich),
     /// The component's caboose was not found in the inventory
     #[error("caboose for {0:?} is not in inventory")]
     CabooseNotInInventory(CabooseWhich),
@@ -530,12 +660,15 @@ pub enum FailedMgsUpdateReason {
     /// Last reconciliation details were not found in inventory
     #[error("sled agent last reconciliation is not in inventory")]
     LastReconciliationNotInInventory,
-    /// No artifact with the required conditions for the component was found
-    #[error("no matching artifact was found")]
-    NoMatchingArtifactFound,
-    /// RoT state was not found in inventory
-    #[error("rot state is not in inventory")]
-    RotStateNotInInventory,
+    /// No artifacts with the required conditions for the component were found
+    #[error("no matching artifacts for phase 1 or 2 were found")]
+    NoMatchingArtifactsFound,
+    /// No artifact with the required conditions for phase 1 was found
+    #[error("no matching artifact for phase 1 was found")]
+    NoMatchingPhase1ArtifactFound,
+    /// No artifact with the required conditions for phase 2 was found
+    #[error("no matching artifact for phase 2 was found")]
+    NoMatchingPhase2ArtifactFound,
     /// Sled agent info was not found in inventory
     #[error("sled agent info is not in inventory")]
     SledAgentInfoNotInInventory,

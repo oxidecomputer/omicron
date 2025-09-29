@@ -12,6 +12,7 @@ use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdateDetails;
 use nexus_types::deployment::PendingMgsUpdateSpDetails;
 use nexus_types::deployment::planning_report::FailedMgsUpdateReason;
+use nexus_types::deployment::planning_report::FailedSpUpdateReason;
 use nexus_types::inventory::BaseboardId;
 use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::Collection;
@@ -65,24 +66,28 @@ pub fn try_make_update_sp(
     // https://github.com/oxidecomputer/omicron/pull/9001#discussion_r2372837627
 ) -> Result<Option<PendingMgsUpdate>, FailedMgsUpdateReason> {
     let Some(sp_info) = inventory.sps.get(baseboard_id) else {
-        return Err(FailedMgsUpdateReason::SpNotInInventory);
+        return Err(FailedMgsUpdateReason::Sp(
+            FailedSpUpdateReason::SpNotInInventory,
+        ));
     };
 
     let Some(active_caboose) =
         inventory.caboose_for(CabooseWhich::SpSlot0, baseboard_id)
     else {
-        return Err(FailedMgsUpdateReason::CabooseNotInInventory(
-            CabooseWhich::SpSlot0,
+        return Err(FailedMgsUpdateReason::Sp(
+            FailedSpUpdateReason::CabooseNotInInventory(CabooseWhich::SpSlot0),
         ));
     };
 
     let expected_active_version = match active_caboose.caboose.version.parse() {
         Ok(v) => v,
         Err(e) => {
-            return Err(FailedMgsUpdateReason::FailedVersionParse {
-                caboose: CabooseWhich::SpSlot0,
-                err: format!("{}", e),
-            });
+            return Err(FailedMgsUpdateReason::Sp(
+                FailedSpUpdateReason::FailedVersionParse {
+                    caboose: CabooseWhich::SpSlot0,
+                    err: format!("{}", e),
+                },
+            ));
         }
     };
 
@@ -124,7 +129,9 @@ pub fn try_make_update_sp(
         })
         .collect();
     if matching_artifacts.is_empty() {
-        return Err(FailedMgsUpdateReason::NoMatchingArtifactFound);
+        return Err(FailedMgsUpdateReason::Sp(
+            FailedSpUpdateReason::NoMatchingArtifactFound,
+        ));
     }
 
     if matching_artifacts.len() > 1 {
@@ -152,10 +159,12 @@ pub fn try_make_update_sp(
         Ok(None) => ExpectedVersion::NoValidVersion,
         Ok(Some(v)) => ExpectedVersion::Version(v),
         Err(e) => {
-            return Err(FailedMgsUpdateReason::FailedVersionParse {
-                caboose: CabooseWhich::SpSlot1,
-                err: format!("{}", e),
-            });
+            return Err(FailedMgsUpdateReason::Sp(
+                FailedSpUpdateReason::FailedVersionParse {
+                    caboose: CabooseWhich::SpSlot1,
+                    err: format!("{}", e),
+                },
+            ));
         }
     };
 

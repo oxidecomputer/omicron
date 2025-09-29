@@ -14,6 +14,7 @@ use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdateDetails;
 use nexus_types::deployment::PendingMgsUpdateRotDetails;
 use nexus_types::deployment::planning_report::FailedMgsUpdateReason;
+use nexus_types::deployment::planning_report::FailedRotUpdateReason;
 use nexus_types::inventory::BaseboardId;
 use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::Collection;
@@ -111,11 +112,15 @@ pub fn try_make_update_rot(
     // https://github.com/oxidecomputer/omicron/pull/9001#discussion_r2372837627
 ) -> Result<Option<PendingMgsUpdate>, FailedMgsUpdateReason> {
     let Some(sp_info) = inventory.sps.get(baseboard_id) else {
-        return Err(FailedMgsUpdateReason::SpNotInInventory);
+        return Err(FailedMgsUpdateReason::Rot(
+            FailedRotUpdateReason::SpNotInInventory,
+        ));
     };
 
     let Some(rot_state) = inventory.rots.get(baseboard_id) else {
-        return Err(FailedMgsUpdateReason::RotStateNotInInventory);
+        return Err(FailedMgsUpdateReason::Rot(
+            FailedRotUpdateReason::RotStateNotInInventory,
+        ));
     };
 
     let active_slot = rot_state.active_slot;
@@ -124,25 +129,27 @@ pub fn try_make_update_rot(
     let Some(active_caboose) =
         inventory.caboose_for(active_caboose_which, baseboard_id)
     else {
-        return Err(FailedMgsUpdateReason::CabooseNotInInventory(
-            active_caboose_which,
+        return Err(FailedMgsUpdateReason::Rot(
+            FailedRotUpdateReason::CabooseNotInInventory(active_caboose_which),
         ));
     };
 
     let expected_active_version = match active_caboose.caboose.version.parse() {
         Ok(v) => v,
         Err(e) => {
-            return Err(FailedMgsUpdateReason::FailedVersionParse {
-                caboose: active_caboose_which,
-                err: format!("{}", e),
-            });
+            return Err(FailedMgsUpdateReason::Rot(
+                FailedRotUpdateReason::FailedVersionParse {
+                    caboose: active_caboose_which,
+                    err: format!("{}", e),
+                },
+            ));
         }
     };
 
     let board = &active_caboose.caboose.board;
     let Some(rkth) = &active_caboose.caboose.sign else {
-        return Err(FailedMgsUpdateReason::CabooseMissingSign(
-            active_caboose_which,
+        return Err(FailedMgsUpdateReason::Rot(
+            FailedRotUpdateReason::CabooseMissingSign(active_caboose_which),
         ));
     };
 
@@ -202,7 +209,9 @@ pub fn try_make_update_rot(
         })
         .collect();
     if matching_artifacts.is_empty() {
-        return Err(FailedMgsUpdateReason::NoMatchingArtifactFound);
+        return Err(FailedMgsUpdateReason::Rot(
+            FailedRotUpdateReason::NoMatchingArtifactFound,
+        ));
     }
 
     if matching_artifacts.len() > 1 {
@@ -238,10 +247,12 @@ pub fn try_make_update_rot(
         Ok(None) => ExpectedVersion::NoValidVersion,
         Ok(Some(v)) => ExpectedVersion::Version(v),
         Err(e) => {
-            return Err(FailedMgsUpdateReason::FailedVersionParse {
-                caboose: inactive_caboose_which,
-                err: format!("{}", e),
-            });
+            return Err(FailedMgsUpdateReason::Rot(
+                FailedRotUpdateReason::FailedVersionParse {
+                    caboose: inactive_caboose_which,
+                    err: format!("{}", e),
+                },
+            ));
         }
     };
 

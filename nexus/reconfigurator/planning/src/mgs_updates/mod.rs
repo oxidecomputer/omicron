@@ -669,7 +669,11 @@ mod test {
     use nexus_types::deployment::PendingMgsUpdates;
     use nexus_types::deployment::TargetReleaseDescription;
     use nexus_types::deployment::planning_report::BlockedMgsUpdate;
+    use nexus_types::deployment::planning_report::FailedHostOsUpdateReason;
     use nexus_types::deployment::planning_report::FailedMgsUpdateReason;
+    use nexus_types::deployment::planning_report::FailedRotBootloaderUpdateReason;
+    use nexus_types::deployment::planning_report::FailedRotUpdateReason;
+    use nexus_types::deployment::planning_report::FailedSpUpdateReason;
     use nexus_types::inventory::BaseboardId;
     use nexus_types::inventory::CabooseWhich;
     use nexus_types::inventory::SpType;
@@ -736,7 +740,9 @@ mod test {
         let expected_blocked_updates = vec![BlockedMgsUpdate {
             baseboard_id: fake_board.clone(),
             component: MgsUpdateComponent::RotBootloader,
-            reason: FailedMgsUpdateReason::SpNotInInventory,
+            reason: FailedMgsUpdateReason::RotBootloader(
+                FailedRotBootloaderUpdateReason::SpNotInInventory,
+            ),
         }];
         assert_eq!(blocked_mgs_updates, expected_blocked_updates);
         assert!(updates.is_empty());
@@ -780,7 +786,9 @@ mod test {
             expected_blocked_updates.push(BlockedMgsUpdate {
                 baseboard_id: baseboard_id.clone(),
                 component: MgsUpdateComponent::Rot,
-                reason: FailedMgsUpdateReason::RotStateNotInInventory,
+                reason: FailedMgsUpdateReason::Rot(
+                    FailedRotUpdateReason::RotStateNotInInventory,
+                ),
             });
         }
         assert_eq!(blocked_mgs_updates, expected_blocked_updates);
@@ -822,8 +830,10 @@ mod test {
             expected_blocked_updates.push(BlockedMgsUpdate {
                 baseboard_id: baseboard_id.clone(),
                 component: MgsUpdateComponent::Sp,
-                reason: FailedMgsUpdateReason::CabooseNotInInventory(
-                    CabooseWhich::SpSlot0,
+                reason: FailedMgsUpdateReason::Sp(
+                    FailedSpUpdateReason::CabooseNotInInventory(
+                        CabooseWhich::SpSlot0,
+                    ),
                 ),
             });
         }
@@ -866,7 +876,9 @@ mod test {
                 expected_blocked_updates.push(BlockedMgsUpdate {
                     baseboard_id: baseboard_id.clone(),
                     component: MgsUpdateComponent::HostOs,
-                    reason: FailedMgsUpdateReason::SledAgentInfoNotInInventory,
+                    reason: FailedMgsUpdateReason::HostOs(
+                        FailedHostOsUpdateReason::SledAgentInfoNotInInventory,
+                    ),
                 });
             }
         }

@@ -12,6 +12,7 @@ use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdateDetails;
 use nexus_types::deployment::PendingMgsUpdateRotBootloaderDetails;
 use nexus_types::deployment::planning_report::FailedMgsUpdateReason;
+use nexus_types::deployment::planning_report::FailedRotBootloaderUpdateReason;
 use nexus_types::inventory::BaseboardId;
 use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::Collection;
@@ -66,31 +67,39 @@ pub fn try_make_update_rot_bootloader(
     // https://github.com/oxidecomputer/omicron/pull/9001#discussion_r2372837627
 ) -> Result<Option<PendingMgsUpdate>, FailedMgsUpdateReason> {
     let Some(sp_info) = inventory.sps.get(baseboard_id) else {
-        return Err(FailedMgsUpdateReason::SpNotInInventory);
+        return Err(FailedMgsUpdateReason::RotBootloader(
+            FailedRotBootloaderUpdateReason::SpNotInInventory,
+        ));
     };
 
     let Some(stage0_caboose) =
         inventory.caboose_for(CabooseWhich::Stage0, baseboard_id)
     else {
-        return Err(FailedMgsUpdateReason::CabooseNotInInventory(
-            CabooseWhich::Stage0,
+        return Err(FailedMgsUpdateReason::RotBootloader(
+            FailedRotBootloaderUpdateReason::CabooseNotInInventory(
+                CabooseWhich::Stage0,
+            ),
         ));
     };
 
     let expected_stage0_version = match stage0_caboose.caboose.version.parse() {
         Ok(v) => v,
         Err(e) => {
-            return Err(FailedMgsUpdateReason::FailedVersionParse {
-                caboose: CabooseWhich::Stage0,
-                err: format!("{}", e),
-            });
+            return Err(FailedMgsUpdateReason::RotBootloader(
+                FailedRotBootloaderUpdateReason::FailedVersionParse {
+                    caboose: CabooseWhich::Stage0,
+                    err: format!("{}", e),
+                },
+            ));
         }
     };
 
     let board = &stage0_caboose.caboose.board;
     let Some(rkth) = &stage0_caboose.caboose.sign else {
-        return Err(FailedMgsUpdateReason::CabooseMissingSign(
-            CabooseWhich::Stage0,
+        return Err(FailedMgsUpdateReason::RotBootloader(
+            FailedRotBootloaderUpdateReason::CabooseMissingSign(
+                CabooseWhich::Stage0,
+            ),
         ));
     };
 
@@ -143,7 +152,9 @@ pub fn try_make_update_rot_bootloader(
         })
         .collect();
     if matching_artifacts.is_empty() {
-        return Err(FailedMgsUpdateReason::NoMatchingArtifactFound);
+        return Err(FailedMgsUpdateReason::RotBootloader(
+            FailedRotBootloaderUpdateReason::NoMatchingArtifactFound,
+        ));
     }
 
     if matching_artifacts.len() > 1 {
@@ -175,10 +186,12 @@ pub fn try_make_update_rot_bootloader(
         Ok(None) => ExpectedVersion::NoValidVersion,
         Ok(Some(v)) => ExpectedVersion::Version(v),
         Err(e) => {
-            return Err(FailedMgsUpdateReason::FailedVersionParse {
-                caboose: CabooseWhich::Stage0Next,
-                err: format!("{}", e),
-            });
+            return Err(FailedMgsUpdateReason::RotBootloader(
+                FailedRotBootloaderUpdateReason::FailedVersionParse {
+                    caboose: CabooseWhich::Stage0Next,
+                    err: format!("{}", e),
+                },
+            ));
         }
     };
 
