@@ -6473,7 +6473,7 @@ dependencies = [
  "tokio",
  "tufaceous-artifact",
  "uuid",
- "vergen-gitcl",
+ "vergen-git2",
 ]
 
 [[package]]
@@ -8220,7 +8220,7 @@ dependencies = [
  "update-engine",
  "url",
  "uuid",
- "vergen-gitcl",
+ "vergen-git2",
 ]
 
 [[package]]
@@ -15185,20 +15185,6 @@ dependencies = [
  "anyhow",
  "derive_builder",
  "git2",
- "rustversion",
- "time",
- "vergen",
- "vergen-lib",
-]
-
-[[package]]
-name = "vergen-gitcl"
-version = "1.0.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b9dfc1de6eb2e08a4ddf152f1b179529638bedc0ea95e6d667c014506377aefe"
-dependencies = [
- "anyhow",
- "derive_builder",
  "rustversion",
  "time",
  "vergen",

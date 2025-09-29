@@ -774,7 +774,7 @@ url = "2.5.4"
 usdt = "0.5.0"
 uuid = { version = "1.17.0", features = ["serde", "v4"] }
 uzers = "0.12"
-vergen-gitcl = { version = "1.0.8" }
+vergen-git2 = { version = "1.0.7" }
 walkdir = "2.5"
 whoami = "1.5"
 wicket = { path = "wicket" }
