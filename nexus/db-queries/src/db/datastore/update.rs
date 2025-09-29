@@ -17,8 +17,8 @@ use crate::db::pagination::paginated;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
 use diesel::result::Error as DieselError;
+use nexus_db_errors::OptionalError;
 use nexus_db_errors::{ErrorHandler, public_error_from_diesel};
-use nexus_db_errors::{OptionalError, TransactionError};
 use nexus_db_lookup::DbConnection;
 use nexus_db_model::{
     ArtifactHash, TargetRelease, TufArtifact, TufRepo, TufRepoDescription,
@@ -311,16 +311,16 @@ impl DataStore {
                             .first_async(&txn)
                             .await
                             .map_err(|e| {
-                                public_error_from_diesel(
-                                    e,
-                                    ErrorHandler::Server,
-                                )
-                            })
-                            .internal_context(
-                                "fetching latest target_release generation",
-                            )
-                            .map_err(|e| {
-                                error.bail(TransactionError::CustomError(e))
+                                error.bail_retryable_or_else(e, |e| {
+                                    public_error_from_diesel(
+                                        e,
+                                        ErrorHandler::Server,
+                                    )
+                                    .internal_context(
+                                        "fetching latest target_release \
+                                         generation",
+                                    )
+                                })
                             })?
                             .generation
                             .0
@@ -328,15 +328,13 @@ impl DataStore {
                     if target_release_generation_now
                         != recent_releases.target_release_generation
                     {
-                        return Err(error.bail(TransactionError::CustomError(
-                            Error::conflict(format!(
-                                "bailing out to avoid risk of marking current \
+                        return Err(error.bail(Error::conflict(format!(
+                            "bailing out to avoid risk of marking current \
                                  target release pruned: target release has \
                                  changed since check (currently {}, was {})",
-                                target_release_generation_now,
-                                recent_releases.target_release_generation
-                            )),
-                        )));
+                            target_release_generation_now,
+                            recent_releases.target_release_generation
+                        ))));
                     }
 
                     // If the TUF repo generation has changed, bail out.
@@ -346,24 +344,25 @@ impl DataStore {
                     // instances don't concurrently decide to prune a lot more
                     // than either of them would on their own because they chose
                     // different repos to keep.
-                    let tuf_generation_now = get_generation(&txn)
-                        .await
-                        .map_err(|e| {
-                            public_error_from_diesel(e, ErrorHandler::Server)
-                        })
-                        .internal_context("fetching latest TUF generation")
-                        .map_err(|e| {
-                            error.bail(TransactionError::CustomError(e))
+                    let tuf_generation_now =
+                        get_generation(&txn).await.map_err(|e| {
+                            error.bail_retryable_or_else(e, |e| {
+                                public_error_from_diesel(
+                                    e,
+                                    ErrorHandler::Server,
+                                )
+                                .internal_context(
+                                    "fetching latest TUF generation",
+                                )
+                            })
                         })?;
                     if tuf_generation_now != initial_tuf_generation {
-                        return Err(error.bail(TransactionError::CustomError(
-                        Error::conflict(format!(
+                        return Err(error.bail(Error::conflict(format!(
                             "bailing out to avoid risk of pruning too much: \
                              tuf repo generation has changed since check \
                              (currently {}, was {})",
                             tuf_generation_now, initial_tuf_generation,
-                        )),
-                    )));
+                        ))));
                     }
 
                     // Try to mark the repo pruned.
@@ -375,11 +374,13 @@ impl DataStore {
                         .execute_async(&txn)
                         .await
                         .map_err(|e| {
-                            public_error_from_diesel(e, ErrorHandler::Server)
-                        })
-                        .internal_context("marking TUF repo pruned")
-                        .map_err(|e| {
-                            error.bail(TransactionError::CustomError(e))
+                            error.bail_retryable_or_else(e, |e| {
+                                public_error_from_diesel(
+                                    e,
+                                    ErrorHandler::Server,
+                                )
+                                .internal_context("marking TUF repo pruned")
+                            })
                         })?;
 
                     // If we made any changes, bump the TUF repo generation.
@@ -392,15 +393,14 @@ impl DataStore {
                             tuf_generation_now.next().into(),
                         )
                         .await
-                        .map_err(|error| {
-                            public_error_from_diesel(
-                                error,
-                                ErrorHandler::Server,
-                            )
-                        })
-                        .internal_context("bumping TUF generation")
                         .map_err(|e| {
-                            error.bail(TransactionError::CustomError(e))
+                            error.bail_retryable_or_else(e, |e| {
+                                public_error_from_diesel(
+                                    e,
+                                    ErrorHandler::Server,
+                                )
+                                .internal_context("bumping TUF generation")
+                            })
                         })?;
                     }
 
@@ -409,7 +409,7 @@ impl DataStore {
             })
             .await
             .map_err(|e| match error.take() {
-                Some(err) => err.into(),
+                Some(err) => err,
                 None => public_error_from_diesel(e, ErrorHandler::Server),
             })
     }
