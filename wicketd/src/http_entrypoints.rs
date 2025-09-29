@@ -779,7 +779,7 @@ impl WicketdApi for WicketdApiImpl {
 
         apictx
             .mgs_client
-            .ignition_command(type_, slot, command)
+            .ignition_command(&type_, slot, command)
             .await
             .map_err(http_error_from_client_error)?;
 

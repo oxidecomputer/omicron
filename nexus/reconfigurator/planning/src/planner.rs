@@ -20,7 +20,6 @@ use crate::mgs_updates::plan_mgs_updates;
 use crate::planner::image_source::NoopConvertHostPhase2Contents;
 use crate::planner::image_source::NoopConvertZoneStatus;
 use crate::planner::omicron_zone_placement::PlacementError;
-use gateway_client::types::SpType;
 use iddqd::IdOrdMap;
 use itertools::Itertools;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryResult;
@@ -56,6 +55,7 @@ use nexus_types::external_api::views::PhysicalDiskPolicy;
 use nexus_types::external_api::views::SledPolicy;
 use nexus_types::external_api::views::SledState;
 use nexus_types::inventory::Collection;
+use nexus_types::inventory::SpType;
 use omicron_common::api::external::Generation;
 use omicron_common::disk::M2Slot;
 use omicron_common::policy::BOUNDARY_NTP_REDUNDANCY;
@@ -5267,9 +5267,10 @@ pub(crate) mod test {
         );
         assert_eq!(bp4_config.keepers, bp3_config.keepers);
         assert_eq!(bp4_config.servers, bp3_config.servers);
+        // The blueprint shouldn't update solely because the log index changed
         assert_eq!(
             bp4_config.highest_seen_keeper_leader_committed_log_index,
-            1
+            0
         );
 
         // Let's bump the clickhouse target to 5 via policy so that we can add
@@ -5431,9 +5432,10 @@ pub(crate) mod test {
         );
         assert_eq!(bp8_config.keepers, bp7_config.keepers);
         assert_eq!(bp7_config.keepers.len(), target_keepers as usize);
+        // The blueprint should not change solely due to the log index in inventory changing
         assert_eq!(
             bp8_config.highest_seen_keeper_leader_committed_log_index,
-            3
+            2
         );
 
         logctx.cleanup_successful();

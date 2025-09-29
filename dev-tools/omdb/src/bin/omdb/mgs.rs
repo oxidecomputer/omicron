@@ -20,9 +20,9 @@ use gateway_client::types::SpIgnition;
 use gateway_client::types::SpIgnitionInfo;
 use gateway_client::types::SpIgnitionSystemType;
 use gateway_client::types::SpState;
-use gateway_client::types::SpType;
 use gateway_types::rot::RotSlot;
 use internal_dns_types::names::ServiceName;
+use nexus_types::inventory::SpType;
 use tabled::Tabled;
 
 mod dashboard;
@@ -149,7 +149,7 @@ async fn cmd_mgs_inventory(
             }
         }))
         .then(async move |sp_id| {
-            c.sp_get(sp_id.type_, sp_id.slot)
+            c.sp_get(&sp_id.type_, sp_id.slot)
                 .await
                 .with_context(|| format!("fetching info about SP {:?}", sp_id))
                 .map(|s| (sp_id, s))
@@ -479,7 +479,7 @@ async fn show_sp_details(
     }
 
     let component_list = mgs_client
-        .sp_component_list(sp_id.type_, sp_id.slot)
+        .sp_component_list(&sp_id.type_, sp_id.slot)
         .await
         .with_context(|| format!("fetching components for SP {:?}", sp_id));
     let list = match component_list {
@@ -568,7 +568,7 @@ async fn show_sp_details(
         for i in 0..1 {
             let r = mgs_client
                 .sp_component_caboose_get(
-                    sp_id.type_,
+                    &sp_id.type_,
                     sp_id.slot,
                     &c.component,
                     i,

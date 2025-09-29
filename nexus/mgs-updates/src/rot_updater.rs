@@ -17,8 +17,8 @@ use gateway_client::SpComponent;
 use gateway_client::types::GetRotBootInfoParams;
 use gateway_client::types::RotState;
 use gateway_client::types::SpComponentFirmwareSlot;
-use gateway_client::types::SpType;
 use gateway_messages::RotBootInfo;
+use gateway_types::component::SpType;
 use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdateRotDetails;
 use slog::Logger;
@@ -55,7 +55,7 @@ impl SpComponentUpdateHelperImpl for ReconfiguratorRotUpdater {
             // Verify that the device is the one we think it is.
             let state = mgs_clients
             .try_all_serially(log, move |mgs_client| async move {
-                mgs_client.sp_get(update.sp_type, update.slot_id).await
+                mgs_client.sp_get(&update.sp_type, update.slot_id).await
             })
             .await?
             .into_inner();
@@ -107,7 +107,7 @@ impl SpComponentUpdateHelperImpl for ReconfiguratorRotUpdater {
             .try_all_serially(log, move |mgs_client| async move {
                 mgs_client
                     .sp_component_caboose_get(
-                        update.sp_type,
+                        &update.sp_type,
                         update.slot_id,
                         SpComponent::ROT.const_as_str(),
                         active.to_u16(),
@@ -157,7 +157,7 @@ impl SpComponentUpdateHelperImpl for ReconfiguratorRotUpdater {
                 .try_all_serially(log, move |mgs_client| async move {
                     mgs_client
                         .sp_component_caboose_get(
-                            update.sp_type,
+                            &update.sp_type,
                             update.slot_id,
                             SpComponent::ROT.const_as_str(),
                             expected_active_slot.slot().toggled().to_u16(),
@@ -179,7 +179,7 @@ impl SpComponentUpdateHelperImpl for ReconfiguratorRotUpdater {
             };
             found_version.matches(expected_inactive_version)?;
 
-            // If transient boot is being used, the persistent preference is not going to match 
+            // If transient boot is being used, the persistent preference is not going to match
             // the active slot. At the moment, this mismatch can also mean one of the partitions
             // had a bad signature check. We don't have a way to tell this appart yet.
             // https://github.com/oxidecomputer/hubris/issues/2066
@@ -223,7 +223,7 @@ impl SpComponentUpdateHelperImpl for ReconfiguratorRotUpdater {
                     let persist = true;
                     mgs_client
                         .sp_component_active_slot_set(
-                            update.sp_type,
+                            &update.sp_type,
                             update.slot_id,
                             SpComponent::ROT.const_as_str(),
                             persist,
@@ -242,7 +242,7 @@ impl SpComponentUpdateHelperImpl for ReconfiguratorRotUpdater {
                 .try_all_serially(log, move |mgs_client| async move {
                     mgs_client
                         .sp_component_reset(
-                            update.sp_type,
+                            &update.sp_type,
                             update.slot_id,
                             SpComponent::ROT.const_as_str(),
                         )
@@ -281,7 +281,7 @@ pub async fn wait_for_boot_info(
             .try_all_serially(log, |mgs_client| async move {
                 mgs_client
                     .sp_rot_boot_info(
-                        sp_type,
+                        &sp_type,
                         sp_slot,
                         SpComponent::ROT.const_as_str(),
                         &GetRotBootInfoParams {

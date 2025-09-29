@@ -6,7 +6,6 @@
 
 use super::MgsUpdateStatus;
 use super::MgsUpdateStatusError;
-use gateway_client::types::SpType;
 use nexus_types::deployment::BlueprintArtifactVersion;
 use nexus_types::deployment::BlueprintHostPhase2DesiredContents;
 use nexus_types::deployment::PendingMgsUpdate;
@@ -15,6 +14,7 @@ use nexus_types::deployment::PendingMgsUpdateHostPhase1Details;
 use nexus_types::deployment::planning_report::FailedMgsUpdateReason;
 use nexus_types::inventory::BaseboardId;
 use nexus_types::inventory::Collection;
+use nexus_types::inventory::SpType;
 use omicron_common::api::external::TufArtifactMeta;
 use omicron_common::api::external::TufRepoDescription;
 use omicron_common::disk::M2Slot;
@@ -469,13 +469,13 @@ mod tests {
     use dropshot::ConfigLogging;
     use dropshot::ConfigLoggingLevel;
     use dropshot::test_util::LogContext;
-    use gateway_client::types::SpType;
     use nexus_types::deployment::BlueprintArtifactVersion;
     use nexus_types::deployment::BlueprintHostPhase2DesiredContents;
     use nexus_types::deployment::PendingMgsUpdateDetails;
     use nexus_types::deployment::PendingMgsUpdateHostPhase1Details;
     use nexus_types::deployment::PendingMgsUpdates;
     use nexus_types::deployment::TargetReleaseDescription;
+    use nexus_types::inventory::SpType;
     use omicron_common::disk::M2Slot;
     use std::collections::BTreeSet;
 

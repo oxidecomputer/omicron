@@ -661,7 +661,6 @@ mod test {
     use super::test_helpers::TestBoards;
     use dropshot::ConfigLogging;
     use dropshot::ConfigLoggingLevel;
-    use gateway_client::types::SpType;
     use iddqd::IdOrdMap;
     use nexus_types::deployment::ExpectedVersion;
     use nexus_types::deployment::MgsUpdateComponent;
@@ -673,6 +672,7 @@ mod test {
     use nexus_types::deployment::planning_report::FailedMgsUpdateReason;
     use nexus_types::inventory::BaseboardId;
     use nexus_types::inventory::CabooseWhich;
+    use nexus_types::inventory::SpType;
     use omicron_test_utils::dev::LogContext;
     use std::collections::BTreeSet;
     use std::sync::Arc;
