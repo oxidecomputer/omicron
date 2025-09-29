@@ -14,7 +14,7 @@ use crate::db::datastore::target_release::RecentTargetReleases;
 use crate::db::model::SemverVersion;
 use crate::db::pagination::Paginator;
 use crate::db::pagination::paginated;
-use async_bb8_diesel::{AsyncConnection, AsyncRunQueryDsl};
+use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
 use diesel::result::Error as DieselError;
 use nexus_db_errors::{ErrorHandler, public_error_from_diesel};
@@ -292,98 +292,126 @@ impl DataStore {
 
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
         let conn = self.pool_connection_authorized(opctx).await?;
-        conn.transaction_async(|txn| async move {
-            // If the target release generation has changed, bail out.  This
-            // means someone has changed the target release, which means they
-            // may have set it to the repo we're trying to prune.  (This check
-            // could be more fine-grained, but this is adequate for now)
-            let target_release_generation_now = {
-                use nexus_db_schema::schema::target_release::dsl;
-                dsl::target_release
-                    .select(TargetRelease::as_select())
-                    .order_by(dsl::generation.desc())
-                    .limit(1)
-                    .first_async(&txn)
-                    .await
-                    .map_err(|err| {
-                        public_error_from_diesel(err, ErrorHandler::Server)
-                    })
-                    .internal_context(
-                        "fetching latest target_release generation",
-                    )?
-                    .generation
-                    .0
-            };
-            if target_release_generation_now
-                != recent_releases.target_release_generation
-            {
-                return Err(TransactionError::CustomError(Error::conflict(
-                    format!(
-                        "bailing out to avoid risk of marking current target \
-                         release pruned: target release has changed since \
-                         check (currently {}, was {})",
-                        target_release_generation_now,
-                        recent_releases.target_release_generation
-                    ),
-                )));
-            }
+        let error = OptionalError::new();
+        self.transaction_retry_wrapper("tuf_repo_mark_pruned")
+            .transaction(&conn, |txn| {
+                let error = error.clone();
+                async move {
+                    // If the target release generation has changed, bail out.
+                    // This means someone has changed the target release, which
+                    // means they may have set it to the repo we're trying to
+                    // prune.  (This check could be more fine-grained, but this
+                    // is adequate for now)
+                    let target_release_generation_now = {
+                        use nexus_db_schema::schema::target_release::dsl;
+                        dsl::target_release
+                            .select(TargetRelease::as_select())
+                            .order_by(dsl::generation.desc())
+                            .limit(1)
+                            .first_async(&txn)
+                            .await
+                            .map_err(|e| {
+                                public_error_from_diesel(
+                                    e,
+                                    ErrorHandler::Server,
+                                )
+                            })
+                            .internal_context(
+                                "fetching latest target_release generation",
+                            )
+                            .map_err(|e| {
+                                error.bail(TransactionError::CustomError(e))
+                            })?
+                            .generation
+                            .0
+                    };
+                    if target_release_generation_now
+                        != recent_releases.target_release_generation
+                    {
+                        return Err(error.bail(TransactionError::CustomError(
+                            Error::conflict(format!(
+                                "bailing out to avoid risk of marking current \
+                                 target release pruned: target release has \
+                                 changed since check (currently {}, was {})",
+                                target_release_generation_now,
+                                recent_releases.target_release_generation
+                            )),
+                        )));
+                    }
 
-            // If the TUF repo generation has changed, bail out.  Someone else
-            // is adding or pruning repos.  Force the caller to re-evaluate.
-            // This is probably more conservative than necessary, but ensures
-            // that two Nexus instances don't concurrently decide to prune a lot
-            // more than either of them would on their own because they chose
-            // different repos to keep.
-            let tuf_generation_now =
-                get_generation(&txn).await.map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                })?;
-            if tuf_generation_now != initial_tuf_generation {
-                return Err(TransactionError::CustomError(Error::conflict(
-                    format!(
-                        "bailing out to avoid risk of pruning too much: \
-                         tuf repo generation has changed since check \
-                         (currently {}, was {})",
-                        tuf_generation_now, initial_tuf_generation,
-                    ),
-                )));
-            }
+                    // If the TUF repo generation has changed, bail out.
+                    // Someone else is adding or pruning repos.  Force the
+                    // caller to re-evaluate.  This is probably more
+                    // conservative than necessary, but ensures that two Nexus
+                    // instances don't concurrently decide to prune a lot more
+                    // than either of them would on their own because they chose
+                    // different repos to keep.
+                    let tuf_generation_now = get_generation(&txn)
+                        .await
+                        .map_err(|e| {
+                            public_error_from_diesel(e, ErrorHandler::Server)
+                        })
+                        .internal_context("fetching latest TUF generation")
+                        .map_err(|e| {
+                            error.bail(TransactionError::CustomError(e))
+                        })?;
+                    if tuf_generation_now != initial_tuf_generation {
+                        return Err(error.bail(TransactionError::CustomError(
+                        Error::conflict(format!(
+                            "bailing out to avoid risk of pruning too much: \
+                             tuf repo generation has changed since check \
+                             (currently {}, was {})",
+                            tuf_generation_now, initial_tuf_generation,
+                        )),
+                    )));
+                    }
 
-            // Try to mark the repo pruned.
-            use nexus_db_schema::schema::tuf_repo::dsl;
-            let count = diesel::update(dsl::tuf_repo)
-                .filter(dsl::id.eq(to_db_typed_uuid(tuf_repo_id)))
-                .filter(dsl::time_pruned.is_null())
-                .set(dsl::time_pruned.eq(chrono::Utc::now()))
-                .execute_async(&txn)
-                .await
-                .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
-                .internal_context("marking TUF repo pruned")?;
+                    // Try to mark the repo pruned.
+                    use nexus_db_schema::schema::tuf_repo::dsl;
+                    let count = diesel::update(dsl::tuf_repo)
+                        .filter(dsl::id.eq(to_db_typed_uuid(tuf_repo_id)))
+                        .filter(dsl::time_pruned.is_null())
+                        .set(dsl::time_pruned.eq(chrono::Utc::now()))
+                        .execute_async(&txn)
+                        .await
+                        .map_err(|e| {
+                            public_error_from_diesel(e, ErrorHandler::Server)
+                        })
+                        .internal_context("marking TUF repo pruned")
+                        .map_err(|e| {
+                            error.bail(TransactionError::CustomError(e))
+                        })?;
 
-            // If we made any changes, bump the TUF repo generation.  This is
-            // necessary because that generation covers the set of TUF repos
-            // whose artifacts should be replicated.
-            if count > 0 {
-                put_generation(
-                    &txn,
-                    tuf_generation_now.into(),
-                    tuf_generation_now.next().into(),
-                )
-                .await
-                .map_err(|error| {
-                    public_error_from_diesel(error, ErrorHandler::Server)
-                })?;
-            }
+                    // If we made any changes, bump the TUF repo generation.
+                    // This is necessary because that generation covers the set
+                    // of TUF repos whose artifacts should be replicated.
+                    if count > 0 {
+                        put_generation(
+                            &txn,
+                            tuf_generation_now.into(),
+                            tuf_generation_now.next().into(),
+                        )
+                        .await
+                        .map_err(|error| {
+                            public_error_from_diesel(
+                                error,
+                                ErrorHandler::Server,
+                            )
+                        })
+                        .internal_context("bumping TUF generation")
+                        .map_err(|e| {
+                            error.bail(TransactionError::CustomError(e))
+                        })?;
+                    }
 
-            Ok(())
-        })
-        .await
-        .map_err(|error: TransactionError<Error>| match error {
-            TransactionError::CustomError(error) => error,
-            TransactionError::Database(error) => {
-                public_error_from_diesel(error, ErrorHandler::Server)
-            }
-        })
+                    Ok(())
+                }
+            })
+            .await
+            .map_err(|e| match error.take() {
+                Some(err) => err.into(),
+                None => public_error_from_diesel(e, ErrorHandler::Server),
+            })
     }
 
     /// Returns the current TUF repo generation number.
