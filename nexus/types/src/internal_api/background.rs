@@ -387,11 +387,23 @@ pub enum TufArtifactReplicationOperation {
 
 #[derive(Debug, Serialize)]
 pub struct TufRepoPrunerStatus {
-    pub repos_keep: IdOrdMap<TufRepoInfo>,
-    pub repos_prune: IdOrdMap<TufRepoInfo>,
-    pub warnings: Vec<String>,
+    // Input
+    /// how many recent releases we're configured to keep
     pub nkeep_recent_releases: u8,
+    /// how many recent uploads we're configured to keep
     pub nkeep_recent_uploads: u8,
+
+    // Output
+    /// repos that we're keeping because they're a recent target release
+    pub repos_keep_target_release: IdOrdMap<TufRepoInfo>,
+    /// repos that we're keeping because they were recently uploaded
+    pub repos_keep_recent_uploads: IdOrdMap<TufRepoInfo>,
+    /// repo that we're pruning
+    pub repo_prune: Option<TufRepoInfo>,
+    /// other repos that were eligible for pruning
+    pub other_repos_eligible_to_prune: IdOrdMap<TufRepoInfo>,
+    /// runtime warnings while attempting to prune repos
+    pub warnings: Vec<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
