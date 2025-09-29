@@ -631,7 +631,6 @@ fn try_make_update(
             Err(e) => {
                 pending_actions.add_blocked_update(BlockedMgsUpdate {
                     baseboard_id: baseboard_id.clone(),
-                    component,
                     reason: e,
                 });
                 break;
@@ -663,7 +662,6 @@ mod test {
     use dropshot::ConfigLoggingLevel;
     use iddqd::IdOrdMap;
     use nexus_types::deployment::ExpectedVersion;
-    use nexus_types::deployment::MgsUpdateComponent;
     use nexus_types::deployment::PendingMgsUpdateDetails;
     use nexus_types::deployment::PendingMgsUpdateSpDetails;
     use nexus_types::deployment::PendingMgsUpdates;
@@ -739,7 +737,6 @@ mod test {
         // single entry as there is only a single fake board.
         let expected_blocked_updates = vec![BlockedMgsUpdate {
             baseboard_id: fake_board.clone(),
-            component: MgsUpdateComponent::RotBootloader,
             reason: FailedMgsUpdateReason::RotBootloader(
                 FailedRotBootloaderUpdateReason::SpNotInInventory,
             ),
@@ -785,7 +782,6 @@ mod test {
         for baseboard_id in &collection.baseboards {
             expected_blocked_updates.push(BlockedMgsUpdate {
                 baseboard_id: baseboard_id.clone(),
-                component: MgsUpdateComponent::Rot,
                 reason: FailedMgsUpdateReason::Rot(
                     FailedRotUpdateReason::RotStateNotInInventory,
                 ),
@@ -829,7 +825,6 @@ mod test {
         for baseboard_id in &collection.baseboards {
             expected_blocked_updates.push(BlockedMgsUpdate {
                 baseboard_id: baseboard_id.clone(),
-                component: MgsUpdateComponent::Sp,
                 reason: FailedMgsUpdateReason::Sp(
                     FailedSpUpdateReason::CabooseNotInInventory(
                         CabooseWhich::SpSlot0,
@@ -875,7 +870,6 @@ mod test {
             if baseboard_id.part_number == "dummy_sled" {
                 expected_blocked_updates.push(BlockedMgsUpdate {
                     baseboard_id: baseboard_id.clone(),
-                    component: MgsUpdateComponent::HostOs,
                     reason: FailedMgsUpdateReason::HostOs(
                         FailedHostOsUpdateReason::SledAgentInfoNotInInventory,
                     ),

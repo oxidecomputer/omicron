@@ -10,7 +10,6 @@ use super::BlueprintZoneImageSource;
 use super::CockroachDbPreserveDowngrade;
 use super::PendingMgsUpdates;
 use super::PlannerConfig;
-use crate::deployment::MgsUpdateComponent;
 use crate::inventory::BaseboardId;
 use crate::inventory::CabooseWhich;
 
@@ -695,8 +694,6 @@ pub enum FailedHostOsUpdateReason {
 pub struct BlockedMgsUpdate {
     /// id of the baseboard that we attempted to update
     pub baseboard_id: Arc<BaseboardId>,
-    /// type of SP component that we attempted to update
-    pub component: MgsUpdateComponent,
     /// reason why the update failed
     pub reason: FailedMgsUpdateReason,
 }
@@ -759,11 +756,7 @@ impl fmt::Display for PlanningMgsUpdatesStepReport {
             let s = plural(n);
             writeln!(f, "* {n} blocked MGS update{s}:")?;
             for update in blocked_mgs_updates {
-                writeln!(
-                    f,
-                    "  * {} {}: {}",
-                    update.baseboard_id, update.component, update.reason
-                )?;
+                writeln!(f, "  * {}: {}", update.baseboard_id, update.reason)?;
             }
         }
         Ok(())
