@@ -300,7 +300,7 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
             "db-metadata",
             "force-mark-nexus-quiesced",
             "--skip-confirmation",
-            "--ignore-target-blueprint",
+            "--skip-blueprint-validation",
             &cptestctx.server.server_context().nexus.id().to_string(),
         ],
     ];
