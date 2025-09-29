@@ -10,20 +10,15 @@ use crate::context::OpContext;
 use crate::db::model::{
     Generation, SemverVersion, TargetRelease, TargetReleaseSource,
 };
-use crate::db::raw_query_builder::{QueryBuilder, TypedSqlQuery};
 use async_bb8_diesel::AsyncRunQueryDsl as _;
-use chrono::{DateTime, Utc};
 use diesel::insert_into;
-use diesel::pg::Pg;
 use diesel::prelude::*;
 use diesel::sql_types;
 use nexus_db_errors::{ErrorHandler, public_error_from_diesel};
-use nexus_db_model::DbTypedUuid;
 use nexus_db_schema::enums::TargetReleaseSourceEnum;
 use nexus_db_schema::schema::target_release::dsl;
 use nexus_types::external_api::views;
 use omicron_common::api::external::{CreateResult, Error, LookupResult};
-use omicron_uuid_kinds::TufRepoKind;
 
 impl DataStore {
     /// Fetch the current target release, i.e., the row with the largest
@@ -85,37 +80,89 @@ impl DataStore {
             .await?;
         let conn = self.pool_connection_authorized(opctx).await?;
 
-        // If we have a TUF repo ID, we need to use a CTE to confirm
+        // If we have a TUF repo ID, we need a more complex query to confirm
         // (transactionally) that it isn't the pruned as we make it the target
         // release.
         if let Some(tuf_repo_id) = target_release.tuf_repo_id {
-            let TargetRelease {
-                generation,
-                time_requested,
-                release_source,
-                tuf_repo_id: _,
-            } = target_release;
+            let selection = {
+                use nexus_db_schema::schema::tuf_repo::dsl as repo_dsl;
 
-            match insert_target_release_query(
-                generation,
-                time_requested,
-                release_source,
-                tuf_repo_id,
-            )
-            .get_result_async(&*conn)
-            .await
-            .optional()
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?
-            {
+                // This statement is just here to force a compilation error if
+                // the set of columns in `target_release` changes, because that
+                // will affect the correctness of the query below.
+                //
+                // If you're here because of a compile error, you might be
+                // changing the `target_release` table. Update the statement
+                // below to match!
+                let _: (
+                    dsl::generation,
+                    dsl::time_requested,
+                    dsl::release_source,
+                    dsl::tuf_repo_id,
+                ) = dsl::target_release::all_columns();
+
+                // What we want to write here is a query that confirms
+                // `tuf_repo_id` is not pruned and avoids performing an insert
+                // otherwise. We'll do that via an `INSERT SELECT ...` where the
+                // `SELECT` is:
+                //
+                // ```
+                // SELECT $target_release WHERE EXISTS (
+                //     SELECT 1 FROM tuf_repo WHERE
+                //         id = $tuf_repo_id
+                //         AND time_pruned IS NULL
+                // )
+                // ```
+                //
+                // but with a couple of diesel quirks:
+                //
+                // 1. We can't splat the `$target_release` value directly into a
+                //    SELECT, so we select each of its columns individually. See
+                //    the above check that the columns of this table haven't
+                //    changed.
+                // 2. We don't bother getting it to `SELECT 1 ...` in the
+                //    subquery. diesel defaults to `SELECT * ...` there instead,
+                //    but that should be fine since it's inside a `WHERE
+                //    EXISTS`.
+                diesel::select((
+                    target_release.generation.into_sql::<sql_types::Int8>(),
+                    target_release
+                        .time_requested
+                        .into_sql::<sql_types::Timestamptz>(),
+                    target_release
+                        .release_source
+                        .into_sql::<TargetReleaseSourceEnum>(),
+                    tuf_repo_id
+                        .into_sql::<sql_types::Nullable<sql_types::Uuid>>(),
+                ))
+                .filter(diesel::dsl::exists(
+                    repo_dsl::tuf_repo
+                        .filter(repo_dsl::id.eq(tuf_repo_id))
+                        .filter(repo_dsl::time_pruned.is_null()),
+                ))
+            };
+
+            // Attempt the insert; use `.optional()` so we can attach a custom
+            // error message if we get back no rows.
+            let result = insert_into(dsl::target_release)
+                .values(selection)
+                .returning(TargetRelease::as_returning())
+                .get_result_async(&*conn)
+                .await
+                .optional()
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+
+            match result {
                 Some(target_release) => {
                     // Insertion succeeded and returned the newly-inserted
                     // target release.
                     Ok(target_release)
                 }
                 None => {
-                    // Insertion succeeded but didn't return any rows: this is
-                    // how `insert_target_release_query` indicates that the
-                    // referenced repo is pruned.
+                    // Insertion succeeded but didn't return any rows: we tried
+                    // to insert a target release for a pruned repo.
                     Err(Error::invalid_request(format!(
                         "cannot make TUF repo {tuf_repo_id} the \
                          target release: it has been pruned from the system"
@@ -176,66 +223,11 @@ impl DataStore {
     }
 }
 
-type SelectableSql<T> = <
-    <T as diesel::Selectable<Pg>>::SelectExpression as diesel::Expression
->::SqlType;
-type InsertTargetReleaseQuery = TypedSqlQuery<SelectableSql<TargetRelease>>;
-
-// The arguments to this function match the fields of `TargetRelease`, except
-// that `tuf_repo_id` is not optional. This query confirms via a CTE that the
-// referenced TUF repo is not pruned. If inserting a `TargetRelease` with no
-// `tuf_repo_id`, a normal diesel insert is fine.
-fn insert_target_release_query(
-    generation: Generation,
-    time_requested: DateTime<Utc>,
-    release_source: TargetReleaseSource,
-    tuf_repo_id: DbTypedUuid<TufRepoKind>,
-) -> InsertTargetReleaseQuery {
-    let mut builder = QueryBuilder::new();
-
-    builder
-        .sql(
-            "INSERT INTO target_release \
-                (generation, time_requested, release_source, tuf_repo_id) \
-             SELECT ",
-        )
-        .param()
-        .bind::<sql_types::Int8, _>(generation)
-        .sql(", ")
-        .param()
-        .bind::<sql_types::Timestamptz, _>(time_requested)
-        .sql(", ")
-        .param()
-        .bind::<TargetReleaseSourceEnum, _>(release_source)
-        .sql(", ")
-        .param()
-        .bind::<sql_types::Uuid, _>(tuf_repo_id)
-        // This "WHERE EXISTS ..." clause will cause our insertion to return
-        // zero rows if `tuf_repo_id` does not refer to a row in the `tuf_repo`
-        // table with a NULL `time_pruned`; i.e., it will reject both bogus
-        // `tuf_repo_id`s that don't reference the foreign table at all as well
-        // as `tuf_repo_id`s that reference a TUF repo that has been pruned.
-        .sql(
-            "WHERE EXISTS (\
-                SELECT 1 FROM tuf_repo \
-                WHERE id = ",
-        )
-        .param()
-        .bind::<sql_types::Uuid, _>(tuf_repo_id)
-        .sql(
-            " AND time_pruned IS NULL) \
-            RETURNING *",
-        );
-
-    builder.query()
-}
-
 #[cfg(test)]
 mod test {
     use super::*;
     use crate::db::model::{Generation, TargetReleaseSource};
     use crate::db::pub_test_utils::TestDatabase;
-    use crate::db::raw_query_builder::expectorate_query_contents;
     use chrono::{TimeDelta, Utc};
     use nexus_db_model::TufRepo;
     use omicron_common::api::external::{
@@ -454,23 +446,5 @@ mod test {
         // Clean up.
         db.terminate().await;
         logctx.cleanup_successful();
-    }
-
-    // This test is a bit of a "change detector", but it's here to help with
-    // debugging too. If you change this query, it can be useful to see exactly
-    // how the output SQL has been altered.
-    #[tokio::test]
-    async fn expectorate_insert_target_release_query() {
-        let query = insert_target_release_query(
-            Generation::new(),
-            DateTime::<Utc>::MIN_UTC,
-            TargetReleaseSource::SystemVersion,
-            "00000000-0000-0000-0000-000000000000".parse().unwrap(),
-        );
-        expectorate_query_contents(
-            &query,
-            "tests/output/insert_target_release.sql",
-        )
-        .await;
     }
 }
