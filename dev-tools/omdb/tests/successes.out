@@ -11,7 +11,7 @@ stderr:
 note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
 note: database schema version matches expected (<redacted database version>)
 =============================================
-EXECUTING COMMAND: omdb ["--destructive", "db", "db-metadata", "force-nexus-quiesce", "..........<REDACTED_UUID>..........."]
+EXECUTING COMMAND: omdb ["--destructive", "db", "db-metadata", "force-mark-nexus-quiesced", "--skip-confirmation", "..........<REDACTED_UUID>..........."]
 termination: Exited(1)
 ---------------------------------------------
 stdout:
@@ -1766,13 +1766,17 @@ note: database schema version matches expected (<redacted database version>)
 assembling reconfigurator state ... done
 wrote <TMP_PATH_REDACTED>
 =============================================
-EXECUTING COMMAND: omdb ["--destructive", "db", "db-metadata", "force-nexus-quiesce", "--ignore-target-blueprint", "..........<REDACTED_UUID>..........."]
-termination: Exited(0)
+EXECUTING COMMAND: omdb ["--destructive", "db", "db-metadata", "force-mark-nexus-quiesced", "--skip-confirmation", "--ignore-target-blueprint", "..........<REDACTED_UUID>..........."]
+termination: Exited(2)
 ---------------------------------------------
 stdout:
-Quiesced ..........<REDACTED_UUID>...........
 ---------------------------------------------
 stderr:
-note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
-note: database schema version matches expected (<redacted database version>)
+error: unexpected argument '--ignore-target-blueprint' found
+
+  tip: to pass '--ignore-target-blueprint' as a value, use '-- --ignore-target-blueprint'
+
+Usage: omdb db db-metadata force-mark-nexus-quiesced --skip-confirmation <ID>
+
+For more information, try '--help'.
 =============================================

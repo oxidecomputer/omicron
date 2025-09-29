@@ -7,6 +7,7 @@
 use super::display_option_blank;
 
 use crate::check_allow_destructive::DestructiveOperationToken;
+use crate::helpers::ConfirmationPrompt;
 use anyhow::Context;
 use anyhow::bail;
 use clap::ArgAction;
@@ -47,21 +48,26 @@ pub enum DbMetadataCommands {
     /// This operation is intended to assist in the explicit case where a Nexus
     /// is unable to finish marking itself quiesced during the handoff process,
     /// and cannot be expunged.
-    ForceNexusQuiesce(ForceNexusQuiesceArgs),
+    ForceMarkNexusQuiesced(ForceMarkNexusQuiescedArgs),
 }
 
 #[derive(Debug, Args, Clone)]
-pub struct ForceNexusQuiesceArgs {
+pub struct ForceMarkNexusQuiescedArgs {
     /// The UUID of the Nexus zone to be marked quiesced
     id: OmicronZoneUuid,
 
-    /// If "true": don't bother parsing the target blueprint to identify the
-    /// validity of the [`id`] argument.
+    /// Skip checking the target blueprint to determine whether Nexus zone `id`
+    /// is from the generation of Nexus zones that could be active or handing
+    /// off.
     ///
-    /// Forcing Nexus to quiesce is already an unsafe operation; this makes
-    /// it even less safe. Use with caution.
+    /// Manually marking Nexus quiesced is already an unsafe operation; this
+    /// makes it even less safe. Use with caution.
     #[arg(long, action=ArgAction::SetTrue)]
-    ignore_target_blueprint: bool,
+    skip_blueprint_validation: bool,
+
+    /// Skip confirmation prompt to verify that this operation is intended.
+    #[arg(long, action=ArgAction::SetTrue)]
+    skip_confirmation: bool,
 }
 
 // DB Metadata
@@ -186,13 +192,22 @@ pub async fn cmd_db_metadata_list_nexus(
     Ok(())
 }
 
-pub async fn cmd_db_metadata_force_nexus_quiesce(
+pub async fn cmd_db_metadata_force_mark_nexus_quiesced(
     opctx: &OpContext,
     datastore: &DataStore,
-    args: &ForceNexusQuiesceArgs,
+    args: &ForceMarkNexusQuiescedArgs,
     _destruction_token: DestructiveOperationToken,
 ) -> Result<(), anyhow::Error> {
-    if !args.ignore_target_blueprint {
+    if !args.skip_confirmation {
+        println!(
+            "\nDo you want to mark Nexus {} as quiesced in the database?",
+            args.id
+        );
+        let mut prompt = ConfirmationPrompt::new();
+        prompt.read_and_validate("y/N", "y")?;
+    }
+
+    if !args.skip_blueprint_validation {
         let (_, current_target_blueprint) = datastore
             .blueprint_target_get_current_full(opctx)
             .await
@@ -220,7 +235,7 @@ pub async fn cmd_db_metadata_force_nexus_quiesce(
     }
 
     datastore.database_nexus_access_update_quiesced(args.id).await?;
-    println!("Quiesced {}", args.id);
+    println!("Marked {} quiesced", args.id);
 
     Ok(())
 }
