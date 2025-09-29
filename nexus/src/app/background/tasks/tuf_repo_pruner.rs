@@ -173,11 +173,13 @@ fn decide_prune(
         }
     }
 
-    // Keep as many other uploaded repos as makes sense.
+    // Keep as many other uploaded repos as makes sense, preferring the most
+    // recently uploaded.
     let mut nleft = status.nkeep_recent_uploads;
     let mut candidate_repos_by_upload_time =
         all_repos.into_iter().collect::<Vec<_>>();
     candidate_repos_by_upload_time.sort_by_key(|k| k.time_created);
+    candidate_repos_by_upload_time.reverse();
     let mut candidates = candidate_repos_by_upload_time.into_iter();
     while nleft > 0 {
         let Some(next) = candidates.next() else {
