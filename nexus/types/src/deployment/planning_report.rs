@@ -82,7 +82,7 @@ impl PlanningReport {
             expunge: PlanningExpungeStepReport::new(),
             decommission: PlanningDecommissionStepReport::new(),
             noop_image_source: PlanningNoopImageSourceStepReport::new(),
-            mgs_updates: PlanningMgsUpdatesStepReport::empty(),
+            mgs_updates: PlanningMgsUpdatesStepReport::new(),
             add: PlanningAddStepReport::new(),
             zone_updates: PlanningZoneUpdatesStepReport::new(),
             nexus_generation_bump: PlanningNexusGenerationBumpReport::new(),
@@ -589,16 +589,7 @@ pub struct PlanningMgsUpdatesStepReport {
 }
 
 impl PlanningMgsUpdatesStepReport {
-    // TODO-K: Do we need this?
-    //pub fn new(
-    //    pending_mgs_updates: PendingMgsUpdates,
-    //    blocked_mgs_updates: Vec<BlockedMgsUpdate>,
-    //    unsafe_zones: BTreeMap<OmicronZoneUuid, ZoneUnsafeToShutdown>,
-    //) -> Self {
-    //    Self { blocked_mgs_updates, pending_mgs_updates, unsafe_zones}
-    //}
-
-    pub fn empty() -> Self {
+    pub fn new() -> Self {
         Self {
             blocked_mgs_updates: Vec::new(),
             pending_mgs_updates: PendingMgsUpdates::new(),

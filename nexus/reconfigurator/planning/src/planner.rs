@@ -235,7 +235,7 @@ impl<'a> Planner<'a> {
         let mgs_updates = if add_update_blocked_reasons.is_empty() {
             self.do_plan_mgs_updates()?
         } else {
-            PlanningMgsUpdatesStepReport::empty()
+            PlanningMgsUpdatesStepReport::new()
         };
 
         // Likewise for zone additions, unless overridden by the config, or
@@ -1390,7 +1390,7 @@ impl<'a> Planner<'a> {
     fn do_plan_mgs_updates(
         &mut self,
     ) -> Result<PlanningMgsUpdatesStepReport, Error> {
-        let mut report = PlanningMgsUpdatesStepReport::empty();
+        let mut report = PlanningMgsUpdatesStepReport::new();
         // Determine which baseboards we will consider updating.
         //
         // Sleds may be present but not adopted as part of the control plane.
@@ -1500,7 +1500,6 @@ impl<'a> Planner<'a> {
 
         self.blueprint.pending_mgs_updates_replace_all(pending_updates.clone());
 
-        // TODO-K: Make this better
         report.pending_mgs_updates = pending_updates;
         report.blocked_mgs_updates = blocked_mgs_updates;
         Ok(report)
