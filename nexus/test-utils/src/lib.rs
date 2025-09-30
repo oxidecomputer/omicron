@@ -684,6 +684,9 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         let (mut mgs_config, sp_sim_config) =
             gateway_test_utils::setup::load_test_config(sp_sim_config_file);
 
+        // The sp_sim_config_file contains suitable configuration information for a MGS daemon running on
+        // switch0. For switch1, the port information needs to be flipped in order for MGS to correctly identify
+        // itself as the switch1 MGS daemon.
         if switch_location == SwitchLocation::Switch1 {
             for config in mgs_config.switch.location.determination.iter_mut() {
                 let swap = config.sp_port_1.clone();
