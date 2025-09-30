@@ -795,6 +795,8 @@ zone = { version = "0.3.1", default-features = false, features = ["async"] }
 newtype-uuid = { version = "1.2.4", default-features = false }
 omicron-uuid-kinds = { path = "uuid-kinds", features = ["serde", "schemars08", "uuid-v4"] }
 
+scim2-rs = { git = "https://github.com/oxidecomputer/scim2-rs" }
+
 # NOTE: The test profile inherits from the dev profile, so settings under
 # profile.dev get inherited. AVOID setting anything under profile.test: that
 # will cause dev and test builds to diverge, which will cause more Cargo build

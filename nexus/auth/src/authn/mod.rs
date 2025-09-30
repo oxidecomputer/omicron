@@ -32,6 +32,7 @@ pub use nexus_db_fixed_data::silo_user::USER_TEST_PRIVILEGED;
 pub use nexus_db_fixed_data::silo_user::USER_TEST_UNPRIVILEGED;
 pub use nexus_db_fixed_data::user_builtin::USER_DB_INIT;
 pub use nexus_db_fixed_data::user_builtin::USER_EXTERNAL_AUTHN;
+pub use nexus_db_fixed_data::user_builtin::USER_EXTERNAL_SCIM;
 pub use nexus_db_fixed_data::user_builtin::USER_INTERNAL_API;
 pub use nexus_db_fixed_data::user_builtin::USER_INTERNAL_READ;
 pub use nexus_db_fixed_data::user_builtin::USER_SAGA_RECOVERY;
@@ -199,6 +200,12 @@ impl Context {
         Context::context_for_builtin_user(USER_SERVICE_BALANCER.id)
     }
 
+    /// Returns an authenticated context for use for authenticating SCIM
+    /// requests
+    pub fn external_scim() -> Context {
+        Context::context_for_builtin_user(USER_EXTERNAL_SCIM.id)
+    }
+
     fn context_for_builtin_user(user_builtin_id: BuiltInUserUuid) -> Context {
         Context {
             kind: Kind::Authenticated(
@@ -300,6 +307,7 @@ mod test {
     use super::USER_TEST_PRIVILEGED;
     use super::USER_TEST_UNPRIVILEGED;
     use nexus_db_fixed_data::user_builtin::USER_EXTERNAL_AUTHN;
+    use nexus_db_fixed_data::user_builtin::USER_EXTERNAL_SCIM;
     use nexus_types::identity::Asset;
 
     #[test]
@@ -342,6 +350,10 @@ mod test {
         let authn = Context::internal_api();
         let actor = authn.actor().unwrap();
         assert_eq!(actor.built_in_user_id(), Some(USER_INTERNAL_API.id));
+
+        let authn = Context::external_scim();
+        let actor = authn.actor().unwrap();
+        assert_eq!(actor.built_in_user_id(), Some(USER_EXTERNAL_SCIM.id));
     }
 }
 

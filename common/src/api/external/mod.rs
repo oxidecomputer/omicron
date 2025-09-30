@@ -969,6 +969,7 @@ pub enum ResourceType {
     RouterRoute,
     SagaDbg,
     SamlIdentityProvider,
+    ScimClientBearerToken,
     Service,
     ServiceNetworkInterface,
     Silo,
