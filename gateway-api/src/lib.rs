@@ -9,6 +9,7 @@ use dropshot::{
     RequestContext, TypedBody, UntypedBody, WebsocketEndpointResult,
     WebsocketUpgrade,
 };
+use dropshot_api_manager_types::api_versions;
 use gateway_types::{
     caboose::SpComponentCaboose,
     component::{
@@ -26,9 +27,6 @@ use gateway_types::{
         HostPhase2Progress, HostPhase2RecoveryImageId, InstallinatorImageId,
         SpComponentResetError, SpUpdateStatus,
     },
-};
-use openapi_manager_types::{
-    SupportedVersion, SupportedVersions, api_versions,
 };
 use schemars::JsonSchema;
 use serde::Deserialize;
