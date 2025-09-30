@@ -656,7 +656,7 @@ task: "multicast_group_reconciler"
   configured period: every <REDACTED_DURATION>m
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-warning: unknown background task: "multicast_group_reconciler" (don't know how to interpret details: Object {"errors": Array [String("failed to create multicast dataplane client: Internal Error: failed to build DPD clients")], "groups_created": Number(0), "groups_deleted": Number(0), "groups_verified": Number(0), "members_deleted": Number(0), "members_processed": Number(0)})
+warning: unknown background task: "multicast_group_reconciler" (don't know how to interpret details: Object {"disabled": Bool(false), "errors": Array [String("failed to create multicast dataplane client: Internal Error: failed to build DPD clients")], "groups_created": Number(0), "groups_deleted": Number(0), "groups_verified": Number(0), "members_deleted": Number(0), "members_processed": Number(0)})
 
 task: "phantom_disks"
   configured period: every <REDACTED_DURATION>s
@@ -1180,7 +1180,7 @@ task: "multicast_group_reconciler"
   configured period: every <REDACTED_DURATION>m
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-warning: unknown background task: "multicast_group_reconciler" (don't know how to interpret details: Object {"errors": Array [String("failed to create multicast dataplane client: Internal Error: failed to build DPD clients")], "groups_created": Number(0), "groups_deleted": Number(0), "groups_verified": Number(0), "members_deleted": Number(0), "members_processed": Number(0)})
+warning: unknown background task: "multicast_group_reconciler" (don't know how to interpret details: Object {"disabled": Bool(false), "errors": Array [String("failed to create multicast dataplane client: Internal Error: failed to build DPD clients")], "groups_created": Number(0), "groups_deleted": Number(0), "groups_verified": Number(0), "members_deleted": Number(0), "members_processed": Number(0)})
 
 task: "phantom_disks"
   configured period: every <REDACTED_DURATION>s
