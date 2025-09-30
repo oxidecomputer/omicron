@@ -133,6 +133,28 @@ impl NodeCtx {
             alarms: BTreeSet::new(),
         }
     }
+
+    pub fn new_with_persistent_state(
+        platform_id: PlatformId,
+        persistent_state: PersistentState,
+    ) -> NodeCtx {
+        NodeCtx {
+            platform_id,
+            persistent_state,
+            persistent_state_changed: false,
+            outgoing: Vec::new(),
+            connected: BTreeSet::new(),
+            alarms: BTreeSet::new(),
+        }
+    }
+
+    #[cfg(any(test, feature = "testing"))]
+    pub fn clear_mutable_state(&mut self) {
+        self.persistent_state_changed = false;
+        self.outgoing.clear();
+        self.connected.clear();
+        self.alarms.clear();
+    }
 }
 
 impl NodeCommonCtx for NodeCtx {

@@ -1238,7 +1238,7 @@ pub(crate) mod test {
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::external_api::views;
     use nexus_types::identity::Asset;
-    use omicron_uuid_kinds::GenericUuid;
+
     use sled_agent_client::VolumeConstructionRequest;
 
     type ControlPlaneTestContext =
@@ -1534,17 +1534,21 @@ pub(crate) mod test {
         request: &RegionSnapshotReplacement,
     ) {
         let opctx = test_opctx(cptestctx);
+
         let db_request = datastore
             .get_region_snapshot_replacement_request_by_id(&opctx, request.id)
             .await
             .unwrap();
 
         assert_eq!(db_request.new_region_id, None);
-        assert_eq!(
-            db_request.replacement_state,
-            RegionSnapshotReplacementState::Requested
-        );
         assert_eq!(db_request.operating_saga_id, None);
+
+        match db_request.replacement_state {
+            RegionSnapshotReplacementState::Requested => {}
+            x => {
+                panic!("replacement state {:?} != Requested", x);
+            }
+        }
     }
 
     async fn assert_volume_untouched(
@@ -1883,11 +1887,11 @@ pub(crate) mod test {
 
             let zpool = disk_test
                 .zpools()
-                .find(|x| *x.id.as_untyped_uuid() == dataset.pool_id)
+                .find(|x| x.id == dataset.pool_id())
                 .expect("Expected at least one zpool");
 
             let (_, db_zpool) = LookupPath::new(&opctx, datastore)
-                .zpool_id(zpool.id.into_untyped_uuid())
+                .zpool_id(zpool.id)
                 .fetch()
                 .await
                 .unwrap();
@@ -1895,7 +1899,7 @@ pub(crate) mod test {
             datastore
                 .physical_disk_update_policy(
                     &opctx,
-                    db_zpool.physical_disk_id.into(),
+                    db_zpool.physical_disk_id(),
                     PhysicalDiskPolicy::Expunged,
                 )
                 .await
@@ -2041,11 +2045,11 @@ pub(crate) mod test {
 
             let zpool = disk_test
                 .zpools()
-                .find(|x| *x.id.as_untyped_uuid() == dataset.pool_id)
+                .find(|x| x.id == dataset.pool_id())
                 .expect("Expected at least one zpool");
 
             let (_, db_zpool) = LookupPath::new(&opctx, datastore)
-                .zpool_id(zpool.id.into_untyped_uuid())
+                .zpool_id(zpool.id)
                 .fetch()
                 .await
                 .unwrap();
@@ -2053,7 +2057,7 @@ pub(crate) mod test {
             datastore
                 .physical_disk_update_policy(
                     &opctx,
-                    db_zpool.physical_disk_id.into(),
+                    db_zpool.physical_disk_id(),
                     PhysicalDiskPolicy::Expunged,
                 )
                 .await

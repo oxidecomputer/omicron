@@ -10,129 +10,16 @@
     "version": "0.0.1"
   },
   "paths": {
-    "/bgtasks": {
-      "get": {
-        "summary": "List background tasks",
-        "description": "This is a list of discrete background activities that Nexus carries out. This is exposed for support and debugging.",
-        "operationId": "bgtask_list",
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "title": "Map_of_BackgroundTask",
-                  "type": "object",
-                  "additionalProperties": {
-                    "$ref": "#/components/schemas/BackgroundTask"
-                  }
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
     "/bgtasks/activate": {
       "post": {
-        "summary": "Activates one or more background tasks, causing them to be run immediately",
-        "description": "if idle, or scheduled to run again as soon as possible if already running.",
+        "summary": "**Do not use in new code!**",
+        "description": "Callers to this API should either be capable of using the nexus-lockstep API or should be rewritten to use a doorbell API to activate a specific task. Task names are internal to Nexus.",
         "operationId": "bgtask_activate",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/BackgroundTasksActivateRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "204": {
-            "description": "resource updated"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/bgtasks/view/{bgtask_name}": {
-      "get": {
-        "summary": "Fetch status of one background task",
-        "description": "This is exposed for support and debugging.",
-        "operationId": "bgtask_view",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "bgtask_name",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BackgroundTask"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/clickhouse/policy": {
-      "get": {
-        "summary": "Get the current clickhouse policy",
-        "operationId": "clickhouse_policy_get",
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ClickhousePolicy"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      },
-      "post": {
-        "summary": "Set the new clickhouse policy",
-        "operationId": "clickhouse_policy_set",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ClickhousePolicy"
               }
             }
           },
@@ -362,430 +249,6 @@
         }
       }
     },
-    "/demo-saga": {
-      "post": {
-        "summary": "Kick off an instance of the \"demo\" saga",
-        "description": "This saga is used for demo and testing.  The saga just waits until you complete using the `saga_demo_complete` API.",
-        "operationId": "saga_demo_create",
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DemoSaga"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/demo-saga/{demo_saga_id}/complete": {
-      "post": {
-        "summary": "Complete a waiting demo saga",
-        "description": "Note that the id used here is not the same as the id of the saga.  It's the one returned by the `saga_demo_create` API.",
-        "operationId": "saga_demo_complete",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "demo_saga_id",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/TypedUuidForDemoSagaKind"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "resource updated"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/deployment/blueprints/all": {
-      "get": {
-        "summary": "Lists blueprints",
-        "operationId": "blueprint_list",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "limit",
-            "description": "Maximum number of items returned by a single call",
-            "schema": {
-              "nullable": true,
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 1
-            }
-          },
-          {
-            "in": "query",
-            "name": "page_token",
-            "description": "Token returned by previous call to retrieve the subsequent page",
-            "schema": {
-              "nullable": true,
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "sort_by",
-            "schema": {
-              "$ref": "#/components/schemas/IdSortMode"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BlueprintMetadataResultsPage"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "x-dropshot-pagination": {
-          "required": []
-        }
-      }
-    },
-    "/deployment/blueprints/all/{blueprint_id}": {
-      "get": {
-        "summary": "Fetches one blueprint",
-        "operationId": "blueprint_view",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "blueprint_id",
-            "description": "ID of the blueprint",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Blueprint"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      },
-      "delete": {
-        "summary": "Deletes one blueprint",
-        "operationId": "blueprint_delete",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "blueprint_id",
-            "description": "ID of the blueprint",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "successful deletion"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/deployment/blueprints/import": {
-      "post": {
-        "summary": "Imports a client-provided blueprint",
-        "description": "This is intended for development and support, not end users or operators.",
-        "operationId": "blueprint_import",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/Blueprint"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "204": {
-            "description": "resource updated"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/deployment/blueprints/regenerate": {
-      "post": {
-        "summary": "Generates a new blueprint for the current system, re-evaluating anything",
-        "description": "that's changed since the last one was generated",
-        "operationId": "blueprint_regenerate",
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Blueprint"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/deployment/blueprints/target": {
-      "get": {
-        "summary": "Fetches the current target blueprint, if any",
-        "operationId": "blueprint_target_view",
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BlueprintTarget"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      },
-      "post": {
-        "summary": "Make the specified blueprint the new target",
-        "operationId": "blueprint_target_set",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/BlueprintTargetSet"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BlueprintTarget"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/deployment/blueprints/target/enabled": {
-      "put": {
-        "summary": "Set the `enabled` field of the current target blueprint",
-        "operationId": "blueprint_target_set_enabled",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/BlueprintTargetSet"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BlueprintTarget"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/deployment/chicken-switches": {
-      "get": {
-        "summary": "Get the current set of chicken switches",
-        "operationId": "reconfigurator_chicken_switches_show_current",
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ReconfiguratorChickenSwitchesView"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      },
-      "post": {
-        "summary": "Update the chicken switches at the latest versions",
-        "operationId": "reconfigurator_chicken_switches_set",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ReconfiguratorChickenSwitchesParam"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "204": {
-            "description": "resource updated"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/deployment/chicken-switches/{version}": {
-      "get": {
-        "summary": "Get the chicken switches at `version` if it exists",
-        "operationId": "reconfigurator_chicken_switches_show",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "version",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 0
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ReconfiguratorChickenSwitchesView"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/deployment/update-status": {
-      "get": {
-        "summary": "Show deployed versions of artifacts",
-        "operationId": "update_status",
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UpdateStatus"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
     "/disk/{disk_id}/remove-read-only-parent": {
       "post": {
         "summary": "Request removal of a read_only_parent from a disk.",
@@ -843,440 +306,6 @@
         "responses": {
           "204": {
             "description": "resource updated"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/experimental/v1/system/support-bundles": {
-      "get": {
-        "summary": "List all support bundles",
-        "operationId": "support_bundle_list",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "limit",
-            "description": "Maximum number of items returned by a single call",
-            "schema": {
-              "nullable": true,
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 1
-            }
-          },
-          {
-            "in": "query",
-            "name": "page_token",
-            "description": "Token returned by previous call to retrieve the subsequent page",
-            "schema": {
-              "nullable": true,
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "sort_by",
-            "schema": {
-              "$ref": "#/components/schemas/TimeAndIdSortMode"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SupportBundleInfoResultsPage"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "x-dropshot-pagination": {
-          "required": []
-        }
-      },
-      "post": {
-        "summary": "Create a new support bundle",
-        "operationId": "support_bundle_create",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SupportBundleCreate"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "description": "successful creation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SupportBundleInfo"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/experimental/v1/system/support-bundles/{bundle_id}": {
-      "get": {
-        "summary": "View a support bundle",
-        "operationId": "support_bundle_view",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "bundle_id",
-            "description": "ID of the support bundle",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SupportBundleInfo"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      },
-      "put": {
-        "summary": "Update a support bundle",
-        "operationId": "support_bundle_update",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "bundle_id",
-            "description": "ID of the support bundle",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SupportBundleUpdate"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SupportBundleInfo"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      },
-      "delete": {
-        "summary": "Delete an existing support bundle",
-        "description": "May also be used to cancel a support bundle which is currently being collected, or to remove metadata for a support bundle that has failed.",
-        "operationId": "support_bundle_delete",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "bundle_id",
-            "description": "ID of the support bundle",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "successful deletion"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/experimental/v1/system/support-bundles/{bundle_id}/download": {
-      "get": {
-        "summary": "Download the contents of a support bundle",
-        "operationId": "support_bundle_download",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "range",
-            "description": "A request to access a portion of the resource, such as `bytes=0-499`\n\nSee: <https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Range>",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "bundle_id",
-            "description": "ID of the support bundle",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "responses": {
-          "default": {
-            "description": "",
-            "content": {
-              "*/*": {
-                "schema": {}
-              }
-            }
-          }
-        }
-      },
-      "head": {
-        "summary": "Download the metadata of a support bundle",
-        "operationId": "support_bundle_head",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "range",
-            "description": "A request to access a portion of the resource, such as `bytes=0-499`\n\nSee: <https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Range>",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "bundle_id",
-            "description": "ID of the support bundle",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "responses": {
-          "default": {
-            "description": "",
-            "content": {
-              "*/*": {
-                "schema": {}
-              }
-            }
-          }
-        }
-      }
-    },
-    "/experimental/v1/system/support-bundles/{bundle_id}/download/{file}": {
-      "get": {
-        "summary": "Download a file within a support bundle",
-        "operationId": "support_bundle_download_file",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "range",
-            "description": "A request to access a portion of the resource, such as `bytes=0-499`\n\nSee: <https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Range>",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "bundle_id",
-            "description": "ID of the support bundle",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          },
-          {
-            "in": "path",
-            "name": "file",
-            "description": "The file within the bundle to download",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "default": {
-            "description": "",
-            "content": {
-              "*/*": {
-                "schema": {}
-              }
-            }
-          }
-        }
-      },
-      "head": {
-        "summary": "Download the metadata of a file within the support bundle",
-        "operationId": "support_bundle_head_file",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "range",
-            "description": "A request to access a portion of the resource, such as `bytes=0-499`\n\nSee: <https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Range>",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "bundle_id",
-            "description": "ID of the support bundle",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          },
-          {
-            "in": "path",
-            "name": "file",
-            "description": "The file within the bundle to download",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "default": {
-            "description": "",
-            "content": {
-              "*/*": {
-                "schema": {}
-              }
-            }
-          }
-        }
-      }
-    },
-    "/experimental/v1/system/support-bundles/{bundle_id}/index": {
-      "get": {
-        "summary": "Download the index of a support bundle",
-        "operationId": "support_bundle_index",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "range",
-            "description": "A request to access a portion of the resource, such as `bytes=0-499`\n\nSee: <https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Range>",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "bundle_id",
-            "description": "ID of the support bundle",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "responses": {
-          "default": {
-            "description": "",
-            "content": {
-              "*/*": {
-                "schema": {}
-              }
-            }
-          }
-        }
-      }
-    },
-    "/instances/{instance_id}/migrate": {
-      "post": {
-        "operationId": "instance_migrate",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "instance_id",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/InstanceMigrateRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Instance"
-                }
-              }
-            }
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -1414,30 +443,6 @@
         }
       }
     },
-    "/mgs-updates": {
-      "get": {
-        "summary": "Fetch information about ongoing MGS updates",
-        "operationId": "mgs_updates",
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/MgsUpdateDriverStatus"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
     "/nat/ipv4/changeset/{from_gen}": {
       "get": {
         "summary": "Fetch NAT ChangeSet",
@@ -1479,83 +484,6 @@
                 }
               }
             }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/oximeter/read-policy": {
-      "get": {
-        "summary": "Get the current oximeter read policy",
-        "operationId": "oximeter_read_policy_get",
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/OximeterReadPolicy"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      },
-      "post": {
-        "summary": "Set the new oximeter read policy",
-        "operationId": "oximeter_read_policy_set",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/OximeterReadPolicy"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "204": {
-            "description": "resource updated"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/physical-disk/expunge": {
-      "post": {
-        "summary": "Mark a physical disk as expunged",
-        "description": "This is an irreversible process! It should only be called after sufficient warning to the operator.\n\nThis is idempotent.",
-        "operationId": "physical_disk_expunge",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/PhysicalDiskPath"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "204": {
-            "description": "resource updated"
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -1635,46 +563,6 @@
         }
       }
     },
-    "/quiesce": {
-      "get": {
-        "summary": "Check whether Nexus is running normally, quiescing, or fully quiesced.",
-        "operationId": "quiesce_get",
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/QuiesceStatus"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      },
-      "post": {
-        "summary": "Begin quiescing this Nexus instance",
-        "description": "This causes no new sagas to be started and eventually causes no database connections to become available.  This is a one-way trip.  There's no unquiescing Nexus.",
-        "operationId": "quiesce_start",
-        "responses": {
-          "204": {
-            "description": "resource updated"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
     "/racks/{rack_id}/initialization-complete": {
       "put": {
         "summary": "Report that the Rack Setup Service initialization is complete",
@@ -1704,97 +592,6 @@
         "responses": {
           "204": {
             "description": "resource updated"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/sagas": {
-      "get": {
-        "summary": "List sagas",
-        "operationId": "saga_list",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "limit",
-            "description": "Maximum number of items returned by a single call",
-            "schema": {
-              "nullable": true,
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 1
-            }
-          },
-          {
-            "in": "query",
-            "name": "page_token",
-            "description": "Token returned by previous call to retrieve the subsequent page",
-            "schema": {
-              "nullable": true,
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "sort_by",
-            "schema": {
-              "$ref": "#/components/schemas/IdSortMode"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SagaResultsPage"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "x-dropshot-pagination": {
-          "required": []
-        }
-      }
-    },
-    "/sagas/{saga_id}": {
-      "get": {
-        "summary": "Fetch a saga",
-        "operationId": "saga_view",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "saga_id",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Saga"
-                }
-              }
-            }
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -1892,99 +689,6 @@
         "responses": {
           "204": {
             "description": "resource updated"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/sleds/add": {
-      "post": {
-        "summary": "Add sled to initialized rack",
-        "operationId": "sled_add",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/UninitializedSledId"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "description": "successful creation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SledId"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/sleds/expunge": {
-      "post": {
-        "summary": "Mark a sled as expunged",
-        "description": "This is an irreversible process! It should only be called after sufficient warning to the operator.\n\nThis is idempotent, and it returns the old policy of the sled.",
-        "operationId": "sled_expunge",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SledSelector"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SledPolicy"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/sleds/uninitialized": {
-      "get": {
-        "summary": "List uninitialized sleds",
-        "operationId": "sled_list_uninitialized",
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UninitializedSledResultsPage"
-                }
-              }
-            }
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -2132,15 +836,6 @@
   },
   "components": {
     "schemas": {
-      "ActivationReason": {
-        "description": "Describes why a background task was activated\n\nThis is only used for debugging.  This is deliberately not made available to the background task itself.  See \"Design notes\" in the module-level documentation for details.",
-        "type": "string",
-        "enum": [
-          "signaled",
-          "timeout",
-          "dependency"
-        ]
-      },
       "AllowedSourceIps": {
         "description": "Description of source IPs allowed to reach rack services.",
         "oneOf": [
@@ -2187,51 +882,6 @@
         "description": "An artifact version.\n\nThis is a freeform identifier with some basic validation. It may be the serialized form of a semver version, or a custom identifier that uses the same character set as a semver, plus `_`.\n\nThe exact pattern accepted is `^[a-zA-Z0-9._+-]{1,63}$`.\n\n# Ord implementation\n\n`ArtifactVersion`s are not intended to be sorted, just compared for equality. `ArtifactVersion` implements `Ord` only for storage within sorted collections.",
         "type": "string",
         "pattern": "^[a-zA-Z0-9._+-]{1,63}$"
-      },
-      "BackgroundTask": {
-        "description": "Background tasks\n\nThese are currently only intended for observability by developers.  We will eventually want to flesh this out into something more observable for end users.",
-        "type": "object",
-        "properties": {
-          "current": {
-            "description": "Describes the current task status",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/CurrentStatus"
-              }
-            ]
-          },
-          "description": {
-            "description": "brief summary (for developers) of what this task does",
-            "type": "string"
-          },
-          "last": {
-            "description": "Describes the last completed activation",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/LastResult"
-              }
-            ]
-          },
-          "name": {
-            "description": "unique identifier for this background task",
-            "type": "string"
-          },
-          "period": {
-            "description": "how long after an activation completes before another will be triggered automatically\n\n(activations can also be triggered for other reasons)",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Duration"
-              }
-            ]
-          }
-        },
-        "required": [
-          "current",
-          "description",
-          "last",
-          "name",
-          "period"
-        ]
       },
       "BackgroundTasksActivateRequest": {
         "description": "Query parameters for Background Task activation requests.",
@@ -2511,6 +1161,40 @@
           "port"
         ]
       },
+      "BlockedMgsUpdate": {
+        "type": "object",
+        "properties": {
+          "baseboard_id": {
+            "description": "id of the baseboard that we attempted to update",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BaseboardId"
+              }
+            ]
+          },
+          "component": {
+            "description": "type of SP component that we attempted to update",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MgsUpdateComponent"
+              }
+            ]
+          },
+          "reason": {
+            "description": "reason why the update failed",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/FailedMgsUpdateReason"
+              }
+            ]
+          }
+        },
+        "required": [
+          "baseboard_id",
+          "component",
+          "reason"
+        ]
+      },
       "Blueprint": {
         "description": "Describes a complete set of software and configuration for the system",
         "type": "object",
@@ -2609,20 +1293,20 @@
               }
             ]
           },
-          "report": {
-            "description": "Report on the planning session that resulted in this blueprint",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/PlanningReport"
-              }
-            ]
-          },
           "sleds": {
             "description": "A map of sled id -> desired configuration of the sled.",
             "type": "object",
             "additionalProperties": {
               "$ref": "#/components/schemas/BlueprintSledConfig"
             }
+          },
+          "source": {
+            "description": "Source of this blueprint (can include planning report)",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BlueprintSource"
+              }
+            ]
           },
           "target_release_minimum_generation": {
             "description": "The minimum release generation to accept for target release configuration. Target release configuration with a generation less than this number will be ignored.\n\nFor example, let's say that the current target release generation is 5. Then, when reconfigurator detects a MUPdate:\n\n* the target release is ignored in favor of the install dataset * this field is set to 6\n\nOnce an operator sets a new target release, its generation will be 6 or higher. Reconfigurator will then know that it is back in charge of driving the system to the target release.",
@@ -2650,8 +1334,8 @@
           "oximeter_read_mode",
           "oximeter_read_version",
           "pending_mgs_updates",
-          "report",
           "sleds",
+          "source",
           "target_release_minimum_generation",
           "time_created"
         ]
@@ -2822,119 +1506,6 @@
           "slot_b"
         ]
       },
-      "BlueprintMetadata": {
-        "description": "Describe high-level metadata about a blueprint",
-        "type": "object",
-        "properties": {
-          "cockroachdb_fingerprint": {
-            "description": "CockroachDB state fingerprint when this blueprint was created",
-            "type": "string"
-          },
-          "cockroachdb_setting_preserve_downgrade": {
-            "nullable": true,
-            "description": "Whether to set `cluster.preserve_downgrade_option` and what to set it to (`None` if this value was retrieved from the database and was invalid)",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/CockroachDbPreserveDowngrade"
-              }
-            ]
-          },
-          "comment": {
-            "description": "human-readable string describing why this blueprint was created (for debugging)",
-            "type": "string"
-          },
-          "creator": {
-            "description": "identity of the component that generated the blueprint (for debugging) This would generally be the Uuid of a Nexus instance.",
-            "type": "string"
-          },
-          "external_dns_version": {
-            "description": "external DNS version when this blueprint was created",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Generation"
-              }
-            ]
-          },
-          "id": {
-            "description": "unique identifier for this blueprint",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/TypedUuidForBlueprintKind"
-              }
-            ]
-          },
-          "internal_dns_version": {
-            "description": "internal DNS version when this blueprint was created",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Generation"
-              }
-            ]
-          },
-          "nexus_generation": {
-            "description": "The Nexus generation number\n\nSee [`Blueprint::nexus_generation`].",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Generation"
-              }
-            ]
-          },
-          "parent_blueprint_id": {
-            "nullable": true,
-            "description": "which blueprint this blueprint is based on",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/TypedUuidForBlueprintKind"
-              }
-            ]
-          },
-          "target_release_minimum_generation": {
-            "description": "The minimum generation for the target release.\n\nSee [`Blueprint::target_release_minimum_generation`].",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Generation"
-              }
-            ]
-          },
-          "time_created": {
-            "description": "when this blueprint was generated (for debugging)",
-            "type": "string",
-            "format": "date-time"
-          }
-        },
-        "required": [
-          "cockroachdb_fingerprint",
-          "comment",
-          "creator",
-          "external_dns_version",
-          "id",
-          "internal_dns_version",
-          "nexus_generation",
-          "target_release_minimum_generation",
-          "time_created"
-        ]
-      },
-      "BlueprintMetadataResultsPage": {
-        "description": "A single page of results",
-        "type": "object",
-        "properties": {
-          "items": {
-            "description": "list of items on this page of results",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/BlueprintMetadata"
-            }
-          },
-          "next_page": {
-            "nullable": true,
-            "description": "token used to fetch the next page of results (if any)",
-            "type": "string"
-          }
-        },
-        "required": [
-          "items"
-        ]
-      },
       "BlueprintPhysicalDiskConfig": {
         "description": "Information about an Omicron physical disk as recorded in a bluerprint.",
         "type": "object",
@@ -3053,48 +1624,125 @@
           "zones"
         ]
       },
-      "BlueprintTarget": {
-        "description": "Describes what blueprint, if any, the system is currently working toward",
-        "type": "object",
-        "properties": {
-          "enabled": {
-            "description": "policy: should the system actively work towards this blueprint\n\nThis should generally be left enabled.",
-            "type": "boolean"
-          },
-          "target_id": {
-            "description": "id of the blueprint that the system is trying to make real",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/TypedUuidForBlueprintKind"
+      "BlueprintSource": {
+        "description": "Description of the source of a blueprint.",
+        "oneOf": [
+          {
+            "description": "The initial blueprint created by the rack setup service.",
+            "type": "object",
+            "properties": {
+              "source": {
+                "type": "string",
+                "enum": [
+                  "rss"
+                ]
               }
+            },
+            "required": [
+              "source"
             ]
           },
-          "time_made_target": {
-            "description": "when this blueprint was made the target",
-            "type": "string",
-            "format": "date-time"
-          }
-        },
-        "required": [
-          "enabled",
-          "target_id",
-          "time_made_target"
-        ]
-      },
-      "BlueprintTargetSet": {
-        "description": "Specifies what blueprint, if any, the system should be working toward",
-        "type": "object",
-        "properties": {
-          "enabled": {
-            "type": "boolean"
+          {
+            "description": "A blueprint created by the planner, and we still have the associated planning report.",
+            "type": "object",
+            "properties": {
+              "add": {
+                "$ref": "#/components/schemas/PlanningAddStepReport"
+              },
+              "cockroachdb_settings": {
+                "$ref": "#/components/schemas/PlanningCockroachdbSettingsStepReport"
+              },
+              "decommission": {
+                "$ref": "#/components/schemas/PlanningDecommissionStepReport"
+              },
+              "expunge": {
+                "$ref": "#/components/schemas/PlanningExpungeStepReport"
+              },
+              "mgs_updates": {
+                "$ref": "#/components/schemas/PlanningMgsUpdatesStepReport"
+              },
+              "nexus_generation_bump": {
+                "$ref": "#/components/schemas/PlanningNexusGenerationBumpReport"
+              },
+              "noop_image_source": {
+                "$ref": "#/components/schemas/PlanningNoopImageSourceStepReport"
+              },
+              "planner_config": {
+                "description": "The configuration in effect for this planning run.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/PlannerConfig"
+                  }
+                ]
+              },
+              "source": {
+                "type": "string",
+                "enum": [
+                  "planner"
+                ]
+              },
+              "zone_updates": {
+                "$ref": "#/components/schemas/PlanningZoneUpdatesStepReport"
+              }
+            },
+            "required": [
+              "add",
+              "cockroachdb_settings",
+              "decommission",
+              "expunge",
+              "mgs_updates",
+              "nexus_generation_bump",
+              "noop_image_source",
+              "planner_config",
+              "source",
+              "zone_updates"
+            ]
           },
-          "target_id": {
-            "$ref": "#/components/schemas/TypedUuidForBlueprintKind"
+          {
+            "description": "A blueprint created by the planner but loaded from the database, so we no longer have the associated planning report.",
+            "type": "object",
+            "properties": {
+              "source": {
+                "type": "string",
+                "enum": [
+                  "planner_loaded_from_database"
+                ]
+              }
+            },
+            "required": [
+              "source"
+            ]
+          },
+          {
+            "description": "This blueprint was created by one of `reconfigurator-cli`'s blueprint editing subcommands.",
+            "type": "object",
+            "properties": {
+              "source": {
+                "type": "string",
+                "enum": [
+                  "reconfigurator_cli_edit"
+                ]
+              }
+            },
+            "required": [
+              "source"
+            ]
+          },
+          {
+            "description": "This blueprint was constructed by hand by an automated test.",
+            "type": "object",
+            "properties": {
+              "source": {
+                "type": "string",
+                "enum": [
+                  "test"
+                ]
+              }
+            },
+            "required": [
+              "source"
+            ]
           }
-        },
-        "required": [
-          "enabled",
-          "target_id"
         ]
       },
       "BlueprintZoneConfig": {
@@ -3535,6 +2183,12 @@
                 "description": "The address at which the internal nexus server is reachable.",
                 "type": "string"
               },
+              "lockstep_port": {
+                "description": "The port at which the lockstep server is reachable. This shares the same IP address with `internal_address`.",
+                "type": "integer",
+                "format": "uint16",
+                "minimum": 0
+              },
               "nexus_generation": {
                 "description": "Generation number for this Nexus zone. This is used to coordinate handoff between old and new Nexus instances during updates. See RFD 588.",
                 "allOf": [
@@ -3563,6 +2217,7 @@
               "external_ip",
               "external_tls",
               "internal_address",
+              "lockstep_port",
               "nexus_generation",
               "nic",
               "type"
@@ -3593,6 +2248,18 @@
         "type": "integer",
         "format": "uint64",
         "minimum": 0
+      },
+      "CabooseWhich": {
+        "description": "Describes which caboose this is (which component, which slot)",
+        "type": "string",
+        "enum": [
+          "sp_slot0",
+          "sp_slot1",
+          "rot_slot_a",
+          "rot_slot_b",
+          "stage0",
+          "stage0_next"
+        ]
       },
       "Certificate": {
         "type": "object",
@@ -3675,115 +2342,6 @@
           "max_used_keeper_id",
           "max_used_server_id",
           "servers"
-        ]
-      },
-      "ClickhouseMode": {
-        "description": "How to deploy clickhouse nodes",
-        "oneOf": [
-          {
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "single_node_only"
-                ]
-              }
-            },
-            "required": [
-              "type"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "cluster_only"
-                ]
-              },
-              "value": {
-                "type": "object",
-                "properties": {
-                  "target_keepers": {
-                    "type": "integer",
-                    "format": "uint8",
-                    "minimum": 0
-                  },
-                  "target_servers": {
-                    "type": "integer",
-                    "format": "uint8",
-                    "minimum": 0
-                  }
-                },
-                "required": [
-                  "target_keepers",
-                  "target_servers"
-                ]
-              }
-            },
-            "required": [
-              "type",
-              "value"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "both"
-                ]
-              },
-              "value": {
-                "type": "object",
-                "properties": {
-                  "target_keepers": {
-                    "type": "integer",
-                    "format": "uint8",
-                    "minimum": 0
-                  },
-                  "target_servers": {
-                    "type": "integer",
-                    "format": "uint8",
-                    "minimum": 0
-                  }
-                },
-                "required": [
-                  "target_keepers",
-                  "target_servers"
-                ]
-              }
-            },
-            "required": [
-              "type",
-              "value"
-            ]
-          }
-        ]
-      },
-      "ClickhousePolicy": {
-        "type": "object",
-        "properties": {
-          "mode": {
-            "$ref": "#/components/schemas/ClickhouseMode"
-          },
-          "time_created": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "version": {
-            "type": "integer",
-            "format": "uint32",
-            "minimum": 0
-          }
-        },
-        "required": [
-          "mode",
-          "time_created",
-          "version"
         ]
       },
       "CockroachDbClusterVersion": {
@@ -3933,78 +2491,6 @@
           }
         ]
       },
-      "CompletedAttempt": {
-        "description": "externally-exposed status for a completed attempt",
-        "type": "object",
-        "properties": {
-          "elapsed": {
-            "$ref": "#/components/schemas/Duration"
-          },
-          "nattempts_done": {
-            "type": "integer",
-            "format": "uint32",
-            "minimum": 0
-          },
-          "request": {
-            "$ref": "#/components/schemas/PendingMgsUpdate"
-          },
-          "result": {
-            "x-rust-type": {
-              "crate": "std",
-              "parameters": [
-                {
-                  "$ref": "#/components/schemas/UpdateCompletedHow"
-                },
-                {
-                  "type": "string"
-                }
-              ],
-              "path": "::std::result::Result",
-              "version": "*"
-            },
-            "oneOf": [
-              {
-                "type": "object",
-                "properties": {
-                  "ok": {
-                    "$ref": "#/components/schemas/UpdateCompletedHow"
-                  }
-                },
-                "required": [
-                  "ok"
-                ]
-              },
-              {
-                "type": "object",
-                "properties": {
-                  "err": {
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "err"
-                ]
-              }
-            ]
-          },
-          "time_done": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "time_started": {
-            "type": "string",
-            "format": "date-time"
-          }
-        },
-        "required": [
-          "elapsed",
-          "nattempts_done",
-          "request",
-          "result",
-          "time_done",
-          "time_started"
-        ]
-      },
       "CompressionAlgorithm": {
         "oneOf": [
           {
@@ -4130,93 +2616,23 @@
           "zpool_id"
         ]
       },
-      "CurrentStatus": {
-        "description": "Describes the current status of a background task",
-        "oneOf": [
-          {
-            "description": "The background task is not running\n\nTypically, the task would be waiting for its next activation, which would happen after a timeout or some other event that triggers activation",
-            "type": "object",
-            "properties": {
-              "current_status": {
-                "type": "string",
-                "enum": [
-                  "idle"
-                ]
-              }
-            },
-            "required": [
-              "current_status"
-            ]
-          },
-          {
-            "description": "The background task is currently running\n\nMore precisely, the task has been activated and has not yet finished this activation",
-            "type": "object",
-            "properties": {
-              "current_status": {
-                "type": "string",
-                "enum": [
-                  "running"
-                ]
-              },
-              "details": {
-                "$ref": "#/components/schemas/CurrentStatusRunning"
-              }
-            },
-            "required": [
-              "current_status",
-              "details"
-            ]
-          }
-        ]
-      },
-      "CurrentStatusRunning": {
-        "type": "object",
-        "properties": {
-          "iteration": {
-            "description": "which iteration this was (counter)",
-            "type": "integer",
-            "format": "uint64",
-            "minimum": 0
-          },
-          "reason": {
-            "description": "what kind of event triggered this activation",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/ActivationReason"
-              }
-            ]
-          },
-          "start_time": {
-            "description": "wall-clock time when the current activation started",
-            "type": "string",
-            "format": "date-time"
-          }
-        },
-        "required": [
-          "iteration",
-          "reason",
-          "start_time"
-        ]
-      },
       "DatasetKind": {
         "description": "The kind of dataset. See the `DatasetKind` enum in omicron-common for possible values.",
         "type": "string"
       },
-      "DemoSaga": {
-        "description": "Identifies an instance of the demo saga",
+      "DiscretionaryZonePlacement": {
         "type": "object",
         "properties": {
-          "demo_saga_id": {
-            "$ref": "#/components/schemas/TypedUuidForDemoSagaKind"
+          "kind": {
+            "type": "string"
           },
-          "saga_id": {
-            "type": "string",
-            "format": "uuid"
+          "source": {
+            "type": "string"
           }
         },
         "required": [
-          "demo_saga_id",
-          "saga_id"
+          "kind",
+          "source"
         ]
       },
       "DiskIdentity": {
@@ -4807,6 +3223,280 @@
           }
         ]
       },
+      "FailedMgsUpdateReason": {
+        "description": "Describes the reason why an SP component failed to update",
+        "oneOf": [
+          {
+            "description": "The active host phase 1 slot does not match the boot disk",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "active_host_phase1_slot_boot_disk_mismatch"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/M2Slot"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "description": "The active host phase 1 hash was not found in inventory",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "active_host_phase1_hash_not_in_inventory"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/M2Slot"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "description": "The active host phase 1 slot was not found in inventory",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "active_host_phase1_slot_not_in_inventory"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "The component's caboose was missing a value for \"sign\"",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "caboose_missing_sign"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/CabooseWhich"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "description": "The component's caboose was not found in the inventory",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "caboose_not_in_inventory"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/CabooseWhich"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "description": "The version in the caboose or artifact was not able to be parsed",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "failed_version_parse"
+                ]
+              },
+              "value": {
+                "type": "object",
+                "properties": {
+                  "caboose": {
+                    "$ref": "#/components/schemas/CabooseWhich"
+                  },
+                  "err": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "caboose",
+                  "err"
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "description": "The inactive host phase 1 hash was not found in inventory",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "inactive_host_phase1_hash_not_in_inventory"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/M2Slot"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "description": "Last reconciliation details were not found in inventory",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "last_reconciliation_not_in_inventory"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "No artifact with the required conditions for the component was found",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "no_matching_artifact_found"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "RoT state was not found in inventory",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "rot_state_not_in_inventory"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "Sled agent info was not found in inventory",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "sled_agent_info_not_in_inventory"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "The component's corresponding SP was not found in the inventory",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "sp_not_in_inventory"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "Too many artifacts with the required conditions for the component were found",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "too_many_matching_artifacts"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "The sled agent reported an error determining the boot disk",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "unable_to_determine_boot_disk"
+                ]
+              },
+              "value": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "description": "The sled agent reported an error retrieving boot disk phase 2 image details",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "unable_to_retrieve_boot_disk_phase2_image"
+                ]
+              },
+              "value": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          }
+        ]
+      },
       "Generation": {
         "description": "Generation numbers stored in the database, used for optimistic concurrency control",
         "type": "integer",
@@ -4817,141 +3507,6 @@
         "type": "integer",
         "format": "uint8",
         "minimum": 0
-      },
-      "HeldDbClaimInfo": {
-        "description": "Describes an outstanding database claim (for debugging why quiesce is stuck)",
-        "type": "object",
-        "properties": {
-          "debug": {
-            "type": "string"
-          },
-          "held_since": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "id": {
-            "type": "integer",
-            "format": "uint64",
-            "minimum": 0
-          }
-        },
-        "required": [
-          "debug",
-          "held_since",
-          "id"
-        ]
-      },
-      "HostPhase1Status": {
-        "oneOf": [
-          {
-            "description": "This device has no host phase 1 status because it is not a sled (e.g., it's a PSC or switch).",
-            "type": "object",
-            "properties": {
-              "kind": {
-                "type": "string",
-                "enum": [
-                  "not_a_sled"
-                ]
-              }
-            },
-            "required": [
-              "kind"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "active_slot": {
-                "nullable": true,
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/M2Slot"
-                  }
-                ]
-              },
-              "kind": {
-                "type": "string",
-                "enum": [
-                  "sled"
-                ]
-              },
-              "sled_id": {
-                "nullable": true,
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/TypedUuidForSledKind"
-                  }
-                ]
-              },
-              "slot_a_version": {
-                "$ref": "#/components/schemas/TufRepoVersion"
-              },
-              "slot_b_version": {
-                "$ref": "#/components/schemas/TufRepoVersion"
-              }
-            },
-            "required": [
-              "kind",
-              "slot_a_version",
-              "slot_b_version"
-            ]
-          }
-        ]
-      },
-      "HostPhase2Status": {
-        "type": "object",
-        "properties": {
-          "boot_disk": {
-            "x-rust-type": {
-              "crate": "std",
-              "parameters": [
-                {
-                  "$ref": "#/components/schemas/M2Slot"
-                },
-                {
-                  "type": "string"
-                }
-              ],
-              "path": "::std::result::Result",
-              "version": "*"
-            },
-            "oneOf": [
-              {
-                "type": "object",
-                "properties": {
-                  "ok": {
-                    "$ref": "#/components/schemas/M2Slot"
-                  }
-                },
-                "required": [
-                  "ok"
-                ]
-              },
-              {
-                "type": "object",
-                "properties": {
-                  "err": {
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "err"
-                ]
-              }
-            ]
-          },
-          "slot_a_version": {
-            "$ref": "#/components/schemas/TufRepoVersion"
-          },
-          "slot_b_version": {
-            "$ref": "#/components/schemas/TufRepoVersion"
-          }
-        },
-        "required": [
-          "boot_disk",
-          "slot_a_version",
-          "slot_b_version"
-        ]
       },
       "IdMapBlueprintDatasetConfig": {
         "type": "object",
@@ -5008,257 +3563,6 @@
             "required": [
               "type",
               "value"
-            ]
-          }
-        ]
-      },
-      "InProgressUpdateStatus": {
-        "description": "externally-exposed status for each in-progress update",
-        "type": "object",
-        "properties": {
-          "baseboard_id": {
-            "$ref": "#/components/schemas/BaseboardId"
-          },
-          "nattempts_done": {
-            "type": "integer",
-            "format": "uint32",
-            "minimum": 0
-          },
-          "status": {
-            "$ref": "#/components/schemas/UpdateAttemptStatus"
-          },
-          "time_started": {
-            "type": "string",
-            "format": "date-time"
-          }
-        },
-        "required": [
-          "baseboard_id",
-          "nattempts_done",
-          "status",
-          "time_started"
-        ]
-      },
-      "Instance": {
-        "description": "View of an Instance",
-        "type": "object",
-        "properties": {
-          "auto_restart_cooldown_expiration": {
-            "nullable": true,
-            "description": "The time at which the auto-restart cooldown period for this instance completes, permitting it to be automatically restarted again. If the instance enters the `Failed` state, it will not be restarted until after this time.\n\nIf this is not present, then either the instance has never been automatically restarted, or the cooldown period has already expired, allowing the instance to be restarted immediately if it fails.",
-            "type": "string",
-            "format": "date-time"
-          },
-          "auto_restart_enabled": {
-            "description": "`true` if this instance's auto-restart policy will permit the control plane to automatically restart it if it enters the `Failed` state.",
-            "type": "boolean"
-          },
-          "auto_restart_policy": {
-            "nullable": true,
-            "description": "The auto-restart policy configured for this instance, or `null` if no explicit policy has been configured.\n\nThis policy determines whether the instance should be automatically restarted by the control plane on failure. If this is `null`, the control plane will use the default policy when determining whether or not to automatically restart this instance, which may or may not allow it to be restarted. The value of the `auto_restart_enabled` field indicates whether the instance will be auto-restarted, based on its current policy or the default if it has no configured policy.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/InstanceAutoRestartPolicy"
-              }
-            ]
-          },
-          "boot_disk_id": {
-            "nullable": true,
-            "description": "the ID of the disk used to boot this Instance, if a specific one is assigned.",
-            "type": "string",
-            "format": "uuid"
-          },
-          "description": {
-            "description": "human-readable free-form text about a resource",
-            "type": "string"
-          },
-          "hostname": {
-            "description": "RFC1035-compliant hostname for the Instance.",
-            "type": "string"
-          },
-          "id": {
-            "description": "unique, immutable, system-controlled identifier for each resource",
-            "type": "string",
-            "format": "uuid"
-          },
-          "memory": {
-            "description": "memory allocated for this Instance",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/ByteCount"
-              }
-            ]
-          },
-          "name": {
-            "description": "unique, mutable, user-controlled identifier for each resource",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Name"
-              }
-            ]
-          },
-          "ncpus": {
-            "description": "number of CPUs allocated for this Instance",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/InstanceCpuCount"
-              }
-            ]
-          },
-          "project_id": {
-            "description": "id for the project containing this Instance",
-            "type": "string",
-            "format": "uuid"
-          },
-          "run_state": {
-            "$ref": "#/components/schemas/InstanceState"
-          },
-          "time_created": {
-            "description": "timestamp when this resource was created",
-            "type": "string",
-            "format": "date-time"
-          },
-          "time_last_auto_restarted": {
-            "nullable": true,
-            "description": "The timestamp of the most recent time this instance was automatically restarted by the control plane.\n\nIf this is not present, then this instance has not been automatically restarted.",
-            "type": "string",
-            "format": "date-time"
-          },
-          "time_modified": {
-            "description": "timestamp when this resource was last modified",
-            "type": "string",
-            "format": "date-time"
-          },
-          "time_run_state_updated": {
-            "type": "string",
-            "format": "date-time"
-          }
-        },
-        "required": [
-          "auto_restart_enabled",
-          "description",
-          "hostname",
-          "id",
-          "memory",
-          "name",
-          "ncpus",
-          "project_id",
-          "run_state",
-          "time_created",
-          "time_modified",
-          "time_run_state_updated"
-        ]
-      },
-      "InstanceAutoRestartPolicy": {
-        "description": "A policy determining when an instance should be automatically restarted by the control plane.",
-        "oneOf": [
-          {
-            "description": "The instance should not be automatically restarted by the control plane if it fails.",
-            "type": "string",
-            "enum": [
-              "never"
-            ]
-          },
-          {
-            "description": "If this instance is running and unexpectedly fails (e.g. due to a host software crash or unexpected host reboot), the control plane will make a best-effort attempt to restart it. The control plane may choose not to restart the instance to preserve the overall availability of the system.",
-            "type": "string",
-            "enum": [
-              "best_effort"
-            ]
-          }
-        ]
-      },
-      "InstanceCpuCount": {
-        "description": "The number of CPUs in an Instance",
-        "type": "integer",
-        "format": "uint16",
-        "minimum": 0
-      },
-      "InstanceMigrateRequest": {
-        "description": "Parameters used when migrating an instance.",
-        "type": "object",
-        "properties": {
-          "dst_sled_id": {
-            "description": "The ID of the sled to which to migrate the target instance.",
-            "type": "string",
-            "format": "uuid"
-          }
-        },
-        "required": [
-          "dst_sled_id"
-        ]
-      },
-      "InstanceState": {
-        "description": "Running state of an Instance (primarily: booted or stopped)\n\nThis typically reflects whether it's starting, running, stopping, or stopped, but also includes states related to the Instance's lifecycle",
-        "oneOf": [
-          {
-            "description": "The instance is being created.",
-            "type": "string",
-            "enum": [
-              "creating"
-            ]
-          },
-          {
-            "description": "The instance is currently starting up.",
-            "type": "string",
-            "enum": [
-              "starting"
-            ]
-          },
-          {
-            "description": "The instance is currently running.",
-            "type": "string",
-            "enum": [
-              "running"
-            ]
-          },
-          {
-            "description": "The instance has been requested to stop and a transition to \"Stopped\" is imminent.",
-            "type": "string",
-            "enum": [
-              "stopping"
-            ]
-          },
-          {
-            "description": "The instance is currently stopped.",
-            "type": "string",
-            "enum": [
-              "stopped"
-            ]
-          },
-          {
-            "description": "The instance is in the process of rebooting - it will remain in the \"rebooting\" state until the VM is starting once more.",
-            "type": "string",
-            "enum": [
-              "rebooting"
-            ]
-          },
-          {
-            "description": "The instance is in the process of migrating - it will remain in the \"migrating\" state until the migration process is complete and the destination propolis is ready to continue execution.",
-            "type": "string",
-            "enum": [
-              "migrating"
-            ]
-          },
-          {
-            "description": "The instance is attempting to recover from a failure.",
-            "type": "string",
-            "enum": [
-              "repairing"
-            ]
-          },
-          {
-            "description": "The instance has encountered a failure.",
-            "type": "string",
-            "enum": [
-              "failed"
-            ]
-          },
-          {
-            "description": "The instance has been deleted.",
-            "type": "string",
-            "enum": [
-              "destroyed"
             ]
           }
         ]
@@ -5374,86 +3678,6 @@
         "format": "uint64",
         "minimum": 0
       },
-      "LastResult": {
-        "oneOf": [
-          {
-            "description": "The task has never completed an activation",
-            "type": "object",
-            "properties": {
-              "last_result": {
-                "type": "string",
-                "enum": [
-                  "never_completed"
-                ]
-              }
-            },
-            "required": [
-              "last_result"
-            ]
-          },
-          {
-            "description": "The task has completed at least one activation",
-            "type": "object",
-            "properties": {
-              "details": {
-                "$ref": "#/components/schemas/LastResultCompleted"
-              },
-              "last_result": {
-                "type": "string",
-                "enum": [
-                  "completed"
-                ]
-              }
-            },
-            "required": [
-              "details",
-              "last_result"
-            ]
-          }
-        ]
-      },
-      "LastResultCompleted": {
-        "type": "object",
-        "properties": {
-          "details": {
-            "description": "arbitrary datum emitted by the background task"
-          },
-          "elapsed": {
-            "description": "total time elapsed during the activation",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Duration"
-              }
-            ]
-          },
-          "iteration": {
-            "description": "which iteration this was (counter)",
-            "type": "integer",
-            "format": "uint64",
-            "minimum": 0
-          },
-          "reason": {
-            "description": "what kind of event triggered this activation",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/ActivationReason"
-              }
-            ]
-          },
-          "start_time": {
-            "description": "wall-clock time when the activation started",
-            "type": "string",
-            "format": "date-time"
-          }
-        },
-        "required": [
-          "details",
-          "elapsed",
-          "iteration",
-          "reason",
-          "start_time"
-        ]
-      },
       "LldpAdminStatus": {
         "description": "To what extent should this port participate in LLDP",
         "type": "string",
@@ -5532,84 +3756,13 @@
         "minLength": 5,
         "maxLength": 17
       },
-      "MgsDrivenUpdateStatus": {
-        "type": "object",
-        "properties": {
-          "baseboard_description": {
-            "type": "string"
-          },
-          "host_os_phase_1": {
-            "$ref": "#/components/schemas/HostPhase1Status"
-          },
-          "rot": {
-            "$ref": "#/components/schemas/RotStatus"
-          },
-          "rot_bootloader": {
-            "$ref": "#/components/schemas/RotBootloaderStatus"
-          },
-          "sp": {
-            "$ref": "#/components/schemas/SpStatus"
-          }
-        },
-        "required": [
-          "baseboard_description",
-          "host_os_phase_1",
+      "MgsUpdateComponent": {
+        "type": "string",
+        "enum": [
+          "sp",
           "rot",
           "rot_bootloader",
-          "sp"
-        ]
-      },
-      "MgsUpdateDriverStatus": {
-        "description": "Status of ongoing update attempts, recently completed attempts, and update requests that are waiting for retry.",
-        "type": "object",
-        "properties": {
-          "in_progress": {
-            "title": "IdOrdMap",
-            "x-rust-type": {
-              "crate": "iddqd",
-              "parameters": [
-                {
-                  "$ref": "#/components/schemas/InProgressUpdateStatus"
-                }
-              ],
-              "path": "iddqd::IdOrdMap",
-              "version": "*"
-            },
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/InProgressUpdateStatus"
-            },
-            "uniqueItems": true
-          },
-          "recent": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/CompletedAttempt"
-            }
-          },
-          "waiting": {
-            "title": "IdOrdMap",
-            "x-rust-type": {
-              "crate": "iddqd",
-              "parameters": [
-                {
-                  "$ref": "#/components/schemas/WaitingStatus"
-                }
-              ],
-              "path": "iddqd::IdOrdMap",
-              "version": "*"
-            },
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/WaitingStatus"
-            },
-            "uniqueItems": true
-          }
-        },
-        "required": [
-          "in_progress",
-          "recent",
-          "waiting"
+          "host_os"
         ]
       },
       "MigrationRuntimeState": {
@@ -5852,9 +4005,69 @@
         "description": "Password hashes must be in PHC (Password Hashing Competition) string format.  Passwords must be hashed with Argon2id.  Password hashes may be rejected if the parameters appear not to be secure enough.",
         "type": "string"
       },
-      "NodeName": {
-        "description": "Unique name for a saga [`Node`]\n\nEach node requires a string name that's unique within its DAG.  The name is used to identify its output.  Nodes that depend on a given node (either directly or indirectly) can access the node's output using its name.",
-        "type": "string"
+      "NexusGenerationBumpWaitingOn": {
+        "oneOf": [
+          {
+            "description": "Waiting for the planner to finish updating all non-Nexus zones",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "found_old_non_nexus_zones"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "Waiting for the planner to deploy new-generation Nexus zones",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "missing_new_nexus_in_blueprint"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "Waiting for `db_metadata_nexus` records to be deployed for new-generation Nexus zones",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "missing_nexus_database_access_records"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "Waiting for newly deployed Nexus zones to appear to inventory",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "missing_new_nexus_in_inventory"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          }
+        ]
       },
       "OmicronZoneDataset": {
         "description": "Describes a persistent ZFS dataset associated with an Omicron zone",
@@ -5917,357 +4130,6 @@
           "snat_cfg"
         ]
       },
-      "OmicronZoneType": {
-        "description": "Describes what kind of zone this is (i.e., what component is running in it) as well as any type-specific configuration",
-        "oneOf": [
-          {
-            "type": "object",
-            "properties": {
-              "address": {
-                "type": "string"
-              },
-              "dns_servers": {
-                "type": "array",
-                "items": {
-                  "type": "string",
-                  "format": "ip"
-                }
-              },
-              "domain": {
-                "nullable": true,
-                "type": "string"
-              },
-              "nic": {
-                "description": "The service vNIC providing outbound connectivity using OPTE.",
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/NetworkInterface"
-                  }
-                ]
-              },
-              "ntp_servers": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
-              },
-              "snat_cfg": {
-                "description": "The SNAT configuration for outbound connections.",
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/SourceNatConfig"
-                  }
-                ]
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "boundary_ntp"
-                ]
-              }
-            },
-            "required": [
-              "address",
-              "dns_servers",
-              "nic",
-              "ntp_servers",
-              "snat_cfg",
-              "type"
-            ]
-          },
-          {
-            "description": "Type of clickhouse zone used for a single node clickhouse deployment",
-            "type": "object",
-            "properties": {
-              "address": {
-                "type": "string"
-              },
-              "dataset": {
-                "$ref": "#/components/schemas/OmicronZoneDataset"
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "clickhouse"
-                ]
-              }
-            },
-            "required": [
-              "address",
-              "dataset",
-              "type"
-            ]
-          },
-          {
-            "description": "A zone used to run a Clickhouse Keeper node\n\nKeepers are only used in replicated clickhouse setups",
-            "type": "object",
-            "properties": {
-              "address": {
-                "type": "string"
-              },
-              "dataset": {
-                "$ref": "#/components/schemas/OmicronZoneDataset"
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "clickhouse_keeper"
-                ]
-              }
-            },
-            "required": [
-              "address",
-              "dataset",
-              "type"
-            ]
-          },
-          {
-            "description": "A zone used to run a Clickhouse Server in a replicated deployment",
-            "type": "object",
-            "properties": {
-              "address": {
-                "type": "string"
-              },
-              "dataset": {
-                "$ref": "#/components/schemas/OmicronZoneDataset"
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "clickhouse_server"
-                ]
-              }
-            },
-            "required": [
-              "address",
-              "dataset",
-              "type"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "address": {
-                "type": "string"
-              },
-              "dataset": {
-                "$ref": "#/components/schemas/OmicronZoneDataset"
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "cockroach_db"
-                ]
-              }
-            },
-            "required": [
-              "address",
-              "dataset",
-              "type"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "address": {
-                "type": "string"
-              },
-              "dataset": {
-                "$ref": "#/components/schemas/OmicronZoneDataset"
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "crucible"
-                ]
-              }
-            },
-            "required": [
-              "address",
-              "dataset",
-              "type"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "address": {
-                "type": "string"
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "crucible_pantry"
-                ]
-              }
-            },
-            "required": [
-              "address",
-              "type"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "dataset": {
-                "$ref": "#/components/schemas/OmicronZoneDataset"
-              },
-              "dns_address": {
-                "description": "The address at which the external DNS server is reachable.",
-                "type": "string"
-              },
-              "http_address": {
-                "description": "The address at which the external DNS server API is reachable.",
-                "type": "string"
-              },
-              "nic": {
-                "description": "The service vNIC providing external connectivity using OPTE.",
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/NetworkInterface"
-                  }
-                ]
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "external_dns"
-                ]
-              }
-            },
-            "required": [
-              "dataset",
-              "dns_address",
-              "http_address",
-              "nic",
-              "type"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "dataset": {
-                "$ref": "#/components/schemas/OmicronZoneDataset"
-              },
-              "dns_address": {
-                "type": "string"
-              },
-              "gz_address": {
-                "description": "The addresses in the global zone which should be created\n\nFor the DNS service, which exists outside the sleds's typical subnet - adding an address in the GZ is necessary to allow inter-zone traffic routing.",
-                "type": "string",
-                "format": "ipv6"
-              },
-              "gz_address_index": {
-                "description": "The address is also identified with an auxiliary bit of information to ensure that the created global zone address can have a unique name.",
-                "type": "integer",
-                "format": "uint32",
-                "minimum": 0
-              },
-              "http_address": {
-                "type": "string"
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "internal_dns"
-                ]
-              }
-            },
-            "required": [
-              "dataset",
-              "dns_address",
-              "gz_address",
-              "gz_address_index",
-              "http_address",
-              "type"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "address": {
-                "type": "string"
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "internal_ntp"
-                ]
-              }
-            },
-            "required": [
-              "address",
-              "type"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "external_dns_servers": {
-                "description": "External DNS servers Nexus can use to resolve external hosts.",
-                "type": "array",
-                "items": {
-                  "type": "string",
-                  "format": "ip"
-                }
-              },
-              "external_ip": {
-                "description": "The address at which the external nexus server is reachable.",
-                "type": "string",
-                "format": "ip"
-              },
-              "external_tls": {
-                "description": "Whether Nexus's external endpoint should use TLS",
-                "type": "boolean"
-              },
-              "internal_address": {
-                "description": "The address at which the internal nexus server is reachable.",
-                "type": "string"
-              },
-              "nic": {
-                "description": "The service vNIC providing external connectivity using OPTE.",
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/NetworkInterface"
-                  }
-                ]
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "nexus"
-                ]
-              }
-            },
-            "required": [
-              "external_dns_servers",
-              "external_ip",
-              "external_tls",
-              "internal_address",
-              "nic",
-              "type"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "address": {
-                "type": "string"
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "oximeter"
-                ]
-              }
-            },
-            "required": [
-              "address",
-              "type"
-            ]
-          }
-        ]
-      },
       "OximeterInfo": {
         "description": "Message used to notify Nexus that this oximeter instance is up and running.",
         "type": "object",
@@ -6318,28 +4180,6 @@
               "type"
             ]
           }
-        ]
-      },
-      "OximeterReadPolicy": {
-        "type": "object",
-        "properties": {
-          "mode": {
-            "$ref": "#/components/schemas/OximeterReadMode"
-          },
-          "time_created": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "version": {
-            "type": "integer",
-            "format": "uint32",
-            "minimum": 0
-          }
-        },
-        "required": [
-          "mode",
-          "time_created",
-          "version"
         ]
       },
       "PendingMgsUpdate": {
@@ -6602,78 +4442,12 @@
           "by_baseboard"
         ]
       },
-      "PendingRecovery": {
-        "description": "Snapshot of reassignment state when a recovery pass started",
-        "type": "object",
-        "properties": {
-          "blueprint_id": {
-            "nullable": true,
-            "description": "which blueprint id we'd be fully caught up to upon completion",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/TypedUuidForBlueprintKind"
-              }
-            ]
-          },
-          "generation": {
-            "description": "what `reassignment_generation` was when this recovery started",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Generation"
-              }
-            ]
-          }
-        },
-        "required": [
-          "generation"
-        ]
-      },
-      "PendingSagaInfo": {
-        "description": "Describes a pending saga (for debugging why quiesce is stuck)",
-        "type": "object",
-        "properties": {
-          "recovered": {
-            "description": "If true, we know the saga needs to be recovered.  It may or may not be running already.\n\nIf false, this saga was created in this Nexus process's lifetime.  It's still running.",
-            "type": "boolean"
-          },
-          "saga_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "saga_name": {
-            "type": "string"
-          },
-          "time_pending": {
-            "type": "string",
-            "format": "date-time"
-          }
-        },
-        "required": [
-          "recovered",
-          "saga_id",
-          "saga_name",
-          "time_pending"
-        ]
-      },
       "PhysicalDiskKind": {
         "description": "Describes the form factor of physical disks.",
         "type": "string",
         "enum": [
           "m2",
           "u2"
-        ]
-      },
-      "PhysicalDiskPath": {
-        "type": "object",
-        "properties": {
-          "disk_id": {
-            "description": "ID of the physical disk",
-            "type": "string",
-            "format": "uuid"
-          }
-        },
-        "required": [
-          "disk_id"
         ]
       },
       "PhysicalDiskPutRequest": {
@@ -6730,11 +4504,11 @@
           "ok"
         ]
       },
-      "PlannerChickenSwitches": {
+      "PlannerConfig": {
         "type": "object",
         "properties": {
           "add_zones_with_mupdate_override": {
-            "description": "Whether to add zones even if a mupdate override is present.\n\nOnce Nexus-driven update is active on a customer system, we must not add new zones while the system is recovering from a MUPdate. But that would require customers to upload a TUF repo before adding a new sled, even though Nexus-driven update is not active (as of r16).\n\nThis switch, which is currently on by default, allows us to add zones even if we've detected a recent MUPdate on the system. We will want to turn it off as part of enabling Nexus-driven update.",
+            "description": "Whether to add zones even if a mupdate override is present.\n\nOnce Nexus-driven update is active on a customer system, we must not add new zones while the system is recovering from a MUPdate.\n\nThis setting, which is off by default, allows us to add zones even if we've detected a recent MUPdate on the system.",
             "type": "boolean"
           }
         },
@@ -6773,7 +4547,7 @@
             }
           },
           "add_zones_with_mupdate_override": {
-            "description": "The value of the homonymous chicken switch. (What this really means is that zone adds happen despite being blocked by one or more MUPdate-related reasons.)",
+            "description": "The value of the homonymous planner config. (What this really means is that zone adds happen despite being blocked by one or more MUPdate-related reasons.)",
             "type": "boolean"
           },
           "discretionary_zones_placed": {
@@ -6782,7 +4556,7 @@
             "additionalProperties": {
               "type": "array",
               "items": {
-                "type": "string"
+                "$ref": "#/components/schemas/DiscretionaryZonePlacement"
               }
             }
           },
@@ -6844,6 +4618,10 @@
               "$ref": "#/components/schemas/PlanningAddSufficientZonesExist"
             }
           },
+          "target_release_generation_is_one": {
+            "description": "Set to true if the target release generation is 1, which would allow zones to be added.",
+            "type": "boolean"
+          },
           "waiting_on": {
             "nullable": true,
             "description": "What are we waiting on to start zone additions?",
@@ -6865,7 +4643,8 @@
           "sleds_waiting_for_ntp_zone",
           "sleds_without_ntp_zones_in_inventory",
           "sleds_without_zpools_for_ntp_zones",
-          "sufficient_zones_exist"
+          "sufficient_zones_exist",
+          "target_release_generation_is_one"
         ]
       },
       "PlanningAddSufficientZonesExist": {
@@ -6932,12 +4711,76 @@
       "PlanningMgsUpdatesStepReport": {
         "type": "object",
         "properties": {
+          "blocked_mgs_updates": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BlockedMgsUpdate"
+            }
+          },
           "pending_mgs_updates": {
             "$ref": "#/components/schemas/PendingMgsUpdates"
           }
         },
         "required": [
+          "blocked_mgs_updates",
           "pending_mgs_updates"
+        ]
+      },
+      "PlanningNexusGenerationBumpReport": {
+        "oneOf": [
+          {
+            "description": "We have no reason to bump the Nexus generation number.",
+            "type": "object",
+            "properties": {
+              "component": {
+                "type": "string",
+                "enum": [
+                  "nothing_to_report"
+                ]
+              }
+            },
+            "required": [
+              "component"
+            ]
+          },
+          {
+            "description": "We are waiting on some condition before we can bump the Nexus generation.",
+            "type": "object",
+            "properties": {
+              "component": {
+                "type": "string",
+                "enum": [
+                  "waiting_on"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/NexusGenerationBumpWaitingOn"
+              }
+            },
+            "required": [
+              "component",
+              "value"
+            ]
+          },
+          {
+            "description": "We are bumping the Nexus generation number to this value.",
+            "type": "object",
+            "properties": {
+              "component": {
+                "type": "string",
+                "enum": [
+                  "bumping_generation"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/Generation"
+              }
+            },
+            "required": [
+              "component",
+              "value"
+            ]
+          }
         ]
       },
       "PlanningNoopImageSourceConverted": {
@@ -7199,67 +5042,29 @@
           "desired_image_source": {
             "$ref": "#/components/schemas/BlueprintZoneImageSource"
           },
-          "zone_config": {
-            "$ref": "#/components/schemas/BlueprintZoneConfig"
+          "zone": {
+            "$ref": "#/components/schemas/PlanningReportBlueprintZone"
           }
         },
         "required": [
           "desired_image_source",
-          "zone_config"
+          "zone"
         ]
       },
-      "PlanningReport": {
-        "description": "A full blueprint planning report. Other than the blueprint ID, each field corresponds to a step in the update planner, i.e., a subroutine of `omicron_nexus::reconfigurator::planning::Planner::do_plan`.\n\nThe intent of a planning report is to capture information useful to an operator or developer about the planning process itself, especially if it has become \"stuck\" (unable to proceed with an update). It is *not* a summary of the plan (blueprint), but rather a description of non-fatal conditions the planner is waiting on, unexpected or invalid configurations encountered during planning, etc. The planner may make internal decisions based on the step reports; the intent is that an operator may make administrative decisions based on the full report.\n\nOnly successful planning runs are currently covered by this report. Failures to plan (i.e., to generate a valid blueprint) are represented by `nexus-reconfigurator-planning::blueprint_builder::Error`.",
+      "PlanningReportBlueprintZone": {
+        "description": "Reduced form of a `BlueprintZoneConfig` stored in a [`PlanningReport`].",
         "type": "object",
         "properties": {
-          "add": {
-            "$ref": "#/components/schemas/PlanningAddStepReport"
+          "id": {
+            "$ref": "#/components/schemas/TypedUuidForOmicronZoneKind"
           },
-          "blueprint_id": {
-            "description": "The blueprint produced by the planning run this report describes.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/TypedUuidForBlueprintKind"
-              }
-            ]
-          },
-          "chicken_switches": {
-            "description": "The set of \"chicken switches\" in effect for this planning run.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/PlannerChickenSwitches"
-              }
-            ]
-          },
-          "cockroachdb_settings": {
-            "$ref": "#/components/schemas/PlanningCockroachdbSettingsStepReport"
-          },
-          "decommission": {
-            "$ref": "#/components/schemas/PlanningDecommissionStepReport"
-          },
-          "expunge": {
-            "$ref": "#/components/schemas/PlanningExpungeStepReport"
-          },
-          "mgs_updates": {
-            "$ref": "#/components/schemas/PlanningMgsUpdatesStepReport"
-          },
-          "noop_image_source": {
-            "$ref": "#/components/schemas/PlanningNoopImageSourceStepReport"
-          },
-          "zone_updates": {
-            "$ref": "#/components/schemas/PlanningZoneUpdatesStepReport"
+          "kind": {
+            "$ref": "#/components/schemas/ZoneKind"
           }
         },
         "required": [
-          "add",
-          "blueprint_id",
-          "chicken_switches",
-          "cockroachdb_settings",
-          "decommission",
-          "expunge",
-          "mgs_updates",
-          "noop_image_source",
-          "zone_updates"
+          "id",
+          "kind"
         ]
       },
       "PlanningZoneUpdatesStepReport": {
@@ -7270,7 +5075,7 @@
             "additionalProperties": {
               "type": "array",
               "items": {
-                "$ref": "#/components/schemas/BlueprintZoneConfig"
+                "$ref": "#/components/schemas/PlanningReportBlueprintZone"
               }
             }
           },
@@ -7294,7 +5099,7 @@
             "additionalProperties": {
               "type": "array",
               "items": {
-                "$ref": "#/components/schemas/BlueprintZoneConfig"
+                "$ref": "#/components/schemas/PlanningReportBlueprintZone"
               }
             }
           },
@@ -7306,13 +5111,20 @@
                 "$ref": "#/components/schemas/ZoneUpdatesWaitingOn"
               }
             ]
+          },
+          "waiting_zones": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ZoneWaitingToExpunge"
+            }
           }
         },
         "required": [
           "expunged_zones",
           "out_of_date_zones",
           "unsafe_zones",
-          "updated_zones"
+          "updated_zones",
+          "waiting_zones"
         ]
       },
       "PortConfigV2": {
@@ -7601,232 +5413,6 @@
           "lease_duration"
         ]
       },
-      "QuiesceState": {
-        "description": "See [`QuiesceStatus`] for more on Nexus quiescing.\n\nAt any given time, Nexus is always in one of these states:\n\n```text Undetermined        (have not loaded persistent state; don't know yet) | | load persistent state and find we're not quiescing v Running             (normal operation) | | quiesce starts v DrainingSagas       (no new sagas are allowed, but some are still running) | | no more sagas running v DrainingDb          (no sagas running; no new db connections may be |                  acquired by Nexus at-large, but some are still held) | | no more database connections held v RecordingQuiesce    (everything is quiesced aside from one connection being |                  used to record our final quiesced state) | | finish recording quiesce state in database v Quiesced            (no sagas running, no database connections in use) ```\n\nQuiescing is (currently) a one-way trip: once a Nexus process starts quiescing, it will never go back to normal operation.  It will never go back to an earlier stage, either.",
-        "oneOf": [
-          {
-            "description": "We have not yet determined based on persistent state if we're supposed to be quiesced or not",
-            "type": "object",
-            "properties": {
-              "state": {
-                "type": "string",
-                "enum": [
-                  "undetermined"
-                ]
-              }
-            },
-            "required": [
-              "state"
-            ]
-          },
-          {
-            "description": "Normal operation",
-            "type": "object",
-            "properties": {
-              "state": {
-                "type": "string",
-                "enum": [
-                  "running"
-                ]
-              }
-            },
-            "required": [
-              "state"
-            ]
-          },
-          {
-            "description": "New sagas disallowed, but some are still running on some Nexus instances",
-            "type": "object",
-            "properties": {
-              "quiesce_details": {
-                "type": "object",
-                "properties": {
-                  "time_requested": {
-                    "type": "string",
-                    "format": "date-time"
-                  }
-                },
-                "required": [
-                  "time_requested"
-                ]
-              },
-              "state": {
-                "type": "string",
-                "enum": [
-                  "draining_sagas"
-                ]
-              }
-            },
-            "required": [
-              "quiesce_details",
-              "state"
-            ]
-          },
-          {
-            "description": "No sagas running on any Nexus instances\n\nNo new database connections may be claimed, but some database connections are still held.",
-            "type": "object",
-            "properties": {
-              "quiesce_details": {
-                "type": "object",
-                "properties": {
-                  "duration_draining_sagas": {
-                    "$ref": "#/components/schemas/Duration"
-                  },
-                  "time_requested": {
-                    "type": "string",
-                    "format": "date-time"
-                  }
-                },
-                "required": [
-                  "duration_draining_sagas",
-                  "time_requested"
-                ]
-              },
-              "state": {
-                "type": "string",
-                "enum": [
-                  "draining_db"
-                ]
-              }
-            },
-            "required": [
-              "quiesce_details",
-              "state"
-            ]
-          },
-          {
-            "description": "No database connections in use except to record the final \"quiesced\" state",
-            "type": "object",
-            "properties": {
-              "quiesce_details": {
-                "type": "object",
-                "properties": {
-                  "duration_draining_db": {
-                    "$ref": "#/components/schemas/Duration"
-                  },
-                  "duration_draining_sagas": {
-                    "$ref": "#/components/schemas/Duration"
-                  },
-                  "time_requested": {
-                    "type": "string",
-                    "format": "date-time"
-                  }
-                },
-                "required": [
-                  "duration_draining_db",
-                  "duration_draining_sagas",
-                  "time_requested"
-                ]
-              },
-              "state": {
-                "type": "string",
-                "enum": [
-                  "recording_quiesce"
-                ]
-              }
-            },
-            "required": [
-              "quiesce_details",
-              "state"
-            ]
-          },
-          {
-            "description": "Nexus has no sagas running and is not using the database",
-            "type": "object",
-            "properties": {
-              "quiesce_details": {
-                "type": "object",
-                "properties": {
-                  "duration_draining_db": {
-                    "$ref": "#/components/schemas/Duration"
-                  },
-                  "duration_draining_sagas": {
-                    "$ref": "#/components/schemas/Duration"
-                  },
-                  "duration_recording_quiesce": {
-                    "$ref": "#/components/schemas/Duration"
-                  },
-                  "duration_total": {
-                    "$ref": "#/components/schemas/Duration"
-                  },
-                  "time_quiesced": {
-                    "type": "string",
-                    "format": "date-time"
-                  },
-                  "time_requested": {
-                    "type": "string",
-                    "format": "date-time"
-                  }
-                },
-                "required": [
-                  "duration_draining_db",
-                  "duration_draining_sagas",
-                  "duration_recording_quiesce",
-                  "duration_total",
-                  "time_quiesced",
-                  "time_requested"
-                ]
-              },
-              "state": {
-                "type": "string",
-                "enum": [
-                  "quiesced"
-                ]
-              }
-            },
-            "required": [
-              "quiesce_details",
-              "state"
-            ]
-          }
-        ]
-      },
-      "QuiesceStatus": {
-        "description": "Describes whether Nexus is quiescing or quiesced and what, if anything, is blocking the quiesce process\n\n**Quiescing** is the process of draining Nexus of running sagas and stopping all use of the database in preparation for upgrade.  See [`QuiesceState`] for more on the stages involved.",
-        "type": "object",
-        "properties": {
-          "db_claims": {
-            "title": "IdOrdMap",
-            "description": "what database claims are currently held (by any part of Nexus)\n\nEntries here prevent transitioning from `WaitingForDb` to `Quiesced`.",
-            "x-rust-type": {
-              "crate": "iddqd",
-              "parameters": [
-                {
-                  "$ref": "#/components/schemas/HeldDbClaimInfo"
-                }
-              ],
-              "path": "iddqd::IdOrdMap",
-              "version": "*"
-            },
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/HeldDbClaimInfo"
-            },
-            "uniqueItems": true
-          },
-          "sagas": {
-            "description": "information about saga quiescing",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/SagaQuiesceStatus"
-              }
-            ]
-          },
-          "state": {
-            "description": "what stage of quiescing is Nexus at",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/QuiesceState"
-              }
-            ]
-          }
-        },
-        "required": [
-          "db_claims",
-          "sagas",
-          "state"
-        ]
-      },
       "RackInitializationRequest": {
         "type": "object",
         "properties": {
@@ -7981,60 +5567,6 @@
           "rack_subnet"
         ]
       },
-      "ReconfiguratorChickenSwitches": {
-        "type": "object",
-        "properties": {
-          "planner_enabled": {
-            "type": "boolean"
-          },
-          "planner_switches": {
-            "$ref": "#/components/schemas/PlannerChickenSwitches"
-          }
-        },
-        "required": [
-          "planner_enabled",
-          "planner_switches"
-        ]
-      },
-      "ReconfiguratorChickenSwitchesParam": {
-        "type": "object",
-        "properties": {
-          "switches": {
-            "$ref": "#/components/schemas/ReconfiguratorChickenSwitches"
-          },
-          "version": {
-            "type": "integer",
-            "format": "uint32",
-            "minimum": 0
-          }
-        },
-        "required": [
-          "switches",
-          "version"
-        ]
-      },
-      "ReconfiguratorChickenSwitchesView": {
-        "type": "object",
-        "properties": {
-          "switches": {
-            "$ref": "#/components/schemas/ReconfiguratorChickenSwitches"
-          },
-          "time_modified": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "version": {
-            "type": "integer",
-            "format": "uint32",
-            "minimum": 0
-          }
-        },
-        "required": [
-          "switches",
-          "time_modified",
-          "version"
-        ]
-      },
       "RecoverySiloConfig": {
         "type": "object",
         "properties": {
@@ -8142,21 +5674,6 @@
           "time"
         ]
       },
-      "RotBootloaderStatus": {
-        "type": "object",
-        "properties": {
-          "stage0_next_version": {
-            "$ref": "#/components/schemas/TufRepoVersion"
-          },
-          "stage0_version": {
-            "$ref": "#/components/schemas/TufRepoVersion"
-          }
-        },
-        "required": [
-          "stage0_next_version",
-          "stage0_version"
-        ]
-      },
       "RotSlot": {
         "oneOf": [
           {
@@ -8187,29 +5704,6 @@
               "slot"
             ]
           }
-        ]
-      },
-      "RotStatus": {
-        "type": "object",
-        "properties": {
-          "active_slot": {
-            "nullable": true,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/RotSlot"
-              }
-            ]
-          },
-          "slot_a_version": {
-            "$ref": "#/components/schemas/TufRepoVersion"
-          },
-          "slot_b_version": {
-            "$ref": "#/components/schemas/TufRepoVersion"
-          }
-        },
-        "required": [
-          "slot_a_version",
-          "slot_b_version"
         ]
       },
       "RouteConfig": {
@@ -8248,344 +5742,6 @@
         "required": [
           "destination",
           "nexthop"
-        ]
-      },
-      "Saga": {
-        "description": "Sagas\n\nThese are currently only intended for observability by developers.  We will eventually want to flesh this out into something more observable for end users.",
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "state": {
-            "$ref": "#/components/schemas/SagaState"
-          }
-        },
-        "required": [
-          "id",
-          "state"
-        ]
-      },
-      "SagaErrorInfo": {
-        "oneOf": [
-          {
-            "type": "object",
-            "properties": {
-              "error": {
-                "type": "string",
-                "enum": [
-                  "action_failed"
-                ]
-              },
-              "source_error": {}
-            },
-            "required": [
-              "error",
-              "source_error"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "error": {
-                "type": "string",
-                "enum": [
-                  "deserialize_failed"
-                ]
-              },
-              "message": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "error",
-              "message"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "error": {
-                "type": "string",
-                "enum": [
-                  "injected_error"
-                ]
-              }
-            },
-            "required": [
-              "error"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "error": {
-                "type": "string",
-                "enum": [
-                  "serialize_failed"
-                ]
-              },
-              "message": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "error",
-              "message"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "error": {
-                "type": "string",
-                "enum": [
-                  "subsaga_create_failed"
-                ]
-              },
-              "message": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "error",
-              "message"
-            ]
-          }
-        ]
-      },
-      "SagaQuiesceStatus": {
-        "type": "object",
-        "properties": {
-          "drained_blueprint_id": {
-            "nullable": true,
-            "description": "blueprint id that we're \"fully drained up to\"\n\nIf this value is non-`None`, that means that:\n\n- saga creation is disallowed - no sagas are running - we have re-assigned sagas from other Nexus instances expunged in this blueprint or earlier - we have finished recovery for all those sagas (that had been assigned to us as of the re-assignment pass for this blueprint id)\n\nThis means that the only way we can wind up running another saga is if there's a new blueprint that expunges a different Nexus zone.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/TypedUuidForBlueprintKind"
-              }
-            ]
-          },
-          "first_recovery_complete": {
-            "description": "whether at least one recovery pass has successfully completed\n\nWe have to track this because we can't quiesce until we know we've recovered all outstanding sagas.",
-            "type": "boolean"
-          },
-          "new_sagas_allowed": {
-            "description": "current policy: are we allowed to *create* new sagas?\n\nThis also affects re-assigning sagas from expunged Nexus instances to ourselves.  It does **not** affect saga recovery.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/SagasAllowed"
-              }
-            ]
-          },
-          "reassignment_blueprint_id": {
-            "nullable": true,
-            "description": "blueprint id associated with last successful saga reassignment\n\nSimilar to the generation number, this is used to track whether we've accounted for all sagas for all expungements up through this target blueprint.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/TypedUuidForBlueprintKind"
-              }
-            ]
-          },
-          "reassignment_generation": {
-            "description": "generation number for the saga reassignment\n\nThis gets bumped whenever a saga reassignment operation completes that may have re-assigned us some sagas.  It's used to keep track of when we've recovered all sagas that could be assigned to us.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Generation"
-              }
-            ]
-          },
-          "reassignment_pending": {
-            "description": "whether there is a saga reassignment operation happening\n\nThese operatinos may assign new sagas to Nexus that must be recovered and completed before quiescing can finish.",
-            "type": "boolean"
-          },
-          "recovered_blueprint_id": {
-            "nullable": true,
-            "description": "blueprint id that saga recovery has \"caught up to\"\n\nThis means that we have finished recovering any sagas that were re-assigned to us due to expungements of other Nexus zones up through this blueprint.  Put differently: we know that we will never be assigned more sagas due to expungement unless the target blueprint changes past this one.\n\nThis does not mean that we've fully drained all sagas up through this blueprint.  There may still be sagas running.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/TypedUuidForBlueprintKind"
-              }
-            ]
-          },
-          "recovered_reassignment_generation": {
-            "description": "\"saga reassignment generation number\" that was \"caught up to\" by the last recovery pass\n\nThis is used with `reassignment_generation` to help us know when we've recovered all the sagas that may have been assigned to us during a given reassignment pass.  See `reassignment_done()` for details.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Generation"
-              }
-            ]
-          },
-          "recovery_pending": {
-            "nullable": true,
-            "description": "If a recovery pass is ongoing, a snapshot of reassignment state when it started (which reflects what we'll be caught up to when it finishes)",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/PendingRecovery"
-              }
-            ]
-          },
-          "sagas_pending": {
-            "title": "IdOrdMap",
-            "description": "list of sagas we need to wait to complete before quiescing\n\nThese are basically running sagas.  They may have been created in this Nexus process lifetime or created in another process and then recovered in this one.",
-            "x-rust-type": {
-              "crate": "iddqd",
-              "parameters": [
-                {
-                  "$ref": "#/components/schemas/PendingSagaInfo"
-                }
-              ],
-              "path": "iddqd::IdOrdMap",
-              "version": "*"
-            },
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/PendingSagaInfo"
-            },
-            "uniqueItems": true
-          }
-        },
-        "required": [
-          "first_recovery_complete",
-          "new_sagas_allowed",
-          "reassignment_generation",
-          "reassignment_pending",
-          "recovered_reassignment_generation",
-          "sagas_pending"
-        ]
-      },
-      "SagaResultsPage": {
-        "description": "A single page of results",
-        "type": "object",
-        "properties": {
-          "items": {
-            "description": "list of items on this page of results",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/Saga"
-            }
-          },
-          "next_page": {
-            "nullable": true,
-            "description": "token used to fetch the next page of results (if any)",
-            "type": "string"
-          }
-        },
-        "required": [
-          "items"
-        ]
-      },
-      "SagaState": {
-        "oneOf": [
-          {
-            "description": "Saga is currently executing",
-            "type": "object",
-            "properties": {
-              "state": {
-                "type": "string",
-                "enum": [
-                  "running"
-                ]
-              }
-            },
-            "required": [
-              "state"
-            ]
-          },
-          {
-            "description": "Saga completed successfully",
-            "type": "object",
-            "properties": {
-              "state": {
-                "type": "string",
-                "enum": [
-                  "succeeded"
-                ]
-              }
-            },
-            "required": [
-              "state"
-            ]
-          },
-          {
-            "description": "One or more saga actions failed and the saga was successfully unwound (i.e., undo actions were executed for any actions that were completed). The saga is no longer running.",
-            "type": "object",
-            "properties": {
-              "error_info": {
-                "$ref": "#/components/schemas/SagaErrorInfo"
-              },
-              "error_node_name": {
-                "$ref": "#/components/schemas/NodeName"
-              },
-              "state": {
-                "type": "string",
-                "enum": [
-                  "failed"
-                ]
-              }
-            },
-            "required": [
-              "error_info",
-              "error_node_name",
-              "state"
-            ]
-          },
-          {
-            "description": "One or more saga actions failed, *and* one or more undo actions failed during unwinding.  State managed by the saga may now be inconsistent. Support may be required to repair the state.  The saga is no longer running.",
-            "type": "object",
-            "properties": {
-              "error_info": {
-                "$ref": "#/components/schemas/SagaErrorInfo"
-              },
-              "error_node_name": {
-                "$ref": "#/components/schemas/NodeName"
-              },
-              "state": {
-                "type": "string",
-                "enum": [
-                  "stuck"
-                ]
-              },
-              "undo_error_node_name": {
-                "$ref": "#/components/schemas/NodeName"
-              },
-              "undo_source_error": {}
-            },
-            "required": [
-              "error_info",
-              "error_node_name",
-              "state",
-              "undo_error_node_name",
-              "undo_source_error"
-            ]
-          }
-        ]
-      },
-      "SagasAllowed": {
-        "description": "Policy determining whether new sagas are allowed to be started\n\nThis is used by Nexus quiesce to disallow creation of new sagas when we're trying to quiesce Nexus.",
-        "oneOf": [
-          {
-            "description": "New sagas may be started (normal condition)",
-            "type": "string",
-            "enum": [
-              "allowed"
-            ]
-          },
-          {
-            "description": "New sagas may not be started because we're quiescing or quiesced",
-            "type": "string",
-            "enum": [
-              "disallowed_quiesce"
-            ]
-          },
-          {
-            "description": "New sagas may not be started because we just started up and haven't determined if we're quiescing yet",
-            "type": "string",
-            "enum": [
-              "disallowed_unknown"
-            ]
-          }
         ]
       },
       "ServerId": {
@@ -8680,40 +5836,6 @@
           "usable_physical_ram"
         ]
       },
-      "SledAgentUpdateStatus": {
-        "type": "object",
-        "properties": {
-          "host_phase_2": {
-            "$ref": "#/components/schemas/HostPhase2Status"
-          },
-          "sled_id": {
-            "$ref": "#/components/schemas/TypedUuidForSledKind"
-          },
-          "zones": {
-            "title": "IdOrdMap",
-            "x-rust-type": {
-              "crate": "iddqd",
-              "parameters": [
-                {
-                  "$ref": "#/components/schemas/ZoneStatus"
-                }
-              ],
-              "path": "iddqd::IdOrdMap",
-              "version": "*"
-            },
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/ZoneStatus"
-            },
-            "uniqueItems": true
-          }
-        },
-        "required": [
-          "host_phase_2",
-          "sled_id",
-          "zones"
-        ]
-      },
       "SledCpuFamily": {
         "description": "Identifies the kind of CPU present on a sled, determined by reading CPUID.\n\nThis is intended to broadly support the control plane answering the question \"can I run this instance on that sled?\" given an instance with either no or some CPU platform requirement. It is not enough information for more precise placement questions - for example, is a CPU a high-frequency part or many-core part? We don't include Genoa here, but in that CPU family there are high frequency parts, many-core parts, and large-cache parts. To support those questions (or satisfactorily answer #8730) we would need to collect additional information and send it along.",
         "oneOf": [
@@ -8747,80 +5869,6 @@
           }
         ]
       },
-      "SledId": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "$ref": "#/components/schemas/TypedUuidForSledKind"
-          }
-        },
-        "required": [
-          "id"
-        ]
-      },
-      "SledPolicy": {
-        "description": "The operator-defined policy of a sled.",
-        "oneOf": [
-          {
-            "description": "The operator has indicated that the sled is in-service.",
-            "type": "object",
-            "properties": {
-              "kind": {
-                "type": "string",
-                "enum": [
-                  "in_service"
-                ]
-              },
-              "provision_policy": {
-                "description": "Determines whether new resources can be provisioned onto the sled.",
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/SledProvisionPolicy"
-                  }
-                ]
-              }
-            },
-            "required": [
-              "kind",
-              "provision_policy"
-            ]
-          },
-          {
-            "description": "The operator has indicated that the sled has been permanently removed from service.\n\nThis is a terminal state: once a particular sled ID is expunged, it will never return to service. (The actual hardware may be reused, but it will be treated as a brand-new sled.)\n\nAn expunged sled is always non-provisionable.",
-            "type": "object",
-            "properties": {
-              "kind": {
-                "type": "string",
-                "enum": [
-                  "expunged"
-                ]
-              }
-            },
-            "required": [
-              "kind"
-            ]
-          }
-        ]
-      },
-      "SledProvisionPolicy": {
-        "description": "The operator-defined provision policy of a sled.\n\nThis controls whether new resources are going to be provisioned on this sled.",
-        "oneOf": [
-          {
-            "description": "New resources will be provisioned on this sled.",
-            "type": "string",
-            "enum": [
-              "provisionable"
-            ]
-          },
-          {
-            "description": "New resources will not be provisioned on this sled. However, if the sled is currently in service, existing resources will continue to be on this sled unless manually migrated off.",
-            "type": "string",
-            "enum": [
-              "non_provisionable"
-            ]
-          }
-        ]
-      },
       "SledRole": {
         "description": "Describes the role of the sled within the rack.\n\nNote that this may change if the sled is physically moved within the rack.",
         "oneOf": [
@@ -8838,19 +5886,6 @@
               "scrimlet"
             ]
           }
-        ]
-      },
-      "SledSelector": {
-        "type": "object",
-        "properties": {
-          "sled": {
-            "description": "ID of the sled",
-            "type": "string",
-            "format": "uuid"
-          }
-        },
-        "required": [
-          "sled"
         ]
       },
       "SledState": {
@@ -8935,23 +5970,7 @@
           "last_port"
         ]
       },
-      "SpStatus": {
-        "type": "object",
-        "properties": {
-          "slot0_version": {
-            "$ref": "#/components/schemas/TufRepoVersion"
-          },
-          "slot1_version": {
-            "$ref": "#/components/schemas/TufRepoVersion"
-          }
-        },
-        "required": [
-          "slot0_version",
-          "slot1_version"
-        ]
-      },
       "SpType": {
-        "description": "`SpType`\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"string\", \"enum\": [ \"sled\", \"power\", \"switch\" ] } ``` </details>",
         "type": "string",
         "enum": [
           "sled",
@@ -8987,112 +6006,6 @@
           "target",
           "weight"
         ]
-      },
-      "SupportBundleCreate": {
-        "type": "object",
-        "properties": {
-          "user_comment": {
-            "nullable": true,
-            "description": "User comment for the support bundle",
-            "type": "string"
-          }
-        }
-      },
-      "SupportBundleInfo": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "reason_for_creation": {
-            "type": "string"
-          },
-          "reason_for_failure": {
-            "nullable": true,
-            "type": "string"
-          },
-          "state": {
-            "$ref": "#/components/schemas/SupportBundleState"
-          },
-          "time_created": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "user_comment": {
-            "nullable": true,
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "reason_for_creation",
-          "state",
-          "time_created"
-        ]
-      },
-      "SupportBundleInfoResultsPage": {
-        "description": "A single page of results",
-        "type": "object",
-        "properties": {
-          "items": {
-            "description": "list of items on this page of results",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/SupportBundleInfo"
-            }
-          },
-          "next_page": {
-            "nullable": true,
-            "description": "token used to fetch the next page of results (if any)",
-            "type": "string"
-          }
-        },
-        "required": [
-          "items"
-        ]
-      },
-      "SupportBundleState": {
-        "oneOf": [
-          {
-            "description": "Support Bundle still actively being collected.\n\nThis is the initial state for a Support Bundle, and it will automatically transition to either \"Failing\" or \"Active\".\n\nIf a user no longer wants to access a Support Bundle, they can request cancellation, which will transition to the \"Destroying\" state.",
-            "type": "string",
-            "enum": [
-              "collecting"
-            ]
-          },
-          {
-            "description": "Support Bundle is being destroyed.\n\nOnce backing storage has been freed, this bundle is destroyed.",
-            "type": "string",
-            "enum": [
-              "destroying"
-            ]
-          },
-          {
-            "description": "Support Bundle was not created successfully, or was created and has lost backing storage.\n\nThe record of the bundle still exists for readability, but the only valid operation on these bundles is to destroy them.",
-            "type": "string",
-            "enum": [
-              "failed"
-            ]
-          },
-          {
-            "description": "Support Bundle has been processed, and is ready for usage.",
-            "type": "string",
-            "enum": [
-              "active"
-            ]
-          }
-        ]
-      },
-      "SupportBundleUpdate": {
-        "type": "object",
-        "properties": {
-          "user_comment": {
-            "nullable": true,
-            "description": "User comment for the support bundle",
-            "type": "string"
-          }
-        }
       },
       "SwitchLocation": {
         "description": "Identifies switch physical location",
@@ -9131,75 +6044,6 @@
       },
       "SwitchPutResponse": {
         "type": "object"
-      },
-      "TufRepoVersion": {
-        "oneOf": [
-          {
-            "type": "object",
-            "properties": {
-              "zone_status_version": {
-                "type": "string",
-                "enum": [
-                  "unknown"
-                ]
-              }
-            },
-            "required": [
-              "zone_status_version"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "zone_status_version": {
-                "type": "string",
-                "enum": [
-                  "install_dataset"
-                ]
-              }
-            },
-            "required": [
-              "zone_status_version"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "details": {
-                "type": "string",
-                "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$"
-              },
-              "zone_status_version": {
-                "type": "string",
-                "enum": [
-                  "version"
-                ]
-              }
-            },
-            "required": [
-              "details",
-              "zone_status_version"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "details": {
-                "type": "string"
-              },
-              "zone_status_version": {
-                "type": "string",
-                "enum": [
-                  "error"
-                ]
-              }
-            },
-            "required": [
-              "details",
-              "zone_status_version"
-            ]
-          }
-        ]
       },
       "TxEqConfig": {
         "description": "Per-port tx-eq overrides.  This can be used to fine-tune the transceiver equalization settings to improve signal integrity.",
@@ -9245,10 +6089,6 @@
         "type": "string",
         "format": "uuid"
       },
-      "TypedUuidForDemoSagaKind": {
-        "type": "string",
-        "format": "uuid"
-      },
       "TypedUuidForDownstairsRegionKind": {
         "type": "string",
         "format": "uuid"
@@ -9284,134 +6124,6 @@
       "TypedUuidForZpoolKind": {
         "type": "string",
         "format": "uuid"
-      },
-      "UninitializedSled": {
-        "description": "A sled that has not been added to an initialized rack yet",
-        "type": "object",
-        "properties": {
-          "baseboard": {
-            "$ref": "#/components/schemas/Baseboard"
-          },
-          "cubby": {
-            "type": "integer",
-            "format": "uint16",
-            "minimum": 0
-          },
-          "rack_id": {
-            "type": "string",
-            "format": "uuid"
-          }
-        },
-        "required": [
-          "baseboard",
-          "cubby",
-          "rack_id"
-        ]
-      },
-      "UninitializedSledId": {
-        "description": "The unique hardware ID for a sled",
-        "type": "object",
-        "properties": {
-          "part": {
-            "type": "string"
-          },
-          "serial": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "part",
-          "serial"
-        ]
-      },
-      "UninitializedSledResultsPage": {
-        "description": "A single page of results",
-        "type": "object",
-        "properties": {
-          "items": {
-            "description": "list of items on this page of results",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/UninitializedSled"
-            }
-          },
-          "next_page": {
-            "nullable": true,
-            "description": "token used to fetch the next page of results (if any)",
-            "type": "string"
-          }
-        },
-        "required": [
-          "items"
-        ]
-      },
-      "UpdateAttemptStatus": {
-        "description": "status of a single update attempt",
-        "type": "string",
-        "enum": [
-          "not_started",
-          "fetching_artifact",
-          "precheck",
-          "updating",
-          "update_waiting",
-          "post_update",
-          "post_update_wait",
-          "done"
-        ]
-      },
-      "UpdateCompletedHow": {
-        "type": "string",
-        "enum": [
-          "found_no_changes_needed",
-          "completed_update",
-          "waited_for_concurrent_update",
-          "took_over_concurrent_update"
-        ]
-      },
-      "UpdateStatus": {
-        "type": "object",
-        "properties": {
-          "mgs_driven": {
-            "title": "IdOrdMap",
-            "x-rust-type": {
-              "crate": "iddqd",
-              "parameters": [
-                {
-                  "$ref": "#/components/schemas/MgsDrivenUpdateStatus"
-                }
-              ],
-              "path": "iddqd::IdOrdMap",
-              "version": "*"
-            },
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/MgsDrivenUpdateStatus"
-            },
-            "uniqueItems": true
-          },
-          "sleds": {
-            "title": "IdOrdMap",
-            "x-rust-type": {
-              "crate": "iddqd",
-              "parameters": [
-                {
-                  "$ref": "#/components/schemas/SledAgentUpdateStatus"
-                }
-              ],
-              "path": "iddqd::IdOrdMap",
-              "version": "*"
-            },
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/SledAgentUpdateStatus"
-            },
-            "uniqueItems": true
-          }
-        },
-        "required": [
-          "mgs_driven",
-          "sleds"
-        ]
       },
       "UplinkAddressConfig": {
         "type": "object",
@@ -9546,29 +6258,6 @@
         "format": "uint32",
         "minimum": 0
       },
-      "WaitingStatus": {
-        "description": "externally-exposed status for waiting updates",
-        "type": "object",
-        "properties": {
-          "baseboard_id": {
-            "$ref": "#/components/schemas/BaseboardId"
-          },
-          "nattempts_done": {
-            "type": "integer",
-            "format": "uint32",
-            "minimum": 0
-          },
-          "next_attempt_time": {
-            "type": "string",
-            "format": "date-time"
-          }
-        },
-        "required": [
-          "baseboard_id",
-          "nattempts_done",
-          "next_attempt_time"
-        ]
-      },
       "ZoneAddWaitingOn": {
         "oneOf": [
           {
@@ -9588,26 +6277,26 @@
           }
         ]
       },
-      "ZoneStatus": {
-        "type": "object",
-        "properties": {
-          "version": {
-            "$ref": "#/components/schemas/TufRepoVersion"
-          },
-          "zone_id": {
-            "$ref": "#/components/schemas/TypedUuidForOmicronZoneKind"
-          },
-          "zone_type": {
-            "$ref": "#/components/schemas/OmicronZoneType"
-          }
-        },
-        "required": [
-          "version",
-          "zone_id",
-          "zone_type"
+      "ZoneKind": {
+        "description": "Like [`OmicronZoneType`], but without any associated data.\n\nThis enum is meant to correspond exactly 1:1 with `OmicronZoneType`.\n\n# String representations of this type\n\nThere are no fewer than six string representations for this type, all slightly different from each other.\n\n1. [`Self::zone_prefix`]: Used to construct zone names. 2. [`Self::service_prefix`]: Used to construct SMF service names. 3. [`Self::name_prefix`]: Used to construct `Name` instances. 4. [`Self::report_str`]: Used for reporting and testing. 5. [`Self::artifact_id_name`]: Used to match TUF artifact IDs. 6. [`Self::artifact_in_install_dataset`]: Used to match zone image tarballs in the install dataset. (This method is equivalent to appending `.tar.gz` to the result of [`Self::zone_prefix`].)\n\nThere is no `Display` impl to ensure that users explicitly choose the representation they want. (Please play close attention to this! The functions are all similar but different, and we don't currently have great type safety around the choice.)\n\n## Adding new representations\n\nIf you have a new use case for a string representation, please reuse one of the six representations if at all possible. If you must add a new one, please add it here rather than doing something ad-hoc in the calling code so it's more legible.",
+        "type": "string",
+        "enum": [
+          "boundary_ntp",
+          "clickhouse",
+          "clickhouse_keeper",
+          "clickhouse_server",
+          "cockroach_db",
+          "crucible",
+          "crucible_pantry",
+          "external_dns",
+          "internal_dns",
+          "internal_ntp",
+          "nexus",
+          "oximeter"
         ]
       },
       "ZoneUnsafeToShutdown": {
+        "description": "Zones which should not be shut down, because their lack of availability could be problematic for the successful functioning of the deployed system.",
         "oneOf": [
           {
             "type": "object",
@@ -9684,6 +6373,21 @@
       "ZoneUpdatesWaitingOn": {
         "oneOf": [
           {
+            "description": "Waiting on blocked updates to RoT bootloader / RoT / SP / Host OS.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "blocked_mgs_updates"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
             "description": "Waiting on discretionary zone placement.",
             "type": "object",
             "properties": {
@@ -9699,7 +6403,22 @@
             ]
           },
           {
-            "description": "Waiting on updates to RoT / SP / Host OS / etc.",
+            "description": "Waiting on zones to propagate to inventory.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "inventory_propagation"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "Waiting on updates to RoT bootloader / RoT / SP / Host OS.",
             "type": "object",
             "properties": {
               "type": {
@@ -9726,6 +6445,29 @@
             },
             "required": [
               "type"
+            ]
+          }
+        ]
+      },
+      "ZoneWaitingToExpunge": {
+        "description": "Out-of-date zones which are not yet ready to be expunged.\n\nFor example, out-of-date Nexus zones should not be expunged until handoff has completed.",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "nexus"
+                ]
+              },
+              "zone_generation": {
+                "$ref": "#/components/schemas/Generation"
+              }
+            },
+            "required": [
+              "type",
+              "zone_generation"
             ]
           }
         ]
@@ -9774,25 +6516,6 @@
             "type": "string",
             "enum": [
               "id_ascending"
-            ]
-          }
-        ]
-      },
-      "TimeAndIdSortMode": {
-        "description": "Supported set of sort modes for scanning by timestamp and ID",
-        "oneOf": [
-          {
-            "description": "sort in increasing order of timestamp and ID, i.e., earliest first",
-            "type": "string",
-            "enum": [
-              "time_and_id_ascending"
-            ]
-          },
-          {
-            "description": "sort in increasing order of timestamp and ID, i.e., most recent first",
-            "type": "string",
-            "enum": [
-              "time_and_id_descending"
             ]
           }
         ]

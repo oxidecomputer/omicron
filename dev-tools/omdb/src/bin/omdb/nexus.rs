@@ -4,8 +4,8 @@
 
 //! omdb commands that query or update specific Nexus instances
 
-mod chicken_switches;
 mod quiesce;
+mod reconfigurator_config;
 mod update_status;
 
 use crate::Omdb;
@@ -19,8 +19,6 @@ use crate::helpers::should_colorize;
 use anyhow::Context as _;
 use anyhow::bail;
 use camino::Utf8PathBuf;
-use chicken_switches::ChickenSwitchesArgs;
-use chicken_switches::cmd_nexus_chicken_switches;
 use chrono::DateTime;
 use chrono::SecondsFormat;
 use chrono::Utc;
@@ -33,18 +31,19 @@ use futures::TryStreamExt;
 use http::StatusCode;
 use internal_dns_types::names::ServiceName;
 use itertools::Itertools;
-use nexus_client::types::ActivationReason;
-use nexus_client::types::BackgroundTask;
-use nexus_client::types::BackgroundTasksActivateRequest;
-use nexus_client::types::CurrentStatus;
-use nexus_client::types::LastResult;
-use nexus_client::types::PhysicalDiskPath;
-use nexus_client::types::SagaState;
-use nexus_client::types::SledSelector;
-use nexus_client::types::UninitializedSledId;
 use nexus_db_lookup::LookupPath;
+use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_inventory::now_db_precision;
+use nexus_lockstep_client::types::ActivationReason;
+use nexus_lockstep_client::types::BackgroundTask;
+use nexus_lockstep_client::types::BackgroundTasksActivateRequest;
+use nexus_lockstep_client::types::CurrentStatus;
+use nexus_lockstep_client::types::LastResult;
+use nexus_lockstep_client::types::PhysicalDiskPath;
+use nexus_lockstep_client::types::SagaState;
+use nexus_lockstep_client::types::SledSelector;
+use nexus_lockstep_client::types::UninitializedSledId;
 use nexus_saga_recovery::LastPass;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::ClickhouseMode;
@@ -82,6 +81,8 @@ use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
 use quiesce::QuiesceArgs;
 use quiesce::cmd_nexus_quiesce;
+use reconfigurator_config::ReconfiguratorConfigArgs;
+use reconfigurator_config::cmd_nexus_reconfigurator_config;
 use serde::Deserialize;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
@@ -112,7 +113,7 @@ use uuid::Uuid;
 /// Arguments to the "omdb nexus" subcommand
 #[derive(Debug, Args)]
 pub struct NexusArgs {
-    /// URL of the Nexus internal API
+    /// URL of the Nexus internal lockstep API
     #[clap(
         long,
         env = "OMDB_NEXUS_URL",
@@ -133,8 +134,6 @@ enum NexusCommands {
     BackgroundTasks(BackgroundTasksArgs),
     /// interact with blueprints
     Blueprints(BlueprintsArgs),
-    /// interact with reconfigurator chicken switches
-    ChickenSwitches(ChickenSwitchesArgs),
     /// interact with clickhouse policy
     ClickhousePolicy(ClickhousePolicyArgs),
     /// print information about pending MGS updates
@@ -143,6 +142,8 @@ enum NexusCommands {
     OximeterReadPolicy(OximeterReadPolicyArgs),
     /// view or modify the quiesce status
     Quiesce(QuiesceArgs),
+    /// interact with reconfigurator config
+    ReconfiguratorConfig(ReconfiguratorConfigArgs),
     /// view sagas, create and complete demo sagas
     Sagas(SagasArgs),
     /// interact with sleds
@@ -229,7 +230,7 @@ enum BlueprintsCommands {
 }
 
 #[derive(Debug, Clone, Copy)]
-enum BlueprintIdOrCurrentTarget {
+pub(crate) enum BlueprintIdOrCurrentTarget {
     CurrentTarget,
     BlueprintId(BlueprintUuid),
 }
@@ -248,9 +249,26 @@ impl FromStr for BlueprintIdOrCurrentTarget {
 }
 
 impl BlueprintIdOrCurrentTarget {
-    async fn resolve_to_id(
+    pub(crate) async fn resolve_to_id_via_db(
         &self,
-        client: &nexus_client::Client,
+        opctx: &OpContext,
+        datastore: &DataStore,
+    ) -> anyhow::Result<BlueprintUuid> {
+        match self {
+            BlueprintIdOrCurrentTarget::CurrentTarget => {
+                let target = datastore
+                    .blueprint_target_get_current(opctx)
+                    .await
+                    .context("failed to get current target")?;
+                Ok(target.target_id)
+            }
+            BlueprintIdOrCurrentTarget::BlueprintId(id) => Ok(*id),
+        }
+    }
+
+    async fn resolve_to_id_via_nexus(
+        &self,
+        client: &nexus_lockstep_client::Client,
     ) -> anyhow::Result<BlueprintUuid> {
         match self {
             Self::CurrentTarget => {
@@ -266,9 +284,9 @@ impl BlueprintIdOrCurrentTarget {
 
     async fn resolve_to_blueprint(
         &self,
-        client: &nexus_client::Client,
+        client: &nexus_lockstep_client::Client,
     ) -> anyhow::Result<Blueprint> {
-        let id = self.resolve_to_id(client).await?;
+        let id = self.resolve_to_id_via_nexus(client).await?;
         let response = client
             .blueprint_view(id.as_untyped_uuid())
             .await
@@ -596,13 +614,14 @@ impl NexusArgs {
                     "note: Nexus URL not specified.  Will pick one from DNS."
                 );
                 let addr = omdb
-                    .dns_lookup_one(log.clone(), ServiceName::Nexus)
+                    .dns_lookup_one(log.clone(), ServiceName::NexusLockstep)
                     .await?;
                 format!("http://{}", addr)
             }
         };
         eprintln!("note: using Nexus URL {}", &nexus_url);
-        let client = nexus_client::Client::new(&nexus_url, log.clone());
+        let client =
+            nexus_lockstep_client::Client::new(&nexus_url, log.clone());
 
         match &self.command {
             NexusCommands::BackgroundTasks(BackgroundTasksArgs {
@@ -698,10 +717,6 @@ impl NexusArgs {
                 cmd_nexus_blueprints_import(&client, token, args).await
             }
 
-            NexusCommands::ChickenSwitches(args) => {
-                cmd_nexus_chicken_switches(&omdb, &client, args).await
-            }
-
             NexusCommands::ClickhousePolicy(ClickhousePolicyArgs {
                 command,
             }) => match command {
@@ -731,6 +746,10 @@ impl NexusArgs {
 
             NexusCommands::Quiesce(args) => {
                 cmd_nexus_quiesce(&omdb, &client, args).await
+            }
+
+            NexusCommands::ReconfiguratorConfig(args) => {
+                cmd_nexus_reconfigurator_config(&omdb, &client, args).await
             }
 
             NexusCommands::Sagas(SagasArgs { command }) => {
@@ -819,7 +838,7 @@ impl NexusArgs {
 
 /// Runs `omdb nexus background-tasks doc`
 async fn cmd_nexus_background_tasks_doc(
-    client: &nexus_client::Client,
+    client: &nexus_lockstep_client::Client,
 ) -> Result<(), anyhow::Error> {
     let response =
         client.bgtask_list().await.context("listing background tasks")?;
@@ -845,7 +864,7 @@ async fn cmd_nexus_background_tasks_doc(
 
 /// Runs `omdb nexus background-tasks list`
 async fn cmd_nexus_background_tasks_list(
-    client: &nexus_client::Client,
+    client: &nexus_lockstep_client::Client,
 ) -> Result<(), anyhow::Error> {
     let response =
         client.bgtask_list().await.context("listing background tasks")?;
@@ -863,7 +882,7 @@ async fn cmd_nexus_background_tasks_list(
 
 /// Runs `omdb nexus background-tasks show`
 async fn cmd_nexus_background_tasks_show(
-    client: &nexus_client::Client,
+    client: &nexus_lockstep_client::Client,
     args: &BackgroundTasksShowArgs,
 ) -> Result<(), anyhow::Error> {
     let response =
@@ -948,7 +967,7 @@ async fn cmd_nexus_background_tasks_show(
 
 /// Runs `omdb nexus background-tasks print-report`
 async fn cmd_nexus_background_tasks_print_report(
-    client: &nexus_client::Client,
+    client: &nexus_lockstep_client::Client,
     args: &BackgroundTasksPrintReportArgs,
     color: ColorChoice,
 ) -> Result<(), anyhow::Error> {
@@ -991,7 +1010,7 @@ async fn cmd_nexus_background_tasks_print_report(
 
 /// Runs `omdb nexus background-tasks activate`
 async fn cmd_nexus_background_tasks_activate(
-    client: &nexus_client::Client,
+    client: &nexus_lockstep_client::Client,
     args: &BackgroundTasksActivateArgs,
     // This isn't quite "destructive" in the sense that of it being potentially
     // dangerous, but it does modify the system rather than being a read-only
@@ -1276,14 +1295,20 @@ fn print_task_blueprint_planner(details: &serde_json::Value) {
         BlueprintPlannerStatus::Error(error) => {
             println!("    task did not complete successfully: {error}");
         }
-        BlueprintPlannerStatus::Unchanged { parent_blueprint_id } => {
+        BlueprintPlannerStatus::Unchanged { parent_blueprint_id, report } => {
             println!("    plan unchanged from parent {parent_blueprint_id}");
+            println!("{report}");
         }
-        BlueprintPlannerStatus::Planned { parent_blueprint_id, error } => {
+        BlueprintPlannerStatus::Planned {
+            parent_blueprint_id,
+            error,
+            report,
+        } => {
             println!(
                 "    planned new blueprint from parent {parent_blueprint_id}, \
                      but could not make it the target: {error}"
             );
+            println!("{report}");
         }
         BlueprintPlannerStatus::Targeted { blueprint_id, report, .. } => {
             println!(
@@ -2834,6 +2859,7 @@ fn print_task_webhook_deliverator(details: &serde_json::Value) {
 }
 
 fn print_task_sp_ereport_ingester(details: &serde_json::Value) {
+    use ereporter_status_fields::*;
     use nexus_types::internal_api::background::SpEreportIngesterStatus;
     use nexus_types::internal_api::background::SpEreporterStatus;
 
@@ -2849,15 +2875,8 @@ fn print_task_sp_ereport_ingester(details: &serde_json::Value) {
             Ok(status) => status,
         };
 
-    const NEW_EREPORTS: &str = "new ereports ingested:";
-    const HTTP_REQUESTS: &str = "HTTP requests sent:";
-    const ERRORS: &str = "errors:";
-    const WIDTH: usize =
-        const_max_len(&[NEW_EREPORTS, HTTP_REQUESTS, ERRORS]) + 1;
-    const NUM_WIDTH: usize = 3;
-
     if !errors.is_empty() {
-        println!("{ERRICON} {ERRORS:<WIDTH$}{:>NUM_WIDTH$}", errors.len());
+        println!("    errors listing reporters:");
         for error in errors {
             println!("      - {error}");
         }
@@ -2876,6 +2895,7 @@ fn print_task_sp_ereport_ingester(details: &serde_json::Value) {
                  some SP statuses were recorded!"
             )
         }
+
         println!("\n    service processors:");
         for SpEreporterStatus { sp_type, slot, status } in &sps {
             println!(
@@ -2933,21 +2953,7 @@ fn print_ereporter_status_totals<'status>(
         }
     }
 
-    const EREPORTS_RECEIVED: &str = "total ereports received:";
-    const NEW_EREPORTS: &str = "  new ereports ingested:";
-    const HTTP_REQUESTS: &str = "total HTTP requests sent:";
-    const ERRORS: &str = "  total collection errors:";
-    const REPORTERS_WITH_EREPORTS: &str = "reporters with ereports:";
-    const REPORTERS_WITH_ERRORS: &str = "reporters with collection errors:";
-    const WIDTH: usize = const_max_len(&[
-        EREPORTS_RECEIVED,
-        NEW_EREPORTS,
-        HTTP_REQUESTS,
-        ERRORS,
-        REPORTERS_WITH_EREPORTS,
-    ]) + 1;
-    const NUM_WIDTH: usize = 4;
-
+    use ereporter_status_fields::*;
     println!("    {EREPORTS_RECEIVED:<WIDTH$}{total_received:>NUM_WIDTH$}");
     println!("    {NEW_EREPORTS:<WIDTH$}{total_new:>NUM_WIDTH$}");
     println!("    {HTTP_REQUESTS:<WIDTH$}{total_reqs:>NUM_WIDTH$}");
@@ -2960,6 +2966,29 @@ fn print_ereporter_status_totals<'status>(
         "    {REPORTERS_WITH_ERRORS:<WIDTH$}\
          {reporters_with_errors:>NUM_WIDTH$}"
     );
+}
+
+mod ereporter_status_fields {
+    pub const TOTAL_NEW_EREPORTS: &str = "new ereports ingested:";
+    pub const TOTAL_HTTP_REQUESTS: &str = "HTTP requests sent:";
+
+    pub const EREPORTS_RECEIVED: &str = "total ereports received:";
+    pub const NEW_EREPORTS: &str = "  new ereports ingested:";
+    pub const HTTP_REQUESTS: &str = "total HTTP requests sent:";
+    pub const ERRORS: &str = "  total collection errors:";
+    pub const REPORTERS_WITH_EREPORTS: &str = "reporters with ereports:";
+    pub const REPORTERS_WITH_ERRORS: &str = "reporters with collection errors:";
+    pub const WIDTH: usize = super::const_max_len(&[
+        TOTAL_NEW_EREPORTS,
+        TOTAL_HTTP_REQUESTS,
+        EREPORTS_RECEIVED,
+        NEW_EREPORTS,
+        HTTP_REQUESTS,
+        ERRORS,
+        REPORTERS_WITH_EREPORTS,
+        REPORTERS_WITH_ERRORS,
+    ]) + 1;
+    pub const NUM_WIDTH: usize = 4;
 }
 
 const ERRICON: &str = "/!\\";
@@ -3222,7 +3251,7 @@ fn reason_code(reason: ActivationReason) -> char {
 }
 
 async fn cmd_nexus_blueprints_list(
-    client: &nexus_client::Client,
+    client: &nexus_lockstep_client::Client,
 ) -> Result<(), anyhow::Error> {
     #[derive(Tabled)]
     #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
@@ -3294,7 +3323,7 @@ async fn cmd_nexus_blueprints_list(
 }
 
 async fn cmd_nexus_blueprints_show(
-    client: &nexus_client::Client,
+    client: &nexus_lockstep_client::Client,
     args: &BlueprintIdArgs,
 ) -> Result<(), anyhow::Error> {
     let blueprint = args.blueprint_id.resolve_to_blueprint(client).await?;
@@ -3303,7 +3332,7 @@ async fn cmd_nexus_blueprints_show(
 }
 
 async fn cmd_nexus_blueprints_diff(
-    client: &nexus_client::Client,
+    client: &nexus_lockstep_client::Client,
     args: &BlueprintDiffArgs,
 ) -> Result<(), anyhow::Error> {
     let blueprint = args.blueprint1_id.resolve_to_blueprint(client).await?;
@@ -3330,11 +3359,12 @@ async fn cmd_nexus_blueprints_diff(
 }
 
 async fn cmd_nexus_blueprints_delete(
-    client: &nexus_client::Client,
+    client: &nexus_lockstep_client::Client,
     args: &BlueprintIdArgs,
     _destruction_token: DestructiveOperationToken,
 ) -> Result<(), anyhow::Error> {
-    let blueprint_id = args.blueprint_id.resolve_to_id(client).await?;
+    let blueprint_id =
+        args.blueprint_id.resolve_to_id_via_nexus(client).await?;
     let _ = client
         .blueprint_delete(blueprint_id.as_untyped_uuid())
         .await
@@ -3344,7 +3374,7 @@ async fn cmd_nexus_blueprints_delete(
 }
 
 async fn cmd_nexus_blueprints_target_show(
-    client: &nexus_client::Client,
+    client: &nexus_lockstep_client::Client,
 ) -> Result<(), anyhow::Error> {
     let target = client
         .blueprint_target_view()
@@ -3357,7 +3387,7 @@ async fn cmd_nexus_blueprints_target_show(
 }
 
 async fn cmd_nexus_blueprints_target_set(
-    client: &nexus_client::Client,
+    client: &nexus_lockstep_client::Client,
     args: &BlueprintTargetSetArgs,
     _destruction_token: DestructiveOperationToken,
 ) -> Result<(), anyhow::Error> {
@@ -3413,10 +3443,12 @@ async fn cmd_nexus_blueprints_target_set(
     };
 
     client
-        .blueprint_target_set(&nexus_client::types::BlueprintTargetSet {
-            target_id: args.blueprint_id,
-            enabled,
-        })
+        .blueprint_target_set(
+            &nexus_lockstep_client::types::BlueprintTargetSet {
+                target_id: args.blueprint_id,
+                enabled,
+            },
+        )
         .await
         .with_context(|| {
             format!("setting target to blueprint {}", args.blueprint_id)
@@ -3426,16 +3458,17 @@ async fn cmd_nexus_blueprints_target_set(
 }
 
 async fn cmd_nexus_blueprints_target_set_enabled(
-    client: &nexus_client::Client,
+    client: &nexus_lockstep_client::Client,
     args: &BlueprintIdArgs,
     enabled: bool,
     _destruction_token: DestructiveOperationToken,
 ) -> Result<(), anyhow::Error> {
-    let blueprint_id = args.blueprint_id.resolve_to_id(client).await?;
+    let blueprint_id =
+        args.blueprint_id.resolve_to_id_via_nexus(client).await?;
     let description = if enabled { "enabled" } else { "disabled" };
     client
         .blueprint_target_set_enabled(
-            &nexus_client::types::BlueprintTargetSet {
+            &nexus_lockstep_client::types::BlueprintTargetSet {
                 target_id: blueprint_id,
                 enabled,
             },
@@ -3449,7 +3482,7 @@ async fn cmd_nexus_blueprints_target_set_enabled(
 }
 
 async fn cmd_nexus_blueprints_regenerate(
-    client: &nexus_client::Client,
+    client: &nexus_lockstep_client::Client,
     _destruction_token: DestructiveOperationToken,
 ) -> Result<(), anyhow::Error> {
     let blueprint =
@@ -3459,7 +3492,7 @@ async fn cmd_nexus_blueprints_regenerate(
 }
 
 async fn cmd_nexus_blueprints_import(
-    client: &nexus_client::Client,
+    client: &nexus_lockstep_client::Client,
     _destruction_token: DestructiveOperationToken,
     args: &BlueprintImportArgs,
 ) -> Result<(), anyhow::Error> {
@@ -3477,7 +3510,7 @@ async fn cmd_nexus_blueprints_import(
 }
 
 async fn cmd_nexus_clickhouse_policy_get(
-    client: &nexus_client::Client,
+    client: &nexus_lockstep_client::Client,
 ) -> Result<(), anyhow::Error> {
     let res = client.clickhouse_policy_get().await;
 
@@ -3521,7 +3554,7 @@ async fn cmd_nexus_clickhouse_policy_get(
 }
 
 async fn cmd_nexus_mgs_updates(
-    client: &nexus_client::Client,
+    client: &nexus_lockstep_client::Client,
 ) -> Result<(), anyhow::Error> {
     let response = client
         .mgs_updates()
@@ -3533,7 +3566,7 @@ async fn cmd_nexus_mgs_updates(
 }
 
 async fn cmd_nexus_clickhouse_policy_set(
-    client: &nexus_client::Client,
+    client: &nexus_lockstep_client::Client,
     args: &ClickhousePolicySetArgs,
     _destruction_token: DestructiveOperationToken,
 ) -> Result<(), anyhow::Error> {
@@ -3583,7 +3616,7 @@ async fn cmd_nexus_clickhouse_policy_set(
 }
 
 async fn cmd_nexus_oximeter_read_policy_get(
-    client: &nexus_client::Client,
+    client: &nexus_lockstep_client::Client,
 ) -> Result<(), anyhow::Error> {
     let res = client.oximeter_read_policy_get().await;
 
@@ -3617,7 +3650,7 @@ async fn cmd_nexus_oximeter_read_policy_get(
 }
 
 async fn cmd_nexus_oximeter_read_policy_set(
-    client: &nexus_client::Client,
+    client: &nexus_lockstep_client::Client,
     args: &OximeterReadPolicySetArgs,
     _destruction_token: DestructiveOperationToken,
 ) -> Result<(), anyhow::Error> {
@@ -3661,7 +3694,7 @@ async fn cmd_nexus_oximeter_read_policy_set(
 
 /// Runs `omdb nexus sagas list`
 async fn cmd_nexus_sagas_list(
-    client: &nexus_client::Client,
+    client: &nexus_lockstep_client::Client,
 ) -> Result<(), anyhow::Error> {
     // We don't want users to confuse this with a general way to list all sagas.
     // Such a command would read database state and it would go under "omdb db".
@@ -3706,7 +3739,7 @@ async fn cmd_nexus_sagas_list(
 
 /// Runs `omdb nexus sagas demo-create`
 async fn cmd_nexus_sagas_demo_create(
-    client: &nexus_client::Client,
+    client: &nexus_lockstep_client::Client,
     _destruction_token: DestructiveOperationToken,
 ) -> Result<(), anyhow::Error> {
     let demo_saga =
@@ -3721,7 +3754,7 @@ async fn cmd_nexus_sagas_demo_create(
 
 /// Runs `omdb nexus sagas demo-complete`
 async fn cmd_nexus_sagas_demo_complete(
-    client: &nexus_client::Client,
+    client: &nexus_lockstep_client::Client,
     args: &DemoSagaIdArgs,
     _destruction_token: DestructiveOperationToken,
 ) -> Result<(), anyhow::Error> {
@@ -3746,7 +3779,7 @@ async fn cmd_nexus_sagas_demo_complete(
 
 /// Runs `omdb nexus sleds list-uninitialized`
 async fn cmd_nexus_sleds_list_uninitialized(
-    client: &nexus_client::Client,
+    client: &nexus_lockstep_client::Client,
 ) -> Result<(), anyhow::Error> {
     let response = client
         .sled_list_uninitialized()
@@ -3788,7 +3821,7 @@ async fn cmd_nexus_sleds_list_uninitialized(
 
 /// Runs `omdb nexus sleds add`
 async fn cmd_nexus_sled_add(
-    client: &nexus_client::Client,
+    client: &nexus_lockstep_client::Client,
     args: &SledAddArgs,
     _destruction_token: DestructiveOperationToken,
 ) -> Result<(), anyhow::Error> {
@@ -3807,7 +3840,7 @@ async fn cmd_nexus_sled_add(
 
 /// Runs `omdb nexus sleds expunge`
 async fn cmd_nexus_sled_expunge(
-    client: &nexus_client::Client,
+    client: &nexus_lockstep_client::Client,
     args: &SledExpungeArgs,
     omdb: &Omdb,
     log: &slog::Logger,
@@ -3829,7 +3862,7 @@ async fn cmd_nexus_sled_expunge(
 // `omdb nexus sleds expunge`, but borrowing a datastore
 async fn cmd_nexus_sled_expunge_with_datastore(
     datastore: &Arc<DataStore>,
-    client: &nexus_client::Client,
+    client: &nexus_lockstep_client::Client,
     args: &SledExpungeArgs,
     log: &slog::Logger,
     _destruction_token: DestructiveOperationToken,
@@ -3848,7 +3881,7 @@ async fn cmd_nexus_sled_expunge_with_datastore(
 
     // First, we need to look up the sled so we know its serial number.
     let (_authz_sled, sled) = LookupPath::new(opctx, datastore)
-        .sled_id(args.sled_id.into_untyped_uuid())
+        .sled_id(args.sled_id)
         .fetch()
         .await
         .with_context(|| format!("failed to find sled {}", args.sled_id))?;
@@ -3918,7 +3951,7 @@ async fn cmd_nexus_sled_expunge_with_datastore(
 
 /// Runs `omdb nexus sleds expunge-disk`
 async fn cmd_nexus_sled_expunge_disk(
-    client: &nexus_client::Client,
+    client: &nexus_lockstep_client::Client,
     args: &DiskExpungeArgs,
     omdb: &Omdb,
     log: &slog::Logger,
@@ -3939,7 +3972,7 @@ async fn cmd_nexus_sled_expunge_disk(
 
 async fn cmd_nexus_sled_expunge_disk_with_datastore(
     datastore: &Arc<DataStore>,
-    client: &nexus_client::Client,
+    client: &nexus_lockstep_client::Client,
     args: &DiskExpungeArgs,
     log: &slog::Logger,
     _destruction_token: DestructiveOperationToken,
@@ -4052,7 +4085,7 @@ async fn cmd_nexus_sled_expunge_disk_with_datastore(
 
 /// Runs `omdb nexus support-bundles list`
 async fn cmd_nexus_support_bundles_list(
-    client: &nexus_client::Client,
+    client: &nexus_lockstep_client::Client,
 ) -> Result<(), anyhow::Error> {
     let support_bundle_stream = client.support_bundle_list_stream(None, None);
 
@@ -4091,13 +4124,15 @@ async fn cmd_nexus_support_bundles_list(
 
 /// Runs `omdb nexus support-bundles create`
 async fn cmd_nexus_support_bundles_create(
-    client: &nexus_client::Client,
+    client: &nexus_lockstep_client::Client,
     _destruction_token: DestructiveOperationToken,
 ) -> Result<(), anyhow::Error> {
     let support_bundle_id = client
-        .support_bundle_create(&nexus_client::types::SupportBundleCreate {
-            user_comment: None,
-        })
+        .support_bundle_create(
+            &nexus_lockstep_client::types::SupportBundleCreate {
+                user_comment: None,
+            },
+        )
         .await
         .context("creating support bundle")?
         .into_inner()
@@ -4108,7 +4143,7 @@ async fn cmd_nexus_support_bundles_create(
 
 /// Runs `omdb nexus support-bundles delete`
 async fn cmd_nexus_support_bundles_delete(
-    client: &nexus_client::Client,
+    client: &nexus_lockstep_client::Client,
     args: &SupportBundleDeleteArgs,
     _destruction_token: DestructiveOperationToken,
 ) -> Result<(), anyhow::Error> {
@@ -4138,7 +4173,7 @@ async fn write_stream_to_sink(
 //
 // "range" is in bytes, and is inclusive on both sides.
 async fn support_bundle_download_range(
-    client: &nexus_client::Client,
+    client: &nexus_lockstep_client::Client,
     id: SupportBundleUuid,
     range: (u64, u64),
 ) -> anyhow::Result<impl futures::Stream<Item = anyhow::Result<bytes::Bytes>>> {
@@ -4157,7 +4192,7 @@ async fn support_bundle_download_range(
 // Starts the download at "start" bytes (inclusive) and continues up to "end"
 // bytes (exclusive).
 fn support_bundle_download_ranges(
-    client: &nexus_client::Client,
+    client: &nexus_lockstep_client::Client,
     id: SupportBundleUuid,
     start: u64,
     end: u64,
@@ -4186,7 +4221,7 @@ fn support_bundle_download_ranges(
 
 /// Runs `omdb nexus support-bundles download`
 async fn cmd_nexus_support_bundles_download(
-    client: &nexus_client::Client,
+    client: &nexus_lockstep_client::Client,
     args: &SupportBundleDownloadArgs,
 ) -> Result<(), anyhow::Error> {
     let total_length = client
@@ -4224,7 +4259,7 @@ async fn cmd_nexus_support_bundles_download(
 
 /// Runs `omdb nexus support-bundles get-index`
 async fn cmd_nexus_support_bundles_get_index(
-    client: &nexus_client::Client,
+    client: &nexus_lockstep_client::Client,
     args: &SupportBundleIndexArgs,
 ) -> Result<(), anyhow::Error> {
     let stream = client
@@ -4244,7 +4279,7 @@ async fn cmd_nexus_support_bundles_get_index(
 
 /// Runs `omdb nexus support-bundles get-file`
 async fn cmd_nexus_support_bundles_get_file(
-    client: &nexus_client::Client,
+    client: &nexus_lockstep_client::Client,
     args: &SupportBundleFileArgs,
 ) -> Result<(), anyhow::Error> {
     let stream = client
@@ -4276,7 +4311,7 @@ async fn cmd_nexus_support_bundles_get_file(
 
 /// Runs `omdb nexus support-bundles inspect`
 async fn cmd_nexus_support_bundles_inspect(
-    client: &nexus_client::Client,
+    client: &nexus_lockstep_client::Client,
     args: &SupportBundleInspectArgs,
 ) -> Result<(), anyhow::Error> {
     let accessor: Box<dyn SupportBundleAccessor> = match (args.id, &args.path) {

@@ -204,6 +204,7 @@ pub async fn realize_blueprint(
         &opctx,
         datastore,
         blueprint,
+        nexus_id,
     );
 
     register_deploy_sled_configs_step(
@@ -227,6 +228,7 @@ pub async fn realize_blueprint(
         creator,
         overrides.unwrap_or(&*overridables::DEFAULT),
         sled_list.clone(),
+        nexus_id,
     );
 
     register_cleanup_expunged_zones_step(
@@ -405,22 +407,30 @@ fn register_deploy_db_metadata_nexus_records_step<'a>(
     opctx: &'a OpContext,
     datastore: &'a DataStore,
     blueprint: &'a Blueprint,
+    nexus_id: Option<OmicronZoneUuid>,
 ) {
     registrar
         .new_step(
             ExecutionStepId::Ensure,
             "Ensure db_metadata_nexus_state records exist",
-            async move |_cx| match database::deploy_db_metadata_nexus_records(
-                opctx, &datastore, &blueprint,
-            )
-            .await
-            {
-                Ok(()) => StepSuccess::new(()).into(),
-                Err(err) => StepWarning::new(
-                    (),
-                    err.context("ensuring db_metadata_nexus_state").to_string(),
+            async move |_cx| {
+                let Some(nexus_id) = nexus_id else {
+                    return StepSkipped::new((), "not running as Nexus").into();
+                };
+
+                match database::deploy_db_metadata_nexus_records(
+                    opctx, &datastore, &blueprint, nexus_id,
                 )
-                .into(),
+                .await
+                {
+                    Ok(()) => StepSuccess::new(()).into(),
+                    Err(err) => StepWarning::new(
+                        (),
+                        err.context("ensuring db_metadata_nexus_state")
+                            .to_string(),
+                    )
+                    .into(),
+                }
             },
         )
         .register();
@@ -483,6 +493,7 @@ fn register_plumb_firewall_rules_step<'a>(
         .register();
 }
 
+#[allow(clippy::too_many_arguments)]
 fn register_dns_records_step<'a>(
     registrar: &ComponentRegistrar<'_, 'a>,
     opctx: &'a OpContext,
@@ -491,12 +502,17 @@ fn register_dns_records_step<'a>(
     creator: OmicronZoneUuid,
     overrides: &'a Overridables,
     sleds: SharedStepHandle<Arc<IdOrdMap<Sled>>>,
+    nexus_id: Option<OmicronZoneUuid>,
 ) {
     registrar
         .new_step(
             ExecutionStepId::Ensure,
             "Deploy DNS records",
             async move |cx| {
+                let Some(nexus_id) = nexus_id else {
+                    return StepSkipped::new((), "not running as Nexus").into();
+                };
+
                 let sleds_by_id = sleds.into_value(cx.token()).await;
 
                 let res = dns::deploy_dns(
@@ -506,6 +522,7 @@ fn register_dns_records_step<'a>(
                     blueprint,
                     &sleds_by_id,
                     overrides,
+                    nexus_id,
                 )
                 .await
                 .map_err(|e| anyhow!("{}", InlineErrorChain::new(&e)));

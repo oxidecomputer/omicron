@@ -20,6 +20,10 @@ pub enum Event {
         config: NexusConfig,
         crashed_nodes: BTreeSet<PlatformId>,
     },
+    InitialSetupLrtq {
+        member_universe_size: usize,
+        config: NexusConfig,
+    },
     AbortConfiguration(Epoch),
     SendNexusReplyOnUnderlay(NexusReply),
     /// Call `Node::handle` with the given Envelope.
@@ -27,10 +31,19 @@ pub enum Event {
     /// Since replay is deterministic, we actually know what this value is,
     /// even though a prior event may not have yet sent the message.
     DeliverEnvelope(Envelope),
+    LoadRackSecret(PlatformId, Epoch),
+    ClearSecrets(PlatformId),
     /// Pull a `NexusReply` off the underlay network and update the `NexusState`
     DeliverNexusReply(NexusReply),
     CommitConfiguration(PlatformId),
     Reconfigure(NexusConfig),
+    LrtqUpgrade(NexusConfig),
+    CrashNode(PlatformId),
+    RestartNode {
+        id: PlatformId,
+        connection_order: Vec<PlatformId>,
+    },
+    PrepareAndCommit(PlatformId),
 }
 
 impl Event {
@@ -40,12 +53,25 @@ impl Event {
             Self::InitialSetup { config, crashed_nodes, .. } => {
                 config.members.union(&crashed_nodes).cloned().collect()
             }
+            Self::InitialSetupLrtq { config, .. } => {
+                config.members.iter().cloned().collect()
+            }
             Self::AbortConfiguration(_) => vec![],
             Self::SendNexusReplyOnUnderlay(_) => vec![],
             Self::DeliverEnvelope(envelope) => vec![envelope.to.clone()],
             Self::DeliverNexusReply(_) => vec![],
+            Self::LoadRackSecret(id, _) => vec![id.clone()],
+            Self::ClearSecrets(id) => vec![id.clone()],
             Self::CommitConfiguration(id) => vec![id.clone()],
             Self::Reconfigure(_) => vec![],
+            Self::LrtqUpgrade(_) => vec![],
+            Self::CrashNode(id) => vec![id.clone()],
+            Self::RestartNode { id, connection_order } => {
+                let mut nodes = connection_order.clone();
+                nodes.push(id.clone());
+                nodes
+            }
+            Self::PrepareAndCommit(id) => vec![id.clone()],
         }
     }
 }

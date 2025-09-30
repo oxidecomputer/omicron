@@ -12,6 +12,7 @@ use omicron_uuid_kinds::{
     BlueprintKind, BlueprintUuid, OmicronZoneKind, OmicronZoneUuid,
 };
 use serde::{Deserialize, Serialize};
+use std::fmt;
 
 /// Internal database metadata
 #[derive(
@@ -51,6 +52,16 @@ impl_enum_type!(
     NotYet => b"not_yet"
     Quiesced => b"quiesced"
 );
+
+impl fmt::Display for DbMetadataNexusState {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            DbMetadataNexusState::Active => "active",
+            DbMetadataNexusState::NotYet => "not yet",
+            DbMetadataNexusState::Quiesced => "quiesced",
+        })
+    }
+}
 
 #[derive(
     Queryable, Insertable, Debug, Clone, Selectable, Serialize, Deserialize,

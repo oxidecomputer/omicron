@@ -10,7 +10,7 @@ use crate::Nexus;
 use nexus_db_lookup::LookupPath;
 use nexus_db_model::{
     ByteCount, ExternalIp, InstanceState, IpAttachState, NatEntry,
-    SledReservationConstraints, SledResourceVmm, VmmState,
+    SledReservationConstraints, SledResourceVmm, VmmCpuPlatform, VmmState,
 };
 use nexus_db_queries::authz;
 use nexus_db_queries::{authn, context::OpContext, db, db::DataStore};
@@ -94,6 +94,7 @@ pub async fn create_and_insert_vmm_record(
     propolis_id: PropolisUuid,
     sled_id: SledUuid,
     propolis_ip: Ipv6Addr,
+    cpu_platform: VmmCpuPlatform,
 ) -> Result<db::model::Vmm, ActionError> {
     let vmm = db::model::Vmm::new(
         propolis_id,
@@ -101,6 +102,7 @@ pub async fn create_and_insert_vmm_record(
         sled_id,
         IpAddr::V6(propolis_ip).into(),
         DEFAULT_PROPOLIS_PORT,
+        cpu_platform,
     );
 
     let vmm = datastore
@@ -213,7 +215,7 @@ pub(super) async fn instance_ip_get_instance_state(
     let mut propolis_and_sled_id =
         inst_and_vmm.vmm().as_ref().map(|vmm| VmmAndSledIds {
             vmm_id: PropolisUuid::from_untyped_uuid(vmm.id),
-            sled_id: SledUuid::from_untyped_uuid(vmm.sled_id),
+            sled_id: vmm.sled_id(),
         });
 
     slog::debug!(
@@ -356,7 +358,7 @@ pub async fn instance_ip_add_nat(
     // Querying sleds requires fleet access; use the instance allocator context
     // for this.
     let (.., sled) = LookupPath::new(&osagactx.nexus().opctx_alloc, datastore)
-        .sled_id(sled_uuid.into_untyped_uuid())
+        .sled_id(sled_uuid)
         .fetch()
         .await
         .map_err(ActionError::action_failed)?;

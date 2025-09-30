@@ -16,8 +16,14 @@
 //! Node, and so this should not be problematic.
 
 use crate::compute_key_share::KeyShareComputer;
+use crate::coordinator_state::CoordinatingMsg;
+use crate::crypto::{LrtqShare, ReconstructedRackSecret};
+use crate::rack_secret_loader::{
+    LoadRackSecretError, RackSecretLoader, RackSecretLoaderDiff,
+};
 use crate::validators::{
-    MismatchedRackIdError, ReconfigurationError, ValidatedReconfigureMsg,
+    LrtqUpgradeError, MismatchedRackIdError, ReconfigurationError,
+    ValidatedLrtqUpgradeMsg, ValidatedReconfigureMsg,
 };
 use crate::{
     Alarm, Configuration, CoordinatorState, Epoch, ExpungedMetadata,
@@ -44,17 +50,25 @@ pub struct Node {
     /// In memory state for when this node is trying to compute its own key
     /// share for a committed epoch.
     key_share_computer: Option<KeyShareComputer>,
+
+    /// A mechanism for loading rack secrets by collecting key shares
+    /// for the latest committed epoch.
+    rack_secret_loader: RackSecretLoader,
 }
 
 // For diffs we want to allow access to all fields, but not make them public in
 // the `Node` type itself.
-impl NodeDiff<'_> {
+impl<'a> NodeDiff<'a> {
     pub fn coordinator_state(&self) -> Leaf<Option<&CoordinatorState>> {
         self.coordinator_state
     }
 
     pub fn key_share_computer(&self) -> Leaf<Option<&KeyShareComputer>> {
         self.key_share_computer
+    }
+
+    pub fn rack_secret_loader(&self) -> &RackSecretLoaderDiff<'a> {
+        &self.rack_secret_loader
     }
 }
 
@@ -74,7 +88,32 @@ impl Node {
         let id_str = format!("{:?}", ctx.platform_id());
         let log =
             log.new(o!("component" => "trust-quorum", "platform_id" => id_str));
-        Node { log, coordinator_state: None, key_share_computer: None }
+        let rack_secret_loader = RackSecretLoader::new(&log);
+        Node {
+            log,
+            coordinator_state: None,
+            key_share_computer: None,
+            rack_secret_loader,
+        }
+    }
+
+    /// Attempt to load a rack secret at the given epoch.
+    ///
+    /// If no secrets are loaded the node will start collecting shares for the
+    /// latest committed epoch and return `Ok(None)`. `Ok(None)` will continue
+    /// to be returned while share collection is in progress. The secret will
+    /// be returned on the next call after it becomes available.
+    pub fn load_rack_secret(
+        &mut self,
+        ctx: &mut impl NodeHandlerCtx,
+        epoch: Epoch,
+    ) -> Result<Option<ReconstructedRackSecret>, LoadRackSecretError> {
+        self.rack_secret_loader.load(ctx, epoch)
+    }
+
+    /// Clear all loaded rack secrets cached in memory
+    pub fn clear_secrets(&mut self) {
+        self.rack_secret_loader.clear_secrets();
     }
 
     /// Start coordinating a reconfiguration
@@ -88,12 +127,25 @@ impl Node {
         ctx: &mut impl NodeHandlerCtx,
         msg: ReconfigureMsg,
     ) -> Result<(), ReconfigurationError> {
+        let last_reconfig_msg = if let Some(cs) = &self.coordinator_state {
+            match cs.msg() {
+                CoordinatingMsg::Upgrade(_) => {
+                    return Err(
+                        ReconfigurationError::UpgradeFromLrtqInProgress,
+                    );
+                }
+                CoordinatingMsg::Reconfig(msg) => Some(msg),
+            }
+        } else {
+            None
+        };
+
         let Some(validated_msg) = ValidatedReconfigureMsg::new(
             &self.log,
             ctx.platform_id(),
             msg,
             ctx.persistent_state().into(),
-            self.coordinator_state.as_ref().map(|cs| cs.reconfigure_msg()),
+            last_reconfig_msg,
         )?
         else {
             // This was an idempotent (duplicate) request.
@@ -122,8 +174,92 @@ impl Node {
         Ok(())
     }
 
+    /// Start coordinating an upgrade from LRTQ
+    pub fn coordinate_upgrade_from_lrtq(
+        &mut self,
+        ctx: &mut impl NodeHandlerCtx,
+        msg: LrtqUpgradeMsg,
+    ) -> Result<(), LrtqUpgradeError> {
+        let validated_msg = ValidatedLrtqUpgradeMsg::new(&self.log, ctx, msg)?;
+        if let Some(kcs) = &self.key_share_computer {
+            // We know from our `ValidatedLrtqUpgradeMsg` that we haven't seen a
+            // newer configuration Therefore if we are computing a key share, we
+            // must be doing it for a stale commit and should cancel it.
+            //
+            // I don't think it's actually possible to hit this condition, but
+            // we check anyway.
+            info!(
+                self.log,
+                "Upgrade from LRTQ started. Cancelling key share compute";
+                "reconfiguration_epoch" => %validated_msg.epoch(),
+                "key_share_compute_epoch" => %kcs.config().epoch
+            );
+            self.key_share_computer = None;
+        }
+
+        self.coordinator_state = Some(CoordinatorState::new_upgrade_from_lrtq(
+            &self.log,
+            ctx,
+            validated_msg,
+        )?);
+        self.send_coordinator_msgs(ctx);
+
+        Ok(())
+    }
+
     pub fn is_computing_key_share(&self) -> bool {
         self.key_share_computer.is_some()
+    }
+
+    pub fn is_collecting_shares_for_rack_secret(&self, epoch: Epoch) -> bool {
+        self.rack_secret_loader.is_collecting_shares_for_rack_secret(epoch)
+    }
+
+    /// Handle a `PrepareAndCommit` message from nexus
+    pub fn prepare_and_commit(
+        &mut self,
+        ctx: &mut impl NodeHandlerCtx,
+        config: Configuration,
+    ) -> Result<(), PrepareAndCommitError> {
+        let ps = ctx.persistent_state();
+
+        if let Some(expunged) = &ps.expunged {
+            error!(
+                self.log,
+                "PrepareAndCommit attempted on expunged node";
+                "expunged_epoch" => %expunged.epoch,
+                "expunging_node" => %expunged.from
+            );
+            return Err(PrepareAndCommitError::Expunged {
+                epoch: expunged.epoch,
+                from: expunged.from.clone(),
+            });
+        }
+
+        // If we have a configuration the rack id must match the one from
+        // Nexus
+        if let Some(ps_rack_id) = ps.rack_id() {
+            if config.rack_id != ps_rack_id {
+                error!(
+                    self.log,
+                    "PrepareAndCommit attempted with invalid rack_id";
+                    "expected" => %ps_rack_id,
+                    "got" => %config.rack_id
+                );
+                return Err(PrepareAndCommitError::InvalidRackId(
+                    MismatchedRackIdError {
+                        expected: ps_rack_id,
+                        got: config.rack_id,
+                    },
+                ));
+            }
+        }
+
+        // `PrepareAndCommit` from Nexus shares a behavior with a
+        // `CommitAdvance` message from a peer node.
+        self.handle_commit_advance(ctx, "Nexus", "PrepareAndCommit", config);
+
+        Ok(())
     }
 
     /// Commit a configuration
@@ -215,7 +351,7 @@ impl Node {
         // Are we currently coordinating for this epoch?
         // Stop coordinating if we are.
         if let Some(cs) = &self.coordinator_state {
-            if cs.reconfigure_msg().epoch() == epoch {
+            if cs.msg().epoch() == epoch {
                 info!(
                     self.log,
                     "Stopping coordination due to commit";
@@ -237,8 +373,9 @@ impl Node {
         ctx.add_connection(peer.clone());
         self.send_coordinator_msgs_to(ctx, peer.clone());
         if let Some(ksc) = &mut self.key_share_computer {
-            ksc.on_connect(ctx, peer);
+            ksc.on_connect(ctx, peer.clone());
         }
+        self.rack_secret_loader.on_connect(ctx, peer);
     }
 
     /// A peer node has disconnected from this one
@@ -294,14 +431,18 @@ impl Node {
                 self.handle_share(ctx, from, epoch, share);
             }
             PeerMsgKind::CommitAdvance(config) => {
-                self.handle_commit_advance(ctx, from, config)
+                let from = from.to_string();
+                self.handle_commit_advance(ctx, &from, "CommitAdvance", config)
             }
             PeerMsgKind::Expunged(epoch) => {
                 self.handle_expunged(ctx, from, epoch);
             }
-            _ => todo!(
-                "cannot handle message variant yet - not implemented: {msg:?}"
-            ),
+            PeerMsgKind::GetLrtqShare => {
+                self.handle_get_lrtq_share(ctx, from);
+            }
+            PeerMsgKind::LrtqShare(share) => {
+                self.handle_lrtq_share(ctx, from, share);
+            }
         }
     }
 
@@ -313,7 +454,7 @@ impl Node {
     fn handle_prepare_ack(&mut self, from: PlatformId, epoch: Epoch) {
         // Are we coordinating for this epoch?
         if let Some(cs) = &mut self.coordinator_state {
-            let current_epoch = cs.reconfigure_msg().epoch();
+            let current_epoch = cs.msg().epoch();
             if current_epoch == epoch {
                 info!(self.log, "Received prepare ack";
                      "from" => %from,
@@ -420,7 +561,8 @@ impl Node {
     fn handle_commit_advance(
         &mut self,
         ctx: &mut impl NodeHandlerCtx,
-        from: PlatformId,
+        from: &str,
+        op: &str,
         config: Configuration,
     ) {
         // The sender sent us a configuration even though we are not part of the
@@ -429,92 +571,113 @@ impl Node {
         if !config.members.contains_key(ctx.platform_id()) {
             error!(
                 self.log,
-                "Received CommitAdvance, but not a member of configuration";
+                "Received {op}, but not a member of configuration";
                 "from" => %from,
                 "epoch" => %config.epoch
             );
             return;
         }
 
-        // We may have already advanced by the time we receive this message.
-        // Let's check.
-        if ctx.persistent_state().commits.contains(&config.epoch) {
-            info!(
-                self.log,
-                "Received CommitAdvance, but already committed";
-                "from" => %from,
-                "epoch" => %config.epoch
-            );
-            return;
+        if let Some(latest_committed_epoch) =
+            ctx.persistent_state().latest_committed_epoch()
+        {
+            if latest_committed_epoch > config.epoch {
+                info!(
+                    self.log,
+                    "Received {op}, but already committed at later epoch";
+                    "from" => %from,
+                    "epoch" => %config.epoch,
+                    "latest_committed_epoch" => %latest_committed_epoch
+                );
+                return;
+            } else if latest_committed_epoch == config.epoch {
+                info!(
+                    self.log,
+                    "Received {op}, but already committed";
+                    "from" => %from,
+                    "epoch" => %config.epoch
+                );
+                return;
+            }
         }
+
+        let mut just_committed = false;
         if ctx.persistent_state().has_prepared(config.epoch) {
             // Go ahead and commit
             info!(
                 self.log,
-                "Received CommitAdvance. Already prepared, now committing";
+                "Received {op}. Already prepared, now committing";
                 "from" => %from,
                 "epoch" => %config.epoch
             );
             ctx.update_persistent_state(|ps| ps.commits.insert(config.epoch));
-            return;
-        }
-
-        // Do we have the configuration in our persistent state? If not save it.
-        if let Some(existing) =
-            ctx.persistent_state().configuration(config.epoch)
-        {
-            if existing != &config {
-                error!(
-                    self.log,
-                    "Received a configuration mismatch";
-                    "from" => %from,
-                    "existing_config" => #?existing,
-                    "received_config" => #?config
-                );
-                ctx.raise_alarm(Alarm::MismatchedConfigurations {
-                    config1: (*existing).clone(),
-                    config2: config.clone(),
-                    from: from.clone(),
-                });
-                return;
-            }
+            just_committed = true;
         } else {
-            ctx.update_persistent_state(|ps| {
-                ps.configs.insert_unique(config.clone()).expect("new config");
-                true
-            });
+            // Do we have the configuration in our persistent state? If not save it.
+            if let Some(existing) =
+                ctx.persistent_state().configuration(config.epoch)
+            {
+                if existing != &config {
+                    error!(
+                        self.log,
+                        "Received a configuration mismatch";
+                        "from" => %from,
+                        "existing_config" => #?existing,
+                        "received_config" => #?config
+                    );
+                    ctx.raise_alarm(Alarm::MismatchedConfigurations {
+                        config1: (*existing).clone(),
+                        config2: config.clone(),
+                        from: from.to_string(),
+                    });
+                    return;
+                }
+            } else {
+                ctx.update_persistent_state(|ps| {
+                    ps.configs
+                        .insert_unique(config.clone())
+                        .expect("new config");
+                    true
+                });
+            }
         }
 
-        // Are we coordinating for an older epoch? If so, cancel.
         if let Some(cs) = &self.coordinator_state {
-            let coordinating_epoch = cs.reconfigure_msg().epoch();
+            let coordinating_epoch = cs.msg().epoch();
+
+            // Are we coordinating for an older epoch? If so, cancel.
             if coordinating_epoch < config.epoch {
                 info!(
                     self.log,
-                    "Received CommitAdvance. Cancelling stale coordination";
+                    "Received {op}. Cancelling stale coordination";
                     "from" => %from,
                     "coordinating_epoch" => %coordinating_epoch,
                     "received_epoch" => %config.epoch
                 );
                 self.coordinator_state = None;
-                // Intentionally fall through
             } else if coordinating_epoch == config.epoch {
+                // We want to cancel coordination here as well. Nexus has
+                // informed the sending node of the commit (or it learned from
+                // another node), and Nexus will eventually inform us. But since
+                // we have committed above by updating the persistent state, the
+                // message from Nexus will be a no-op.
                 info!(
                     self.log,
-                    "Received CommitAdvance while coordinating for same epoch!";
+                    "Received {op} while coordinating for same epoch. \
+                     Cancelling coordination.";
                     "from" => %from,
                     "epoch" => %config.epoch
                 );
-                return;
+                self.coordinator_state = None;
             } else {
+                // We are coordinating for a later epoch. Continue to do so.
                 info!(
                     self.log,
-                    "Received CommitAdvance for stale epoch while coordinating";
+                    "Received {op} for stale epoch while coordinating";
                     "from" => %from,
                     "received_epoch" => %config.epoch,
                     "coordinating_epoch" => %coordinating_epoch
                 );
-                return;
             }
         }
 
@@ -522,7 +685,7 @@ impl Node {
         if let Some(ksc) = &mut self.key_share_computer {
             if ksc.config().epoch > config.epoch {
                 let msg = concat!(
-                    "Received stale CommitAdvance. ",
+                    "Received stale {op}. ",
                     "Already computing for later epoch"
                 );
                 info!(
@@ -536,27 +699,32 @@ impl Node {
             } else if ksc.config().epoch == config.epoch {
                 info!(
                     self.log,
-                    "Received CommitAdvance while already computing share";
+                    "Received {op} while already computing share";
                     "from" => %from,
                     "epoch" => %config.epoch
                 );
+                if just_committed {
+                    self.key_share_computer = None;
+                }
                 return;
             } else {
                 info!(
                     self.log,
-                    "Received CommitAdvance while computing share for old epoch";
+                    "Received {op} while computing share for old epoch";
                     "from" => %from,
                     "epoch" => %ksc.config().epoch,
                     "received_epoch" => %config.epoch
                 );
+                self.key_share_computer = None;
                 // Intentionally fall through
             }
         }
 
-        // We either were collecting shares for an old epoch or haven't started
-        // yet.
-        self.key_share_computer =
-            Some(KeyShareComputer::new(&self.log, ctx, config));
+        // We need to compute our key share for this epoch if we have gotten here and not committed.
+        if !just_committed {
+            self.key_share_computer =
+                Some(KeyShareComputer::new(&self.log, ctx, config));
+        }
     }
 
     fn handle_get_share(
@@ -659,22 +827,17 @@ impl Node {
         share: Share,
     ) {
         if let Some(cs) = &mut self.coordinator_state {
-            cs.handle_share(ctx, from, epoch, share);
+            cs.handle_share(ctx, from.clone(), epoch, share.clone());
         } else if let Some(ksc) = &mut self.key_share_computer {
-            if ksc.handle_share(ctx, from, epoch, share) {
+            if ksc.handle_share(ctx, from.clone(), epoch, share.clone()) {
                 // We're have completed computing our share and saved it to
                 // our persistent state. We have also marked the configuration
                 // committed.
                 self.key_share_computer = None;
             }
-        } else {
-            warn!(
-                self.log,
-                "Received share when not coordinating or computing share";
-                "from" => %from,
-                "epoch" => %epoch
-            );
         }
+
+        self.rack_secret_loader.handle_share(ctx, from, epoch, share);
     }
 
     fn handle_prepare(
@@ -741,7 +904,7 @@ impl Node {
         // Nexus. In either case the rest of the system has moved on and we
         // should stop coordinating.
         if let Some(cs) = &self.coordinator_state {
-            if msg_epoch > cs.reconfigure_msg().epoch() {
+            if msg_epoch > cs.msg().epoch() {
                 // This prepare is for a newer configuration than the one we are
                 // currently coordinating. We must cancel our coordination as Nexus
                 // has moved on.
@@ -751,7 +914,7 @@ impl Node {
                 );
                 info!(self.log, "{cancel_msg}";
                     "msg_epoch" => %msg_epoch,
-                    "epoch" => %cs.reconfigure_msg().epoch(),
+                    "epoch" => %cs.msg().epoch(),
                     "from" => %from
                 );
                 self.coordinator_state = None;
@@ -760,6 +923,81 @@ impl Node {
 
         // Ack regardless of whether this is a new or idempotent request
         ctx.send(from, PeerMsgKind::PrepareAck(msg_epoch));
+    }
+
+    fn handle_get_lrtq_share(
+        &mut self,
+        ctx: &mut impl NodeHandlerCtx,
+        from: PlatformId,
+    ) {
+        // Have we already committed a TQ config?
+        if let Some(latest_committed_config) =
+            ctx.persistent_state().latest_committed_configuration()
+        {
+            if !latest_committed_config.members.contains_key(&from) {
+                info!(
+                    self.log,
+                    "Received a GetLrtqShare message from expunged node";
+                    "from" => %from,
+                    "latest_committed_epoch" =>
+                        %latest_committed_config.epoch,
+                );
+                ctx.send(
+                    from,
+                    PeerMsgKind::Expunged(latest_committed_config.epoch),
+                );
+                return;
+            }
+            info!(
+                self.log,
+                concat!(
+                    "Received 'GetLrtqShare' from stale node. ",
+                    "Responded with 'CommitAdvance'."
+                );
+                "from" => %from,
+                "latest_committed_epoch" => %latest_committed_config.epoch,
+            );
+            ctx.send(
+                from,
+                PeerMsgKind::CommitAdvance(latest_committed_config.clone()),
+            );
+            return;
+        }
+
+        // Do we have the LRTQ share?
+        //
+        // We always return an LRTQ share to anyone who asks if we have it. This
+        // matches the LRTQ protocol.
+        if let Some(lrtq_share_data) = &ctx.persistent_state().lrtq {
+            info!(
+                self.log,
+                "Received 'GetLrtqShare'. Responded with 'LrtqShare'.";
+                "from" => %from,
+            );
+            ctx.send(
+                from,
+                PeerMsgKind::LrtqShare(LrtqShare::new(
+                    lrtq_share_data.share.clone(),
+                )),
+            );
+        } else {
+            warn!(
+                self.log,
+                "Received 'GetLrtqShare', but it's missing.";
+                "from" => %from,
+            );
+        }
+    }
+
+    fn handle_lrtq_share(
+        &mut self,
+        ctx: &mut impl NodeHandlerCtx,
+        from: PlatformId,
+        share: LrtqShare,
+    ) {
+        if let Some(cs) = &mut self.coordinator_state {
+            cs.handle_lrtq_share(ctx, from.clone(), share.clone());
+        }
     }
 
     // Send any required messages as a reconfiguration coordinator
@@ -778,9 +1016,8 @@ impl Node {
         ctx: &mut impl NodeHandlerCtx,
         platform_id: PlatformId,
     ) {
-        // This function is called unconditionally in `tick` callbacks. In this
-        // case we may not actually be a coordinator. We ignore the call in
-        // that case.
+        // This function is called unconditionally in callbacks. We may not
+        // actually be a coordinator. We ignore the call in that case.
         if let Some(c) = self.coordinator_state.as_mut() {
             c.send_msgs_to(ctx, platform_id);
         }
@@ -795,12 +1032,10 @@ impl Node {
         ctx: &mut impl NodeHandlerCtx,
         msg: ValidatedReconfigureMsg,
     ) -> Result<(), ReconfigurationError> {
-        let log = self.log.new(o!("component" => "tq-coordinator-state"));
-
         // We have no committed configuration or lrtq ledger
         if ctx.persistent_state().is_uninitialized() {
             let (coordinator_state, my_config, my_share) =
-                CoordinatorState::new_uninitialized(log, msg)?;
+                CoordinatorState::new_uninitialized(&self.log, msg)?;
             self.coordinator_state = Some(coordinator_state);
             ctx.update_persistent_state(move |ps| {
                 ps.shares.insert(my_config.epoch, my_share);
@@ -818,7 +1053,7 @@ impl Node {
             .expect("committed configuration exists");
 
         self.coordinator_state = Some(CoordinatorState::new_reconfiguration(
-            log,
+            &self.log,
             msg,
             config,
             our_share.clone(),
@@ -838,6 +1073,18 @@ pub enum CommitError {
     ),
     #[error("cannot commit: not prepared for epoch {0}")]
     NotPrepared(Epoch),
+    #[error("cannot commit: expunged at epoch {epoch} by {from}")]
+    Expunged { epoch: Epoch, from: PlatformId },
+}
+
+#[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]
+pub enum PrepareAndCommitError {
+    #[error("invalid rack id")]
+    InvalidRackId(
+        #[from]
+        #[source]
+        MismatchedRackIdError,
+    ),
     #[error("cannot commit: expunged at epoch {epoch} by {from}")]
     Expunged { epoch: Epoch, from: PlatformId },
 }

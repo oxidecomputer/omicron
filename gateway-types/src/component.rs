@@ -2,8 +2,12 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::{fmt, str};
+use std::{
+    fmt,
+    str::{self, FromStr},
+};
 
+use daft::Diffable;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -15,17 +19,43 @@ use crate::rot::RotState;
     Copy,
     PartialEq,
     Eq,
+    Hash,
     PartialOrd,
     Ord,
     Serialize,
     Deserialize,
     JsonSchema,
+    Diffable,
 )]
 #[serde(rename_all = "lowercase")]
+#[cfg_attr(any(test, feature = "testing"), derive(test_strategy::Arbitrary))]
 pub enum SpType {
     Sled,
     Power,
     Switch,
+}
+
+impl fmt::Display for SpType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            SpType::Sled => write!(f, "sled"),
+            SpType::Power => write!(f, "power"),
+            SpType::Switch => write!(f, "switch"),
+        }
+    }
+}
+
+impl FromStr for SpType {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "sled" => Ok(SpType::Sled),
+            "power" => Ok(SpType::Power),
+            "switch" => Ok(SpType::Switch),
+            _ => Err(format!("invalid SpType: {}", s)),
+        }
+    }
 }
 
 #[derive(

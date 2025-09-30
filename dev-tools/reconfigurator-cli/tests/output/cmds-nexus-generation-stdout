@@ -1,0 +1,185 @@
+using provided RNG seed: reconfigurator-cli-test
+> # Load example system
+> load-example --nsleds 3 --ndisks-per-sled 3
+loaded example system with:
+- collection: f45ba181-4b56-42cc-a762-874d90184a43
+- blueprint: dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21
+
+
+> # Print the initial configuration
+> show
+configured external DNS zone name: oxide.example
+configured silo names: example-silo
+internal DNS generations: 1
+external DNS generations: 1
+target number of Nexus instances: default
+target release (generation 1): unset
+planner config:
+    add zones with mupdate override:   false
+
+
+> sled-list
+ID                                   SERIAL  NZPOOLS SUBNET                  
+2b8f0cb3-0295-4b3c-bc58-4fe88b57112c serial1 3       fd00:1122:3344:102::/64 
+98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 serial0 3       fd00:1122:3344:101::/64 
+d81c6a84-79b8-4958-ae41-ea46c9b19763 serial2 3       fd00:1122:3344:103::/64 
+
+
+> # Try to bump the Nexus generation.  This should not work because you can't
+> # bump it to a generation that has no Nexus instances deployed.
+> blueprint-edit dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21 bump-nexus-generation
+error: cannot bump blueprint generation (currently 1) past highest deployed Nexus generation (currently 1)
+
+
+> # Now, deploy a Nexus instance at the next generation.
+> blueprint-edit dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21 add-nexus serial0 2
+blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1 created from blueprint dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21: added Nexus zone to sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
+
+> blueprint-diff 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
+from: blueprint dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21
+to:   blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
+
+ MODIFIED SLEDS:
+
+  sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 (active, config generation 2 -> 3):
+
+    host phase 2 contents:
+    ------------------------
+    slot   boot image source
+    ------------------------
+    A      current contents 
+    B      current contents 
+
+
+    physical disks:
+    ------------------------------------------------------------------------------------
+    vendor        model        serial                                        disposition
+    ------------------------------------------------------------------------------------
+    fake-vendor   fake-model   serial-073979dd-3248-44a5-9fa1-cc72a140d682   in service 
+    fake-vendor   fake-model   serial-c6d33b64-fb96-4129-bab1-7878a06a5f9b   in service 
+    fake-vendor   fake-model   serial-e4d937e1-6ddc-4eca-bb08-c1f73791e608   in service 
+
+
+    datasets:
+    -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+    dataset name                                                                                                   dataset id                             disposition   quota     reservation   compression
+    -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+    oxp_073979dd-3248-44a5-9fa1-cc72a140d682/crucible                                                              7b4ce6bf-95bb-42fe-a4a0-dff31211ab88   in service    none      none          off        
+    oxp_c6d33b64-fb96-4129-bab1-7878a06a5f9b/crucible                                                              ea8a11bf-a884-4c4f-8df0-3ef9b7aacf43   in service    none      none          off        
+    oxp_e4d937e1-6ddc-4eca-bb08-c1f73791e608/crucible                                                              50b029e3-96aa-41e5-bf39-023193a4355e   in service    none      none          off        
+    oxp_073979dd-3248-44a5-9fa1-cc72a140d682/crypt/external_dns                                                    4847a96e-a267-4ae7-aa3d-805c1e77f81e   in service    none      none          off        
+    oxp_073979dd-3248-44a5-9fa1-cc72a140d682/crypt/internal_dns                                                    ad41be71-6c15-4428-b510-20ceacde4fa6   in service    none      none          off        
+    oxp_073979dd-3248-44a5-9fa1-cc72a140d682/crypt/zone                                                            4617d206-4330-4dfa-b9f3-f63a3db834f9   in service    none      none          off        
+    oxp_c6d33b64-fb96-4129-bab1-7878a06a5f9b/crypt/zone                                                            793ac181-1b01-403c-850d-7f5c54bda6c9   in service    none      none          off        
+    oxp_e4d937e1-6ddc-4eca-bb08-c1f73791e608/crypt/zone                                                            4f60b534-eaa3-40a1-b60f-bfdf147af478   in service    none      none          off        
+    oxp_e4d937e1-6ddc-4eca-bb08-c1f73791e608/crypt/zone/oxz_crucible_058fd5f9-60a8-4e11-9302-15172782e17d          02c56a30-7d97-406d-bd34-1eb437fd517d   in service    none      none          off        
+    oxp_073979dd-3248-44a5-9fa1-cc72a140d682/crypt/zone/oxz_crucible_5199c033-4cf9-4ab6-8ae7-566bd7606363          832fd140-d467-4bad-b5e9-63171634087c   in service    none      none          off        
+    oxp_c6d33b64-fb96-4129-bab1-7878a06a5f9b/crypt/zone/oxz_crucible_dfac80b4-a887-430a-ae87-a4e065dba787          4d7e3e8e-06bd-414c-a468-779e056a9b75   in service    none      none          off        
+    oxp_073979dd-3248-44a5-9fa1-cc72a140d682/crypt/zone/oxz_crucible_pantry_ba4994a8-23f9-4b1a-a84f-a08d74591389   42430c80-7836-4191-a4f6-bcee749010fe   in service    none      none          off        
+    oxp_073979dd-3248-44a5-9fa1-cc72a140d682/crypt/zone/oxz_external_dns_803bfb63-c246-41db-b0da-d3b87ddfc63d      43931274-7fe8-4077-825d-dff2bc8efa58   in service    none      none          off        
+    oxp_073979dd-3248-44a5-9fa1-cc72a140d682/crypt/zone/oxz_internal_dns_427ec88f-f467-42fa-9bbb-66a91a36103c      1bca7f71-5e42-4749-91ec-fa40793a3a9a   in service    none      none          off        
+    oxp_073979dd-3248-44a5-9fa1-cc72a140d682/crypt/zone/oxz_nexus_0c71b3b2-6ceb-4e8f-b020-b08675e83038             a4c3032e-21fa-4d4a-b040-a7e3c572cf3c   in service    none      none          off        
+    oxp_073979dd-3248-44a5-9fa1-cc72a140d682/crypt/zone/oxz_ntp_6444f8a5-6465-4f0b-a549-1993c113569c               3ac089c9-9dec-465b-863a-188e80d71fb4   in service    none      none          off        
+    oxp_073979dd-3248-44a5-9fa1-cc72a140d682/crypt/debug                                                           248c6c10-1ac6-45de-bb55-ede36ca56bbd   in service    100 GiB   none          gzip-9     
+    oxp_c6d33b64-fb96-4129-bab1-7878a06a5f9b/crypt/debug                                                           cdf3684f-a6cf-4449-b9ec-e696b2c663e2   in service    100 GiB   none          gzip-9     
+    oxp_e4d937e1-6ddc-4eca-bb08-c1f73791e608/crypt/debug                                                           686c19cf-a0d7-45f6-866f-c564612b2664   in service    100 GiB   none          gzip-9     
++   oxp_c6d33b64-fb96-4129-bab1-7878a06a5f9b/crypt/zone/oxz_nexus_16a766ee-9400-4e67-9363-883670371a1b             5205257b-48e5-4fb8-827a-9a7b29f43dbe   in service    none      none          off        
+
+
+    omicron zones:
+    ---------------------------------------------------------------------------------------------------------------
+    zone type         zone id                                image source      disposition   underlay IP           
+    ---------------------------------------------------------------------------------------------------------------
+    crucible          058fd5f9-60a8-4e11-9302-15172782e17d   install dataset   in service    fd00:1122:3344:101::27
+    crucible          5199c033-4cf9-4ab6-8ae7-566bd7606363   install dataset   in service    fd00:1122:3344:101::25
+    crucible          dfac80b4-a887-430a-ae87-a4e065dba787   install dataset   in service    fd00:1122:3344:101::26
+    crucible_pantry   ba4994a8-23f9-4b1a-a84f-a08d74591389   install dataset   in service    fd00:1122:3344:101::24
+    external_dns      803bfb63-c246-41db-b0da-d3b87ddfc63d   install dataset   in service    fd00:1122:3344:101::23
+    internal_dns      427ec88f-f467-42fa-9bbb-66a91a36103c   install dataset   in service    fd00:1122:3344:2::1   
+    internal_ntp      6444f8a5-6465-4f0b-a549-1993c113569c   install dataset   in service    fd00:1122:3344:101::21
+    nexus             0c71b3b2-6ceb-4e8f-b020-b08675e83038   install dataset   in service    fd00:1122:3344:101::22
++   nexus             16a766ee-9400-4e67-9363-883670371a1b   install dataset   in service    fd00:1122:3344:101::28
+
+
+ COCKROACHDB SETTINGS:
+    state fingerprint:::::::::::::::::   (none) (unchanged)
+    cluster.preserve_downgrade_option:   (do not modify) (unchanged)
+
+ METADATA:
+    internal DNS version:::   1 (unchanged)
+    external DNS version:::   1 (unchanged)
+    target release min gen:   1 (unchanged)
+    nexus gen::::::::::::::   1 (unchanged)
+
+ OXIMETER SETTINGS:
+    generation:   1 (unchanged)
+    read from::   SingleNode (unchanged)
+
+
+internal DNS:
+  DNS zone: "control-plane.oxide.internal" (unchanged)
+    unchanged names: 52 (records: 68)
+
+external DNS:
+  DNS zone: "oxide.example" (unchanged)
+    unchanged names: 5 (records: 9)
+
+
+
+
+> # Now we can bump the Nexus generation to trigger a handoff.
+> blueprint-edit 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1 bump-nexus-generation
+blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4 created from blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1: nexus generation: 1 -> 2
+
+> blueprint-diff 58d5e830-0884-47d8-a7cd-b2b3751adeb4
+from: blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
+to:   blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4
+
+ COCKROACHDB SETTINGS:
+    state fingerprint:::::::::::::::::   (none) (unchanged)
+    cluster.preserve_downgrade_option:   (do not modify) (unchanged)
+
+ METADATA:
+    internal DNS version:::   1 (unchanged)
+    external DNS version:::   1 (unchanged)
+    target release min gen:   1 (unchanged)
+*   nexus gen::::::::::::::   1 -> 2
+
+ OXIMETER SETTINGS:
+    generation:   1 (unchanged)
+    read from::   SingleNode (unchanged)
+
+
+internal DNS:
+* DNS zone: "control-plane.oxide.internal": 
+-   name: 0c71b3b2-6ceb-4e8f-b020-b08675e83038.host          (records: 1)
+-       AAAA fd00:1122:3344:101::22
++   name: 16a766ee-9400-4e67-9363-883670371a1b.host          (records: 1)
++       AAAA fd00:1122:3344:101::28
+-   name: 3eeb8d49-eb1a-43f8-bb64-c2338421c2c6.host          (records: 1)
+-       AAAA fd00:1122:3344:103::22
+-   name: 466a9f29-62bf-4e63-924a-b9efdb86afec.host          (records: 1)
+-       AAAA fd00:1122:3344:102::22
+*   name: _nexus-lockstep._tcp                               (records: 3 -> 1)
+-       SRV  port 12232 0c71b3b2-6ceb-4e8f-b020-b08675e83038.host.control-plane.oxide.internal
+-       SRV  port 12232 3eeb8d49-eb1a-43f8-bb64-c2338421c2c6.host.control-plane.oxide.internal
+-       SRV  port 12232 466a9f29-62bf-4e63-924a-b9efdb86afec.host.control-plane.oxide.internal
++       SRV  port 12232 16a766ee-9400-4e67-9363-883670371a1b.host.control-plane.oxide.internal
+*   name: _nexus._tcp                                        (records: 3 -> 1)
+-       SRV  port 12221 0c71b3b2-6ceb-4e8f-b020-b08675e83038.host.control-plane.oxide.internal
+-       SRV  port 12221 3eeb8d49-eb1a-43f8-bb64-c2338421c2c6.host.control-plane.oxide.internal
+-       SRV  port 12221 466a9f29-62bf-4e63-924a-b9efdb86afec.host.control-plane.oxide.internal
++       SRV  port 12221 16a766ee-9400-4e67-9363-883670371a1b.host.control-plane.oxide.internal
+    unchanged names: 47 (records: 59)
+
+external DNS:
+* DNS zone: "oxide.example": 
+*   name: example-silo.sys                                   (records: 3 -> 1)
+-       A    192.0.2.2
+-       A    192.0.2.3
+-       A    192.0.2.4
++       A    192.0.2.5
+    unchanged names: 4 (records: 6)
+
+
+

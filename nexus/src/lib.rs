@@ -7,14 +7,13 @@
 // We only use rustdoc for internal documentation, including private items, so
 // it's expected that we'll have links to private items in the docs.
 #![allow(rustdoc::private_intra_doc_links)]
-// TODO(#40): Remove this exception once resolved.
-#![allow(clippy::unnecessary_wraps)]
 
 pub mod app; // Public for documentation examples
 mod cidata;
 mod context; // Public for documentation examples
 pub mod external_api; // Public for testing
 mod internal_api;
+mod lockstep_api;
 mod populate;
 mod saga_interface;
 
@@ -25,6 +24,7 @@ use context::ServerContext;
 use dropshot::ConfigDropshot;
 use external_api::http_entrypoints::external_api;
 use internal_api::http_entrypoints::internal_api;
+use lockstep_api::http_entrypoints::lockstep_api;
 use nexus_config::NexusConfig;
 use nexus_db_model::RendezvousDebugDataset;
 use nexus_db_queries::db;
@@ -46,8 +46,6 @@ use omicron_common::api::internal::shared::{
 use omicron_common::disk::DatasetKind;
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::DatasetUuid;
-use omicron_uuid_kinds::GenericUuid as _;
-use omicron_uuid_kinds::ZpoolUuid;
 use oximeter::types::ProducerRegistry;
 use oximeter_producer::Server as ProducerServer;
 use slog::Logger;
@@ -65,6 +63,8 @@ pub struct InternalServer {
     apictx: ApiContext,
     /// dropshot server for internal API
     http_server_internal: dropshot::HttpServer<ApiContext>,
+    /// dropshot server for lockstep API
+    http_server_lockstep: dropshot::HttpServer<ApiContext>,
     config: NexusConfig,
     log: Logger,
 }
@@ -87,6 +87,17 @@ impl InternalServer {
         )
         .await?;
 
+        if config.deployment.dropshot_internal.bind_address.ip()
+            != config.deployment.dropshot_lockstep.bind_address.ip()
+        {
+            return Err(format!(
+                "internal server IP ({}) does not equal \
+                lockstep server IP ({})",
+                config.deployment.dropshot_internal.bind_address.ip(),
+                config.deployment.dropshot_lockstep.bind_address.ip()
+            ));
+        }
+
         // Launch the internal server.
         let http_server_internal = match dropshot::ServerBuilder::new(
             internal_api(),
@@ -104,12 +115,41 @@ impl InternalServer {
             }
         };
 
+        // Launch the lockstep server. This is launched at the same time as the
+        // internal server, before all the other servers.
+        let http_server_lockstep = match dropshot::ServerBuilder::new(
+            lockstep_api(),
+            context.clone(),
+            log.new(o!("component" => "dropshot_lockstep")),
+        )
+        .config(config.deployment.dropshot_lockstep.clone())
+        .start()
+        .map_err(|error| format!("initializing lockstep server: {}", error))
+        {
+            Ok(server) => server,
+            Err(err) => {
+                context.context.nexus.datastore().terminate().await;
+                return Err(err);
+            }
+        };
+
         Ok(Self {
             apictx: context,
             http_server_internal,
+            http_server_lockstep,
             config: config.clone(),
             log,
         })
+    }
+}
+
+impl nexus_test_interface::InternalServer for InternalServer {
+    fn get_http_server_internal_address(&self) -> SocketAddr {
+        self.http_server_internal.local_addr()
+    }
+
+    fn get_http_server_lockstep_address(&self) -> SocketAddr {
+        self.http_server_lockstep.local_addr()
     }
 }
 
@@ -126,6 +166,7 @@ impl Server {
     async fn start(internal: InternalServer) -> Result<Self, String> {
         let apictx = internal.apictx;
         let http_server_internal = internal.http_server_internal;
+        let http_server_lockstep = internal.http_server_lockstep;
         let log = internal.log;
         let config = internal.config;
 
@@ -212,6 +253,7 @@ impl Server {
                 http_server_external,
                 http_server_techport_external,
                 http_server_internal,
+                http_server_lockstep,
                 producer_server,
             )
             .await;
@@ -240,11 +282,10 @@ impl nexus_test_interface::NexusServer for Server {
     async fn start_internal(
         config: &NexusConfig,
         log: &Logger,
-    ) -> Result<(InternalServer, SocketAddr), String> {
+    ) -> Result<InternalServer, String> {
         let internal_server = InternalServer::start(config, &log).await?;
         internal_server.apictx.context.nexus.wait_for_populate().await.unwrap();
-        let addr = internal_server.http_server_internal.local_addr();
-        Ok((internal_server, addr))
+        Ok(internal_server)
     }
 
     async fn stop_internal(internal_server: InternalServer) {
@@ -337,6 +378,7 @@ impl nexus_test_interface::NexusServer for Server {
                     },
                     allowed_source_ips: AllowedSourceIps::Any,
                 },
+                false, // blueprint_execution_enabled
             )
             .await
             .expect("Could not initialize rack");
@@ -369,6 +411,10 @@ impl nexus_test_interface::NexusServer for Server {
 
     async fn get_http_server_internal_address(&self) -> SocketAddr {
         self.apictx.context.nexus.get_internal_server_address().await.unwrap()
+    }
+
+    async fn get_http_server_lockstep_address(&self) -> SocketAddr {
+        self.apictx.context.nexus.get_lockstep_server_address().await.unwrap()
     }
 
     async fn upsert_test_dataset(
@@ -411,7 +457,7 @@ impl nexus_test_interface::NexusServer for Server {
                         &opctx,
                         RendezvousDebugDataset::new(
                             dataset_id,
-                            ZpoolUuid::from_untyped_uuid(zpool_id),
+                            zpool_id,
                             BlueprintUuid::new_v4(),
                         ),
                     )

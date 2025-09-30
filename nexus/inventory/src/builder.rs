@@ -16,7 +16,6 @@ use clickhouse_admin_types::ClickhouseKeeperClusterMembership;
 use cockroach_admin_types::NodeId;
 use gateway_client::types::SpComponentCaboose;
 use gateway_client::types::SpState;
-use gateway_client::types::SpType;
 use iddqd::IdOrdMap;
 use nexus_sled_agent_shared::inventory::Baseboard;
 use nexus_sled_agent_shared::inventory::Inventory;
@@ -35,6 +34,7 @@ use nexus_types::inventory::RotPageWhich;
 use nexus_types::inventory::RotState;
 use nexus_types::inventory::ServiceProcessor;
 use nexus_types::inventory::SledAgent;
+use nexus_types::inventory::SpType;
 use nexus_types::inventory::TimeSync;
 use nexus_types::inventory::Zpool;
 use omicron_cockroach_metrics::CockroachMetric;
@@ -627,7 +627,7 @@ impl CollectionBuilder {
 
         let baseboard_id = match inventory.baseboard {
             Baseboard::Pc { .. } => None,
-            Baseboard::Gimlet { identifier, model, revision: _ } => {
+            Baseboard::Gimlet { identifier, model, .. } => {
                 Some(Self::normalize_item(
                     &mut self.baseboards,
                     BaseboardId {
@@ -797,7 +797,6 @@ mod test {
     use gateway_client::types::RotState;
     use gateway_client::types::SpComponentCaboose;
     use gateway_client::types::SpState;
-    use gateway_client::types::SpType;
     use gateway_types::rot::RotSlot;
     use nexus_sled_agent_shared::inventory::SledRole;
     use nexus_types::inventory::BaseboardId;
@@ -805,6 +804,7 @@ mod test {
     use nexus_types::inventory::CabooseWhich;
     use nexus_types::inventory::RotPage;
     use nexus_types::inventory::RotPageWhich;
+    use nexus_types::inventory::SpType;
     use omicron_common::api::external::ByteCount;
 
     // Verify the contents of an empty collection.

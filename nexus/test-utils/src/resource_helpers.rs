@@ -46,6 +46,7 @@ use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Instance;
 use omicron_common::api::external::InstanceAutoRestartPolicy;
 use omicron_common::api::external::InstanceCpuCount;
+use omicron_common::api::external::InstanceCpuPlatform;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::RouteDestination;
@@ -63,7 +64,6 @@ use omicron_sled_agent::sim::SledAgent;
 use omicron_test_utils::dev::poll::CondCheckError;
 use omicron_test_utils::dev::poll::wait_for_condition;
 use omicron_uuid_kinds::DatasetUuid;
-use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SiloUserUuid;
 use omicron_uuid_kinds::SledUuid;
@@ -628,6 +628,7 @@ pub async fn create_instance(
         Vec::<params::ExternalIpCreate>::new(),
         true,
         Default::default(),
+        None,
     )
     .await
 }
@@ -644,6 +645,7 @@ pub async fn create_instance_with(
     external_ips: Vec<params::ExternalIpCreate>,
     start: bool,
     auto_restart_policy: Option<InstanceAutoRestartPolicy>,
+    cpu_platform: Option<InstanceCpuPlatform>,
 ) -> Instance {
     let url = format!("/v1/instances?project={}", project_name);
 
@@ -666,6 +668,7 @@ pub async fn create_instance_with(
             external_ips,
             disks,
             boot_disk: None,
+            cpu_platform,
             start,
             auto_restart_policy,
             anti_affinity_groups: Vec::new(),
@@ -1564,14 +1567,14 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
                 model: disk_identity.model.clone(),
                 variant:
                     nexus_types::external_api::params::PhysicalDiskKind::U2,
-                sled_id: sled_id.into_untyped_uuid(),
+                sled_id,
             };
 
         let zpool_request =
             nexus_types::internal_api::params::ZpoolPutRequest {
-                id: zpool.id.into_untyped_uuid(),
+                id: zpool.id,
                 physical_disk_id,
-                sled_id: sled_id.into_untyped_uuid(),
+                sled_id,
             };
 
         // Find the sled on which we're adding a zpool
@@ -1685,7 +1688,7 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
                 }
             },
             &Duration::from_millis(50),
-            &Duration::from_secs(30),
+            &Duration::from_secs(120),
         )
         .await
         .expect("expected to find inventory collection");
@@ -1772,9 +1775,9 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
     /// _not_ clean up crucible resources on an expunged disk (due to the "gone"
     /// check that it performs), but it's useful for tests to be able to assert
     /// all crucible resources are cleaned up.
-    pub async fn remove_zpool(&mut self, zpool_id: Uuid) {
+    pub async fn remove_zpool(&mut self, zpool_id: ZpoolUuid) {
         for sled in self.sleds.values_mut() {
-            sled.zpools.retain(|zpool| *zpool.id.as_untyped_uuid() != zpool_id);
+            sled.zpools.retain(|zpool| zpool.id != zpool_id);
         }
     }
 }

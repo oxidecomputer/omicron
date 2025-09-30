@@ -29,9 +29,13 @@ mod rack_secret_loader;
 mod validators;
 pub use configuration::Configuration;
 pub use coordinator_state::{
-    CoordinatorOperation, CoordinatorState, CoordinatorStateDiff,
+    CoordinatingMsg, CoordinatorOperation, CoordinatorState,
+    CoordinatorStateDiff,
 };
-pub use validators::ValidatedReconfigureMsgDiff;
+pub use rack_secret_loader::{LoadRackSecretError, RackSecretLoaderDiff};
+pub use validators::{
+    ValidatedLrtqUpgradeMsgDiff, ValidatedReconfigureMsgDiff,
+};
 mod alarm;
 
 pub use alarm::Alarm;

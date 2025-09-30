@@ -24,8 +24,10 @@ pub struct TargetBlueprintLoader {
 }
 
 impl TargetBlueprintLoader {
-    pub fn new(datastore: Arc<DataStore>) -> TargetBlueprintLoader {
-        let (tx, _) = watch::channel(None);
+    pub fn new(
+        datastore: Arc<DataStore>,
+        tx: watch::Sender<Option<Arc<(BlueprintTarget, Blueprint)>>>,
+    ) -> TargetBlueprintLoader {
         TargetBlueprintLoader { datastore, last: None, tx }
     }
 
@@ -194,8 +196,8 @@ mod test {
     use nexus_inventory::now_db_precision;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::{
-        Blueprint, BlueprintTarget, CockroachDbPreserveDowngrade,
-        OximeterReadMode, PendingMgsUpdates, PlanningReport,
+        Blueprint, BlueprintSource, BlueprintTarget,
+        CockroachDbPreserveDowngrade, OximeterReadMode, PendingMgsUpdates,
     };
     use omicron_common::api::external::Generation;
     use omicron_uuid_kinds::BlueprintUuid;
@@ -233,7 +235,7 @@ mod test {
                 time_created: now_db_precision(),
                 creator: "test".to_string(),
                 comment: "test blueprint".to_string(),
-                report: PlanningReport::new(id),
+                source: BlueprintSource::Test,
             },
         )
     }
@@ -256,7 +258,8 @@ mod test {
             datastore.clone(),
         );
 
-        let mut task = TargetBlueprintLoader::new(datastore.clone());
+        let (tx, _) = watch::channel(None);
+        let mut task = TargetBlueprintLoader::new(datastore.clone(), tx);
         let mut rx = task.watcher();
 
         // We expect to see the initial blueprint set up by nexus-test-utils

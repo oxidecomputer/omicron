@@ -107,6 +107,7 @@ pretty_assertions.workspace = true
 rcgen.workspace = true
 regex.workspace = true
 rustls.workspace = true
+sha2.workspace = true
 subprocess.workspace = true
 term.workspace = true
 

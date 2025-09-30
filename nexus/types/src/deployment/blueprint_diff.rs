@@ -77,7 +77,7 @@ impl<'a> BlueprintDiffSummary<'a> {
             oximeter_read_mode,
             creator: _,
             comment: _,
-            report: _,
+            source: _,
         } = &self.diff;
 
         // Did we modify, add, or remove any sleds?
@@ -2139,6 +2139,8 @@ impl fmt::Display for BlueprintDiffDisplay<'_, '_> {
             writeln!(f, " PENDING MGS UPDATES:\n")?;
             writeln!(f, "{}", table)?;
         }
+
+        // TODO-K: Add blocked updates in a follow up PR
 
         Ok(())
     }

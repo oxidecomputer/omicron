@@ -192,7 +192,7 @@ impl SledUpdateBuilder {
 
     pub fn build(&self) -> SledUpdate {
         SledUpdate::new(
-            self.sled_id.into_untyped_uuid(),
+            self.sled_id,
             self.addr,
             self.repo_depot_port,
             sled_baseboard_for_test(),
@@ -236,6 +236,7 @@ pub async fn create_stopped_instance_record(
             external_ips: Vec::new(),
             disks: Vec::new(),
             boot_disk: None,
+            cpu_platform: None,
             ssh_public_keys: None,
             start: false,
             auto_restart_policy: Default::default(),

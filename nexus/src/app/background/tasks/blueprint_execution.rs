@@ -244,17 +244,17 @@ mod test {
     };
     use nexus_types::deployment::{
         Blueprint, BlueprintHostPhase2DesiredSlots, BlueprintSledConfig,
-        BlueprintTarget, BlueprintZoneConfig, BlueprintZoneDisposition,
-        BlueprintZoneImageSource, BlueprintZoneType,
+        BlueprintSource, BlueprintTarget, BlueprintZoneConfig,
+        BlueprintZoneDisposition, BlueprintZoneImageSource, BlueprintZoneType,
         CockroachDbPreserveDowngrade, OximeterReadMode, PendingMgsUpdates,
-        PlanningReport, blueprint_zone_type,
+        blueprint_zone_type,
     };
     use nexus_types::external_api::views::SledState;
     use omicron_common::api::external;
     use omicron_common::api::external::Generation;
     use omicron_common::zpool_name::ZpoolName;
     use omicron_uuid_kinds::BlueprintUuid;
-    use omicron_uuid_kinds::GenericUuid;
+
     use omicron_uuid_kinds::OmicronZoneUuid;
     use omicron_uuid_kinds::PhysicalDiskUuid;
     use omicron_uuid_kinds::SledUuid;
@@ -328,7 +328,7 @@ mod test {
             time_created: chrono::Utc::now(),
             creator: "test".to_string(),
             comment: "test blueprint".to_string(),
-            report: PlanningReport::new(id),
+            source: BlueprintSource::Test,
         };
 
         datastore
@@ -399,7 +399,7 @@ mod test {
             };
             let bogus_repo_depot_port = 0;
             let update = SledUpdate::new(
-                sled_id.into_untyped_uuid(),
+                *sled_id,
                 addr,
                 bogus_repo_depot_port,
                 SledBaseboard {
@@ -428,11 +428,16 @@ mod test {
         let mut task = BlueprintExecutor::new(
             datastore.clone(),
             resolver.clone(),
-            blueprint_rx,
+            blueprint_rx.clone(),
             OmicronZoneUuid::new_v4(),
             Activator::new(),
             dummy_tx,
-            NexusQuiesceHandle::new(&opctx.log, datastore.clone()),
+            NexusQuiesceHandle::new(
+                datastore.clone(),
+                OmicronZoneUuid::new_v4(),
+                blueprint_rx,
+                opctx.child(BTreeMap::new()),
+            ),
         );
 
         // Now we're ready.
@@ -525,8 +530,8 @@ mod test {
 
             let pool_id = dataset.dataset.pool_name.id();
             let zpool = Zpool::new(
-                pool_id.into_untyped_uuid(),
-                sled_id.into_untyped_uuid(),
+                pool_id,
+                sled_id,
                 PhysicalDiskUuid::new_v4(),
                 external::ByteCount::from(0).into(),
             );

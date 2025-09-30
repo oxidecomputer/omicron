@@ -12,12 +12,13 @@ use crate::driver::UpdateAttemptStatusUpdater;
 use crate::mgs_clients::GatewayClientError;
 use crate::{ArtifactCache, ArtifactCacheError, MgsClients};
 use gateway_client::SpComponent;
+use gateway_client::types::SpUpdateStatus;
 use gateway_client::types::UpdateAbortBody;
-use gateway_client::types::{SpType, SpUpdateStatus};
 use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdateDetails;
 use nexus_types::internal_api::views::UpdateAttemptStatus;
 use nexus_types::internal_api::views::UpdateCompletedHow;
+use nexus_types::inventory::SpType;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SpUpdateUuid;
 use qorb::resolver::AllBackends;
@@ -312,7 +313,7 @@ pub(crate) async fn apply_update(
             async move {
                 client
                     .sp_component_update(
-                        sp_type,
+                        &sp_type,
                         sp_slot,
                         component,
                         sp_update.firmware_slot,
@@ -525,7 +526,7 @@ async fn wait_for_delivery(
         let status = mgs_clients
             .try_all_serially(log, |client| async move {
                 let update_status = client
-                    .sp_component_update_status(sp_type, sp_slot, component)
+                    .sp_component_update_status(&sp_type, sp_slot, component)
                     .await?;
 
                 debug!(
@@ -624,7 +625,7 @@ async fn abort_update(
         .try_all_serially(log, |mgs_client| async move {
             let arg = UpdateAbortBody { id: update_id };
             mgs_client
-                .sp_component_update_abort(sp_type, sp_slot, component, &arg)
+                .sp_component_update_abort(&sp_type, sp_slot, component, &arg)
                 .await
         })
         .await
@@ -778,7 +779,6 @@ mod test {
     use crate::test_util::updates::ExpectedSpComponent;
     use crate::test_util::updates::UpdateDescription;
     use assert_matches::assert_matches;
-    use gateway_client::types::SpType;
     use gateway_messages::SpPort;
     use gateway_test_utils::setup::GatewayTestContext;
     use gateway_types::rot::RotSlot;
@@ -787,6 +787,7 @@ mod test {
     use nexus_types::internal_api::views::UpdateAttemptStatus;
     use nexus_types::internal_api::views::UpdateCompletedHow;
     use nexus_types::inventory::BaseboardId;
+    use nexus_types::inventory::SpType;
     use slog_error_chain::InlineErrorChain;
     use std::time::Duration;
     use tufaceous_artifact::ArtifactHash;

@@ -21,6 +21,7 @@ use omicron_common::api::internal::shared::RackNetworkConfig;
 use omicron_common::api::internal::shared::SourceNatConfig;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
+use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -87,15 +88,20 @@ pub struct PhysicalDiskPutRequest {
     pub model: String,
 
     pub variant: PhysicalDiskKind,
-    pub sled_id: Uuid,
+    #[schemars(with = "Uuid")]
+    pub sled_id: SledUuid,
 }
 
 /// Identifies information about a Zpool that should be part of the control
 /// plane.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct ZpoolPutRequest {
-    pub id: Uuid,
-    pub sled_id: Uuid,
+    #[schemars(with = "Uuid")]
+    pub id: ZpoolUuid,
+
+    #[schemars(with = "Uuid")]
+    pub sled_id: SledUuid,
+
     pub physical_disk_id: PhysicalDiskUuid,
 }
 
@@ -213,5 +219,6 @@ pub struct OximeterInfo {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct InstanceMigrateRequest {
     /// The ID of the sled to which to migrate the target instance.
-    pub dst_sled_id: Uuid,
+    #[schemars(with = "Uuid")]
+    pub dst_sled_id: SledUuid,
 }

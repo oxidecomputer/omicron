@@ -5,7 +5,7 @@
 use super::InstanceIntendedState as IntendedState;
 use super::{
     ByteCount, Disk, ExternalIp, Generation, InstanceAutoRestartPolicy,
-    InstanceCpuCount, InstanceState, Vmm, VmmState,
+    InstanceCpuCount, InstanceCpuPlatform, InstanceState, Vmm, VmmState,
 };
 use crate::collection::DatastoreAttachTargetConfig;
 use crate::serde_time_delta::optional_time_delta;
@@ -67,6 +67,12 @@ pub struct Instance {
     /// The primary boot disk for this instance.
     #[diesel(column_name = boot_disk_id)]
     pub boot_disk_id: Option<Uuid>,
+
+    /// The instance's required CPU platform. If this is `None`, Nexus will not
+    /// constrain placement decisions by CPU platform. Instead, after selecting
+    /// a sled by any other constraints the instance will be incarnated with the
+    /// most general CPU platform supported by the selected sled.
+    pub cpu_platform: Option<InstanceCpuPlatform>,
 
     #[diesel(embed)]
     pub runtime_state: InstanceRuntimeState,
@@ -139,6 +145,7 @@ impl Instance {
             // Intentionally ignore `params.boot_disk_id` here: we can't set
             // `boot_disk_id` until the referenced disk is attached.
             boot_disk_id: None,
+            cpu_platform: params.cpu_platform.map(Into::into),
 
             runtime_state,
             intended_state,
@@ -368,9 +375,9 @@ pub enum Reincarnatability {
 
 impl InstanceAutoRestart {
     /// The default cooldown used when an instance has no overridden cooldown.
-    pub const DEFAULT_COOLDOWN: TimeDelta = match TimeDelta::try_hours(1) {
+    pub const DEFAULT_COOLDOWN: TimeDelta = match TimeDelta::try_minutes(5) {
         Some(delta) => delta,
-        None => unreachable!(), // 1 hour should be representable...
+        None => unreachable!(), // 5 minutes should be representable...
     };
 
     /// The default policy used when an instance does not override the
@@ -493,4 +500,6 @@ pub struct InstanceUpdate {
     pub ncpus: InstanceCpuCount,
 
     pub memory: ByteCount,
+
+    pub cpu_platform: Option<InstanceCpuPlatform>,
 }

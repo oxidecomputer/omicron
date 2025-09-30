@@ -115,6 +115,8 @@ Query the control plane database (CockroachDB)
 Usage: omdb db [OPTIONS] <COMMAND>
 
 Commands:
+  blueprints                   Print information about blueprints
+  db-metadata                  Commands for database metadata
   crucible-dataset             Commands relevant to Crucible datasets
   replacements-to-do           Print any Crucible resources that are located on expunged physical
                                disks
@@ -174,6 +176,8 @@ Query the control plane database (CockroachDB)
 Usage: omdb db [OPTIONS] <COMMAND>
 
 Commands:
+  blueprints                   Print information about blueprints
+  db-metadata                  Commands for database metadata
   crucible-dataset             Commands relevant to Crucible datasets
   replacements-to-do           Print any Crucible resources that are located on expunged physical
                                disks
@@ -843,18 +847,18 @@ Debug a specific Nexus instance
 Usage: omdb nexus [OPTIONS] <COMMAND>
 
 Commands:
-  background-tasks      print information about background tasks
-  blueprints            interact with blueprints
-  chicken-switches      interact with reconfigurator chicken switches
-  clickhouse-policy     interact with clickhouse policy
-  mgs-updates           print information about pending MGS updates
-  oximeter-read-policy  interact with oximeter read policy
-  quiesce               view or modify the quiesce status
-  sagas                 view sagas, create and complete demo sagas
-  sleds                 interact with sleds
-  support-bundles       interact with support bundles [aliases: sb]
-  update-status         show running artifact versions
-  help                  Print this message or the help of the given subcommand(s)
+  background-tasks       print information about background tasks
+  blueprints             interact with blueprints
+  clickhouse-policy      interact with clickhouse policy
+  mgs-updates            print information about pending MGS updates
+  oximeter-read-policy   interact with oximeter read policy
+  quiesce                view or modify the quiesce status
+  reconfigurator-config  interact with reconfigurator config
+  sagas                  view sagas, create and complete demo sagas
+  sleds                  interact with sleds
+  support-bundles        interact with support bundles [aliases: sb]
+  update-status          show running artifact versions
+  help                   Print this message or the help of the given subcommand(s)
 
 Options:
       --log-level <LOG_LEVEL>  log level filter [env: LOG_LEVEL=] [default: warn]
@@ -862,9 +866,10 @@ Options:
   -h, --help                   Print help
 
 Connection Options:
-      --nexus-internal-url <NEXUS_INTERNAL_URL>  URL of the Nexus internal API [env:
-                                                 OMDB_NEXUS_URL=]
-      --dns-server <DNS_SERVER>                  [env: OMDB_DNS_SERVER=]
+      --nexus-internal-url <NEXUS_INTERNAL_URL>
+          URL of the Nexus internal lockstep API [env: OMDB_NEXUS_URL=]
+      --dns-server <DNS_SERVER>
+          [env: OMDB_DNS_SERVER=]
 
 Safety Options:
   -w, --destructive  Allow potentially-destructive subcommands
@@ -893,9 +898,10 @@ Options:
   -h, --help                   Print help
 
 Connection Options:
-      --nexus-internal-url <NEXUS_INTERNAL_URL>  URL of the Nexus internal API [env:
-                                                 OMDB_NEXUS_URL=]
-      --dns-server <DNS_SERVER>                  [env: OMDB_DNS_SERVER=]
+      --nexus-internal-url <NEXUS_INTERNAL_URL>
+          URL of the Nexus internal lockstep API [env: OMDB_NEXUS_URL=]
+      --dns-server <DNS_SERVER>
+          [env: OMDB_DNS_SERVER=]
 
 Safety Options:
   -w, --destructive  Allow potentially-destructive subcommands
@@ -938,7 +944,7 @@ Options:
 
 Connection Options:
       --nexus-internal-url <NEXUS_INTERNAL_URL>
-          URL of the Nexus internal API
+          URL of the Nexus internal lockstep API
           
           [env: OMDB_NEXUS_URL=]
 
@@ -977,9 +983,10 @@ Options:
   -h, --help                   Print help
 
 Connection Options:
-      --nexus-internal-url <NEXUS_INTERNAL_URL>  URL of the Nexus internal API [env:
-                                                 OMDB_NEXUS_URL=]
-      --dns-server <DNS_SERVER>                  [env: OMDB_DNS_SERVER=]
+      --nexus-internal-url <NEXUS_INTERNAL_URL>
+          URL of the Nexus internal lockstep API [env: OMDB_NEXUS_URL=]
+      --dns-server <DNS_SERVER>
+          [env: OMDB_DNS_SERVER=]
 
 Safety Options:
   -w, --destructive  Allow potentially-destructive subcommands
@@ -1006,9 +1013,10 @@ Options:
   -h, --help                   Print help
 
 Connection Options:
-      --nexus-internal-url <NEXUS_INTERNAL_URL>  URL of the Nexus internal API [env:
-                                                 OMDB_NEXUS_URL=]
-      --dns-server <DNS_SERVER>                  [env: OMDB_DNS_SERVER=]
+      --nexus-internal-url <NEXUS_INTERNAL_URL>
+          URL of the Nexus internal lockstep API [env: OMDB_NEXUS_URL=]
+      --dns-server <DNS_SERVER>
+          [env: OMDB_DNS_SERVER=]
 
 Safety Options:
   -w, --destructive  Allow potentially-destructive subcommands
@@ -1045,9 +1053,10 @@ Options:
   -h, --help                   Print help
 
 Connection Options:
-      --nexus-internal-url <NEXUS_INTERNAL_URL>  URL of the Nexus internal API [env:
-                                                 OMDB_NEXUS_URL=]
-      --dns-server <DNS_SERVER>                  [env: OMDB_DNS_SERVER=]
+      --nexus-internal-url <NEXUS_INTERNAL_URL>
+          URL of the Nexus internal lockstep API [env: OMDB_NEXUS_URL=]
+      --dns-server <DNS_SERVER>
+          [env: OMDB_DNS_SERVER=]
 
 Safety Options:
   -w, --destructive  Allow potentially-destructive subcommands
@@ -1185,12 +1194,12 @@ Interact with the Reconfigurator system
 Usage: omdb reconfigurator [OPTIONS] <COMMAND>
 
 Commands:
-  export                    Save the current Reconfigurator state to a file
-  archive                   Save the current Reconfigurator state to a file and remove historical
-                            artifacts from the live system (e.g., non-target blueprints)
-  history                   Show recent history of blueprints
-  chicken-switches-history  Show the recent history of chicken switch settings
-  help                      Print this message or the help of the given subcommand(s)
+  export          Save the current Reconfigurator state to a file
+  archive         Save the current Reconfigurator state to a file and remove historical artifacts
+                  from the live system (e.g., non-target blueprints)
+  history         Show recent history of blueprints
+  config-history  Show the recent history of configuration values
+  help            Print this message or the help of the given subcommand(s)
 
 Options:
       --log-level <LOG_LEVEL>  log level filter [env: LOG_LEVEL=] [default: warn]

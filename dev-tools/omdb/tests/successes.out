@@ -1,3 +1,26 @@
+EXECUTING COMMAND: omdb ["db", "db-metadata", "ls-nexus"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+Target Blueprint ......<REDACTED_BLUEPRINT_ID>....... @ nexus_generation: 1
+ID                                   |LAST_DRAINED_BLUEPRINT |STATE  |TRANSITIONING_TO 
+-------------------------------------+-----------------------+-------+-----------------
+..........<REDACTED_UUID>........... |                       |active |                 
+---------------------------------------------
+stderr:
+note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
+note: database schema version matches expected (<redacted database version>)
+=============================================
+EXECUTING COMMAND: omdb ["--destructive", "db", "db-metadata", "force-mark-nexus-quiesced", "--skip-confirmation", "..........<REDACTED_UUID>..........."]
+termination: Exited(1)
+---------------------------------------------
+stdout:
+---------------------------------------------
+stderr:
+note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
+note: database schema version matches expected (<redacted database version>)
+Error: Nexus ..........<REDACTED_UUID>........... not ready to quiesce (nexus generation 1 >= blueprint gen 1)
+=============================================
 EXECUTING COMMAND: omdb ["db", "disks", "list"]
 termination: Exited(0)
 ---------------------------------------------
@@ -268,10 +291,6 @@ task: "blueprint_rendezvous"
     owned rendezvous tables that other subsystems consume
 
 
-task: "chicken_switches_watcher"
-    watch db for chicken switch changes
-
-
 task: "crdb_node_id_collector"
     Collects node IDs of running CockroachDB zones
 
@@ -355,6 +374,10 @@ task: "physical_disk_adoption"
 
 task: "read_only_region_replacement_start"
     detect if read-only regions need replacement and begin the process
+
+
+task: "reconfigurator_config_watcher"
+    watch db for reconfigurator config changes
 
 
 task: "region_replacement"
@@ -550,12 +573,6 @@ task: "blueprint_rendezvous"
         num_already_exist:    0
         num_not_in_inventory: 0
 
-task: "chicken_switches_watcher"
-  configured period: every <REDACTED_DURATION>s
-  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
-    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-warning: unknown background task: "chicken_switches_watcher" (don't know how to interpret details: Object {"chicken_switches_updated": Bool(false)})
-
 task: "crdb_node_id_collector"
   configured period: every <REDACTED_DURATION>m
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
@@ -661,6 +678,12 @@ task: "read_only_region_replacement_start"
     total requests created ok: 0
     errors: 0
 
+task: "reconfigurator_config_watcher"
+  configured period: every <REDACTED_DURATION>s
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+warning: unknown background task: "reconfigurator_config_watcher" (don't know how to interpret details: Object {"config_updated": Bool(false)})
+
 task: "region_replacement"
   configured period: every <REDACTED_DURATION>days <REDACTED_DURATION>h <REDACTED_DURATION>m <REDACTED_DURATION>s
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
@@ -746,14 +769,12 @@ task: "sp_ereport_ingester"
   configured period: every <REDACTED_DURATION>s
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-/!\ errors:                  1
-      - failed to resolve MGS addresses: proto error: no records found for Query { name: Name("_mgs._tcp.control-plane.oxide.internal."), query_type: SRV, query_class: IN }
-    total ereports received:      0
-      new ereports ingested:      0
-    total HTTP requests sent:     0
-      total collection errors:    0
-    reporters with ereports:      0
-    reporters with collection errors:   0
+    total ereports received:             <TOTAL_EREPORTS_RECEIVED_REDACTED>
+      new ereports ingested:             <NEW_EREPORTS_INGESTED_REDACTED>
+    total HTTP requests sent:            <TOTAL_HTTP_REQUESTS_SENT_REDACTED>
+      total collection errors:           <TOTAL_COLLECTION_ERRORS_REDACTED>
+    reporters with ereports:             <REPORTERS_WITH_EREPORTS_REDACTED>
+    reporters with collection errors:    <REPORTERS_WITH_COLLECTION_ERRORS_REDACTED>
 
 task: "support_bundle_collector"
   configured period: every <REDACTED_DURATION>days <REDACTED_DURATION>h <REDACTED_DURATION>m <REDACTED_DURATION>s
@@ -1068,12 +1089,6 @@ task: "blueprint_rendezvous"
         num_already_exist:    0
         num_not_in_inventory: 0
 
-task: "chicken_switches_watcher"
-  configured period: every <REDACTED_DURATION>s
-  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
-    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-warning: unknown background task: "chicken_switches_watcher" (don't know how to interpret details: Object {"chicken_switches_updated": Bool(false)})
-
 task: "crdb_node_id_collector"
   configured period: every <REDACTED_DURATION>m
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
@@ -1179,6 +1194,12 @@ task: "read_only_region_replacement_start"
     total requests created ok: 0
     errors: 0
 
+task: "reconfigurator_config_watcher"
+  configured period: every <REDACTED_DURATION>s
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+warning: unknown background task: "reconfigurator_config_watcher" (don't know how to interpret details: Object {"config_updated": Bool(false)})
+
 task: "region_replacement"
   configured period: every <REDACTED_DURATION>days <REDACTED_DURATION>h <REDACTED_DURATION>m <REDACTED_DURATION>s
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
@@ -1264,14 +1285,12 @@ task: "sp_ereport_ingester"
   configured period: every <REDACTED_DURATION>s
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-/!\ errors:                  1
-      - failed to resolve MGS addresses: proto error: no records found for Query { name: Name("_mgs._tcp.control-plane.oxide.internal."), query_type: SRV, query_class: IN }
-    total ereports received:      0
-      new ereports ingested:      0
-    total HTTP requests sent:     0
-      total collection errors:    0
-    reporters with ereports:      0
-    reporters with collection errors:   0
+    total ereports received:             <TOTAL_EREPORTS_RECEIVED_REDACTED>
+      new ereports ingested:             <NEW_EREPORTS_INGESTED_REDACTED>
+    total HTTP requests sent:            <TOTAL_HTTP_REQUESTS_SENT_REDACTED>
+      total collection errors:           <TOTAL_COLLECTION_ERRORS_REDACTED>
+    reporters with ereports:             <REPORTERS_WITH_EREPORTS_REDACTED>
+    reporters with collection errors:    <REPORTERS_WITH_COLLECTION_ERRORS_REDACTED>
 
 task: "support_bundle_collector"
   configured period: every <REDACTED_DURATION>days <REDACTED_DURATION>h <REDACTED_DURATION>m <REDACTED_DURATION>s
@@ -1514,7 +1533,7 @@ parent:    <none>
 
  PENDING MGS-MANAGED UPDATES: 0
 
-empty planning report for blueprint ......<REDACTED_BLUEPRINT_ID>........
+blueprint source: constructed by an automated test
 
 
 ---------------------------------------------
@@ -1638,7 +1657,7 @@ parent:    <none>
 
  PENDING MGS-MANAGED UPDATES: 0
 
-empty planning report for blueprint ......<REDACTED_BLUEPRINT_ID>........
+blueprint source: constructed by an automated test
 
 
 ---------------------------------------------
@@ -1680,49 +1699,54 @@ stderr:
 note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
 Error: `blueprint2_id` was not specified and blueprint1 has no parent
 =============================================
-EXECUTING COMMAND: omdb ["nexus", "chicken-switches", "show", "current"]
+EXECUTING COMMAND: omdb ["nexus", "reconfigurator-config", "show", "current"]
 termination: Exited(0)
 ---------------------------------------------
 stdout:
-No chicken switches enabled
+Reconfigurator config:
+    version: 1
+    modified time: <REDACTED_TIMESTAMP>
+    planner enabled: false
+    planner config:
+        add zones with mupdate override:   false
 ---------------------------------------------
 stderr:
 note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
 =============================================
-EXECUTING COMMAND: omdb ["-w", "nexus", "chicken-switches", "set", "--planner-enabled", "true"]
+EXECUTING COMMAND: omdb ["-w", "nexus", "reconfigurator-config", "set", "--planner-enabled", "true"]
 termination: Exited(0)
 ---------------------------------------------
 stdout:
-chicken switches updated to version 1:
-    planner enabled: true
-    planner switches:
-        add zones with mupdate override:   true
+reconfigurator config updated to version 2:
+*   planner enabled:   false -> true
+    planner config:
+        add zones with mupdate override:   false (unchanged)
 ---------------------------------------------
 stderr:
 note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
 =============================================
-EXECUTING COMMAND: omdb ["-w", "nexus", "chicken-switches", "set", "--add-zones-with-mupdate-override", "false"]
+EXECUTING COMMAND: omdb ["-w", "nexus", "reconfigurator-config", "set", "--add-zones-with-mupdate-override", "true"]
 termination: Exited(0)
 ---------------------------------------------
 stdout:
-chicken switches updated to version 2:
+reconfigurator config updated to version 3:
     planner enabled:   true (unchanged)
-    planner switches:
-    *   add zones with mupdate override:   true -> false
+    planner config:
+    *   add zones with mupdate override:   false -> true
 ---------------------------------------------
 stderr:
 note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
 =============================================
-EXECUTING COMMAND: omdb ["nexus", "chicken-switches", "show", "current"]
+EXECUTING COMMAND: omdb ["nexus", "reconfigurator-config", "show", "current"]
 termination: Exited(0)
 ---------------------------------------------
 stdout:
-Reconfigurator chicken switches:
-    version: 2
+Reconfigurator config:
+    version: 3
     modified time: <REDACTED_TIMESTAMP>
     planner enabled: true
-    planner switches:
-        add zones with mupdate override:   false
+    planner config:
+        add zones with mupdate override:   true
 ---------------------------------------------
 stderr:
 note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
@@ -1737,4 +1761,14 @@ note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=d
 note: database schema version matches expected (<redacted database version>)
 assembling reconfigurator state ... done
 wrote <TMP_PATH_REDACTED>
+=============================================
+EXECUTING COMMAND: omdb ["--destructive", "db", "db-metadata", "force-mark-nexus-quiesced", "--skip-confirmation", "--skip-blueprint-validation", "..........<REDACTED_UUID>..........."]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+Marked ..........<REDACTED_UUID>........... quiesced
+---------------------------------------------
+stderr:
+note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
+note: database schema version matches expected (<redacted database version>)
 =============================================

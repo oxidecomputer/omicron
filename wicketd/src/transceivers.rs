@@ -4,7 +4,7 @@
 
 //! Fetching transceiver state from the SP.
 
-use gateway_client::types::{SpIdentifier, SpType};
+use gateway_client::types::SpIdentifier;
 use omicron_common::api::external::SwitchLocation;
 use slog::{Logger, debug, error};
 use std::{
@@ -20,7 +20,7 @@ use transceiver_controller::{
     ConfigBuilder, Controller, Error, ModuleId, ModuleResult,
 };
 use transceiver_controller::{SpRequest, message::ExtendedStatus};
-use wicket_common::inventory::Transceiver;
+use wicket_common::inventory::{SpType, Transceiver};
 
 /// Type alias for a map of all transceivers on each switch.
 pub type TransceiverMap = HashMap<SwitchLocation, Vec<Transceiver>>;

@@ -424,6 +424,7 @@ table! {
         auto_restart_policy -> Nullable<crate::enums::InstanceAutoRestartPolicyEnum>,
         auto_restart_cooldown -> Nullable<Interval>,
         boot_disk_id -> Nullable<Uuid>,
+        cpu_platform -> Nullable<crate::enums::InstanceCpuPlatformEnum>,
         time_state_updated -> Timestamptz,
         state_generation -> Int8,
         active_propolis_id -> Nullable<Uuid>,
@@ -448,6 +449,7 @@ table! {
         sled_id -> Uuid,
         propolis_ip -> Inet,
         propolis_port -> Int4,
+        cpu_platform -> crate::enums::VmmCpuPlatformEnum,
         time_state_updated -> Timestamptz,
         state_generation -> Int8,
         state -> crate::enums::VmmStateEnum,
@@ -1126,6 +1128,15 @@ table! {
 allow_tables_to_appear_in_same_query!(zpool, crucible_dataset);
 
 table! {
+    debug_log_blueprint_planning (blueprint_id) {
+        blueprint_id -> Uuid,
+        debug_blob -> Jsonb,
+    }
+}
+
+allow_tables_to_appear_in_same_query!(blueprint, debug_log_blueprint_planning);
+
+table! {
     rendezvous_debug_dataset (id) {
         id -> Uuid,
         time_created -> Timestamptz,
@@ -1406,6 +1417,7 @@ table! {
         valid_until -> Timestamptz,
         system_version -> Text,
         file_name -> Text,
+        time_pruned -> Nullable<Timestamptz>,
     }
 }
 
@@ -1858,6 +1870,8 @@ table! {
 
         image_source -> crate::enums::InvZoneImageSourceEnum,
         image_artifact_sha256 -> Nullable<Text>,
+
+        nexus_lockstep_port -> Nullable<Int4>,
     }
 }
 
@@ -1918,7 +1932,7 @@ table! {
 }
 
 table! {
-    reconfigurator_chicken_switches (version) {
+    reconfigurator_config (version) {
         version -> Int8,
         planner_enabled -> Bool,
         time_modified -> Timestamptz,
@@ -1972,6 +1986,8 @@ table! {
         target_release_minimum_generation -> Int8,
 
         nexus_generation -> Int8,
+
+        source -> crate::enums::BpSourceEnum,
     }
 }
 
@@ -2073,6 +2089,7 @@ table! {
         image_source -> crate::enums::BpZoneImageSourceEnum,
         image_artifact_sha256 -> Nullable<Text>,
         nexus_generation -> Nullable<Int8>,
+        nexus_lockstep_port -> Nullable<Int4>,
     }
 }
 

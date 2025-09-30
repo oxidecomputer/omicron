@@ -105,9 +105,7 @@ use omicron_common::api::external::http_pagination::marker_for_name;
 use omicron_common::api::external::http_pagination::marker_for_name_or_id;
 use omicron_common::api::external::http_pagination::name_or_id_pagination;
 use omicron_common::bail_unless;
-use omicron_uuid_kinds::GenericUuid;
-use omicron_uuid_kinds::SupportBundleUuid;
-use omicron_uuid_kinds::TufTrustRootUuid;
+use omicron_uuid_kinds::*;
 use propolis_client::support::WebSocketStream;
 use propolis_client::support::tungstenite::protocol::frame::coding::CloseCode;
 use propolis_client::support::tungstenite::protocol::{
@@ -6153,10 +6151,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
         let handler = async {
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
-            let id = nexus
-                .sled_add(&opctx, sled.into_inner())
-                .await?
-                .into_untyped_uuid();
+            let id = nexus.sled_add(&opctx, sled.into_inner()).await?;
             Ok(HttpResponseCreated(views::SledId { id }))
         };
         apictx
@@ -6567,13 +6562,26 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let nexus = &apictx.context.nexus;
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
-            let query = body.into_inner().query;
+            let body_params = body.into_inner();
+            let query = body_params.query;
+            let include_summaries = body_params.include_summaries;
             nexus
                 .timeseries_query(&opctx, &query)
                 .await
-                .map(|tables| {
+                .map(|result| {
                     HttpResponseOk(views::OxqlQueryResult {
-                        tables: tables.into_iter().map(Into::into).collect(),
+                        tables: result
+                            .tables
+                            .into_iter()
+                            .map(Into::into)
+                            .collect(),
+                        query_summaries: include_summaries.then_some(
+                            result
+                                .query_summaries
+                                .into_iter()
+                                .map(Into::into)
+                                .collect(),
+                        ),
                     })
                 })
                 .map_err(HttpError::from)
@@ -6596,15 +6604,28 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
             let project_selector = query_params.into_inner();
-            let query = body.into_inner().query;
+            let body_params = body.into_inner();
+            let query = body_params.query;
+            let include_summaries = body_params.include_summaries;
             let project_lookup =
                 nexus.project_lookup(&opctx, project_selector)?;
             nexus
                 .timeseries_query_project(&opctx, &project_lookup, &query)
                 .await
-                .map(|tables| {
+                .map(|result| {
                     HttpResponseOk(views::OxqlQueryResult {
-                        tables: tables.into_iter().map(Into::into).collect(),
+                        tables: result
+                            .tables
+                            .into_iter()
+                            .map(Into::into)
+                            .collect(),
+                        query_summaries: include_summaries.then_some(
+                            result
+                                .query_summaries
+                                .into_iter()
+                                .map(Into::into)
+                                .collect(),
+                        ),
                     })
                 })
                 .map_err(HttpError::from)
@@ -6829,7 +6850,10 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .await?
                 .release_source
             {
-                if version > system_version {
+                if !is_new_target_release_version_allowed(
+                    &version,
+                    &system_version,
+                ) {
                     return Err(HttpError::for_bad_request(
                         None,
                         format!(
@@ -8791,5 +8815,63 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .external_latencies
             .instrument_dropshot_handler(&rqctx, handler)
             .await
+    }
+}
+
+fn is_new_target_release_version_allowed(
+    current_version: &semver::Version,
+    proposed_new_version: &semver::Version,
+) -> bool {
+    let mut current_version = current_version.clone();
+    let mut proposed_new_version = proposed_new_version.clone();
+
+    // Strip out the build metadata; this allows upgrading from one commit on
+    // the same major/minor/release/patch to another. This isn't always right -
+    // we shouldn't allow downgrading to an earlier commit - but we don't have
+    // enough information in the version strings today to determine that. See
+    // <https://github.com/oxidecomputer/omicron/issues/9071>.
+    current_version.build = semver::BuildMetadata::EMPTY;
+    proposed_new_version.build = semver::BuildMetadata::EMPTY;
+
+    proposed_new_version >= current_version
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_is_new_target_release_version_allowed() {
+        // Updating between versions that differ only in build metadata should
+        // be allowed in both directions.
+        let v1: semver::Version = "16.0.0-0.ci+git544f608e05a".parse().unwrap();
+        let v2: semver::Version = "16.0.0-0.ci+git8571be38c0b".parse().unwrap();
+        assert!(is_new_target_release_version_allowed(&v1, &v2));
+        assert!(is_new_target_release_version_allowed(&v2, &v1));
+
+        // Updating from a version to itself is always allowed. (This is
+        // important for clearing mupdate overrides.)
+        assert!(is_new_target_release_version_allowed(&v1, &v1));
+        assert!(is_new_target_release_version_allowed(&v2, &v2));
+
+        // We should be able to upgrade but not downgrade if the versions differ
+        // in major/minor/patch/prerelease.
+        for (v1, v2) in [
+            ("15.0.0-0.ci+git12345", "16.0.0-0.ci+git12345"),
+            ("16.0.0-0.ci+git12345", "16.1.0-0.ci+git12345"),
+            ("16.1.0-0.ci+git12345", "16.1.1-0.ci+git12345"),
+            ("16.1.1-0.ci+git12345", "16.1.1-1.ci+git12345"),
+        ] {
+            let v1: semver::Version = v1.parse().unwrap();
+            let v2: semver::Version = v2.parse().unwrap();
+            assert!(
+                is_new_target_release_version_allowed(&v1, &v2),
+                "should be allowed to upgrade from {v1} to {v2}"
+            );
+            assert!(
+                !is_new_target_release_version_allowed(&v2, &v1),
+                "should not be allowed to upgrade from {v1} to {v2}"
+            );
+        }
     }
 }
