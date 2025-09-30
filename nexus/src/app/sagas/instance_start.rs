@@ -794,6 +794,7 @@ async fn sis_ensure_running(
 
 #[cfg(test)]
 mod test {
+    use core::time::Duration;
     use std::net::SocketAddrV6;
 
     use crate::app::{saga::create_saga_dag, sagas::test_helpers};
@@ -810,7 +811,7 @@ mod test {
         InstanceCpuCount, Name,
     };
     use omicron_common::api::internal::shared::SwitchLocation;
-    use tokio::time::sleep;
+    use omicron_test_utils::dev::poll;
     use uuid::Uuid;
 
     use super::*;
@@ -1121,33 +1122,42 @@ mod test {
 
         cptestctx.dendrite.insert(SwitchLocation::Switch0, new_switch0);
 
-        let dpd_client = dpd_client::Client::new(
-            &format!("http://[{addr}]:{port}"),
-            client_state,
-        );
-
         // Ensure that the nat entry for the address has made it onto the new switch0 dendrite.
-        // This might take a few seconds while the new dendrite comes online.
-        let mut nat_entries = vec![];
-        for _ in 0..5 {
-            nat_entries = dpd_client
-                .nat_ipv4_list(
-                    &std::net::Ipv4Addr::new(10, 0, 0, 0),
-                    None,
-                    None,
-                )
-                .await
-                .unwrap()
-                .items
-                .clone();
+        // This might take some time while the new dendrite comes online.
+        let poll_interval = Duration::from_secs(1);
+        let poll_max = Duration::from_secs(30);
 
-            if !nat_entries.is_empty() {
-                break;
-            }
-            sleep(tokio::time::Duration::from_secs(1)).await;
-        }
+        poll::wait_for_condition(
+            move || {
+                let dpd_client = dpd_client::Client::new(
+                    &format!("http://[{addr}]:{port}"),
+                    client_state.clone(),
+                );
 
-        assert_eq!(nat_entries.len(), 1);
+                async move {
+                    let nat_entries = &dpd_client
+                        .nat_ipv4_list(
+                            &std::net::Ipv4Addr::new(10, 0, 0, 0),
+                            None,
+                            None,
+                        )
+                        .await
+                        .unwrap()
+                        .items;
+
+                    match nat_entries.is_empty() {
+                        // if the nat entries are empty the dendrite NAT RPW hasn't
+                        // successfully reconciled yet
+                        true => Err(poll::CondCheckError::<()>::NotYet),
+                        false => Ok(()),
+                    }
+                }
+            },
+            &poll_interval,
+            &poll_max,
+        )
+        .await
+        .unwrap();
 
         cptestctx.teardown().await;
     }
