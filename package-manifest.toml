@@ -576,7 +576,7 @@ source.repo = "management-gateway-service"
 # In general, this commit should match the pinned revision of `gateway-sp-comms`
 # in `Cargo.toml`.
 source.commit = "6bd2660d651332f38949cdfd3d23d751ca54b120"
-source.sha256 = "8e71c91fc0d6af919acd2601f66b642cf1bf8ee09c5e43e42f5ff180f730391c"
+source.sha256 = "bf38d83d61ea7b2923fc7bd3aa563627e1f270b4bf18b1fc7bc744ddedc3b8bc"
 output.type = "zone"
 output.intermediate_only = true
 
