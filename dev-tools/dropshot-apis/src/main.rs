@@ -38,11 +38,11 @@ fn environment() -> anyhow::Result<Environment> {
         .to_path_buf();
     let env = Environment::new(
         // This is the command used to run the OpenAPI manager.
-        "cargo xtask openapi".to_owned(),
+        "cargo xtask openapi",
         workspace_root,
         // This is the location within the workspace root where the OpenAPI
         // documents are stored.
-        "openapi".into(),
+        "openapi",
     )?;
     Ok(env)
 }

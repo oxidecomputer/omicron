@@ -4338,7 +4338,7 @@
         ]
       },
       "SpIgnition": {
-        "description": "State of an ignition target.\n\nTODO: Ignition returns much more information than we're reporting here: do we want to expand this?\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"State of an ignition target.\\n\\nTODO: Ignition returns much more information than we're reporting here: do we want to expand this?\", \"oneOf\": [ { \"type\": \"object\", \"required\": [ \"present\" ], \"properties\": { \"present\": { \"type\": \"string\", \"enum\": [ \"no\" ] } } }, { \"type\": \"object\", \"required\": [ \"ctrl_detect_0\", \"ctrl_detect_1\", \"flt_a2\", \"flt_a3\", \"flt_rot\", \"flt_sp\", \"id\", \"power\", \"present\" ], \"properties\": { \"ctrl_detect_0\": { \"type\": \"boolean\" }, \"ctrl_detect_1\": { \"type\": \"boolean\" }, \"flt_a2\": { \"type\": \"boolean\" }, \"flt_a3\": { \"type\": \"boolean\" }, \"flt_rot\": { \"type\": \"boolean\" }, \"flt_sp\": { \"type\": \"boolean\" }, \"id\": { \"$ref\": \"#/components/schemas/SpIgnitionSystemType\" }, \"power\": { \"type\": \"boolean\" }, \"present\": { \"type\": \"string\", \"enum\": [ \"yes\" ] } } } ] } ``` </details>",
+        "description": "State of an ignition target.\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"State of an ignition target.\", \"oneOf\": [ { \"type\": \"object\", \"required\": [ \"present\" ], \"properties\": { \"present\": { \"type\": \"string\", \"enum\": [ \"no\" ] } } }, { \"type\": \"object\", \"required\": [ \"ctrl_detect_0\", \"ctrl_detect_1\", \"flt_a2\", \"flt_a3\", \"flt_rot\", \"flt_sp\", \"id\", \"power\", \"present\" ], \"properties\": { \"ctrl_detect_0\": { \"type\": \"boolean\" }, \"ctrl_detect_1\": { \"type\": \"boolean\" }, \"flt_a2\": { \"description\": \"Fault from the A2 power domain\", \"type\": \"boolean\" }, \"flt_a3\": { \"description\": \"Fault from the A3 power domain\", \"type\": \"boolean\" }, \"flt_rot\": { \"description\": \"Fault from the RoT\", \"type\": \"boolean\" }, \"flt_sp\": { \"description\": \"Fault from the SP\", \"type\": \"boolean\" }, \"id\": { \"$ref\": \"#/components/schemas/SpIgnitionSystemType\" }, \"power\": { \"type\": \"boolean\" }, \"present\": { \"type\": \"string\", \"enum\": [ \"yes\" ] } } } ] } ``` </details>",
         "oneOf": [
           {
             "type": "object",
@@ -4364,15 +4364,19 @@
                 "type": "boolean"
               },
               "flt_a2": {
+                "description": "Fault from the A2 power domain",
                 "type": "boolean"
               },
               "flt_a3": {
+                "description": "Fault from the A3 power domain",
                 "type": "boolean"
               },
               "flt_rot": {
+                "description": "Fault from the RoT",
                 "type": "boolean"
               },
               "flt_sp": {
+                "description": "Fault from the SP",
                 "type": "boolean"
               },
               "id": {
@@ -4403,7 +4407,7 @@
         ]
       },
       "SpIgnitionSystemType": {
-        "description": "TODO: Do we want to bake in specific board names, or use raw u16 ID numbers?\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"TODO: Do we want to bake in specific board names, or use raw u16 ID numbers?\", \"oneOf\": [ { \"type\": \"object\", \"required\": [ \"system_type\" ], \"properties\": { \"system_type\": { \"type\": \"string\", \"enum\": [ \"gimlet\" ] } } }, { \"type\": \"object\", \"required\": [ \"system_type\" ], \"properties\": { \"system_type\": { \"type\": \"string\", \"enum\": [ \"sidecar\" ] } } }, { \"type\": \"object\", \"required\": [ \"system_type\" ], \"properties\": { \"system_type\": { \"type\": \"string\", \"enum\": [ \"psc\" ] } } }, { \"type\": \"object\", \"required\": [ \"id\", \"system_type\" ], \"properties\": { \"id\": { \"type\": \"integer\", \"format\": \"uint16\", \"minimum\": 0.0 }, \"system_type\": { \"type\": \"string\", \"enum\": [ \"unknown\" ] } } } ] } ``` </details>",
+        "description": "`SpIgnitionSystemType`\n\n<details><summary>JSON schema</summary>\n\n```json { \"oneOf\": [ { \"type\": \"object\", \"required\": [ \"system_type\" ], \"properties\": { \"system_type\": { \"type\": \"string\", \"enum\": [ \"gimlet\" ] } } }, { \"type\": \"object\", \"required\": [ \"system_type\" ], \"properties\": { \"system_type\": { \"type\": \"string\", \"enum\": [ \"sidecar\" ] } } }, { \"type\": \"object\", \"required\": [ \"system_type\" ], \"properties\": { \"system_type\": { \"type\": \"string\", \"enum\": [ \"psc\" ] } } }, { \"type\": \"object\", \"required\": [ \"id\", \"system_type\" ], \"properties\": { \"id\": { \"type\": \"integer\", \"format\": \"uint16\", \"minimum\": 0.0 }, \"system_type\": { \"type\": \"string\", \"enum\": [ \"unknown\" ] } } }, { \"type\": \"object\", \"required\": [ \"system_type\" ], \"properties\": { \"system_type\": { \"type\": \"string\", \"enum\": [ \"cosmo\" ] } } } ] } ``` </details>",
         "oneOf": [
           {
             "type": "object",
@@ -4464,6 +4468,20 @@
             },
             "required": [
               "id",
+              "system_type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "system_type": {
+                "type": "string",
+                "enum": [
+                  "cosmo"
+                ]
+              }
+            },
+            "required": [
               "system_type"
             ]
           }
@@ -4574,7 +4592,6 @@
         ]
       },
       "SpType": {
-        "description": "`SpType`\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"string\", \"enum\": [ \"sled\", \"power\", \"switch\" ] } ``` </details>",
         "type": "string",
         "enum": [
           "sled",
