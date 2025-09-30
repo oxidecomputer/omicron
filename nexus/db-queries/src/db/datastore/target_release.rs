@@ -13,7 +13,9 @@ use crate::db::model::{
 use async_bb8_diesel::AsyncRunQueryDsl as _;
 use diesel::insert_into;
 use diesel::prelude::*;
+use diesel::sql_types;
 use nexus_db_errors::{ErrorHandler, public_error_from_diesel};
+use nexus_db_schema::enums::TargetReleaseSourceEnum;
 use nexus_db_schema::schema::target_release::dsl;
 use nexus_types::external_api::views;
 use omicron_common::api::external::{CreateResult, Error, LookupResult};
@@ -79,12 +81,104 @@ impl DataStore {
             .authorize(authz::Action::Modify, &authz::TARGET_RELEASE_CONFIG)
             .await?;
         let conn = self.pool_connection_authorized(opctx).await?;
-        insert_into(dsl::target_release)
-            .values(target_release)
-            .returning(TargetRelease::as_returning())
-            .get_result_async(&*conn)
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+
+        // If we have a TUF repo ID, we need a more complex query to confirm
+        // (transactionally) that it isn't the pruned as we make it the target
+        // release.
+        if let Some(tuf_repo_id) = target_release.tuf_repo_id {
+            let selection = {
+                use nexus_db_schema::schema::tuf_repo::dsl as repo_dsl;
+
+                // This statement is just here to force a compilation error if
+                // the set of columns in `target_release` changes, because that
+                // will affect the correctness of the query below.
+                //
+                // If you're here because of a compile error, you might be
+                // changing the `target_release` table. Update the statement
+                // below to match!
+                let _: (
+                    dsl::generation,
+                    dsl::time_requested,
+                    dsl::release_source,
+                    dsl::tuf_repo_id,
+                ) = dsl::target_release::all_columns();
+
+                // What we want to write here is a query that confirms
+                // `tuf_repo_id` is not pruned and avoids performing an insert
+                // otherwise. We'll do that via an `INSERT SELECT ...` where the
+                // `SELECT` is:
+                //
+                // ```
+                // SELECT $target_release WHERE EXISTS (
+                //     SELECT 1 FROM tuf_repo WHERE
+                //         id = $tuf_repo_id
+                //         AND time_pruned IS NULL
+                // )
+                // ```
+                //
+                // but with a couple of diesel quirks:
+                //
+                // 1. We can't splat the `$target_release` value directly into a
+                //    SELECT, so we select each of its columns individually. See
+                //    the above check that the columns of this table haven't
+                //    changed.
+                // 2. We don't bother getting it to `SELECT 1 ...` in the
+                //    subquery. diesel defaults to `SELECT * ...` there instead,
+                //    but that should be fine since it's inside a `WHERE
+                //    EXISTS`.
+                diesel::select((
+                    target_release.generation.into_sql::<sql_types::Int8>(),
+                    target_release
+                        .time_requested
+                        .into_sql::<sql_types::Timestamptz>(),
+                    target_release
+                        .release_source
+                        .into_sql::<TargetReleaseSourceEnum>(),
+                    tuf_repo_id
+                        .into_sql::<sql_types::Nullable<sql_types::Uuid>>(),
+                ))
+                .filter(diesel::dsl::exists(
+                    repo_dsl::tuf_repo
+                        .filter(repo_dsl::id.eq(tuf_repo_id))
+                        .filter(repo_dsl::time_pruned.is_null()),
+                ))
+            };
+
+            // Attempt the insert; use `.optional()` so we can attach a custom
+            // error message if we get back no rows.
+            let result = insert_into(dsl::target_release)
+                .values(selection)
+                .returning(TargetRelease::as_returning())
+                .get_result_async(&*conn)
+                .await
+                .optional()
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+
+            match result {
+                Some(target_release) => {
+                    // Insertion succeeded and returned the newly-inserted
+                    // target release.
+                    Ok(target_release)
+                }
+                None => {
+                    // Insertion succeeded but didn't return any rows: we tried
+                    // to insert a target release for a pruned repo.
+                    Err(Error::invalid_request(format!(
+                        "cannot make TUF repo {tuf_repo_id} the \
+                         target release: it has been pruned from the system"
+                    )))
+                }
+            }
+        } else {
+            insert_into(dsl::target_release)
+                .values(target_release)
+                .returning(TargetRelease::as_returning())
+                .get_result_async(&*conn)
+                .await
+                .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+        }
     }
 
     /// Convert a model-level target release to an external view.
@@ -222,19 +316,66 @@ pub struct RecentTargetReleases {
 }
 
 #[cfg(test)]
-pub(crate) mod test {
+mod test {
+    use crate::db::DataStore;
     use crate::db::model::{Generation, TargetReleaseSource};
     use crate::db::pub_test_utils::TestDatabase;
     use crate::db::pub_test_utils::helpers::insert_test_tuf_repo;
+    use crate::diesel::ExpressionMethods;
+    use async_bb8_diesel::AsyncRunQueryDsl;
     use chrono::{TimeDelta, Utc};
+    use nexus_auth::context::OpContext;
     use nexus_db_model::TargetRelease;
+    use nexus_db_model::TufRepo;
     use omicron_common::api::external::{
         TufArtifactMeta, TufRepoDescription, TufRepoMeta,
     };
     use omicron_common::update::ArtifactId;
     use omicron_test_utils::dev;
     use semver::Version;
-    use tufaceous_artifact::{ArtifactKind, ArtifactVersion};
+    use sha2::Digest;
+    use sha2::Sha256;
+    use slog_error_chain::InlineErrorChain;
+    use tufaceous_artifact::{ArtifactHash, ArtifactKind, ArtifactVersion};
+
+    async fn insert_tuf_repo(
+        opctx: &OpContext,
+        datastore: &DataStore,
+        version: &Version,
+    ) -> TufRepo {
+        let artifact_version = ArtifactVersion::new(version.to_string())
+            .expect("version is valid for artifacts too");
+        let hash = ArtifactHash(Sha256::digest(version.to_string()).into());
+
+        datastore
+            .tuf_repo_insert(
+                opctx,
+                &TufRepoDescription {
+                    repo: TufRepoMeta {
+                        hash,
+                        targets_role_version: 0,
+                        valid_until: Utc::now(),
+                        system_version: version.clone(),
+                        file_name: String::new(),
+                    },
+                    artifacts: vec![TufArtifactMeta {
+                        id: ArtifactId {
+                            name: String::new(),
+                            version: artifact_version,
+                            kind: ArtifactKind::from_static("empty"),
+                        },
+                        hash,
+                        size: 0,
+                        board: None,
+                        sign: None,
+                    }],
+                },
+            )
+            .await
+            .expect("inserted TUF repo description")
+            .recorded
+            .repo
+    }
 
     #[tokio::test]
     async fn target_release_datastore() {
@@ -296,40 +437,7 @@ pub(crate) mod test {
 
         // Now add a new TUF repo and use it as the source.
         let version = Version::new(0, 0, 1);
-        const ARTIFACT_VERSION: ArtifactVersion =
-            ArtifactVersion::new_const("0.0.1");
-        let hash =
-            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-                .parse()
-                .expect("SHA256('')");
-        let repo = datastore
-            .tuf_repo_insert(
-                opctx,
-                &TufRepoDescription {
-                    repo: TufRepoMeta {
-                        hash,
-                        targets_role_version: 0,
-                        valid_until: Utc::now(),
-                        system_version: version.clone(),
-                        file_name: String::new(),
-                    },
-                    artifacts: vec![TufArtifactMeta {
-                        id: ArtifactId {
-                            name: String::new(),
-                            version: ARTIFACT_VERSION,
-                            kind: ArtifactKind::from_static("empty"),
-                        },
-                        hash,
-                        size: 0,
-                        board: None,
-                        sign: None,
-                    }],
-                },
-            )
-            .await
-            .unwrap()
-            .recorded
-            .repo;
+        let repo = insert_tuf_repo(opctx, datastore, &version).await;
         assert_eq!(repo.system_version, version.into());
         let tuf_repo_id = repo.id;
 
@@ -521,6 +629,87 @@ pub(crate) mod test {
                 assert_eq!(recent.target_release_generation, generation);
             }
         }
+
+        // Clean up.
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn reject_target_release_if_repo_pruned() {
+        let logctx =
+            dev::test_setup_log("reject_target_release_if_repo_pruned");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Insert two TUF repos.
+        let repo1 =
+            insert_tuf_repo(opctx, datastore, &Version::new(0, 0, 1)).await;
+        let repo2 =
+            insert_tuf_repo(opctx, datastore, &Version::new(0, 0, 2)).await;
+
+        // Manually prune the second one.
+        {
+            use nexus_db_schema::schema::tuf_repo::dsl;
+
+            let conn = datastore
+                .pool_connection_for_tests()
+                .await
+                .expect("got connection");
+            let n = diesel::update(dsl::tuf_repo)
+                .filter(dsl::id.eq(repo2.id))
+                .set(dsl::time_pruned.eq(Some(Utc::now())))
+                .execute_async(&*conn)
+                .await
+                .expect("pruned repo2");
+            assert_eq!(n, 1, "should have only pruned 1 repo");
+        }
+
+        // There should always be an initial target release.
+        let target_release = datastore
+            .target_release_get_current(opctx)
+            .await
+            .expect("should be a target release");
+
+        // Make repo1 the target release. This should succeed.
+        let target_release = datastore
+            .target_release_insert(
+                opctx,
+                TargetRelease::new_system_version(&target_release, repo1.id),
+            )
+            .await
+            .expect("made repo1 the target release");
+        assert_eq!(target_release.generation, Generation(2.into()));
+
+        // Attempting to make repo1 the target release again should fail with a
+        // reasonable error message (we need a higher generation).
+        let err = datastore
+            .target_release_insert(opctx, target_release.clone())
+            .await
+            .expect_err("making repo1 the target release again should fail");
+        let err = InlineErrorChain::new(&err).to_string();
+        assert!(
+            err.contains("violates unique constraint"),
+            "unexpected error: {err}"
+        );
+
+        // Attempt to make repo2 the target release. This should fail with a
+        // reasonable error message (it's been pruned).
+        let err = datastore
+            .target_release_insert(
+                opctx,
+                TargetRelease::new_system_version(&target_release, repo2.id),
+            )
+            .await
+            .expect_err("making repo2 the target release should fail");
+        let err = InlineErrorChain::new(&err).to_string();
+        assert!(
+            err.contains("cannot make TUF repo")
+                && err.contains(&repo2.id.to_string())
+                && err.contains("target release")
+                && err.contains("pruned"),
+            "unexpected error: {err}"
+        );
 
         // Clean up.
         db.terminate().await;
