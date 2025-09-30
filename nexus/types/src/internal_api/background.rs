@@ -6,6 +6,7 @@ use crate::deployment::PlanningReport;
 use crate::external_api::views;
 use chrono::DateTime;
 use chrono::Utc;
+use gateway_types::component::SpType;
 use omicron_common::api::external::Generation;
 use omicron_uuid_kinds::AlertReceiverUuid;
 use omicron_uuid_kinds::AlertUuid;
@@ -524,11 +525,18 @@ pub enum BlueprintPlannerStatus {
 
     /// Planning produced a blueprint identital to the current target,
     /// so we threw it away and did nothing.
-    Unchanged { parent_blueprint_id: BlueprintUuid },
+    Unchanged {
+        parent_blueprint_id: BlueprintUuid,
+        report: Arc<PlanningReport>,
+    },
 
     /// Planning produced a new blueprint, but we failed to make it
     /// the current target and so deleted it.
-    Planned { parent_blueprint_id: BlueprintUuid, error: String },
+    Planned {
+        parent_blueprint_id: BlueprintUuid,
+        error: String,
+        report: Arc<PlanningReport>,
+    },
 
     /// Planing succeeded, and we saved and made the new blueprint the
     /// current target.
@@ -621,7 +629,7 @@ pub struct SpEreportIngesterStatus {
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq)]
 pub struct SpEreporterStatus {
-    pub sp_type: crate::inventory::SpType,
+    pub sp_type: SpType,
     pub slot: u16,
     #[serde(flatten)]
     pub status: EreporterStatus,

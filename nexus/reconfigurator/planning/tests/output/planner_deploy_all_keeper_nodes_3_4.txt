@@ -21,7 +21,7 @@ to:   blueprint 92fa943c-7dd4-48c3-9447-c9d0665744b6
     max used keeper id:::::::::::::::::::::::::::::   3 (unchanged)
     cluster name:::::::::::::::::::::::::::::::::::   oximeter_cluster (unchanged)
     cluster secret:::::::::::::::::::::::::::::::::   6a984e2e-20be-4ed9-b572-d7ef063c67f7 (unchanged)
-*   highest seen keeper leader committed log index:   0 -> 1
+    highest seen keeper leader committed log index:   0 (unchanged)
 
     clickhouse keepers at generation 2:
     ------------------------------------------------

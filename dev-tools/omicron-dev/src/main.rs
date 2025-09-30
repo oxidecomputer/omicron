@@ -12,6 +12,10 @@ use nexus_config::NexusConfig;
 use nexus_test_interface::NexusServer;
 use nexus_test_utils::resource_helpers::DiskTest;
 use signal_hook_tokio::Signals;
+use std::fs;
+
+const DEFAULT_NEXUS_CONFIG: &str =
+    concat!(env!("CARGO_MANIFEST_DIR"), "/../../nexus/examples/config.toml");
 
 fn main() -> anyhow::Result<()> {
     oxide_tokio_rt::run(async {
@@ -50,6 +54,9 @@ struct RunAllArgs {
     /// Override the gateway server configuration file.
     #[clap(long, default_value = DEFAULT_SP_SIM_CONFIG)]
     gateway_config: Utf8PathBuf,
+    /// Override the nexus configuration file.
+    #[clap(long, default_value = DEFAULT_NEXUS_CONFIG)]
+    nexus_config: Utf8PathBuf,
 }
 
 impl RunAllArgs {
@@ -60,9 +67,10 @@ impl RunAllArgs {
         let mut signal_stream = signals.fuse();
 
         // Read configuration.
-        let config_str = include_str!("../../../nexus/examples/config.toml");
-        let mut config: NexusConfig =
-            toml::from_str(config_str).context("parsing example config")?;
+        let config_str = fs::read_to_string(&self.nexus_config)?;
+        let mut config: NexusConfig = toml::from_str(&config_str).context(
+            format!("parsing config: {}", self.nexus_config.as_str()),
+        )?;
         config.pkg.log = dropshot::ConfigLogging::File {
             // See LogContext::new(),
             path: "UNUSED".to_string().into(),

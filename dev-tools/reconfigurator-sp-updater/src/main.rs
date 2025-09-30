@@ -12,7 +12,6 @@ use clap::Parser;
 use clap::Subcommand;
 use futures::StreamExt;
 use gateway_client::types::SpIgnition;
-use gateway_client::types::SpType;
 use gateway_types::rot::RotSlot;
 use internal_dns_types::names::ServiceName;
 use nexus_mgs_updates::ArtifactCache;
@@ -28,6 +27,7 @@ use nexus_types::deployment::PendingMgsUpdateSpDetails;
 use nexus_types::deployment::PendingMgsUpdates;
 use nexus_types::internal_api::views::MgsUpdateDriverStatus;
 use nexus_types::inventory::BaseboardId;
+use nexus_types::inventory::SpType;
 use omicron_common::disk::M2Slot;
 use omicron_repl_utils::run_repl_on_stdin;
 use qorb::resolver::Resolver;
@@ -220,7 +220,7 @@ impl Inventory {
             }),
         )
         .then(async move |sp_id| {
-            c.sp_get(sp_id.type_, sp_id.slot)
+            c.sp_get(&sp_id.type_, sp_id.slot)
                 .await
                 .with_context(|| format!("fetching info about SP {:?}", sp_id))
                 .map(|s| (sp_id.type_, sp_id.slot, s))
