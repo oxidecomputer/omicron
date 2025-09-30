@@ -198,7 +198,7 @@ pub fn try_make_update_rot_bootloader(
     };
 
     Ok(MgsUpdateOutcome::Pending(
-        PendingMgsUpdate {
+        Box::new(PendingMgsUpdate {
             baseboard_id: baseboard_id.clone(),
             sp_type: sp_info.sp_type,
             slot_id: sp_info.sp_slot,
@@ -210,7 +210,7 @@ pub fn try_make_update_rot_bootloader(
             ),
             artifact_hash: artifact.hash,
             artifact_version: artifact.id.version.clone(),
-        },
+        }),
         // Host phase 2 changes are only possible during Host OS updates.
         PendingHostPhase2Changes::empty(),
     ))

@@ -548,7 +548,7 @@ fn mgs_update_status_inactive_versions(
 
 enum MgsUpdateOutcome {
     NoUpdateNeeded,
-    Pending(PendingMgsUpdate, PendingHostPhase2Changes),
+    Pending(Box<PendingMgsUpdate>, PendingHostPhase2Changes),
 }
 
 /// Determine if the given baseboard needs any MGS-driven update (e.g., update
@@ -632,7 +632,7 @@ fn try_make_update(
                 update,
                 pending_host_os_phase2_changes,
             )) => {
-                pending_actions.add_pending_update(update);
+                pending_actions.add_pending_update(*update);
                 // Host OS updates also return phase 2 changes.
                 pending_actions.set_pending_host_os_phase2_changes(
                     pending_host_os_phase2_changes,
