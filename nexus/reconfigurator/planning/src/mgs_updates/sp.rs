@@ -26,7 +26,7 @@ use tufaceous_artifact::KnownArtifactKind;
 
 /// Compares a configured SP update with information from inventory and
 /// determines the current status of the update.  See `MgsUpdateStatus`.
-pub fn mgs_update_status_sp(
+pub(super) fn update_status(
     desired_version: &ArtifactVersion,
     expected_active_version: &ArtifactVersion,
     expected_inactive_version: &ExpectedVersion,
@@ -59,7 +59,7 @@ pub fn mgs_update_status_sp(
 
 /// Determine if the given baseboard needs an SP update and, if so, returns it.
 /// An error means an update is still necessary but cannot be completed.
-pub fn try_make_update_sp(
+pub(super) fn try_make_update(
     log: &slog::Logger,
     baseboard_id: &Arc<BaseboardId>,
     inventory: &Collection,

@@ -10,12 +10,6 @@ mod rot_bootloader;
 mod sp;
 
 use crate::mgs_updates::rot::RotUpdateState;
-use crate::mgs_updates::rot::mgs_update_status_rot;
-use crate::mgs_updates::rot::try_make_update_rot;
-use crate::mgs_updates::rot_bootloader::mgs_update_status_rot_bootloader;
-use crate::mgs_updates::rot_bootloader::try_make_update_rot_bootloader;
-use crate::mgs_updates::sp::mgs_update_status_sp;
-use crate::mgs_updates::sp::try_make_update_sp;
 
 use gateway_types::rot::RotSlot;
 use nexus_types::deployment::ExpectedActiveRotSlot;
@@ -352,7 +346,7 @@ fn mgs_update_status(
                 .caboose_for(CabooseWhich::Stage0Next, baseboard_id)
                 .map(|c| c.caboose.version.as_ref());
 
-            mgs_update_status_rot_bootloader(
+            rot_bootloader::update_status(
                 desired_version,
                 expected_stage0_version,
                 expected_stage0_next_version,
@@ -374,7 +368,7 @@ fn mgs_update_status(
                 .caboose_for(CabooseWhich::SpSlot1, baseboard_id)
                 .map(|c| c.caboose.version.as_ref());
 
-            mgs_update_status_sp(
+            sp::update_status(
                 desired_version,
                 expected_active_version,
                 expected_inactive_version,
@@ -447,7 +441,7 @@ fn mgs_update_status(
                 transient_boot_preference: *expected_transient_boot_preference,
             };
 
-            mgs_update_status_rot(
+            rot::update_status(
                 desired_version,
                 expected,
                 found,
@@ -574,20 +568,20 @@ fn try_make_update(
     ] {
         let update_attempt = match component {
             MgsUpdateComponent::RotBootloader => {
-                try_make_update_rot_bootloader(
+                rot_bootloader::try_make_update(
                     log,
                     baseboard_id,
                     inventory,
                     current_artifacts,
                 )
             }
-            MgsUpdateComponent::Rot => try_make_update_rot(
+            MgsUpdateComponent::Rot => rot::try_make_update(
                 log,
                 baseboard_id,
                 inventory,
                 current_artifacts,
             ),
-            MgsUpdateComponent::Sp => try_make_update_sp(
+            MgsUpdateComponent::Sp => sp::try_make_update(
                 log,
                 baseboard_id,
                 inventory,
@@ -598,27 +592,7 @@ fn try_make_update(
                 baseboard_id,
                 inventory,
                 current_artifacts,
-            ), //{
-               //  Ok(pending_update) => {
-               //      // Host updates also return host OS phase 2 changes;
-               //      // pull those out here and insert them into
-               //      // `pending_actions`, then return the typical pending
-               //      // update (which will itself be inserted into
-               //      // `pending_actions` below).
-               //      if let Some((update, host_os_phase_2_changes)) =
-               //          pending_update
-               //      {
-               //          pending_actions.set_pending_host_os_phase2_changes(
-               //              host_os_phase_2_changes,
-               //          );
-               //          Ok(Some(update))
-               //      } else {
-               //          Ok(None)
-               //      }
-               //  }
-               //  Err(e) => Err(e),
-               //}
-               //};
+            ),
         };
 
         match update_attempt {

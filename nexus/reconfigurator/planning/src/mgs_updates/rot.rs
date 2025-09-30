@@ -34,7 +34,7 @@ pub struct RotUpdateState {
     pub transient_boot_preference: Option<RotSlot>,
 }
 
-pub fn mgs_update_status_rot(
+pub(super) fn update_status(
     desired_version: &ArtifactVersion,
     expected: RotUpdateState,
     found: RotUpdateState,
@@ -105,7 +105,7 @@ pub fn mgs_update_status_rot(
 
 /// Determine if the given baseboard needs an RoT update and, if so, returns it.
 /// An error means an update is still necessary but cannot be completed.
-pub fn try_make_update_rot(
+pub(super) fn try_make_update(
     log: &slog::Logger,
     baseboard_id: &Arc<BaseboardId>,
     inventory: &Collection,
