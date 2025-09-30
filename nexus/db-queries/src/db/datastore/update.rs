@@ -945,9 +945,12 @@ mod test {
             .await
             .expect("initial target release");
         let mut next = initial;
-        for repo_id in
-            [old_target_repo2_id, old_target_repo3_id, old_target_repo4_id]
-        {
+        for repo_id in [
+            old_target_repo1_id,
+            old_target_repo2_id,
+            old_target_repo3_id,
+            old_target_repo4_id,
+        ] {
             next = datastore
                 .target_release_insert(
                     opctx,

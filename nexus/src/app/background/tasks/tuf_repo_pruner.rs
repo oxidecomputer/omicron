@@ -16,6 +16,7 @@ use nexus_types::internal_api::background::TufRepoPrunerStatus;
 use omicron_uuid_kinds::TufRepoUuid;
 use serde_json::json;
 use slog_error_chain::InlineErrorChain;
+use std::cmp::Reverse;
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
@@ -63,7 +64,7 @@ impl BackgroundTask for TufRepoPruner {
                     }),
                 },
                 Err(error) => json!({
-                    "error": error.to_string(),
+                    "error": InlineErrorChain::new(&*error).to_string(),
                 }),
             }
         })
@@ -77,9 +78,9 @@ async fn tuf_repos_prune(
 ) -> Result<TufRepoPrunerStatus, anyhow::Error> {
     // Compute configuration.
     let nkeep_recent_releases = NKEEP_RECENT_TARGET_RELEASES_ALWAYS
-        + config.nkeep_extra_target_releases;
-    let nkeep_recent_uploads =
-        NKEEP_RECENT_UPLOADS_ALWAYS + config.nkeep_extra_newly_uploaded;
+        .saturating_add(config.nkeep_extra_target_releases);
+    let nkeep_recent_uploads = NKEEP_RECENT_UPLOADS_ALWAYS
+        .saturating_add(config.nkeep_extra_newly_uploaded);
 
     // Fetch the state we need to make a decision.
     let tuf_generation = datastore
@@ -205,8 +206,7 @@ fn decide_prune(args: TufRepoPrune) -> TufRepoPrunerStatus {
         .iter()
         .filter(|r| !repos_keep_target_release.contains_key(&r.id))
         .collect::<Vec<_>>();
-    non_target_release_repos.sort_by_key(|k| k.time_created);
-    non_target_release_repos.reverse();
+    non_target_release_repos.sort_by_key(|k| Reverse(k.time_created));
     let mut repos_keep_recent_uploads = IdOrdMap::new();
     let mut repo_prune = None;
     let mut other_repos_eligible_to_prune = IdOrdMap::new();

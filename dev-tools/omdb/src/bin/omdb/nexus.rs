@@ -2580,8 +2580,9 @@ fn print_task_tuf_artifact_replication(details: &serde_json::Value) {
 fn print_task_tuf_repo_pruner(details: &serde_json::Value) {
     match serde_json::from_value::<TufRepoPrunerStatus>(details.clone()) {
         Err(error) => eprintln!(
-            "warning: failed to interpret task details: {:?}: {:?}",
-            error, details
+            "warning: failed to interpret task details: {}: {:?}",
+            InlineErrorChain::new(&error),
+            details
         ),
         Ok(status) => {
             print!("{}", status);
