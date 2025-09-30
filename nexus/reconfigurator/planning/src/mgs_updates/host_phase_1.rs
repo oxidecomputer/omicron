@@ -274,13 +274,7 @@ pub(super) fn try_make_update(
     baseboard_id: &Arc<BaseboardId>,
     inventory: &Collection,
     current_artifacts: &TufRepoDescription,
-    // TODO-K: Instead of this convoluted return type use an enum as suggested in
-    // https://github.com/oxidecomputer/omicron/pull/9001#discussion_r2372837627
-) -> Result<
-    //Option<(PendingMgsUpdate, PendingHostPhase2Changes)>,
-    MgsUpdateOutcome,
-    FailedMgsUpdateReason,
-> {
+) -> Result<MgsUpdateOutcome, FailedMgsUpdateReason> {
     let Some(sp_info) = inventory.sps.get(baseboard_id) else {
         return Err(FailedMgsUpdateReason::HostOs(
             FailedHostOsUpdateReason::SpNotInInventory,

@@ -1172,14 +1172,6 @@
               }
             ]
           },
-          "component": {
-            "description": "type of SP component that we attempted to update",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/MgsUpdateComponent"
-              }
-            ]
-          },
           "reason": {
             "description": "reason why the update failed",
             "allOf": [
@@ -1191,7 +1183,6 @@
         },
         "required": [
           "baseboard_id",
-          "component",
           "reason"
         ]
       },
@@ -4140,15 +4131,6 @@
         "pattern": "^([0-9a-fA-F]{0,2}:){5}[0-9a-fA-F]{0,2}$",
         "minLength": 5,
         "maxLength": 17
-      },
-      "MgsUpdateComponent": {
-        "type": "string",
-        "enum": [
-          "sp",
-          "rot",
-          "rot_bootloader",
-          "host_os"
-        ]
       },
       "MigrationRuntimeState": {
         "description": "An update from a sled regarding the state of a migration, indicating the role of the VMM whose migration state was updated.",

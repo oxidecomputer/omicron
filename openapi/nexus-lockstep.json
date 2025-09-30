@@ -1487,14 +1487,6 @@
               }
             ]
           },
-          "component": {
-            "description": "type of SP component that we attempted to update",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/MgsUpdateComponent"
-              }
-            ]
-          },
           "reason": {
             "description": "reason why the update failed",
             "allOf": [
@@ -1506,7 +1498,6 @@
         },
         "required": [
           "baseboard_id",
-          "component",
           "reason"
         ]
       },
@@ -4740,15 +4731,6 @@
           "rot",
           "rot_bootloader",
           "sp"
-        ]
-      },
-      "MgsUpdateComponent": {
-        "type": "string",
-        "enum": [
-          "sp",
-          "rot",
-          "rot_bootloader",
-          "host_os"
         ]
       },
       "MgsUpdateDriverStatus": {
