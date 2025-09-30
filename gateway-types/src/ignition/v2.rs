@@ -23,6 +23,12 @@ pub struct SpIgnitionInfo {
     pub details: SpIgnition,
 }
 
+impl From<SpIgnitionInfo> for crate::ignition::v1::SpIgnitionInfo {
+    fn from(s: SpIgnitionInfo) -> Self {
+        Self { id: s.id, details: s.details.into() }
+    }
+}
+
 /// State of an ignition target.
 //
 // TODO: Ignition returns much more information than we're reporting here: do
@@ -83,6 +89,33 @@ impl From<gateway_messages::IgnitionState> for SpIgnition {
     }
 }
 
+impl From<SpIgnition> for crate::ignition::v1::SpIgnition {
+    fn from(state: SpIgnition) -> Self {
+        match state {
+            SpIgnition::Absent => Self::Absent,
+            SpIgnition::Present {
+                id,
+                power,
+                ctrl_detect_0,
+                ctrl_detect_1,
+                flt_a3,
+                flt_a2,
+                flt_rot,
+                flt_sp,
+            } => Self::Present {
+                id: id.into(),
+                power,
+                ctrl_detect_0,
+                ctrl_detect_1,
+                flt_a3,
+                flt_a2,
+                flt_rot,
+                flt_sp,
+            },
+        }
+    }
+}
+
 #[derive(
     Debug,
     Clone,
@@ -113,6 +146,19 @@ impl From<gateway_messages::ignition::SystemType> for SpIgnitionSystemType {
             SystemType::Psc => Self::Psc,
             SystemType::Unknown(id) => Self::Unknown { id },
             SystemType::Cosmo => Self::Cosmo,
+        }
+    }
+}
+
+impl From<SpIgnitionSystemType> for crate::ignition::v1::SpIgnitionSystemType {
+    fn from(st: SpIgnitionSystemType) -> Self {
+        match st {
+            SpIgnitionSystemType::Gimlet => Self::Gimlet,
+            SpIgnitionSystemType::Sidecar => Self::Sidecar,
+            SpIgnitionSystemType::Psc => Self::Psc,
+            // Cosmo system id is 0x4
+            SpIgnitionSystemType::Cosmo => Self::Unknown { id: 0x4 },
+            SpIgnitionSystemType::Unknown { id } => Self::Unknown { id },
         }
     }
 }

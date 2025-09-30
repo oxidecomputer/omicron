@@ -830,21 +830,13 @@ impl GatewayApi for GatewayImpl {
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<Vec<ignition::v1::SpIgnitionInfo>>, HttpError>
     {
-        let apictx = rqctx.context();
-        let mgmt_switch = &apictx.mgmt_switch;
-        let handler = async {
-            let out = mgmt_switch
-                .bulk_ignition_state()
-                .await?
-                .map(|(id, state)| ignition::v1::SpIgnitionInfo {
-                    id: id.into(),
-                    details: state.into(),
-                })
-                .collect();
-
-            Ok(HttpResponseOk(out))
-        };
-        apictx.latencies.instrument_dropshot_handler(&rqctx, handler).await
+        let HttpResponseOk(v2_info) = Self::ignition_list(rqctx).await?;
+        Ok(HttpResponseOk(
+            v2_info
+                .into_iter()
+                .map(|x| ignition::v1::SpIgnitionInfo::from(x))
+                .collect(),
+        ))
     }
 
     async fn ignition_list(
@@ -871,29 +863,8 @@ impl GatewayApi for GatewayImpl {
         rqctx: RequestContext<Self::Context>,
         path: Path<PathSp>,
     ) -> Result<HttpResponseOk<ignition::v1::SpIgnitionInfo>, HttpError> {
-        let apictx = rqctx.context();
-        let mgmt_switch = &apictx.mgmt_switch;
-
-        let sp_id = path.into_inner().sp.into();
-        let handler = async {
-            let ignition_target = mgmt_switch.ignition_target(sp_id)?;
-
-            let state = mgmt_switch
-                .ignition_controller()
-                .ignition_state(ignition_target)
-                .await
-                .map_err(|err| SpCommsError::SpCommunicationFailed {
-                    sp: sp_id,
-                    err,
-                })?;
-
-            let info = ignition::v1::SpIgnitionInfo {
-                id: sp_id.into(),
-                details: state.into(),
-            };
-            Ok(HttpResponseOk(info))
-        };
-        apictx.latencies.instrument_dropshot_handler(&rqctx, handler).await
+        let HttpResponseOk(v2_info) = Self::ignition_get(rqctx, path).await?;
+        Ok(HttpResponseOk(ignition::v1::SpIgnitionInfo::from(v2_info)))
     }
 
     async fn ignition_get(
