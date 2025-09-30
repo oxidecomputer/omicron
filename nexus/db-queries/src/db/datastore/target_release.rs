@@ -223,20 +223,17 @@ pub struct RecentTargetReleases {
 
 #[cfg(test)]
 pub(crate) mod test {
-    use crate::db::DataStore;
     use crate::db::model::{Generation, TargetReleaseSource};
     use crate::db::pub_test_utils::TestDatabase;
+    use crate::db::pub_test_utils::helpers::insert_test_tuf_repo;
     use chrono::{TimeDelta, Utc};
-    use nexus_auth::context::OpContext;
     use nexus_db_model::TargetRelease;
     use omicron_common::api::external::{
         TufArtifactMeta, TufRepoDescription, TufRepoMeta,
     };
     use omicron_common::update::ArtifactId;
     use omicron_test_utils::dev;
-    use omicron_uuid_kinds::TufRepoUuid;
     use semver::Version;
-    use tufaceous_artifact::ArtifactHash;
     use tufaceous_artifact::{ArtifactKind, ArtifactVersion};
 
     #[tokio::test]
@@ -359,53 +356,6 @@ pub(crate) mod test {
         logctx.cleanup_successful();
     }
 
-    pub(crate) fn make_test_repo(version: u32) -> TufRepoDescription {
-        // We just need a unique hash for each repo.  We'll key it on the
-        // version for determinism.
-        let version_bytes = version.to_le_bytes();
-        let hash_bytes: [u8; 32] =
-            std::array::from_fn(|i| version_bytes[i % 4]);
-        let hash = ArtifactHash(hash_bytes);
-        let version = semver::Version::new(u64::from(version), 0, 0);
-        let artifact_version = ArtifactVersion::new(version.to_string())
-            .expect("valid artifact version");
-        TufRepoDescription {
-            repo: TufRepoMeta {
-                hash,
-                targets_role_version: 0,
-                valid_until: chrono::Utc::now(),
-                system_version: version,
-                file_name: String::new(),
-            },
-            artifacts: vec![TufArtifactMeta {
-                id: ArtifactId {
-                    name: String::new(),
-                    version: artifact_version,
-                    kind: ArtifactKind::from_static("empty"),
-                },
-                hash,
-                size: 0,
-                board: None,
-                sign: None,
-            }],
-        }
-    }
-
-    pub(crate) async fn make_and_insert(
-        opctx: &OpContext,
-        datastore: &DataStore,
-        version: u32,
-    ) -> TufRepoUuid {
-        let repo = make_test_repo(version);
-        datastore
-            .tuf_repo_insert(opctx, &repo)
-            .await
-            .expect("inserting repo")
-            .recorded
-            .repo
-            .id()
-    }
-
     #[tokio::test]
     async fn test_recent_distinct() {
         let logctx = dev::test_setup_log("target_release_datastore");
@@ -431,7 +381,7 @@ pub(crate) mod test {
 
         // Now insert a TUF repo and try again.  That alone shouldn't change
         // anything.
-        let repo1id = make_and_insert(opctx, datastore, 1).await;
+        let repo1id = insert_test_tuf_repo(opctx, datastore, 1).await;
         let target_release =
             datastore.target_release_get_current(opctx).await.unwrap();
         let last_generation = generation;
@@ -469,7 +419,7 @@ pub(crate) mod test {
         assert_eq!(recent.target_release_generation, generation);
 
         // Now insert a second distinct target release and try again.
-        let repo2id = make_and_insert(opctx, datastore, 2).await;
+        let repo2id = insert_test_tuf_repo(opctx, datastore, 2).await;
         let target_release = datastore
             .target_release_insert(
                 opctx,
