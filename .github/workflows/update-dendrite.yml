@@ -43,11 +43,12 @@ jobs:
       - name: Update dendrite versions
         run: |
           ./tools/update_dendrite.sh
-          - name: Extract new dendrite package version
-            run: |
-              eval $(cat tools/dendrite_version | grep COMMIT)
-              echo "version=${COMMIT:0:7}" >> $GITHUB_OUTPUT
-            id: updated
+
+      - name: Extract new dendrite package version
+        run: |
+          eval $(cat tools/dendrite_version | grep COMMIT)
+          echo "version=${COMMIT:0:7}" >> $GITHUB_OUTPUT
+        id: updated
 
       - name: Commit changes
         run: |
