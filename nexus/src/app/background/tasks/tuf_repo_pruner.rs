@@ -200,12 +200,9 @@ fn decide_prune(args: TufRepoPrune) -> TufRepoPrunerStatus {
             continue;
         }
 
-        if repo_prune.is_none() {
-            repo_prune = Some(repo.clone());
-            continue;
+        if let Some(last_maybe_prune) = repo_prune.replace(repo.clone()) {
+            other_repos_eligible_to_prune.insert_overwrite(last_maybe_prune);
         }
-
-        other_repos_eligible_to_prune.insert_overwrite(repo.clone());
     }
 
     TufRepoPrunerStatus {
@@ -266,6 +263,7 @@ mod test {
     #[test]
     fn test_decide_prune() {
         let all_repos = make_test_repos();
+        eprintln!("repos: {:#?}", all_repos);
         let [r1, r2, r3, r4, r5, r6] = &all_repos;
         let all_repos: IdOrdMap<_> = all_repos.clone().into_iter().collect();
 
@@ -302,10 +300,7 @@ mod test {
         assert!(status.repos_keep_target_release.contains_key(&r4.id));
         assert!(status.repos_keep_recent_uploads.is_empty());
         assert_eq!(status.repo_prune.expect("repo to prune").id, r1.id);
-        assert_eq!(
-            status.other_repos_eligible_to_prune.len(),
-            all_repos.len() - releases_to_keep.len()
-        );
+        assert_eq!(status.other_repos_eligible_to_prune.len(), 3);
         assert!(status.other_repos_eligible_to_prune.contains_key(&r2.id));
         assert!(status.other_repos_eligible_to_prune.contains_key(&r5.id));
         assert!(status.other_repos_eligible_to_prune.contains_key(&r6.id));
@@ -320,14 +315,9 @@ mod test {
         });
         assert!(status.warnings.is_empty());
         assert!(status.repos_keep_target_release.is_empty());
-        assert!(status.repos_keep_target_release.contains_key(&r5.id));
-        assert!(status.repos_keep_target_release.contains_key(&r6.id));
         assert_eq!(status.repos_keep_recent_uploads.len(), 2);
         assert_eq!(status.repo_prune.expect("repo to prune").id, r1.id);
-        assert_eq!(
-            status.other_repos_eligible_to_prune.len(),
-            all_repos.len() - 1 - status.repos_keep_recent_uploads.len(),
-        );
+        assert_eq!(status.other_repos_eligible_to_prune.len(), 3);
         assert!(status.other_repos_eligible_to_prune.contains_key(&r2.id));
         assert!(status.other_repos_eligible_to_prune.contains_key(&r3.id));
         assert!(status.other_repos_eligible_to_prune.contains_key(&r4.id));
@@ -349,12 +339,8 @@ mod test {
         assert_eq!(status.repos_keep_recent_uploads.len(), 1);
         assert!(status.repos_keep_recent_uploads.contains_key(&r6.id));
         assert_eq!(status.repo_prune.expect("repo to prune").id, r1.id);
-        assert_eq!(
-            status.other_repos_eligible_to_prune.len(),
-            all_repos.len()
-                - releases_to_keep.len()
-                - status.repos_keep_recent_uploads.len(),
-        );
+        assert_eq!(status.other_repos_eligible_to_prune.len(), 2);
+        assert!(status.other_repos_eligible_to_prune.contains_key(&r2.id));
         assert!(status.other_repos_eligible_to_prune.contains_key(&r5.id));
     }
 }
