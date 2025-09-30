@@ -424,6 +424,10 @@ task: "tuf_artifact_replication"
     replicate update repo artifacts across sleds
 
 
+task: "tuf_repo_pruner"
+    determine which TUF repos' artifacts can be pruned
+
+
 task: "v2p_manager"
     manages opte v2p mappings for vpc networking
 
@@ -810,6 +814,18 @@ task: "tuf_artifact_replication"
       copy ok:          0
       copy err:         0
     local repos: 0
+
+task: "tuf_repo_pruner"
+  configured period: every <REDACTED_DURATION>m
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    configuration:
+        nkeep_recent_releases: 3
+        nkeep_recent_uploads:  3
+    repo pruned: none
+    repos kept because they're recent target releases: none
+    repos kept because they're recent uploads: none
+    other repos eligible for pruning: none
 
 task: "v2p_manager"
   configured period: every <REDACTED_DURATION>s
@@ -1328,6 +1344,18 @@ task: "tuf_artifact_replication"
       copy ok:          0
       copy err:         0
     local repos: 0
+
+task: "tuf_repo_pruner"
+  configured period: every <REDACTED_DURATION>m
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    configuration:
+        nkeep_recent_releases: 3
+        nkeep_recent_uploads:  3
+    repo pruned: none
+    repos kept because they're recent target releases: none
+    repos kept because they're recent uploads: none
+    other repos eligible for pruning: none
 
 task: "v2p_manager"
   configured period: every <REDACTED_DURATION>s

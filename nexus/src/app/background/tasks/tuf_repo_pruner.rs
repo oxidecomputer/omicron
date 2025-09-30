@@ -110,8 +110,17 @@ async fn tuf_repos_prune(
         recent_releases: &recent_releases.releases,
     });
 
+    info!(&opctx.log, "tuf_repo_prune decision"; "status" => ?status);
+
     // If we decided to prune something, do it.
     if let Some(to_prune) = &status.repo_prune {
+        info!(
+            &opctx.log,
+            "tuf_repo_prune: pruning repo";
+            "repo_id" => %to_prune.id,
+            "system_version" => %to_prune.system_version,
+            "time_created" => %to_prune.time_created,
+        );
         let prune_id = to_prune.id;
         if let Err(error) = datastore
             .tuf_repo_mark_pruned(
@@ -122,6 +131,13 @@ async fn tuf_repos_prune(
             )
             .await
         {
+            warn!(
+                &opctx.log,
+                "tuf_repo_prune: failed to prune";
+                "repo_id" => %to_prune.id,
+                "system_version" => %to_prune.system_version,
+                "time_created" => %to_prune.time_created,
+            );
             status.warnings.push(format!(
                 "failed to prune {} (release {}): {}",
                 prune_id,

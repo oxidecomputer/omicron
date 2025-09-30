@@ -929,8 +929,8 @@ fn display_kind_hash(kind: &str, hash: ArtifactHash) -> String {
 #[cfg(test)]
 mod test {
     use crate::db::datastore::SQL_BATCH_SIZE;
-    use crate::db::datastore::target_release::test::make_and_insert;
     use crate::db::pub_test_utils::TestDatabase;
+    use crate::db::pub_test_utils::helpers::insert_test_tuf_repo;
     use nexus_db_model::TargetRelease;
     use omicron_test_utils::dev;
     use slog_error_chain::InlineErrorChain;
@@ -950,7 +950,7 @@ mod test {
         assert!(repos.is_empty());
 
         // Add one TUF repo to the database.
-        let repo1id = make_and_insert(opctx, datastore, 1).await;
+        let repo1id = insert_test_tuf_repo(opctx, datastore, 1).await;
 
         // Make sure it's there.
         let repos = datastore
@@ -982,13 +982,17 @@ mod test {
         assert!(repos.is_empty());
 
         // Now set up a more realistic case.
-        let old_target_repo1_id = make_and_insert(opctx, datastore, 2).await;
-        let old_target_repo2_id = make_and_insert(opctx, datastore, 3).await;
-        let old_target_repo3_id = make_and_insert(opctx, datastore, 4).await;
-        let old_target_repo4_id = make_and_insert(opctx, datastore, 5).await;
-        let new_upload1 = make_and_insert(opctx, datastore, 10).await;
-        let new_upload2 = make_and_insert(opctx, datastore, 11).await;
-        let new_upload3 = make_and_insert(opctx, datastore, 12).await;
+        let old_target_repo1_id =
+            insert_test_tuf_repo(opctx, datastore, 2).await;
+        let old_target_repo2_id =
+            insert_test_tuf_repo(opctx, datastore, 3).await;
+        let old_target_repo3_id =
+            insert_test_tuf_repo(opctx, datastore, 4).await;
+        let old_target_repo4_id =
+            insert_test_tuf_repo(opctx, datastore, 5).await;
+        let new_upload1 = insert_test_tuf_repo(opctx, datastore, 10).await;
+        let new_upload2 = insert_test_tuf_repo(opctx, datastore, 11).await;
+        let new_upload3 = insert_test_tuf_repo(opctx, datastore, 12).await;
 
         // Make sure they're all there.
         let repos = datastore
@@ -1136,8 +1140,9 @@ mod test {
         let mut expected_repos = BTreeSet::new();
         for i in 0..count {
             assert!(
-                expected_repos
-                    .insert(make_and_insert(opctx, datastore, i + 1).await)
+                expected_repos.insert(
+                    insert_test_tuf_repo(opctx, datastore, i + 1).await
+                )
             );
         }
 
