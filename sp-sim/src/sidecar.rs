@@ -615,6 +615,66 @@ impl Handler {
             rot: Ok(rot_state_v2(self.update_state.rot_state())),
         }
     }
+
+    /// Pretends to unlock the tech port if the challenge and response are compatible
+    fn unlock(
+        &mut self,
+        _vid: <Self as SpHandler>::VLanId,
+        challenge: UnlockChallenge,
+        response: UnlockResponse,
+        time_sec: u32,
+    ) -> Result<(), MonorailError> {
+        if time_sec > MAX_UNLOCK_TIME_SECS {
+            warn!(&self.log, "unlock time too long"; "time_sec" => time_sec);
+            return Err(MonorailError::TimeIsTooLong);
+        }
+
+        // Callers only get one attempt per challenge; if they fail to authorize
+        // the unlock, they have to ask for a new challenge.
+        let Some((last_challenge, challenge_time)) = self.last_challenge.take()
+        else {
+            warn!(&self.log, "no challenge for monorail unlock");
+            return Err(MonorailError::UnlockAuthFailed);
+        };
+
+        if challenge != last_challenge {
+            warn!(&self.log, "wrong challenge for monorail unlock");
+            return Err(MonorailError::UnlockAuthFailed);
+        }
+
+        if now() >= challenge_time + CHALLENGE_EXPIRATION_TIME_SECS {
+            warn!(&self.log, "challenge expired");
+            return Err(MonorailError::UnlockAuthFailed);
+        }
+
+        // Check that the response is valid for our current challenge
+        // and trusted keys.
+        match (challenge, response) {
+            (
+                UnlockChallenge::Trivial { timestamp: ts1 },
+                UnlockResponse::Trivial { timestamp: ts2 },
+            ) if ts1 == ts2 => Ok(()),
+            (
+                UnlockChallenge::EcdsaSha2Nistp256(data),
+                UnlockResponse::EcdsaSha2Nistp256 {
+                    key,
+                    signer_nonce,
+                    signature,
+                },
+            ) => verify_signature(
+                &self.log,
+                &self.trusted_keys,
+                &data,
+                &key,
+                &signer_nonce,
+                &signature,
+            ),
+            _ => Err(MonorailError::UnlockAuthFailed),
+        }?;
+        debug!(&self.log, "unlock auth succeeded");
+
+        Ok(())
+    }
 }
 
 impl SpHandler for Handler {
@@ -1138,66 +1198,6 @@ impl SpHandler for Handler {
                 Err(SpError::RequestUnsupportedForComponent)
             }
         }
-    }
-
-    /// Pretends to unlock the tech port if the challenge and response are compatible
-    fn unlock(
-        &mut self,
-        _vid: Self::VLanId,
-        challenge: UnlockChallenge,
-        response: UnlockResponse,
-        time_sec: u32,
-    ) -> Result<(), MonorailError> {
-        if time_sec > MAX_UNLOCK_TIME_SECS {
-            warn!(&self.log, "unlock time too long"; "time_sec" => time_sec);
-            return Err(MonorailError::TimeIsTooLong);
-        }
-
-        // Callers only get one attempt per challenge; if they fail to authorize
-        // the unlock, they have to ask for a new challenge.
-        let Some((last_challenge, challenge_time)) = self.last_challenge.take()
-        else {
-            warn!(&self.log, "no challenge for monorail unlock");
-            return Err(MonorailError::UnlockAuthFailed);
-        };
-
-        if challenge != last_challenge {
-            warn!(&self.log, "wrong challenge for monorail unlock");
-            return Err(MonorailError::UnlockAuthFailed);
-        }
-
-        if now() >= challenge_time + CHALLENGE_EXPIRATION_TIME_SECS {
-            warn!(&self.log, "challenge expired");
-            return Err(MonorailError::UnlockAuthFailed);
-        }
-
-        // Check that the response is valid for our current challenge
-        // and trusted keys.
-        match (challenge, response) {
-            (
-                UnlockChallenge::Trivial { timestamp: ts1 },
-                UnlockResponse::Trivial { timestamp: ts2 },
-            ) if ts1 == ts2 => Ok(()),
-            (
-                UnlockChallenge::EcdsaSha2Nistp256(data),
-                UnlockResponse::EcdsaSha2Nistp256 {
-                    key,
-                    signer_nonce,
-                    signature,
-                },
-            ) => verify_signature(
-                &self.log,
-                &self.trusted_keys,
-                &data,
-                &key,
-                &signer_nonce,
-                &signature,
-            ),
-            _ => Err(MonorailError::UnlockAuthFailed),
-        }?;
-        debug!(&self.log, "unlock auth succeeded");
-
-        Ok(())
     }
 
     fn get_startup_options(&mut self) -> Result<StartupOptions, SpError> {
