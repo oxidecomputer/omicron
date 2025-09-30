@@ -27,7 +27,6 @@ jobs:
       INT_BRANCH: dendrite-integration
       TARGET_BRANCH: main
     steps:
-
       # Checkout both the target and integration branches
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
@@ -44,6 +43,26 @@ jobs:
       - name: Update dendrite versions
         run: |
           ./tools/update_dendrite.sh
+
+      - name: Extract new dendrite package version
+        run: |
+          COMMIT=$(cargo metadata | \
+            jq -r '.resolve.nodes[] | select(.id | startswith("git+https://github.com/oxidecomputer/dendrite?rev=")) | select(.id | contains("dpd-client")) | .id' | \
+            awk 'match($0, /\?rev=([^#]+)/) { print substr($0, RSTART + 5, RLENGTH - 5) }')
+
+          echo "version=${COMMIT}" >> $GITHUB_OUTPUT
+        id: updated
+
+      - name: Commit changes
+        run: |
+          . ./tools/reflector/helpers.sh
+
+          PATHS=("Cargo.toml" "Cargo.lock")
+          CHANGES=()
+          commit $TARGET_BRANCH $INT_BRANCH ${{ inputs.reflector_user_id }} PATHS CHANGES
+
+          echo "api=${CHANGES[0]}" >> $GITHUB_OUTPUT
+        id: committed
 
       - name: Update pull request
         env:
