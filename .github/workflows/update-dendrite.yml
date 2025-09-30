@@ -43,21 +43,17 @@ jobs:
       - name: Update dendrite versions
         run: |
           ./tools/update_dendrite.sh
-
-      - name: Extract new dendrite package version
-        run: |
-          COMMIT=$(cargo metadata | \
-            jq -r '.resolve.nodes[] | select(.id | startswith("git+https://github.com/oxidecomputer/dendrite?rev=")) | select(.id | contains("dpd-client")) | .id' | \
-            awk 'match($0, /\?rev=([^#]+)/) { print substr($0, RSTART + 5, RLENGTH - 5) }')
-
-          echo "version=${COMMIT}" >> $GITHUB_OUTPUT
-        id: updated
+          - name: Extract new dendrite package version
+            run: |
+              eval $(cat tools/dendrite_version | grep COMMIT)
+              echo "version=${COMMIT:0:7}" >> $GITHUB_OUTPUT
+            id: updated
 
       - name: Commit changes
         run: |
           . ./tools/reflector/helpers.sh
 
-          PATHS=("Cargo.toml" "Cargo.lock")
+          PATHS=("tools/dendrite_version" "Cargo.toml" "Cargo.lock")
           CHANGES=()
           commit $TARGET_BRANCH $INT_BRANCH ${{ inputs.reflector_user_id }} PATHS CHANGES
 
