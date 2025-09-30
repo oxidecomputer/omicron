@@ -5,7 +5,7 @@
 //! Messsages for the trust quorum protocol
 
 use crate::crypto::LrtqShare;
-use crate::{Configuration, Epoch, PlatformId, Threshold};
+use crate::{Configuration, Epoch, BaseboardId, Threshold};
 use gfss::shamir::Share;
 use omicron_uuid_kinds::RackUuid;
 use serde::{Deserialize, Serialize};
@@ -18,7 +18,7 @@ pub struct ReconfigureMsg {
     pub rack_id: RackUuid,
     pub epoch: Epoch,
     pub last_committed_epoch: Option<Epoch>,
-    pub members: BTreeSet<PlatformId>,
+    pub members: BTreeSet<BaseboardId>,
     pub threshold: Threshold,
 }
 
@@ -32,7 +32,7 @@ pub struct LrtqUpgradeMsg {
     // upgraded trust quorum cluster. This is implicit, as the membership of the
     // LRTQ cluster is computed based on the existing control plane sleds known
     // to Nexus.
-    pub members: BTreeSet<PlatformId>,
+    pub members: BTreeSet<BaseboardId>,
     pub threshold: Threshold,
 }
 

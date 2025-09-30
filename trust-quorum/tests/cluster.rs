@@ -16,7 +16,7 @@ use slog::{Logger, info, o};
 use std::collections::BTreeSet;
 use test_strategy::{Arbitrary, proptest};
 use trust_quorum::{
-    CoordinatorOperation, Epoch, NodeCallerCtx, NodeCommonCtx, PlatformId,
+    CoordinatorOperation, Epoch, NodeCallerCtx, NodeCommonCtx, BaseboardId,
     Threshold,
 };
 use trust_quorum_test_utils::TqState;
@@ -53,7 +53,7 @@ impl TestState {
         // event.
         let member_universe =
             trust_quorum_test_utils::member_universe(MEMBER_UNIVERSE_SIZE);
-        let members: BTreeSet<PlatformId> = config
+        let members: BTreeSet<BaseboardId> = config
             .members
             .iter()
             .map(|index| member_universe[*index].clone())
@@ -77,7 +77,7 @@ impl TestState {
         // event.
         let member_universe =
             trust_quorum_test_utils::member_universe(MEMBER_UNIVERSE_SIZE);
-        let members: BTreeSet<PlatformId> = config
+        let members: BTreeSet<BaseboardId> = config
             .members
             .iter()
             .map(|index| member_universe[*index].clone())
@@ -916,7 +916,7 @@ impl TestState {
     /// having to loop over all nodes when they haven't changed.
     fn check_invariants(
         &self,
-        affected_nodes: Vec<PlatformId>,
+        affected_nodes: Vec<BaseboardId>,
     ) -> Result<(), TestCaseError> {
         self.invariant_all_nodes_have_same_configuration_per_epoch(
             &affected_nodes,
@@ -939,7 +939,7 @@ impl TestState {
     ///  * have no committed configurations
     fn invariant_expunged_nodes_have_actually_been_expunged(
         &self,
-        affected_nodes: &[PlatformId],
+        affected_nodes: &[BaseboardId],
     ) -> Result<(), TestCaseError> {
         for id in affected_nodes {
             if self.tq_state.expunged.contains(id) {
@@ -975,7 +975,7 @@ impl TestState {
     /// Sometimes nodes may not have a configuration for a given epoch.
     fn invariant_all_nodes_have_same_configuration_per_epoch(
         &self,
-        affected_nodes: &[PlatformId],
+        affected_nodes: &[BaseboardId],
     ) -> Result<(), TestCaseError> {
         for id in affected_nodes {
             let (_, ctx) =
@@ -1005,7 +1005,7 @@ impl TestState {
     /// only have acknowledgments from nodes that have seen the `Prepare`.
     fn invariant_nodes_have_prepared_if_coordinator_has_acks(
         &self,
-        affected_nodes: &[PlatformId],
+        affected_nodes: &[BaseboardId],
     ) -> Result<(), TestCaseError> {
         let (acked, epoch) = {
             let latest_config = self.tq_state.nexus.latest_config();
@@ -1056,7 +1056,7 @@ impl TestState {
     /// configuration and share for this epoch.
     fn invariant_nodes_have_committed_if_nexus_has_acks(
         &self,
-        affected_nodes: &[PlatformId],
+        affected_nodes: &[BaseboardId],
     ) -> Result<(), TestCaseError> {
         let latest_config = self.tq_state.nexus.latest_config();
         if latest_config.op != NexusOp::Committed {
@@ -1087,7 +1087,7 @@ impl TestState {
     //   key share for the latest committed configuration that they know of.
     fn invariant_nodes_not_coordinating_and_computing_key_share_simultaneously(
         &self,
-        affected_nodes: &[PlatformId],
+        affected_nodes: &[BaseboardId],
     ) -> Result<(), TestCaseError> {
         for id in affected_nodes {
             let (node, _) =
@@ -1106,7 +1106,7 @@ impl TestState {
     // Ensure there has been no alarm at any affected node
     fn invariant_no_alarms(
         &self,
-        affected_nodes: &[PlatformId],
+        affected_nodes: &[BaseboardId],
     ) -> Result<(), TestCaseError> {
         for id in affected_nodes {
             let (_, ctx) =
@@ -1129,7 +1129,7 @@ impl TestState {
 pub enum Action {
     /// Deliver an in-flight bootstrap network msg if there is one.
     ///
-    /// The selector here is used to index into the `PlatformIds` of
+    /// The selector here is used to index into the `BaseboardIds` of
     /// `test_state.bootstrap_network`.
     #[weight(30)]
     DeliverEnvelope(Selector),

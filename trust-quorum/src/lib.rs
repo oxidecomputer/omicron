@@ -14,6 +14,7 @@ use daft::Diffable;
 use derive_more::Display;
 use gfss::shamir::Share;
 use serde::{Deserialize, Serialize};
+pub use sled_agent_types::sled::BaseboardId;
 use slog::{Logger, error, warn};
 
 mod compute_key_share;
@@ -91,57 +92,14 @@ impl Epoch {
 #[daft(leaf)]
 pub struct Threshold(pub u8);
 
-/// A unique identifier for a given trust quorum member.
-//
-/// This data is derived from the subject common name in the platform identity
-/// certificate that makes up part of the certificate chain used to establish
-/// [sprockets](https://github.com/oxidecomputer/sprockets) connections.
-///
-/// See RFDs 303 and 308 for more details.
-#[derive(
-    Debug,
-    Clone,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Serialize,
-    Deserialize,
-    Diffable,
-)]
-#[daft(leaf)]
-pub struct PlatformId {
-    part_number: String,
-    serial_number: String,
-}
-
-impl std::fmt::Display for PlatformId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}:{}", self.part_number, self.serial_number)
-    }
-}
-
-impl PlatformId {
-    pub fn new(part_number: String, serial_number: String) -> PlatformId {
-        PlatformId { part_number, serial_number }
-    }
-
-    pub fn part_number(&self) -> &str {
-        &self.part_number
-    }
-
-    pub fn serial_number(&self) -> &str {
-        &self.serial_number
-    }
-}
 
 /// A container to make messages between trust quorum nodes routable
 #[derive(Debug, Clone, Serialize, Deserialize, Diffable)]
 #[cfg_attr(feature = "danger_partial_eq_ct_wrapper", derive(PartialEq, Eq))]
 #[daft(leaf)]
 pub struct Envelope {
-    pub to: PlatformId,
-    pub from: PlatformId,
+    pub to: BaseboardId,
+    pub from: BaseboardId,
     pub msg: PeerMsg,
 }
 
@@ -160,7 +118,7 @@ impl Envelope {
 pub fn validate_share(
     log: &Logger,
     config: &Configuration,
-    from: &PlatformId,
+    from: &BaseboardId,
     epoch: Epoch,
     share: &Share,
 ) -> bool {

@@ -5,7 +5,7 @@
 //! Parameter to Node API calls that allows interaction with the system at large
 
 use crate::{
-    Alarm, Envelope, PeerMsg, PeerMsgKind, PersistentState, PlatformId,
+    Alarm, Envelope, PeerMsg, PeerMsgKind, PersistentState, BaseboardId,
     persistent_state::PersistentStateDiff,
 };
 use daft::{BTreeSetDiff, Diffable, Leaf};
@@ -13,9 +13,9 @@ use std::collections::BTreeSet;
 
 /// An API shared by [`NodeCallerCtx`] and [`NodeHandlerCtx`]
 pub trait NodeCommonCtx {
-    fn platform_id(&self) -> &PlatformId;
+    fn platform_id(&self) -> &BaseboardId;
     fn persistent_state(&self) -> &PersistentState;
-    fn connected(&self) -> &BTreeSet<PlatformId>;
+    fn connected(&self) -> &BTreeSet<BaseboardId>;
     fn alarms(&self) -> &BTreeSet<Alarm>;
 }
 
@@ -37,7 +37,7 @@ pub trait NodeCallerCtx: NodeCommonCtx {
 
 /// An API for an [`NodeCtx`] usable from inside FSM states
 pub trait NodeHandlerCtx: NodeCommonCtx {
-    fn send(&mut self, to: PlatformId, msg: PeerMsgKind);
+    fn send(&mut self, to: BaseboardId, msg: PeerMsgKind);
 
     /// Attempt to update the persistent state inside the callback `f`. If
     /// the state is updated, then `f` should return `true`, otherwise it should
@@ -55,10 +55,10 @@ pub trait NodeHandlerCtx: NodeCommonCtx {
         F: FnOnce(&mut PersistentState) -> bool;
 
     /// Add a peer to the connected set
-    fn add_connection(&mut self, id: PlatformId);
+    fn add_connection(&mut self, id: BaseboardId);
 
     /// Remove a peer from the connected set
-    fn remove_connection(&mut self, id: &PlatformId);
+    fn remove_connection(&mut self, id: &BaseboardId);
 
     /// Record (in-memory) that an alarm has occurred
     fn raise_alarm(&mut self, alarm: Alarm);
@@ -73,7 +73,7 @@ pub trait NodeHandlerCtx: NodeCommonCtx {
 #[cfg_attr(feature = "danger_partial_eq_ct_wrapper", derive(PartialEq, Eq))]
 pub struct NodeCtx {
     /// The unique hardware ID of a sled
-    platform_id: PlatformId,
+    platform_id: BaseboardId,
 
     /// State that gets persistenly stored in ledgers
     persistent_state: PersistentState,
@@ -88,7 +88,7 @@ pub struct NodeCtx {
     outgoing: Vec<Envelope>,
 
     /// Connected peer nodes
-    connected: BTreeSet<PlatformId>,
+    connected: BTreeSet<BaseboardId>,
 
     /// Any alarms that have occurred
     alarms: BTreeSet<Alarm>,
@@ -97,7 +97,7 @@ pub struct NodeCtx {
 // For diffs we want to allow access to all fields, but not make them public in
 // the `NodeCtx` type itself.
 impl<'daft> NodeCtxDiff<'daft> {
-    pub fn platform_id(&self) -> Leaf<&PlatformId> {
+    pub fn platform_id(&self) -> Leaf<&BaseboardId> {
         self.platform_id
     }
 
@@ -113,7 +113,7 @@ impl<'daft> NodeCtxDiff<'daft> {
         self.outgoing
     }
 
-    pub fn connected(&self) -> &BTreeSetDiff<'daft, PlatformId> {
+    pub fn connected(&self) -> &BTreeSetDiff<'daft, BaseboardId> {
         &self.connected
     }
 
@@ -123,7 +123,7 @@ impl<'daft> NodeCtxDiff<'daft> {
 }
 
 impl NodeCtx {
-    pub fn new(platform_id: PlatformId) -> NodeCtx {
+    pub fn new(platform_id: BaseboardId) -> NodeCtx {
         NodeCtx {
             platform_id,
             persistent_state: PersistentState::empty(),
@@ -135,7 +135,7 @@ impl NodeCtx {
     }
 
     pub fn new_with_persistent_state(
-        platform_id: PlatformId,
+        platform_id: BaseboardId,
         persistent_state: PersistentState,
     ) -> NodeCtx {
         NodeCtx {
@@ -158,7 +158,7 @@ impl NodeCtx {
 }
 
 impl NodeCommonCtx for NodeCtx {
-    fn platform_id(&self) -> &PlatformId {
+    fn platform_id(&self) -> &BaseboardId {
         &self.platform_id
     }
 
@@ -166,7 +166,7 @@ impl NodeCommonCtx for NodeCtx {
         &self.persistent_state
     }
 
-    fn connected(&self) -> &BTreeSet<PlatformId> {
+    fn connected(&self) -> &BTreeSet<BaseboardId> {
         &self.connected
     }
 
@@ -176,7 +176,7 @@ impl NodeCommonCtx for NodeCtx {
 }
 
 impl NodeHandlerCtx for NodeCtx {
-    fn send(&mut self, to: PlatformId, msg_kind: PeerMsgKind) {
+    fn send(&mut self, to: BaseboardId, msg_kind: PeerMsgKind) {
         let rack_id = self.persistent_state.rack_id().expect("rack id exists");
         self.outgoing.push(Envelope {
             to,
@@ -199,11 +199,11 @@ impl NodeHandlerCtx for NodeCtx {
         }
     }
 
-    fn add_connection(&mut self, id: PlatformId) {
+    fn add_connection(&mut self, id: BaseboardId) {
         self.connected.insert(id);
     }
 
-    fn remove_connection(&mut self, id: &PlatformId) {
+    fn remove_connection(&mut self, id: &BaseboardId) {
         self.connected.remove(id);
     }
 

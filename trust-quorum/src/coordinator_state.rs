@@ -10,7 +10,7 @@ use crate::crypto::{LrtqShare, PlaintextRackSecrets, ReconstructedRackSecret};
 use crate::validators::{
     ReconfigurationError, ValidatedLrtqUpgradeMsg, ValidatedReconfigureMsg,
 };
-use crate::{Configuration, Epoch, PeerMsgKind, PlatformId, RackSecret};
+use crate::{Configuration, Epoch, PeerMsgKind, BaseboardId, RackSecret};
 use bootstore::trust_quorum::RackSecret as LrtqRackSecret;
 use daft::{Diffable, Leaf};
 use gfss::shamir::Share;
@@ -302,7 +302,7 @@ impl CoordinatorState {
     pub fn send_msgs_to(
         &mut self,
         ctx: &mut impl NodeHandlerCtx,
-        to: PlatformId,
+        to: BaseboardId,
     ) {
         match &self.op {
             CoordinatorOperation::CollectShares {
@@ -349,7 +349,7 @@ impl CoordinatorState {
 
     /// Record a `PrepareAck` from another node as part of tracking
     /// quorum for the prepare phase of the trust quorum protocol.
-    pub fn ack_prepare(&mut self, from: PlatformId) {
+    pub fn ack_prepare(&mut self, from: BaseboardId) {
         match &mut self.op {
             CoordinatorOperation::Prepare {
                 prepares, prepare_acks, ..
@@ -384,7 +384,7 @@ impl CoordinatorState {
     pub fn handle_share(
         &mut self,
         ctx: &mut impl NodeHandlerCtx,
-        from: PlatformId,
+        from: BaseboardId,
         epoch: Epoch,
         share: Share,
     ) {
@@ -501,7 +501,7 @@ impl CoordinatorState {
     pub fn handle_lrtq_share(
         &mut self,
         ctx: &mut impl NodeHandlerCtx,
-        from: PlatformId,
+        from: BaseboardId,
         share: LrtqShare,
     ) {
         match &mut self.op {
@@ -627,7 +627,7 @@ impl CoordinatorState {
         &mut self,
         ctx: &mut impl NodeHandlerCtx,
         log: Logger,
-        mut new_shares: BTreeMap<PlatformId, Share>,
+        mut new_shares: BTreeMap<BaseboardId, Share>,
         plaintext_secrets: PlaintextRackSecrets,
     ) {
         let new_epoch = self.configuration.epoch;
@@ -714,25 +714,25 @@ impl CoordinatorState {
 pub enum CoordinatorOperation {
     CollectShares {
         old_epoch: Epoch,
-        old_collected_shares: BTreeMap<PlatformId, Share>,
+        old_collected_shares: BTreeMap<BaseboardId, Share>,
 
         // These are new shares that the coordinator created that we carry along
         // until we get to `CoordinatorOperation::Prepare`
-        new_shares: BTreeMap<PlatformId, Share>,
+        new_shares: BTreeMap<BaseboardId, Share>,
     },
     CollectLrtqShares {
-        collected_lrtq_shares: BTreeMap<PlatformId, LrtqShare>,
+        collected_lrtq_shares: BTreeMap<BaseboardId, LrtqShare>,
 
         // These are new shares that the coordinator created that we carry along
         // until we get to `CoordinatorOperation::Prepare`
-        new_shares: BTreeMap<PlatformId, Share>,
+        new_shares: BTreeMap<BaseboardId, Share>,
     },
     Prepare {
         /// The set of Prepares to send to each node
-        prepares: BTreeMap<PlatformId, (Configuration, Share)>,
+        prepares: BTreeMap<BaseboardId, (Configuration, Share)>,
 
         /// Acknowledgements that the prepare has been received
-        prepare_acks: BTreeSet<PlatformId>,
+        prepare_acks: BTreeSet<BaseboardId>,
     },
 }
 
@@ -749,7 +749,7 @@ impl CoordinatorOperation {
 
     /// Return the members that have acked prepares, if the current operation
     /// is `Prepare`. Otherwise return an empty set.
-    pub fn acked_prepares(&self) -> BTreeSet<PlatformId> {
+    pub fn acked_prepares(&self) -> BTreeSet<BaseboardId> {
         if let CoordinatorOperation::Prepare { prepare_acks, .. } = self {
             prepare_acks.clone()
         } else {

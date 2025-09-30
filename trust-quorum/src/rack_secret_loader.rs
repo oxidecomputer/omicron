@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 
 use crate::crypto::ReconstructedRackSecret;
 use crate::{
-    Alarm, Configuration, Epoch, NodeHandlerCtx, PeerMsgKind, PlatformId,
+    Alarm, Configuration, Epoch, NodeHandlerCtx, PeerMsgKind, BaseboardId,
     RackSecret, Share,
 };
 use daft::{BTreeMapDiff, Diffable, Leaf};
@@ -143,7 +143,7 @@ impl RackSecretLoader {
     pub fn handle_share(
         &mut self,
         ctx: &mut impl NodeHandlerCtx,
-        from: PlatformId,
+        from: BaseboardId,
         epoch: Epoch,
         share: Share,
     ) {
@@ -174,7 +174,7 @@ impl RackSecretLoader {
         self.collector = None;
     }
 
-    pub fn on_connect(&self, ctx: &mut impl NodeHandlerCtx, peer: PlatformId) {
+    pub fn on_connect(&self, ctx: &mut impl NodeHandlerCtx, peer: BaseboardId) {
         if let Some(collector) = &self.collector {
             collector.on_connect(ctx, peer);
         }
@@ -189,7 +189,7 @@ pub struct ShareCollector {
     // A copy of the configuration stored in persistent state
     #[daft(leaf)]
     config: Configuration,
-    shares: BTreeMap<PlatformId, Share>,
+    shares: BTreeMap<BaseboardId, Share>,
 }
 
 #[cfg(feature = "danger_partial_eq_ct_wrapper")]
@@ -207,7 +207,7 @@ impl<'daft> ShareCollectorDiff<'daft> {
         self.config
     }
 
-    pub fn shares(&self) -> &BTreeMapDiff<'daft, PlatformId, Share> {
+    pub fn shares(&self) -> &BTreeMapDiff<'daft, BaseboardId, Share> {
         &self.shares
     }
 }
@@ -250,7 +250,7 @@ impl ShareCollector {
     pub fn handle_share(
         &mut self,
         ctx: &mut impl NodeHandlerCtx,
-        from: PlatformId,
+        from: BaseboardId,
         epoch: Epoch,
         share: Share,
     ) -> Option<BTreeMap<Epoch, ReconstructedRackSecret>> {
@@ -344,7 +344,7 @@ impl ShareCollector {
     }
 
     /// A peer node has connected to this one
-    pub fn on_connect(&self, ctx: &mut impl NodeHandlerCtx, peer: PlatformId) {
+    pub fn on_connect(&self, ctx: &mut impl NodeHandlerCtx, peer: BaseboardId) {
         if self.config.members.contains_key(&peer) {
             info!(
                 self.log,
@@ -374,10 +374,13 @@ mod tests {
     const NUM_INITIAL_MEMBERS: u8 = 5;
 
     pub fn initial_config()
-    -> (Configuration, RackSecret, BTreeMap<PlatformId, Share>) {
+    -> (Configuration, RackSecret, BTreeMap<BaseboardId, Share>) {
         let threshold = Threshold(3);
         let initial_members: BTreeSet<_> = (0..NUM_INITIAL_MEMBERS)
-            .map(|serial| PlatformId::new("test".into(), serial.to_string()))
+            .map(|serial| BaseboardId {
+                part_number: "test".into(),
+                serial_number: serial.to_string(),
+            })
             .collect();
         let initial_rack_secret = RackSecret::new();
         let shares: BTreeMap<_, _> = initial_members
@@ -419,17 +422,17 @@ mod tests {
         new_member_serial: u8,
         old_config: &Configuration,
         old_rack_secret: ReconstructedRackSecret,
-    ) -> (Configuration, ReconstructedRackSecret, BTreeMap<PlatformId, Share>)
+    ) -> (Configuration, ReconstructedRackSecret, BTreeMap<BaseboardId, Share>)
     {
         let threshold = Threshold(3);
         let rack_secret = RackSecret::new();
 
         let mut new_members: BTreeSet<_> =
             old_config.members.keys().cloned().collect();
-        new_members.insert(PlatformId::new(
-            "test".into(),
-            new_member_serial.to_string(),
-        ));
+        new_members.insert(BaseboardId {
+            part_number: "test".into(),
+            serial_number: new_member_serial.to_string(),
+        });
         let num_members = new_members.len() as u8;
         let shares: BTreeMap<_, _> = new_members
             .into_iter()

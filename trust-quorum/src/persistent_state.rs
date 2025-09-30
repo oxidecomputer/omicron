@@ -7,7 +7,7 @@
 //! Note that this state is not necessarily directly serialized and saved.
 
 use crate::crypto::LrtqShare;
-use crate::{Configuration, Epoch, PlatformId};
+use crate::{Configuration, Epoch, BaseboardId};
 use bootstore::schemes::v0::SharePkgCommon as LrtqShareData;
 use daft::Diffable;
 use gfss::shamir::Share;
@@ -134,7 +134,7 @@ pub struct ExpungedMetadata {
     pub epoch: Epoch,
 
     /// Which node this commit information was learned from  
-    pub from: PlatformId,
+    pub from: BaseboardId,
 }
 
 /// A subset of information stored in [`PersistentState`] that is useful

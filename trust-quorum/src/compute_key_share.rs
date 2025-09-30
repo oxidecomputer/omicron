@@ -9,7 +9,7 @@
 //! other nodes so  that it can compute its own key share.
 
 use crate::{
-    Alarm, Configuration, Epoch, NodeHandlerCtx, PeerMsgKind, PlatformId,
+    Alarm, Configuration, Epoch, NodeHandlerCtx, PeerMsgKind, BaseboardId,
 };
 use gfss::gf256::Gf256;
 use gfss::shamir::{self, Share};
@@ -25,7 +25,7 @@ pub struct KeyShareComputer {
     // A copy of the configuration stored in persistent state
     config: Configuration,
 
-    collected_shares: BTreeMap<PlatformId, Share>,
+    collected_shares: BTreeMap<BaseboardId, Share>,
 }
 
 #[cfg(feature = "danger_partial_eq_ct_wrapper")]
@@ -63,7 +63,7 @@ impl KeyShareComputer {
     pub fn on_connect(
         &mut self,
         ctx: &mut impl NodeHandlerCtx,
-        peer: PlatformId,
+        peer: BaseboardId,
     ) {
         if self.config.members.contains_key(&peer)
             && !self.collected_shares.contains_key(&peer)
@@ -79,7 +79,7 @@ impl KeyShareComputer {
     pub fn handle_share(
         &mut self,
         ctx: &mut impl NodeHandlerCtx,
-        from: PlatformId,
+        from: BaseboardId,
         epoch: Epoch,
         share: Share,
     ) -> bool {
