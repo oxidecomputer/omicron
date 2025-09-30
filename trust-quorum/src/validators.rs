@@ -7,7 +7,7 @@
 use crate::configuration::{ConfigurationError, NewConfigParams};
 use crate::messages::ReconfigureMsg;
 use crate::{
-    Epoch, LrtqUpgradeMsg, NodeHandlerCtx, PersistentStateSummary, BaseboardId,
+    BaseboardId, Epoch, LrtqUpgradeMsg, NodeHandlerCtx, PersistentStateSummary,
     Threshold,
 };
 use daft::{BTreeSetDiff, Diffable, Leaf};
@@ -657,8 +657,9 @@ mod tests {
     use uuid::Uuid;
 
     fn arb_member() -> impl Strategy<Value = BaseboardId> {
-        (0..255u8).prop_map(|serial| {
-            BaseboardId { part_number: "test".into(), serial_number: serial.to_string() }
+        (0..255u8).prop_map(|serial| BaseboardId {
+            part_number: "test".into(),
+            serial_number: serial.to_string(),
         })
     }
 
@@ -732,8 +733,10 @@ mod tests {
                 expunged: None,
             };
             let mut members = input.members.clone();
-            members
-                .insert(BaseboardId { part_number: "test".into(), serial_number: "removed_node".into() });
+            members.insert(BaseboardId {
+                part_number: "test".into(),
+                serial_number: "removed_node".into(),
+            });
             let last_reconfig_msg = ValidatedReconfigureMsg {
                 rack_id: input.rack_id,
                 epoch: msg.last_committed_epoch.unwrap(),
@@ -802,8 +805,10 @@ mod tests {
                 expunged: None,
             };
             let mut members = input.members.clone();
-            members
-                .insert(BaseboardId { part_number: "test".into(), serial_number: "removed_node".into() });
+            members.insert(BaseboardId {
+                part_number: "test".into(),
+                serial_number: "removed_node".into(),
+            });
             let last_reconfig_msg = ValidatedReconfigureMsg {
                 rack_id: input.rack_id,
                 epoch: msg.last_committed_epoch.unwrap(),
@@ -838,7 +843,10 @@ mod tests {
 
         // Coordinator must be a member of the new group
         let msg = original_msg.clone();
-        let bad_platform_id = BaseboardId { part_number: "bad".into(), serial_number: "bad".into() };
+        let bad_platform_id = BaseboardId {
+            part_number: "bad".into(),
+            serial_number: "bad".into(),
+        };
         let err = ValidatedReconfigureMsg::new(
             &logctx.log,
             &bad_platform_id,

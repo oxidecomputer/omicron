@@ -26,8 +26,8 @@ use crate::validators::{
     ValidatedLrtqUpgradeMsg, ValidatedReconfigureMsg,
 };
 use crate::{
-    Alarm, Configuration, CoordinatorState, Epoch, ExpungedMetadata,
-    NodeHandlerCtx, BaseboardId, messages::*,
+    Alarm, BaseboardId, Configuration, CoordinatorState, Epoch,
+    ExpungedMetadata, NodeHandlerCtx, messages::*,
 };
 use daft::{Diffable, Leaf};
 use gfss::shamir::Share;
@@ -1100,11 +1100,9 @@ mod tests {
     use test_strategy::{Arbitrary, proptest};
 
     fn arb_member() -> impl Strategy<Value = BaseboardId> {
-        (0..255u8).prop_map(|serial| {
-            BaseboardId {
-                part_number: "test".into(),
-                serial_number: serial.to_string(),
-            }
+        (0..255u8).prop_map(|serial| BaseboardId {
+            part_number: "test".into(),
+            serial_number: serial.to_string(),
         })
     }
 

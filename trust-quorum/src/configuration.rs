@@ -5,7 +5,7 @@
 //! A configuration of a trust quroum at a given epoch
 
 use crate::crypto::{EncryptedRackSecrets, RackSecret, Sha3_256Digest};
-use crate::{Epoch, BaseboardId, Threshold};
+use crate::{BaseboardId, Epoch, Threshold};
 use daft::Diffable;
 use gfss::shamir::{Share, SplitError};
 use iddqd::{IdOrdItem, id_upcast};
@@ -110,7 +110,8 @@ impl Configuration {
                 (s.clone(), digest)
             });
 
-        let mut members: BTreeMap<BaseboardId, Sha3_256Digest> = BTreeMap::new();
+        let mut members: BTreeMap<BaseboardId, Sha3_256Digest> =
+            BTreeMap::new();
         let mut shares: BTreeMap<BaseboardId, Share> = BTreeMap::new();
         for (platform_id, (share, digest)) in
             params.members.iter().cloned().zip(shares_and_digests)

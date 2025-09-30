@@ -10,7 +10,7 @@ use crate::crypto::{LrtqShare, PlaintextRackSecrets, ReconstructedRackSecret};
 use crate::validators::{
     ReconfigurationError, ValidatedLrtqUpgradeMsg, ValidatedReconfigureMsg,
 };
-use crate::{Configuration, Epoch, PeerMsgKind, BaseboardId, RackSecret};
+use crate::{BaseboardId, Configuration, Epoch, PeerMsgKind, RackSecret};
 use bootstore::trust_quorum::RackSecret as LrtqRackSecret;
 use daft::{Diffable, Leaf};
 use gfss::shamir::Share;

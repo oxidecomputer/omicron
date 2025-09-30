@@ -11,7 +11,7 @@ use omicron_uuid_kinds::RackUuid;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use trust_quorum::{
-    Epoch, LrtqUpgradeMsg, BaseboardId, ReconfigureMsg, Threshold,
+    BaseboardId, Epoch, LrtqUpgradeMsg, ReconfigureMsg, Threshold,
 };
 
 // The operational state of nexus for a given configuration

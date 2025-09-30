@@ -18,10 +18,10 @@ use slog::{Logger, info};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Display;
 use trust_quorum::{
-    Configuration, CoordinatingMsg, CoordinatorOperation, CoordinatorStateDiff,
-    Envelope, Epoch, LoadRackSecretError, Node, NodeCallerCtx, NodeCommonCtx,
-    NodeCtx, NodeCtxDiff, NodeDiff, PeerMsgKind, PersistentState, BaseboardId,
-    ValidatedLrtqUpgradeMsgDiff, ValidatedReconfigureMsgDiff,
+    BaseboardId, Configuration, CoordinatingMsg, CoordinatorOperation,
+    CoordinatorStateDiff, Envelope, Epoch, LoadRackSecretError, Node,
+    NodeCallerCtx, NodeCommonCtx, NodeCtx, NodeCtxDiff, NodeDiff, PeerMsgKind,
+    PersistentState, ValidatedLrtqUpgradeMsgDiff, ValidatedReconfigureMsgDiff,
 };
 
 // The state of our entire system including the system under test and

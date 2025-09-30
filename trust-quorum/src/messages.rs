@@ -5,7 +5,7 @@
 //! Messsages for the trust quorum protocol
 
 use crate::crypto::LrtqShare;
-use crate::{Configuration, Epoch, BaseboardId, Threshold};
+use crate::{BaseboardId, Configuration, Epoch, Threshold};
 use gfss::shamir::Share;
 use omicron_uuid_kinds::RackUuid;
 use serde::{Deserialize, Serialize};

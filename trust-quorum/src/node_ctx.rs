@@ -5,7 +5,7 @@
 //! Parameter to Node API calls that allows interaction with the system at large
 
 use crate::{
-    Alarm, Envelope, PeerMsg, PeerMsgKind, PersistentState, BaseboardId,
+    Alarm, BaseboardId, Envelope, PeerMsg, PeerMsgKind, PersistentState,
     persistent_state::PersistentStateDiff,
 };
 use daft::{BTreeSetDiff, Diffable, Leaf};

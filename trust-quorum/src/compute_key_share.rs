@@ -9,7 +9,7 @@
 //! other nodes so  that it can compute its own key share.
 
 use crate::{
-    Alarm, Configuration, Epoch, NodeHandlerCtx, PeerMsgKind, BaseboardId,
+    Alarm, BaseboardId, Configuration, Epoch, NodeHandlerCtx, PeerMsgKind,
 };
 use gfss::gf256::Gf256;
 use gfss::shamir::{self, Share};

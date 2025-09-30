@@ -7,7 +7,7 @@
 //! Note that this state is not necessarily directly serialized and saved.
 
 use crate::crypto::LrtqShare;
-use crate::{Configuration, Epoch, BaseboardId};
+use crate::{BaseboardId, Configuration, Epoch};
 use bootstore::schemes::v0::SharePkgCommon as LrtqShareData;
 use daft::Diffable;
 use gfss::shamir::Share;

@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 
 use crate::crypto::ReconstructedRackSecret;
 use crate::{
-    Alarm, Configuration, Epoch, NodeHandlerCtx, PeerMsgKind, BaseboardId,
+    Alarm, BaseboardId, Configuration, Epoch, NodeHandlerCtx, PeerMsgKind,
     RackSecret, Share,
 };
 use daft::{BTreeMapDiff, Diffable, Leaf};

@@ -16,7 +16,7 @@ use slog::{Logger, info, o};
 use std::collections::BTreeSet;
 use test_strategy::{Arbitrary, proptest};
 use trust_quorum::{
-    CoordinatorOperation, Epoch, NodeCallerCtx, NodeCommonCtx, BaseboardId,
+    BaseboardId, CoordinatorOperation, Epoch, NodeCallerCtx, NodeCommonCtx,
     Threshold,
 };
 use trust_quorum_test_utils::TqState;

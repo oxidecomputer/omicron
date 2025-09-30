@@ -92,7 +92,6 @@ impl Epoch {
 #[daft(leaf)]
 pub struct Threshold(pub u8);
 
-
 /// A container to make messages between trust quorum nodes routable
 #[derive(Debug, Clone, Serialize, Deserialize, Diffable)]
 #[cfg_attr(feature = "danger_partial_eq_ct_wrapper", derive(PartialEq, Eq))]
