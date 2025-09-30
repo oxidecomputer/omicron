@@ -6,6 +6,8 @@
 
 use super::MgsUpdateStatus;
 use super::mgs_update_status_inactive_versions;
+use crate::mgs_updates::MgsUpdateOutcome;
+use crate::mgs_updates::PendingHostPhase2Changes;
 
 use nexus_types::deployment::ExpectedVersion;
 use nexus_types::deployment::PendingMgsUpdate;
@@ -64,7 +66,7 @@ pub fn try_make_update_sp(
     current_artifacts: &TufRepoDescription,
     // TODO-K: Like the Host OS, use an enum here as the return type as suggested in
     // https://github.com/oxidecomputer/omicron/pull/9001#discussion_r2372837627
-) -> Result<Option<PendingMgsUpdate>, FailedMgsUpdateReason> {
+) -> Result<MgsUpdateOutcome, FailedMgsUpdateReason> {
     let Some(sp_info) = inventory.sps.get(baseboard_id) else {
         return Err(FailedMgsUpdateReason::Sp(
             FailedSpUpdateReason::SpNotInInventory,
@@ -147,7 +149,7 @@ pub fn try_make_update_sp(
     // needed.
     if artifact.id.version == expected_active_version {
         debug!(log, "no SP update needed for board"; baseboard_id);
-        return Ok(None);
+        return Ok(MgsUpdateOutcome::NoUpdateNeeded);
     }
 
     // Begin configuring an update.
@@ -168,17 +170,21 @@ pub fn try_make_update_sp(
         }
     };
 
-    Ok(Some(PendingMgsUpdate {
-        baseboard_id: baseboard_id.clone(),
-        sp_type: sp_info.sp_type,
-        slot_id: sp_info.sp_slot,
-        details: PendingMgsUpdateDetails::Sp(PendingMgsUpdateSpDetails {
-            expected_active_version,
-            expected_inactive_version,
-        }),
-        artifact_hash: artifact.hash,
-        artifact_version: artifact.id.version.clone(),
-    }))
+    Ok(MgsUpdateOutcome::Pending(
+        PendingMgsUpdate {
+            baseboard_id: baseboard_id.clone(),
+            sp_type: sp_info.sp_type,
+            slot_id: sp_info.sp_slot,
+            details: PendingMgsUpdateDetails::Sp(PendingMgsUpdateSpDetails {
+                expected_active_version,
+                expected_inactive_version,
+            }),
+            artifact_hash: artifact.hash,
+            artifact_version: artifact.id.version.clone(),
+        },
+        // Host phase 2 changes are only possible during Host OS updates.
+        PendingHostPhase2Changes::empty(),
+    ))
 }
 
 #[cfg(test)]

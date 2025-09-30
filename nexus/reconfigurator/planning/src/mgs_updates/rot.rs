@@ -6,6 +6,8 @@
 
 use super::MgsUpdateStatus;
 use super::mgs_update_status_inactive_versions;
+use crate::mgs_updates::MgsUpdateOutcome;
+use crate::mgs_updates::PendingHostPhase2Changes;
 
 use gateway_types::rot::RotSlot;
 use nexus_types::deployment::ExpectedActiveRotSlot;
@@ -110,7 +112,7 @@ pub fn try_make_update_rot(
     current_artifacts: &TufRepoDescription,
     // TODO-K: Like the Host OS, use an enum here as the return type as suggested in
     // https://github.com/oxidecomputer/omicron/pull/9001#discussion_r2372837627
-) -> Result<Option<PendingMgsUpdate>, FailedMgsUpdateReason> {
+) -> Result<MgsUpdateOutcome, FailedMgsUpdateReason> {
     let Some(sp_info) = inventory.sps.get(baseboard_id) else {
         return Err(FailedMgsUpdateReason::Rot(
             FailedRotUpdateReason::SpNotInInventory,
@@ -228,7 +230,7 @@ pub fn try_make_update_rot(
     // needed.
     if artifact.id.version == expected_active_version {
         debug!(log, "no RoT update needed for board"; baseboard_id);
-        return Ok(None);
+        return Ok(MgsUpdateOutcome::NoUpdateNeeded);
     }
 
     let expected_active_slot = ExpectedActiveRotSlot {
@@ -256,23 +258,27 @@ pub fn try_make_update_rot(
         }
     };
 
-    Ok(Some(PendingMgsUpdate {
-        baseboard_id: baseboard_id.clone(),
-        sp_type: sp_info.sp_type,
-        slot_id: sp_info.sp_slot,
-        details: PendingMgsUpdateDetails::Rot(PendingMgsUpdateRotDetails {
-            expected_active_slot,
-            expected_inactive_version,
-            expected_persistent_boot_preference: rot_state
-                .persistent_boot_preference,
-            expected_pending_persistent_boot_preference: rot_state
-                .pending_persistent_boot_preference,
-            expected_transient_boot_preference: rot_state
-                .transient_boot_preference,
-        }),
-        artifact_hash: artifact.hash,
-        artifact_version: artifact.id.version.clone(),
-    }))
+    Ok(MgsUpdateOutcome::Pending(
+        PendingMgsUpdate {
+            baseboard_id: baseboard_id.clone(),
+            sp_type: sp_info.sp_type,
+            slot_id: sp_info.sp_slot,
+            details: PendingMgsUpdateDetails::Rot(PendingMgsUpdateRotDetails {
+                expected_active_slot,
+                expected_inactive_version,
+                expected_persistent_boot_preference: rot_state
+                    .persistent_boot_preference,
+                expected_pending_persistent_boot_preference: rot_state
+                    .pending_persistent_boot_preference,
+                expected_transient_boot_preference: rot_state
+                    .transient_boot_preference,
+            }),
+            artifact_hash: artifact.hash,
+            artifact_version: artifact.id.version.clone(),
+        },
+        // Host phase 2 changes are only possible during Host OS updates.
+        PendingHostPhase2Changes::empty(),
+    ))
 }
 
 #[cfg(test)]

@@ -6,6 +6,7 @@
 
 use super::MgsUpdateStatus;
 use super::MgsUpdateStatusError;
+use crate::mgs_updates::MgsUpdateOutcome;
 use nexus_types::deployment::BlueprintArtifactVersion;
 use nexus_types::deployment::BlueprintHostPhase2DesiredContents;
 use nexus_types::deployment::PendingMgsUpdate;
@@ -276,7 +277,8 @@ pub(super) fn try_make_update(
     // TODO-K: Instead of this convoluted return type use an enum as suggested in
     // https://github.com/oxidecomputer/omicron/pull/9001#discussion_r2372837627
 ) -> Result<
-    Option<(PendingMgsUpdate, PendingHostPhase2Changes)>,
+    //Option<(PendingMgsUpdate, PendingHostPhase2Changes)>,
+    MgsUpdateOutcome,
     FailedMgsUpdateReason,
 > {
     let Some(sp_info) = inventory.sps.get(baseboard_id) else {
@@ -287,12 +289,14 @@ pub(super) fn try_make_update(
 
     // Only configure host OS updates for sleds.
     //
-    // We don't bother logging a return value of `None` for non-sleds, because
-    // we will never attempt to configure an update for them (nor should we).
-    // For the same reason, we do not return an error.
+    // We don't bother logging a return value of `NoUpdateNeeded` for non-sleds,
+    // because we will never attempt to configure an update for them (nor should
+    // we). For the same reason, we do not return an error.
     match sp_info.sp_type {
         SpType::Sled => (),
-        SpType::Power | SpType::Switch => return Ok(None),
+        SpType::Power | SpType::Switch => {
+            return Ok(MgsUpdateOutcome::NoUpdateNeeded);
+        }
     }
 
     let Some(sled_agent) = inventory.sled_agents.iter().find(|sled_agent| {
@@ -432,7 +436,7 @@ pub(super) fn try_make_update(
     // this sled will fail to boot if it were rebooted now.)
     if active_phase_2_hash == phase_2_artifact.hash {
         debug!(log, "no host OS update needed for board"; baseboard_id);
-        return Ok(None);
+        return Ok(MgsUpdateOutcome::NoUpdateNeeded);
     }
 
     // Before we can proceed with the phase 1 update, we need sled-agent to
@@ -448,7 +452,7 @@ pub(super) fn try_make_update(
         phase_2_artifact,
     );
 
-    Ok(Some((
+    Ok(MgsUpdateOutcome::Pending(
         PendingMgsUpdate {
             baseboard_id: baseboard_id.clone(),
             sp_type: sp_info.sp_type,
@@ -468,7 +472,7 @@ pub(super) fn try_make_update(
             artifact_version: phase_1_artifact.id.version.clone(),
         },
         pending_host_phase_2_changes,
-    )))
+    ))
 }
 
 #[cfg(test)]

@@ -546,6 +546,11 @@ fn mgs_update_status_inactive_versions(
     }
 }
 
+enum MgsUpdateOutcome {
+    NoUpdateNeeded,
+    Pending(PendingMgsUpdate, PendingHostPhase2Changes),
+}
+
 /// Determine if the given baseboard needs any MGS-driven update (e.g., update
 /// to its SP, RoT, etc.).  If so, returns the update and a set of changes that
 /// need to be made to sled configs related to host phase 2 images (this set
@@ -588,44 +593,50 @@ fn try_make_update(
                 inventory,
                 current_artifacts,
             ),
-            MgsUpdateComponent::HostOs => {
-                match host_phase_1::try_make_update(
-                    log,
-                    baseboard_id,
-                    inventory,
-                    current_artifacts,
-                ) {
-                    Ok(pending_update) => {
-                        // Host updates also return host OS phase 2 changes;
-                        // pull those out here and insert them into
-                        // `pending_actions`, then return the typical pending
-                        // update (which will itself be inserted into
-                        // `pending_actions` below).
-                        if let Some((update, host_os_phase_2_changes)) =
-                            pending_update
-                        {
-                            pending_actions.set_pending_host_os_phase2_changes(
-                                host_os_phase_2_changes,
-                            );
-                            Ok(Some(update))
-                        } else {
-                            Ok(None)
-                        }
-                    }
-                    Err(e) => Err(e),
-                }
-            }
+            MgsUpdateComponent::HostOs => host_phase_1::try_make_update(
+                log,
+                baseboard_id,
+                inventory,
+                current_artifacts,
+            ), //{
+               //  Ok(pending_update) => {
+               //      // Host updates also return host OS phase 2 changes;
+               //      // pull those out here and insert them into
+               //      // `pending_actions`, then return the typical pending
+               //      // update (which will itself be inserted into
+               //      // `pending_actions` below).
+               //      if let Some((update, host_os_phase_2_changes)) =
+               //          pending_update
+               //      {
+               //          pending_actions.set_pending_host_os_phase2_changes(
+               //              host_os_phase_2_changes,
+               //          );
+               //          Ok(Some(update))
+               //      } else {
+               //          Ok(None)
+               //      }
+               //  }
+               //  Err(e) => Err(e),
+               //}
+               //};
         };
 
         match update_attempt {
-            Ok(None) => {
+            Ok(MgsUpdateOutcome::NoUpdateNeeded) => {
                 // No update needed; try the next component.
                 continue;
             }
             // If there is a pending or blocked MGS-driven update, we break so
             // we can return it immediately.
-            Ok(Some(update)) => {
+            Ok(MgsUpdateOutcome::Pending(
+                update,
+                pending_host_os_phase2_changes,
+            )) => {
                 pending_actions.add_pending_update(update);
+                // Host OS updates also return phase 2 changes.
+                pending_actions.set_pending_host_os_phase2_changes(
+                    pending_host_os_phase2_changes,
+                );
                 break;
             }
             Err(e) => {
