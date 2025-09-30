@@ -19,6 +19,9 @@ progenitor::generate_api!(
         slog::debug!(log, "client response"; "result" => ?result);
     }),
     derives = [schemars::JsonSchema],
+    crates = {
+        "omicron-uuid-kinds" = "*",
+    },
     replace = {
         Duration = std::time::Duration,
         EventReportForInstallinatorSpec = installinator_common::EventReport,
@@ -27,7 +30,6 @@ progenitor::generate_api!(
         ProgressEventForInstallinatorSpec = installinator_common::ProgressEvent,
         StepEventForGenericSpec = installinator_common::StepEvent<update_engine::NestedSpec>,
         StepEventForInstallinatorSpec = installinator_common::StepEvent,
-        TypedUuidForMupdateKind = omicron_uuid_kinds::MupdateUuid,
     }
 );
 

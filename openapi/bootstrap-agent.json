@@ -105,7 +105,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/TypedUuidForRackInitKind"
+                  "$ref": "#/components/schemas/RackInitUuid"
                 }
               }
             }
@@ -127,7 +127,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/TypedUuidForRackResetKind"
+                  "$ref": "#/components/schemas/RackResetUuid"
                 }
               }
             }
@@ -921,6 +921,15 @@
           "speed400_g"
         ]
       },
+      "RackInitUuid": {
+        "x-rust-type": {
+          "crate": "omicron-uuid-kinds",
+          "path": "omicron_uuid_kinds::RackInitUuid",
+          "version": "*"
+        },
+        "type": "string",
+        "format": "uuid"
+      },
       "RackInitializeRequest": {
         "description": "Configuration for the \"rack setup service\".\n\nThe Rack Setup Service should be responsible for one-time setup actions, such as CockroachDB placement and initialization.  Without operator intervention, however, these actions need a way to be automated in our deployment.",
         "type": "object",
@@ -1077,7 +1086,7 @@
             "type": "object",
             "properties": {
               "id": {
-                "$ref": "#/components/schemas/TypedUuidForRackInitKind"
+                "$ref": "#/components/schemas/RackInitUuid"
               },
               "status": {
                 "type": "string",
@@ -1103,7 +1112,7 @@
                 "nullable": true,
                 "allOf": [
                   {
-                    "$ref": "#/components/schemas/TypedUuidForRackInitKind"
+                    "$ref": "#/components/schemas/RackInitUuid"
                   }
                 ]
               },
@@ -1122,7 +1131,7 @@
             "type": "object",
             "properties": {
               "id": {
-                "$ref": "#/components/schemas/TypedUuidForRackInitKind"
+                "$ref": "#/components/schemas/RackInitUuid"
               },
               "message": {
                 "type": "string"
@@ -1144,7 +1153,7 @@
             "type": "object",
             "properties": {
               "id": {
-                "$ref": "#/components/schemas/TypedUuidForRackInitKind"
+                "$ref": "#/components/schemas/RackInitUuid"
               },
               "status": {
                 "type": "string",
@@ -1162,7 +1171,7 @@
             "type": "object",
             "properties": {
               "id": {
-                "$ref": "#/components/schemas/TypedUuidForRackResetKind"
+                "$ref": "#/components/schemas/RackResetUuid"
               },
               "status": {
                 "type": "string",
@@ -1184,7 +1193,7 @@
                 "nullable": true,
                 "allOf": [
                   {
-                    "$ref": "#/components/schemas/TypedUuidForRackResetKind"
+                    "$ref": "#/components/schemas/RackResetUuid"
                   }
                 ]
               },
@@ -1203,7 +1212,7 @@
             "type": "object",
             "properties": {
               "id": {
-                "$ref": "#/components/schemas/TypedUuidForRackResetKind"
+                "$ref": "#/components/schemas/RackResetUuid"
               },
               "message": {
                 "type": "string"
@@ -1225,7 +1234,7 @@
             "type": "object",
             "properties": {
               "id": {
-                "$ref": "#/components/schemas/TypedUuidForRackResetKind"
+                "$ref": "#/components/schemas/RackResetUuid"
               },
               "status": {
                 "type": "string",
@@ -1240,6 +1249,15 @@
             ]
           }
         ]
+      },
+      "RackResetUuid": {
+        "x-rust-type": {
+          "crate": "omicron-uuid-kinds",
+          "path": "omicron_uuid_kinds::RackResetUuid",
+          "version": "*"
+        },
+        "type": "string",
+        "format": "uuid"
       },
       "RecoverySiloConfig": {
         "type": "object",
@@ -1567,14 +1585,6 @@
             "format": "int32"
           }
         }
-      },
-      "TypedUuidForRackInitKind": {
-        "type": "string",
-        "format": "uuid"
-      },
-      "TypedUuidForRackResetKind": {
-        "type": "string",
-        "format": "uuid"
       },
       "UplinkAddressConfig": {
         "type": "object",

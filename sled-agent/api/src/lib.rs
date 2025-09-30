@@ -67,6 +67,7 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
+    (5, NEWTYPE_UUID_BUMP),
     (4, ADD_NEXUS_LOCKSTEP_PORT_TO_INVENTORY),
     (3, ADD_SWITCH_ZONE_OPERATOR_POLICY),
     (2, REMOVE_DESTROY_ORPHANED_DATASETS_CHICKEN_SWITCH),
