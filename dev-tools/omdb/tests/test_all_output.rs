@@ -178,6 +178,20 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
 
     let invocations: &[&[&str]] = &[
         &["db", "db-metadata", "ls-nexus"],
+        // We expect this operation to fail (the nexus generation is the same
+        // as the one in the target blueprint - it shouldn't be trying to
+        // quiesce yet).
+        //
+        // We test a version of this command which sets this record to quiesced
+        // anyway as the final invocation.
+        &[
+            "--destructive",
+            "db",
+            "db-metadata",
+            "force-mark-nexus-quiesced",
+            "--skip-confirmation",
+            &cptestctx.server.server_context().nexus.id().to_string(),
+        ],
         &["db", "disks", "list"],
         &["db", "dns", "show"],
         &["db", "dns", "diff", "external", "2"],
@@ -274,6 +288,21 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
         // We can't easily test the sled agent output because that's only
         // provided by a real sled agent, which is not available in the
         // ControlPlaneTestContext.
+
+        // This operation will set the "db_metadata_nexus" state to quiesced.
+        //
+        // This would normally only be set by a Nexus as it shuts itself down;
+        // save it for last to avoid causing a weird state while testing other
+        // commands.
+        &[
+            "--destructive",
+            "db",
+            "db-metadata",
+            "force-mark-nexus-quiesced",
+            "--skip-confirmation",
+            "--skip-blueprint-validation",
+            &cptestctx.server.server_context().nexus.id().to_string(),
+        ],
     ];
 
     let mut redactor = Redactor::default();
@@ -302,6 +331,26 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
         .field("list ok:", r"\d+")
         .field("triggered by", r"[\w ]+")
         .section(&["task: \"tuf_artifact_replication\"", "request ringbuf:"]);
+
+    // The `sp_ereport_ingester` task's output depends on how many simulated
+    // sled agents ahppen to register with Nexus before its first execution.
+    // These redactions work around the issue described in
+    // https://github.com/oxidecomputer/omicron/issues/8979
+    redactor
+        .field("total ereports received:", r"\d+")
+        .field("new ereports ingested:", r"\d+")
+        .field("total HTTP requests sent:", r"\d+")
+        .field("total collection errors:", r"\d+")
+        .field("reporters with ereports:", r"\d+")
+        .field("reporters with collection errors:", r"\d+")
+        .totally_annihilate_section(&[
+            "task: \"sp_ereport_ingester\"",
+            "errors listing reporters:",
+        ])
+        .totally_annihilate_section(&[
+            "task: \"sp_ereport_ingester\"",
+            "service processors:",
+        ]);
 
     for args in invocations {
         println!("running commands with args: {:?}", args);

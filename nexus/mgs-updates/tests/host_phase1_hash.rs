@@ -11,10 +11,10 @@
 use gateway_client::Client;
 use gateway_client::SpComponent;
 use gateway_client::types::ComponentFirmwareHashStatus;
-use gateway_client::types::SpType;
 use gateway_client::types::SpUpdateStatus;
 use gateway_messages::SpPort;
 use gateway_test_utils::setup as mgs_setup;
+use nexus_types::inventory::SpType;
 use omicron_test_utils::dev::poll::CondCheckError;
 use omicron_test_utils::dev::poll::wait_for_condition;
 use sha2::Digest as _;
@@ -40,7 +40,7 @@ impl Phase1HashStatusChecker<'_> {
             let status = self
                 .mgs_client
                 .sp_component_hash_firmware_get(
-                    self.sp_type,
+                    &self.sp_type,
                     self.sp_slot,
                     self.sp_component,
                     *firmware_slot,
@@ -89,7 +89,7 @@ async fn test_host_phase1_hashing() {
     for firmware_slot in [0, 1] {
         let status = mgs_client
             .sp_component_hash_firmware_get(
-                sp_type,
+                &sp_type,
                 sp_slot,
                 sp_component,
                 firmware_slot,
@@ -104,7 +104,7 @@ async fn test_host_phase1_hashing() {
 
     // Start hashing firmware slot 0.
     mgs_client
-        .sp_component_hash_firmware_start(sp_type, sp_slot, sp_component, 0)
+        .sp_component_hash_firmware_start(&sp_type, sp_slot, sp_component, 0)
         .await
         .expect("started firmware hashing");
 
@@ -120,7 +120,7 @@ async fn test_host_phase1_hashing() {
     // We can start hashing firmware slot 0 again; this should be a no-op while
     // hashing is being done.
     mgs_client
-        .sp_component_hash_firmware_start(sp_type, sp_slot, sp_component, 0)
+        .sp_component_hash_firmware_start(&sp_type, sp_slot, sp_component, 0)
         .await
         .expect("starting hashing while hashing should be okay");
 
@@ -156,7 +156,7 @@ async fn test_host_phase1_hashing() {
 
     // Repeat, but slot 1.
     mgs_client
-        .sp_component_hash_firmware_start(sp_type, sp_slot, sp_component, 1)
+        .sp_component_hash_firmware_start(&sp_type, sp_slot, sp_component, 1)
         .await
         .expect("started firmware hashing");
     hashing_complete_sender.complete_next_hashing_attempt();
@@ -176,7 +176,7 @@ async fn test_host_phase1_hashing() {
         let update_id = Uuid::new_v4();
         mgs_client
             .sp_component_update(
-                sp_type,
+                &sp_type,
                 sp_slot,
                 sp_component,
                 1,
@@ -188,7 +188,7 @@ async fn test_host_phase1_hashing() {
         wait_for_condition(
             || async {
                 let update_status = mgs_client
-                    .sp_component_update_status(sp_type, sp_slot, sp_component)
+                    .sp_component_update_status(&sp_type, sp_slot, sp_component)
                     .await
                     .expect("got update status")
                     .into_inner();
@@ -244,7 +244,7 @@ async fn test_host_phase1_hashing() {
 
     // Start hashing firmware slot 1.
     mgs_client
-        .sp_component_hash_firmware_start(sp_type, sp_slot, sp_component, 1)
+        .sp_component_hash_firmware_start(&sp_type, sp_slot, sp_component, 1)
         .await
         .expect("started firmware hashing");
     phase1_checker

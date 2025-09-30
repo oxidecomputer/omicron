@@ -1420,6 +1420,7 @@ table! {
         valid_until -> Timestamptz,
         system_version -> Text,
         file_name -> Text,
+        time_pruned -> Nullable<Timestamptz>,
     }
 }
 
