@@ -23,7 +23,6 @@ use nexus_types::deployment::PendingMgsUpdateSpDetails;
 use nexus_types::deployment::PendingMgsUpdates;
 use nexus_types::deployment::TargetReleaseDescription;
 use nexus_types::deployment::planning_report::BlockedMgsUpdate;
-use nexus_types::deployment::planning_report::FailedMgsUpdateReasonComponent;
 use nexus_types::inventory::BaseboardId;
 use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::Collection;
@@ -586,7 +585,7 @@ fn try_make_update(
                     inventory,
                     current_artifacts,
                 )
-                .map_err(|e| e.into_generic())
+                .map_err(|e| e.into())
             }
             MgsUpdateComponent::Rot => rot::try_make_update(
                 log,
@@ -594,21 +593,21 @@ fn try_make_update(
                 inventory,
                 current_artifacts,
             )
-            .map_err(|e| e.into_generic()),
+            .map_err(|e| e.into()),
             MgsUpdateComponent::Sp => sp::try_make_update(
                 log,
                 baseboard_id,
                 inventory,
                 current_artifacts,
             )
-            .map_err(|e| e.into_generic()),
+            .map_err(|e| e.into()),
             MgsUpdateComponent::HostOs => host_phase_1::try_make_update(
                 log,
                 baseboard_id,
                 inventory,
                 current_artifacts,
             )
-            .map_err(|e| e.into_generic()),
+            .map_err(|e| e.into()),
         };
 
         match update_attempt {
@@ -623,7 +622,8 @@ fn try_make_update(
                 pending_host_os_phase2_changes,
             )) => {
                 pending_actions.add_pending_update(update);
-                // Host OS updates also return phase 2 changes.
+                // If update_attempt is a host OS update, stage the phase 2
+                // changes. For any other type, this set will be empty
                 pending_actions.set_pending_host_os_phase2_changes(
                     pending_host_os_phase2_changes,
                 );
