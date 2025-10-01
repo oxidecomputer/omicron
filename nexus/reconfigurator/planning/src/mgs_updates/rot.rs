@@ -246,7 +246,7 @@ pub(super) fn try_make_update(
     };
 
     Ok(MgsUpdateOutcome::Pending(
-        Box::new(PendingMgsUpdate {
+        PendingMgsUpdate {
             baseboard_id: baseboard_id.clone(),
             sp_type: sp_info.sp_type,
             slot_id: sp_info.sp_slot,
@@ -262,7 +262,7 @@ pub(super) fn try_make_update(
             }),
             artifact_hash: artifact.hash,
             artifact_version: artifact.id.version.clone(),
-        }),
+        },
         // Host phase 2 changes are only possible during Host OS updates.
         PendingHostPhase2Changes::empty(),
     ))

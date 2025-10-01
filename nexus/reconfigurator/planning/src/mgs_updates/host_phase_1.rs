@@ -434,7 +434,7 @@ pub(super) fn try_make_update(
     );
 
     Ok(MgsUpdateOutcome::Pending(
-        Box::new(PendingMgsUpdate {
+        PendingMgsUpdate {
             baseboard_id: baseboard_id.clone(),
             sp_type: sp_info.sp_type,
             slot_id: sp_info.sp_slot,
@@ -451,7 +451,7 @@ pub(super) fn try_make_update(
             ),
             artifact_hash: phase_1_artifact.hash,
             artifact_version: phase_1_artifact.id.version.clone(),
-        }),
+        },
         pending_host_phase_2_changes,
     ))
 }
