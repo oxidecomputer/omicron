@@ -13,7 +13,6 @@ use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdateDetails;
 use nexus_types::deployment::PendingMgsUpdateHostPhase1Details;
 use nexus_types::deployment::planning_report::FailedHostOsUpdateReason;
-use nexus_types::deployment::planning_report::FailedMgsUpdateReason;
 use nexus_types::inventory::BaseboardId;
 use nexus_types::inventory::Collection;
 use nexus_types::inventory::SpType;
@@ -274,11 +273,9 @@ pub(super) fn try_make_update(
     baseboard_id: &Arc<BaseboardId>,
     inventory: &Collection,
     current_artifacts: &TufRepoDescription,
-) -> Result<MgsUpdateOutcome, FailedMgsUpdateReason> {
+) -> Result<MgsUpdateOutcome, FailedHostOsUpdateReason> {
     let Some(sp_info) = inventory.sps.get(baseboard_id) else {
-        return Err(FailedMgsUpdateReason::HostOs(
-            FailedHostOsUpdateReason::SpNotInInventory,
-        ));
+        return Err(FailedHostOsUpdateReason::SpNotInInventory);
     };
 
     // Only configure host OS updates for sleds.
@@ -296,23 +293,17 @@ pub(super) fn try_make_update(
     let Some(sled_agent) = inventory.sled_agents.iter().find(|sled_agent| {
         sled_agent.baseboard_id.as_ref() == Some(baseboard_id)
     }) else {
-        return Err(FailedMgsUpdateReason::HostOs(
-            FailedHostOsUpdateReason::SledAgentInfoNotInInventory,
-        ));
+        return Err(FailedHostOsUpdateReason::SledAgentInfoNotInInventory);
     };
     let Some(last_reconciliation) = sled_agent.last_reconciliation.as_ref()
     else {
-        return Err(FailedMgsUpdateReason::HostOs(
-            FailedHostOsUpdateReason::LastReconciliationNotInInventory,
-        ));
+        return Err(FailedHostOsUpdateReason::LastReconciliationNotInInventory);
     };
     let boot_disk = match &last_reconciliation.boot_partitions.boot_disk {
         Ok(boot_disk) => *boot_disk,
         Err(err) => {
-            return Err(FailedMgsUpdateReason::HostOs(
-                FailedHostOsUpdateReason::UnableToDetermineBootDisk(
-                    err.to_string(),
-                ),
+            return Err(FailedHostOsUpdateReason::UnableToDetermineBootDisk(
+                err.to_string(),
             ));
         }
     };
@@ -320,20 +311,20 @@ pub(super) fn try_make_update(
         match &last_reconciliation.boot_partitions.slot_details(boot_disk) {
             Ok(details) => details.artifact_hash,
             Err(err) => {
-                return Err(FailedMgsUpdateReason::HostOs(
+                return Err(
                 FailedHostOsUpdateReason::UnableToRetrieveBootDiskPhase2Image(
                     err.to_string(),
                 ),
-            ));
+            );
             }
         };
 
     let Some(active_phase_1_slot) =
         inventory.host_phase_1_active_slot_for(baseboard_id).map(|s| s.slot)
     else {
-        return Err(FailedMgsUpdateReason::HostOs(
+        return Err(
             FailedHostOsUpdateReason::ActiveHostPhase1SlotNotInInventory,
-        ));
+        );
     };
 
     // TODO-correctness What should we do if the active phase 1 slot doesn't
@@ -348,22 +339,22 @@ pub(super) fn try_make_update(
     // 1 slot and the boot disk, they'll induce a support case to recover, given
     // this current implementation. As far as we know they shouldn't happen.
     if active_phase_1_slot != boot_disk {
-        return Err(FailedMgsUpdateReason::HostOs(
+        return Err(
             FailedHostOsUpdateReason::ActiveHostPhase1SlotBootDiskMismatch(
                 active_phase_1_slot,
             ),
-        ));
+        );
     }
 
     let Some(active_phase_1_hash) = inventory
         .host_phase_1_flash_hash_for(active_phase_1_slot, baseboard_id)
         .map(|h| h.hash)
     else {
-        return Err(FailedMgsUpdateReason::HostOs(
+        return Err(
             FailedHostOsUpdateReason::ActiveHostPhase1HashNotInInventory(
                 active_phase_1_slot,
             ),
-        ));
+        );
     };
 
     let Some(inactive_phase_1_hash) = inventory
@@ -373,11 +364,11 @@ pub(super) fn try_make_update(
         )
         .map(|h| h.hash)
     else {
-        return Err(FailedMgsUpdateReason::HostOs(
+        return Err(
             FailedHostOsUpdateReason::InactiveHostPhase1HashNotInInventory(
                 active_phase_1_slot.toggled(),
             ),
-        ));
+        );
     };
 
     let mut phase_1_artifacts = Vec::with_capacity(1);
@@ -397,28 +388,24 @@ pub(super) fn try_make_update(
             ([p1], [p2]) => (p1, p2),
             // "TUF is broken" cases: missing both, one or the other.
             ([], []) => {
-                return Err(FailedMgsUpdateReason::HostOs(
-                    FailedHostOsUpdateReason::NoMatchingArtifactsFound,
-                ));
+                return Err(FailedHostOsUpdateReason::NoMatchingArtifactsFound);
             }
             ([], _) => {
-                return Err(FailedMgsUpdateReason::HostOs(
+                return Err(
                     FailedHostOsUpdateReason::NoMatchingPhase1ArtifactFound,
-                ));
+                );
             }
             (_, []) => {
-                return Err(FailedMgsUpdateReason::HostOs(
+                return Err(
                     FailedHostOsUpdateReason::NoMatchingPhase2ArtifactFound,
-                ));
+                );
             }
             // "TUF is broken" cases: have multiple of one or the other. This
             // should be impossible unless we shipped a TUF repo with multiple
             // host OS images. We can't proceed, because we don't know how to
             // pair up which phase 1 matches which phase 2.
             (_, _) => {
-                return Err(FailedMgsUpdateReason::HostOs(
-                    FailedHostOsUpdateReason::TooManyMatchingArtifacts,
-                ));
+                return Err(FailedHostOsUpdateReason::TooManyMatchingArtifacts);
             }
         };
 

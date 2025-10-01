@@ -23,6 +23,7 @@ use nexus_types::deployment::PendingMgsUpdateSpDetails;
 use nexus_types::deployment::PendingMgsUpdates;
 use nexus_types::deployment::TargetReleaseDescription;
 use nexus_types::deployment::planning_report::BlockedMgsUpdate;
+use nexus_types::deployment::planning_report::FailedMgsUpdateReasonComponent;
 use nexus_types::inventory::BaseboardId;
 use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::Collection;
@@ -574,25 +575,29 @@ fn try_make_update(
                     inventory,
                     current_artifacts,
                 )
+                .map_err(|e| e.into_generic())
             }
             MgsUpdateComponent::Rot => rot::try_make_update(
                 log,
                 baseboard_id,
                 inventory,
                 current_artifacts,
-            ),
+            )
+            .map_err(|e| e.into_generic()),
             MgsUpdateComponent::Sp => sp::try_make_update(
                 log,
                 baseboard_id,
                 inventory,
                 current_artifacts,
-            ),
+            )
+            .map_err(|e| e.into_generic()),
             MgsUpdateComponent::HostOs => host_phase_1::try_make_update(
                 log,
                 baseboard_id,
                 inventory,
                 current_artifacts,
-            ),
+            )
+            .map_err(|e| e.into_generic()),
         };
 
         match update_attempt {

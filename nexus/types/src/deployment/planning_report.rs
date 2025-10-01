@@ -515,6 +515,12 @@ pub enum FailedMgsUpdateReason {
     Sp(FailedSpUpdateReason),
 }
 
+pub trait FailedMgsUpdateReasonComponent {
+    /// Converts a failed planned update from a specific component into a
+    /// FailedMgsUpdateReason
+    fn into_generic(self) -> FailedMgsUpdateReason;
+}
+
 /// Describes the reason why an RoT bootloader failed to update
 #[derive(
     Error,
@@ -548,6 +554,12 @@ pub enum FailedRotBootloaderUpdateReason {
     /// The component's corresponding SP was not found in the inventory
     #[error("corresponding SP is not in inventory")]
     SpNotInInventory,
+}
+
+impl FailedMgsUpdateReasonComponent for FailedRotBootloaderUpdateReason {
+    fn into_generic(self) -> FailedMgsUpdateReason {
+        FailedMgsUpdateReason::RotBootloader(self)
+    }
 }
 
 /// Describes the reason why an RoT failed to update
@@ -588,6 +600,12 @@ pub enum FailedRotUpdateReason {
     SpNotInInventory,
 }
 
+impl FailedMgsUpdateReasonComponent for FailedRotUpdateReason {
+    fn into_generic(self) -> FailedMgsUpdateReason {
+        FailedMgsUpdateReason::Rot(self)
+    }
+}
+
 /// Describes the reason why an SP failed to update
 #[derive(
     Error,
@@ -618,6 +636,12 @@ pub enum FailedSpUpdateReason {
     /// The component's corresponding SP was not found in the inventory
     #[error("corresponding SP is not in inventory")]
     SpNotInInventory,
+}
+
+impl FailedMgsUpdateReasonComponent for FailedSpUpdateReason {
+    fn into_generic(self) -> FailedMgsUpdateReason {
+        FailedMgsUpdateReason::Sp(self)
+    }
 }
 
 /// Describes the reason why a Host OS failed to update
@@ -685,6 +709,12 @@ pub enum FailedHostOsUpdateReason {
     /// details
     #[error("sled agent was unable to retrieve boot disk phase 2 image: {0:?}")]
     UnableToRetrieveBootDiskPhase2Image(String),
+}
+
+impl FailedMgsUpdateReasonComponent for FailedHostOsUpdateReason {
+    fn into_generic(self) -> FailedMgsUpdateReason {
+        FailedMgsUpdateReason::HostOs(self)
+    }
 }
 
 #[derive(

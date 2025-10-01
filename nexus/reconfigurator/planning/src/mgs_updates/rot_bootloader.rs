@@ -13,7 +13,6 @@ use nexus_types::deployment::ExpectedVersion;
 use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdateDetails;
 use nexus_types::deployment::PendingMgsUpdateRotBootloaderDetails;
-use nexus_types::deployment::planning_report::FailedMgsUpdateReason;
 use nexus_types::deployment::planning_report::FailedRotBootloaderUpdateReason;
 use nexus_types::inventory::BaseboardId;
 use nexus_types::inventory::CabooseWhich;
@@ -65,41 +64,33 @@ pub(super) fn try_make_update(
     baseboard_id: &Arc<BaseboardId>,
     inventory: &Collection,
     current_artifacts: &TufRepoDescription,
-) -> Result<MgsUpdateOutcome, FailedMgsUpdateReason> {
+) -> Result<MgsUpdateOutcome, FailedRotBootloaderUpdateReason> {
     let Some(sp_info) = inventory.sps.get(baseboard_id) else {
-        return Err(FailedMgsUpdateReason::RotBootloader(
-            FailedRotBootloaderUpdateReason::SpNotInInventory,
-        ));
+        return Err(FailedRotBootloaderUpdateReason::SpNotInInventory);
     };
 
     let Some(stage0_caboose) =
         inventory.caboose_for(CabooseWhich::Stage0, baseboard_id)
     else {
-        return Err(FailedMgsUpdateReason::RotBootloader(
-            FailedRotBootloaderUpdateReason::CabooseNotInInventory(
-                CabooseWhich::Stage0,
-            ),
+        return Err(FailedRotBootloaderUpdateReason::CabooseNotInInventory(
+            CabooseWhich::Stage0,
         ));
     };
 
     let expected_stage0_version = match stage0_caboose.caboose.version.parse() {
         Ok(v) => v,
         Err(e) => {
-            return Err(FailedMgsUpdateReason::RotBootloader(
-                FailedRotBootloaderUpdateReason::FailedVersionParse {
-                    caboose: CabooseWhich::Stage0,
-                    err: format!("{}", e),
-                },
-            ));
+            return Err(FailedRotBootloaderUpdateReason::FailedVersionParse {
+                caboose: CabooseWhich::Stage0,
+                err: format!("{}", e),
+            });
         }
     };
 
     let board = &stage0_caboose.caboose.board;
     let Some(rkth) = &stage0_caboose.caboose.sign else {
-        return Err(FailedMgsUpdateReason::RotBootloader(
-            FailedRotBootloaderUpdateReason::CabooseMissingSign(
-                CabooseWhich::Stage0,
-            ),
+        return Err(FailedRotBootloaderUpdateReason::CabooseMissingSign(
+            CabooseWhich::Stage0,
         ));
     };
 
@@ -152,9 +143,7 @@ pub(super) fn try_make_update(
         })
         .collect();
     if matching_artifacts.is_empty() {
-        return Err(FailedMgsUpdateReason::RotBootloader(
-            FailedRotBootloaderUpdateReason::NoMatchingArtifactFound,
-        ));
+        return Err(FailedRotBootloaderUpdateReason::NoMatchingArtifactFound);
     }
 
     if matching_artifacts.len() > 1 {
@@ -186,12 +175,10 @@ pub(super) fn try_make_update(
         Ok(None) => ExpectedVersion::NoValidVersion,
         Ok(Some(v)) => ExpectedVersion::Version(v),
         Err(e) => {
-            return Err(FailedMgsUpdateReason::RotBootloader(
-                FailedRotBootloaderUpdateReason::FailedVersionParse {
-                    caboose: CabooseWhich::Stage0Next,
-                    err: format!("{}", e),
-                },
-            ));
+            return Err(FailedRotBootloaderUpdateReason::FailedVersionParse {
+                caboose: CabooseWhich::Stage0Next,
+                err: format!("{}", e),
+            });
         }
     };
 
