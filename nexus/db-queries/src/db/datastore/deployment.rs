@@ -3866,7 +3866,7 @@ mod tests {
 
         // Now make a new blueprint (with no meaningful changes) to ensure we
         // can delete the last test blueprint we generated above.
-        let blueprint6 = BlueprintBuilder::new_based_on(
+        let mut blueprint6 = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint5,
             &planning_input,
@@ -3876,6 +3876,23 @@ mod tests {
         )
         .expect("failed to create builder")
         .build(BlueprintSource::Test);
+
+        // Add ClickHouse configuration to exercise those tables
+        if let Some((_, sled_config)) = blueprint6.sleds.iter().next() {
+            if let Some(zone_config) = sled_config.zones.iter().next() {
+                let zone_id = zone_config.id;
+                let mut cfg = ClickhouseClusterConfig::new(
+                    format!("cluster-{TEST_NAME}"),
+                    "test-secret".into(),
+                );
+                cfg.max_used_keeper_id = KeeperId::from(1u64);
+                cfg.max_used_server_id = ServerId::from(1u64);
+                cfg.keepers.insert(zone_id, KeeperId::from(1u64));
+                cfg.servers.insert(zone_id, ServerId::from(1u64));
+                blueprint6.clickhouse_cluster_config = Some(cfg);
+            }
+        }
+
         datastore
             .blueprint_insert(&opctx, &blueprint6)
             .await
@@ -4750,13 +4767,9 @@ mod tests {
         /// Complements `ensure_blueprint_fully_deleted`.
         fn ensure_fully_populated(&self) {
             // Exception tables that may be empty in the test blueprints:
-            // - ClickHouse tables: only populated when blueprint includes ClickHouse configuration
             // - debug log for planner reports: only populated when the blueprint
             //   was produced by the planner (test blueprints generally aren't)
             let exception_tables = [
-                "bp_clickhouse_cluster_config",
-                "bp_clickhouse_keeper_zone_id_to_node_id",
-                "bp_clickhouse_server_zone_id_to_node_id",
                 "debug_log_blueprint_planning",
             ];
 
