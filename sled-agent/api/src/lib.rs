@@ -12,6 +12,7 @@ use dropshot::{
     HttpResponseOk, HttpResponseUpdatedNoContent, Path, Query, RequestContext,
     StreamingBody, TypedBody,
 };
+use dropshot_api_manager_types::api_versions;
 use nexus_sled_agent_shared::inventory::{
     Inventory, OmicronSledConfig, SledRole,
 };
@@ -29,9 +30,6 @@ use omicron_common::{
 };
 use omicron_uuid_kinds::{
     DatasetUuid, PropolisUuid, SupportBundleUuid, ZpoolUuid,
-};
-use openapi_manager_types::{
-    SupportedVersion, SupportedVersions, api_versions,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};

@@ -14,6 +14,7 @@ use dropshot::{
     Query, RequestContext, ResultsPage, StreamingBody, TypedBody,
     WebsocketChannelResult, WebsocketConnection,
 };
+use dropshot_api_manager_types::ValidationContext;
 use http::Response;
 use ipnetwork::IpNetwork;
 use nexus_types::{
@@ -30,7 +31,6 @@ use omicron_common::api::external::{
     },
     *,
 };
-use openapi_manager_types::ValidationContext;
 use openapiv3::OpenAPI;
 
 pub const API_VERSION: &str = "20251008.0.0";

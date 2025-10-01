@@ -44,6 +44,7 @@ pub struct BackgroundTasks {
     pub task_region_snapshot_replacement_step: Activator,
     pub task_region_snapshot_replacement_finish: Activator,
     pub task_tuf_artifact_replication: Activator,
+    pub task_tuf_repo_pruner: Activator,
     pub task_read_only_region_replacement_start: Activator,
     pub task_alert_dispatcher: Activator,
     pub task_webhook_deliverator: Activator,

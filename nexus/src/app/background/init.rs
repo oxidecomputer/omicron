@@ -127,6 +127,7 @@ use super::tasks::support_bundle_collector;
 use super::tasks::sync_service_zone_nat::ServiceZoneNatTracker;
 use super::tasks::sync_switch_configuration::SwitchPortSettingsManager;
 use super::tasks::tuf_artifact_replication;
+use super::tasks::tuf_repo_pruner;
 use super::tasks::v2p_mappings::V2PManager;
 use super::tasks::vpc_routes;
 use super::tasks::webhook_deliverator;
@@ -231,6 +232,7 @@ impl BackgroundTasksInitializer {
             task_region_snapshot_replacement_step: Activator::new(),
             task_region_snapshot_replacement_finish: Activator::new(),
             task_tuf_artifact_replication: Activator::new(),
+            task_tuf_repo_pruner: Activator::new(),
             task_read_only_region_replacement_start: Activator::new(),
             task_alert_dispatcher: Activator::new(),
             task_webhook_deliverator: Activator::new(),
@@ -313,6 +315,7 @@ impl BackgroundTasksInitializer {
             task_region_snapshot_replacement_step,
             task_region_snapshot_replacement_finish,
             task_tuf_artifact_replication,
+            task_tuf_repo_pruner,
             task_read_only_region_replacement_start,
             task_alert_dispatcher,
             task_webhook_deliverator,
@@ -922,6 +925,19 @@ impl BackgroundTasksInitializer {
             opctx: opctx.child(BTreeMap::new()),
             watchers: vec![],
             activator: task_tuf_artifact_replication,
+        });
+
+        driver.register(TaskDefinition {
+            name: "tuf_repo_pruner",
+            description: "determine which TUF repos' artifacts can be pruned",
+            period: config.tuf_repo_pruner.period_secs,
+            task_impl: Box::new(tuf_repo_pruner::TufRepoPruner::new(
+                datastore.clone(),
+                config.tuf_repo_pruner.clone(),
+            )),
+            opctx: opctx.child(BTreeMap::new()),
+            watchers: vec![],
+            activator: task_tuf_repo_pruner,
         });
 
         driver.register(TaskDefinition {

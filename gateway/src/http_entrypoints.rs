@@ -40,6 +40,7 @@ use gateway_types::component::SpState;
 use gateway_types::component_details::SpComponentDetails;
 use gateway_types::host::ComponentFirmwareHashStatus;
 use gateway_types::host::HostStartupOptions;
+use gateway_types::ignition;
 use gateway_types::ignition::SpIgnitionInfo;
 use gateway_types::rot::RotCfpa;
 use gateway_types::rot::RotCfpaSlot;
@@ -825,6 +826,19 @@ impl GatewayApi for GatewayImpl {
         apictx.latencies.instrument_dropshot_handler(&rqctx, handler).await
     }
 
+    async fn ignition_list_v1(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Vec<ignition::v1::SpIgnitionInfo>>, HttpError>
+    {
+        let HttpResponseOk(v2_info) = Self::ignition_list(rqctx).await?;
+        Ok(HttpResponseOk(
+            v2_info
+                .into_iter()
+                .map(|x| ignition::v1::SpIgnitionInfo::from(x))
+                .collect(),
+        ))
+    }
+
     async fn ignition_list(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<Vec<SpIgnitionInfo>>, HttpError> {
@@ -843,6 +857,14 @@ impl GatewayApi for GatewayImpl {
             Ok(HttpResponseOk(out))
         };
         apictx.latencies.instrument_dropshot_handler(&rqctx, handler).await
+    }
+
+    async fn ignition_get_v1(
+        rqctx: RequestContext<Self::Context>,
+        path: Path<PathSp>,
+    ) -> Result<HttpResponseOk<ignition::v1::SpIgnitionInfo>, HttpError> {
+        let HttpResponseOk(v2_info) = Self::ignition_get(rqctx, path).await?;
+        Ok(HttpResponseOk(ignition::v1::SpIgnitionInfo::from(v2_info)))
     }
 
     async fn ignition_get(

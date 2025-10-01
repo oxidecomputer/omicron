@@ -35,14 +35,21 @@ use nexus_db_model::Vmm;
 use nexus_types::external_api::params;
 use nexus_types::identity::Resource;
 use omicron_common::api::external;
+use omicron_common::api::external::{
+    TufArtifactMeta, TufRepoDescription, TufRepoMeta,
+};
+use omicron_common::update::ArtifactId;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::PropolisUuid;
 use omicron_uuid_kinds::SledUuid;
+use omicron_uuid_kinds::TufRepoUuid;
 use omicron_uuid_kinds::VolumeUuid;
 use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
 use std::str::FromStr;
+use tufaceous_artifact::ArtifactHash;
+use tufaceous_artifact::{ArtifactKind, ArtifactVersion};
 use uuid::Uuid;
 
 /// Creates a project within the silo of "opctx".
@@ -584,4 +591,50 @@ pub async fn create_instance_with_vmm(
     .await;
 
     (instance_id, vmm_id)
+}
+
+pub async fn insert_test_tuf_repo(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    version: u32,
+) -> TufRepoUuid {
+    let repo = make_test_repo(version);
+    datastore
+        .tuf_repo_insert(opctx, &repo)
+        .await
+        .expect("inserting repo")
+        .recorded
+        .repo
+        .id()
+}
+
+fn make_test_repo(version: u32) -> TufRepoDescription {
+    // We just need a unique hash for each repo.  We'll key it on the
+    // version for determinism.
+    let version_bytes = version.to_le_bytes();
+    let hash_bytes: [u8; 32] = std::array::from_fn(|i| version_bytes[i % 4]);
+    let hash = ArtifactHash(hash_bytes);
+    let version = semver::Version::new(u64::from(version), 0, 0);
+    let artifact_version = ArtifactVersion::new(version.to_string())
+        .expect("valid artifact version");
+    TufRepoDescription {
+        repo: TufRepoMeta {
+            hash,
+            targets_role_version: 0,
+            valid_until: chrono::Utc::now(),
+            system_version: version,
+            file_name: String::new(),
+        },
+        artifacts: vec![TufArtifactMeta {
+            id: ArtifactId {
+                name: String::new(),
+                version: artifact_version,
+                kind: ArtifactKind::from_static("empty"),
+            },
+            hash,
+            size: 0,
+            board: None,
+            sign: None,
+        }],
+    }
 }

@@ -430,6 +430,8 @@ pub struct BackgroundTaskConfig {
         RegionSnapshotReplacementFinishConfig,
     /// configuration for TUF artifact replication task
     pub tuf_artifact_replication: TufArtifactReplicationConfig,
+    /// configuration for TUF repo pruner task
+    pub tuf_repo_pruner: TufRepoPrunerConfig,
     /// configuration for read-only region replacement start task
     pub read_only_region_replacement_start:
         ReadOnlyRegionReplacementStartConfig,
@@ -765,6 +767,26 @@ pub struct TufArtifactReplicationConfig {
     /// The number of sleds that artifacts must be present on before a local
     /// copy of a repo's artifacts is dropped.
     pub min_sled_replication: usize,
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct TufRepoPrunerConfig {
+    /// period (in seconds) for periodic activations of this background task
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
+
+    /// number of extra recent target releases to keep
+    ///
+    /// The system always keeps two: the current release and the previous one.
+    /// This number is in addition to that.
+    pub nkeep_extra_target_releases: u8,
+
+    /// number of extra recently uploaded repos to keep
+    ///
+    /// The system always keeps one, assuming that the operator may be about to
+    /// update to it.  This number is in addition to that.
+    pub nkeep_extra_newly_uploaded: u8,
 }
 
 #[serde_as]
@@ -1154,6 +1176,9 @@ mod test {
             region_snapshot_replacement_finish.period_secs = 30
             tuf_artifact_replication.period_secs = 300
             tuf_artifact_replication.min_sled_replication = 3
+            tuf_repo_pruner.period_secs = 299
+            tuf_repo_pruner.nkeep_extra_target_releases = 51
+            tuf_repo_pruner.nkeep_extra_newly_uploaded = 52
             read_only_region_replacement_start.period_secs = 30
             alert_dispatcher.period_secs = 42
             webhook_deliverator.period_secs = 43
@@ -1378,6 +1403,11 @@ mod test {
                                 period_secs: Duration::from_secs(300),
                                 min_sled_replication: 3,
                             },
+                        tuf_repo_pruner: TufRepoPrunerConfig {
+                            period_secs: Duration::from_secs(299),
+                            nkeep_extra_target_releases: 51,
+                            nkeep_extra_newly_uploaded: 52,
+                        },
                         read_only_region_replacement_start:
                             ReadOnlyRegionReplacementStartConfig {
                                 period_secs: Duration::from_secs(30),
@@ -1490,6 +1520,9 @@ mod test {
             region_snapshot_replacement_finish.period_secs = 30
             tuf_artifact_replication.period_secs = 300
             tuf_artifact_replication.min_sled_replication = 3
+            tuf_repo_pruner.period_secs = 299
+            tuf_repo_pruner.nkeep_extra_target_releases = 51
+            tuf_repo_pruner.nkeep_extra_newly_uploaded = 52
             read_only_region_replacement_start.period_secs = 30
             alert_dispatcher.period_secs = 42
             webhook_deliverator.period_secs = 43

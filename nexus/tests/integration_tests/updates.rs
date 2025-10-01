@@ -9,6 +9,8 @@ use chrono::{DateTime, Duration, Timelike, Utc};
 use dropshot::ResultsPage;
 use http::{Method, StatusCode};
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db::pub_test_utils::helpers::insert_test_tuf_repo;
+use nexus_test_utils::background::activate_background_task;
 use nexus_test_utils::background::run_tuf_artifact_replication_step;
 use nexus_test_utils::background::wait_tuf_artifact_replication_step;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
@@ -624,4 +626,45 @@ async fn test_trust_root_operations(cptestctx: &ControlPlaneTestContext) {
         .parsed_body()
         .expect("failed to parse list after delete response");
     assert!(response.items.is_empty());
+}
+
+#[nexus_test]
+async fn test_repo_prune(cptestctx: &ControlPlaneTestContext) {
+    let logctx = &cptestctx.logctx;
+    let datastore = cptestctx.server.server_context().nexus.datastore();
+    let opctx = OpContext::for_tests(logctx.log.new(o!()), datastore.clone());
+
+    // Wait for one activation of the task to avoid racing with it.
+    let client = &cptestctx.lockstep_client;
+    activate_background_task(client, "tuf_repo_pruner").await;
+
+    // Insert four TUF repos.
+    let repo1id = insert_test_tuf_repo(&opctx, datastore, 1).await;
+    let repo2id = insert_test_tuf_repo(&opctx, datastore, 2).await;
+    let repo3id = insert_test_tuf_repo(&opctx, datastore, 3).await;
+    let repo4id = insert_test_tuf_repo(&opctx, datastore, 4).await;
+
+    // Immediately, all four repos ought to be visible.
+    let repos = datastore
+        .tuf_list_repos_unpruned_batched(&opctx)
+        .await
+        .expect("listing repos");
+    assert_eq!(repos.len(), 4);
+    assert!(repos.iter().any(|r| r.id() == repo1id));
+    assert!(repos.iter().any(|r| r.id() == repo2id));
+    assert!(repos.iter().any(|r| r.id() == repo3id));
+    assert!(repos.iter().any(|r| r.id() == repo4id));
+
+    // Activate the task again and wait for it to complete.  Exactly one of
+    // the repos should be pruned.
+    activate_background_task(client, "tuf_repo_pruner").await;
+    let repos = datastore
+        .tuf_list_repos_unpruned_batched(&opctx)
+        .await
+        .expect("listing repos");
+    assert_eq!(repos.len(), 3);
+    assert!(!repos.iter().any(|r| r.id() == repo1id));
+    assert!(repos.iter().any(|r| r.id() == repo2id));
+    assert!(repos.iter().any(|r| r.id() == repo3id));
+    assert!(repos.iter().any(|r| r.id() == repo4id));
 }
