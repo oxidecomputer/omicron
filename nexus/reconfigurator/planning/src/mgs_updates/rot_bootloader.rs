@@ -7,7 +7,6 @@
 use super::MgsUpdateStatus;
 use super::mgs_update_status_inactive_versions;
 use crate::mgs_updates::MgsUpdateOutcome;
-use crate::mgs_updates::PendingHostPhase2Changes;
 
 use nexus_types::deployment::ExpectedVersion;
 use nexus_types::deployment::PendingMgsUpdate;
@@ -182,23 +181,19 @@ pub(super) fn try_make_update(
         }
     };
 
-    Ok(MgsUpdateOutcome::Pending(
-        PendingMgsUpdate {
-            baseboard_id: baseboard_id.clone(),
-            sp_type: sp_info.sp_type,
-            slot_id: sp_info.sp_slot,
-            details: PendingMgsUpdateDetails::RotBootloader(
-                PendingMgsUpdateRotBootloaderDetails {
-                    expected_stage0_version,
-                    expected_stage0_next_version,
-                },
-            ),
-            artifact_hash: artifact.hash,
-            artifact_version: artifact.id.version.clone(),
-        },
-        // Host phase 2 changes are only possible during Host OS updates.
-        PendingHostPhase2Changes::empty(),
-    ))
+    Ok(MgsUpdateOutcome::pending_with_update_only(PendingMgsUpdate {
+        baseboard_id: baseboard_id.clone(),
+        sp_type: sp_info.sp_type,
+        slot_id: sp_info.sp_slot,
+        details: PendingMgsUpdateDetails::RotBootloader(
+            PendingMgsUpdateRotBootloaderDetails {
+                expected_stage0_version,
+                expected_stage0_next_version,
+            },
+        ),
+        artifact_hash: artifact.hash,
+        artifact_version: artifact.id.version.clone(),
+    }))
 }
 
 #[cfg(test)]

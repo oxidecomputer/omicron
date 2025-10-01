@@ -501,18 +501,18 @@ impl PlanningMupdateOverrideStepReport {
 #[serde(tag = "type", content = "value")]
 #[cfg_attr(test, derive(test_strategy::Arbitrary))]
 pub enum FailedMgsUpdateReason {
-    /// There was a failed Host OS update
-    #[error("failed Host OS update: {0:?}")]
-    HostOs(FailedHostOsUpdateReason),
-    /// There was a failed RoT update
-    #[error("failed RoT update: {0:?}")]
-    Rot(FailedRotUpdateReason),
-    /// There was a failed RoT bootloader update
-    #[error("failed RoT bootloader update: {0:?}")]
-    RotBootloader(FailedRotBootloaderUpdateReason),
-    /// There was a failed SP update
-    #[error("failed SP update: {0:?}")]
-    Sp(FailedSpUpdateReason),
+    /// There was a failed attempt to plan a Host OS update
+    #[error("failed to plan a Host OS update")]
+    HostOs(#[from] FailedHostOsUpdateReason),
+    /// There was a failed attempt to plan an RoT update
+    #[error("failed to plan an RoT update")]
+    Rot(#[from] FailedRotUpdateReason),
+    /// There was a failed attempt to plan an RoT bootloader update
+    #[error("failed to plan an RoT bootloader update")]
+    RotBootloader(#[from] FailedRotBootloaderUpdateReason),
+    /// There was a failed attempt to plan an SP update
+    #[error("failed to plan an SP update")]
+    Sp(#[from] FailedSpUpdateReason),
 }
 
 pub trait FailedMgsUpdateReasonComponent {

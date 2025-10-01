@@ -7,7 +7,6 @@
 use super::MgsUpdateStatus;
 use super::mgs_update_status_inactive_versions;
 use crate::mgs_updates::MgsUpdateOutcome;
-use crate::mgs_updates::PendingHostPhase2Changes;
 
 use gateway_types::rot::RotSlot;
 use nexus_types::deployment::ExpectedActiveRotSlot;
@@ -245,27 +244,23 @@ pub(super) fn try_make_update(
         }
     };
 
-    Ok(MgsUpdateOutcome::Pending(
-        PendingMgsUpdate {
-            baseboard_id: baseboard_id.clone(),
-            sp_type: sp_info.sp_type,
-            slot_id: sp_info.sp_slot,
-            details: PendingMgsUpdateDetails::Rot(PendingMgsUpdateRotDetails {
-                expected_active_slot,
-                expected_inactive_version,
-                expected_persistent_boot_preference: rot_state
-                    .persistent_boot_preference,
-                expected_pending_persistent_boot_preference: rot_state
-                    .pending_persistent_boot_preference,
-                expected_transient_boot_preference: rot_state
-                    .transient_boot_preference,
-            }),
-            artifact_hash: artifact.hash,
-            artifact_version: artifact.id.version.clone(),
-        },
-        // Host phase 2 changes are only possible during Host OS updates.
-        PendingHostPhase2Changes::empty(),
-    ))
+    Ok(MgsUpdateOutcome::pending_with_update_only(PendingMgsUpdate {
+        baseboard_id: baseboard_id.clone(),
+        sp_type: sp_info.sp_type,
+        slot_id: sp_info.sp_slot,
+        details: PendingMgsUpdateDetails::Rot(PendingMgsUpdateRotDetails {
+            expected_active_slot,
+            expected_inactive_version,
+            expected_persistent_boot_preference: rot_state
+                .persistent_boot_preference,
+            expected_pending_persistent_boot_preference: rot_state
+                .pending_persistent_boot_preference,
+            expected_transient_boot_preference: rot_state
+                .transient_boot_preference,
+        }),
+        artifact_hash: artifact.hash,
+        artifact_version: artifact.id.version.clone(),
+    }))
 }
 
 #[cfg(test)]

@@ -3488,7 +3488,7 @@
         "description": "Describes the reason why an SP component failed to update",
         "oneOf": [
           {
-            "description": "There was a failed Host OS update",
+            "description": "There was a failed attempt to plan a Host OS update",
             "type": "object",
             "properties": {
               "type": {
@@ -3507,7 +3507,7 @@
             ]
           },
           {
-            "description": "There was a failed RoT update",
+            "description": "There was a failed attempt to plan an RoT update",
             "type": "object",
             "properties": {
               "type": {
@@ -3526,7 +3526,7 @@
             ]
           },
           {
-            "description": "There was a failed RoT bootloader update",
+            "description": "There was a failed attempt to plan an RoT bootloader update",
             "type": "object",
             "properties": {
               "type": {
@@ -3545,7 +3545,7 @@
             ]
           },
           {
-            "description": "There was a failed SP update",
+            "description": "There was a failed attempt to plan an SP update",
             "type": "object",
             "properties": {
               "type": {

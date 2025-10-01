@@ -548,10 +548,19 @@ enum MgsUpdateOutcome {
     Pending(PendingMgsUpdate, PendingHostPhase2Changes),
 }
 
+impl MgsUpdateOutcome {
+    // Host phase 2 changes are only possible during Host OS updates. For the
+    // rest of the components we'll only need to set the pending update.
+    fn pending_with_update_only(update: PendingMgsUpdate) -> MgsUpdateOutcome {
+        MgsUpdateOutcome::Pending(update, PendingHostPhase2Changes::empty())
+    }
+}
+
 /// Determine if the given baseboard needs any MGS-driven update (e.g., update
 /// to its SP, RoT, etc.).  If so, returns the update and a set of changes that
 /// need to be made to sled configs related to host phase 2 images (this set
-/// will be empty if we made a non-host update).  If not, returns `None`.
+/// will be empty if we made a non-host update).  If not, returns
+/// `NoUpdateNeeded`.
 fn try_make_update(
     log: &slog::Logger,
     baseboard_id: &Arc<BaseboardId>,
