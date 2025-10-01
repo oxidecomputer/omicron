@@ -17,7 +17,7 @@ use tokio::sync::watch;
 
 pub struct InventoryLoader {
     datastore: Arc<DataStore>,
-    tx: watch::Sender<Option<Collection>>,
+    tx: watch::Sender<Option<Arc<Collection>>>,
 }
 
 impl BackgroundTask for InventoryLoader {
@@ -43,7 +43,7 @@ impl InventoryLoader {
         Self { datastore, tx: watch::Sender::new(None) }
     }
 
-    pub fn watcher(&self) -> watch::Receiver<Option<Collection>> {
+    pub fn watcher(&self) -> watch::Receiver<Option<Arc<Collection>>> {
         self.tx.subscribe()
     }
 
@@ -136,7 +136,7 @@ impl InventoryLoader {
         let new_id = collection.id;
         let new_time_started = collection.time_started;
         self.tx.send_modify(|c| {
-            *c = Some(collection);
+            *c = Some(Arc::new(collection));
         });
 
         InventoryLoadStatus::LoadedNew {
@@ -171,7 +171,7 @@ mod tests {
         assert!(!rx.has_changed().unwrap());
 
         // Insert a collection and activate; we should load it.
-        let coll0 = CollectionBuilder::new("test").build();
+        let coll0 = Arc::new(CollectionBuilder::new("test").build());
         datastore
             .inventory_insert_collection(opctx, &coll0)
             .await
@@ -200,7 +200,7 @@ mod tests {
             .inventory_insert_collection(opctx, &coll1)
             .await
             .expect("inserted collection");
-        let coll2 = CollectionBuilder::new("test").build();
+        let coll2 = Arc::new(CollectionBuilder::new("test").build());
         datastore
             .inventory_insert_collection(opctx, &coll2)
             .await
