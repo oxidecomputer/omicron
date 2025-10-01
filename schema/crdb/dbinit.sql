@@ -6678,11 +6678,11 @@ CREATE TYPE IF NOT EXISTS omicron.public.db_metadata_nexus_state AS ENUM (
 CREATE TABLE IF NOT EXISTS omicron.public.db_metadata_nexus (
     nexus_id UUID NOT NULL PRIMARY KEY,
     last_drained_blueprint_id UUID,
-    state omicron.public.db_metadata_nexus_state NOT NULL
+    state omicron.public.db_metadata_nexus_state NOT NULL,
     -- the following fields are for debugging only
     time_row_created TIMESTAMPTZ, -- nullable
     time_quiesced TIMESTAMPTZ,    -- nullable
-    time_active TIMESTAMPTZ,      -- nullable
+    time_active TIMESTAMPTZ       -- nullable
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS lookup_db_metadata_nexus_by_state on omicron.public.db_metadata_nexus (
