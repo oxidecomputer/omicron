@@ -4667,7 +4667,8 @@ mod tests {
                 counts.insert(table_name.to_string(), count);
             }
 
-            let table_counts = BlueprintTableCounts { counts, num_blueprints: 1 };
+            let table_counts =
+                BlueprintTableCounts { counts, num_blueprints: 1 };
 
             // Verify no new blueprint tables were added without updating this function
             if let Err(msg) =
@@ -4769,9 +4770,7 @@ mod tests {
             // Exception tables that may be empty in the test blueprints:
             // - debug log for planner reports: only populated when the blueprint
             //   was produced by the planner (test blueprints generally aren't)
-            let exception_tables = [
-                "debug_log_blueprint_planning",
-            ];
+            let exception_tables = ["debug_log_blueprint_planning"];
 
             // Check that all non-exception tables have at least one row
             let empty_tables = self.empty_tables();
