@@ -414,6 +414,19 @@ impl DataStore {
             })
     }
 
+    /// List the artifacts present in a TUF repo.
+    pub async fn tuf_list_repo_artifacts(
+        &self,
+        opctx: &OpContext,
+        repo_id: TufRepoUuid,
+    ) -> ListResultVec<TufArtifact> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
+        artifacts_for_repo(repo_id, &conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
     /// Returns the current TUF repo generation number.
     pub async fn tuf_get_generation(
         &self,
