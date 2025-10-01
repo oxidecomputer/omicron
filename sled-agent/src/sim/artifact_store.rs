@@ -7,13 +7,15 @@
 
 use std::sync::Arc;
 
+use camino::Utf8Path;
 use camino_tempfile::Utf8TempDir;
 use dropshot::{
     Body, ConfigDropshot, FreeformBody, HttpError, HttpResponseOk, HttpServer,
     Path, RequestContext, ServerBuilder,
 };
+use omicron_common::api::external::Generation;
 use repo_depot_api::*;
-use tokio::sync::{OwnedSemaphorePermit, Semaphore};
+use tokio::sync::{OwnedSemaphorePermit, Semaphore, watch};
 
 use crate::artifact_store::{ArtifactStore, DatasetsManager};
 
@@ -28,6 +30,10 @@ pub struct SimArtifactStorage {
     // Semaphore to keep track of how many copy requests are in flight, and to
     // be able to await on their completion. Used in integration tests.
     copy_semaphore: Arc<Semaphore>,
+
+    // Watch channel to be able to await on the delete reconciler completing in
+    // integration tests.
+    delete_done: watch::Sender<Generation>,
 }
 
 impl SimArtifactStorage {
@@ -40,6 +46,7 @@ impl SimArtifactStorage {
             copy_semaphore: Arc::new(
                 const { Semaphore::const_new(MAX_PERMITS as usize) },
             ),
+            delete_done: watch::Sender::new(0u32.into()),
         }
     }
 }
@@ -53,6 +60,14 @@ impl DatasetsManager for SimArtifactStorage {
 
     async fn copy_permit(&self) -> Option<OwnedSemaphorePermit> {
         Some(self.copy_semaphore.clone().acquire_owned().await.unwrap())
+    }
+
+    fn signal_delete_done(&self, generation: Generation) {
+        self.delete_done.send_if_modified(|old| {
+            let modified = *old != generation;
+            *old = generation;
+            modified
+        });
     }
 }
 
@@ -73,6 +88,10 @@ impl ArtifactStore<SimArtifactStorage> {
         .unwrap()
     }
 
+    pub fn storage_paths(&self) -> impl Iterator<Item = &Utf8Path> {
+        self.storage.dirs.iter().map(|p| p.path())
+    }
+
     pub async fn wait_for_copy_tasks(&self) {
         // Acquire a permit for MAX_PERMITS, which requires that all copy tasks
         // have dropped their permits. Then immediately drop it.
@@ -82,6 +101,10 @@ impl ArtifactStore<SimArtifactStorage> {
             .acquire_many(MAX_PERMITS)
             .await
             .unwrap();
+    }
+
+    pub fn subscribe_delete_done(&self) -> watch::Receiver<Generation> {
+        self.storage.delete_done.subscribe()
     }
 }
 

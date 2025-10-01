@@ -26,11 +26,8 @@ async fn task_dump() {
     assert!(sim_state.iter().all(|sp| sp.state.is_ok()));
 
     // Get task dump count for sled 0.
-    let resp = client
-        .sp_task_dump_count(gateway_client::types::SpType::Sled, 0)
-        .await
-        .unwrap()
-        .into_inner();
+    let resp =
+        client.sp_task_dump_count(&SpType::Sled, 0).await.unwrap().into_inner();
     assert_eq!(resp, 1);
 
     // Get the task dump.
@@ -43,7 +40,7 @@ async fn task_dump() {
         vers,
         base64_zip,
     } = client
-        .sp_task_dump_get(gateway_client::types::SpType::Sled, 0, 0)
+        .sp_task_dump_get(&SpType::Sled, 0, 0)
         .await
         .unwrap()
         .into_inner();

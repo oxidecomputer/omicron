@@ -11,7 +11,6 @@ use anyhow::Context;
 use anyhow::anyhow;
 use gateway_client::types::GetCfpaParams;
 use gateway_client::types::RotCfpaSlot;
-use gateway_client::types::SpType;
 use gateway_messages::SpComponent;
 use itertools::Itertools;
 use nexus_sled_agent_shared::inventory::OmicronZoneType;
@@ -21,6 +20,7 @@ use nexus_types::inventory::Collection;
 use nexus_types::inventory::InternalDnsGenerationStatus;
 use nexus_types::inventory::RotPage;
 use nexus_types::inventory::RotPageWhich;
+use nexus_types::inventory::SpType;
 use omicron_cockroach_metrics::CockroachClusterAdminClient;
 use omicron_common::address::NTP_ADMIN_PORT;
 use omicron_common::disk::M2Slot;
@@ -159,7 +159,7 @@ impl<'a> Collector<'a> {
             // First, fetch the state of the SP.  If that fails, report the
             // error but continue.
             let result =
-                client.sp_get(sp.type_, sp.slot).await.with_context(|| {
+                client.sp_get(&sp.type_, sp.slot).await.with_context(|| {
                     format!(
                         "MGS {:?}: fetching state of SP {:?}",
                         client.baseurl(),
@@ -197,7 +197,7 @@ impl<'a> Collector<'a> {
                 {
                     let result = client
                         .sp_component_active_slot_get(
-                            sp.type_,
+                            &sp.type_,
                             sp.slot,
                             SpComponent::HOST_CPU_BOOT_FLASH.const_as_str(),
                         )
@@ -319,7 +319,7 @@ impl<'a> Collector<'a> {
 
                 let result = client
                     .sp_component_caboose_get(
-                        sp.type_, sp.slot, component, slot,
+                        &sp.type_, sp.slot, component, slot,
                     )
                     .await
                     .with_context(|| {
@@ -367,12 +367,12 @@ impl<'a> Collector<'a> {
 
                 let result = match which {
                     RotPageWhich::Cmpa => client
-                        .sp_rot_cmpa_get(sp.type_, sp.slot, component)
+                        .sp_rot_cmpa_get(&sp.type_, sp.slot, component)
                         .await
                         .map(|response| response.into_inner().base64_data),
                     RotPageWhich::CfpaActive => client
                         .sp_rot_cfpa_get(
-                            sp.type_,
+                            &sp.type_,
                             sp.slot,
                             component,
                             &GetCfpaParams { slot: RotCfpaSlot::Active },
@@ -381,7 +381,7 @@ impl<'a> Collector<'a> {
                         .map(|response| response.into_inner().base64_data),
                     RotPageWhich::CfpaInactive => client
                         .sp_rot_cfpa_get(
-                            sp.type_,
+                            &sp.type_,
                             sp.slot,
                             component,
                             &GetCfpaParams { slot: RotCfpaSlot::Inactive },
@@ -390,7 +390,7 @@ impl<'a> Collector<'a> {
                         .map(|response| response.into_inner().base64_data),
                     RotPageWhich::CfpaScratch => client
                         .sp_rot_cfpa_get(
-                            sp.type_,
+                            &sp.type_,
                             sp.slot,
                             component,
                             &GetCfpaParams { slot: RotCfpaSlot::Scratch },
