@@ -1521,6 +1521,19 @@ planning report:
 
 
 
+> # If we're missing the "Active" records, we won't be able to lookup the
+> # current Nexus image, which will cause planning to fail
+> set active-nexus-zones
+set 0 explicit active Nexus zones
+
+> blueprint-plan latest latest
+error: failed to construct planning input: no Nexus zones found at current active generation (1)
+
+> # Reset the set of active Nexuses.
+> set active-nexus-zones-infer
+cleared explicit active Nexus zones (will infer from generation)
+
+
 > # If we're missing the "NotYet" records, we'll refuse to bump the Nexus
 > # generation ("new Nexus zones do not have database records yet")
 > set not-yet-nexus-zones
@@ -1552,12 +1565,11 @@ planning report:
 
 
 
-> set not-yet-nexus-zones-infer
-cleared explicit not-yet Nexus zones (will infer from generation)
 
+> # Even if we have records for one of the zones, we need all of them.
+> set not-yet-nexus-zones a40e7821-3ec7-4aa9-995d-7d26ecec7d0f
+set 1 explicit not-yet Nexus zones
 
-> # Bump the nexus generation to "2".
-> # This will cause the "0.0.1" zones to be considered out-of-date
 > blueprint-plan latest latest
 INFO performed noop zone image source checks on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, num_total: 10, num_already_artifact: 10, num_eligible: 0, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
@@ -1580,13 +1592,48 @@ planning report:
   * zone 0c71b3b2-6ceb-4e8f-b020-b08675e83038: nexus image out-of-date, but nexus_generation 1 is still active
   * zone 3eeb8d49-eb1a-43f8-bb64-c2338421c2c6: nexus image out-of-date, but nexus_generation 1 is still active
   * zone 466a9f29-62bf-4e63-924a-b9efdb86afec: nexus image out-of-date, but nexus_generation 1 is still active
+* waiting to update top-level nexus_generation: new Nexus zones do not have database records yet
+
+
+
+
+> # This is equivalent to explicitly setting the "not-yet-nexus-zones" to
+> # all the newly created Nexuses.
+> set not-yet-nexus-zones-infer
+cleared explicit not-yet Nexus zones (will infer from generation)
+
+
+> # Bump the nexus generation to "2".
+> # This will cause the "0.0.1" zones to be considered out-of-date
+> blueprint-plan latest latest
+INFO performed noop zone image source checks on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, num_total: 10, num_already_artifact: 10, num_eligible: 0, num_ineligible: 0
+INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
+INFO performed noop zone image source checks on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, num_total: 9, num_already_artifact: 9, num_eligible: 0, num_ineligible: 0
+INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
+INFO performed noop zone image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 9, num_already_artifact: 9, num_eligible: 0, num_ineligible: 0
+INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial0, part_number: model0
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial1, part_number: model1
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial2, part_number: model2
+INFO ran out of boards for MGS-driven update
+generated blueprint afb09faf-a586-4483-9289-04d4f1d8ba23 based on parent blueprint c1a0d242-9160-40f4-96ae-61f8f40a0b1b
+blueprint source: planner with report:
+planning report:
+* skipping noop zone image source check on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: all 10 zones are already from artifacts
+* skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 9 zones are already from artifacts
+* skipping noop zone image source check on sled d81c6a84-79b8-4958-ae41-ea46c9b19763: all 9 zones are already from artifacts
+* 3 remaining out-of-date zones
+* 3 zones waiting to be expunged:
+  * zone 0c71b3b2-6ceb-4e8f-b020-b08675e83038: nexus image out-of-date, but nexus_generation 1 is still active
+  * zone 3eeb8d49-eb1a-43f8-bb64-c2338421c2c6: nexus image out-of-date, but nexus_generation 1 is still active
+  * zone 466a9f29-62bf-4e63-924a-b9efdb86afec: nexus image out-of-date, but nexus_generation 1 is still active
 * updating top-level nexus_generation to: 2
 
 
 
 > blueprint-diff latest
-from: blueprint 626487fa-7139-45ec-8416-902271fc730b
-to:   blueprint c1a0d242-9160-40f4-96ae-61f8f40a0b1b
+from: blueprint c1a0d242-9160-40f4-96ae-61f8f40a0b1b
+to:   blueprint afb09faf-a586-4483-9289-04d4f1d8ba23
 
  COCKROACHDB SETTINGS:
     state fingerprint:::::::::::::::::   (none) (unchanged)
@@ -1660,7 +1707,7 @@ INFO skipping board for MGS-driven update (no update necessary), serial_number: 
 INFO skipping board for MGS-driven update (no update necessary), serial_number: serial1, part_number: model1
 INFO skipping board for MGS-driven update (no update necessary), serial_number: serial2, part_number: model2
 INFO ran out of boards for MGS-driven update
-generated blueprint afb09faf-a586-4483-9289-04d4f1d8ba23 based on parent blueprint c1a0d242-9160-40f4-96ae-61f8f40a0b1b
+generated blueprint ce365dff-2cdb-4f35-a186-b15e20e1e700 based on parent blueprint afb09faf-a586-4483-9289-04d4f1d8ba23
 blueprint source: planner with report:
 planning report:
 * skipping noop zone image source check on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: all 10 zones are already from artifacts
@@ -1675,8 +1722,8 @@ planning report:
 
 
 > blueprint-diff latest
-from: blueprint c1a0d242-9160-40f4-96ae-61f8f40a0b1b
-to:   blueprint afb09faf-a586-4483-9289-04d4f1d8ba23
+from: blueprint afb09faf-a586-4483-9289-04d4f1d8ba23
+to:   blueprint ce365dff-2cdb-4f35-a186-b15e20e1e700
 
  COCKROACHDB SETTINGS:
     state fingerprint:::::::::::::::::   (none) (unchanged)
@@ -1722,7 +1769,7 @@ INFO skipping board for MGS-driven update (no update necessary), serial_number: 
 INFO skipping board for MGS-driven update (no update necessary), serial_number: serial1, part_number: model1
 INFO skipping board for MGS-driven update (no update necessary), serial_number: serial2, part_number: model2
 INFO ran out of boards for MGS-driven update
-generated blueprint ce365dff-2cdb-4f35-a186-b15e20e1e700 based on parent blueprint afb09faf-a586-4483-9289-04d4f1d8ba23
+generated blueprint 8f2d1f39-7c88-4701-aa43-56bf281b28c1 based on parent blueprint ce365dff-2cdb-4f35-a186-b15e20e1e700
 blueprint source: planner with report:
 planning report:
 * skipping noop zone image source check on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: all 10 zones are already from artifacts
@@ -1735,8 +1782,8 @@ planning report:
 
 
 > blueprint-diff latest
-from: blueprint afb09faf-a586-4483-9289-04d4f1d8ba23
-to:   blueprint ce365dff-2cdb-4f35-a186-b15e20e1e700
+from: blueprint ce365dff-2cdb-4f35-a186-b15e20e1e700
+to:   blueprint 8f2d1f39-7c88-4701-aa43-56bf281b28c1
 
  MODIFIED SLEDS:
 
@@ -1841,7 +1888,7 @@ INFO skipping board for MGS-driven update (no update necessary), serial_number: 
 INFO skipping board for MGS-driven update (no update necessary), serial_number: serial1, part_number: model1
 INFO skipping board for MGS-driven update (no update necessary), serial_number: serial2, part_number: model2
 INFO ran out of boards for MGS-driven update
-generated blueprint 8f2d1f39-7c88-4701-aa43-56bf281b28c1 based on parent blueprint ce365dff-2cdb-4f35-a186-b15e20e1e700
+generated blueprint 12d602a6-5ab4-487a-b94e-eb30cdf30300 based on parent blueprint 8f2d1f39-7c88-4701-aa43-56bf281b28c1
 blueprint source: planner with report:
 planning report:
 * skipping noop zone image source check on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: all 9 zones are already from artifacts
@@ -1854,8 +1901,8 @@ planning report:
 
 
 > blueprint-diff latest
-from: blueprint ce365dff-2cdb-4f35-a186-b15e20e1e700
-to:   blueprint 8f2d1f39-7c88-4701-aa43-56bf281b28c1
+from: blueprint 8f2d1f39-7c88-4701-aa43-56bf281b28c1
+to:   blueprint 12d602a6-5ab4-487a-b94e-eb30cdf30300
 
  MODIFIED SLEDS:
 
@@ -1957,7 +2004,7 @@ INFO skipping board for MGS-driven update (no update necessary), serial_number: 
 INFO skipping board for MGS-driven update (no update necessary), serial_number: serial1, part_number: model1
 INFO skipping board for MGS-driven update (no update necessary), serial_number: serial2, part_number: model2
 INFO ran out of boards for MGS-driven update
-generated blueprint 12d602a6-5ab4-487a-b94e-eb30cdf30300 based on parent blueprint 8f2d1f39-7c88-4701-aa43-56bf281b28c1
+generated blueprint 61a93ea3-c872-48e0-aace-e86b0c52b839 based on parent blueprint 12d602a6-5ab4-487a-b94e-eb30cdf30300
 blueprint source: planner with report:
 planning report:
 * skipping noop zone image source check on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: all 9 zones are already from artifacts
@@ -1970,8 +2017,8 @@ planning report:
 
 
 > blueprint-diff latest
-from: blueprint 8f2d1f39-7c88-4701-aa43-56bf281b28c1
-to:   blueprint 12d602a6-5ab4-487a-b94e-eb30cdf30300
+from: blueprint 12d602a6-5ab4-487a-b94e-eb30cdf30300
+to:   blueprint 61a93ea3-c872-48e0-aace-e86b0c52b839
 
  MODIFIED SLEDS:
 
@@ -2075,7 +2122,7 @@ INFO skipping board for MGS-driven update (no update necessary), serial_number: 
 INFO skipping board for MGS-driven update (no update necessary), serial_number: serial1, part_number: model1
 INFO skipping board for MGS-driven update (no update necessary), serial_number: serial2, part_number: model2
 INFO ran out of boards for MGS-driven update
-generated blueprint 61a93ea3-c872-48e0-aace-e86b0c52b839 based on parent blueprint 12d602a6-5ab4-487a-b94e-eb30cdf30300
+generated blueprint 27e755bc-dc10-4647-853c-f89bb3a15a2c based on parent blueprint 61a93ea3-c872-48e0-aace-e86b0c52b839
 blueprint source: planner with report:
 planning report:
 * skipping noop zone image source check on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: all 9 zones are already from artifacts
@@ -2085,8 +2132,8 @@ planning report:
 
 
 > blueprint-diff latest
-from: blueprint 12d602a6-5ab4-487a-b94e-eb30cdf30300
-to:   blueprint 61a93ea3-c872-48e0-aace-e86b0c52b839
+from: blueprint 61a93ea3-c872-48e0-aace-e86b0c52b839
+to:   blueprint 27e755bc-dc10-4647-853c-f89bb3a15a2c
 
  COCKROACHDB SETTINGS:
     state fingerprint:::::::::::::::::   (none) (unchanged)

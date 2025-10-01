@@ -114,10 +114,24 @@ inventory-generate
 # are not in inventory yet")
 blueprint-plan latest b1bda47d-2c19-4fba-96e3-d9df28db7436
 
+# If we're missing the "Active" records, we won't be able to lookup the
+# current Nexus image, which will cause planning to fail
+set active-nexus-zones
+blueprint-plan latest latest
+# Reset the set of active Nexuses.
+set active-nexus-zones-infer
+
 # If we're missing the "NotYet" records, we'll refuse to bump the Nexus
 # generation ("new Nexus zones do not have database records yet")
 set not-yet-nexus-zones
 blueprint-plan latest latest
+
+# Even if we have records for one of the zones, we need all of them.
+set not-yet-nexus-zones a40e7821-3ec7-4aa9-995d-7d26ecec7d0f
+blueprint-plan latest latest
+
+# This is equivalent to explicitly setting the "not-yet-nexus-zones" to
+# all the newly created Nexuses.
 set not-yet-nexus-zones-infer
 
 # Bump the nexus generation to "2".
