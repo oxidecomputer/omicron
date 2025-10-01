@@ -470,7 +470,7 @@ impl BackgroundTasksInitializer {
                 resolver.clone(),
                 &nexus_id.to_string(),
                 config.inventory.nkeep,
-                config.inventory.disable,
+                config.inventory.disable_collect,
             );
             let inventory_watcher = collector.watcher();
             driver.register(TaskDefinition {
@@ -478,7 +478,7 @@ impl BackgroundTasksInitializer {
                 description:
                     "collects hardware and software inventory data from the \
                      whole system",
-                period: config.inventory.period_secs,
+                period: config.inventory.period_secs_collect,
                 task_impl: Box::new(collector),
                 opctx: opctx.child(BTreeMap::new()),
                 watchers: vec![Box::new(rx_blueprint_exec.clone())],
