@@ -550,7 +550,7 @@ async fn test_repo_upload() -> Result<()> {
         .sled_agents
         .iter()
         .map(|sled_agent| {
-            sled_agent.sled_agent().artifact_store().create_delete_watcher()
+            sled_agent.sled_agent().artifact_store().subscribe_delete_done()
         })
         .collect::<Vec<_>>();
     // Manually prune the first repo.

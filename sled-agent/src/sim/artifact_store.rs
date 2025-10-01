@@ -33,13 +33,11 @@ pub struct SimArtifactStorage {
 
     // Watch channel to be able to await on the delete reconciler completing in
     // integration tests.
-    delete_done_tx: watch::Sender<Generation>,
-    delete_done_rx: watch::Receiver<Generation>,
+    delete_done: watch::Sender<Generation>,
 }
 
 impl SimArtifactStorage {
     pub(super) fn new() -> SimArtifactStorage {
-        let (delete_done_tx, delete_done_rx) = watch::channel(0u32.into());
         SimArtifactStorage {
             dirs: Arc::new([
                 camino_tempfile::tempdir().unwrap(),
@@ -48,8 +46,7 @@ impl SimArtifactStorage {
             copy_semaphore: Arc::new(
                 const { Semaphore::const_new(MAX_PERMITS as usize) },
             ),
-            delete_done_tx,
-            delete_done_rx,
+            delete_done: watch::Sender::new(0u32.into()),
         }
     }
 }
@@ -66,7 +63,7 @@ impl DatasetsManager for SimArtifactStorage {
     }
 
     fn signal_delete_done(&self, generation: Generation) {
-        self.delete_done_tx.send_if_modified(|old| {
+        self.delete_done.send_if_modified(|old| {
             let modified = *old != generation;
             *old = generation;
             modified
@@ -106,10 +103,8 @@ impl ArtifactStore<SimArtifactStorage> {
             .unwrap();
     }
 
-    pub fn create_delete_watcher(&self) -> watch::Receiver<Generation> {
-        let mut watcher = self.storage.delete_done_rx.clone();
-        watcher.mark_unchanged();
-        watcher
+    pub fn subscribe_delete_done(&self) -> watch::Receiver<Generation> {
+        self.storage.delete_done.subscribe()
     }
 }
 

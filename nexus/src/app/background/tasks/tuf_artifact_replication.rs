@@ -593,6 +593,9 @@ impl ArtifactReplication {
         let generation = self.datastore.tuf_get_generation(opctx).await?;
         let repos =
             self.datastore.tuf_list_repos_unpruned_batched(opctx).await?;
+        // `tuf_list_repos_unpruned_batched` performs pagination internally,
+        // so check that the generation hasn't changed during our pagination to
+        // ensure we got a consistent read.
         {
             let generation_now =
                 self.datastore.tuf_get_generation(opctx).await?;
