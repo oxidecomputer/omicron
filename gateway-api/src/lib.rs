@@ -9,6 +9,7 @@ use dropshot::{
     RequestContext, TypedBody, UntypedBody, WebsocketEndpointResult,
     WebsocketUpgrade,
 };
+use dropshot_api_manager_types::api_versions;
 use gateway_types::{
     caboose::SpComponentCaboose,
     component::{
@@ -17,6 +18,7 @@ use gateway_types::{
     },
     component_details::SpComponentDetails,
     host::{ComponentFirmwareHashStatus, HostStartupOptions},
+    ignition,
     ignition::{IgnitionCommand, SpIgnitionInfo},
     rot::{RotCfpa, RotCfpaSlot, RotCmpa, RotState},
     sensor::SpSensorReading,
@@ -25,9 +27,6 @@ use gateway_types::{
         HostPhase2Progress, HostPhase2RecoveryImageId, InstallinatorImageId,
         SpComponentResetError, SpUpdateStatus,
     },
-};
-use openapi_manager_types::{
-    SupportedVersion, SupportedVersions, api_versions,
 };
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -45,6 +44,7 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
+    (2, COSMO),
     (1, INITIAL),
 ]);
 
@@ -407,6 +407,22 @@ pub trait GatewayApi {
     #[endpoint {
         method = GET,
         path = "/ignition",
+        operation_id = "ignition_list",
+        versions = VERSION_INITIAL..VERSION_COSMO
+    }]
+    async fn ignition_list_v1(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Vec<ignition::v1::SpIgnitionInfo>>, HttpError>;
+
+    /// List SPs via Ignition
+    ///
+    /// Retreive information for all SPs via the Ignition controller. This is
+    /// lower latency and has fewer possible failure modes than querying the SP
+    /// over the management network.
+    #[endpoint {
+        method = GET,
+        path = "/ignition",
+        versions = VERSION_COSMO..
     }]
     async fn ignition_list(
         rqctx: RequestContext<Self::Context>,
@@ -420,6 +436,23 @@ pub trait GatewayApi {
     #[endpoint {
         method = GET,
         path = "/ignition/{type}/{slot}",
+        operation_id = "ignition_get",
+        versions = VERSION_INITIAL..VERSION_COSMO
+    }]
+    async fn ignition_get_v1(
+        rqctx: RequestContext<Self::Context>,
+        path: Path<PathSp>,
+    ) -> Result<HttpResponseOk<ignition::v1::SpIgnitionInfo>, HttpError>;
+
+    /// Get SP info via Ignition
+    ///
+    /// Retreive information for an SP via the Ignition controller. This is
+    /// lower latency and has fewer possible failure modes than querying the SP
+    /// over the management network.
+    #[endpoint {
+        method = GET,
+        path = "/ignition/{type}/{slot}",
+        versions = VERSION_COSMO..
     }]
     async fn ignition_get(
         rqctx: RequestContext<Self::Context>,
