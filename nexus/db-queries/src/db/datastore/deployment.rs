@@ -4589,7 +4589,7 @@ mod tests {
         );
     }
 
-    /// Counts rows in blueprint-related tables for a specific blueprint ID.
+    /// Counts rows in blueprint-related tables.
     /// Used by both `ensure_blueprint_fully_populated` and `ensure_blueprint_fully_deleted`.
     struct BlueprintTableCounts {
         counts: BTreeMap<String, i64>,
