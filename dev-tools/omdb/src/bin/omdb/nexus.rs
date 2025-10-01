@@ -70,6 +70,7 @@ use nexus_types::internal_api::background::SupportBundleEreportStatus;
 use nexus_types::internal_api::background::TufArtifactReplicationCounters;
 use nexus_types::internal_api::background::TufArtifactReplicationRequest;
 use nexus_types::internal_api::background::TufArtifactReplicationStatus;
+use nexus_types::internal_api::background::TufRepoPrunerStatus;
 use nexus_types::inventory::BaseboardId;
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::CollectionUuid;
@@ -1198,6 +1199,9 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
         }
         "tuf_artifact_replication" => {
             print_task_tuf_artifact_replication(details);
+        }
+        "tuf_repo_pruner" => {
+            print_task_tuf_repo_pruner(details);
         }
         "alert_dispatcher" => {
             print_task_alert_dispatcher(details);
@@ -2569,6 +2573,19 @@ fn print_task_tuf_artifact_replication(details: &serde_json::Value) {
             println!("    lifetime:");
             print_counters(status.lifetime_counters);
             println!("    local repos: {}", status.local_repos);
+        }
+    }
+}
+
+fn print_task_tuf_repo_pruner(details: &serde_json::Value) {
+    match serde_json::from_value::<TufRepoPrunerStatus>(details.clone()) {
+        Err(error) => eprintln!(
+            "warning: failed to interpret task details: {}: {:?}",
+            InlineErrorChain::new(&error),
+            details
+        ),
+        Ok(status) => {
+            print!("{}", status);
         }
     }
 }

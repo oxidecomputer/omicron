@@ -2555,6 +2555,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.tuf_repo (
     CONSTRAINT unique_system_version UNIQUE (system_version)
 );
 
+CREATE UNIQUE INDEX IF NOT EXISTS tuf_repo_not_pruned
+    ON omicron.public.tuf_repo (id)
+    WHERE time_pruned IS NULL;
+
 -- Describes an individual artifact from an uploaded TUF repo.
 --
 -- In the future, this may also be used to describe artifacts that are fetched
@@ -6695,7 +6699,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '194.0.0', NULL)
+    (TRUE, NOW(), NOW(), '195.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

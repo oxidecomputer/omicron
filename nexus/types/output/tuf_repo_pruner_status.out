@@ -1,0 +1,10 @@
+    configuration:
+        nkeep_recent_releases: 1
+        nkeep_recent_uploads:  1
+    repo pruned: 4e8a87a0-3102-4014-99d3-e1bf486685bd (1.2.3, created 2025-09-29 01:23:45 UTC)
+    repos kept because they're recent target releases: 
+        4e8a87a0-3102-4014-99d3-e1bf486685bd (1.2.3, created 2025-09-29 01:23:45 UTC)
+    repos kept because they're recent uploads: none
+    other repos eligible for pruning: 
+        4e8a87a0-3102-4014-99d3-e1bf486685bd (1.2.3, created 2025-09-29 01:23:45 UTC)
+        867e42ae-ed72-4dc3-abcd-508b875c9601 (4.5.6, created 2025-09-29 02:34:56 UTC)

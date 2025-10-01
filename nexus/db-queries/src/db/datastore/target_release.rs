@@ -19,6 +19,8 @@ use nexus_db_schema::enums::TargetReleaseSourceEnum;
 use nexus_db_schema::schema::target_release::dsl;
 use nexus_types::external_api::views;
 use omicron_common::api::external::{CreateResult, Error, LookupResult};
+use omicron_uuid_kinds::TufRepoUuid;
+use std::collections::BTreeSet;
 
 impl DataStore {
     /// Fetch the current target release, i.e., the row with the largest
@@ -221,14 +223,109 @@ impl DataStore {
         };
         Ok(target_release.into_external(release_source))
     }
+
+    /// Lists the most recent N distinct target releases
+    pub async fn target_release_fetch_recent_distinct(
+        &self,
+        opctx: &OpContext,
+        count: u8,
+    ) -> Result<RecentTargetReleases, Error> {
+        opctx
+            .authorize(authz::Action::Read, &authz::TARGET_RELEASE_CONFIG)
+            .await?;
+
+        // Fetch recent rows from `target_release`.
+        //
+        // In almost all cases, `count` = 2 and we only need to look back two
+        // rows to find the most recent target releases.  But we do allow this
+        // to be configurable, and there are cases where the same release can
+        // appear in sequential `target_release` rows (e.g., after a MUPdate).
+        //
+        // We want to avoid a loop so that this function can be used in contexts
+        // that don't want to take an arbitrary amount of time.
+        //
+        // The solution: `count` is a `u8`, so it can be at most 255.  We'll
+        // multiply this by 4 to account for an unbelievable number of MUPdates.
+        // That's still small enough to do in one go.  If we're wrong and can't
+        // find enough distinct releases, we'll return an error.  (This seems
+        // extremely unlikely.)
+        let limit = 4 * u16::from(count);
+        let conn = self.pool_connection_authorized(opctx).await?;
+        let rows = dsl::target_release
+            .select(TargetRelease::as_select())
+            .order_by(dsl::generation.desc())
+            .limit(i64::from(limit))
+            .load_async(&*conn)
+            .await
+            .map_err(|err| {
+                public_error_from_diesel(err, ErrorHandler::Server)
+            })?;
+        if rows.is_empty() {
+            return Err(Error::internal_error(
+                "unexpectedly found no rows in `target_release` table",
+            ));
+        }
+
+        let target_release_generation = rows[0].generation.0;
+        let nfound = rows.len();
+        let mut releases = BTreeSet::new();
+        for target_release in rows {
+            if let Some(repo_id) = target_release.tuf_repo_id {
+                releases.insert(repo_id.into());
+                if releases.len() >= usize::from(count) {
+                    return Ok(RecentTargetReleases {
+                        releases,
+                        count,
+                        target_release_generation,
+                    });
+                }
+            }
+        }
+
+        // We ran out of rows before finding enough distinct target releases.
+        // If we got `limit` rows, there may have been more that we didn't
+        // search.  This is the case we called "extremely unlikely" above.
+        // Return an error in that case.
+        if nfound == usize::from(limit) {
+            return Err(Error::internal_error(&format!(
+                "looking for {} distinct releases in the most recent {} \
+                 target_release rows, but found only {} before giving up",
+                count,
+                limit,
+                releases.len(),
+            )));
+        }
+
+        // Otherwise, that's it: we found all the releases that were there.
+        Ok(RecentTargetReleases { releases, count, target_release_generation })
+    }
+}
+
+/// Represents information fetched about recent target releases
+#[derive(Debug)]
+pub struct RecentTargetReleases {
+    /// distinct target releases found
+    pub releases: BTreeSet<TufRepoUuid>,
+    /// how many releases we tried to find
+    pub(crate) count: u8,
+    /// latest target_release generation when we fetched these releases
+    /// (used to notice if a new target release has been set that could
+    /// invalidate this information)
+    pub(crate) target_release_generation:
+        omicron_common::api::external::Generation,
 }
 
 #[cfg(test)]
 mod test {
-    use super::*;
+    use crate::db::DataStore;
     use crate::db::model::{Generation, TargetReleaseSource};
     use crate::db::pub_test_utils::TestDatabase;
+    use crate::db::pub_test_utils::helpers::insert_test_tuf_repo;
+    use crate::diesel::ExpressionMethods;
+    use async_bb8_diesel::AsyncRunQueryDsl;
     use chrono::{TimeDelta, Utc};
+    use nexus_auth::context::OpContext;
+    use nexus_db_model::TargetRelease;
     use nexus_db_model::TufRepo;
     use omicron_common::api::external::{
         TufArtifactMeta, TufRepoDescription, TufRepoMeta,
@@ -361,6 +458,177 @@ mod test {
             TargetReleaseSource::SystemVersion
         );
         assert_eq!(target_release.tuf_repo_id, Some(tuf_repo_id));
+
+        // Clean up.
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_recent_distinct() {
+        let logctx = dev::test_setup_log("target_release_datastore");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // From initial conditions, this should succeed but find nothing of
+        // note.  That's because on a freshly installed system, there's a row in
+        // the target_release table, but it has no system version in it.
+        let generation = datastore
+            .target_release_get_current(opctx)
+            .await
+            .unwrap()
+            .generation
+            .0;
+        let recent = datastore
+            .target_release_fetch_recent_distinct(opctx, 3)
+            .await
+            .unwrap();
+        assert_eq!(recent.count, 3);
+        assert!(recent.releases.is_empty());
+        assert_eq!(recent.target_release_generation, generation);
+
+        // Now insert a TUF repo and try again.  That alone shouldn't change
+        // anything.
+        let repo1id = insert_test_tuf_repo(opctx, datastore, 1).await;
+        let target_release =
+            datastore.target_release_get_current(opctx).await.unwrap();
+        let last_generation = generation;
+        let generation = target_release.generation.0;
+        let recent = datastore
+            .target_release_fetch_recent_distinct(opctx, 3)
+            .await
+            .unwrap();
+        assert_eq!(recent.count, 3);
+        assert!(recent.releases.is_empty());
+        assert_eq!(last_generation, generation);
+        assert_eq!(recent.target_release_generation, generation);
+
+        // Now insert a target release and try again.
+        let target_release = datastore
+            .target_release_insert(
+                opctx,
+                TargetRelease::new_system_version(
+                    &target_release,
+                    repo1id.into(),
+                ),
+            )
+            .await
+            .unwrap();
+        let last_generation = generation;
+        let generation = target_release.generation.0;
+        assert_ne!(last_generation, generation);
+        let recent = datastore
+            .target_release_fetch_recent_distinct(opctx, 3)
+            .await
+            .unwrap();
+        assert_eq!(recent.count, 3);
+        assert_eq!(recent.releases.len(), 1);
+        assert!(recent.releases.contains(&repo1id));
+        assert_eq!(recent.target_release_generation, generation);
+
+        // Now insert a second distinct target release and try again.
+        let repo2id = insert_test_tuf_repo(opctx, datastore, 2).await;
+        let target_release = datastore
+            .target_release_insert(
+                opctx,
+                TargetRelease::new_system_version(
+                    &target_release,
+                    repo2id.into(),
+                ),
+            )
+            .await
+            .unwrap();
+        let last_generation = generation;
+        let generation = target_release.generation.0;
+        assert_ne!(last_generation, generation);
+        let recent = datastore
+            .target_release_fetch_recent_distinct(opctx, 3)
+            .await
+            .unwrap();
+        assert_eq!(recent.count, 3);
+        assert_eq!(recent.releases.len(), 2);
+        assert!(recent.releases.contains(&repo1id));
+        assert!(recent.releases.contains(&repo2id));
+        assert_eq!(recent.target_release_generation, generation);
+
+        // If we only look back far enough for one, we'll only find one.
+        let recent = datastore
+            .target_release_fetch_recent_distinct(opctx, 1)
+            .await
+            .unwrap();
+        assert_eq!(recent.count, 1);
+        assert_eq!(recent.releases.len(), 1);
+        assert!(recent.releases.contains(&repo2id));
+        assert_eq!(recent.target_release_generation, generation);
+
+        // Set the target release to the same value again.  We'll use this to
+        // test that it looks back further than two rows when necessary.
+        let target_release = datastore
+            .target_release_insert(
+                opctx,
+                TargetRelease::new_system_version(
+                    &target_release,
+                    repo2id.into(),
+                ),
+            )
+            .await
+            .unwrap();
+        let generation = target_release.generation.0;
+        let recent = datastore
+            .target_release_fetch_recent_distinct(opctx, 3)
+            .await
+            .unwrap();
+        assert_eq!(recent.count, 3);
+        assert_eq!(recent.releases.len(), 2);
+        assert!(recent.releases.contains(&repo1id));
+        assert!(recent.releases.contains(&repo2id));
+        assert_eq!(recent.target_release_generation, generation);
+
+        // If we do that a total of 7 times (so, five more times), it will have
+        // to look back 8 rows to find two distinct releases, and it won't know
+        // if it's looked back far enough.
+        let mut target_release = target_release;
+        for i in 0..6 {
+            target_release = datastore
+                .target_release_insert(
+                    opctx,
+                    TargetRelease::new_system_version(
+                        &target_release,
+                        repo2id.into(),
+                    ),
+                )
+                .await
+                .unwrap();
+            let generation = target_release.generation.0;
+            if i < 5 {
+                let recent = datastore
+                    .target_release_fetch_recent_distinct(opctx, 2)
+                    .await
+                    .unwrap();
+                assert_eq!(recent.count, 2);
+                assert_eq!(recent.releases.len(), 2);
+                assert!(recent.releases.contains(&repo1id));
+                assert!(recent.releases.contains(&repo2id));
+                assert_eq!(recent.target_release_generation, generation);
+            } else {
+                let error = datastore
+                    .target_release_fetch_recent_distinct(opctx, 2)
+                    .await
+                    .unwrap_err();
+                eprintln!("got error (expected one): {}", error);
+                // It'll look further if we're looking for more distinct
+                // releases.
+                let recent = datastore
+                    .target_release_fetch_recent_distinct(opctx, 3)
+                    .await
+                    .unwrap();
+                assert_eq!(recent.count, 3);
+                assert_eq!(recent.releases.len(), 2);
+                assert!(recent.releases.contains(&repo1id));
+                assert!(recent.releases.contains(&repo2id));
+                assert_eq!(recent.target_release_generation, generation);
+            }
+        }
 
         // Clean up.
         db.terminate().await;
