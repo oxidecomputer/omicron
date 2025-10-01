@@ -3896,7 +3896,7 @@ mod tests {
         datastore.blueprint_delete(&opctx, &authz_blueprint5).await.unwrap();
         ensure_blueprint_fully_deleted(&datastore, blueprint5.id).await;
 
-        ensure_blueprint_fully_populated(&datastore, &cumulative_counts).await;
+        cumulative_counts.ensure_fully_populated();
 
         // Clean up.
         db.terminate().await;
@@ -4745,41 +4745,38 @@ mod tests {
                 Ok(())
             }
         }
-    }
 
-    // Verify that every blueprint-related table contains ≥1 row across test blueprints.
-    // Complements `ensure_blueprint_fully_deleted`.
-    async fn ensure_blueprint_fully_populated(
-        _datastore: &DataStore,
-        cumulative_counts: &BlueprintTableCounts,
-    ) {
-        // Exception tables that may be empty in the test blueprints:
-        // - ClickHouse tables: only populated when blueprint includes ClickHouse configuration
-        // - debug log for planner reports: only populated when the blueprint
-        //   was produced by the planner (test blueprints generally aren't)
-        let exception_tables = [
-            "bp_clickhouse_cluster_config",
-            "bp_clickhouse_keeper_zone_id_to_node_id",
-            "bp_clickhouse_server_zone_id_to_node_id",
-            "debug_log_blueprint_planning",
-        ];
+        /// Verify that every blueprint-related table contains ≥1 row across test blueprints.
+        /// Complements `ensure_blueprint_fully_deleted`.
+        fn ensure_fully_populated(&self) {
+            // Exception tables that may be empty in the test blueprints:
+            // - ClickHouse tables: only populated when blueprint includes ClickHouse configuration
+            // - debug log for planner reports: only populated when the blueprint
+            //   was produced by the planner (test blueprints generally aren't)
+            let exception_tables = [
+                "bp_clickhouse_cluster_config",
+                "bp_clickhouse_keeper_zone_id_to_node_id",
+                "bp_clickhouse_server_zone_id_to_node_id",
+                "debug_log_blueprint_planning",
+            ];
 
-        // Check that all non-exception tables have at least one row
-        let empty_tables = cumulative_counts.empty_tables();
-        let problematic_tables: Vec<_> = empty_tables
-            .into_iter()
-            .filter(|table| !exception_tables.contains(&table.as_str()))
-            .collect();
+            // Check that all non-exception tables have at least one row
+            let empty_tables = self.empty_tables();
+            let problematic_tables: Vec<_> = empty_tables
+                .into_iter()
+                .filter(|table| !exception_tables.contains(&table.as_str()))
+                .collect();
 
-        if !problematic_tables.is_empty() {
-            panic!(
-                "Expected tables to be populated across test blueprints: {:?}\n\n\
-                If every blueprint should be expected to have a value in this table, then this is a bug. \
-                Otherwise, you may need to add a table to the exception list in `ensure_blueprint_fully_populated()`. \
-                If you do this, please ensure that you add a test to `test_representative_blueprint()` that creates a \
-                blueprint that _does_ populate this table and verifies it.",
-                problematic_tables
-            );
+            if !problematic_tables.is_empty() {
+                panic!(
+                    "Expected tables to be populated across test blueprints: {:?}\n\n\
+                    If every blueprint should be expected to have a value in this table, then this is a bug. \
+                    Otherwise, you may need to add a table to the exception list in `ensure_fully_populated()`. \
+                    If you do this, please ensure that you add a test to `test_representative_blueprint()` that creates a \
+                    blueprint that _does_ populate this table and verifies it.",
+                    problematic_tables
+                );
+            }
         }
     }
 }
