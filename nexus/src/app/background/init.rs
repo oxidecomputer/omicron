@@ -107,6 +107,7 @@ use super::tasks::instance_reincarnation;
 use super::tasks::instance_updater;
 use super::tasks::instance_watcher;
 use super::tasks::inventory_collection;
+use super::tasks::inventory_load;
 use super::tasks::lookup_region_port;
 use super::tasks::metrics_producer_gc;
 use super::tasks::nat_cleanup;
@@ -203,6 +204,7 @@ impl BackgroundTasksInitializer {
             task_nat_cleanup: Activator::new(),
             task_bfd_manager: Activator::new(),
             task_inventory_collection: Activator::new(),
+            task_inventory_loader: Activator::new(),
             task_support_bundle_collector: Activator::new(),
             task_physical_disk_adoption: Activator::new(),
             task_decommissioned_disk_cleaner: Activator::new(),
@@ -282,6 +284,7 @@ impl BackgroundTasksInitializer {
             task_nat_cleanup,
             task_bfd_manager,
             task_inventory_collection,
+            task_inventory_loader,
             task_support_bundle_collector,
             task_physical_disk_adoption,
             task_decommissioned_disk_cleaner,
@@ -488,6 +491,20 @@ impl BackgroundTasksInitializer {
             inventory_watcher
         };
 
+        // Background task: inventory loader
+        let inventory_loader =
+            inventory_load::InventoryLoader::new(datastore.clone());
+        driver.register(TaskDefinition {
+            name: "inventory_loader",
+            description: "loads the latest inventory collection from the DB",
+            period: config.inventory.period_secs_load,
+            task_impl: Box::new(inventory_loader),
+            opctx: opctx.child(BTreeMap::new()),
+            watchers: vec![],
+            activator: task_inventory_loader,
+        });
+
+        // Background task: reconfigurator config loader
         let reconfigurator_config_loader =
             ReconfiguratorConfigLoader::new(datastore.clone());
         let reconfigurator_config_watcher =
