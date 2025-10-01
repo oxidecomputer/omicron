@@ -45,6 +45,7 @@ use clap::builder::PossibleValuesParser;
 use clap::builder::TypedValueParser;
 use db_metadata::DbMetadataArgs;
 use db_metadata::DbMetadataCommands;
+use db_metadata::cmd_db_metadata_force_mark_nexus_quiesced;
 use db_metadata::cmd_db_metadata_list_nexus;
 use diesel::BoolExpressionMethods;
 use diesel::ExpressionMethods;
@@ -1147,6 +1148,12 @@ impl DbArgs {
                         command: DbMetadataCommands::ListNexus,
                     }) => {
                         cmd_db_metadata_list_nexus(&opctx, &datastore).await
+                    }
+                    DbCommands::DbMetadata(DbMetadataArgs {
+                        command: DbMetadataCommands::ForceMarkNexusQuiesced(args),
+                    }) => {
+                        let token = omdb.check_allow_destructive()?;
+                        cmd_db_metadata_force_mark_nexus_quiesced(&opctx, &datastore, args, token).await
                     }
                     DbCommands::CrucibleDataset(CrucibleDatasetArgs {
                         command: CrucibleDatasetCommands::List,

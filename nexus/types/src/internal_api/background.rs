@@ -7,6 +7,9 @@ use crate::external_api::views;
 use chrono::DateTime;
 use chrono::Utc;
 use gateway_types::component::SpType;
+use iddqd::IdOrdItem;
+use iddqd::IdOrdMap;
+use iddqd::id_upcast;
 use omicron_common::api::external::Generation;
 use omicron_uuid_kinds::AlertReceiverUuid;
 use omicron_uuid_kinds::AlertUuid;
@@ -14,12 +17,16 @@ use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
+use omicron_uuid_kinds::TufRepoUuid;
 use omicron_uuid_kinds::WebhookDeliveryUuid;
+use semver::Version;
 use serde::Deserialize;
 use serde::Serialize;
 use std::collections::BTreeMap;
 use std::collections::VecDeque;
 use std::sync::Arc;
+use swrite::SWrite;
+use swrite::swriteln;
 use tufaceous_artifact::ArtifactHash;
 use uuid::Uuid;
 
@@ -380,6 +387,111 @@ pub enum TufArtifactReplicationOperation {
     Copy { hash: ArtifactHash, source_sled: SledUuid },
 }
 
+#[derive(Debug, Deserialize, Serialize)]
+pub struct TufRepoPrunerStatus {
+    // Input
+    /// how many recent releases we're configured to keep
+    pub nkeep_recent_releases: u8,
+    /// how many recent uploads we're configured to keep
+    pub nkeep_recent_uploads: u8,
+
+    // Output
+    /// repos that we're keeping because they're a recent target release
+    pub repos_keep_target_release: IdOrdMap<TufRepoInfo>,
+    /// repos that we're keeping because they were recently uploaded
+    pub repos_keep_recent_uploads: IdOrdMap<TufRepoInfo>,
+    /// repo that we're pruning
+    pub repo_prune: Option<TufRepoInfo>,
+    /// other repos that were eligible for pruning
+    pub other_repos_eligible_to_prune: IdOrdMap<TufRepoInfo>,
+    /// runtime warnings while attempting to prune repos
+    pub warnings: Vec<String>,
+}
+
+impl std::fmt::Display for TufRepoPrunerStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        fn print_collection(c: &IdOrdMap<TufRepoInfo>) -> String {
+            if c.is_empty() {
+                return String::from("none\n");
+            }
+
+            let mut rv = String::from("\n");
+            for repo in c {
+                swriteln!(
+                    rv,
+                    "        {} ({}, created {})",
+                    repo.id,
+                    repo.system_version,
+                    repo.time_created,
+                );
+            }
+
+            rv
+        }
+
+        // This is indented appropriately for use in `omdb`.
+        writeln!(f, "    configuration:")?;
+        writeln!(
+            f,
+            "        nkeep_recent_releases: {}",
+            self.nkeep_recent_releases
+        )?;
+        writeln!(
+            f,
+            "        nkeep_recent_uploads:  {}",
+            self.nkeep_recent_releases
+        )?;
+
+        write!(f, "    repo pruned:")?;
+        if let Some(pruned) = &self.repo_prune {
+            writeln!(
+                f,
+                " {} ({}, created {})",
+                pruned.id, pruned.system_version, pruned.time_created
+            )?;
+        } else {
+            writeln!(f, " none")?;
+        }
+
+        write!(
+            f,
+            "    repos kept because they're recent target releases: {}",
+            print_collection(&self.repos_keep_target_release)
+        )?;
+
+        write!(
+            f,
+            "    repos kept because they're recent uploads: {}",
+            print_collection(&self.repos_keep_recent_uploads)
+        )?;
+
+        write!(
+            f,
+            "    other repos eligible for pruning: {}",
+            print_collection(&self.other_repos_eligible_to_prune)
+        )?;
+
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct TufRepoInfo {
+    pub id: TufRepoUuid,
+    pub system_version: Version,
+    pub time_created: DateTime<Utc>,
+}
+
+impl IdOrdItem for TufRepoInfo {
+    type Key<'a> = &'a TufRepoUuid;
+
+    fn key(&self) -> Self::Key<'_> {
+        &self.id
+    }
+
+    id_upcast!();
+}
+
 /// The status of an `blueprint_rendezvous` background task activation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BlueprintRendezvousStatus {
@@ -614,4 +726,44 @@ pub struct EreporterStatus {
     /// total number of HTTP requests sent.
     pub requests: usize,
     pub errors: Vec<String>,
+}
+
+#[cfg(test)]
+mod test {
+    use super::TufRepoInfo;
+    use super::TufRepoPrunerStatus;
+    use expectorate::assert_contents;
+    use iddqd::IdOrdMap;
+
+    #[test]
+    fn test_display_tuf_repo_pruner_status() {
+        let repo1 = TufRepoInfo {
+            id: "4e8a87a0-3102-4014-99d3-e1bf486685bd".parse().unwrap(),
+            system_version: "1.2.3".parse().unwrap(),
+            time_created: "2025-09-29T01:23:45Z".parse().unwrap(),
+        };
+        let repo2 = TufRepoInfo {
+            id: "867e42ae-ed72-4dc3-abcd-508b875c9601".parse().unwrap(),
+            system_version: "4.5.6".parse().unwrap(),
+            time_created: "2025-09-29T02:34:56Z".parse().unwrap(),
+        };
+        let repo_map: IdOrdMap<_> = std::iter::once(repo1.clone()).collect();
+
+        let status = TufRepoPrunerStatus {
+            nkeep_recent_releases: 1,
+            nkeep_recent_uploads: 2,
+            repos_keep_target_release: repo_map,
+            repos_keep_recent_uploads: IdOrdMap::new(),
+            repo_prune: Some(repo1.clone()),
+            other_repos_eligible_to_prune: [repo1.clone(), repo2.clone()]
+                .into_iter()
+                .collect(),
+            warnings: vec![String::from("fake-oh problem-oh")],
+        };
+
+        assert_contents(
+            "output/tuf_repo_pruner_status.out",
+            &status.to_string(),
+        );
+    }
 }
