@@ -404,6 +404,20 @@ resource: Disk "silo1-proj1-disk1"
   silo1-proj1-viewer               ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
 
+resource: MulticastGroup "silo1-proj1-multicast-group1"
+
+  USER                             Q  R LC RP  M MP CC  D
+  fleet-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  fleet-collaborator               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  fleet-viewer                     ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-admin                      ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
+  silo1-collaborator               ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
+  silo1-viewer                     ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
+  silo1-proj1-admin                ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
+  silo1-proj1-collaborator         ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
+  silo1-proj1-viewer               ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
+  unauthenticated                  !  !  !  !  !  !  !  !
+
 resource: AffinityGroup "silo1-proj1-affinity-group1"
 
   USER                             Q  R LC RP  M MP CC  D
@@ -587,6 +601,20 @@ resource: Project "silo1-proj2"
   unauthenticated                  !  !  !  !  !  !  !  !
 
 resource: Disk "silo1-proj2-disk1"
+
+  USER                             Q  R LC RP  M MP CC  D
+  fleet-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  fleet-collaborator               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  fleet-viewer                     ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-admin                      ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
+  silo1-collaborator               ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
+  silo1-viewer                     ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
+  silo1-proj1-admin                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  unauthenticated                  !  !  !  !  !  !  !  !
+
+resource: MulticastGroup "silo1-proj2-multicast-group1"
 
   USER                             Q  R LC RP  M MP CC  D
   fleet-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
@@ -979,6 +1007,20 @@ resource: Project "silo2-proj1"
   unauthenticated                  !  !  !  !  !  !  !  !
 
 resource: Disk "silo2-proj1-disk1"
+
+  USER                             Q  R LC RP  M MP CC  D
+  fleet-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  fleet-collaborator               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  fleet-viewer                     ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-collaborator               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-viewer                     ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-admin                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  unauthenticated                  !  !  !  !  !  !  !  !
+
+resource: MulticastGroup "silo2-proj1-multicast-group1"
 
   USER                             Q  R LC RP  M MP CC  D
   fleet-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘

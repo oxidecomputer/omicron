@@ -142,6 +142,38 @@ impl InstanceUpdaterStatus {
     }
 }
 
+/// The status of a `multicast_group_reconciler` background task activation.
+#[derive(Default, Serialize, Deserialize, Debug)]
+pub struct MulticastGroupReconcilerStatus {
+    /// Whether the multicast reconciler is disabled due to the feature not
+    /// being enabled.
+    ///
+    /// We use disabled here to match other background task status structs.
+    pub disabled: bool,
+    /// Number of multicast groups transitioned from "Creating" to "Active" state.
+    pub groups_created: usize,
+    /// Number of multicast groups cleaned up (transitioned to "Deleted" state).
+    pub groups_deleted: usize,
+    /// Number of active multicast groups verified on dataplane switches.
+    pub groups_verified: usize,
+    /// Number of members processed ("Joining"→"Active", "Leaving"→"Deleted").
+    pub members_processed: usize,
+    /// Number of members deleted (Left + time_deleted).
+    pub members_deleted: usize,
+    /// Errors that occurred during reconciliation operations.
+    pub errors: Vec<String>,
+}
+
+impl MulticastGroupReconcilerStatus {
+    pub fn total_groups_processed(&self) -> usize {
+        self.groups_created + self.groups_deleted + self.groups_verified
+    }
+
+    pub fn has_errors(&self) -> bool {
+        !self.errors.is_empty()
+    }
+}
+
 /// The status of an `instance_reincarnation` background task activation.
 #[derive(Default, Serialize, Deserialize, Debug)]
 pub struct InstanceReincarnationStatus {

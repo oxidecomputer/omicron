@@ -80,6 +80,7 @@ async fn instance_launch() -> Result<()> {
             auto_restart_policy: Default::default(),
             anti_affinity_groups: Vec::new(),
             cpu_platform: None,
+            multicast_groups: Vec::new(),
         })
         .send()
         .await?;

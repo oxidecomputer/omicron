@@ -662,6 +662,7 @@ pub static DEMO_INSTANCE_CREATE: LazyLock<params::InstanceCreate> =
         start: true,
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
+        multicast_groups: Vec::new(),
     });
 pub static DEMO_STOPPED_INSTANCE_CREATE: LazyLock<params::InstanceCreate> =
     LazyLock::new(|| params::InstanceCreate {
@@ -684,6 +685,7 @@ pub static DEMO_STOPPED_INSTANCE_CREATE: LazyLock<params::InstanceCreate> =
         start: true,
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
+        multicast_groups: Vec::new(),
     });
 pub static DEMO_INSTANCE_UPDATE: LazyLock<params::InstanceUpdate> =
     LazyLock::new(|| params::InstanceUpdate {
@@ -692,6 +694,7 @@ pub static DEMO_INSTANCE_UPDATE: LazyLock<params::InstanceUpdate> =
         auto_restart_policy: Nullable(None),
         ncpus: InstanceCpuCount(1),
         memory: ByteCount::from_gibibytes_u32(16),
+        multicast_groups: None,
     });
 
 // The instance needs a network interface, too.
@@ -745,6 +748,76 @@ pub static DEMO_CERTIFICATE_CREATE: LazyLock<params::CertificateCreate> =
         service: shared::ServiceUsingCertificate::ExternalApi,
     });
 
+// Multicast groups and members
+pub static DEMO_MULTICAST_GROUP_NAME: LazyLock<Name> =
+    LazyLock::new(|| "demo-multicast-group".parse().unwrap());
+pub static MULTICAST_GROUPS_URL: LazyLock<String> = LazyLock::new(|| {
+    format!("/v1/multicast-groups?project={}", *DEMO_PROJECT_NAME)
+});
+pub static DEMO_MULTICAST_GROUP_URL: LazyLock<String> = LazyLock::new(|| {
+    format!(
+        "/v1/multicast-groups/{}?project={}",
+        *DEMO_MULTICAST_GROUP_NAME, *DEMO_PROJECT_NAME
+    )
+});
+pub static DEMO_MULTICAST_GROUP_MEMBERS_URL: LazyLock<String> =
+    LazyLock::new(|| {
+        format!(
+            "/v1/multicast-groups/{}/members?project={}",
+            *DEMO_MULTICAST_GROUP_NAME, *DEMO_PROJECT_NAME
+        )
+    });
+pub static DEMO_MULTICAST_GROUP_MEMBER_URL: LazyLock<String> =
+    LazyLock::new(|| {
+        format!(
+            "/v1/multicast-groups/{}/members/{}?project={}",
+            *DEMO_MULTICAST_GROUP_NAME, *DEMO_INSTANCE_NAME, *DEMO_PROJECT_NAME
+        )
+    });
+pub static DEMO_INSTANCE_MULTICAST_GROUPS_URL: LazyLock<String> =
+    LazyLock::new(|| {
+        format!(
+            "/v1/instances/{}/multicast-groups?project={}",
+            *DEMO_INSTANCE_NAME, *DEMO_PROJECT_NAME
+        )
+    });
+pub static DEMO_INSTANCE_MULTICAST_GROUP_JOIN_URL: LazyLock<String> =
+    LazyLock::new(|| {
+        format!(
+            "/v1/instances/{}/multicast-groups/{}?project={}",
+            *DEMO_INSTANCE_NAME, *DEMO_MULTICAST_GROUP_NAME, *DEMO_PROJECT_NAME
+        )
+    });
+pub static DEMO_MULTICAST_GROUP_BY_IP_URL: LazyLock<String> =
+    LazyLock::new(|| {
+        "/v1/system/multicast-groups/by-ip/224.0.1.100".to_string()
+    });
+pub static DEMO_MULTICAST_GROUP_CREATE: LazyLock<params::MulticastGroupCreate> =
+    LazyLock::new(|| params::MulticastGroupCreate {
+        identity: IdentityMetadataCreateParams {
+            name: DEMO_MULTICAST_GROUP_NAME.clone(),
+            description: String::from("demo multicast group"),
+        },
+        multicast_ip: Some("224.0.1.100".parse().unwrap()),
+        pool: Some(DEMO_MULTICAST_IP_POOL_NAME.clone().into()),
+        vpc: None,
+        source_ips: Some(Vec::new()),
+    });
+pub static DEMO_MULTICAST_GROUP_UPDATE: LazyLock<params::MulticastGroupUpdate> =
+    LazyLock::new(|| params::MulticastGroupUpdate {
+        identity: IdentityMetadataUpdateParams {
+            name: None,
+            description: Some("updated description".to_string()),
+        },
+        source_ips: Some(Vec::new()),
+    });
+pub static DEMO_MULTICAST_MEMBER_ADD: LazyLock<
+    params::MulticastGroupMemberAdd,
+> = LazyLock::new(|| params::MulticastGroupMemberAdd {
+    instance: DEMO_INSTANCE_NAME.clone().into(),
+});
+
+// Switch port settings and status
 pub const DEMO_SWITCH_PORT_URL: &'static str =
     "/v1/system/hardware/switch-port";
 pub static DEMO_SWITCH_PORT_SETTINGS_APPLY_URL: LazyLock<String> =
@@ -956,6 +1029,45 @@ pub static DEMO_IP_POOL_UPDATE: LazyLock<params::IpPoolUpdate> =
         mvlan: None,
         switch_port_uplinks: None,
     });
+
+// Multicast IP Pool
+pub static DEMO_MULTICAST_IP_POOL_NAME: LazyLock<Name> =
+    LazyLock::new(|| "default-multicast".parse().unwrap());
+pub static DEMO_MULTICAST_IP_POOL_CREATE: LazyLock<params::IpPoolCreate> =
+    LazyLock::new(|| {
+        params::IpPoolCreate::new_multicast(
+            IdentityMetadataCreateParams {
+                name: DEMO_MULTICAST_IP_POOL_NAME.clone(),
+                description: String::from("a multicast IP pool"),
+            },
+            IpVersion::V4,
+            None, // switch_port_uplinks
+            None, // mvlan
+        )
+    });
+pub static DEMO_MULTICAST_IP_POOL_URL: LazyLock<String> = LazyLock::new(|| {
+    format!("/v1/system/ip-pools/{}", *DEMO_MULTICAST_IP_POOL_NAME)
+});
+pub static DEMO_MULTICAST_IP_POOL_SILOS_URL: LazyLock<String> =
+    LazyLock::new(|| format!("{}/silos", *DEMO_MULTICAST_IP_POOL_URL));
+pub static DEMO_MULTICAST_IP_POOL_RANGE: LazyLock<IpRange> =
+    LazyLock::new(|| {
+        IpRange::V4(
+            Ipv4Range::new(
+                Ipv4Addr::new(224, 0, 1, 100),
+                Ipv4Addr::new(224, 0, 1, 200),
+            )
+            .unwrap(),
+        )
+    });
+pub static DEMO_MULTICAST_IP_POOL_RANGES_ADD_URL: LazyLock<String> =
+    LazyLock::new(|| format!("{}/ranges/add", *DEMO_MULTICAST_IP_POOL_URL));
+pub static DEMO_MULTICAST_IP_POOL_SILOS_BODY: LazyLock<params::IpPoolLinkSilo> =
+    LazyLock::new(|| params::IpPoolLinkSilo {
+        silo: NameOrId::Id(DEFAULT_SILO.identity().id),
+        is_default: false, // multicast pool is not the default
+    });
+
 pub static DEMO_IP_POOL_SILOS_URL: LazyLock<String> =
     LazyLock::new(|| format!("{}/silos", *DEMO_IP_POOL_URL));
 pub static DEMO_IP_POOL_SILOS_BODY: LazyLock<params::IpPoolLinkSilo> =
@@ -973,8 +1085,8 @@ pub static DEMO_IP_POOL_SILO_UPDATE_BODY: LazyLock<params::IpPoolSiloUpdate> =
 pub static DEMO_IP_POOL_RANGE: LazyLock<IpRange> = LazyLock::new(|| {
     IpRange::V4(
         Ipv4Range::new(
-            std::net::Ipv4Addr::new(10, 0, 0, 0),
-            std::net::Ipv4Addr::new(10, 0, 0, 255),
+            Ipv4Addr::new(10, 0, 0, 0),
+            Ipv4Addr::new(10, 0, 0, 255),
         )
         .unwrap(),
     )
@@ -1064,7 +1176,7 @@ pub static DEMO_FLOAT_IP_CREATE: LazyLock<params::FloatingIpCreate> =
             name: DEMO_FLOAT_IP_NAME.clone(),
             description: String::from("a new IP pool"),
         },
-        ip: Some(std::net::Ipv4Addr::new(10, 0, 0, 141).into()),
+        ip: Some(Ipv4Addr::new(10, 0, 0, 141).into()),
         pool: None,
     });
 
@@ -3024,6 +3136,70 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
             },
             VerifyEndpoint {
                 url: &ALERT_CLASSES_URL,
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Get],
+            },
+            // Multicast groups
+            VerifyEndpoint {
+                url: &MULTICAST_GROUPS_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::Get,
+                    AllowedMethod::Post(
+                        serde_json::to_value(&*DEMO_MULTICAST_GROUP_CREATE).unwrap(),
+                    ),
+                ],
+            },
+            VerifyEndpoint {
+                url: &DEMO_MULTICAST_GROUP_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::Get,
+                    AllowedMethod::Put(
+                        serde_json::to_value(&*DEMO_MULTICAST_GROUP_UPDATE).unwrap(),
+                    ),
+                    AllowedMethod::Delete,
+                ],
+            },
+            VerifyEndpoint {
+                url: &DEMO_MULTICAST_GROUP_MEMBERS_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::Get,
+                    AllowedMethod::Post(
+                        serde_json::to_value(&*DEMO_MULTICAST_MEMBER_ADD).unwrap(),
+                    ),
+                ],
+            },
+            VerifyEndpoint {
+                url: &DEMO_MULTICAST_GROUP_MEMBER_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::Delete,
+                ],
+            },
+            VerifyEndpoint {
+                url: &DEMO_INSTANCE_MULTICAST_GROUPS_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Get],
+            },
+            VerifyEndpoint {
+                url: &DEMO_INSTANCE_MULTICAST_GROUP_JOIN_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::Put(serde_json::to_value(()).unwrap()),
+                    AllowedMethod::Delete,
+                ],
+            },
+            VerifyEndpoint {
+                url: &DEMO_MULTICAST_GROUP_BY_IP_URL,
                 visibility: Visibility::Public,
                 unprivileged_access: UnprivilegedAccess::None,
                 allowed_methods: vec![AllowedMethod::Get],

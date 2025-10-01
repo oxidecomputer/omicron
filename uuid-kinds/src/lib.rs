@@ -70,6 +70,8 @@ impl_typed_uuid_kind! {
     Instance => "instance",
     InternalZpool => "internal_zpool",
     LoopbackAddress => "loopback_address",
+    MulticastGroup => "multicast_group",
+    MulticastGroupMember => "multicast_group_member",
     Mupdate => "mupdate",
     MupdateOverride => "mupdate_override",
     // `OmicronSledConfig`s do not themselves contain IDs, but we generate IDs

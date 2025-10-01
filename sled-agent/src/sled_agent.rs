@@ -53,6 +53,7 @@ use omicron_ddm_admin_client::Client as DdmAdminClient;
 use omicron_uuid_kinds::{
     GenericUuid, MupdateOverrideUuid, PropolisUuid, SledUuid,
 };
+use sled_agent_api::v5::{InstanceEnsureBody, InstanceMulticastBody};
 use sled_agent_config_reconciler::{
     ConfigReconcilerHandle, ConfigReconcilerSpawnToken, InternalDisks,
     InternalDisksReceiver, LedgerNewConfigError, LedgerTaskError,
@@ -61,8 +62,8 @@ use sled_agent_config_reconciler::{
 use sled_agent_types::disk::DiskStateRequested;
 use sled_agent_types::early_networking::EarlyNetworkConfig;
 use sled_agent_types::instance::{
-    InstanceEnsureBody, InstanceExternalIpBody, VmmPutStateResponse,
-    VmmStateRequested, VmmUnregisterResponse,
+    InstanceExternalIpBody, VmmPutStateResponse, VmmStateRequested,
+    VmmUnregisterResponse,
 };
 use sled_agent_types::sled::{BaseboardId, StartSledAgentRequest};
 use sled_agent_types::zone_bundle::{
@@ -848,7 +849,42 @@ impl SledAgent {
     /// Idempotently ensures that a given instance is registered with this sled,
     /// i.e., that it can be addressed by future calls to
     /// [`Self::instance_ensure_state`].
-    pub async fn instance_ensure_registered(
+    pub async fn instance_ensure_registered_v1(
+        &self,
+        propolis_id: PropolisUuid,
+        instance: sled_agent_types::instance::InstanceEnsureBody,
+    ) -> Result<SledVmmState, Error> {
+        // Convert v1 to v2
+        let v5_instance = sled_agent_api::v5::InstanceEnsureBody {
+            vmm_spec: instance.vmm_spec,
+            local_config: sled_agent_api::v5::InstanceSledLocalConfig {
+                hostname: instance.local_config.hostname,
+                nics: instance.local_config.nics,
+                source_nat: instance.local_config.source_nat,
+                ephemeral_ip: instance.local_config.ephemeral_ip,
+                floating_ips: instance.local_config.floating_ips,
+                multicast_groups: Vec::new(), // v1 doesn't support multicast
+                firewall_rules: instance.local_config.firewall_rules,
+                dhcp_config: instance.local_config.dhcp_config,
+            },
+            vmm_runtime: instance.vmm_runtime,
+            instance_id: instance.instance_id,
+            migration_id: instance.migration_id,
+            propolis_addr: instance.propolis_addr,
+            metadata: instance.metadata,
+        };
+        self.instance_ensure_registered_v5(propolis_id, v5_instance).await
+    }
+
+    pub async fn instance_ensure_registered_v5(
+        &self,
+        propolis_id: PropolisUuid,
+        instance: InstanceEnsureBody,
+    ) -> Result<SledVmmState, Error> {
+        self.instance_ensure_registered(propolis_id, instance).await
+    }
+
+    async fn instance_ensure_registered(
         &self,
         propolis_id: PropolisUuid,
         instance: InstanceEnsureBody,
@@ -917,6 +953,30 @@ impl SledAgent {
         self.inner
             .instances
             .delete_external_ip(propolis_id, external_ip)
+            .await
+            .map_err(|e| Error::Instance(e))
+    }
+
+    pub async fn instance_join_multicast_group(
+        &self,
+        propolis_id: PropolisUuid,
+        multicast_body: &InstanceMulticastBody,
+    ) -> Result<(), Error> {
+        self.inner
+            .instances
+            .join_multicast_group(propolis_id, multicast_body)
+            .await
+            .map_err(|e| Error::Instance(e))
+    }
+
+    pub async fn instance_leave_multicast_group(
+        &self,
+        propolis_id: PropolisUuid,
+        multicast_body: &InstanceMulticastBody,
+    ) -> Result<(), Error> {
+        self.inner
+            .instances
+            .leave_multicast_group(propolis_id, multicast_body)
             .await
             .map_err(|e| Error::Instance(e))
     }

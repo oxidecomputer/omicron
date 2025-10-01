@@ -357,6 +357,14 @@ async fn make_project(
         Uuid::new_v4(),
         LookupType::ByName(disk_name.clone()),
     ));
+
+    let multicast_group_name = format!("{project_name}-multicast-group1");
+    builder.new_resource(authz::MulticastGroup::new(
+        project.clone(),
+        Uuid::new_v4(),
+        LookupType::ByName(multicast_group_name),
+    ));
+
     builder.new_resource(affinity_group.clone());
     builder.new_resource(anti_affinity_group.clone());
     builder.new_resource(instance.clone());
