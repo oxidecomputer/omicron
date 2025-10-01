@@ -400,12 +400,7 @@ impl RackInitRequestBuilder {
         address: SocketAddrV6,
     ) {
         self.internal_dns_config
-            .host_zone_clickhouse_single_node(
-                zone_id,
-                ServiceName::Clickhouse,
-                address,
-                true,
-            )
+            .host_zone_clickhouse_single_node(zone_id, address, true)
             .expect("Failed to setup ClickHouse DNS");
     }
 
@@ -418,12 +413,7 @@ impl RackInitRequestBuilder {
         dns_address: SocketAddrV6,
     ) {
         self.internal_dns_config
-            .host_zone_internal_dns(
-                zone_id,
-                ServiceName::InternalDns,
-                http_address,
-                dns_address,
-            )
+            .host_zone_internal_dns(zone_id, http_address, dns_address)
             .expect("Failed to setup internal DNS");
     }
 }

@@ -452,23 +452,20 @@ impl DnsConfigBuilder {
     ///
     /// # Errors
     ///
-    /// This fails if the provided `http_service` is not for a ClickHouse single
-    /// node server. It also fails if the given zone has already been added
-    /// to the configuration.
+    /// This function fails if the given zone has already been added to the
+    /// configuration.
     pub fn host_zone_clickhouse_single_node(
         &mut self,
         zone_id: OmicronZoneUuid,
-        http_service: ServiceName,
         http_address: SocketAddrV6,
         read_policy_enabled: bool,
     ) -> anyhow::Result<()> {
-        anyhow::ensure!(
-            http_service == ServiceName::Clickhouse,
-            "This method is only valid for the ClickHouse single node server, \
-            but we were provided the service '{http_service:?}'",
-        );
         let zone = self.host_zone(zone_id, *http_address.ip())?;
-        self.service_backend_zone(http_service, &zone, http_address.port())?;
+        self.service_backend_zone(
+            ServiceName::Clickhouse,
+            &zone,
+            http_address.port(),
+        )?;
         if read_policy_enabled {
             self.service_backend_zone(
                 ServiceName::OximeterReader,
@@ -506,23 +503,20 @@ impl DnsConfigBuilder {
     ///
     /// # Errors
     ///
-    /// This fails if the provided `http_service` is not for a ClickHouse cluster
-    /// replica server. It also fails if the given zone has already been added
-    /// to the configuration.
+    /// This function fails if the given zone has already been added to the
+    /// configuration.
     pub fn host_zone_clickhouse_cluster(
         &mut self,
         zone_id: OmicronZoneUuid,
-        http_service: ServiceName,
         http_address: SocketAddrV6,
         read_policy_enabled: bool,
     ) -> anyhow::Result<()> {
-        anyhow::ensure!(
-            http_service == ServiceName::ClickhouseServer,
-            "This method is only valid for ClickHouse cluster replica servers, \
-            but we were provided the service '{http_service:?}'",
-        );
         let zone = self.host_zone(zone_id, *http_address.ip())?;
-        self.service_backend_zone(http_service, &zone, http_address.port())?;
+        self.service_backend_zone(
+            ServiceName::ClickhouseServer,
+            &zone,
+            http_address.port(),
+        )?;
         if read_policy_enabled {
             self.service_backend_zone(
                 ServiceName::OximeterReader,
@@ -547,22 +541,19 @@ impl DnsConfigBuilder {
     ///
     /// # Errors
     ///
-    /// This fails if the provided `service` is not for a ClickhouseKeeper
-    /// replica server. It also fails if the given zone has already been added
-    /// to the configuration.
+    /// This function fails if the given zone has already been added to the
+    /// configuration.
     pub fn host_zone_clickhouse_keeper(
         &mut self,
         zone_id: OmicronZoneUuid,
-        service: ServiceName,
         address: SocketAddrV6,
     ) -> anyhow::Result<()> {
-        anyhow::ensure!(
-            service == ServiceName::ClickhouseKeeper,
-            "This method is only valid for ClickHouse keeper servers, \
-            but we were provided the service '{service:?}'",
-        );
         let zone = self.host_zone(zone_id, *address.ip())?;
-        self.service_backend_zone(service, &zone, address.port())?;
+        self.service_backend_zone(
+            ServiceName::ClickhouseKeeper,
+            &zone,
+            address.port(),
+        )?;
         self.service_backend_zone(
             ServiceName::ClickhouseAdminKeeper,
             &zone,
@@ -575,23 +566,20 @@ impl DnsConfigBuilder {
     ///
     /// # Errors
     ///
-    /// This fails if the provided `service` is not for an internal DNS zone. It
-    /// also fails if the given zone has already been added to the
+    /// This function fails if the given zone has already been added to the
     /// configuration.
     pub fn host_zone_internal_dns(
         &mut self,
         zone_id: OmicronZoneUuid,
-        service: ServiceName,
         http_address: SocketAddrV6,
         dns_address: SocketAddrV6,
     ) -> anyhow::Result<()> {
-        anyhow::ensure!(
-            service == ServiceName::InternalDns,
-            "This method is only valid for internal DNS servers, \
-            but we were provided the service '{service:?}'",
-        );
         let zone = self.host_zone(zone_id, *http_address.ip())?;
-        self.service_backend_zone(service, &zone, http_address.port())?;
+        self.service_backend_zone(
+            ServiceName::InternalDns,
+            &zone,
+            http_address.port(),
+        )?;
         let prior_address =
             self.internal_dns_addresses.insert(zone.clone(), *dns_address.ip());
         if let Some(addr) = prior_address {
@@ -898,14 +886,12 @@ mod test {
             // Add clickhouse and clickhouse server zones, which have serveral services each
             b.host_zone_clickhouse_single_node(
                 zone_clickhouse_uuid,
-                ServiceName::Clickhouse,
                 SocketAddrV6::new(ZONE_CLICKHOUSE_IP, 0, 0, 0),
                 true,
             )
             .unwrap();
             b.host_zone_clickhouse_cluster(
                 zone_clickhouse_server_uuid,
-                ServiceName::ClickhouseServer,
                 SocketAddrV6::new(ZONE_CLICKHOUSE_SERVER_IP, 0, 0, 0),
                 false,
             )
