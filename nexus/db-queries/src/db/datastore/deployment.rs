@@ -4593,6 +4593,7 @@ mod tests {
     /// Used by both `ensure_blueprint_fully_populated` and `ensure_blueprint_fully_deleted`.
     struct BlueprintTableCounts {
         counts: BTreeMap<String, i64>,
+        num_blueprints: usize,
     }
 
     impl BlueprintTableCounts {
@@ -4649,7 +4650,7 @@ mod tests {
                 counts.insert(table_name.to_string(), count);
             }
 
-            let table_counts = BlueprintTableCounts { counts };
+            let table_counts = BlueprintTableCounts { counts, num_blueprints: 1 };
 
             // Verify no new blueprint tables were added without updating this function
             if let Err(msg) =
@@ -4671,6 +4672,7 @@ mod tests {
             for (table, &count) in &other.counts {
                 *self.counts.entry(table.clone()).or_insert(0) += count;
             }
+            self.num_blueprints += other.num_blueprints;
         }
 
         /// Returns a list of table names that are empty.
