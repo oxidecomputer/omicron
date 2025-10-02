@@ -351,6 +351,10 @@ task: "inventory_collection"
     collects hardware and software inventory data from the whole system
 
 
+task: "inventory_loader"
+    loads the latest inventory collection from the DB
+
+
 task: "lookup_region_port"
     fill in missing ports for region records
 
@@ -648,6 +652,12 @@ task: "inventory_collection"
     last collection id:      ..........<REDACTED_UUID>...........
     last collection started: <REDACTED_TIMESTAMP>
     last collection done:    <REDACTED_TIMESTAMP>
+
+task: "inventory_loader"
+  configured period: every <REDACTED_DURATION>s
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+warning: unknown background task: "inventory_loader" (don't know how to interpret details: Object {"LoadedNew": Object {"collection_id": String("..........<REDACTED_UUID>..........."), "time_started": String("<REDACTED_TIMESTAMP>")}})
 
 task: "lookup_region_port"
   configured period: every <REDACTED_DURATION>m
@@ -1176,6 +1186,12 @@ task: "inventory_collection"
     last collection id:      ..........<REDACTED_UUID>...........
     last collection started: <REDACTED_TIMESTAMP>
     last collection done:    <REDACTED_TIMESTAMP>
+
+task: "inventory_loader"
+  configured period: every <REDACTED_DURATION>s
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+warning: unknown background task: "inventory_loader" (don't know how to interpret details: Object {"LoadedNew": Object {"collection_id": String("..........<REDACTED_UUID>..........."), "time_started": String("<REDACTED_TIMESTAMP>")}})
 
 task: "lookup_region_port"
   configured period: every <REDACTED_DURATION>m
