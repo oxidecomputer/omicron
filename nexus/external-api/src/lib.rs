@@ -3041,11 +3041,12 @@ pub trait NexusExternalApi {
         path_params: Path<params::TufTrustRootPath>,
     ) -> Result<HttpResponseDeleted, HttpError>;
 
-    /// Set the current target release of the rack's system software
+    /// Set target release
     ///
-    /// The rack reconfigurator will treat the software specified here as a goal
-    /// state for the rack's software, and attempt to asynchronously update to
-    /// that release. Use the update status endpoint to view the current target
+    /// Set the current target release of the rack's system software. The rack
+    /// reconfigurator will treat the software specified here as a goal state
+    /// for the rack's software, and attempt to asynchronously update to that
+    /// release. Use the update status endpoint to view the current target
     /// release.
     #[endpoint {
         method = PUT,
@@ -3057,6 +3058,10 @@ pub trait NexusExternalApi {
         params: TypedBody<params::SetTargetReleaseParams>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
+    /// Fetch system update status
+    ///
+    /// Returns information about the current target release and the
+    /// progress of system software updates.
     #[endpoint {
         method = GET,
         path = "/v1/system/update/status",

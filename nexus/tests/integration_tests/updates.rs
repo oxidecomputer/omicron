@@ -716,12 +716,16 @@ async fn test_update_status() -> Result<()> {
     let status: views::UpdateStatus =
         object_get(client, "/v1/system/update/status").await;
     assert_eq!(status.target_release.0, None);
+    assert!(
+        status.paused,
+        "should be paused initially when no target release is set"
+    );
     let counts = status.components_by_release_version;
     assert_eq!(counts.get("install dataset").unwrap(), &7);
     assert_eq!(counts.get("unknown").unwrap(), &15);
 
     // hold onto this to compare it to later values
-    let time_last_progress = status.time_last_progress;
+    let time_last_blueprint = status.time_last_blueprint;
 
     // Upload a fake TUF repo and set it as the target release
     let trust_root = TestTrustRoot::generate().await?;
@@ -738,9 +742,10 @@ async fn test_update_status() -> Result<()> {
     let status: views::UpdateStatus =
         object_get(client, "/v1/system/update/status").await;
     assert_eq!(status.target_release.0.unwrap().version, v1);
+    assert!(!status.paused, "should not be paused after setting v1");
 
     // blueprint time doesn't change
-    assert_eq!(time_last_progress, status.time_last_progress);
+    assert_eq!(time_last_blueprint, status.time_last_blueprint);
 
     let counts = status.components_by_release_version;
     assert_eq!(counts.get("install dataset").unwrap(), &7);
@@ -769,9 +774,10 @@ async fn test_update_status() -> Result<()> {
         object_get(client, "/v1/system/update/status").await;
 
     assert_eq!(status.target_release.0.unwrap().version, v2);
+    assert!(!status.paused, "should not be paused after setting v2");
 
     // blueprint time doesn't change
-    assert_eq!(time_last_progress, status.time_last_progress);
+    assert_eq!(time_last_blueprint, status.time_last_blueprint);
 
     let counts = status.components_by_release_version;
     assert_eq!(counts.get("install dataset").unwrap(), &7);

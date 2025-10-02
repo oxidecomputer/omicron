@@ -1559,26 +1559,35 @@ pub struct UpdatesTrustRoot {
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct UpdateStatus {
-    /// Current target release of the rack's system software
+    /// Current target release of the system software
     ///
-    /// This may not correspond to the actual software running on the rack
-    /// at the time of request; it is instead the release that the rack
-    /// reconfigurator should be moving towards as a goal state. After some
-    /// number of planning and execution phases, the software running on the
-    /// rack should eventually correspond to the release described here.
+    /// This may not correspond to the actual system software running
+    /// at the time of request; it is instead the release that the system
+    /// should be moving towards as a goal state. The system asynchronously
+    /// updates software to match this target release.
     ///
-    /// Will only be null if a target release has never been set.
+    /// Will only be null if a target release has never been set. In that case,
+    /// the system is not automatically attempting to manage software versions.
     pub target_release: Nullable<TargetRelease>,
 
     /// Count of components running each release version
     pub components_by_release_version: BTreeMap<String, usize>,
 
-    /// Time of last meaningful change to update status
+    /// Time of most recent update planning activity
     ///
-    /// Internally, this represents the last time a blueprint (proposed system
-    /// configuration) was made a target by the update system. In other words,
-    /// it's the last time the system decided on a next step to take.
-    pub time_last_progress: DateTime<Utc>,
+    /// This is intended as a rough indicator of the last time something
+    /// happened in the update planner. A blueprint is the update system's plan
+    /// for the next state of the system, so this timestamp indicates the last
+    /// time the update system made a plan.
+    pub time_last_blueprint: DateTime<Utc>,
+
+    /// Whether update activity is paused
+    ///
+    /// When true, the system has stopped attempting to make progress toward the
+    /// target release. This happens after a MUPdate because the system wants to
+    /// make sure of the operator's intent. To resume update, set a new target
+    /// release.
+    pub paused: bool,
 }
 
 fn expected_one_of<T: strum::VariantArray + fmt::Display>() -> String {

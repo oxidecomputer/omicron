@@ -163,8 +163,6 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
     ) -> Result<views::UpdateStatus, Error> {
-        // ? because we expect there to always be a current target release. but
-        // it can still have an Unspecified release_source
         let db_target_release =
             self.datastore().target_release_get_current(opctx).await?;
         let target_release = match db_target_release.tuf_repo_id {
@@ -184,16 +182,21 @@ impl super::Nexus {
         let components_by_release_version =
             self.component_version_counts(opctx, &db_target_release).await?;
 
-        let time_last_progress = self
-            .datastore()
-            .blueprint_target_get_current(opctx)
-            .await?
-            .time_made_target;
+        let (blueprint_target, blueprint) =
+            self.datastore().blueprint_target_get_current_full(opctx).await?;
+
+        let time_last_blueprint = blueprint_target.time_made_target;
+
+        // Update activity is paused if the current target release generation
+        // is less than or equal to the blueprint's minimum generation
+        let paused = *db_target_release.generation
+            <= blueprint.target_release_minimum_generation;
 
         Ok(views::UpdateStatus {
             target_release: Nullable(target_release),
             components_by_release_version,
-            time_last_progress,
+            time_last_blueprint,
+            paused,
         })
     }
 
@@ -203,12 +206,10 @@ impl super::Nexus {
         opctx: &OpContext,
         target_release: &nexus_db_model::TargetRelease,
     ) -> Result<BTreeMap<String, usize>, Error> {
-        // Get the latest inventory collection
         let Some(inventory) =
             self.datastore().inventory_get_latest_collection(opctx).await?
         else {
-            // No inventory collection available, return empty counts
-            return Ok(BTreeMap::new());
+            return Err(Error::internal_error("No inventory collection found"));
         };
 
         // Build current TargetReleaseDescription, defaulting to Initial if

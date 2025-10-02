@@ -10997,6 +10997,8 @@
         "tags": [
           "system/update"
         ],
+        "summary": "Fetch system update status",
+        "description": "Returns information about the current target release and the progress of system software updates.",
         "operationId": "system_update_status",
         "responses": {
           "200": {
@@ -11023,8 +11025,8 @@
         "tags": [
           "system/update"
         ],
-        "summary": "Set the current target release of the rack's system software",
-        "description": "The rack reconfigurator will treat the software specified here as a goal state for the rack's software, and attempt to asynchronously update to that release. Use the update status endpoint to view the current target release.",
+        "summary": "Set target release",
+        "description": "Set the current target release of the rack's system software. The rack reconfigurator will treat the software specified here as a goal state for the rack's software, and attempt to asynchronously update to that release. Use the update status endpoint to view the current target release.",
         "operationId": "target_release_update",
         "requestBody": {
           "content": {
@@ -26172,25 +26174,30 @@
               "minimum": 0
             }
           },
+          "paused": {
+            "description": "Whether update activity is paused\n\nWhen true, the system has stopped attempting to make progress toward the target release. This happens after a MUPdate because the system wants to make sure of the operator's intent. To resume update, set a new target release.",
+            "type": "boolean"
+          },
           "target_release": {
             "nullable": true,
-            "description": "Current target release of the rack's system software\n\nThis may not correspond to the actual software running on the rack at the time of request; it is instead the release that the rack reconfigurator should be moving towards as a goal state. After some number of planning and execution phases, the software running on the rack should eventually correspond to the release described here.\n\nWill only be null if a target release has never been set.",
+            "description": "Current target release of the system software\n\nThis may not correspond to the actual system software running at the time of request; it is instead the release that the system should be moving towards as a goal state. The system asynchronously updates software to match this target release.\n\nWill only be null if a target release has never been set. In that case, the system is not automatically attempting to manage software versions.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/TargetRelease"
               }
             ]
           },
-          "time_last_progress": {
-            "description": "Time of last meaningful change to update status\n\nInternally, this represents the last time a blueprint (proposed system configuration) was made a target by the update system. In other words, it's the last time the system decided on a next step to take.",
+          "time_last_blueprint": {
+            "description": "Time of most recent update planning activity\n\nThis is intended as a rough indicator of the last time something happened in the update planner. A blueprint is the update system's plan for the next state of the system, so this timestamp indicates the last time the update system made a plan.",
             "type": "string",
             "format": "date-time"
           }
         },
         "required": [
           "components_by_release_version",
+          "paused",
           "target_release",
-          "time_last_progress"
+          "time_last_blueprint"
         ]
       },
       "UpdatesTrustRoot": {
