@@ -49,7 +49,7 @@
             "name": "downstairs_id",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForDownstairsKind"
+              "$ref": "#/components/schemas/DownstairsUuid"
             }
           },
           {
@@ -57,7 +57,7 @@
             "name": "upstairs_id",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForUpstairsKind"
+              "$ref": "#/components/schemas/UpstairsUuid"
             }
           }
         ],
@@ -95,7 +95,7 @@
             "name": "downstairs_id",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForDownstairsKind"
+              "$ref": "#/components/schemas/DownstairsUuid"
             }
           },
           {
@@ -103,7 +103,7 @@
             "name": "upstairs_id",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForUpstairsKind"
+              "$ref": "#/components/schemas/UpstairsUuid"
             }
           }
         ],
@@ -140,7 +140,7 @@
             "name": "repair_id",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForUpstairsRepairKind"
+              "$ref": "#/components/schemas/UpstairsRepairUuid"
             }
           },
           {
@@ -148,7 +148,7 @@
             "name": "upstairs_id",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForUpstairsKind"
+              "$ref": "#/components/schemas/UpstairsUuid"
             }
           }
         ],
@@ -185,7 +185,7 @@
             "name": "upstairs_id",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForUpstairsKind"
+              "$ref": "#/components/schemas/UpstairsUuid"
             }
           }
         ],
@@ -222,7 +222,7 @@
             "name": "upstairs_id",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForUpstairsKind"
+              "$ref": "#/components/schemas/UpstairsUuid"
             }
           }
         ],
@@ -612,7 +612,7 @@
             "name": "sled_id",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForSledKind"
+              "$ref": "#/components/schemas/SledUuid"
             }
           }
         ],
@@ -644,7 +644,7 @@
             "name": "sled_id",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForSledKind"
+              "$ref": "#/components/schemas/SledUuid"
             }
           }
         ],
@@ -682,7 +682,7 @@
             "name": "sled_id",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForSledKind"
+              "$ref": "#/components/schemas/SledUuid"
             }
           }
         ],
@@ -778,7 +778,7 @@
             "name": "propolis_id",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForPropolisKind"
+              "$ref": "#/components/schemas/PropolisUuid"
             }
           }
         ],
@@ -816,7 +816,7 @@
             "name": "volume_id",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForVolumeKind"
+              "$ref": "#/components/schemas/VolumeUuid"
             }
           }
         ],
@@ -1231,7 +1231,7 @@
             "description": "unique identifier for this blueprint",
             "allOf": [
               {
-                "$ref": "#/components/schemas/TypedUuidForBlueprintKind"
+                "$ref": "#/components/schemas/BlueprintUuid"
               }
             ]
           },
@@ -1272,7 +1272,7 @@
             "description": "which blueprint this blueprint is based on",
             "allOf": [
               {
-                "$ref": "#/components/schemas/TypedUuidForBlueprintKind"
+                "$ref": "#/components/schemas/BlueprintUuid"
               }
             ]
           },
@@ -1385,7 +1385,7 @@
             "$ref": "#/components/schemas/BlueprintDatasetDisposition"
           },
           "id": {
-            "$ref": "#/components/schemas/TypedUuidForDatasetKind"
+            "$ref": "#/components/schemas/DatasetUuid"
           },
           "kind": {
             "$ref": "#/components/schemas/DatasetKind"
@@ -1505,13 +1505,13 @@
             "$ref": "#/components/schemas/BlueprintPhysicalDiskDisposition"
           },
           "id": {
-            "$ref": "#/components/schemas/TypedUuidForPhysicalDiskKind"
+            "$ref": "#/components/schemas/PhysicalDiskUuid"
           },
           "identity": {
             "$ref": "#/components/schemas/DiskIdentity"
           },
           "pool_id": {
-            "$ref": "#/components/schemas/TypedUuidForZpoolKind"
+            "$ref": "#/components/schemas/ZpoolUuid"
           }
         },
         "required": [
@@ -1587,7 +1587,7 @@
             "nullable": true,
             "allOf": [
               {
-                "$ref": "#/components/schemas/TypedUuidForMupdateOverrideKind"
+                "$ref": "#/components/schemas/MupdateOverrideUuid"
               }
             ]
           },
@@ -1736,6 +1736,15 @@
           }
         ]
       },
+      "BlueprintUuid": {
+        "x-rust-type": {
+          "crate": "omicron-uuid-kinds",
+          "path": "omicron_uuid_kinds::BlueprintUuid",
+          "version": "*"
+        },
+        "type": "string",
+        "format": "uuid"
+      },
       "BlueprintZoneConfig": {
         "description": "Describes one Omicron-managed zone in a blueprint.\n\nPart of [`BlueprintSledConfig`].",
         "type": "object",
@@ -1757,7 +1766,7 @@
             ]
           },
           "id": {
-            "$ref": "#/components/schemas/TypedUuidForOmicronZoneKind"
+            "$ref": "#/components/schemas/OmicronZoneUuid"
           },
           "image_source": {
             "$ref": "#/components/schemas/BlueprintZoneImageSource"
@@ -2595,10 +2604,10 @@
             "type": "string"
           },
           "dataset_id": {
-            "$ref": "#/components/schemas/TypedUuidForDatasetKind"
+            "$ref": "#/components/schemas/DatasetUuid"
           },
           "zpool_id": {
-            "$ref": "#/components/schemas/TypedUuidForZpoolKind"
+            "$ref": "#/components/schemas/ZpoolUuid"
           }
         },
         "required": [
@@ -2610,6 +2619,15 @@
       "DatasetKind": {
         "description": "The kind of dataset. See the `DatasetKind` enum in omicron-common for possible values.",
         "type": "string"
+      },
+      "DatasetUuid": {
+        "x-rust-type": {
+          "crate": "omicron-uuid-kinds",
+          "path": "omicron_uuid_kinds::DatasetUuid",
+          "version": "*"
+        },
+        "type": "string",
+        "format": "uuid"
       },
       "DiscretionaryZonePlacement": {
         "type": "object",
@@ -3068,11 +3086,20 @@
           "receive_task_cancelled"
         ]
       },
+      "DownstairsRegionUuid": {
+        "x-rust-type": {
+          "crate": "omicron-uuid-kinds",
+          "path": "omicron_uuid_kinds::DownstairsRegionUuid",
+          "version": "*"
+        },
+        "type": "string",
+        "format": "uuid"
+      },
       "DownstairsUnderRepair": {
         "type": "object",
         "properties": {
           "region_uuid": {
-            "$ref": "#/components/schemas/TypedUuidForDownstairsRegionKind"
+            "$ref": "#/components/schemas/DownstairsRegionUuid"
           },
           "target_addr": {
             "type": "string"
@@ -3175,6 +3202,15 @@
             ]
           }
         ]
+      },
+      "ExternalIpUuid": {
+        "x-rust-type": {
+          "crate": "omicron-uuid-kinds",
+          "path": "omicron_uuid_kinds::ExternalIpUuid",
+          "version": "*"
+        },
+        "type": "string",
+        "format": "uuid"
       },
       "ExternalPortDiscovery": {
         "oneOf": [
@@ -4192,6 +4228,15 @@
           }
         ]
       },
+      "MupdateOverrideUuid": {
+        "x-rust-type": {
+          "crate": "omicron-uuid-kinds",
+          "path": "omicron_uuid_kinds::MupdateOverrideUuid",
+          "version": "*"
+        },
+        "type": "string",
+        "format": "uuid"
+      },
       "Name": {
         "title": "A name unique within the parent collection",
         "description": "Names must begin with a lower case ASCII letter, be composed exclusively of lowercase ASCII, uppercase ASCII, numbers, and '-', and may not end with a '-'. Names cannot be a UUID, but they may contain a UUID. They can be at most 63 characters long.",
@@ -4456,7 +4501,7 @@
             "type": "string"
           },
           "id": {
-            "$ref": "#/components/schemas/TypedUuidForExternalIpKind"
+            "$ref": "#/components/schemas/ExternalIpUuid"
           }
         },
         "required": [
@@ -4469,7 +4514,7 @@
         "type": "object",
         "properties": {
           "id": {
-            "$ref": "#/components/schemas/TypedUuidForExternalIpKind"
+            "$ref": "#/components/schemas/ExternalIpUuid"
           },
           "ip": {
             "type": "string",
@@ -4486,7 +4531,7 @@
         "type": "object",
         "properties": {
           "id": {
-            "$ref": "#/components/schemas/TypedUuidForExternalIpKind"
+            "$ref": "#/components/schemas/ExternalIpUuid"
           },
           "snat_cfg": {
             "$ref": "#/components/schemas/SourceNatConfig"
@@ -4496,6 +4541,15 @@
           "id",
           "snat_cfg"
         ]
+      },
+      "OmicronZoneUuid": {
+        "x-rust-type": {
+          "crate": "omicron-uuid-kinds",
+          "path": "omicron_uuid_kinds::OmicronZoneUuid",
+          "version": "*"
+        },
+        "type": "string",
+        "format": "uuid"
       },
       "OximeterInfo": {
         "description": "Message used to notify Nexus that this oximeter instance is up and running.",
@@ -4821,7 +4875,7 @@
         "type": "object",
         "properties": {
           "id": {
-            "$ref": "#/components/schemas/TypedUuidForPhysicalDiskKind"
+            "$ref": "#/components/schemas/PhysicalDiskUuid"
           },
           "model": {
             "type": "string"
@@ -4848,6 +4902,15 @@
           "variant",
           "vendor"
         ]
+      },
+      "PhysicalDiskUuid": {
+        "x-rust-type": {
+          "crate": "omicron-uuid-kinds",
+          "path": "omicron_uuid_kinds::PhysicalDiskUuid",
+          "version": "*"
+        },
+        "type": "string",
+        "format": "uuid"
       },
       "Ping": {
         "type": "object",
@@ -4937,7 +5000,7 @@
           "sleds_getting_ntp_and_discretionary_zones": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/TypedUuidForSledKind"
+              "$ref": "#/components/schemas/SledUuid"
             },
             "uniqueItems": true
           },
@@ -4946,35 +5009,35 @@
             "additionalProperties": {
               "type": "array",
               "items": {
-                "$ref": "#/components/schemas/TypedUuidForZpoolKind"
+                "$ref": "#/components/schemas/ZpoolUuid"
               }
             }
           },
           "sleds_missing_ntp_zone": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/TypedUuidForSledKind"
+              "$ref": "#/components/schemas/SledUuid"
             },
             "uniqueItems": true
           },
           "sleds_waiting_for_ntp_zone": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/TypedUuidForSledKind"
+              "$ref": "#/components/schemas/SledUuid"
             },
             "uniqueItems": true
           },
           "sleds_without_ntp_zones_in_inventory": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/TypedUuidForSledKind"
+              "$ref": "#/components/schemas/SledUuid"
             },
             "uniqueItems": true
           },
           "sleds_without_zpools_for_ntp_zones": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/TypedUuidForSledKind"
+              "$ref": "#/components/schemas/SledUuid"
             },
             "uniqueItems": true
           },
@@ -5052,7 +5115,7 @@
             "description": "Decommissioned sleds that unexpectedly appeared as commissioned.",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/TypedUuidForSledKind"
+              "$ref": "#/components/schemas/SledUuid"
             }
           }
         },
@@ -5067,7 +5130,7 @@
             "description": "Expunged disks not present in the parent blueprint.",
             "type": "object",
             "additionalProperties": {
-              "$ref": "#/components/schemas/TypedUuidForPhysicalDiskKind"
+              "$ref": "#/components/schemas/PhysicalDiskUuid"
             }
           }
         },
@@ -5268,7 +5331,7 @@
             "type": "object",
             "properties": {
               "id": {
-                "$ref": "#/components/schemas/TypedUuidForMupdateOverrideKind"
+                "$ref": "#/components/schemas/MupdateOverrideUuid"
               },
               "type": {
                 "type": "string",
@@ -5423,7 +5486,7 @@
         "type": "object",
         "properties": {
           "id": {
-            "$ref": "#/components/schemas/TypedUuidForOmicronZoneKind"
+            "$ref": "#/components/schemas/OmicronZoneUuid"
           },
           "kind": {
             "$ref": "#/components/schemas/ZoneKind"
@@ -5960,7 +6023,7 @@
             "type": "boolean"
           },
           "repair_id": {
-            "$ref": "#/components/schemas/TypedUuidForUpstairsRepairKind"
+            "$ref": "#/components/schemas/UpstairsRepairUuid"
           },
           "repair_type": {
             "$ref": "#/components/schemas/UpstairsRepairType"
@@ -5972,7 +6035,7 @@
             }
           },
           "session_id": {
-            "$ref": "#/components/schemas/TypedUuidForUpstairsSessionKind"
+            "$ref": "#/components/schemas/UpstairsSessionUuid"
           },
           "time": {
             "type": "string",
@@ -6014,7 +6077,7 @@
         "type": "object",
         "properties": {
           "repair_id": {
-            "$ref": "#/components/schemas/TypedUuidForUpstairsRepairKind"
+            "$ref": "#/components/schemas/UpstairsRepairUuid"
           },
           "repair_type": {
             "$ref": "#/components/schemas/UpstairsRepairType"
@@ -6026,7 +6089,7 @@
             }
           },
           "session_id": {
-            "$ref": "#/components/schemas/TypedUuidForUpstairsSessionKind"
+            "$ref": "#/components/schemas/UpstairsSessionUuid"
           },
           "time": {
             "type": "string",
@@ -6274,6 +6337,15 @@
           }
         ]
       },
+      "SledUuid": {
+        "x-rust-type": {
+          "crate": "omicron-uuid-kinds",
+          "path": "omicron_uuid_kinds::SledUuid",
+          "version": "*"
+        },
+        "type": "string",
+        "format": "uuid"
+      },
       "SledVmmState": {
         "description": "A wrapper type containing a sled's total knowledge of the state of a VMM.",
         "type": "object",
@@ -6448,50 +6520,6 @@
           }
         }
       },
-      "TypedUuidForBlueprintKind": {
-        "type": "string",
-        "format": "uuid"
-      },
-      "TypedUuidForDatasetKind": {
-        "type": "string",
-        "format": "uuid"
-      },
-      "TypedUuidForDownstairsRegionKind": {
-        "type": "string",
-        "format": "uuid"
-      },
-      "TypedUuidForExternalIpKind": {
-        "type": "string",
-        "format": "uuid"
-      },
-      "TypedUuidForMupdateOverrideKind": {
-        "type": "string",
-        "format": "uuid"
-      },
-      "TypedUuidForOmicronZoneKind": {
-        "type": "string",
-        "format": "uuid"
-      },
-      "TypedUuidForPhysicalDiskKind": {
-        "type": "string",
-        "format": "uuid"
-      },
-      "TypedUuidForSledKind": {
-        "type": "string",
-        "format": "uuid"
-      },
-      "TypedUuidForUpstairsRepairKind": {
-        "type": "string",
-        "format": "uuid"
-      },
-      "TypedUuidForUpstairsSessionKind": {
-        "type": "string",
-        "format": "uuid"
-      },
-      "TypedUuidForZpoolKind": {
-        "type": "string",
-        "format": "uuid"
-      },
       "UplinkAddressConfig": {
         "type": "object",
         "properties": {
@@ -6517,6 +6545,24 @@
           "live",
           "reconciliation"
         ]
+      },
+      "UpstairsRepairUuid": {
+        "x-rust-type": {
+          "crate": "omicron-uuid-kinds",
+          "path": "omicron_uuid_kinds::UpstairsRepairUuid",
+          "version": "*"
+        },
+        "type": "string",
+        "format": "uuid"
+      },
+      "UpstairsSessionUuid": {
+        "x-rust-type": {
+          "crate": "omicron-uuid-kinds",
+          "path": "omicron_uuid_kinds::UpstairsSessionUuid",
+          "version": "*"
+        },
+        "type": "string",
+        "format": "uuid"
       },
       "UserId": {
         "title": "A username for a local-only user",
@@ -6854,7 +6900,7 @@
             "format": "uuid"
           },
           "physical_disk_id": {
-            "$ref": "#/components/schemas/TypedUuidForPhysicalDiskKind"
+            "$ref": "#/components/schemas/PhysicalDiskUuid"
           },
           "sled_id": {
             "type": "string",
@@ -6867,11 +6913,30 @@
           "sled_id"
         ]
       },
-      "TypedUuidForDownstairsKind": {
+      "ZpoolUuid": {
+        "x-rust-type": {
+          "crate": "omicron-uuid-kinds",
+          "path": "omicron_uuid_kinds::ZpoolUuid",
+          "version": "*"
+        },
         "type": "string",
         "format": "uuid"
       },
-      "TypedUuidForUpstairsKind": {
+      "DownstairsUuid": {
+        "x-rust-type": {
+          "crate": "omicron-uuid-kinds",
+          "path": "omicron_uuid_kinds::DownstairsUuid",
+          "version": "*"
+        },
+        "type": "string",
+        "format": "uuid"
+      },
+      "UpstairsUuid": {
+        "x-rust-type": {
+          "crate": "omicron-uuid-kinds",
+          "path": "omicron_uuid_kinds::UpstairsUuid",
+          "version": "*"
+        },
         "type": "string",
         "format": "uuid"
       },
@@ -6887,11 +6952,21 @@
           }
         ]
       },
-      "TypedUuidForPropolisKind": {
+      "PropolisUuid": {
+        "x-rust-type": {
+          "crate": "omicron-uuid-kinds",
+          "path": "omicron_uuid_kinds::PropolisUuid",
+          "version": "*"
+        },
         "type": "string",
         "format": "uuid"
       },
-      "TypedUuidForVolumeKind": {
+      "VolumeUuid": {
+        "x-rust-type": {
+          "crate": "omicron-uuid-kinds",
+          "path": "omicron_uuid_kinds::VolumeUuid",
+          "version": "*"
+        },
         "type": "string",
         "format": "uuid"
       }
