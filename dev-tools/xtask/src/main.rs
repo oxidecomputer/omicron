@@ -139,7 +139,7 @@ fn main() -> Result<()> {
         Cmds::LsApis(external) => external.exec_bin("ls-apis"),
         Cmds::MgsDev(external) => external.exec_bin("mgs-dev"),
         Cmds::OmicronDev(external) => external.exec_bin("omicron-dev"),
-        Cmds::Openapi(external) => external.exec_bin("openapi-manager"),
+        Cmds::Openapi(external) => external.exec_bin("omicron-dropshot-apis"),
         #[cfg(target_os = "illumos")]
         Cmds::Releng(external) => {
             external.cargo_args(["--release"]).exec_bin("omicron-releng")

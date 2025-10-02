@@ -42,6 +42,7 @@ progenitor::generate_api!(
         VirtualNetworkInterfaceHost = { derives = [Eq, Hash] },
     },
     crates = {
+        "omicron-uuid-kinds" = "*",
         "oxnet" = "0.1.0",
     },
     replace = {
@@ -84,13 +85,6 @@ progenitor::generate_api!(
         SledRole = nexus_sled_agent_shared::inventory::SledRole,
         SourceNatConfig = omicron_common::api::internal::shared::SourceNatConfig,
         SwitchLocation = omicron_common::api::external::SwitchLocation,
-        TypedUuidForDatasetKind = omicron_uuid_kinds::DatasetUuid,
-        TypedUuidForInstanceKind = omicron_uuid_kinds::InstanceUuid,
-        TypedUuidForOmicronZoneKind = omicron_uuid_kinds::OmicronZoneUuid,
-        TypedUuidForPropolisKind = omicron_uuid_kinds::PropolisUuid,
-        TypedUuidForSledKind = omicron_uuid_kinds::SledUuid,
-        TypedUuidForSupportBundleKind = omicron_uuid_kinds::SupportBundleUuid,
-        TypedUuidForZpoolKind = omicron_uuid_kinds::ZpoolUuid,
         Vni = omicron_common::api::external::Vni,
         VpcFirewallIcmpFilter = omicron_common::api::external::VpcFirewallIcmpFilter,
         ZpoolKind = omicron_common::zpool_name::ZpoolKind,

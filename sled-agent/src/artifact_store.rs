@@ -81,10 +81,6 @@ pub struct ArtifactStore<T: DatasetsManager> {
     ledger_tx: mpsc::Sender<LedgerManagerRequest>,
     config: watch::Receiver<Option<ArtifactConfig>>,
     pub(crate) storage: T,
-
-    /// Used for synchronization in unit tests.
-    #[cfg(test)]
-    delete_done: watch::Receiver<Generation>,
 }
 
 impl<T: DatasetsManager> ArtifactStore<T> {
@@ -136,14 +132,10 @@ impl<T: DatasetsManager> ArtifactStore<T> {
             config_tx,
         ));
 
-        #[cfg(test)]
-        let (done_signal, delete_done) = watch::channel(0u32.into());
         tokio::task::spawn(delete_reconciler(
             log.clone(),
             storage.clone(),
             config.clone(),
-            #[cfg(test)]
-            done_signal,
         ));
 
         ArtifactStore {
@@ -155,9 +147,6 @@ impl<T: DatasetsManager> ArtifactStore<T> {
             ledger_tx,
             config,
             storage,
-
-            #[cfg(test)]
-            delete_done,
         }
     }
 }
@@ -506,7 +495,6 @@ async fn delete_reconciler<T: DatasetsManager>(
     log: Logger,
     storage: T,
     mut receiver: watch::Receiver<Option<ArtifactConfig>>,
-    #[cfg(test)] done_signal: watch::Sender<Generation>,
 ) {
     while let Ok(()) = receiver.changed().await {
         let generation = match receiver.borrow_and_update().as_ref() {
@@ -580,12 +568,7 @@ async fn delete_reconciler<T: DatasetsManager>(
                 }
             }
         }
-        #[cfg(test)]
-        done_signal.send_if_modified(|old| {
-            let modified = *old != generation;
-            *old = generation;
-            modified
-        });
+        storage.signal_delete_done(generation);
     }
     warn!(log, "Delete reconciler sender dropped");
 }
@@ -602,6 +585,8 @@ pub trait DatasetsManager: Clone + Send + Sync + 'static {
     async fn copy_permit(&self) -> Option<OwnedSemaphorePermit> {
         None
     }
+
+    fn signal_delete_done(&self, _generation: Generation) {}
 }
 
 impl DatasetsManager for InternalDisksReceiver {
@@ -908,16 +893,20 @@ mod test {
     use camino_tempfile::Utf8TempDir;
     use futures::stream::{self, StreamExt};
     use hex_literal::hex;
+    use omicron_common::api::external::Generation;
     use omicron_test_utils::dev::test_setup_log;
     use sled_agent_api::ArtifactConfig;
     use tokio::io::AsyncReadExt;
     use tokio::sync::oneshot;
+    use tokio::sync::watch;
     use tufaceous_artifact::ArtifactHash;
 
     use super::{ArtifactStore, DatasetsManager, Error};
 
     #[derive(Clone)]
     struct TestBackend {
+        delete_done_tx: watch::Sender<Generation>,
+        delete_done_rx: watch::Receiver<Generation>,
         datasets: Vec<Utf8PathBuf>,
         _tempdir: Arc<Utf8TempDir>,
     }
@@ -934,7 +923,13 @@ mod test {
                 datasets.push(dataset)
             }
 
-            TestBackend { datasets, _tempdir: tempdir }
+            let (delete_done_tx, delete_done_rx) = watch::channel(0u32.into());
+            TestBackend {
+                delete_done_tx,
+                delete_done_rx,
+                datasets,
+                _tempdir: tempdir,
+            }
         }
     }
 
@@ -943,6 +938,14 @@ mod test {
             &self,
         ) -> impl Iterator<Item = camino::Utf8PathBuf> + '_ {
             self.datasets.iter().cloned()
+        }
+
+        fn signal_delete_done(&self, generation: Generation) {
+            self.delete_done_tx.send_if_modified(|old| {
+                let modified = *old != generation;
+                *old = generation;
+                modified
+            });
         }
     }
 
@@ -1121,7 +1124,7 @@ mod test {
         }
 
         // clear `delete_done` so we can synchronize with the delete reconciler
-        store.delete_done.mark_unchanged();
+        store.storage.delete_done_rx.mark_unchanged();
         // put a new config that says we don't want the artifact anymore.
         config.generation = config.generation.next();
         config.artifacts.remove(&TEST_HASH);
@@ -1130,7 +1133,7 @@ mod test {
         // has actually occurred yet
         assert!(store.list().await.unwrap().list.is_empty());
         // wait for deletion to actually complete
-        store.delete_done.changed().await.unwrap();
+        store.storage.delete_done_rx.changed().await.unwrap();
         // get fails, because it has been deleted
         assert!(matches!(
             store.get(TEST_HASH).await,
