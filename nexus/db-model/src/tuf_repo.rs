@@ -154,10 +154,9 @@ impl From<TufRepo> for views::TufRepo {
     fn from(repo: TufRepo) -> views::TufRepo {
         views::TufRepo {
             hash: repo.sha256.into(),
-            targets_role_version: repo.targets_role_version as u64,
-            valid_until: repo.valid_until,
             system_version: repo.system_version.into(),
             file_name: repo.file_name,
+            time_created: repo.time_created,
         }
     }
 }

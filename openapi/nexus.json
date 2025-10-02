@@ -25881,14 +25881,8 @@
             "type": "string",
             "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$"
           },
-          "targets_role_version": {
-            "description": "The version of the targets role",
-            "type": "integer",
-            "format": "uint64",
-            "minimum": 0
-          },
-          "valid_until": {
-            "description": "The time until which the repo is valid",
+          "time_created": {
+            "description": "Time the repository was uploaded",
             "type": "string",
             "format": "date-time"
           }
@@ -25897,8 +25891,7 @@
           "file_name",
           "hash",
           "system_version",
-          "targets_role_version",
-          "valid_until"
+          "time_created"
         ]
       },
       "TufRepoResultsPage": {

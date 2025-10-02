@@ -1601,12 +1601,6 @@ pub struct TufRepo {
     /// convenience.
     pub hash: ArtifactHash,
 
-    /// The version of the targets role
-    pub targets_role_version: u64,
-
-    /// The time until which the repo is valid
-    pub valid_until: DateTime<Utc>,
-
     /// The system version in artifacts.json
     pub system_version: Version,
 
@@ -1616,6 +1610,9 @@ pub struct TufRepo {
     /// with wicket, we read the file contents from stdin so we don't know the
     /// correct file name).
     pub file_name: String,
+
+    /// Time the repository was uploaded
+    pub time_created: DateTime<Utc>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
