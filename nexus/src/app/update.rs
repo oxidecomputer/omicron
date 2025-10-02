@@ -182,8 +182,14 @@ impl super::Nexus {
         let components_by_release_version =
             self.component_version_counts(opctx, &db_target_release).await?;
 
-        let (blueprint_target, blueprint) =
-            self.datastore().blueprint_target_get_current_full(opctx).await?;
+        let (blueprint_target, blueprint) = self
+            .quiesce
+            .latest_blueprint()
+            .ok_or_else(|| {
+                Error::internal_error("Tried to get update status before target blueprint is loaded")
+            })?
+            .as_ref()
+            .clone();
 
         let time_last_blueprint = blueprint_target.time_made_target;
 
