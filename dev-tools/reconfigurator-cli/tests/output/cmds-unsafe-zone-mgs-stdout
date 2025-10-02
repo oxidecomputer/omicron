@@ -1423,13 +1423,13 @@ external DNS:
 > # Collect inventory from it and use that collection for another planning step.
 > # This should report that the update completed, and show errors again for the
 > # RoT on two sleds
-> sled-update-rot-bootloader 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 --stage0 1.0.0
+> sled-update-rot-bootloader serial0 --stage0 1.0.0
 set sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 RoT bootloader versions: stage0 -> 1.0.0
 
-> sled-update-rot-bootloader 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c --stage0 1.0.0
+> sled-update-rot-bootloader serial1 --stage0 1.0.0
 set sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c RoT bootloader versions: stage0 -> 1.0.0
 
-> sled-update-rot-bootloader d81c6a84-79b8-4958-ae41-ea46c9b19763 --stage0 1.0.0
+> sled-update-rot-bootloader serial2 --stage0 1.0.0
 set sled d81c6a84-79b8-4958-ae41-ea46c9b19763 RoT bootloader versions: stage0 -> 1.0.0
 
 > inventory-generate
@@ -1507,13 +1507,13 @@ external DNS:
 
 > # We repeat the same process with the RoT expecting to see the same errors with
 > # the SP updates
-> sled-update-rot 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 --slot-b 1.0.0 --active-slot b --persistent-boot-preference b
+> sled-update-rot serial0 --slot-b 1.0.0 --active-slot b --persistent-boot-preference b
 set sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 RoT settings: slot b -> 1.0.0, active slot -> B, persistent boot preference -> B
 
-> sled-update-rot 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c --slot-b 1.0.0 --active-slot b --persistent-boot-preference b
+> sled-update-rot serial1 --slot-b 1.0.0 --active-slot b --persistent-boot-preference b
 set sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c RoT settings: slot b -> 1.0.0, active slot -> B, persistent boot preference -> B
 
-> sled-update-rot d81c6a84-79b8-4958-ae41-ea46c9b19763 --slot-b 1.0.0 --active-slot b --persistent-boot-preference b
+> sled-update-rot serial2 --slot-b 1.0.0 --active-slot b --persistent-boot-preference b
 set sled d81c6a84-79b8-4958-ae41-ea46c9b19763 RoT settings: slot b -> 1.0.0, active slot -> B, persistent boot preference -> B
 
 > inventory-generate
@@ -1590,13 +1590,13 @@ external DNS:
 
 
 > # And once more to see the errors with the Host OS
-> sled-update-sp 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 --active 1.0.0
+> sled-update-sp serial0 --active 1.0.0
 set sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 SP versions: active -> 1.0.0
 
-> sled-update-sp 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c --active 1.0.0
+> sled-update-sp serial1 --active 1.0.0
 set sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c SP versions: active -> 1.0.0
 
-> sled-update-sp d81c6a84-79b8-4958-ae41-ea46c9b19763 --active 1.0.0
+> sled-update-sp serial2 --active 1.0.0
 set sled d81c6a84-79b8-4958-ae41-ea46c9b19763 SP versions: active -> 1.0.0
 
 > inventory-generate
