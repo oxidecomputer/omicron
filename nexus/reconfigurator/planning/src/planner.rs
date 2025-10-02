@@ -1424,15 +1424,11 @@ impl<'a> Planner<'a> {
                         &mut report.unsafe_zones
                     )
                 })
-                .collect();
-
-            if !unsafe_zones.is_empty() {
-                let unsafe_zone_kinds: Vec<_> = unsafe_zones
-                .iter()
                 .map(|zone| zone.kind().report_str())
                 .collect();
 
-                let zone_str = unsafe_zone_kinds.join(", ");
+            if !unsafe_zones.is_empty() {
+                let zone_str = unsafe_zones.join(", ");
 
                 info!(
                     self.log,
@@ -2345,6 +2341,7 @@ impl<'a> Planner<'a> {
         // pending updates for components earlier in the update ordering
         // than zones: RoT bootloader / RoT / SP / Host OS.
         mgs_updates.pending_mgs_updates.is_empty()
+            && mgs_updates.blocked_mgs_updates.is_empty()
     }
 
     fn all_non_nexus_zones_using_new_image(&self) -> Result<bool, Error> {
