@@ -2134,7 +2134,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.ip_pool_resource (
 
     -- resource_type is redundant because resource IDs are globally unique, but
     -- logically it belongs here
-    PRIMARY KEY (ip_pool_id, resource_type, resource_id),
+    PRIMARY KEY (ip_pool_id, resource_type, resource_id)
 );
 
 -- a given resource can only have one default ip pool
