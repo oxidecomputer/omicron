@@ -10,12 +10,6 @@ mod rot_bootloader;
 mod sp;
 
 use crate::mgs_updates::rot::RotUpdateState;
-use crate::mgs_updates::rot::mgs_update_status_rot;
-use crate::mgs_updates::rot::try_make_update_rot;
-use crate::mgs_updates::rot_bootloader::mgs_update_status_rot_bootloader;
-use crate::mgs_updates::rot_bootloader::try_make_update_rot_bootloader;
-use crate::mgs_updates::sp::mgs_update_status_sp;
-use crate::mgs_updates::sp::try_make_update_sp;
 
 use gateway_types::rot::RotSlot;
 use nexus_types::deployment::ExpectedActiveRotSlot;
@@ -352,7 +346,7 @@ fn mgs_update_status(
                 .caboose_for(CabooseWhich::Stage0Next, baseboard_id)
                 .map(|c| c.caboose.version.as_ref());
 
-            mgs_update_status_rot_bootloader(
+            rot_bootloader::update_status(
                 desired_version,
                 expected_stage0_version,
                 expected_stage0_next_version,
@@ -374,7 +368,7 @@ fn mgs_update_status(
                 .caboose_for(CabooseWhich::SpSlot1, baseboard_id)
                 .map(|c| c.caboose.version.as_ref());
 
-            mgs_update_status_sp(
+            sp::update_status(
                 desired_version,
                 expected_active_version,
                 expected_inactive_version,
@@ -447,7 +441,7 @@ fn mgs_update_status(
                 transient_boot_preference: *expected_transient_boot_preference,
             };
 
-            mgs_update_status_rot(
+            rot::update_status(
                 desired_version,
                 expected,
                 found,
@@ -546,10 +540,26 @@ fn mgs_update_status_inactive_versions(
     }
 }
 
+/// Either if an update is unnecessary, or details about the pending MGS update
+#[allow(clippy::large_enum_variant)]
+enum MgsUpdateOutcome {
+    NoUpdateNeeded,
+    Pending(PendingMgsUpdate, PendingHostPhase2Changes),
+}
+
+impl MgsUpdateOutcome {
+    // Host phase 2 changes are only possible during Host OS updates. For the
+    // rest of the components we'll only need to set the pending update.
+    fn pending_with_update_only(update: PendingMgsUpdate) -> MgsUpdateOutcome {
+        MgsUpdateOutcome::Pending(update, PendingHostPhase2Changes::empty())
+    }
+}
+
 /// Determine if the given baseboard needs any MGS-driven update (e.g., update
 /// to its SP, RoT, etc.).  If so, returns the update and a set of changes that
 /// need to be made to sled configs related to host phase 2 images (this set
-/// will be empty if we made a non-host update).  If not, returns `None`.
+/// will be empty if we made a non-host update).  If not, returns
+/// `NoUpdateNeeded`.
 fn try_make_update(
     log: &slog::Logger,
     baseboard_id: &Arc<BaseboardId>,
@@ -569,69 +579,59 @@ fn try_make_update(
     ] {
         let update_attempt = match component {
             MgsUpdateComponent::RotBootloader => {
-                try_make_update_rot_bootloader(
+                rot_bootloader::try_make_update(
                     log,
                     baseboard_id,
                     inventory,
                     current_artifacts,
                 )
+                .map_err(|e| e.into())
             }
-            MgsUpdateComponent::Rot => try_make_update_rot(
+            MgsUpdateComponent::Rot => rot::try_make_update(
                 log,
                 baseboard_id,
                 inventory,
                 current_artifacts,
-            ),
-            MgsUpdateComponent::Sp => try_make_update_sp(
+            )
+            .map_err(|e| e.into()),
+            MgsUpdateComponent::Sp => sp::try_make_update(
                 log,
                 baseboard_id,
                 inventory,
                 current_artifacts,
-            ),
-            MgsUpdateComponent::HostOs => {
-                match host_phase_1::try_make_update(
-                    log,
-                    baseboard_id,
-                    inventory,
-                    current_artifacts,
-                ) {
-                    Ok(pending_update) => {
-                        // Host updates also return host OS phase 2 changes;
-                        // pull those out here and insert them into
-                        // `pending_actions`, then return the typical pending
-                        // update (which will itself be inserted into
-                        // `pending_actions` below).
-                        if let Some((update, host_os_phase_2_changes)) =
-                            pending_update
-                        {
-                            pending_actions.set_pending_host_os_phase2_changes(
-                                host_os_phase_2_changes,
-                            );
-                            Ok(Some(update))
-                        } else {
-                            Ok(None)
-                        }
-                    }
-                    Err(e) => Err(e),
-                }
-            }
+            )
+            .map_err(|e| e.into()),
+            MgsUpdateComponent::HostOs => host_phase_1::try_make_update(
+                log,
+                baseboard_id,
+                inventory,
+                current_artifacts,
+            )
+            .map_err(|e| e.into()),
         };
 
         match update_attempt {
-            Ok(None) => {
+            Ok(MgsUpdateOutcome::NoUpdateNeeded) => {
                 // No update needed; try the next component.
                 continue;
             }
             // If there is a pending or blocked MGS-driven update, we break so
             // we can return it immediately.
-            Ok(Some(update)) => {
+            Ok(MgsUpdateOutcome::Pending(
+                update,
+                pending_host_os_phase2_changes,
+            )) => {
                 pending_actions.add_pending_update(update);
+                // If update_attempt is a host OS update, stage the phase 2
+                // changes. For any other type, this set will be empty
+                pending_actions.set_pending_host_os_phase2_changes(
+                    pending_host_os_phase2_changes,
+                );
                 break;
             }
             Err(e) => {
                 pending_actions.add_blocked_update(BlockedMgsUpdate {
                     baseboard_id: baseboard_id.clone(),
-                    component,
                     reason: e,
                 });
                 break;
@@ -663,13 +663,16 @@ mod test {
     use dropshot::ConfigLoggingLevel;
     use iddqd::IdOrdMap;
     use nexus_types::deployment::ExpectedVersion;
-    use nexus_types::deployment::MgsUpdateComponent;
     use nexus_types::deployment::PendingMgsUpdateDetails;
     use nexus_types::deployment::PendingMgsUpdateSpDetails;
     use nexus_types::deployment::PendingMgsUpdates;
     use nexus_types::deployment::TargetReleaseDescription;
     use nexus_types::deployment::planning_report::BlockedMgsUpdate;
+    use nexus_types::deployment::planning_report::FailedHostOsUpdateReason;
     use nexus_types::deployment::planning_report::FailedMgsUpdateReason;
+    use nexus_types::deployment::planning_report::FailedRotBootloaderUpdateReason;
+    use nexus_types::deployment::planning_report::FailedRotUpdateReason;
+    use nexus_types::deployment::planning_report::FailedSpUpdateReason;
     use nexus_types::inventory::BaseboardId;
     use nexus_types::inventory::CabooseWhich;
     use nexus_types::inventory::SpType;
@@ -735,8 +738,9 @@ mod test {
         // single entry as there is only a single fake board.
         let expected_blocked_updates = vec![BlockedMgsUpdate {
             baseboard_id: fake_board.clone(),
-            component: MgsUpdateComponent::RotBootloader,
-            reason: FailedMgsUpdateReason::SpNotInInventory,
+            reason: FailedMgsUpdateReason::RotBootloader(
+                FailedRotBootloaderUpdateReason::SpNotInInventory,
+            ),
         }];
         assert_eq!(blocked_mgs_updates, expected_blocked_updates);
         assert!(updates.is_empty());
@@ -779,8 +783,9 @@ mod test {
         for baseboard_id in &collection.baseboards {
             expected_blocked_updates.push(BlockedMgsUpdate {
                 baseboard_id: baseboard_id.clone(),
-                component: MgsUpdateComponent::Rot,
-                reason: FailedMgsUpdateReason::RotStateNotInInventory,
+                reason: FailedMgsUpdateReason::Rot(
+                    FailedRotUpdateReason::RotStateNotInInventory,
+                ),
             });
         }
         assert_eq!(blocked_mgs_updates, expected_blocked_updates);
@@ -821,9 +826,10 @@ mod test {
         for baseboard_id in &collection.baseboards {
             expected_blocked_updates.push(BlockedMgsUpdate {
                 baseboard_id: baseboard_id.clone(),
-                component: MgsUpdateComponent::Sp,
-                reason: FailedMgsUpdateReason::CabooseNotInInventory(
-                    CabooseWhich::SpSlot0,
+                reason: FailedMgsUpdateReason::Sp(
+                    FailedSpUpdateReason::CabooseNotInInventory(
+                        CabooseWhich::SpSlot0,
+                    ),
                 ),
             });
         }
@@ -865,8 +871,9 @@ mod test {
             if baseboard_id.part_number == "dummy_sled" {
                 expected_blocked_updates.push(BlockedMgsUpdate {
                     baseboard_id: baseboard_id.clone(),
-                    component: MgsUpdateComponent::HostOs,
-                    reason: FailedMgsUpdateReason::SledAgentInfoNotInInventory,
+                    reason: FailedMgsUpdateReason::HostOs(
+                        FailedHostOsUpdateReason::SledAgentInfoNotInInventory,
+                    ),
                 });
             }
         }

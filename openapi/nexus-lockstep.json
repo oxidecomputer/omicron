@@ -1487,14 +1487,6 @@
               }
             ]
           },
-          "component": {
-            "description": "type of SP component that we attempted to update",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/MgsUpdateComponent"
-              }
-            ]
-          },
           "reason": {
             "description": "reason why the update failed",
             "allOf": [
@@ -1506,7 +1498,6 @@
         },
         "required": [
           "baseboard_id",
-          "component",
           "reason"
         ]
       },
@@ -3497,8 +3488,8 @@
         "type": "string",
         "format": "uuid"
       },
-      "FailedMgsUpdateReason": {
-        "description": "Describes the reason why an SP component failed to update",
+      "FailedHostOsUpdateReason": {
+        "description": "Describes the reason why a Host OS failed to update",
         "oneOf": [
           {
             "description": "The active host phase 1 slot does not match the boot disk",
@@ -3551,25 +3542,6 @@
             },
             "required": [
               "type"
-            ]
-          },
-          {
-            "description": "The component's caboose was missing a value for \"sign\"",
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "caboose_missing_sign"
-                ]
-              },
-              "value": {
-                "$ref": "#/components/schemas/CabooseWhich"
-              }
-            },
-            "required": [
-              "type",
-              "value"
             ]
           },
           {
@@ -3657,13 +3629,13 @@
             ]
           },
           {
-            "description": "No artifact with the required conditions for the component was found",
+            "description": "No artifacts with the required conditions for the component were found",
             "type": "object",
             "properties": {
               "type": {
                 "type": "string",
                 "enum": [
-                  "no_matching_artifact_found"
+                  "no_matching_artifacts_found"
                 ]
               }
             },
@@ -3672,13 +3644,28 @@
             ]
           },
           {
-            "description": "RoT state was not found in inventory",
+            "description": "No artifact with the required conditions for phase 1 was found",
             "type": "object",
             "properties": {
               "type": {
                 "type": "string",
                 "enum": [
-                  "rot_state_not_in_inventory"
+                  "no_matching_phase1_artifact_found"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "No artifact with the required conditions for phase 2 was found",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "no_matching_phase2_artifact_found"
                 ]
               }
             },
@@ -3767,6 +3754,395 @@
             "required": [
               "type",
               "value"
+            ]
+          }
+        ]
+      },
+      "FailedMgsUpdateReason": {
+        "description": "Describes the reason why an SP component failed to update",
+        "oneOf": [
+          {
+            "description": "There was a failed attempt to plan a Host OS update",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "host_os"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/FailedHostOsUpdateReason"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "description": "There was a failed attempt to plan an RoT update",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "rot"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/FailedRotUpdateReason"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "description": "There was a failed attempt to plan an RoT bootloader update",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "rot_bootloader"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/FailedRotBootloaderUpdateReason"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "description": "There was a failed attempt to plan an SP update",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "sp"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/FailedSpUpdateReason"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          }
+        ]
+      },
+      "FailedRotBootloaderUpdateReason": {
+        "description": "Describes the reason why an RoT bootloader failed to update",
+        "oneOf": [
+          {
+            "description": "The component's caboose was missing a value for \"sign\"",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "caboose_missing_sign"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/CabooseWhich"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "description": "The component's caboose was not found in the inventory",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "caboose_not_in_inventory"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/CabooseWhich"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "description": "The version in the caboose or artifact was not able to be parsed",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "failed_version_parse"
+                ]
+              },
+              "value": {
+                "type": "object",
+                "properties": {
+                  "caboose": {
+                    "$ref": "#/components/schemas/CabooseWhich"
+                  },
+                  "err": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "caboose",
+                  "err"
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "description": "No artifact with the required conditions for the component was found",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "no_matching_artifact_found"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "The component's corresponding SP was not found in the inventory",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "sp_not_in_inventory"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          }
+        ]
+      },
+      "FailedRotUpdateReason": {
+        "description": "Describes the reason why an RoT failed to update",
+        "oneOf": [
+          {
+            "description": "The component's caboose was missing a value for \"sign\"",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "caboose_missing_sign"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/CabooseWhich"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "description": "The component's caboose was not found in the inventory",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "caboose_not_in_inventory"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/CabooseWhich"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "description": "The version in the caboose or artifact was not able to be parsed",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "failed_version_parse"
+                ]
+              },
+              "value": {
+                "type": "object",
+                "properties": {
+                  "caboose": {
+                    "$ref": "#/components/schemas/CabooseWhich"
+                  },
+                  "err": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "caboose",
+                  "err"
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "description": "No artifact with the required conditions for the component was found",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "no_matching_artifact_found"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "RoT state was not found in inventory",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "rot_state_not_in_inventory"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "The component's corresponding SP was not found in the inventory",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "sp_not_in_inventory"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          }
+        ]
+      },
+      "FailedSpUpdateReason": {
+        "description": "Describes the reason why an SP failed to update",
+        "oneOf": [
+          {
+            "description": "The component's caboose was not found in the inventory",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "caboose_not_in_inventory"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/CabooseWhich"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "description": "The version in the caboose or artifact was not able to be parsed",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "failed_version_parse"
+                ]
+              },
+              "value": {
+                "type": "object",
+                "properties": {
+                  "caboose": {
+                    "$ref": "#/components/schemas/CabooseWhich"
+                  },
+                  "err": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "caboose",
+                  "err"
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "description": "No artifact with the required conditions for the component was found",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "no_matching_artifact_found"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "The component's corresponding SP was not found in the inventory",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "sp_not_in_inventory"
+                ]
+              }
+            },
+            "required": [
+              "type"
             ]
           }
         ]
@@ -4391,15 +4767,6 @@
           "rot",
           "rot_bootloader",
           "sp"
-        ]
-      },
-      "MgsUpdateComponent": {
-        "type": "string",
-        "enum": [
-          "sp",
-          "rot",
-          "rot_bootloader",
-          "host_os"
         ]
       },
       "MgsUpdateDriverStatus": {
