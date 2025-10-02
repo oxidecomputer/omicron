@@ -602,11 +602,12 @@ pub enum InventoryLoadStatus {
     /// We have no collections.
     NoCollections,
 
-    /// We've already loaded the most recent inventory collection.
-    Unchanged { collection_id: CollectionUuid, time_started: DateTime<Utc> },
-
-    /// We loaded the newest inventory collection.
-    LoadedNew { collection_id: CollectionUuid, time_started: DateTime<Utc> },
+    /// We've loaded the most recent collection as of `time_loaded`.
+    Loaded {
+        collection_id: CollectionUuid,
+        time_started: DateTime<Utc>,
+        time_loaded: DateTime<Utc>,
+    },
 }
 
 /// The status of a `blueprint_planner` background task activation.

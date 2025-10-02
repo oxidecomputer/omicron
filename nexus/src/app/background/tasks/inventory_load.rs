@@ -5,6 +5,7 @@
 //! Background task for loading the latest inventory collection from the DB
 
 use crate::app::background::BackgroundTask;
+use chrono::Utc;
 use futures::future::BoxFuture;
 use nexus_auth::context::OpContext;
 use nexus_db_queries::db::DataStore;
@@ -39,13 +40,11 @@ impl BackgroundTask for InventoryLoader {
 }
 
 impl InventoryLoader {
-    pub fn new(datastore: Arc<DataStore>) -> Self {
-        Self { datastore, tx: watch::Sender::new(None) }
-    }
-
-    #[cfg(test)]
-    pub fn watcher(&self) -> watch::Receiver<Option<Arc<Collection>>> {
-        self.tx.subscribe()
+    pub fn new(
+        datastore: Arc<DataStore>,
+        tx: watch::Sender<Option<Arc<Collection>>>,
+    ) -> Self {
+        Self { datastore, tx }
     }
 
     async fn load_if_needed(&self, opctx: &OpContext) -> InventoryLoadStatus {
@@ -63,6 +62,7 @@ impl InventoryLoader {
         };
 
         // Get the ID of the latest collection.
+        let time_loaded = Utc::now();
         let latest_id = match self
             .datastore
             .inventory_get_latest_collection_id(opctx)
@@ -106,9 +106,10 @@ impl InventoryLoader {
         match old {
             Some((old_id, old_time_started)) if old_id == latest_id => {
                 debug!(log, "latest inventory collection is unchanged");
-                return InventoryLoadStatus::Unchanged {
+                return InventoryLoadStatus::Loaded {
                     collection_id: old_id,
                     time_started: old_time_started,
+                    time_loaded,
                 };
             }
             _ => (),
@@ -136,13 +137,15 @@ impl InventoryLoader {
 
         let new_id = collection.id;
         let new_time_started = collection.time_started;
+        let collection = Arc::new(collection);
         self.tx.send_modify(|c| {
-            *c = Some(Arc::new(collection));
+            *c = Some(collection);
         });
 
-        InventoryLoadStatus::LoadedNew {
+        InventoryLoadStatus::Loaded {
             collection_id: new_id,
             time_started: new_time_started,
+            time_loaded,
         }
     }
 }
@@ -160,8 +163,8 @@ mod tests {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
-        let loader = InventoryLoader::new(datastore.clone());
-        let mut rx = loader.watcher();
+        let (tx, mut rx) = watch::channel(None);
+        let loader = InventoryLoader::new(datastore.clone(), tx);
 
         // Initial state is `None`
         assert_eq!(*rx.borrow_and_update(), None);
@@ -178,21 +181,42 @@ mod tests {
             .await
             .expect("inserted collection");
         let status = loader.load_if_needed(opctx).await;
-        let expected_status = InventoryLoadStatus::LoadedNew {
-            collection_id: coll0.id,
-            time_started: coll0.time_started,
+        let first_time_loaded = match status {
+            InventoryLoadStatus::Loaded {
+                collection_id,
+                time_started,
+                time_loaded,
+            } => {
+                assert_eq!(collection_id, coll0.id);
+                assert_eq!(time_started, coll0.time_started);
+                time_loaded
+            }
+            InventoryLoadStatus::Error(_)
+            | InventoryLoadStatus::NoCollections => {
+                panic!("unexpected status: {status:?}")
+            }
         };
-        assert_eq!(status, expected_status);
         assert!(rx.has_changed().unwrap());
         assert_eq!(*rx.borrow_and_update(), Some(coll0.clone()));
 
-        // Activating again should result in no changes.
+        // Activating again should result in a later `time_loaded` but still the
+        // same collection.
         let status = loader.load_if_needed(opctx).await;
-        let expected_status = InventoryLoadStatus::Unchanged {
-            collection_id: coll0.id,
-            time_started: coll0.time_started,
-        };
-        assert_eq!(status, expected_status);
+        match status {
+            InventoryLoadStatus::Loaded {
+                collection_id,
+                time_started,
+                time_loaded,
+            } => {
+                assert_eq!(collection_id, coll0.id);
+                assert_eq!(time_started, coll0.time_started);
+                assert!(time_loaded > first_time_loaded);
+            }
+            InventoryLoadStatus::Error(_)
+            | InventoryLoadStatus::NoCollections => {
+                panic!("unexpected status: {status:?}")
+            }
+        }
         assert!(!rx.has_changed().unwrap());
 
         // Insert two more collections.
@@ -209,11 +233,20 @@ mod tests {
 
         // Activating should find the latest.
         let status = loader.load_if_needed(opctx).await;
-        let expected_status = InventoryLoadStatus::LoadedNew {
-            collection_id: coll2.id,
-            time_started: coll2.time_started,
-        };
-        assert_eq!(status, expected_status);
+        match status {
+            InventoryLoadStatus::Loaded {
+                collection_id,
+                time_started,
+                time_loaded: _,
+            } => {
+                assert_eq!(collection_id, coll2.id);
+                assert_eq!(time_started, coll2.time_started);
+            }
+            InventoryLoadStatus::Error(_)
+            | InventoryLoadStatus::NoCollections => {
+                panic!("unexpected status: {status:?}")
+            }
+        }
         assert!(rx.has_changed().unwrap());
         assert_eq!(*rx.borrow_and_update(), Some(coll2.clone()));
 

@@ -56,6 +56,7 @@ use nexus_types::internal_api::background::BlueprintRendezvousStatus;
 use nexus_types::internal_api::background::EreporterStatus;
 use nexus_types::internal_api::background::InstanceReincarnationStatus;
 use nexus_types::internal_api::background::InstanceUpdaterStatus;
+use nexus_types::internal_api::background::InventoryLoadStatus;
 use nexus_types::internal_api::background::LookupRegionPortStatus;
 use nexus_types::internal_api::background::ReadOnlyRegionReplacementStartStatus;
 use nexus_types::internal_api::background::RegionReplacementDriverStatus;
@@ -1158,6 +1159,9 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
         "inventory_collection" => {
             print_task_inventory_collection(details);
         }
+        "inventory_loader" => {
+            print_task_inventory_load(details);
+        }
         "lookup_region_port" => {
             print_task_lookup_region_port(details);
         }
@@ -1968,6 +1972,35 @@ fn print_task_inventory_collection(details: &serde_json::Value) {
                     .to_rfc3339_opts(SecondsFormat::Secs, true),
             );
         }
+    };
+}
+
+fn print_task_inventory_load(details: &serde_json::Value) {
+    match serde_json::from_value::<InventoryLoadStatus>(details.clone()) {
+        Err(error) => eprintln!(
+            "warning: failed to interpret task details: {:?}: {:?}",
+            error, details
+        ),
+        Ok(status) => match status {
+            InventoryLoadStatus::Error(error) => {
+                println!("    task did not complete successfully: {error}");
+            }
+            InventoryLoadStatus::NoCollections => {
+                println!("    no collections available to load");
+            }
+            InventoryLoadStatus::Loaded {
+                collection_id,
+                time_started,
+                time_loaded,
+            } => {
+                println!(
+                    "    loaded latest inventory collection as of {}: \
+                         collection {collection_id}, taken at {}",
+                    humantime::format_rfc3339_millis(time_loaded.into()),
+                    humantime::format_rfc3339_millis(time_started.into()),
+                );
+            }
+        },
     };
 }
 
