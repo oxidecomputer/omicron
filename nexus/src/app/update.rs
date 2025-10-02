@@ -165,22 +165,29 @@ impl super::Nexus {
     ) -> Result<views::UpdateStatus, Error> {
         let db_target_release =
             self.datastore().target_release_get_current(opctx).await?;
-        let target_release = match db_target_release.tuf_repo_id {
-            Some(tuf_repo_id) => {
-                let version = self
-                    .datastore()
-                    .tuf_repo_get_version(opctx, &tuf_repo_id)
-                    .await?;
-                Some(views::TargetRelease {
-                    time_requested: db_target_release.time_requested,
-                    version,
-                })
-            }
+
+        let current_tuf_repo = match db_target_release.tuf_repo_id {
+            Some(tuf_repo_id) => Some(
+                self.datastore()
+                    .tuf_repo_get_by_id(opctx, tuf_repo_id.into())
+                    .await?,
+            ),
             None => None,
         };
 
-        let components_by_release_version =
-            self.component_version_counts(opctx, &db_target_release).await?;
+        let target_release =
+            current_tuf_repo.as_ref().map(|repo| views::TargetRelease {
+                time_requested: db_target_release.time_requested,
+                version: repo.repo.system_version.0.clone(),
+            });
+
+        let components_by_release_version = self
+            .component_version_counts(
+                opctx,
+                &db_target_release,
+                current_tuf_repo,
+            )
+            .await?;
 
         let (blueprint_target, blueprint) = self
             .quiesce
@@ -211,6 +218,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         target_release: &nexus_db_model::TargetRelease,
+        current_tuf_repo: Option<nexus_db_model::TufRepoDescription>,
     ) -> Result<BTreeMap<String, usize>, Error> {
         let Some(inventory) =
             self.datastore().inventory_get_latest_collection(opctx).await?
@@ -222,13 +230,10 @@ impl super::Nexus {
         // there is no tuf repo ID which, based on DB constraints, happens if
         // and only if target_release_source is 'unspecified', which should only
         // happen in the initial state before any target release has been set
-        let curr_target_desc = match target_release.tuf_repo_id {
-            Some(id) => TargetReleaseDescription::TufRepo(
-                self.datastore()
-                    .tuf_repo_get_by_id(opctx, id.into())
-                    .await?
-                    .into_external(),
-            ),
+        let curr_target_desc = match current_tuf_repo {
+            Some(repo) => {
+                TargetReleaseDescription::TufRepo(repo.into_external())
+            }
             None => TargetReleaseDescription::Initial,
         };
 
