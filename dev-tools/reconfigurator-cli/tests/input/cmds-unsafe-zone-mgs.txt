@@ -52,10 +52,15 @@ sled-list
 blueprint-show latest
 
 # We expunge a single internal_dns zone
+#
+# Note that since we are not running the command to emulate the sled-agent
+# performing an inventory collection and seeing the DNS zone has gone away, the
+# planner will not attemt to restore the internal DNS zone. This is intentional
+# as we want the zone to stay in this state for the purposes of this test
 blueprint-edit latest expunge-zones 99e2f30b-3174-40bf-a78a-90da8abba8ca
 blueprint-diff latest
 
-# Attempt to upgrade one RoT bootloader. We should see two zones skipped and
+# Attempt to upgrade one RoT bootloader. We should see two sleds skipped and
 # a safe one to update
 blueprint-plan latest latest
 blueprint-diff latest

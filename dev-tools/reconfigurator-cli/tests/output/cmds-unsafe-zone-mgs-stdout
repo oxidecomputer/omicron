@@ -1160,6 +1160,11 @@ blueprint source: edited directly with reconfigurator-cli
 
 
 > # We expunge a single internal_dns zone
+> #
+> # Note that since we are not running the command to emulate the sled-agent
+> # performing an inventory collection and seeing the DNS zone has gone away, the
+> # planner will not attemt to restore the internal DNS zone. This is intentional
+> # as we want the zone to stay in this state for the purposes of this test
 > blueprint-edit latest expunge-zones 99e2f30b-3174-40bf-a78a-90da8abba8ca
 blueprint af934083-59b5-4bf6-8966-6fb5292c29e1 created from latest blueprint (58d5e830-0884-47d8-a7cd-b2b3751adeb4): expunged zone 99e2f30b-3174-40bf-a78a-90da8abba8ca from sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
 
@@ -1282,7 +1287,7 @@ external DNS:
 
 
 
-> # Attempt to upgrade one RoT bootloader. We should see two zones skipped and
+> # Attempt to upgrade one RoT bootloader. We should see two sleds skipped and
 > # a safe one to update
 > blueprint-plan latest latest
 INFO performed noop zone image source checks on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, num_total: 8, num_already_artifact: 8, num_eligible: 0, num_ineligible: 0
