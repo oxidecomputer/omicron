@@ -21,7 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout the source code
-        uses: actions/checkout@v5
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5
 
       - name: Upload JUnit XML to Trunk
         run: tools/upload_buildomat_junit_to_trunk.sh $CHECK_RUN_ID
