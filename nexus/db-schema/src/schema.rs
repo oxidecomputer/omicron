@@ -630,6 +630,7 @@ table! {
         time_deleted -> Nullable<Timestamptz>,
         ip_version -> crate::enums::IpVersionEnum,
         rcgen -> Int8,
+        is_delegated -> Bool,
     }
 }
 
