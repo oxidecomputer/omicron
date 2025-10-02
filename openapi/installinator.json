@@ -65,7 +65,7 @@
             "description": "A unique identifier for the update.",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForMupdateKind"
+              "$ref": "#/components/schemas/MupdateUuid"
             }
           }
         ],
@@ -2317,7 +2317,12 @@
           "slots_written"
         ]
       },
-      "TypedUuidForMupdateKind": {
+      "MupdateUuid": {
+        "x-rust-type": {
+          "crate": "omicron-uuid-kinds",
+          "path": "omicron_uuid_kinds::MupdateUuid",
+          "version": "*"
+        },
         "type": "string",
         "format": "uuid"
       }

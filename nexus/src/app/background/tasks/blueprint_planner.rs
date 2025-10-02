@@ -114,19 +114,53 @@ impl BlueprintPlanner {
             }
         };
 
-        if blueprint_count > self.blueprint_limit {
-            error!(
-                &opctx.log,
-                "blueprint limit exceeded, not running auto-planner";
-                "limit" => self.blueprint_limit,
-                "count" => blueprint_count,
-            );
-            return BlueprintPlannerStatus::LimitExceeded {
-                limit: self.blueprint_limit,
-                count: blueprint_count,
-            };
-        }
+        let usage_percent =
+            blueprint_count.saturating_mul(100) / self.blueprint_limit;
 
+        match usage_percent {
+            0..=59 => {
+                debug!(
+                    &opctx.log,
+                    "blueprint count under limit, proceeding with planning";
+                    "limit" => self.blueprint_limit,
+                    "count" => blueprint_count,
+                    "usage_percent" => usage_percent,
+                );
+            }
+            60..=79 => {
+                info!(
+                    &opctx.log,
+                    "blueprint count above 60% of limit, proceeding with planning \
+                     (will stop autoplanning if limit is reached)";
+                    "limit" => self.blueprint_limit,
+                    "count" => blueprint_count,
+                    "usage_percent" => usage_percent,
+                );
+            }
+            80..=99 => {
+                warn!(
+                    &opctx.log,
+                    "blueprint count above 80% of limit, proceeding with planning \
+                     (will stop autoplanning if limit is reached)";
+                    "limit" => self.blueprint_limit,
+                    "count" => blueprint_count,
+                    "usage_percent" => usage_percent,
+                );
+            }
+            100.. => {
+                error!(
+                    &opctx.log,
+                    "blueprint count at or over limit, not running auto-planner";
+                    "limit" => self.blueprint_limit,
+                    "count" => blueprint_count,
+                    "usage_percent" => usage_percent,
+                );
+                return BlueprintPlannerStatus::LimitExceeded {
+                    limit: self.blueprint_limit,
+                    count: blueprint_count,
+                };
+            }
+        }
         // Get the current target blueprint to use as a parent.
         // Cloned so that we don't block the channel.
         let Some(loaded) = self.rx_blueprint.borrow_and_update().clone() else {
@@ -568,12 +602,12 @@ mod test {
             datastore.clone(),
         );
 
-        // Create a large number of blueprints (49), which we'll use to test the
+        // Create a large number of blueprints (48), which we'll use to test the
         // limit (see below).
         //
         // There's also an initial blueprint for the system, so the total number
-        // of blueprints will be 50 after this step.
-        for i in 0..49 {
+        // of blueprints will be 49 after this step.
+        for i in 0..48 {
             nexus.blueprint_create_regenerate(&opctx).await.unwrap_or_else(
                 |e| {
                     panic!(
@@ -633,7 +667,7 @@ mod test {
             rx_collector,
             rx_loader.clone(),
         );
-        // Set a limit to make the test run faster.
+        // This limit matches the loop above.
         planner.blueprint_limit = 50;
         let _rx_planner = planner.watcher();
 
@@ -648,7 +682,7 @@ mod test {
         eprintln!("status after first activation: {:?}", status);
         assert_matches!(status, BlueprintPlannerStatus::Targeted { .. });
 
-        // Since blueprint 51 was created, doing another activation should fail
+        // Since blueprint 50 was created, doing another activation should fail
         // with LimitExceeded.
         let status = serde_json::from_value::<BlueprintPlannerStatus>(
             planner.activate(&opctx).await,
@@ -657,7 +691,7 @@ mod test {
         eprintln!("status after second activation: {:?}", status);
         assert_eq!(
             status,
-            BlueprintPlannerStatus::LimitExceeded { limit: 50, count: 51 },
+            BlueprintPlannerStatus::LimitExceeded { limit: 50, count: 50 },
         );
 
         // But manual planning should continue to work.
@@ -675,7 +709,7 @@ mod test {
         eprintln!("status after second activation: {:?}", status);
         assert_eq!(
             status,
-            BlueprintPlannerStatus::LimitExceeded { limit: 50, count: 52 },
+            BlueprintPlannerStatus::LimitExceeded { limit: 50, count: 51 },
         );
     }
 }
