@@ -1125,7 +1125,7 @@ mod test {
         // Ensure that the nat entry for the address has made it onto the new switch0 dendrite.
         // This might take some time while the new dendrite comes online.
         let poll_interval = Duration::from_secs(1);
-        let poll_max = Duration::from_secs(30);
+        let poll_max = Duration::from_secs(60);
 
         poll::wait_for_condition(
             move || {
@@ -1135,17 +1135,20 @@ mod test {
                 );
 
                 async move {
-                    let nat_entries = &dpd_client
+                    let result = match dpd_client
                         .nat_ipv4_list(
                             &std::net::Ipv4Addr::new(10, 0, 0, 0),
                             None,
                             None,
                         )
                         .await
-                        .unwrap()
-                        .items;
+                    {
+                        Ok(v) => Ok(v),
+                        // sometimes we reach this point before the dendrite API is available
+                        Err(_) => Err(poll::CondCheckError::<()>::NotYet),
+                    }?;
 
-                    match nat_entries.is_empty() {
+                    match result.items.is_empty() {
                         // if the nat entries are empty the dendrite NAT RPW hasn't
                         // successfully reconciled yet
                         true => Err(poll::CondCheckError::<()>::NotYet),
