@@ -30,10 +30,13 @@ impl BackgroundTask for InventoryLoader {
             let status = self.load_if_needed(opctx).await;
             match serde_json::to_value(status) {
                 Ok(val) => val,
-                Err(err) => json!({
-                    "error": format!("could not serialize task status: {}",
-                                     InlineErrorChain::new(&err)),
-                }),
+                Err(err) => {
+                    let err = format!(
+                        "could not serialize task status: {}",
+                        InlineErrorChain::new(&err)
+                    );
+                    json!({ "error": err })
+                }
             }
         })
     }
@@ -75,6 +78,10 @@ impl InventoryLoader {
                     // collections"; pruning should always keep a small number
                     // of old collections around until we have new ones to
                     // replace them.
+                    //
+                    // In this case we won't replace our channel contents with
+                    // `None`; we'll keep around whatever old collection we had
+                    // loaded.
                     warn!(
                         log,
                         "previously had a collection, but now none exist"

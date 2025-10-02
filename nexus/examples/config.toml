@@ -98,7 +98,7 @@ metrics_producer_gc.period_secs = 60
 external_endpoints.period_secs = 60
 nat_cleanup.period_secs = 30
 bfd_manager.period_secs = 30
-# How frequently do we check for a new inventory collection (made by any Nexus)?
+# How frequently to check for a new inventory collection (made by any Nexus).
 # This is cheap, so we should check frequently.
 inventory.period_secs_load = 15
 # How frequently to collect hardware/software inventory from the whole system
