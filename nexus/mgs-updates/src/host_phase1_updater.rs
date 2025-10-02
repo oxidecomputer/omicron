@@ -133,6 +133,8 @@ use crate::SpComponentUpdateHelperImpl;
 use crate::common_sp_update::PostUpdateError;
 use crate::common_sp_update::PrecheckError;
 use crate::common_sp_update::PrecheckStatus;
+use crate::sp_updater::WAIT_FOR_SP_STATE_TIMEOUT;
+use crate::sp_updater::wait_for_sp_state;
 use futures::FutureExt as _;
 use futures::future::BoxFuture;
 use gateway_client::HostPhase1HashError;
@@ -505,6 +507,15 @@ impl ReconfiguratorHostPhase1Updater {
             })
             .await?;
 
+        // We wait for SP state to ensure a successful reset
+        wait_for_sp_state(
+            log,
+            mgs_clients,
+            update.sp_type,
+            update.slot_id,
+            WAIT_FOR_SP_STATE_TIMEOUT,
+        )
+        .await?;
         Ok(())
     }
 }

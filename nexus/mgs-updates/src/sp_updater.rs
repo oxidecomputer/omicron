@@ -14,9 +14,19 @@ use crate::common_sp_update::error_means_caboose_is_invalid;
 use futures::FutureExt;
 use futures::future::BoxFuture;
 use gateway_client::SpComponent;
+use gateway_client::types::SpState;
+use gateway_types::component::SpType;
 use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdateSpDetails;
-use slog::debug;
+use slog::Logger;
+use slog::{debug, error, info};
+use slog_error_chain::InlineErrorChain;
+use std::time::Duration;
+use std::time::Instant;
+
+pub const WAIT_FOR_SP_STATE_TIMEOUT: Duration = Duration::from_secs(60);
+
+const WAIT_FOR_SP_STATE_INTERVAL: Duration = Duration::from_secs(10);
 
 pub struct ReconfiguratorSpUpdater {
     details: PendingMgsUpdateSpDetails,
@@ -157,8 +167,65 @@ impl SpComponentUpdateHelperImpl for ReconfiguratorSpUpdater {
                         .await
                 })
                 .await?;
+
+            // We wait for SP state to ensure a successful reset
+            wait_for_sp_state(
+                log,
+                mgs_clients,
+                update.sp_type,
+                update.slot_id,
+                WAIT_FOR_SP_STATE_TIMEOUT,
+            )
+            .await?;
             Ok(())
         }
         .boxed()
+    }
+}
+
+/// Poll the SP asking for its state. This confirms that the SP has been
+/// succesfully reset
+pub async fn wait_for_sp_state(
+    log: &Logger,
+    mgs_clients: &mut MgsClients,
+    sp_type: SpType,
+    sp_slot: u16,
+    timeout: Duration,
+) -> Result<SpState, PostUpdateError> {
+    let before = Instant::now();
+    loop {
+        debug!(log, "waiting for SP state to confirm a successful reset");
+        match mgs_clients
+            .try_all_serially(log, |mgs_client| async move {
+                mgs_client.sp_get(&sp_type, sp_slot).await
+            })
+            .await
+        {
+            Ok(state) => {
+                debug!(log, "successfuly retrieved SP state");
+                return Ok(state.into_inner());
+            }
+            // The SP might still be starting
+            Err(error) => {
+                let e = InlineErrorChain::new(&error);
+                if before.elapsed() >= timeout {
+                    error!(
+                        log,
+                        "failed to get SP state";
+                        &e,
+                    );
+                    return Err(PostUpdateError::FatalError {
+                        error: e.to_string(),
+                    });
+                }
+
+                info!(
+                    log,
+                    "failed getting SP state (will retry)";
+                    e,
+                );
+                tokio::time::sleep(WAIT_FOR_SP_STATE_INTERVAL).await;
+            }
+        }
     }
 }
