@@ -50,6 +50,10 @@ impl InventoryLoader {
         Self { datastore, tx }
     }
 
+    pub fn watcher(&self) -> watch::Receiver<Option<Arc<Collection>>> {
+        self.tx.subscribe()
+    }
+
     async fn load_if_needed(&self, opctx: &OpContext) -> InventoryLoadStatus {
         // Set up a logger for this activation that includes metadata about
         // the current target.

@@ -14,9 +14,9 @@ use nexus_reconfigurator_rendezvous::reconcile_blueprint_rendezvous_tables;
 use nexus_types::{
     deployment::{Blueprint, BlueprintTarget},
     internal_api::background::BlueprintRendezvousStatus,
+    inventory::Collection,
 };
 use serde_json::json;
-use slog_error_chain::InlineErrorChain;
 use std::sync::Arc;
 use tokio::sync::watch;
 
@@ -26,6 +26,7 @@ use tokio::sync::watch;
 pub struct BlueprintRendezvous {
     datastore: Arc<DataStore>,
     rx_blueprint: watch::Receiver<Option<Arc<(BlueprintTarget, Blueprint)>>>,
+    rx_inventory: watch::Receiver<Option<Arc<Collection>>>,
 }
 
 impl BlueprintRendezvous {
@@ -34,8 +35,9 @@ impl BlueprintRendezvous {
         rx_blueprint: watch::Receiver<
             Option<Arc<(BlueprintTarget, Blueprint)>>,
         >,
+        rx_inventory: watch::Receiver<Option<Arc<Collection>>>,
     ) -> Self {
-        Self { datastore, rx_blueprint }
+        Self { datastore, rx_blueprint, rx_inventory }
     }
 
     /// Implementation for `BackgroundTask::activate` for `BlueprintRendezvous`,
@@ -56,27 +58,12 @@ impl BlueprintRendezvous {
             return json!({"error": "no blueprint" });
         };
 
-        // Get the latest inventory collection
-        let maybe_collection = match self
-            .datastore
-            .inventory_get_latest_collection(opctx)
-            .await
-        {
-            Ok(maybe_collection) => maybe_collection,
-            Err(err) => {
-                let err = InlineErrorChain::new(&err);
-                warn!(
-                    &opctx.log, "Blueprint rendezvous: skipped";
-                    "reason" => "failed to read latest inventory collection",
-                    &err,
-                );
-                return json!({ "error":
-                    format!("failed reading inventory collection: {err}"),
-                });
-            }
-        };
-
-        let Some(collection) = maybe_collection else {
+        // Get the inventory most recently seen by the inventory loader
+        // background task. We clone the Arc to avoid keeping the channel locked
+        // for the rest of our execution.
+        let Some(collection) =
+            self.rx_inventory.borrow_and_update().as_ref().map(Arc::clone)
+        else {
             warn!(
                 &opctx.log, "Blueprint rendezvous: skipped";
                 "reason" => "no inventory collection",

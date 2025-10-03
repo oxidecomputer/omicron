@@ -20,11 +20,12 @@ use nexus_db_model::Zpool;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_types::identity::Asset;
+use nexus_types::inventory::Collection;
 use omicron_common::api::external::DataPageParams;
-use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use serde_json::json;
+use slog_error_chain::InlineErrorChain;
 use std::sync::Arc;
 use tokio::sync::watch;
 use uuid::Uuid;
@@ -33,13 +34,13 @@ pub struct PhysicalDiskAdoption {
     datastore: Arc<DataStore>,
     disable: bool,
     rack_id: Uuid,
-    rx_inventory_collection: watch::Receiver<Option<CollectionUuid>>,
+    rx_inventory_collection: watch::Receiver<Option<Arc<Collection>>>,
 }
 
 impl PhysicalDiskAdoption {
     pub fn new(
         datastore: Arc<DataStore>,
-        rx_inventory_collection: watch::Receiver<Option<CollectionUuid>>,
+        rx_inventory_collection: watch::Receiver<Option<Arc<Collection>>>,
         disable: bool,
         rack_id: Uuid,
     ) -> Self {
@@ -71,10 +72,10 @@ impl BackgroundTask for PhysicalDiskAdoption {
             //
             // TODO-multirack: This will only work for clusters smaller than
             // a page.
-            let result = self.datastore.rack_list_initialized(
-                opctx,
-                &DataPageParams::max_page()
-            ).await;
+            let result = self
+                .datastore
+                .rack_list_initialized(opctx, &DataPageParams::max_page())
+                .await;
             match result {
                 Ok(racks) => {
                     if !racks.iter().any(|r| r.identity().id == self.rack_id) {
@@ -83,24 +84,36 @@ impl BackgroundTask for PhysicalDiskAdoption {
                             "Physical Disk Adoption: Rack not yet initialized";
                             "rack_id" => %self.rack_id,
                         );
-                        let msg = format!("rack not yet initialized: {}", self.rack_id);
+                        let msg = format!(
+                            "rack not yet initialized: {}",
+                            self.rack_id
+                        );
                         return json!({"error": msg});
                     }
-                },
+                }
                 Err(err) => {
+                    let err = InlineErrorChain::new(&err);
                     warn!(
                         &opctx.log,
-                        "Physical Disk Adoption: failed to query for initialized racks";
-                        "err" => %err,
+                        "Physical Disk Adoption: \
+                         failed to query for initialized racks";
+                        &err,
                     );
-                    return json!({ "error": format!("failed to query database: {:#}", err) });
+                    let err = format!("failed to query database: {err}");
+                    return json!({ "error": err });
                 }
             }
 
             let mut disks_added = 0;
 
-            let collection_id = *self.rx_inventory_collection.borrow();
-            let Some(collection_id) = collection_id else {
+            // Grab the most-recently-loaded collection ID. The ID is `Copy`, so
+            // we can grab it and then unlock the watch channel.
+            let Some(collection_id) = self
+                .rx_inventory_collection
+                .borrow_and_update()
+                .as_ref()
+                .map(|c| c.id)
+            else {
                 warn!(
                     &opctx.log,
                     "Physical Disk Adoption: skipped";
@@ -109,21 +122,24 @@ impl BackgroundTask for PhysicalDiskAdoption {
                 return json!({ "error": "no inventory" });
             };
 
-            let result = self.datastore.physical_disk_uninitialized_list(
-                opctx,
-                collection_id,
-            ).await;
+            let result = self
+                .datastore
+                .physical_disk_uninitialized_list(opctx, collection_id)
+                .await;
 
             let uninitialized = match result {
                 Ok(uninitialized) => uninitialized,
                 Err(err) => {
+                    let err = InlineErrorChain::new(&err);
                     warn!(
                         &opctx.log,
-                        "Physical Disk Adoption: failed to query for insertable disks";
-                        "err" => %err,
+                        "Physical Disk Adoption: \
+                         failed to query for insertable disks";
+                        &err,
                     );
-                    return json!({ "error": format!("failed to query database: {:#}", err) });
-                },
+                    let err = format!("failed to query database: {err}");
+                    return json!({ "error": err });
+                }
             };
 
             for inv_disk in uninitialized {
@@ -143,31 +159,31 @@ impl BackgroundTask for PhysicalDiskAdoption {
                     CONTROL_PLANE_STORAGE_BUFFER.into(),
                 );
 
-                let result = self.datastore.physical_disk_and_zpool_insert(
-                    opctx,
-                    disk.clone(),
-                    zpool
-                ).await;
+                let result = self
+                    .datastore
+                    .physical_disk_and_zpool_insert(opctx, disk.clone(), zpool)
+                    .await;
 
                 if let Err(err) = result {
+                    let err = InlineErrorChain::new(&err);
                     warn!(
                         &opctx.log,
-                        "Physical Disk Adoption: failed to insert new disk and zpool";
-                        "err" => %err
+                        "Physical Disk Adoption: \
+                         failed to insert new disk and zpool";
+                        &err,
                     );
                     let msg = format!(
-                        "failed to insert disk/zpool: {:#}; disk = {:#?}",
-                        err,
-                        disk
+                        "failed to insert disk/zpool: {err}; disk = {disk:#?}",
                     );
-                    return json!({ "error": msg});
+                    return json!({ "error": msg });
                 }
 
                 disks_added += 1;
 
                 info!(
                     &opctx.log,
-                    "Physical Disk Adoption: Successfully added a new disk and zpool";
+                    "Physical Disk Adoption: \
+                     Successfully added a new disk and zpool";
                     "disk" => #?disk
                 );
             }

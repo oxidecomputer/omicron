@@ -18,9 +18,11 @@ use nexus_db_model::NatEntryValues;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_sled_agent_shared::inventory::OmicronZoneType;
+use nexus_types::inventory::Collection;
 use omicron_common::address::{MAX_PORT, MIN_PORT};
 use serde_json::json;
 use std::sync::Arc;
+use tokio::sync::watch;
 
 // Minumum number of boundary NTP zones that should be present in a valid
 // set of service zone nat configurations.
@@ -39,11 +41,16 @@ const MIN_EXTERNAL_DNS_COUNT: usize = 1;
 pub struct ServiceZoneNatTracker {
     datastore: Arc<DataStore>,
     resolver: Resolver,
+    rx_inventory: watch::Receiver<Option<Arc<Collection>>>,
 }
 
 impl ServiceZoneNatTracker {
-    pub fn new(datastore: Arc<DataStore>, resolver: Resolver) -> Self {
-        Self { datastore, resolver }
+    pub fn new(
+        datastore: Arc<DataStore>,
+        resolver: Resolver,
+        rx_inventory: watch::Receiver<Option<Arc<Collection>>>,
+    ) -> Self {
+        Self { datastore, resolver, rx_inventory }
     }
 }
 
@@ -55,46 +62,21 @@ impl BackgroundTask for ServiceZoneNatTracker {
         async {
             let log = &opctx.log;
 
-            // check inventory
-            let inventory = match self
-                .datastore
-                .inventory_get_latest_collection(
-                    opctx,
-                )
-                .await
-            {
-                Ok(inventory) => inventory,
-                Err(e) => {
-                    error!(
-                        &log,
-                        "failed to collect inventory";
-                        "error" => format!("{:#}", e)
-                    );
-                    return json!({
-                        "error":
-                            format!(
-                                "failed collect inventory: \
-                                {:#}",
-                                e
-                            )
-                    });
-                }
-            };
-
-            // generate set of Service Zone NAT entries
-            let collection = match inventory {
-                Some(c) => c,
+            // Get the inventory most recently seen by the inventory loader
+            // background task. We clone the Arc to avoid keeping the channel
+            // locked for the rest of our execution.
+            let Some(collection) =
+                self.rx_inventory.borrow_and_update().as_ref().map(Arc::clone)
+            else {
                 // this could happen if we check the inventory table before the
                 // inventory job has finished running for the first time
-                None => {
-                    warn!(
-                        &log,
-                        "inventory collection is None";
-                    );
-                    return json!({
-                        "error": "inventory collection is None"
-                    });
-                }
+                warn!(
+                    &log,
+                    "inventory collection is None";
+                );
+                return json!({
+                    "error": "inventory collection is None"
+                });
             };
 
             let mut nat_values: Vec<NatEntryValues> = vec![];
