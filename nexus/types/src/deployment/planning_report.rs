@@ -723,7 +723,6 @@ impl IdOrdItem for BlockedMgsUpdate {
 pub struct PlanningMgsUpdatesStepReport {
     pub blocked_mgs_updates: Vec<BlockedMgsUpdate>,
     pub pending_mgs_updates: PendingMgsUpdates,
-    pub unsafe_zones: BTreeMap<OmicronZoneUuid, ZoneUnsafeToShutdown>,
 }
 
 impl PlanningMgsUpdatesStepReport {
@@ -731,21 +730,18 @@ impl PlanningMgsUpdatesStepReport {
         Self {
             blocked_mgs_updates: Vec::new(),
             pending_mgs_updates: PendingMgsUpdates::new(),
-            unsafe_zones: BTreeMap::new(),
         }
     }
 
     pub fn is_empty(&self) -> bool {
         self.pending_mgs_updates.is_empty()
-            && self.unsafe_zones.is_empty()
             && self.blocked_mgs_updates.is_empty()
     }
 }
 
 impl fmt::Display for PlanningMgsUpdatesStepReport {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let Self { blocked_mgs_updates, pending_mgs_updates, unsafe_zones } =
-            self;
+        let Self { blocked_mgs_updates, pending_mgs_updates } = self;
         if !pending_mgs_updates.is_empty() {
             let n = pending_mgs_updates.len();
             let s = plural(n);
@@ -756,17 +752,6 @@ impl fmt::Display for PlanningMgsUpdatesStepReport {
                     "  * {}: {:?}",
                     update.baseboard_id, update.details
                 )?;
-            }
-        }
-
-        if !unsafe_zones.is_empty() {
-            let (n, s) = plural_map(unsafe_zones);
-            writeln!(
-                f,
-                "* {n} zone{s} not ready to shut down safely for an MGS driven update:"
-            )?;
-            for (zone_id, reason) in unsafe_zones.iter() {
-                writeln!(f, "  * zone {zone_id}: {reason}")?;
             }
         }
 

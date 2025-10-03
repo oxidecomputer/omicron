@@ -5187,18 +5187,11 @@
           },
           "pending_mgs_updates": {
             "$ref": "#/components/schemas/PendingMgsUpdates"
-          },
-          "unsafe_zones": {
-            "type": "object",
-            "additionalProperties": {
-              "$ref": "#/components/schemas/ZoneUnsafeToShutdown"
-            }
           }
         },
         "required": [
           "blocked_mgs_updates",
-          "pending_mgs_updates",
-          "unsafe_zones"
+          "pending_mgs_updates"
         ]
       },
       "PlanningNexusGenerationBumpReport": {

@@ -1409,8 +1409,8 @@ impl<'a> Planner<'a> {
             .map(|(sled_id, details)| (&details.baseboard_id, sled_id))
             .collect();
 
-        // We collect the sled baseboards that do not contain zones that are
-        // safe to shut down
+        // We collect the sled baseboards that contain zones that are unsafe to
+        // shut down
         let unsafe_zone_baseboards = included_sled_baseboards
             .iter()
             .filter_map(|(&baseboard_id, sled_id)| {
@@ -1433,8 +1433,10 @@ impl<'a> Planner<'a> {
                     .map(|zone| zone.kind().report_str())
                     .collect();
 
-                (!unsafe_zones.is_empty())
-                    .then_some((Arc::new(baseboard_id.clone()), unsafe_zones))
+                (!unsafe_zones.is_empty()).then_some((
+                    Arc::new(baseboard_id.clone()),
+                    unsafe_zone_report,
+                ))
             })
             .collect();
 
@@ -2337,8 +2339,7 @@ impl<'a> Planner<'a> {
         // We return false for all zone kinds if there are still
         // pending updates for components earlier in the update ordering
         // than zones: RoT bootloader / RoT / SP / Host OS.
-        mgs_updates.pending_mgs_updates.is_empty()
-            && mgs_updates.blocked_mgs_updates.is_empty()
+        mgs_updates.is_empty()
     }
 
     fn all_non_nexus_zones_using_new_image(&self) -> Result<bool, Error> {

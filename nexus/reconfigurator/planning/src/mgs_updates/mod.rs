@@ -22,12 +22,15 @@ use nexus_types::deployment::PendingMgsUpdateRotDetails;
 use nexus_types::deployment::PendingMgsUpdateSpDetails;
 use nexus_types::deployment::PendingMgsUpdates;
 use nexus_types::deployment::TargetReleaseDescription;
+use nexus_types::deployment::ZoneUnsafeToShutdown;
 use nexus_types::deployment::planning_report::BlockedMgsUpdate;
 use nexus_types::inventory::BaseboardId;
 use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::Collection;
 use omicron_common::api::external::TufRepoDescription;
 use omicron_common::disk::M2Slot;
+use omicron_uuid_kinds::OmicronZoneKind;
+use omicron_uuid_kinds::TypedUuid;
 use slog::{error, info, warn};
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
@@ -58,7 +61,10 @@ pub(crate) struct PlanMgsUpdatesInput<'a> {
     pub(crate) log: &'a slog::Logger,
     pub(crate) inventory: &'a Collection,
     pub(crate) current_boards: &'a BTreeSet<Arc<BaseboardId>>,
-    pub(crate) unsafe_zone_boards: &'a BTreeMap<Arc<BaseboardId>, Vec<&'a str>>,
+    pub(crate) unsafe_zone_boards: &'a BTreeMap<
+        Arc<BaseboardId>,
+        BTreeMap<TypedUuid<OmicronZoneKind>, ZoneUnsafeToShutdown>,
+    >,
     pub(crate) current_updates: &'a PendingMgsUpdates,
     pub(crate) current_artifacts: &'a TargetReleaseDescription,
     pub(crate) nmax_updates: usize,
@@ -597,7 +603,10 @@ fn try_make_update(
     baseboard_id: &Arc<BaseboardId>,
     inventory: &Collection,
     current_artifacts: &TufRepoDescription,
-    unsafe_zone_boards: &BTreeMap<Arc<BaseboardId>, Vec<&str>>,
+    unsafe_zone_boards: &BTreeMap<
+        Arc<BaseboardId>,
+        BTreeMap<TypedUuid<OmicronZoneKind>, ZoneUnsafeToShutdown>,
+    >,
 ) -> PlannedMgsUpdates {
     let mut pending_actions = PlannedMgsUpdates::new();
 

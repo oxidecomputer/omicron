@@ -12,11 +12,14 @@ use nexus_types::deployment::ExpectedVersion;
 use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdateDetails;
 use nexus_types::deployment::PendingMgsUpdateSpDetails;
+use nexus_types::deployment::ZoneUnsafeToShutdown;
 use nexus_types::deployment::planning_report::FailedSpUpdateReason;
 use nexus_types::inventory::BaseboardId;
 use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::Collection;
 use omicron_common::api::external::TufRepoDescription;
+use omicron_uuid_kinds::OmicronZoneKind;
+use omicron_uuid_kinds::TypedUuid;
 use slog::{debug, warn};
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -63,7 +66,10 @@ pub(super) fn try_make_update(
     baseboard_id: &Arc<BaseboardId>,
     inventory: &Collection,
     current_artifacts: &TufRepoDescription,
-    unsafe_zone_boards: &BTreeMap<Arc<BaseboardId>, Vec<&str>>,
+    unsafe_zone_boards: &BTreeMap<
+        Arc<BaseboardId>,
+        BTreeMap<TypedUuid<OmicronZoneKind>, ZoneUnsafeToShutdown>,
+    >,
 ) -> Result<MgsUpdateOutcome, FailedSpUpdateReason> {
     let Some(sp_info) = inventory.sps.get(baseboard_id) else {
         return Err(FailedSpUpdateReason::SpNotInInventory);
@@ -148,7 +154,13 @@ pub(super) fn try_make_update(
     // unsafe to shut down
     if unsafe_zone_boards.contains_key(baseboard_id) {
         let zone_str = match unsafe_zone_boards.get(baseboard_id) {
-            Some(str) => str.join(", "),
+            Some(board) => {
+                let mut s = String::new();
+                for (zone_id, zone) in board {
+                    s.push_str(&format!("* {}: {}", zone_id, zone));
+                }
+                s
+            }
             // All unsafe zones boards should contain which zones are unsafe
             // in the unlikely case that they don't, we just pass an empty
             // string as this is meant for informational purposes only. There
