@@ -52,6 +52,10 @@ impl GroupBy {
         );
         let table = &tables[0];
         anyhow::ensure!(
+            table.len() > 0,
+            "Input tables to a `group_by` must not be empty"
+        );
+        anyhow::ensure!(
             table.is_aligned(),
             "Input tables to a `group_by` must be aligned"
         );
