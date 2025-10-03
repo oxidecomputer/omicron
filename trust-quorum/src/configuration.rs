@@ -5,7 +5,7 @@
 //! A configuration of a trust quroum at a given epoch
 
 use crate::crypto::{EncryptedRackSecrets, RackSecret, Sha3_256Digest};
-use crate::{Epoch, PlatformId, Threshold};
+use crate::{BaseboardId, Epoch, Threshold};
 use daft::Diffable;
 use gfss::shamir::{Share, SplitError};
 use iddqd::{IdOrdItem, id_upcast};
@@ -51,11 +51,11 @@ pub struct Configuration {
     pub epoch: Epoch,
 
     /// Who was the coordinator of this reconfiguration?
-    pub coordinator: PlatformId,
+    pub coordinator: BaseboardId,
 
     // All members of the current configuration and the hash of their key shares
     #[serde_as(as = "Vec<(_, _)>")]
-    pub members: BTreeMap<PlatformId, Sha3_256Digest>,
+    pub members: BTreeMap<BaseboardId, Sha3_256Digest>,
 
     /// The number of sleds required to reconstruct the rack secret
     pub threshold: Threshold,
@@ -77,9 +77,9 @@ impl IdOrdItem for Configuration {
 pub struct NewConfigParams<'a> {
     pub rack_id: RackUuid,
     pub epoch: Epoch,
-    pub members: &'a BTreeSet<PlatformId>,
+    pub members: &'a BTreeSet<BaseboardId>,
     pub threshold: Threshold,
-    pub coordinator_id: &'a PlatformId,
+    pub coordinator_id: &'a BaseboardId,
 }
 
 impl Configuration {
@@ -90,7 +90,7 @@ impl Configuration {
     /// the last committed epoch.
     pub fn new(
         params: NewConfigParams<'_>,
-    ) -> Result<(Configuration, BTreeMap<PlatformId, Share>), ConfigurationError>
+    ) -> Result<(Configuration, BTreeMap<BaseboardId, Share>), ConfigurationError>
     {
         let coordinator = params.coordinator_id.clone();
         let rack_secret = RackSecret::new();
@@ -110,8 +110,9 @@ impl Configuration {
                 (s.clone(), digest)
             });
 
-        let mut members: BTreeMap<PlatformId, Sha3_256Digest> = BTreeMap::new();
-        let mut shares: BTreeMap<PlatformId, Share> = BTreeMap::new();
+        let mut members: BTreeMap<BaseboardId, Sha3_256Digest> =
+            BTreeMap::new();
+        let mut shares: BTreeMap<BaseboardId, Share> = BTreeMap::new();
         for (platform_id, (share, digest)) in
             params.members.iter().cloned().zip(shares_and_digests)
         {
