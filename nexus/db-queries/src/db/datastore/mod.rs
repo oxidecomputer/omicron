@@ -133,6 +133,7 @@ pub use instance::{
     InstanceAndActiveVmm, InstanceGestalt, InstanceStateComputer,
 };
 pub use inventory::DataStoreInventoryTest;
+pub use ip_pool::IpPoolListFilters;
 use nexus_db_model::AllSchemaVersions;
 use nexus_types::internal_api::views::HeldDbClaimInfo;
 pub use oximeter::CollectorReassignment;

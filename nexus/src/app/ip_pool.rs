@@ -14,7 +14,7 @@ use nexus_db_queries::authz;
 use nexus_db_queries::authz::ApiResource;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
-use nexus_db_queries::db::datastore::ip_pool::IpPoolListFilters;
+use nexus_db_queries::db::datastore::IpPoolListFilters;
 use nexus_db_queries::db::model::Name;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::CreateResult;
@@ -45,15 +45,6 @@ fn not_found_from_lookup(pool_lookup: &lookup::IpPool<'_>) -> Error {
             Error::not_found_by_id(ResourceType::IpPool, &id)
         }
         lookup::IpPool::Error(_, error) => error.to_owned(),
-    }
-}
-
-impl From<&params::IpPoolListSelector> for IpPoolListFilters {
-    fn from(selector: &params::IpPoolListSelector) -> Self {
-        IpPoolListFilters {
-            ip_version: selector.ip_version.map(Into::into),
-            delegated_for_internal_use: selector.delegated_for_internal_use,
-        }
     }
 }
 
@@ -261,7 +252,10 @@ impl super::Nexus {
         pagparams: &PaginatedBy<'_>,
         selector: &params::IpPoolListSelector,
     ) -> ListResultVec<db::model::IpPool> {
-        let filters = IpPoolListFilters::from(selector);
+        let filters = IpPoolListFilters {
+            ip_version: selector.ip_version.map(Into::into),
+            delegated_for_internal_use: selector.delegated_for_internal_use,
+        };
         self.db_datastore.ip_pools_list(opctx, pagparams, &filters).await
     }
 
