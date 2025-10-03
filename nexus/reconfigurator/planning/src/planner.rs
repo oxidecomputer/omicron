@@ -1410,8 +1410,7 @@ impl<'a> Planner<'a> {
 
         // We collect the sled baseboards that do not contain zones that are
         // safe to shut down
-        // TODO-K: If I turn this into unsafe zones then I can plumb through the reason
-        let safe_zone_baseboards = included_sled_baseboards
+        let unsafe_zone_baseboards = included_sled_baseboards
             .iter()
             .filter_map(|(&baseboard_id, sled_id)| {
                 let zones = self.blueprint.current_sled_zones(
@@ -1430,9 +1429,8 @@ impl<'a> Planner<'a> {
                     .map(|zone| zone.kind().report_str())
                     .collect();
 
-                unsafe_zones
-                    .is_empty()
-                    .then_some(Arc::new(baseboard_id.clone()))
+                (!unsafe_zones.is_empty())
+                    .then_some((Arc::new(baseboard_id.clone()), unsafe_zones))
             })
             .collect();
 
@@ -1471,7 +1469,7 @@ impl<'a> Planner<'a> {
             &self.log,
             &self.inventory,
             &included_baseboards,
-            &safe_zone_baseboards,
+            &unsafe_zone_baseboards,
             current_updates,
             current_artifacts,
             NUM_CONCURRENT_MGS_UPDATES,

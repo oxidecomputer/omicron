@@ -1540,7 +1540,7 @@ planning report:
   * zone 427ec88f-f467-42fa-9bbb-66a91a36103c: only 2/2 internal DNS zones are synchronized; require at least 3
   * zone ea5b4030-b52f-44b2-8d70-45f15f987d01: only 2/2 internal DNS zones are synchronized; require at least 3
 * 1 blocked MGS update:
-  * model0:serial0: failed to plan an SP update: board contains zones that are unsafe to shut down
+  * model0:serial0: failed to plan an SP update: sled contains zones that are unsafe to shut down: "internal_dns"
 * zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
 * waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
@@ -1632,8 +1632,8 @@ planning report:
   * zone 427ec88f-f467-42fa-9bbb-66a91a36103c: only 2/2 internal DNS zones are synchronized; require at least 3
   * zone ea5b4030-b52f-44b2-8d70-45f15f987d01: only 2/2 internal DNS zones are synchronized; require at least 3
 * 2 blocked MGS updates:
-  * model0:serial0: failed to plan a Host OS update: board contains zones that are unsafe to shut down
-  * model2:serial2: failed to plan a Host OS update: board contains zones that are unsafe to shut down
+  * model0:serial0: failed to plan a Host OS update: sled contains zones that are unsafe to shut down: "internal_dns"
+  * model2:serial2: failed to plan a Host OS update: sled contains zones that are unsafe to shut down: "internal_dns"
 * zone updates waiting on blocked MGS updates (RoT bootloader / RoT / SP / Host OS)
 * waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 

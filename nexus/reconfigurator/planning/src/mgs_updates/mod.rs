@@ -30,6 +30,7 @@ use omicron_common::api::external::TufRepoDescription;
 use omicron_common::disk::M2Slot;
 use slog::{error, info, warn};
 use slog_error_chain::InlineErrorChain;
+use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::sync::Arc;
 use thiserror::Error;
@@ -121,7 +122,7 @@ pub(crate) fn plan_mgs_updates(
     log: &slog::Logger,
     inventory: &Collection,
     current_boards: &BTreeSet<Arc<BaseboardId>>,
-    safe_zone_boards: &BTreeSet<Arc<BaseboardId>>,
+    unsafe_zone_boards: &BTreeMap<Arc<BaseboardId>, Vec<&str>>,
     current_updates: &PendingMgsUpdates,
     current_artifacts: &TargetReleaseDescription,
     nmax_updates: usize,
@@ -250,7 +251,7 @@ pub(crate) fn plan_mgs_updates(
             board,
             inventory,
             current_artifacts,
-            safe_zone_boards,
+            unsafe_zone_boards,
         );
 
         if let Some(update) = updates.into_iter().next() {
@@ -574,7 +575,7 @@ fn try_make_update(
     baseboard_id: &Arc<BaseboardId>,
     inventory: &Collection,
     current_artifacts: &TufRepoDescription,
-    safe_zone_boards: &BTreeSet<Arc<BaseboardId>>,
+    unsafe_zone_boards: &BTreeMap<Arc<BaseboardId>, Vec<&str>>,
 ) -> PlannedMgsUpdates {
     let mut pending_actions = PlannedMgsUpdates::new();
 
@@ -609,7 +610,7 @@ fn try_make_update(
                 baseboard_id,
                 inventory,
                 current_artifacts,
-                safe_zone_boards,
+                unsafe_zone_boards,
             )
             .map_err(|e| e.into()),
             MgsUpdateComponent::HostOs => host_phase_1::try_make_update(
@@ -617,7 +618,7 @@ fn try_make_update(
                 baseboard_id,
                 inventory,
                 current_artifacts,
-                safe_zone_boards,
+                unsafe_zone_boards,
             )
             .map_err(|e| e.into()),
         };
@@ -689,6 +690,7 @@ mod test {
     use nexus_types::inventory::CabooseWhich;
     use nexus_types::inventory::SpType;
     use omicron_test_utils::dev::LogContext;
+    use std::collections::BTreeMap;
     use std::collections::BTreeSet;
     use std::sync::Arc;
     use strum::IntoEnumIterator;
@@ -739,7 +741,7 @@ mod test {
             log,
             &collection,
             &fake_boards,
-            &fake_boards,
+            &BTreeMap::new(),
             &current_updates,
             &TargetReleaseDescription::TufRepo(repo.clone()),
             nmax_updates,
@@ -784,7 +786,7 @@ mod test {
             log,
             &collection,
             &collection.baseboards,
-            &collection.baseboards,
+            &BTreeMap::new(),
             &current_updates,
             &TargetReleaseDescription::TufRepo(repo.clone()),
             nmax_updates,
@@ -828,7 +830,7 @@ mod test {
             log,
             &collection,
             &collection.baseboards,
-            &collection.baseboards,
+            &BTreeMap::new(),
             &current_updates,
             &TargetReleaseDescription::TufRepo(repo.clone()),
             nmax_updates,
@@ -873,7 +875,7 @@ mod test {
             log,
             &collection,
             &collection.baseboards,
-            &collection.baseboards,
+            &BTreeMap::new(),
             &current_updates,
             &TargetReleaseDescription::TufRepo(repo.clone()),
             nmax_updates,
@@ -942,7 +944,7 @@ mod test {
                     log,
                     &collection,
                     current_boards,
-                    current_boards,
+                    &BTreeMap::new(),
                     &initial_updates,
                     &TargetReleaseDescription::TufRepo(repo.clone()),
                     nmax_updates,
@@ -993,7 +995,7 @@ mod test {
                 log,
                 &collection,
                 current_boards,
-                current_boards,
+                &BTreeMap::new(),
                 &updates,
                 &TargetReleaseDescription::TufRepo(repo.clone()),
                 nmax_updates,
@@ -1008,7 +1010,7 @@ mod test {
                 log,
                 &collection,
                 current_boards,
-                current_boards,
+                &BTreeMap::new(),
                 &initial_updates,
                 &TargetReleaseDescription::TufRepo(repo.clone()),
                 nmax_updates,
@@ -1091,7 +1093,7 @@ mod test {
                 log,
                 &collection,
                 current_boards,
-                current_boards,
+                &BTreeMap::new(),
                 &latest_updates,
                 &TargetReleaseDescription::TufRepo(repo.clone()),
                 nmax_updates,
@@ -1163,7 +1165,7 @@ mod test {
                 log,
                 &collection,
                 &collection.baseboards,
-                &collection.baseboards,
+                &BTreeMap::new(),
                 &latest_updates,
                 &TargetReleaseDescription::TufRepo(repo.clone()),
                 nmax_updates,
@@ -1222,7 +1224,7 @@ mod test {
             log,
             &collection,
             &collection.baseboards,
-            &collection.baseboards,
+            &BTreeMap::new(),
             &PendingMgsUpdates::new(),
             &TargetReleaseDescription::TufRepo(repo.clone()),
             usize::MAX,
@@ -1268,7 +1270,7 @@ mod test {
             log,
             &collection,
             &collection.baseboards,
-            &collection.baseboards,
+            &BTreeMap::new(),
             &PendingMgsUpdates::new(),
             &TargetReleaseDescription::TufRepo(repo.clone()),
             usize::MAX,
@@ -1312,7 +1314,7 @@ mod test {
             log,
             &collection,
             &collection.baseboards,
-            &collection.baseboards,
+            &BTreeMap::new(),
             &PendingMgsUpdates::new(),
             &TargetReleaseDescription::TufRepo(repo.clone()),
             usize::MAX,
@@ -1355,7 +1357,7 @@ mod test {
             log,
             &collection,
             &collection.baseboards,
-            &collection.baseboards,
+            &BTreeMap::new(),
             &PendingMgsUpdates::new(),
             &TargetReleaseDescription::TufRepo(repo.clone()),
             usize::MAX,
@@ -1390,7 +1392,7 @@ mod test {
             log,
             &collection,
             &collection.baseboards,
-            &collection.baseboards,
+            &BTreeMap::new(),
             &all_updates,
             &TargetReleaseDescription::TufRepo(repo.clone()),
             1,
@@ -1428,7 +1430,7 @@ mod test {
                 log,
                 &collection,
                 &collection.baseboards,
-                &collection.baseboards,
+                &BTreeMap::new(),
                 &PendingMgsUpdates::new(),
                 &TargetReleaseDescription::TufRepo(repo.clone()),
                 nmax_updates,
@@ -1453,7 +1455,7 @@ mod test {
                 log,
                 &collection,
                 &collection.baseboards,
-                &collection.baseboards,
+                &BTreeMap::new(),
                 &updates,
                 &TargetReleaseDescription::TufRepo(repo.clone()),
                 nmax_updates,

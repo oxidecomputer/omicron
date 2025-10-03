@@ -620,11 +620,10 @@ pub enum FailedSpUpdateReason {
     /// The component's corresponding SP was not found in the inventory
     #[error("corresponding SP is not in inventory")]
     SpNotInInventory,
-    // TODO-K: Can I somehow plumb through the zones that can't be shut down?
-    /// The component's corresponding board contains zones that are unsafe to
+    /// The component's corresponding sled contains zones that are unsafe to
     /// shut down
-    #[error("board contains zones that are unsafe to shut down")]
-    UnsafeZoneFound,
+    #[error("sled contains zones that are unsafe to shut down: {0:?}")]
+    UnsafeZoneFound(String),
 }
 
 /// Describes the reason why a Host OS failed to update
@@ -692,11 +691,10 @@ pub enum FailedHostOsUpdateReason {
     /// details
     #[error("sled agent was unable to retrieve boot disk phase 2 image: {0:?}")]
     UnableToRetrieveBootDiskPhase2Image(String),
-    // TODO-K: Can I somehow plumb through the zones that can't be shut down?
-    /// The component's corresponding board contains zones that are unsafe to
+    /// The component's corresponding sled contains zones that are unsafe to
     /// shut down
-    #[error("board contains zones that are unsafe to shut down")]
-    UnsafeZoneFound,
+    #[error("sled contains zones that are unsafe to shut down: {0:?}")]
+    UnsafeZoneFound(String),
 }
 
 #[derive(
