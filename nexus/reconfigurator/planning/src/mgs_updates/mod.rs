@@ -798,6 +798,7 @@ mod test {
     use nexus_types::inventory::CabooseWhich;
     use nexus_types::inventory::SpType;
     use omicron_test_utils::dev::LogContext;
+    use sled_hardware_types::GIMLET_SLED_MODEL;
     use std::collections::BTreeSet;
     use std::sync::Arc;
     use strum::IntoEnumIterator;
@@ -1002,7 +1003,7 @@ mod test {
         // each of the sled boards, and report no pending updates
         let mut expected_blocked_updates = Vec::new();
         for baseboard_id in &collection.baseboards {
-            if baseboard_id.part_number == "dummy_sled" {
+            if baseboard_id.part_number == GIMLET_SLED_MODEL {
                 expected_blocked_updates.push(BlockedMgsUpdate {
                     baseboard_id: baseboard_id.clone(),
                     reason: FailedMgsUpdateReason::HostOs(

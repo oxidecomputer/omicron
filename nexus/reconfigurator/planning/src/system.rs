@@ -71,6 +71,7 @@ use omicron_uuid_kinds::MupdateOverrideUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
+use sled_hardware_types::GIMLET_SLED_MODEL;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::fmt;
@@ -1296,7 +1297,7 @@ impl Sled {
     ) -> Sled {
         use typed_rng::TypedUuidRng;
         let unique = unique.unwrap_or_else(|| hardware_slot.to_string());
-        let model = format!("model{}", unique);
+        let model = GIMLET_SLED_MODEL.to_string();
         let serial = format!("serial{}", unique);
         let revision = 0;
         let mut zpool_rng = TypedUuidRng::from_seed(

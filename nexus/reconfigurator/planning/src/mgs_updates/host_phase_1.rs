@@ -22,6 +22,7 @@ use omicron_common::api::external::TufArtifactMeta;
 use omicron_common::api::external::TufRepoDescription;
 use omicron_common::disk::M2Slot;
 use omicron_uuid_kinds::SledUuid;
+use sled_hardware_types::OxideSled;
 use slog::Logger;
 use slog::debug;
 use slog::error;
@@ -376,12 +377,23 @@ pub(super) fn try_make_update(
         );
     };
 
+    let Some(sled_type) = OxideSled::try_from_model(&baseboard_id.part_number)
+    else {
+        return Err(FailedHostOsUpdateReason::UnableToDetermineSledModel(
+            baseboard_id.part_number.clone(),
+        ));
+    };
+
     let mut phase_1_artifacts = Vec::with_capacity(1);
     let mut phase_2_artifacts = Vec::with_capacity(1);
     for artifact in &current_artifacts.artifacts {
-        // TODO-correctness we only support gimlet at the moment, need
-        // to tell if this target is a gimlet or a comso
-        if artifact.id.kind == ArtifactKind::GIMLET_HOST_PHASE_1 {
+        if artifact.id.kind == ArtifactKind::COSMO_HOST_PHASE_1
+            && sled_type == OxideSled::Cosmo
+        {
+            phase_1_artifacts.push(artifact);
+        } else if artifact.id.kind == ArtifactKind::GIMLET_HOST_PHASE_1
+            && sled_type == OxideSled::Gimlet
+        {
             phase_1_artifacts.push(artifact);
         } else if artifact.id.kind == ArtifactKind::HOST_PHASE_2 {
             phase_2_artifacts.push(artifact);
