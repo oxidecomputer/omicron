@@ -47,8 +47,9 @@ impl RegionReplacementDetector {
         let params = sagas::region_replacement_start::Params {
             serialized_authn,
             request,
-            allocation_strategy:
-                RegionAllocationStrategy::RandomWithDistinctSleds { seed: None },
+            allocation_strategy: RegionAllocationStrategy::Random {
+                    seed: None
+                },
         };
 
         let saga_dag = SagaRegionReplacementStart::prepare(&params)?;

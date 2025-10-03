@@ -46,8 +46,9 @@ impl RegionSnapshotReplacementDetector {
         let params = sagas::region_snapshot_replacement_start::Params {
             serialized_authn,
             request,
-            allocation_strategy:
-                RegionAllocationStrategy::RandomWithDistinctSleds { seed: None },
+            allocation_strategy: RegionAllocationStrategy::Random {
+                seed: None
+            },
         };
 
         let saga_dag = SagaRegionSnapshotReplacementStart::prepare(&params)?;
