@@ -2412,6 +2412,7 @@ mod test {
     use super::PendingMgsUpdates;
     use crate::inventory::BaseboardId;
     use gateway_types::component::SpType;
+    use sled_hardware_types::GIMLET_SLED_MODEL;
 
     #[test]
     fn test_serialize_pending_mgs_updates() {
@@ -2428,7 +2429,7 @@ mod test {
         let mut pending_mgs_updates = PendingMgsUpdates::new();
         let update = PendingMgsUpdate {
             baseboard_id: Arc::new(BaseboardId {
-                part_number: String::from("913-0000019"),
+                part_number: String::from(GIMLET_SLED_MODEL),
                 serial_number: String::from("BRM27230037"),
             }),
             sp_type: SpType::Sled,
