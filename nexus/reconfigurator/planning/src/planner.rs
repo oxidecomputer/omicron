@@ -15,6 +15,7 @@ use crate::blueprint_builder::Operation;
 use crate::blueprint_editor::DisksEditError;
 use crate::blueprint_editor::SledEditError;
 use crate::mgs_updates::ImpossibleUpdatePolicy;
+use crate::mgs_updates::PlanMgsUpdatesInput;
 use crate::mgs_updates::PlannedMgsUpdates;
 use crate::mgs_updates::plan_mgs_updates;
 use crate::planner::image_source::NoopConvertHostPhase2Contents;
@@ -1465,16 +1466,16 @@ impl<'a> Planner<'a> {
             pending_updates,
             pending_host_phase_2_changes,
             blocked_mgs_updates,
-        } = plan_mgs_updates(
-            &self.log,
-            &self.inventory,
-            &included_baseboards,
-            &unsafe_zone_baseboards,
+        } = plan_mgs_updates(PlanMgsUpdatesInput {
+            log: &self.log,
+            inventory: &self.inventory,
+            current_boards: &included_baseboards,
+            unsafe_zone_boards: &unsafe_zone_baseboards,
             current_updates,
             current_artifacts,
-            NUM_CONCURRENT_MGS_UPDATES,
+            nmax_updates: NUM_CONCURRENT_MGS_UPDATES,
             impossible_update_policy,
-        );
+        });
         if pending_updates != *current_updates {
             // This will only add comments if our set of updates changed _and_
             // we have at least one update. If we went from "some updates" to
