@@ -24,6 +24,7 @@ use slog::Logger;
 use slog::debug;
 use slog::error;
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::sync::Arc;
 use tufaceous_artifact::ArtifactHash;
 use tufaceous_artifact::ArtifactKind;
@@ -273,6 +274,7 @@ pub(super) fn try_make_update(
     baseboard_id: &Arc<BaseboardId>,
     inventory: &Collection,
     current_artifacts: &TufRepoDescription,
+    safe_zone_boards: &BTreeSet<Arc<BaseboardId>>,
 ) -> Result<MgsUpdateOutcome, FailedHostOsUpdateReason> {
     let Some(sp_info) = inventory.sps.get(baseboard_id) else {
         return Err(FailedHostOsUpdateReason::SpNotInInventory);
@@ -420,6 +422,12 @@ pub(super) fn try_make_update(
         return Ok(MgsUpdateOutcome::NoUpdateNeeded);
     }
 
+    // Make sure the board we're targetting doesn't contain any zones that are
+    // unsafe to shut down
+    if !safe_zone_boards.contains(baseboard_id) {
+        return Err(FailedHostOsUpdateReason::UnsafeZoneFound);
+    }
+
     // Before we can proceed with the phase 1 update, we need sled-agent to
     // write the corresponding phase 2 artifact to its inactive disk. This
     // requires us updating its `OmicronSledConfig`. We don't thread the
@@ -512,6 +520,7 @@ mod tests {
             log,
             &collection,
             current_boards,
+            current_boards,
             &initial_updates,
             &TargetReleaseDescription::Initial,
             nmax_updates,
@@ -526,6 +535,7 @@ mod tests {
         let planned = plan_mgs_updates(
             log,
             &collection,
+            current_boards,
             current_boards,
             &initial_updates,
             &TargetReleaseDescription::TufRepo(repo.clone()),
@@ -562,6 +572,7 @@ mod tests {
             log,
             &collection,
             current_boards,
+            current_boards,
             &planned.pending_updates,
             &TargetReleaseDescription::TufRepo(repo.clone()),
             nmax_updates,
@@ -592,6 +603,7 @@ mod tests {
             log,
             &later_collection,
             current_boards,
+            current_boards,
             &planned.pending_updates,
             &TargetReleaseDescription::TufRepo(repo.clone()),
             nmax_updates,
@@ -615,6 +627,7 @@ mod tests {
         let later_planned = plan_mgs_updates(
             log,
             &later_collection,
+            current_boards,
             current_boards,
             &planned.pending_updates,
             &TargetReleaseDescription::TufRepo(repo.clone()),
@@ -654,6 +667,7 @@ mod tests {
             log,
             &updated_collection,
             current_boards,
+            current_boards,
             &later_planned.pending_updates,
             &TargetReleaseDescription::TufRepo(repo.clone()),
             nmax_updates,
@@ -676,6 +690,7 @@ mod tests {
             log,
             &collection,
             &BTreeSet::new(),
+            &BTreeSet::new(),
             &PendingMgsUpdates::new(),
             &TargetReleaseDescription::TufRepo(repo.clone()),
             nmax_updates,
@@ -686,6 +701,7 @@ mod tests {
         let planned = plan_mgs_updates(
             log,
             &collection,
+            &collection.baseboards,
             &collection.baseboards,
             &PendingMgsUpdates::new(),
             &TargetReleaseDescription::TufRepo(repo.clone()),
@@ -753,6 +769,7 @@ mod tests {
             log,
             &collection,
             &collection.baseboards,
+            &collection.baseboards,
             &planned.pending_updates,
             &TargetReleaseDescription::TufRepo(repo.clone()),
             nmax_updates,
@@ -814,6 +831,7 @@ mod tests {
         let new_planned = plan_mgs_updates(
             log,
             &collection,
+            &collection.baseboards,
             &collection.baseboards,
             &planned.pending_updates,
             &TargetReleaseDescription::TufRepo(repo.clone()),
@@ -893,6 +911,7 @@ mod tests {
             log,
             &collection,
             &collection.baseboards,
+            &collection.baseboards,
             &PendingMgsUpdates::new(),
             &TargetReleaseDescription::TufRepo(repo.clone()),
             nmax_updates,
@@ -920,6 +939,7 @@ mod tests {
         let new_planned = plan_mgs_updates(
             log,
             &collection,
+            &collection.baseboards,
             &collection.baseboards,
             &planned.pending_updates,
             &TargetReleaseDescription::TufRepo(repo.clone()),

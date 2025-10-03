@@ -115,10 +115,13 @@ impl PlannedMgsUpdates {
 ///
 /// By current policy, `nmax_updates` is always 1, but the implementation here
 /// supports more than one update per invocation.
+// TODO-K: Fix and use a struct instead
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn plan_mgs_updates(
     log: &slog::Logger,
     inventory: &Collection,
     current_boards: &BTreeSet<Arc<BaseboardId>>,
+    safe_zone_boards: &BTreeSet<Arc<BaseboardId>>,
     current_updates: &PendingMgsUpdates,
     current_artifacts: &TargetReleaseDescription,
     nmax_updates: usize,
@@ -242,7 +245,13 @@ pub(crate) fn plan_mgs_updates(
             pending_updates: updates,
             pending_host_phase_2_changes: mut host_phase_2,
             blocked_mgs_updates: mut blocked_updates,
-        } = try_make_update(log, board, inventory, current_artifacts);
+        } = try_make_update(
+            log,
+            board,
+            inventory,
+            current_artifacts,
+            safe_zone_boards,
+        );
 
         if let Some(update) = updates.into_iter().next() {
             info!(log, "configuring MGS-driven update"; update);
@@ -565,6 +574,7 @@ fn try_make_update(
     baseboard_id: &Arc<BaseboardId>,
     inventory: &Collection,
     current_artifacts: &TufRepoDescription,
+    safe_zone_boards: &BTreeSet<Arc<BaseboardId>>,
 ) -> PlannedMgsUpdates {
     let mut pending_actions = PlannedMgsUpdates::new();
 
@@ -599,6 +609,7 @@ fn try_make_update(
                 baseboard_id,
                 inventory,
                 current_artifacts,
+                safe_zone_boards,
             )
             .map_err(|e| e.into()),
             MgsUpdateComponent::HostOs => host_phase_1::try_make_update(
@@ -606,6 +617,7 @@ fn try_make_update(
                 baseboard_id,
                 inventory,
                 current_artifacts,
+                safe_zone_boards,
             )
             .map_err(|e| e.into()),
         };
@@ -727,6 +739,7 @@ mod test {
             log,
             &collection,
             &fake_boards,
+            &fake_boards,
             &current_updates,
             &TargetReleaseDescription::TufRepo(repo.clone()),
             nmax_updates,
@@ -771,6 +784,7 @@ mod test {
             log,
             &collection,
             &collection.baseboards,
+            &collection.baseboards,
             &current_updates,
             &TargetReleaseDescription::TufRepo(repo.clone()),
             nmax_updates,
@@ -813,6 +827,7 @@ mod test {
         } = plan_mgs_updates(
             log,
             &collection,
+            &collection.baseboards,
             &collection.baseboards,
             &current_updates,
             &TargetReleaseDescription::TufRepo(repo.clone()),
@@ -857,6 +872,7 @@ mod test {
         } = plan_mgs_updates(
             log,
             &collection,
+            &collection.baseboards,
             &collection.baseboards,
             &current_updates,
             &TargetReleaseDescription::TufRepo(repo.clone()),
@@ -926,6 +942,7 @@ mod test {
                     log,
                     &collection,
                     current_boards,
+                    current_boards,
                     &initial_updates,
                     &TargetReleaseDescription::TufRepo(repo.clone()),
                     nmax_updates,
@@ -976,6 +993,7 @@ mod test {
                 log,
                 &collection,
                 current_boards,
+                current_boards,
                 &updates,
                 &TargetReleaseDescription::TufRepo(repo.clone()),
                 nmax_updates,
@@ -989,6 +1007,7 @@ mod test {
             plan_mgs_updates(
                 log,
                 &collection,
+                current_boards,
                 current_boards,
                 &initial_updates,
                 &TargetReleaseDescription::TufRepo(repo.clone()),
@@ -1072,6 +1091,7 @@ mod test {
                 log,
                 &collection,
                 current_boards,
+                current_boards,
                 &latest_updates,
                 &TargetReleaseDescription::TufRepo(repo.clone()),
                 nmax_updates,
@@ -1143,6 +1163,7 @@ mod test {
                 log,
                 &collection,
                 &collection.baseboards,
+                &collection.baseboards,
                 &latest_updates,
                 &TargetReleaseDescription::TufRepo(repo.clone()),
                 nmax_updates,
@@ -1201,6 +1222,7 @@ mod test {
             log,
             &collection,
             &collection.baseboards,
+            &collection.baseboards,
             &PendingMgsUpdates::new(),
             &TargetReleaseDescription::TufRepo(repo.clone()),
             usize::MAX,
@@ -1246,6 +1268,7 @@ mod test {
             log,
             &collection,
             &collection.baseboards,
+            &collection.baseboards,
             &PendingMgsUpdates::new(),
             &TargetReleaseDescription::TufRepo(repo.clone()),
             usize::MAX,
@@ -1289,6 +1312,7 @@ mod test {
             log,
             &collection,
             &collection.baseboards,
+            &collection.baseboards,
             &PendingMgsUpdates::new(),
             &TargetReleaseDescription::TufRepo(repo.clone()),
             usize::MAX,
@@ -1331,6 +1355,7 @@ mod test {
             log,
             &collection,
             &collection.baseboards,
+            &collection.baseboards,
             &PendingMgsUpdates::new(),
             &TargetReleaseDescription::TufRepo(repo.clone()),
             usize::MAX,
@@ -1364,6 +1389,7 @@ mod test {
         } = plan_mgs_updates(
             log,
             &collection,
+            &collection.baseboards,
             &collection.baseboards,
             &all_updates,
             &TargetReleaseDescription::TufRepo(repo.clone()),
@@ -1402,6 +1428,7 @@ mod test {
                 log,
                 &collection,
                 &collection.baseboards,
+                &collection.baseboards,
                 &PendingMgsUpdates::new(),
                 &TargetReleaseDescription::TufRepo(repo.clone()),
                 nmax_updates,
@@ -1425,6 +1452,7 @@ mod test {
             plan_mgs_updates(
                 log,
                 &collection,
+                &collection.baseboards,
                 &collection.baseboards,
                 &updates,
                 &TargetReleaseDescription::TufRepo(repo.clone()),

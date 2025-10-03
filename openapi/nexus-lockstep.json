@@ -3755,6 +3755,21 @@
               "type",
               "value"
             ]
+          },
+          {
+            "description": "The component's corresponding board contains zones that are unsafe to shut down",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "unsafe_zone_found"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
           }
         ]
       },
@@ -4138,6 +4153,21 @@
                 "type": "string",
                 "enum": [
                   "sp_not_in_inventory"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "The component's corresponding board contains zones that are unsafe to shut down",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "unsafe_zone_found"
                 ]
               }
             },

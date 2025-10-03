@@ -1402,45 +1402,39 @@ impl<'a> Planner<'a> {
         // For better or worse, switches and PSCs do not have the same idea of
         // being adopted into the control plane.  If they're present, they're
         // part of the system, and we will update them.
-        let mut included_sled_baseboards: BTreeMap<_, _> = self
+        let included_sled_baseboards: BTreeMap<_, _> = self
             .input
             .all_sleds(SledFilter::SpsUpdatedByReconfigurator)
             .map(|(sled_id, details)| (&details.baseboard_id, sled_id))
             .collect();
 
-        // We only keep sled baseboards that do not contain zones that are
-        // unsafe to shut down
-        included_sled_baseboards.retain(|baseboard_id, sled_id| {
-            let zones = self.blueprint.current_sled_zones(
-                *sled_id,
-                BlueprintZoneDisposition::is_in_service,
-            );
-
-            let unsafe_zones: Vec<_> = zones
-                .into_iter()
-                .filter(|zone| {
-                    !self.can_zone_be_shut_down_safely(
-                        zone,
-                        &mut report.unsafe_zones
-                    )
-                })
-                .map(|zone| zone.kind().report_str())
-                .collect();
-
-            if !unsafe_zones.is_empty() {
-                let zone_str = unsafe_zones.join(", ");
-
-                info!(
-                    self.log,
-                    "skipping board for MGS-driven update, serial_number: {}, part_number: {} due to unsafe zones: {}",
-                    baseboard_id.serial_number,
-                    baseboard_id.part_number,
-                    zone_str
+        // We collect the sled baseboards that do not contain zones that are
+        // safe to shut down
+        // TODO-K: If I turn this into unsafe zones then I can plumb through the reason
+        let safe_zone_baseboards = included_sled_baseboards
+            .iter()
+            .filter_map(|(&baseboard_id, sled_id)| {
+                let zones = self.blueprint.current_sled_zones(
+                    *sled_id,
+                    BlueprintZoneDisposition::is_in_service,
                 );
-            }
 
-            unsafe_zones.is_empty()
-        });
+                let unsafe_zones: Vec<_> = zones
+                    .into_iter()
+                    .filter(|zone| {
+                        !self.can_zone_be_shut_down_safely(
+                            zone,
+                            &mut report.unsafe_zones,
+                        )
+                    })
+                    .map(|zone| zone.kind().report_str())
+                    .collect();
+
+                unsafe_zones
+                    .is_empty()
+                    .then_some(Arc::new(baseboard_id.clone()))
+            })
+            .collect();
 
         let included_baseboards = self
             .inventory
@@ -1477,6 +1471,7 @@ impl<'a> Planner<'a> {
             &self.log,
             &self.inventory,
             &included_baseboards,
+            &safe_zone_baseboards,
             current_updates,
             current_artifacts,
             NUM_CONCURRENT_MGS_UPDATES,

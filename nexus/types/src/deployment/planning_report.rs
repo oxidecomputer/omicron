@@ -504,16 +504,16 @@ impl PlanningMupdateOverrideStepReport {
 #[cfg_attr(test, derive(test_strategy::Arbitrary))]
 pub enum FailedMgsUpdateReason {
     /// There was a failed attempt to plan a Host OS update
-    #[error("failed to plan a Host OS update")]
+    #[error("failed to plan a Host OS update: {0}")]
     HostOs(#[from] FailedHostOsUpdateReason),
     /// There was a failed attempt to plan an RoT update
-    #[error("failed to plan an RoT update")]
+    #[error("failed to plan an RoT update: {0}")]
     Rot(#[from] FailedRotUpdateReason),
     /// There was a failed attempt to plan an RoT bootloader update
-    #[error("failed to plan an RoT bootloader update")]
+    #[error("failed to plan an RoT bootloader update: {0}")]
     RotBootloader(#[from] FailedRotBootloaderUpdateReason),
     /// There was a failed attempt to plan an SP update
-    #[error("failed to plan an SP update")]
+    #[error("failed to plan an SP update: {0}")]
     Sp(#[from] FailedSpUpdateReason),
 }
 
@@ -620,6 +620,11 @@ pub enum FailedSpUpdateReason {
     /// The component's corresponding SP was not found in the inventory
     #[error("corresponding SP is not in inventory")]
     SpNotInInventory,
+    // TODO-K: Can I somehow plumb through the zones that can't be shut down?
+    /// The component's corresponding board contains zones that are unsafe to
+    /// shut down
+    #[error("board contains zones that are unsafe to shut down")]
+    UnsafeZoneFound,
 }
 
 /// Describes the reason why a Host OS failed to update
@@ -687,6 +692,11 @@ pub enum FailedHostOsUpdateReason {
     /// details
     #[error("sled agent was unable to retrieve boot disk phase 2 image: {0:?}")]
     UnableToRetrieveBootDiskPhase2Image(String),
+    // TODO-K: Can I somehow plumb through the zones that can't be shut down?
+    /// The component's corresponding board contains zones that are unsafe to
+    /// shut down
+    #[error("board contains zones that are unsafe to shut down")]
+    UnsafeZoneFound,
 }
 
 #[derive(

@@ -18,6 +18,7 @@ use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::Collection;
 use omicron_common::api::external::TufRepoDescription;
 use slog::{debug, warn};
+use std::collections::BTreeSet;
 use std::sync::Arc;
 use tufaceous_artifact::ArtifactVersion;
 use tufaceous_artifact::KnownArtifactKind;
@@ -62,6 +63,7 @@ pub(super) fn try_make_update(
     baseboard_id: &Arc<BaseboardId>,
     inventory: &Collection,
     current_artifacts: &TufRepoDescription,
+    safe_zone_boards: &BTreeSet<Arc<BaseboardId>>,
 ) -> Result<MgsUpdateOutcome, FailedSpUpdateReason> {
     let Some(sp_info) = inventory.sps.get(baseboard_id) else {
         return Err(FailedSpUpdateReason::SpNotInInventory);
@@ -142,6 +144,12 @@ pub(super) fn try_make_update(
         return Ok(MgsUpdateOutcome::NoUpdateNeeded);
     }
 
+    // Make sure the board we're targetting doesn't contain any zones that are
+    // unsafe to shut down
+    if !safe_zone_boards.contains(baseboard_id) {
+        return Err(FailedSpUpdateReason::UnsafeZoneFound);
+    }
+
     // Begin configuring an update.
     let expected_inactive_version = match inventory
         .caboose_for(CabooseWhich::SpSlot1, baseboard_id)
@@ -220,6 +228,7 @@ mod tests {
                 log,
                 &collection,
                 current_boards,
+                current_boards,
                 &initial_updates,
                 &TargetReleaseDescription::Initial,
                 nmax_updates,
@@ -234,6 +243,7 @@ mod tests {
             plan_mgs_updates(
                 log,
                 &collection,
+                current_boards,
                 current_boards,
                 &initial_updates,
                 &TargetReleaseDescription::TufRepo(repo.clone()),
@@ -256,6 +266,7 @@ mod tests {
                 log,
                 &collection,
                 current_boards,
+                current_boards,
                 &updates,
                 &TargetReleaseDescription::TufRepo(repo.clone()),
                 nmax_updates,
@@ -276,6 +287,7 @@ mod tests {
                 log,
                 &later_collection,
                 current_boards,
+                current_boards,
                 &updates,
                 &TargetReleaseDescription::TufRepo(repo.clone()),
                 nmax_updates,
@@ -295,6 +307,7 @@ mod tests {
             plan_mgs_updates(
                 log,
                 &later_collection,
+                current_boards,
                 current_boards,
                 &updates,
                 &TargetReleaseDescription::TufRepo(repo.clone()),
@@ -319,6 +332,7 @@ mod tests {
                 log,
                 &updated_collection,
                 current_boards,
+                current_boards,
                 &later_updates,
                 &TargetReleaseDescription::TufRepo(repo.clone()),
                 nmax_updates,
@@ -337,6 +351,7 @@ mod tests {
                 log,
                 &collection,
                 &BTreeSet::new(),
+                &BTreeSet::new(),
                 &PendingMgsUpdates::new(),
                 &TargetReleaseDescription::TufRepo(repo.clone()),
                 nmax_updates,
@@ -347,6 +362,7 @@ mod tests {
             plan_mgs_updates(
                 log,
                 &collection,
+                &collection.baseboards,
                 &collection.baseboards,
                 &PendingMgsUpdates::new(),
                 &TargetReleaseDescription::TufRepo(repo.clone()),
@@ -389,6 +405,7 @@ mod tests {
                 log,
                 &collection,
                 &collection.baseboards,
+                &collection.baseboards,
                 &updates,
                 &TargetReleaseDescription::TufRepo(repo.clone()),
                 nmax_updates,
@@ -427,6 +444,7 @@ mod tests {
             plan_mgs_updates(
                 log,
                 &collection,
+                &collection.baseboards,
                 &collection.baseboards,
                 &updates,
                 &TargetReleaseDescription::TufRepo(repo.clone()),

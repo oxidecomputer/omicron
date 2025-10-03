@@ -60,8 +60,8 @@ blueprint-show latest
 blueprint-edit latest expunge-zones 99e2f30b-3174-40bf-a78a-90da8abba8ca
 blueprint-diff latest
 
-# Attempt to upgrade one RoT bootloader. We should see two sleds skipped and
-# a safe one to update
+# Attempt to upgrade one RoT bootloader. This should successfully plan the
+# pending RoT bootloader update
 blueprint-plan latest latest
 blueprint-diff latest
 
@@ -72,8 +72,8 @@ blueprint-diff latest
 # Now, forcibly update the simulated RoT bootloader in all sleds to reflect that
 # the update completed.
 # Collect inventory from it and use that collection for another planning step.
-# This should report that the update completed, and show errors again for the
-# RoT on two sleds
+# This should report that the update completed, and successfully plan a
+# pending RoT update
 sled-update-rot-bootloader serial0 --stage0 1.0.0
 sled-update-rot-bootloader serial1 --stage0 1.0.0
 sled-update-rot-bootloader serial2 --stage0 1.0.0
@@ -81,8 +81,9 @@ inventory-generate
 blueprint-plan latest latest
 blueprint-diff latest
 
-# We repeat the same process with the RoT expecting to see the same errors with
-# the SP updates
+# We repeat the same process with the RoT, but now expecting to see a single
+# blocked SP update due to serial0 containing an unsafe zone. We also see a
+# pending SP update on serial1 which has no unsafe zones.
 sled-update-rot serial0 --slot-b 1.0.0 --active-slot b --persistent-boot-preference b
 sled-update-rot serial1 --slot-b 1.0.0 --active-slot b --persistent-boot-preference b
 sled-update-rot serial2 --slot-b 1.0.0 --active-slot b --persistent-boot-preference b
@@ -90,10 +91,15 @@ inventory-generate
 blueprint-plan latest latest
 blueprint-diff latest
 
-# And once more to see the errors with the Host OS
+# Since there was a blocked update on serial0, the planner has moved on to
+# serial1. This sled has no unsafe zones, so we forcibly update it along with
+# the SPs to see the errors with the Host OS on serial2 and serial0, and plan no
+# pending updates
 sled-update-sp serial0 --active 1.0.0
 sled-update-sp serial1 --active 1.0.0
 sled-update-sp serial2 --active 1.0.0
+sled-update-host-phase2 serial1 --boot-disk B --slot-b d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47 
+sled-update-host-phase1 serial1 --active B --slot-b b99d5273ba1418bebb19d74b701d716896409566d41de76ada71bded4c9b166b 
 inventory-generate
 blueprint-plan latest latest
 blueprint-diff latest
