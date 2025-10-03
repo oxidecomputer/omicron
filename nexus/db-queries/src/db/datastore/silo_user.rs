@@ -307,9 +307,11 @@ impl DataStore {
                 model.user_provision_type,
             );
 
-            return Err(Error::invalid_request(
-                "user provision type of silo does not match silo user",
-            ));
+            return Err(Error::internal_error(&format!(
+                "user provision type of silo ({:?}) does not match silo \
+                user's ({:?})",
+                silo.user_provision_type, model.user_provision_type,
+            )));
         }
 
         use nexus_db_schema::schema::silo_user::dsl;

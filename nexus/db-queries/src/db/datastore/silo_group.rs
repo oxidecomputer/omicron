@@ -389,8 +389,18 @@ impl DataStore {
             silo_group_lookup.user_provision_type();
 
         if silo.user_provision_type != lookup_user_provision_type {
-            return Err(Error::invalid_request(format!(
-                "silo provision type {:?} does not match lookup {:?}",
+            error!(
+                self.log,
+                "silo {} provision type {:?} does not match lookup provision \
+                type {:?}",
+                authz_silo.id(),
+                silo.user_provision_type,
+                lookup_user_provision_type,
+            );
+
+            return Err(Error::internal_error(&format!(
+                "user provision type of silo ({:?}) does not match \
+                lookup ({:?})",
                 silo.user_provision_type, lookup_user_provision_type,
             )));
         }
