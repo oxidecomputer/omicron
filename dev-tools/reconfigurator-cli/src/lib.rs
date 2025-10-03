@@ -184,18 +184,11 @@ impl ReconfiguratorSim {
             let active_nexus_gen =
                 state.config().active_nexus_zone_generation();
             let mut active_nexus_zones = BTreeSet::new();
-            for (_, zone) in parent_blueprint
-                .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+            for (_, zone, nexus) in parent_blueprint
+                .all_nexus_zones(BlueprintZoneDisposition::is_in_service)
             {
-                match &zone.zone_type {
-                    nexus_types::deployment::BlueprintZoneType::Nexus(
-                        nexus,
-                    ) => {
-                        if nexus.nexus_generation == active_nexus_gen {
-                            active_nexus_zones.insert(zone.id);
-                        }
-                    }
-                    _ => (),
+                if nexus.nexus_generation == active_nexus_gen {
+                    active_nexus_zones.insert(zone.id);
                 }
             }
             active_nexus_zones
@@ -1233,20 +1226,17 @@ enum SetArgs {
     /// specify the generation of Nexus zones that are considered active when
     /// running the blueprint planner
     ActiveNexusGen { gen: Generation },
-    /// explicit set of Nexus zones to treat as "active" (overrides generation-based inference)
-    ActiveNexusZones {
-        #[clap(action = clap::ArgAction::Append)]
-        zones: Vec<OmicronZoneUuid>,
+    /// Control the set of Nexus zones seen as input to the planner
+    NexusZones {
+        #[clap(long, conflicts_with = "active")]
+        active_inferred: bool,
+        #[clap(long, num_args = 0.., required_unless_present = "active_inferred")]
+        active: Vec<OmicronZoneUuid>,
+        #[clap(long, conflicts_with = "not_yet")]
+        not_yet_inferred: bool,
+        #[clap(long, num_args = 0.., required_unless_present = "not_yet_inferred")]
+        not_yet: Vec<OmicronZoneUuid>,
     },
-    /// infer active Nexus zones from generation (clears explicit override)
-    ActiveNexusZonesInfer,
-    /// explicit set of Nexus zones to treat as "not yet" (overrides generation-based inference)
-    NotYetNexusZones {
-        #[clap(action = clap::ArgAction::Append)]
-        zones: Vec<OmicronZoneUuid>,
-    },
-    /// infer not-yet Nexus zones from generation (clears explicit override)
-    NotYetNexusZonesInfer,
     /// system's external DNS zone name (suffix)
     ExternalDnsZoneName { zone_name: String },
     /// system target release
@@ -2852,30 +2842,43 @@ fn cmd_set(
             state.config_mut().set_active_nexus_zone_generation(gen);
             rv
         }
-        SetArgs::ActiveNexusZones { zones } => {
+        SetArgs::NexusZones {
+            active_inferred,
+            active,
+            not_yet_inferred,
+            not_yet,
+        } => {
             use std::collections::BTreeSet;
-            let zone_set: BTreeSet<_> = zones.into_iter().collect();
-            let count = zone_set.len();
-            let rv = format!("set {} explicit active Nexus zones", count);
-            state.config_mut().set_explicit_active_nexus_zones(Some(zone_set));
-            rv
-        }
-        SetArgs::ActiveNexusZonesInfer => {
-            let rv = "cleared explicit active Nexus zones (will infer from generation)".to_string();
-            state.config_mut().set_explicit_active_nexus_zones(None);
-            rv
-        }
-        SetArgs::NotYetNexusZones { zones } => {
-            use std::collections::BTreeSet;
-            let zone_set: BTreeSet<_> = zones.into_iter().collect();
-            let count = zone_set.len();
-            let rv = format!("set {} explicit not-yet Nexus zones", count);
-            state.config_mut().set_explicit_not_yet_nexus_zones(Some(zone_set));
-            rv
-        }
-        SetArgs::NotYetNexusZonesInfer => {
-            let rv = "cleared explicit not-yet Nexus zones (will infer from generation)".to_string();
-            state.config_mut().set_explicit_not_yet_nexus_zones(None);
+            let mut rv = String::new();
+            if active_inferred {
+                rv.push_str("inferring active nexus zones from generation");
+                state.config_mut().set_explicit_active_nexus_zones(None);
+            } else {
+                let zone_set: BTreeSet<_> = active.into_iter().collect();
+                let count = zone_set.len();
+                rv.push_str(&format!(
+                    "set {} explicit active Nexus zones",
+                    count
+                ));
+                state
+                    .config_mut()
+                    .set_explicit_active_nexus_zones(Some(zone_set));
+            }
+            rv.push_str(", ");
+            if not_yet_inferred {
+                rv.push_str("inferring not-yet nexus zones from generation");
+                state.config_mut().set_explicit_not_yet_nexus_zones(None);
+            } else {
+                let zone_set: BTreeSet<_> = not_yet.into_iter().collect();
+                let count = zone_set.len();
+                rv.push_str(&format!(
+                    "set {} explicit not-yet Nexus zones",
+                    count
+                ));
+                state
+                    .config_mut()
+                    .set_explicit_not_yet_nexus_zones(Some(zone_set));
+            }
             rv
         }
         SetArgs::ExternalDnsZoneName { zone_name } => {
