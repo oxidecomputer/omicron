@@ -8251,6 +8251,23 @@
         "parameters": [
           {
             "in": "query",
+            "name": "delegated_for_internal_use",
+            "description": "Filter on pools delegated for internal Oxide use.\n\nDefaults to excluding internal pools when unset.",
+            "schema": {
+              "nullable": true,
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "ip_version",
+            "description": "Restrict pools to a specific IP version.",
+            "schema": {
+              "$ref": "#/components/schemas/IpVersion"
+            }
+          },
+          {
+            "in": "query",
             "name": "limit",
             "description": "Maximum number of items returned by a single call",
             "schema": {

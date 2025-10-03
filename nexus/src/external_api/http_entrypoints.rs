@@ -1152,7 +1152,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
     async fn ip_pool_list(
         rqctx: RequestContext<ApiContext>,
-        query_params: Query<PaginatedByNameOrId>,
+        query_params: Query<PaginatedByNameOrId<params::IpPoolListSelector>>,
     ) -> Result<HttpResponseOk<ResultsPage<IpPool>>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
@@ -1160,11 +1160,12 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let query = query_params.into_inner();
             let pag_params = data_page_params_for(&rqctx, &query)?;
             let scan_params = ScanByNameOrId::from_query(&query)?;
+            let filters = scan_params.selector.clone();
             let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
             let pools = nexus
-                .ip_pools_list(&opctx, &paginated_by)
+                .ip_pools_list(&opctx, &paginated_by, &filters)
                 .await?
                 .into_iter()
                 .map(IpPool::from)
