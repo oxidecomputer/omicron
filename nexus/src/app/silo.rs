@@ -106,6 +106,7 @@ impl super::Nexus {
         // this (very specific) context.
         let nexus_opctx = self.opctx_external_authn();
         let datastore = self.datastore();
+        let nexus_id = self.id();
 
         // Set up an external DNS name for this Silo's API and console
         // endpoints (which are the same endpoint).
@@ -117,8 +118,12 @@ impl super::Nexus {
             .blueprint_target_get_current_full(opctx)
             .await
             .internal_context("loading target blueprint")?;
-        let nexus_external_ips =
-            blueprint_nexus_external_ips(&target_blueprint);
+        let active_nexus_generation =
+            target_blueprint.find_generation_for_self(nexus_id)?;
+        let nexus_external_ips = blueprint_nexus_external_ips(
+            &target_blueprint,
+            active_nexus_generation,
+        );
         let dns_records: Vec<DnsRecord> = nexus_external_ips
             .into_iter()
             .map(|addr| match addr {

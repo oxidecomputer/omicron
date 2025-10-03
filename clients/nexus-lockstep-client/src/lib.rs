@@ -27,6 +27,7 @@ progenitor::generate_api!(
     }),
     crates = {
         "iddqd" = "*",
+        "omicron-uuid-kinds" = "*",
         "oxnet" = "0.1.0",
     },
     replace = {
@@ -54,12 +55,6 @@ progenitor::generate_api!(
         ReconfiguratorConfig = nexus_types::deployment::ReconfiguratorConfig,
         ReconfiguratorConfigParam = nexus_types::deployment::ReconfiguratorConfigParam,
         ReconfiguratorConfigView = nexus_types::deployment::ReconfiguratorConfigView,
-        TypedUuidForBlueprintKind = omicron_uuid_kinds::BlueprintUuid,
-        TypedUuidForDatasetKind = omicron_uuid_kinds::TypedUuid<omicron_uuid_kinds::DatasetKind>,
-        TypedUuidForDemoSagaKind = omicron_uuid_kinds::DemoSagaUuid,
-        TypedUuidForPhysicalDiskKind = omicron_uuid_kinds::TypedUuid<omicron_uuid_kinds::PhysicalDiskKind>,
-        TypedUuidForSledKind = omicron_uuid_kinds::TypedUuid<omicron_uuid_kinds::SledKind>,
-        TypedUuidForZpoolKind = omicron_uuid_kinds::TypedUuid<omicron_uuid_kinds::ZpoolKind>,
         UpdateStatus = nexus_types::internal_api::views::UpdateStatus,
         ZoneStatus = nexus_types::internal_api::views::ZoneStatus,
         ZoneStatusVersion = nexus_types::internal_api::views::ZoneStatusVersion,

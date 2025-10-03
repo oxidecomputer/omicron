@@ -72,7 +72,7 @@ pub async fn start_server(
     .version_policy(dropshot::VersionPolicy::Dynamic(Box::new(
         dropshot::ClientSpecifiesVersionInHeader::new(
             omicron_common::api::VERSION_HEADER,
-            cockroach_admin_api::VERSION_INITIAL,
+            cockroach_admin_api::VERSION_NEWTYPE_UUID_BUMP,
         ),
     )))
     .start()

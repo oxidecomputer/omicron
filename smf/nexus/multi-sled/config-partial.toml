@@ -18,11 +18,10 @@ mode = "file"
 path = "/dev/stdout"
 if_exists = "append"
 
-# TODO: Uncomment the following lines to enable automatic schema
-# migration on boot.
-#
-# [schema]
-# schema_dir = "/var/nexus/schema/crdb"
+# This allows Nexus to see the CRDB schema, and apply schema updates when it
+# boots.
+[schema]
+schema_dir = "/var/nexus/schema/crdb"
 
 [background_tasks]
 dns_internal.period_secs_config = 60
@@ -77,6 +76,15 @@ region_snapshot_replacement_step.period_secs = 30
 region_snapshot_replacement_finish.period_secs = 30
 tuf_artifact_replication.period_secs = 300
 tuf_artifact_replication.min_sled_replication = 3
+tuf_repo_pruner.period_secs = 300
+# How many extra recent target releases to keep
+# The system always keeps two: the current release and the previous one.
+# This number is in addition to that.
+tuf_repo_pruner.nkeep_extra_target_releases = 1
+# How many extra recently uploaded repos to keep
+# The system always keeps one, assuming that the operator may be about to
+# update to it.  This number is in addition to that.
+tuf_repo_pruner.nkeep_extra_newly_uploaded = 1
 read_only_region_replacement_start.period_secs = 30
 # In general, the webhook dispatcher will be activated when events are queued,
 # so we don't need to periodically activate it *that* frequently.

@@ -236,6 +236,9 @@ impl SimStateBuilder {
         let config = self.config.load_serialized(
             state.external_dns_zone_names.clone(),
             state.silo_names.clone(),
+            state.planning_input.active_nexus_zones(),
+            state.target_blueprint.as_ref(),
+            &state.blueprints,
             &mut res,
         );
         let system =

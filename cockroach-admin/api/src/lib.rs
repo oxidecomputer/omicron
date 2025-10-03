@@ -7,10 +7,8 @@ use dropshot::{
     HttpError, HttpResponseOk, HttpResponseUpdatedNoContent, RequestContext,
     TypedBody,
 };
+use dropshot_api_manager_types::api_versions;
 use omicron_uuid_kinds::OmicronZoneUuid;
-use openapi_manager_types::{
-    SupportedVersion, SupportedVersions, api_versions,
-};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -26,6 +24,7 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
+    (2, NEWTYPE_UUID_BUMP),
     (1, INITIAL),
 ]);
 

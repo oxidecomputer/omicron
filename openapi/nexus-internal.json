@@ -49,7 +49,7 @@
             "name": "downstairs_id",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForDownstairsKind"
+              "$ref": "#/components/schemas/DownstairsUuid"
             }
           },
           {
@@ -57,7 +57,7 @@
             "name": "upstairs_id",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForUpstairsKind"
+              "$ref": "#/components/schemas/UpstairsUuid"
             }
           }
         ],
@@ -95,7 +95,7 @@
             "name": "downstairs_id",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForDownstairsKind"
+              "$ref": "#/components/schemas/DownstairsUuid"
             }
           },
           {
@@ -103,7 +103,7 @@
             "name": "upstairs_id",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForUpstairsKind"
+              "$ref": "#/components/schemas/UpstairsUuid"
             }
           }
         ],
@@ -140,7 +140,7 @@
             "name": "repair_id",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForUpstairsRepairKind"
+              "$ref": "#/components/schemas/UpstairsRepairUuid"
             }
           },
           {
@@ -148,7 +148,7 @@
             "name": "upstairs_id",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForUpstairsKind"
+              "$ref": "#/components/schemas/UpstairsUuid"
             }
           }
         ],
@@ -185,7 +185,7 @@
             "name": "upstairs_id",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForUpstairsKind"
+              "$ref": "#/components/schemas/UpstairsUuid"
             }
           }
         ],
@@ -222,7 +222,7 @@
             "name": "upstairs_id",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForUpstairsKind"
+              "$ref": "#/components/schemas/UpstairsUuid"
             }
           }
         ],
@@ -612,7 +612,7 @@
             "name": "sled_id",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForSledKind"
+              "$ref": "#/components/schemas/SledUuid"
             }
           }
         ],
@@ -644,7 +644,7 @@
             "name": "sled_id",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForSledKind"
+              "$ref": "#/components/schemas/SledUuid"
             }
           }
         ],
@@ -682,7 +682,7 @@
             "name": "sled_id",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForSledKind"
+              "$ref": "#/components/schemas/SledUuid"
             }
           }
         ],
@@ -778,7 +778,7 @@
             "name": "propolis_id",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForPropolisKind"
+              "$ref": "#/components/schemas/PropolisUuid"
             }
           }
         ],
@@ -816,7 +816,7 @@
             "name": "volume_id",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForVolumeKind"
+              "$ref": "#/components/schemas/VolumeUuid"
             }
           }
         ],
@@ -1161,6 +1161,31 @@
           "port"
         ]
       },
+      "BlockedMgsUpdate": {
+        "type": "object",
+        "properties": {
+          "baseboard_id": {
+            "description": "id of the baseboard that we attempted to update",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BaseboardId"
+              }
+            ]
+          },
+          "reason": {
+            "description": "reason why the update failed",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/FailedMgsUpdateReason"
+              }
+            ]
+          }
+        },
+        "required": [
+          "baseboard_id",
+          "reason"
+        ]
+      },
       "Blueprint": {
         "description": "Describes a complete set of software and configuration for the system",
         "type": "object",
@@ -1206,7 +1231,7 @@
             "description": "unique identifier for this blueprint",
             "allOf": [
               {
-                "$ref": "#/components/schemas/TypedUuidForBlueprintKind"
+                "$ref": "#/components/schemas/BlueprintUuid"
               }
             ]
           },
@@ -1247,7 +1272,7 @@
             "description": "which blueprint this blueprint is based on",
             "allOf": [
               {
-                "$ref": "#/components/schemas/TypedUuidForBlueprintKind"
+                "$ref": "#/components/schemas/BlueprintUuid"
               }
             ]
           },
@@ -1360,7 +1385,7 @@
             "$ref": "#/components/schemas/BlueprintDatasetDisposition"
           },
           "id": {
-            "$ref": "#/components/schemas/TypedUuidForDatasetKind"
+            "$ref": "#/components/schemas/DatasetUuid"
           },
           "kind": {
             "$ref": "#/components/schemas/DatasetKind"
@@ -1480,13 +1505,13 @@
             "$ref": "#/components/schemas/BlueprintPhysicalDiskDisposition"
           },
           "id": {
-            "$ref": "#/components/schemas/TypedUuidForPhysicalDiskKind"
+            "$ref": "#/components/schemas/PhysicalDiskUuid"
           },
           "identity": {
             "$ref": "#/components/schemas/DiskIdentity"
           },
           "pool_id": {
-            "$ref": "#/components/schemas/TypedUuidForZpoolKind"
+            "$ref": "#/components/schemas/ZpoolUuid"
           }
         },
         "required": [
@@ -1562,7 +1587,7 @@
             "nullable": true,
             "allOf": [
               {
-                "$ref": "#/components/schemas/TypedUuidForMupdateOverrideKind"
+                "$ref": "#/components/schemas/MupdateOverrideUuid"
               }
             ]
           },
@@ -1711,6 +1736,15 @@
           }
         ]
       },
+      "BlueprintUuid": {
+        "x-rust-type": {
+          "crate": "omicron-uuid-kinds",
+          "path": "omicron_uuid_kinds::BlueprintUuid",
+          "version": "*"
+        },
+        "type": "string",
+        "format": "uuid"
+      },
       "BlueprintZoneConfig": {
         "description": "Describes one Omicron-managed zone in a blueprint.\n\nPart of [`BlueprintSledConfig`].",
         "type": "object",
@@ -1732,7 +1766,7 @@
             ]
           },
           "id": {
-            "$ref": "#/components/schemas/TypedUuidForOmicronZoneKind"
+            "$ref": "#/components/schemas/OmicronZoneUuid"
           },
           "image_source": {
             "$ref": "#/components/schemas/BlueprintZoneImageSource"
@@ -2215,6 +2249,18 @@
         "format": "uint64",
         "minimum": 0
       },
+      "CabooseWhich": {
+        "description": "Describes which caboose this is (which component, which slot)",
+        "type": "string",
+        "enum": [
+          "sp_slot0",
+          "sp_slot1",
+          "rot_slot_a",
+          "rot_slot_b",
+          "stage0",
+          "stage0_next"
+        ]
+      },
       "Certificate": {
         "type": "object",
         "properties": {
@@ -2558,10 +2604,10 @@
             "type": "string"
           },
           "dataset_id": {
-            "$ref": "#/components/schemas/TypedUuidForDatasetKind"
+            "$ref": "#/components/schemas/DatasetUuid"
           },
           "zpool_id": {
-            "$ref": "#/components/schemas/TypedUuidForZpoolKind"
+            "$ref": "#/components/schemas/ZpoolUuid"
           }
         },
         "required": [
@@ -2573,6 +2619,15 @@
       "DatasetKind": {
         "description": "The kind of dataset. See the `DatasetKind` enum in omicron-common for possible values.",
         "type": "string"
+      },
+      "DatasetUuid": {
+        "x-rust-type": {
+          "crate": "omicron-uuid-kinds",
+          "path": "omicron_uuid_kinds::DatasetUuid",
+          "version": "*"
+        },
+        "type": "string",
+        "format": "uuid"
       },
       "DiscretionaryZonePlacement": {
         "type": "object",
@@ -3031,11 +3086,20 @@
           "receive_task_cancelled"
         ]
       },
+      "DownstairsRegionUuid": {
+        "x-rust-type": {
+          "crate": "omicron-uuid-kinds",
+          "path": "omicron_uuid_kinds::DownstairsRegionUuid",
+          "version": "*"
+        },
+        "type": "string",
+        "format": "uuid"
+      },
       "DownstairsUnderRepair": {
         "type": "object",
         "properties": {
           "region_uuid": {
-            "$ref": "#/components/schemas/TypedUuidForDownstairsRegionKind"
+            "$ref": "#/components/schemas/DownstairsRegionUuid"
           },
           "target_addr": {
             "type": "string"
@@ -3139,6 +3203,15 @@
           }
         ]
       },
+      "ExternalIpUuid": {
+        "x-rust-type": {
+          "crate": "omicron-uuid-kinds",
+          "path": "omicron_uuid_kinds::ExternalIpUuid",
+          "version": "*"
+        },
+        "type": "string",
+        "format": "uuid"
+      },
       "ExternalPortDiscovery": {
         "oneOf": [
           {
@@ -3174,6 +3247,665 @@
               "static"
             ],
             "additionalProperties": false
+          }
+        ]
+      },
+      "FailedHostOsUpdateReason": {
+        "description": "Describes the reason why a Host OS failed to update",
+        "oneOf": [
+          {
+            "description": "The active host phase 1 slot does not match the boot disk",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "active_host_phase1_slot_boot_disk_mismatch"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/M2Slot"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "description": "The active host phase 1 hash was not found in inventory",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "active_host_phase1_hash_not_in_inventory"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/M2Slot"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "description": "The active host phase 1 slot was not found in inventory",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "active_host_phase1_slot_not_in_inventory"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "The component's caboose was not found in the inventory",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "caboose_not_in_inventory"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/CabooseWhich"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "description": "The version in the caboose or artifact was not able to be parsed",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "failed_version_parse"
+                ]
+              },
+              "value": {
+                "type": "object",
+                "properties": {
+                  "caboose": {
+                    "$ref": "#/components/schemas/CabooseWhich"
+                  },
+                  "err": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "caboose",
+                  "err"
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "description": "The inactive host phase 1 hash was not found in inventory",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "inactive_host_phase1_hash_not_in_inventory"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/M2Slot"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "description": "Last reconciliation details were not found in inventory",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "last_reconciliation_not_in_inventory"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "No artifacts with the required conditions for the component were found",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "no_matching_artifacts_found"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "No artifact with the required conditions for phase 1 was found",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "no_matching_phase1_artifact_found"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "No artifact with the required conditions for phase 2 was found",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "no_matching_phase2_artifact_found"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "Sled agent info was not found in inventory",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "sled_agent_info_not_in_inventory"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "The component's corresponding SP was not found in the inventory",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "sp_not_in_inventory"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "Too many artifacts with the required conditions for the component were found",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "too_many_matching_artifacts"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "The sled agent reported an error determining the boot disk",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "unable_to_determine_boot_disk"
+                ]
+              },
+              "value": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "description": "The sled agent reported an error retrieving boot disk phase 2 image details",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "unable_to_retrieve_boot_disk_phase2_image"
+                ]
+              },
+              "value": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          }
+        ]
+      },
+      "FailedMgsUpdateReason": {
+        "description": "Describes the reason why an SP component failed to update",
+        "oneOf": [
+          {
+            "description": "There was a failed attempt to plan a Host OS update",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "host_os"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/FailedHostOsUpdateReason"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "description": "There was a failed attempt to plan an RoT update",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "rot"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/FailedRotUpdateReason"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "description": "There was a failed attempt to plan an RoT bootloader update",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "rot_bootloader"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/FailedRotBootloaderUpdateReason"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "description": "There was a failed attempt to plan an SP update",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "sp"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/FailedSpUpdateReason"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          }
+        ]
+      },
+      "FailedRotBootloaderUpdateReason": {
+        "description": "Describes the reason why an RoT bootloader failed to update",
+        "oneOf": [
+          {
+            "description": "The component's caboose was missing a value for \"sign\"",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "caboose_missing_sign"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/CabooseWhich"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "description": "The component's caboose was not found in the inventory",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "caboose_not_in_inventory"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/CabooseWhich"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "description": "The version in the caboose or artifact was not able to be parsed",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "failed_version_parse"
+                ]
+              },
+              "value": {
+                "type": "object",
+                "properties": {
+                  "caboose": {
+                    "$ref": "#/components/schemas/CabooseWhich"
+                  },
+                  "err": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "caboose",
+                  "err"
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "description": "No artifact with the required conditions for the component was found",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "no_matching_artifact_found"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "The component's corresponding SP was not found in the inventory",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "sp_not_in_inventory"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          }
+        ]
+      },
+      "FailedRotUpdateReason": {
+        "description": "Describes the reason why an RoT failed to update",
+        "oneOf": [
+          {
+            "description": "The component's caboose was missing a value for \"sign\"",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "caboose_missing_sign"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/CabooseWhich"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "description": "The component's caboose was not found in the inventory",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "caboose_not_in_inventory"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/CabooseWhich"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "description": "The version in the caboose or artifact was not able to be parsed",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "failed_version_parse"
+                ]
+              },
+              "value": {
+                "type": "object",
+                "properties": {
+                  "caboose": {
+                    "$ref": "#/components/schemas/CabooseWhich"
+                  },
+                  "err": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "caboose",
+                  "err"
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "description": "No artifact with the required conditions for the component was found",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "no_matching_artifact_found"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "RoT state was not found in inventory",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "rot_state_not_in_inventory"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "The component's corresponding SP was not found in the inventory",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "sp_not_in_inventory"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          }
+        ]
+      },
+      "FailedSpUpdateReason": {
+        "description": "Describes the reason why an SP failed to update",
+        "oneOf": [
+          {
+            "description": "The component's caboose was not found in the inventory",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "caboose_not_in_inventory"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/CabooseWhich"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "description": "The version in the caboose or artifact was not able to be parsed",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "failed_version_parse"
+                ]
+              },
+              "value": {
+                "type": "object",
+                "properties": {
+                  "caboose": {
+                    "$ref": "#/components/schemas/CabooseWhich"
+                  },
+                  "err": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "caboose",
+                  "err"
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "description": "No artifact with the required conditions for the component was found",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "no_matching_artifact_found"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "The component's corresponding SP was not found in the inventory",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "sp_not_in_inventory"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
           }
         ]
       },
@@ -3496,6 +4228,15 @@
           }
         ]
       },
+      "MupdateOverrideUuid": {
+        "x-rust-type": {
+          "crate": "omicron-uuid-kinds",
+          "path": "omicron_uuid_kinds::MupdateOverrideUuid",
+          "version": "*"
+        },
+        "type": "string",
+        "format": "uuid"
+      },
       "Name": {
         "title": "A name unique within the parent collection",
         "description": "Names must begin with a lower case ASCII letter, be composed exclusively of lowercase ASCII, uppercase ASCII, numbers, and '-', and may not end with a '-'. Names cannot be a UUID, but they may contain a UUID. They can be at most 63 characters long.",
@@ -3760,7 +4501,7 @@
             "type": "string"
           },
           "id": {
-            "$ref": "#/components/schemas/TypedUuidForExternalIpKind"
+            "$ref": "#/components/schemas/ExternalIpUuid"
           }
         },
         "required": [
@@ -3773,7 +4514,7 @@
         "type": "object",
         "properties": {
           "id": {
-            "$ref": "#/components/schemas/TypedUuidForExternalIpKind"
+            "$ref": "#/components/schemas/ExternalIpUuid"
           },
           "ip": {
             "type": "string",
@@ -3790,7 +4531,7 @@
         "type": "object",
         "properties": {
           "id": {
-            "$ref": "#/components/schemas/TypedUuidForExternalIpKind"
+            "$ref": "#/components/schemas/ExternalIpUuid"
           },
           "snat_cfg": {
             "$ref": "#/components/schemas/SourceNatConfig"
@@ -3800,6 +4541,15 @@
           "id",
           "snat_cfg"
         ]
+      },
+      "OmicronZoneUuid": {
+        "x-rust-type": {
+          "crate": "omicron-uuid-kinds",
+          "path": "omicron_uuid_kinds::OmicronZoneUuid",
+          "version": "*"
+        },
+        "type": "string",
+        "format": "uuid"
       },
       "OximeterInfo": {
         "description": "Message used to notify Nexus that this oximeter instance is up and running.",
@@ -4125,7 +4875,7 @@
         "type": "object",
         "properties": {
           "id": {
-            "$ref": "#/components/schemas/TypedUuidForPhysicalDiskKind"
+            "$ref": "#/components/schemas/PhysicalDiskUuid"
           },
           "model": {
             "type": "string"
@@ -4152,6 +4902,15 @@
           "variant",
           "vendor"
         ]
+      },
+      "PhysicalDiskUuid": {
+        "x-rust-type": {
+          "crate": "omicron-uuid-kinds",
+          "path": "omicron_uuid_kinds::PhysicalDiskUuid",
+          "version": "*"
+        },
+        "type": "string",
+        "format": "uuid"
       },
       "Ping": {
         "type": "object",
@@ -4241,7 +5000,7 @@
           "sleds_getting_ntp_and_discretionary_zones": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/TypedUuidForSledKind"
+              "$ref": "#/components/schemas/SledUuid"
             },
             "uniqueItems": true
           },
@@ -4250,35 +5009,35 @@
             "additionalProperties": {
               "type": "array",
               "items": {
-                "$ref": "#/components/schemas/TypedUuidForZpoolKind"
+                "$ref": "#/components/schemas/ZpoolUuid"
               }
             }
           },
           "sleds_missing_ntp_zone": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/TypedUuidForSledKind"
+              "$ref": "#/components/schemas/SledUuid"
             },
             "uniqueItems": true
           },
           "sleds_waiting_for_ntp_zone": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/TypedUuidForSledKind"
+              "$ref": "#/components/schemas/SledUuid"
             },
             "uniqueItems": true
           },
           "sleds_without_ntp_zones_in_inventory": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/TypedUuidForSledKind"
+              "$ref": "#/components/schemas/SledUuid"
             },
             "uniqueItems": true
           },
           "sleds_without_zpools_for_ntp_zones": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/TypedUuidForSledKind"
+              "$ref": "#/components/schemas/SledUuid"
             },
             "uniqueItems": true
           },
@@ -4288,6 +5047,10 @@
             "additionalProperties": {
               "$ref": "#/components/schemas/PlanningAddSufficientZonesExist"
             }
+          },
+          "target_release_generation_is_one": {
+            "description": "Set to true if the target release generation is 1, which would allow zones to be added.",
+            "type": "boolean"
           },
           "waiting_on": {
             "nullable": true,
@@ -4310,7 +5073,8 @@
           "sleds_waiting_for_ntp_zone",
           "sleds_without_ntp_zones_in_inventory",
           "sleds_without_zpools_for_ntp_zones",
-          "sufficient_zones_exist"
+          "sufficient_zones_exist",
+          "target_release_generation_is_one"
         ]
       },
       "PlanningAddSufficientZonesExist": {
@@ -4351,7 +5115,7 @@
             "description": "Decommissioned sleds that unexpectedly appeared as commissioned.",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/TypedUuidForSledKind"
+              "$ref": "#/components/schemas/SledUuid"
             }
           }
         },
@@ -4366,7 +5130,7 @@
             "description": "Expunged disks not present in the parent blueprint.",
             "type": "object",
             "additionalProperties": {
-              "$ref": "#/components/schemas/TypedUuidForPhysicalDiskKind"
+              "$ref": "#/components/schemas/PhysicalDiskUuid"
             }
           }
         },
@@ -4377,11 +5141,18 @@
       "PlanningMgsUpdatesStepReport": {
         "type": "object",
         "properties": {
+          "blocked_mgs_updates": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BlockedMgsUpdate"
+            }
+          },
           "pending_mgs_updates": {
             "$ref": "#/components/schemas/PendingMgsUpdates"
           }
         },
         "required": [
+          "blocked_mgs_updates",
           "pending_mgs_updates"
         ]
       },
@@ -4560,7 +5331,7 @@
             "type": "object",
             "properties": {
               "id": {
-                "$ref": "#/components/schemas/TypedUuidForMupdateOverrideKind"
+                "$ref": "#/components/schemas/MupdateOverrideUuid"
               },
               "type": {
                 "type": "string",
@@ -4701,13 +5472,29 @@
           "desired_image_source": {
             "$ref": "#/components/schemas/BlueprintZoneImageSource"
           },
-          "zone_config": {
-            "$ref": "#/components/schemas/BlueprintZoneConfig"
+          "zone": {
+            "$ref": "#/components/schemas/PlanningReportBlueprintZone"
           }
         },
         "required": [
           "desired_image_source",
-          "zone_config"
+          "zone"
+        ]
+      },
+      "PlanningReportBlueprintZone": {
+        "description": "Reduced form of a `BlueprintZoneConfig` stored in a [`PlanningReport`].",
+        "type": "object",
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/OmicronZoneUuid"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ZoneKind"
+          }
+        },
+        "required": [
+          "id",
+          "kind"
         ]
       },
       "PlanningZoneUpdatesStepReport": {
@@ -4718,7 +5505,7 @@
             "additionalProperties": {
               "type": "array",
               "items": {
-                "$ref": "#/components/schemas/BlueprintZoneConfig"
+                "$ref": "#/components/schemas/PlanningReportBlueprintZone"
               }
             }
           },
@@ -4742,7 +5529,7 @@
             "additionalProperties": {
               "type": "array",
               "items": {
-                "$ref": "#/components/schemas/BlueprintZoneConfig"
+                "$ref": "#/components/schemas/PlanningReportBlueprintZone"
               }
             }
           },
@@ -5236,7 +6023,7 @@
             "type": "boolean"
           },
           "repair_id": {
-            "$ref": "#/components/schemas/TypedUuidForUpstairsRepairKind"
+            "$ref": "#/components/schemas/UpstairsRepairUuid"
           },
           "repair_type": {
             "$ref": "#/components/schemas/UpstairsRepairType"
@@ -5248,7 +6035,7 @@
             }
           },
           "session_id": {
-            "$ref": "#/components/schemas/TypedUuidForUpstairsSessionKind"
+            "$ref": "#/components/schemas/UpstairsSessionUuid"
           },
           "time": {
             "type": "string",
@@ -5290,7 +6077,7 @@
         "type": "object",
         "properties": {
           "repair_id": {
-            "$ref": "#/components/schemas/TypedUuidForUpstairsRepairKind"
+            "$ref": "#/components/schemas/UpstairsRepairUuid"
           },
           "repair_type": {
             "$ref": "#/components/schemas/UpstairsRepairType"
@@ -5302,7 +6089,7 @@
             }
           },
           "session_id": {
-            "$ref": "#/components/schemas/TypedUuidForUpstairsSessionKind"
+            "$ref": "#/components/schemas/UpstairsSessionUuid"
           },
           "time": {
             "type": "string",
@@ -5550,6 +6337,15 @@
           }
         ]
       },
+      "SledUuid": {
+        "x-rust-type": {
+          "crate": "omicron-uuid-kinds",
+          "path": "omicron_uuid_kinds::SledUuid",
+          "version": "*"
+        },
+        "type": "string",
+        "format": "uuid"
+      },
       "SledVmmState": {
         "description": "A wrapper type containing a sled's total knowledge of the state of a VMM.",
         "type": "object",
@@ -5614,7 +6410,6 @@
         ]
       },
       "SpType": {
-        "description": "`SpType`\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"string\", \"enum\": [ \"sled\", \"power\", \"switch\" ] } ``` </details>",
         "type": "string",
         "enum": [
           "sled",
@@ -5725,50 +6520,6 @@
           }
         }
       },
-      "TypedUuidForBlueprintKind": {
-        "type": "string",
-        "format": "uuid"
-      },
-      "TypedUuidForDatasetKind": {
-        "type": "string",
-        "format": "uuid"
-      },
-      "TypedUuidForDownstairsRegionKind": {
-        "type": "string",
-        "format": "uuid"
-      },
-      "TypedUuidForExternalIpKind": {
-        "type": "string",
-        "format": "uuid"
-      },
-      "TypedUuidForMupdateOverrideKind": {
-        "type": "string",
-        "format": "uuid"
-      },
-      "TypedUuidForOmicronZoneKind": {
-        "type": "string",
-        "format": "uuid"
-      },
-      "TypedUuidForPhysicalDiskKind": {
-        "type": "string",
-        "format": "uuid"
-      },
-      "TypedUuidForSledKind": {
-        "type": "string",
-        "format": "uuid"
-      },
-      "TypedUuidForUpstairsRepairKind": {
-        "type": "string",
-        "format": "uuid"
-      },
-      "TypedUuidForUpstairsSessionKind": {
-        "type": "string",
-        "format": "uuid"
-      },
-      "TypedUuidForZpoolKind": {
-        "type": "string",
-        "format": "uuid"
-      },
       "UplinkAddressConfig": {
         "type": "object",
         "properties": {
@@ -5794,6 +6545,24 @@
           "live",
           "reconciliation"
         ]
+      },
+      "UpstairsRepairUuid": {
+        "x-rust-type": {
+          "crate": "omicron-uuid-kinds",
+          "path": "omicron_uuid_kinds::UpstairsRepairUuid",
+          "version": "*"
+        },
+        "type": "string",
+        "format": "uuid"
+      },
+      "UpstairsSessionUuid": {
+        "x-rust-type": {
+          "crate": "omicron-uuid-kinds",
+          "path": "omicron_uuid_kinds::UpstairsSessionUuid",
+          "version": "*"
+        },
+        "type": "string",
+        "format": "uuid"
       },
       "UserId": {
         "title": "A username for a local-only user",
@@ -5921,6 +6690,24 @@
           }
         ]
       },
+      "ZoneKind": {
+        "description": "Like [`OmicronZoneType`], but without any associated data.\n\nThis enum is meant to correspond exactly 1:1 with `OmicronZoneType`.\n\n# String representations of this type\n\nThere are no fewer than six string representations for this type, all slightly different from each other.\n\n1. [`Self::zone_prefix`]: Used to construct zone names. 2. [`Self::service_prefix`]: Used to construct SMF service names. 3. [`Self::name_prefix`]: Used to construct `Name` instances. 4. [`Self::report_str`]: Used for reporting and testing. 5. [`Self::artifact_id_name`]: Used to match TUF artifact IDs. 6. [`Self::artifact_in_install_dataset`]: Used to match zone image tarballs in the install dataset. (This method is equivalent to appending `.tar.gz` to the result of [`Self::zone_prefix`].)\n\nThere is no `Display` impl to ensure that users explicitly choose the representation they want. (Please play close attention to this! The functions are all similar but different, and we don't currently have great type safety around the choice.)\n\n## Adding new representations\n\nIf you have a new use case for a string representation, please reuse one of the six representations if at all possible. If you must add a new one, please add it here rather than doing something ad-hoc in the calling code so it's more legible.",
+        "type": "string",
+        "enum": [
+          "boundary_ntp",
+          "clickhouse",
+          "clickhouse_keeper",
+          "clickhouse_server",
+          "cockroach_db",
+          "crucible",
+          "crucible_pantry",
+          "external_dns",
+          "internal_dns",
+          "internal_ntp",
+          "nexus",
+          "oximeter"
+        ]
+      },
       "ZoneUnsafeToShutdown": {
         "description": "Zones which should not be shut down, because their lack of availability could be problematic for the successful functioning of the deployed system.",
         "oneOf": [
@@ -5999,6 +6786,21 @@
       "ZoneUpdatesWaitingOn": {
         "oneOf": [
           {
+            "description": "Waiting on blocked updates to RoT bootloader / RoT / SP / Host OS.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "blocked_mgs_updates"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
             "description": "Waiting on discretionary zone placement.",
             "type": "object",
             "properties": {
@@ -6014,7 +6816,22 @@
             ]
           },
           {
-            "description": "Waiting on updates to RoT / SP / Host OS / etc.",
+            "description": "Waiting on zones to propagate to inventory.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "inventory_propagation"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "Waiting on updates to RoT bootloader / RoT / SP / Host OS.",
             "type": "object",
             "properties": {
               "type": {
@@ -6083,7 +6900,7 @@
             "format": "uuid"
           },
           "physical_disk_id": {
-            "$ref": "#/components/schemas/TypedUuidForPhysicalDiskKind"
+            "$ref": "#/components/schemas/PhysicalDiskUuid"
           },
           "sled_id": {
             "type": "string",
@@ -6096,11 +6913,30 @@
           "sled_id"
         ]
       },
-      "TypedUuidForDownstairsKind": {
+      "ZpoolUuid": {
+        "x-rust-type": {
+          "crate": "omicron-uuid-kinds",
+          "path": "omicron_uuid_kinds::ZpoolUuid",
+          "version": "*"
+        },
         "type": "string",
         "format": "uuid"
       },
-      "TypedUuidForUpstairsKind": {
+      "DownstairsUuid": {
+        "x-rust-type": {
+          "crate": "omicron-uuid-kinds",
+          "path": "omicron_uuid_kinds::DownstairsUuid",
+          "version": "*"
+        },
+        "type": "string",
+        "format": "uuid"
+      },
+      "UpstairsUuid": {
+        "x-rust-type": {
+          "crate": "omicron-uuid-kinds",
+          "path": "omicron_uuid_kinds::UpstairsUuid",
+          "version": "*"
+        },
         "type": "string",
         "format": "uuid"
       },
@@ -6116,11 +6952,21 @@
           }
         ]
       },
-      "TypedUuidForPropolisKind": {
+      "PropolisUuid": {
+        "x-rust-type": {
+          "crate": "omicron-uuid-kinds",
+          "path": "omicron_uuid_kinds::PropolisUuid",
+          "version": "*"
+        },
         "type": "string",
         "format": "uuid"
       },
-      "TypedUuidForVolumeKind": {
+      "VolumeUuid": {
+        "x-rust-type": {
+          "crate": "omicron-uuid-kinds",
+          "path": "omicron_uuid_kinds::VolumeUuid",
+          "version": "*"
+        },
         "type": "string",
         "format": "uuid"
       }

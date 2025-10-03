@@ -480,6 +480,7 @@ impl CockroachDbSettings {
     JsonSchema,
     Diffable,
 )]
+#[cfg_attr(test, derive(test_strategy::Arbitrary))]
 pub enum CockroachDbClusterVersion {
     #[display("22.1")]
     V22_1,
@@ -522,6 +523,7 @@ impl CockroachDbClusterVersion {
     Diffable,
 )]
 #[serde(tag = "action", content = "data", rename_all = "snake_case")]
+#[cfg_attr(test, derive(test_strategy::Arbitrary))]
 pub enum CockroachDbPreserveDowngrade {
     /// Do not modify the setting.
     DoNotModify,

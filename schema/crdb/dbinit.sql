@@ -2588,9 +2588,16 @@ CREATE TABLE IF NOT EXISTS omicron.public.tuf_repo (
     -- Filename provided by the user.
     file_name TEXT NOT NULL,
 
+    -- Set when the repository's artifacts can be deleted from replication.
+    time_pruned TIMESTAMPTZ,
+
     CONSTRAINT unique_checksum UNIQUE (sha256),
     CONSTRAINT unique_system_version UNIQUE (system_version)
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS tuf_repo_not_pruned
+    ON omicron.public.tuf_repo (id)
+    WHERE time_pruned IS NULL;
 
 -- Describes an individual artifact from an uploaded TUF repo.
 --
@@ -6728,7 +6735,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '194.0.0', NULL)
+    (TRUE, NOW(), NOW(), '196.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
