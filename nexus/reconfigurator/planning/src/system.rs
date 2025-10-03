@@ -1271,7 +1271,7 @@ impl Sled {
     ) -> Sled {
         use typed_rng::TypedUuidRng;
         let unique = unique.unwrap_or_else(|| hardware_slot.to_string());
-        let model = format!("model{}", unique);
+        let model = "913-0000019".to_string();
         let serial = format!("serial{}", unique);
         let revision = 0;
         let mut zpool_rng = TypedUuidRng::from_seed(
