@@ -137,14 +137,6 @@ impl PlannedMgsUpdates {
 /// supports more than one update per invocation.
 pub(crate) fn plan_mgs_updates(
     input: PlanMgsUpdatesInput,
-    //    log: &slog::Logger,
-    //    inventory: &Collection,
-    //    current_boards: &BTreeSet<Arc<BaseboardId>>,
-    //    unsafe_zone_boards: &BTreeMap<Arc<BaseboardId>, Vec<&str>>,
-    //    current_updates: &PendingMgsUpdates,
-    //    current_artifacts: &TargetReleaseDescription,
-    //    nmax_updates: usize,
-    //    impossible_update_policy: ImpossibleUpdatePolicy,
 ) -> PlannedMgsUpdates {
     let mut pending_updates = PendingMgsUpdates::new();
     let mut pending_host_phase_2_changes = PendingHostPhase2Changes::empty();
