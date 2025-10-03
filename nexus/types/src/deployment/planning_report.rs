@@ -685,6 +685,9 @@ pub enum FailedHostOsUpdateReason {
     /// details
     #[error("sled agent was unable to retrieve boot disk phase 2 image: {0:?}")]
     UnableToRetrieveBootDiskPhase2Image(String),
+    /// The sled model could not be determined
+    #[error("unable to determine the sled model {0:?}")]
+    UnableToDetermineSledModel(String),
 }
 
 #[derive(
