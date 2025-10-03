@@ -732,3 +732,19 @@ impl RelayState {
         .context("json from relay state string")
     }
 }
+
+/// Type of IP pool
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum IpPoolType {
+    /// Unicast IP pool for standard IP allocations
+    Unicast,
+    /// Multicast IP pool for multicast group allocations
+    Multicast,
+}
+
+impl Default for IpPoolType {
+    fn default() -> Self {
+        Self::Unicast
+    }
+}

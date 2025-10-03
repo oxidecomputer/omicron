@@ -5,10 +5,15 @@
 //! IP Pools, collections of external IP addresses for guest instances
 
 use crate::external_api::params;
-use crate::external_api::shared::IpRange;
+use crate::external_api::shared;
+use crate::external_api::views;
+use chrono::Utc;
 use ipnetwork::IpNetwork;
 use nexus_db_lookup::LookupPath;
 use nexus_db_lookup::lookup;
+use nexus_db_model::IpPool;
+use nexus_db_model::IpPoolType;
+use nexus_db_model::IpPoolUpdate;
 use nexus_db_model::IpVersion;
 use nexus_db_queries::authz;
 use nexus_db_queries::authz::ApiResource;
@@ -71,15 +76,45 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         pool_params: &params::IpPoolCreate,
-    ) -> CreateResult<db::model::IpPool> {
-        // https://github.com/oxidecomputer/omicron/issues/8966
+    ) -> CreateResult<IpPool> {
+        // https://github.com/oxidecomputer/omicron/issues/8881
         let ip_version = pool_params.ip_version.into();
-        if matches!(ip_version, IpVersion::V6) {
-            return Err(Error::invalid_request(
-                "IPv6 pools are not yet supported",
-            ));
-        }
-        let pool = db::model::IpPool::new(&pool_params.identity, ip_version);
+
+        let pool = match (
+            pool_params.pool_type.clone(),
+            pool_params.switch_port_uplinks.is_some(),
+        ) {
+            (shared::IpPoolType::Unicast, true) => {
+                return Err(Error::invalid_request(
+                    "switch_port_uplinks are only allowed for multicast IP pools",
+                ));
+            }
+            (shared::IpPoolType::Unicast, false) => {
+                if pool_params.mvlan.is_some() {
+                    return Err(Error::invalid_request(
+                        "mvlan is only allowed for multicast IP pools",
+                    ));
+                }
+                IpPool::new(&pool_params.identity, ip_version)
+            }
+            (shared::IpPoolType::Multicast, _) => {
+                let switch_port_ids = self
+                    .resolve_switch_port_ids(
+                        opctx,
+                        self.rack_id(),
+                        &pool_params.switch_port_uplinks,
+                    )
+                    .await?;
+
+                IpPool::new_multicast(
+                    &pool_params.identity,
+                    ip_version,
+                    switch_port_ids,
+                    pool_params.mvlan,
+                )
+            }
+        };
+
         self.db_datastore.ip_pool_create(opctx, pool).await
     }
 
@@ -281,9 +316,23 @@ impl super::Nexus {
             return Err(not_found_from_lookup(pool_lookup));
         }
 
-        self.db_datastore
-            .ip_pool_update(opctx, &authz_pool, updates.clone().into())
-            .await
+        let switch_port_ids = self
+            .resolve_switch_port_ids(
+                opctx,
+                self.rack_id(),
+                &updates.switch_port_uplinks,
+            )
+            .await?;
+
+        let updates_db = IpPoolUpdate {
+            name: updates.identity.name.clone().map(Into::into),
+            description: updates.identity.description.clone(),
+            switch_port_uplinks: switch_port_ids,
+            mvlan: updates.mvlan.map(|vid| u16::from(vid).into()),
+            time_modified: Utc::now(),
+        };
+
+        self.db_datastore.ip_pool_update(opctx, &authz_pool, updates_db).await
     }
 
     pub(crate) async fn ip_pool_list_ranges(
@@ -308,7 +357,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         pool_lookup: &lookup::IpPool<'_>,
-        range: &IpRange,
+        range: &shared::IpRange,
     ) -> UpdateResult<db::model::IpPoolRange> {
         let (.., authz_pool, db_pool) =
             pool_lookup.fetch_for(authz::Action::Modify).await?;
@@ -326,10 +375,43 @@ impl super::Nexus {
         // pool utilization.
         //
         // See https://github.com/oxidecomputer/omicron/issues/8761.
-        if matches!(range, IpRange::V6(_)) {
+        if matches!(range, shared::IpRange::V6(_)) {
             return Err(Error::invalid_request(
                 "IPv6 ranges are not allowed yet",
             ));
+        }
+
+        let range_is_multicast = match range {
+            shared::IpRange::V4(v4_range) => {
+                let first = v4_range.first_address();
+                let last = v4_range.last_address();
+                first.is_multicast() && last.is_multicast()
+            }
+            shared::IpRange::V6(v6_range) => {
+                let first = v6_range.first_address();
+                let last = v6_range.last_address();
+                first.is_multicast() && last.is_multicast()
+            }
+        };
+
+        match db_pool.pool_type {
+            IpPoolType::Multicast => {
+                if !range_is_multicast {
+                    return Err(Error::invalid_request(
+                        "Cannot add unicast address range to multicast IP pool",
+                    ));
+                }
+
+                // For multicast pools, validate ASM/SSM separation
+                // This validation is done in the datastore layer
+            }
+            IpPoolType::Unicast => {
+                if range_is_multicast {
+                    return Err(Error::invalid_request(
+                        "Cannot add multicast address range to unicast IP pool",
+                    ));
+                }
+            }
         }
 
         self.db_datastore
@@ -341,7 +423,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         pool_lookup: &lookup::IpPool<'_>,
-        range: &IpRange,
+        range: &shared::IpRange,
     ) -> DeleteResult {
         let (.., authz_pool, _db_pool) =
             pool_lookup.fetch_for(authz::Action::Modify).await?;
@@ -391,8 +473,14 @@ impl super::Nexus {
     pub(crate) async fn ip_pool_service_add_range(
         &self,
         opctx: &OpContext,
-        range: &IpRange,
+        range: &shared::IpRange,
     ) -> UpdateResult<db::model::IpPoolRange> {
+        let (authz_pool, db_pool) = self
+            .db_datastore
+            .ip_pools_service_lookup(opctx, range.version().into())
+            .await?;
+        opctx.authorize(authz::Action::Modify, &authz_pool).await?;
+
         // Disallow V6 ranges until IPv6 is fully supported by the networking
         // subsystem. Instead of changing the API to reflect that (making this
         // endpoint inconsistent with the rest) and changing it back when we
@@ -402,16 +490,43 @@ impl super::Nexus {
         // pool utilization.
         //
         // See https://github.com/oxidecomputer/omicron/issues/8761.
-        if matches!(range, IpRange::V6(_)) {
+        if matches!(range, shared::IpRange::V6(_)) {
             return Err(Error::invalid_request(
                 "IPv6 ranges are not allowed yet",
             ));
         }
-        let (authz_pool, db_pool) = self
-            .db_datastore
-            .ip_pools_service_lookup(opctx, range.version().into())
-            .await?;
-        opctx.authorize(authz::Action::Modify, &authz_pool).await?;
+
+        // Validate that the range matches the pool type
+        let range_is_multicast = match range {
+            shared::IpRange::V4(v4_range) => {
+                let first = v4_range.first_address();
+                let last = v4_range.last_address();
+                first.is_multicast() && last.is_multicast()
+            }
+            shared::IpRange::V6(v6_range) => {
+                let first = v6_range.first_address();
+                let last = v6_range.last_address();
+                first.is_multicast() && last.is_multicast()
+            }
+        };
+
+        match db_pool.pool_type {
+            IpPoolType::Multicast => {
+                if !range_is_multicast {
+                    return Err(Error::invalid_request(
+                        "Cannot add unicast address range to multicast IP pool",
+                    ));
+                }
+            }
+            IpPoolType::Unicast => {
+                if range_is_multicast {
+                    return Err(Error::invalid_request(
+                        "Cannot add multicast address range to unicast IP pool",
+                    ));
+                }
+            }
+        }
+
         self.db_datastore
             .ip_pool_add_range(opctx, &authz_pool, &db_pool, range)
             .await
@@ -420,7 +535,7 @@ impl super::Nexus {
     pub(crate) async fn ip_pool_service_delete_range(
         &self,
         opctx: &OpContext,
-        range: &IpRange,
+        range: &shared::IpRange,
     ) -> DeleteResult {
         let (authz_pool, ..) = self
             .db_datastore
@@ -428,5 +543,100 @@ impl super::Nexus {
             .await?;
         opctx.authorize(authz::Action::Modify, &authz_pool).await?;
         self.db_datastore.ip_pool_delete_range(opctx, &authz_pool, range).await
+    }
+
+    async fn resolve_switch_port_ids(
+        &self,
+        opctx: &OpContext,
+        rack_id: Uuid,
+        uplinks: &Option<Vec<params::SwitchPortUplink>>,
+    ) -> Result<Option<Vec<Uuid>>, Error> {
+        match uplinks {
+            None => Ok(None),
+            Some(list) => {
+                let mut ids = Vec::with_capacity(list.len());
+
+                for uplink in list {
+                    let switch_location =
+                        Name::from(uplink.switch_location.clone());
+                    let port_name = Name::from(uplink.port_name.clone());
+                    let id = self
+                        .db_datastore
+                        .switch_port_get_id(
+                            opctx,
+                            rack_id,
+                            switch_location,
+                            port_name,
+                        )
+                        .await
+                        .map_err(|_| {
+                            Error::invalid_value(
+                                "switch_port_uplinks",
+                                format!("Switch port '{}' not found", uplink),
+                            )
+                        })?;
+                    ids.push(id);
+                }
+                Ok(Some(ids))
+            }
+        }
+    }
+
+    /// Convert IP pool with proper switch port name resolution in an async
+    /// context.
+    pub(crate) async fn ip_pool_to_view(
+        &self,
+        opctx: &OpContext,
+        pool: db::model::IpPool,
+    ) -> Result<views::IpPool, Error> {
+        let identity = pool.identity();
+        let pool_type = pool.pool_type;
+
+        // Convert switch port UUIDs to "switch.port" format
+        let switch_port_uplinks = self
+            .resolve_switch_port_names(opctx, &pool.switch_port_uplinks)
+            .await?;
+
+        let mvlan = pool.mvlan.map(|vlan| vlan.into());
+
+        Ok(views::IpPool {
+            identity,
+            ip_version: pool.ip_version.into(),
+            pool_type: pool_type.into(),
+            switch_port_uplinks,
+            mvlan,
+        })
+    }
+
+    // Convert switch port UUIDs to "switch.port" format for views
+    async fn resolve_switch_port_names(
+        &self,
+        opctx: &OpContext,
+        switch_port_ids: &Option<Vec<Uuid>>,
+    ) -> Result<Option<Vec<String>>, Error> {
+        match switch_port_ids {
+            None => Ok(None),
+            Some(ids) => {
+                let mut names = Vec::with_capacity(ids.len());
+                for &id in ids {
+                    let switch_port = self
+                        .db_datastore
+                        .switch_port_get(opctx, id)
+                        .await
+                        .map_err(|_| {
+                            Error::internal_error(&format!(
+                                "Switch port with ID {} not found",
+                                id
+                            ))
+                        })?;
+                    let name = format!(
+                        "{}.{}",
+                        switch_port.switch_location, switch_port.port_name
+                    );
+                    names.push(name);
+                }
+                Ok(Some(names))
+            }
+        }
     }
 }

@@ -394,6 +394,16 @@ pub struct IpPool {
     pub identity: IdentityMetadata,
     /// The IP version for the pool.
     pub ip_version: IpVersion,
+    /// Type of IP pool (unicast or multicast)
+    pub pool_type: shared::IpPoolType,
+    /// Switch port uplinks for multicast pools (format: "switchN.portM")
+    /// Only present for multicast pools.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub switch_port_uplinks: Option<Vec<String>>,
+    /// MVLAN ID for multicast pools
+    /// Only present for multicast pools.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mvlan: Option<u16>,
 }
 
 /// The utilization of IP addresses in a pool.

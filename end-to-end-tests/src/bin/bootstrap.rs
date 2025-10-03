@@ -6,8 +6,8 @@ use end_to_end_tests::helpers::{
 use omicron_test_utils::dev::poll::{CondCheckError, wait_for_condition};
 use oxide_client::types::{
     ByteCount, DeviceAccessTokenRequest, DeviceAuthRequest, DeviceAuthVerify,
-    DiskCreate, DiskSource, IpPoolCreate, IpPoolLinkSilo, IpVersion, NameOrId,
-    SiloQuotasUpdate,
+    DiskCreate, DiskSource, IpPoolCreate, IpPoolLinkSilo, IpPoolType,
+    IpVersion, NameOrId, SiloQuotasUpdate,
 };
 use oxide_client::{
     ClientConsoleAuthExt, ClientDisksExt, ClientProjectsExt,
@@ -53,6 +53,9 @@ async fn run_test() -> Result<()> {
             name: pool_name.parse().unwrap(),
             description: "Default IP pool".to_string(),
             ip_version,
+            mvlan: None,
+            pool_type: IpPoolType::Unicast,
+            switch_port_uplinks: None,
         })
         .send()
         .await?;
